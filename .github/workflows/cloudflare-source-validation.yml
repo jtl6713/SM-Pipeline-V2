@@ -8,6 +8,7 @@ on:
       - 'apps/studio-api/worker.js'
       - 'apps/studio-web/index.html'
       - 'apps/studio-web/assets/**'
+      - '.github/workflows/cloudflare-source-validation.yml'
   pull_request:
     paths:
       - 'apps/studio-api/worker.js'
