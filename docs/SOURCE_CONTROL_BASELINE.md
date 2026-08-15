@@ -2,103 +2,92 @@
 
 Baseline migration started: 2026-08-15.
 
-## Objective
+## Immediate objective
 
-Capture the currently deployed/verified SM Pipeline V2 implementation in GitHub before enabling GitHub-driven Cloudflare production deployments.
+Use GitHub as the editable source authority for the two Cloudflare components that are routinely changed during Studio hardening:
+
+- Cloudflare Worker: `chicagoshining-studio-api`
+- Cloudflare Pages: `chicagoshining-studio`
+
+Local rendering/services and Make blueprint source-control migration are not prerequisites for this Cloudflare deployment capability.
 
 ## Authority model
 
-- **GitHub:** source code, deployment configuration, scripts, Make blueprint exports, technical documentation.
+- **GitHub:** editable Worker and Pages source plus controlled deployment workflows.
+- **Cloudflare:** production runtime/deployment target.
 - **Google Drive:** authoritative durable media / DAM.
-- **Cloudflare:** runtime, Workers, Pages, tunnels, transient processing/staging/preview/cache.
-- **Airtable:** operational workflow/configuration data and pipeline state.
-- **Make:** automation runtime; verified blueprint exports are version-controlled in this repository.
+- **Cloudflare R2:** transient processing, preview, delivery or cache only; not a parallel durable media authority.
 
-## Current migration checkpoints
+## Verified live Cloudflare baseline
 
 ### Studio API Worker
 
-Newest recovered source currently found in the ChatGPT File Library identifies itself as:
+The Worker was read directly from Cloudflare using the Workers Scripts Content API on 2026-08-15 and committed to:
 
-`0.10.3-single-parent-platform-output-routing`
+`apps/studio-api/worker.js`
 
-Worker name:
+Captured live health version:
 
-`chicagoshining-studio-api`
+`0.10.7-p3-direct-diagnostic`
 
-Recovered source filename:
-
-`worker_chicagoshining-studio-api_v0.10.3_single_parent_routing.txt`
-
-This supersedes the earlier recovered `0.9.4-item4-r2-explicit-eligibility` source as the newest known source candidate. It must still be compared with the live Cloudflare Worker before GitHub-driven production deployment is enabled.
-
-Notable v0.10.3 health metadata includes:
-
-- `production_request_outputs_model: single-content-item-platform-output-seeds`
-- `output_work_item_fanout: production-request-outputs-to-platform-outputs`
-- `item4_preview_worker_build: 0.9.5`
-- `item4_source_to_production_bridge: validated-preflight-v1`
+This direct Cloudflare capture supersedes older recovered File Library copies such as v0.10.4, v0.10.3 and v0.9.x for source-control purposes.
 
 ### Studio Pages
 
-The last formally packaged/manifest-verified Pages release in the August 14 handoff was:
+The currently served Pages deployment was read directly from:
 
-`v0.6.17`
+`https://chicagoshining-studio.pages.dev`
 
-Verified package name:
+and committed under:
 
-`SM_Pipeline_V2_Studio_Pages_v0.6.17_FULL_DEPLOYMENT.zip`
+`apps/studio-web/`
 
-Verified package contents were documented as:
+Captured live UI build:
 
-- `BUILD-VALIDATION-v0.6.17.json`
-- `DEPLOY-v0.6.17.txt`
+`0.6.19`
+
+Captured production assets include:
+
 - `index.html`
-- `assets/app-item4-0617.js`
+- `assets/app-item4-0619.js`
 - `assets/config.js`
 - `assets/styles-phase7-0617.css`
 
-Subsequent production-hardening work advanced the live Studio UI beyond that package. Therefore **v0.6.17 is a verified rollback/package baseline, not automatically the current live source baseline**.
+The older v0.6.17 FULL_DEPLOYMENT package remains useful as a rollback/reference artifact, but it is not the current live Pages baseline.
 
-A later recovered `app-item4-0620.js` also exists in the File Library, but it must not be labeled current production until its companion HTML/CSS/config and deployed state are reconciled.
+## GitHub → Cloudflare control path
 
-### Remotion Renderer
+GitHub repository secrets are configured for Cloudflare API authentication. A read-only connection test passed for both the Worker and Pages project.
 
-The renderer has been relocated from the old nested `CSM-Pipeline-V2/remotion-tests/test-remotion` path to the production `Remotion_Renderer` location. Source-control migration must capture the new active folder, not the retired copy.
+Source validation workflow:
 
-A previously uploaded `render-server.js` is available as a reference, but the complete active service folder should be imported from the regular production PC before it is declared authoritative.
+`.github/workflows/cloudflare-source-validation.yml`
 
-### Production Start/Stop/Verify
+Worker production deployment workflow:
 
-The service-management package was updated to reference the relocated Remotion renderer. Import the currently active production scripts after confirming their filesystem paths on the regular production PC.
+`.github/workflows/deploy-cloudflare-worker-production.yml`
 
-## Migration while regular production PC is unavailable
+Pages production deployment workflow:
 
-Work that can proceed safely without the production PC:
+`.github/workflows/deploy-cloudflare-pages-production.yml`
 
-1. Establish repository structure and source-control rules.
-2. Inventory latest recovered Cloudflare/Studio sources in the File Library.
-3. Preserve verified handoff documentation and deployment manifests.
-4. Prepare GitHub/Cloudflare CI configuration without enabling production deployment.
-5. Inventory Make blueprint exports and identify which are historical versus current-live candidates.
+Production deployments are intentionally separated from normal source edits. Editing Worker or Pages source runs validation only. Production deployment requires an intentional update to the matching trigger file under `deploy/` (or an explicit workflow dispatch).
 
-Work intentionally deferred until the production PC is available:
+### Worker safety model
 
-1. Import the complete active Remotion project.
-2. Import local Frame Extractor, Watermark, Voiceover Normalizer, and YouTube Uploader service folders.
-3. Import active Production Start/Stop/Verify scripts.
-4. Run clean-checkout local build/service validation.
+Worker deployment uses Cloudflare's Workers Scripts Content API so code can be replaced **without changing existing Worker bindings or configuration**. The workflow saves the pre-deploy Worker source as a temporary GitHub Actions artifact and verifies that Cloudflare's post-deploy source exactly matches GitHub.
 
-## Deployment safety gate
+### Pages safety model
 
-Do **not** enable automatic deployment from `main` until all of the following are true:
+Pages deployment reads the existing project's production branch from Cloudflare, stages only `index.html` and `assets/`, and deploys those files to the existing `chicagoshining-studio` Direct Upload project with Wrangler. Repository documentation and deployment-control files are never included in the Pages upload directory.
 
-1. Current Cloudflare Worker source is captured and compared to live production.
-2. Current Studio Pages source is captured and compared to live production.
-3. Remotion active source is captured from the new production directory.
-4. Start/Stop/Verify scripts are captured from the currently active directory.
-5. Secrets/config values have been removed or replaced with examples.
-6. A clean checkout can reproduce builds locally.
-7. A preview/non-production deployment passes smoke testing.
+## Operational rule
 
-Only after this gate should GitHub become the deployment trigger for Cloudflare production.
+For future Cloudflare changes:
+
+1. Modify the source in `apps/studio-api/worker.js` and/or `apps/studio-web/`.
+2. Confirm GitHub source validation passes.
+3. Intentionally update the appropriate `deploy/cloudflare-*-production.txt` trigger.
+4. Inspect the deployment run and verify Cloudflare accepted the exact intended source.
+
+This is the production source-control path for routine Studio Worker/Pages modifications.
