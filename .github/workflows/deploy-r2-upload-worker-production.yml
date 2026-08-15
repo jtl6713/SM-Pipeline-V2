@@ -82,7 +82,26 @@ jobs:
           fi
           jq -e '.success == true' /tmp/r2-worker-deploy-result.json >/dev/null
 
-      - name: Verify deployed Worker source is readable
+      - name: Ensure Worker workers.dev subdomain is enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl -sS \
+            -o /tmp/r2-worker-subdomain-result.json \
+            -w '%{http_code}' \
+            -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-r2-upload/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":true}')
+          if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
+            echo "Cloudflare Worker subdomain enable failed with HTTP $HTTP_CODE" >&2
+            jq '{success,errors,messages}' /tmp/r2-worker-subdomain-result.json >&2 || true
+            exit 1
+          fi
+          jq -e '.success == true and .result.enabled == true' /tmp/r2-worker-subdomain-result.json >/dev/null
+
+      - name: Verify deployed Worker source and public health endpoint
         shell: bash
         run: |
           set -euo pipefail
@@ -91,8 +110,19 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -o /tmp/r2-worker-after.bin
           test -s /tmp/r2-worker-after.bin
+          HEALTH_CODE=$(curl -sS \
+            -o /tmp/r2-worker-health.json \
+            -w '%{http_code}' \
+            "https://chicagoshining-r2-upload.joseph-t-logan.workers.dev/health")
+          if [[ "$HEALTH_CODE" -lt 200 || "$HEALTH_CODE" -ge 300 ]]; then
+            echo "Public Worker health check failed with HTTP $HEALTH_CODE" >&2
+            head -c 500 /tmp/r2-worker-health.json >&2 || true
+            exit 1
+          fi
+          jq -e '.ok == true and .service == "chicagoshining-r2-upload"' /tmp/r2-worker-health.json >/dev/null
           {
             echo '### R2 upload Worker production deployment: PASS'
             echo "- Source SHA-256: $(sha256sum apps/r2-upload-worker/worker.js | cut -d' ' -f1)"
             echo '- Existing Worker configuration/bindings were not modified by this workflow.'
+            echo '- workers.dev public subdomain is enabled and /health passed.'
           } >> "$GITHUB_STEP_SUMMARY"
