@@ -1,5 +1,6 @@
 name: Cloudflare Connection Check
 
+# Read-only validation of the GitHub -> Cloudflare credential path.
 on:
   workflow_dispatch:
   push:
