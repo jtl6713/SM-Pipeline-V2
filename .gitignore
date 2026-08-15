@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Logs / runtime
+*.log
+logs/
+.tmp/
+tmp/
+temp/
+.cache/
+
+# Builds / generated
+build/
+dist/
+coverage/
+.wrangler/
+.dev.vars
+
+# Remotion / media outputs
+out/
+render-assets/
+public/render-assets/
+public/renders/
+renders/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+
+# Image/media working files
+*.heic
+*.heif
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Archives / backups
+*.zip
+*.7z
+*.rar
+*.bak
+*.backup
