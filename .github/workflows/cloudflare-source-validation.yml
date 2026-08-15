@@ -1,0 +1,75 @@
+name: Validate Cloudflare Sources
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-web/assets/**'
+  pull_request:
+    paths:
+      - 'apps/studio-api/worker.js'
+      - 'apps/studio-web/index.html'
+      - 'apps/studio-web/assets/**'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate Studio API Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/studio-api/worker.js
+          grep -q 'chicagoshining-studio-api' apps/studio-api/worker.js
+          grep -qE 'export default|addEventListener\(' apps/studio-api/worker.js
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+
+      - name: Validate Studio Pages source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/studio-web/index.html
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const html = fs.readFileSync('apps/studio-web/index.html','utf8');
+          const refs = [];
+          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) {
+            let p = m[1].trim();
+            if (!p.startsWith('/assets/')) continue;
+            p = p.split('#')[0].split('?')[0];
+            refs.push(p);
+            const local = path.join('apps/studio-web', p.replace(/^\//,''));
+            if (!fs.existsSync(local)) {
+              console.error(`Missing referenced asset: ${p}`);
+              process.exitCode = 1;
+            }
+          }
+          if (!refs.some(x => /app-.*\.js$/i.test(x))) throw new Error('index.html does not reference an application JavaScript asset');
+          if (!refs.some(x => /\.css$/i.test(x))) throw new Error('index.html does not reference a CSS asset');
+          NODE
+          for file in apps/studio-web/assets/*.js; do
+            [ -e "$file" ] || continue
+            cp "$file" /tmp/"$(basename "$file" .js)".mjs
+            node --check /tmp/"$(basename "$file" .js)".mjs
+          done
+
+      - name: Source validation summary
+        shell: bash
+        run: |
+          {
+            echo '### Cloudflare source validation: PASS'
+            echo '- Studio API Worker syntax and service marker: PASS'
+            echo '- Studio Pages referenced assets and JavaScript syntax: PASS'
+          } >> "$GITHUB_STEP_SUMMARY"
