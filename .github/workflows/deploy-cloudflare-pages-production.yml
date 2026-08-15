@@ -1,0 +1,104 @@
+name: Deploy Studio Pages Production
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-pages-production.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-pages-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate Pages source and stage deployment directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/studio-web/index.html
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const html = fs.readFileSync('apps/studio-web/index.html','utf8');
+          let app = false, css = false;
+          for (const m of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) {
+            let p = m[1].trim();
+            if (!p.startsWith('/assets/')) continue;
+            p = p.split('#')[0].split('?')[0];
+            const local = path.join('apps/studio-web', p.replace(/^\//,''));
+            if (!fs.existsSync(local)) throw new Error(`Missing referenced asset: ${p}`);
+            if (/app-.*\.js$/i.test(p)) app = true;
+            if (/\.css$/i.test(p)) css = true;
+          }
+          if (!app || !css) throw new Error('Pages baseline must include referenced application JS and CSS');
+          NODE
+          for file in apps/studio-web/assets/*.js; do
+            [ -e "$file" ] || continue
+            cp "$file" /tmp/"$(basename "$file" .js)".mjs
+            node --check /tmp/"$(basename "$file" .js)".mjs
+          done
+          rm -rf /tmp/pages-deploy
+          mkdir -p /tmp/pages-deploy/assets
+          cp apps/studio-web/index.html /tmp/pages-deploy/index.html
+          cp -a apps/studio-web/assets/. /tmp/pages-deploy/assets/
+
+      - name: Read existing Pages production branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/chicagoshining-studio" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -o /tmp/pages-project.json
+          jq -e '.success == true' /tmp/pages-project.json >/dev/null
+          PROD_BRANCH=$(jq -r '.result.production_branch // empty' /tmp/pages-project.json)
+          if [ -z "$PROD_BRANCH" ]; then
+            echo 'Could not determine the existing Pages production branch.' >&2
+            exit 1
+          fi
+          echo "PROD_BRANCH=$PROD_BRANCH" >> "$GITHUB_ENV"
+          echo "Existing production branch: $PROD_BRANCH"
+
+      - name: Deploy staged files to existing Pages production branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest pages deploy /tmp/pages-deploy \
+            --project-name=chicagoshining-studio \
+            --branch="$PROD_BRANCH" \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="SM Pipeline V2 controlled GitHub deployment" \
+            --commit-dirty=false
+
+      - name: Verify latest production deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@latest pages deployment list \
+            --project-name=chicagoshining-studio \
+            --environment=production \
+            --json > /tmp/pages-production.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/pages-production.json','utf8'));
+          const rows = Array.isArray(data) ? data : (data.result || []);
+          if (!rows.length) throw new Error('No production Pages deployment was returned after deploy');
+          const latest = rows[0];
+          const url = latest.url || latest.aliases?.[0] || '(available in Cloudflare dashboard)';
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            `### Studio Pages production deployment: PASS\n- Production branch: ${process.env.PROD_BRANCH}\n- Latest deployment: ${url}\n`);
+          NODE
