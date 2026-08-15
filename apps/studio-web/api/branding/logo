@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <meta name="robots" content="noindex,nofollow,noarchive">
+ <title>ChicagoShining Studio</title>
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.19">
+</head>
+<body>
+ <header class="topbar">
+ <div class="brand-wrap">
+ <div class="brand-logo-frame">
+ <img class="brand-logo" src="/api/branding/logo" alt="ChicagoShining" width="42" height="42" style="width:42px;height:42px;max-width:42px;max-height:42px;object-fit:contain;display:block;">
+ </div>
+ <div class="brand-studio-copy">
+ <div class="brand-name">ChicagoShining Studio</div>
+ <div class="brand-subtitle">Pipeline administration</div>
+ </div>
+ </div>
+ <div class="topbar-status" id="apiStatus">Connecting…</div>
+ </header>
+
+ <div class="shell">
+ <nav class="sidebar" aria-label="Studio navigation">
+ <button class="nav-item active" data-page="dashboard">Dashboard</button>
+ <button class="nav-item" data-page="ideas">Ideas</button>
+ <button class="nav-item" data-page="content">Production</button>
+ <button class="nav-item" data-page="outputs">Pipeline</button>
+ <button class="nav-item" data-page="music">Music Library</button>
+ <div class="nav-divider"></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.19</span></div>
+ </nav>
+
+ <main class="main" id="main">
+ <section id="page-dashboard" class="page active">
+ <div class="page-heading">
+ <div><span class="eyebrow">Overview</span><h1>Pipeline dashboard</h1><p>Real-time administrative view of the current ChicagoShining content pipeline.</p></div>
+ <button class="secondary-button" id="refreshDashboard">Refresh</button>
+ </div>
+ <div class="metrics" id="metrics"></div>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Recent platform outputs</h2><p>Normalized states hide scenario implementation details while preserving actionable status.</p></div></div>
+ <div id="recentOutputs" class="table-wrap"></div>
+ </section>
+ </section>
+
+ <section id="page-ideas" class="page">
+ <div class="page-heading">
+ <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Review, edit, hold, restore, approve, and promote Idea Candidates into the existing production workflow.</p></div>
+ <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
+ </div>
+ <section class="panel idea-create-panel" id="ideaCreatePanel" hidden>
+ <div class="panel-heading"><div><h2>Create idea</h2><p>This creates an Idea Candidate only. It does not promote or start production.</p></div></div>
+ <form id="ideaCreateForm" class="idea-form">
+ <label class="form-field"><span>Idea title</span><input id="ideaTitle" name="title" maxlength="160" required placeholder="e.g. Chicago Riverwalk at sunset"></label>
+ <label class="form-field"><span>Summary <em>optional</em></span><textarea id="ideaSummary" name="summary" maxlength="5000" rows="5" placeholder="What should this content be about?"></textarea></label>
+ <div class="form-message" id="ideaFormMessage" aria-live="polite"></div>
+ <div class="form-actions"><button type="button" class="secondary-button" id="cancelIdeaButton">Cancel</button><button type="submit" class="primary-button" id="createIdeaButton">Create idea</button></div>
+ </form>
+ </section>
+ <section class="panel"><div id="ideasList" class="table-wrap"></div></section>
+ </section>
+
+ <section id="page-content" class="page">
+ <div class="page-heading">
+ <div><span class="eyebrow">Create once · publish everywhere</span><h1>Production workspace</h1><p>Upload your master media once, choose the platforms, and let Studio prepare the right format and ratio for each destination.</p></div>
+ <button class="secondary-button" data-refresh="content">Refresh</button>
+ </div>
+
+ <section class="panel production-request-shell" id="productionRequestWorkspace" hidden>
+ <div class="panel-heading production-request-heading">
+ <div>
+ <span class="eyebrow">Production request</span>
+ <h2 id="productionRequestTitle">Configure production</h2>
+ <p id="productionRequestSubtitle">Draft creative intent before the pipeline starts.</p>
+ </div>
+ <span class="badge" id="productionRequestStatus">Draft</span>
+ </div>
+
+ <form id="productionRequestForm" class="production-request-form">
+ <div class="request-section item4-master-media-section">
+ <div class="request-section-heading item4-heading-row">
+ <div><h3>1. Master media</h3><p>Upload the original photos once. Studio preserves them and plans platform-specific treatments from the same source set.</p></div>
+ <span class="item4-state-pill" id="item4AssetStatus">No media yet</span>
+ </div>
+ <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos">
+ <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
+ <div class="item4-upload-icon">＋</div>
+ <div><strong>Drop photos here or choose files</strong><span>Up to 20 photos · HEIC/HEIF supported · originals are preserved</span></div>
+ <button type="button" class="secondary-button" id="item4ChooseMedia">Choose photos</button>
+ </div>
+ <div class="item4-upload-progress" id="item4UploadProgress" hidden></div>
+ <div class="item4-asset-strip" id="item4AssetStrip"><div class="empty compact-empty">No master photos uploaded yet.</div></div>
+ </div>
+
+ <div class="request-section item4-output-plan-section">
+ <div class="request-section-heading item4-heading-row">
+ <div><h3>2. Platform output plan</h3><p>Studio recommends the strongest format for each platform and uses Platform Output Mappings as the aspect-ratio authority. You can override any recommendation.</p></div>
+ <span class="item4-state-pill" id="item4PlanStatus">Needs plan</span>
+ </div>
+ <div class="item4-platform-toggles" id="item4PlatformToggles">
+ <label><input type="checkbox" data-item4-platform value="Instagram" checked> Instagram</label>
+ <label><input type="checkbox" data-item4-platform value="Facebook" checked> Facebook</label>
+ <label><input type="checkbox" data-item4-platform value="TikTok" checked> TikTok</label>
+ <label><input type="checkbox" data-item4-platform value="YouTube" checked> YouTube</label>
+ </div>
+ <div class="item4-plan-actions"><button type="button" class="primary-button" id="item4BuildPlan">Recommend platform plan</button><span id="item4PlanHint">Upload photos first, then build the plan.</span></div>
+ <div class="item4-output-plan" id="item4OutputPlan"><div class="empty compact-empty">Your platform recommendations will appear here.</div></div>
+ <div class="item4-production-gate" id="item4ProductionGate" hidden>
+ <strong>Output plan ready.</strong>
+ <span>The master photos and requested outputs are saved. Studio validates the source-to-production bridge automatically before promotion.</span>
+ </div>
+ </div>
+ <div class="request-section item4-variant-section">
+ <div class="request-section-heading item4-heading-row">
+ <div><h3>3. Platform-ready media</h3><p>Studio converts the preserved originals into the exact ratios required by the platform plan. HEIC originals stay untouched.</p></div>
+ <span class="item4-state-pill" id="item4VariantStatus">Not prepared</span>
+ </div>
+ <div class="item4-variant-actions">
+ <button type="button" class="primary-button" id="item4PrepareVariants">Prepare platform media</button>
+ <span id="item4VariantHint">Build the platform plan first.</span>
+ </div>
+ <div class="item4-variant-error error-text" id="item4VariantError" hidden></div>
+ <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty">Prepared 4:5, 9:16, 1:1, or 16:9 versions will appear here only when required by the selected outputs.</div></div>
+ </div>
+
+ <div class="request-section">
+ <div class="request-section-heading"><h3>4. Master creative defaults</h3><p>Configure shared defaults once. Requested platform outputs inherit these values unless overridden.</p></div>
+ <div class="request-grid">
+ <label class="form-field"><span>Master content type</span>
+ <select id="prContentType">
+ <option value="">Choose content type…</option>
+ <option>Vertical Short Video</option><option>Story</option><option>Carousel</option>
+ <option>Feed Post</option><option>Text Post</option><option>Thread</option>
+ <option>Longform Video</option><option>Thumbnail / Promo Still</option>
+ <option>Event / Flyer Post</option><option>Photo Set</option>
+ </select>
+ </label>
+ <div class="derived-platform-note">
+ <strong>Platforms</strong>
+ <span>Derived automatically from the requested platform outputs below.</span>
+ </div>
+ <fieldset class="platform-fieldset request-platforms legacy-target-platforms" hidden aria-hidden="true">
+ <legend>Target platforms</legend>
+ <div class="platform-checks">
+ <label><input type="checkbox" name="prPlatform" value="Instagram"> Instagram</label>
+ <label><input type="checkbox" name="prPlatform" value="Facebook"> Facebook</label>
+ <label><input type="checkbox" name="prPlatform" value="TikTok"> TikTok</label>
+ <label><input type="checkbox" name="prPlatform" value="YouTube"> YouTube</label>
+ <label><input type="checkbox" name="prPlatform" value="Threads"> Threads</label>
+ </div>
+ </fieldset>
+ </div>
+ </div>
+
+ <div class="request-section" id="prOutputMatrixSection">
+ <div class="request-section-heading">
+ <h3>5. Requested platform outputs</h3>
+ <p>Advanced output selection. The recommended plan above selects these automatically; use this matrix only when you want additional or alternative outputs.</p>
+ </div>
+ <div class="output-matrix" id="prOutputMatrix">
+ <fieldset class="output-platform-card"><legend>Instagram</legend>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Reel"> Reel</label>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Story"> Story</label>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Single Image"> Single Image</label>
+ <label><input type="checkbox" data-pr-output data-platform="Instagram" value="Carousel"> Carousel</label>
+ </fieldset>
+ <fieldset class="output-platform-card"><legend>Facebook</legend>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Reel"> Reel</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Story"> Story</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Single Image"> Single Image</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Multi-Image Post"> Multi-Image Post</label>
+ <label><input type="checkbox" data-pr-output data-platform="Facebook" value="Slideshow Reel"> Slideshow Reel</label>
+ </fieldset>
+ <fieldset class="output-platform-card"><legend>TikTok</legend>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Video Draft"> Video Draft</label>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Story"> Story</label>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Single Photo"> Single Photo</label>
+ <label><input type="checkbox" data-pr-output data-platform="TikTok" value="Multi-Photo"> Multi-Photo</label>
+ </fieldset>
+ <fieldset class="output-platform-card"><legend>YouTube</legend>
+ <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Short"> Short</label>
+ <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Standard Video"> Standard Video</label>
+ <label><input type="checkbox" data-pr-output data-platform="YouTube" value="Slideshow Video"> Slideshow Video</label>
+ </fieldset>
+ </div>
+ <div class="output-matrix-summary" id="prOutputMatrixSummary">No requested outputs selected yet.</div>
+ <div class="requested-output-cards" id="prOutputCards"></div>
+
+ <div class="output-override-editor" id="prOutputOverrideEditor" hidden>
+ <div class="override-editor-header">
+ <div>
+ <div class="eyebrow">PER-OUTPUT OVERRIDES</div>
+ <h4 id="prOverrideHeading">Output override</h4>
+ <p id="prOverrideInheritedNote">Blank/Inherit values use the master Production Request.</p>
+ </div>
+ <button type="button" class="button secondary small" id="closePrOverride">Close override</button>
+ </div>
+
+ <input type="hidden" id="prOverrideRecordId">
+
+ <div class="override-grid">
+ <label>Voiceover
+ <select id="prOverrideVoiceover">
+ <option>Inherit</option>
+ <option>Use Profile Default</option>
+ <option>Yes</option>
+ <option>No</option>
+ </select>
+ </label>
+
+ <label>Background music
+ <select id="prOverrideMusicMode">
+ <option>Inherit</option>
+ <option>Use Profile Default</option>
+ <option>Yes</option>
+ <option>No</option>
+ </select>
+ </label>
+
+ <label>Thumbnail / cover
+ <select id="prOverrideThumbnail">
+ <option>Inherit</option>
+ <option>Use Profile Default</option>
+ <option>Yes</option>
+ <option>No</option>
+ </select>
+ </label>
+
+ <label>Specific music track
+ <select id="prOverrideMusicAsset">
+ <option value="">Inherit master track</option>
+ </select>
+ </label>
+
+ <label id="prOverrideDurationField">Duration (seconds)
+ <input id="prOverrideDuration" type="number" min="5" max="600" step="1" placeholder="Inherit">
+ </label>
+
+ <label>Voiceover tail (seconds)
+ <input id="prOverrideVoiceoverTail" type="number" min="0" max="10" step="0.5" placeholder="Inherit">
+ </label>
+ </div>
+
+ <div class="override-subsection" id="prOverrideClipSection">
+ <h5>Video clip count</h5>
+ <div class="override-grid count-grid">
+ <label>Mode
+ <select id="prOverrideClipMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Exact</option>
+ <option>Target range</option>
+ </select>
+ </label>
+ <label>Exact
+ <input id="prOverrideClipExact" type="number" min="1" max="15" step="1" placeholder="Inherit">
+ </label>
+ <label>Min
+ <input id="prOverrideClipMin" type="number" min="1" max="15" step="1" placeholder="Inherit">
+ </label>
+ <label>Max
+ <input id="prOverrideClipMax" type="number" min="1" max="15" step="1" placeholder="Inherit">
+ </label>
+ </div>
+ </div>
+
+ <div class="override-subsection" id="prOverrideSlideSection">
+ <h5>Slide / photo count</h5>
+ <div class="override-grid count-grid">
+ <label>Mode
+ <select id="prOverrideSlideMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Exact</option>
+ <option>Target range</option>
+ </select>
+ </label>
+ <label>Exact
+ <input id="prOverrideSlideExact" type="number" min="1" max="20" step="1" placeholder="Inherit">
+ </label>
+ <label>Min
+ <input id="prOverrideSlideMin" type="number" min="1" max="20" step="1" placeholder="Inherit">
+ </label>
+ <label>Max
+ <input id="prOverrideSlideMax" type="number" min="1" max="20" step="1" placeholder="Inherit">
+ </label>
+ <label>Image mode
+ <select id="prOverrideImageMode">
+ <option>Inherit</option>
+ <option>Make AI Generated</option>
+ <option>Manual Upload</option>
+ </select>
+ </label>
+ </div>
+ </div>
+
+ <div class="override-subsection">
+ <h5>Text direction</h5>
+ <div class="override-text-row">
+ <label>Title mode
+ <select id="prOverrideTitleMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Force exact</option>
+ <option>AI improve</option>
+ </select>
+ </label>
+ <label class="grow">Title
+ <input id="prOverrideTitle" type="text" maxlength="500" placeholder="Inherit master title direction">
+ </label>
+ </div>
+ <div class="override-text-row">
+ <label>Caption mode
+ <select id="prOverrideCaptionMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Force exact</option>
+ <option>AI improve</option>
+ </select>
+ </label>
+ <label class="grow">Caption
+ <textarea id="prOverrideCaption" rows="3" placeholder="Inherit master caption direction"></textarea>
+ </label>
+ </div>
+ <div class="override-text-row">
+ <label>Script mode
+ <select id="prOverrideScriptMode">
+ <option>Inherit</option>
+ <option>AI decides</option>
+ <option>Force exact</option>
+ <option>AI improve</option>
+ </select>
+ </label>
+ <label class="grow">Script / voiceover direction
+ <textarea id="prOverrideScript" rows="3" placeholder="Inherit master script direction"></textarea>
+ </label>
+ </div>
+ </div>
+
+ <div class="override-subsection">
+ <h5>Publishing &amp; notes</h5>
+ <div class="override-grid">
+ <label>Publish mode
+ <select id="prOverridePublishMode">
+ <option>Inherit</option>
+ <option>Auto Publish</option>
+ <option>Manual Review</option>
+ <option>Do Not Publish</option>
+ </select>
+ </label>
+ <label>Scheduled at
+ <input id="prOverrideScheduledAt" type="datetime-local">
+ </label>
+ </div>
+ <label class="full-width-label">Output-specific notes
+ <textarea id="prOverrideNotes" rows="4" placeholder="Only instructions that differ for this output"></textarea>
+ </label>
+ </div>
+
+ <div class="effective-preview" id="prOverrideEffectivePreview"></div>
+
+ <div class="override-editor-actions">
+ <span class="form-message" id="prOverrideMessage"></span>
+ <button type="button" class="button primary" id="savePrOverride">Save output override</button>
+ </div>
+ </div>
+ </div>
+
+ <div class="request-section">
+ <div class="request-section-heading"><h3>6. Structure</h3><p>Use AI, force an exact count, or provide a target range.</p></div>
+ <div class="request-grid">
+ <div class="structure-card" id="prVideoStructure">
+ <strong>Video</strong>
+ <label class="form-field"><span>Duration</span><input type="number" id="prVideoDuration" min="5" max="600" value="30"></label>
+ <label class="form-field"><span>Clip count</span><select id="prVideoClipMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
+ <div class="count-inputs">
+ <label class="form-field exact-count"><span>Exact</span><input type="number" id="prVideoClipExact" min="1" max="30"></label>
+ <label class="form-field range-count"><span>Min</span><input type="number" id="prVideoClipMin" min="1" max="30"></label>
+ <label class="form-field range-count"><span>Max</span><input type="number" id="prVideoClipMax" min="1" max="30"></label>
+ </div>
+ </div>
+
+ <div class="structure-card" id="prCarouselStructure">
+ <strong>Carousel / photo sequence</strong>
+ <label class="form-field"><span>Slide count</span><select id="prCarouselSlideMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
+ <div class="count-inputs">
+ <label class="form-field exact-count"><span>Exact</span><input type="number" id="prCarouselSlideExact" min="1" max="20"></label>
+ <label class="form-field range-count"><span>Min</span><input type="number" id="prCarouselSlideMin" min="1" max="20"></label>
+ <label class="form-field range-count"><span>Max</span><input type="number" id="prCarouselSlideMax" min="1" max="20"></label>
+ </div>
+ <label class="form-field"><span>Image mode</span><select id="prCarouselImageMode"><option>Make AI Generated</option><option>Manual Upload</option></select></label>
+ </div>
+ </div>
+ </div>
+
+ <div class="request-section">
+ <div class="request-section-heading"><h3>7. Audio &amp; cover</h3><p>Profile defaults remain available, or explicitly override them.</p></div>
+ <div class="request-grid three">
+ <label class="form-field"><span>Voiceover</span><select id="prVoiceover"><option>Use Profile Default</option><option>Yes</option><option>No</option></select></label>
+ <label class="form-field"><span>Background music</span><select id="prMusicMode"><option>Use Profile Default</option><option>Yes</option><option>No</option></select></label>
+ <label class="form-field"><span>Thumbnail / cover</span><select id="prThumbnail"><option>Use Profile Default</option><option>Yes</option><option>No</option></select></label>
+ <label class="form-field"><span>Specific music track <em>optional</em></span><select id="prMusicAsset"><option value="">AI / profile chooses track</option></select></label>
+ <label class="form-field"><span>Video after voiceover</span><input type="number" id="prVoiceoverTail" min="0" max="10" step=".5" value="2"></label>
+ </div>
+ </div>
+
+ <div class="request-section">
+ <div class="request-section-heading"><h3>8. Text direction</h3><p>Let AI decide, force exact wording, or ask AI to improve your wording.</p></div>
+ <div class="text-control">
+ <label class="form-field"><span>Title control</span><select id="prTitleMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select></label>
+ <label class="form-field grow"><span>Title</span><input id="prRequestedTitle" maxlength="500" placeholder="Optional unless forcing exact wording"></label>
+ </div>
+ <div class="text-control">
+ <label class="form-field"><span>Caption control</span><select id="prCaptionMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select></label>
+ <label class="form-field grow"><span>Caption</span><textarea id="prRequestedCaption" rows="4" maxlength="10000"></textarea></label>
+ </div>
+ <div class="text-control">
+ <label class="form-field"><span>Script control</span><select id="prScriptMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select></label>
+ <label class="form-field grow"><span>Script / voiceover direction</span><textarea id="prRequestedScript" rows="5" maxlength="25000"></textarea></label>
+ </div>
+ </div>
+
+ <div class="request-section">
+ <div class="request-section-heading"><h3>9. Production notes</h3><p>Any additional direction for assets, pacing, style, or execution.</p></div>
+ <label class="form-field"><textarea id="prProductionNotes" rows="5" maxlength="10000"></textarea></label>
+ </div>
+
+ <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
+ <div class="form-message" id="productionPromotionCompatibility">
+              Item 4 bridge checkpoint: master media, platform planning, platform-ready ratios, and downstream work-item routing are validated before promotion.
+ </div>
+ <div class="request-actions">
+ <button type="button" class="secondary-button" id="closeProductionRequest">Close request</button>
+ <button type="submit" class="primary-button" id="saveProductionRequest">Save draft</button>
+ <button type="button" class="secondary-button" id="syncProductionRequestDirectives" hidden>Sync advanced directives</button>
+ <button type="button" class="primary-button" id="promoteProductionRequest">Approve &amp; Promote</button>
+ </div>
+ </form>
+ </section>
+
+ <section class="panel request-list-panel">
+ <div class="panel-heading"><div><h2>Production request drafts</h2><p>Saved creative requests waiting for approval/promotion.</p></div></div>
+ <div id="productionRequestList" class="table-wrap"></div>
+ </section>
+
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Promoted content items</h2><p>Items that have entered the existing production pipeline.</p></div></div>
+ <div id="contentList" class="table-wrap"></div>
+ </section>
+ </section>
+
+ <section id="page-outputs" class="page">
+ <div class="page-heading"><div><span class="eyebrow">Execution + creative review</span><h1>Platform pipeline</h1><p>Track each output and open the Phase 6 creative editor for review-only photo/slide adjustments.</p></div><button class="secondary-button" data-refresh="outputs">Refresh</button></div>
+
+ <section class="panel creative-editor-shell" id="creativeEditorPanel" hidden>
+ <div class="panel-heading creative-editor-heading">
+ <div>
+ <span class="eyebrow">Creative editor</span>
+ <h2 id="creativeEditorTitle">Creative review</h2>
+ <p id="creativeEditorSubtitle">Review and refine the current platform creative.</p>
+ </div>
+ <div class="creative-heading-actions">
+ <span class="creative-save-state saved" id="creativeSaveState">Saved</span>
+ <span class="badge" id="creativeSafetyBadge">Publishing locked</span>
+ <button type="button" class="secondary-button" id="closeCreativeEditor">Close</button>
+ </div>
+ </div>
+
+ <div class="creative-safety-banner" id="creativeSafetyBanner">
+ <strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Publishing stays locked until the later publishing step.
+ </div>
+
+ <nav class="creative-jump-nav" aria-label="Creative editor sections">
+ <button type="button" data-creative-jump="creativePreviewSection" title="Jump to preview controls">Preview</button>
+ <button type="button" data-creative-jump="creativeDefaultsSection" title="Jump to defaults controls">Defaults</button>
+ <button type="button" data-creative-jump="creativeAudioSection" title="Jump to audio controls">Audio</button>
+ <button type="button" data-creative-jump="creativeRatioSection" title="Jump to ratios controls">Ratios</button>
+ <button type="button" data-creative-jump="creativeSlidesSection" title="Jump to slides controls">Slides</button>
+ <button type="button" data-creative-jump="creativeReviewSection" title="Jump to review controls">Review</button>
+ </nav>
+
+ <div class="creative-editor-body">
+ <div class="creative-top-grid">
+ <section class="creative-preview-card" id="creativePreviewSection">
+ <div class="creative-section-heading"><div><h3>Rendered preview</h3><p>Listen to the current mix, adjust below, then save for the next preview render.</p></div></div>
+ <div class="creative-preview-freshness" id="creativePreviewFreshness">Current rendered preview</div>
+ <div class="render-preview-frame">
+ <video id="creativeRenderPreview" controls playsinline preload="metadata"></video>
+ <iframe id="creativeRenderPreviewDrive" class="render-preview-drive" title="Rendered Google Drive preview" allow="autoplay; fullscreen" allowfullscreen hidden></iframe>
+ <div class="render-preview-empty" id="creativeRenderPreviewEmpty">No rendered preview is available yet.</div>
+ </div>
+ <div class="creative-output-meta" id="creativeOutputMeta"></div>
+ </section>
+
+ <section class="creative-global-card" id="creativeDefaultsSection">
+ <div class="creative-section-heading"><div><h3>Global creative controls</h3><p>Shared defaults. Individual slides can override these values.</p></div></div>
+ <div class="creative-form-grid">
+ <label class="form-field"><span>Style strategy</span><select id="creativeStyleStrategy"><option>AI vary naturally</option><option>Consistent campaign</option><option>Manual per slide</option></select></label>
+ <label class="form-field"><span>Default slide duration</span><input type="number" id="creativeDefaultDuration" min="0.5" max="60" step="0.1" value="4"></label>
+ <label class="form-field"><span>Default motion</span><select id="creativeDefaultMotion"></select></label>
+ <label class="form-field"><span>Default transition</span><select id="creativeDefaultTransition"></select></label>
+ <label class="form-field"><span>Transition frames</span><input type="number" id="creativeDefaultTransitionFrames" min="0" max="90" step="1" value="12"></label>
+ <div class="voice-select-wrap"><label class="form-field"><span>Default voice</span><select id="creativeDefaultVoice"></select></label><button type="button" class="voice-preview-button" id="creativeDefaultVoicePreview" title="Preview selected ElevenLabs voice">▶ Preview</button></div>
+ <label class="form-field"><span>Voiceover tail</span><input type="number" id="creativeVoiceoverTail" min="0" max="10" step="0.5" value="2"></label>
+ <label class="form-field"><span>Variant policy</span><select id="creativeVariantPolicy"><option>Prefer exact prepared variant</option><option>Use existing prepared variants only</option><option>Allow fallback crop/fill</option></select></label>
+ <label class="form-field"><span>Opening treatment</span><select id="creativeOpeningTreatment"><option>Auto</option><option>Title card</option><option>Plain image</option><option>No text</option></select></label>
+ <label class="form-field"><span>Closing treatment</span><select id="creativeClosingTreatment"><option>Auto</option><option>End card</option><option>Plain image</option><option>No text</option></select></label>
+ </div>
+ </section>
+ </div>
+
+ <section class="creative-audio-card" id="creativeAudioSection">
+ <div class="creative-section-heading"><div><h3>Review-time audio mix</h3><p>Voiceover, normal music, and music-under-narration are independent controls. Voiceover starts at the existing 100% render level.</p></div><div class="audio-mix-summary" id="creativeAudioSummary">VO 100% · music 24% · 5% under narration</div></div>
+ <div class="audio-control-grid">
+ <label class="audio-control"><span>Voiceover volume</span><input type="range" id="creativeVoiceoverVolumeRange" min="0" max="125" step="1" value="100"><input type="number" id="creativeVoiceoverVolume" min="0" max="125" step="1" value="100"><b>%</b></label>
+ <label class="audio-control"><span>Normal music volume</span><input type="range" id="creativeMusicNormalRange" min="0" max="100" step="0.1" value="24"><input type="number" id="creativeMusicNormal" min="0" max="100" step="0.1" value="24"><b>%</b></label>
+ <label class="audio-control"><span>Music during narration</span><input type="range" id="creativeMusicDuckedRange" min="0" max="100" step="0.1" value="8.4"><input type="number" id="creativeMusicDucked" min="0" max="100" step="0.1" value="8.4"><b>%</b></label>
+ <label class="toggle-control"><input type="checkbox" id="creativeDuckingEnabled" checked><span>Duck music during narration</span></label>
+ <label class="form-field compact"><span>Duck ramp (frames)</span><input type="number" id="creativeDuckFadeFrames" min="0" max="90" step="1" value="6"></label>
+ </div>
+ <div class="audio-help">100% voiceover is the current proven render level. A slide can optionally override it below. Changes apply to the next preview render; they do not alter the current video in-place.</div>
+ </section>
+
+ <section class="creative-ratio-card" id="creativeRatioSection">
+ <div class="creative-section-heading"><div><h3>Ratio readiness</h3><p>Platform mapping remains the ratio authority. Exact resized variants are optional. When one is not prepared, Studio can render from the source image using the selected crop/fill treatment.</p></div></div>
+ <div id="creativeRatioPanel"></div>
+ </section>
+
+ <section class="creative-slides-section" id="creativeSlidesSection">
+ <div class="creative-section-heading slides-heading">
+ <div><h3>Photo / slide sequence</h3><p>Drag cards to reorder. Collapse slides when you only need to scan the sequence.</p></div>
+ <div class="creative-slide-heading-tools"><span class="subtle" id="creativeSlideCount">0 slides</span><button type="button" class="text-button" id="collapseCreativeSlides" title="Collapse all slide cards to scan the sequence">Collapse all</button><button type="button" class="text-button" id="expandCreativeSlides" title="Expand all slide cards to show every control">Expand all</button></div>
+ </div>
+ <div id="creativeSlidesList" class="creative-slides-list"></div>
+ </section>
+
+ <section class="creative-review-section" id="creativeReviewSection">
+ <div class="creative-review-notes-heading"><span>Review notes</span><button type="button" class="text-button" id="clearCreativeReviewNotes" title="Clear the review notes field">Clear notes</button></div>
+ <label class="form-field creative-review-notes"><textarea id="creativeReviewNotes" rows="3" maxlength="10000" placeholder="Optional notes for this review cycle"></textarea></label>
+ </section>
+
+ <section class="creative-change-progress" id="creativeChangeProgress" aria-live="polite">
+ <div class="creative-change-progress-heading">
+ <div>
+ <span class="eyebrow">Creative change progress</span>
+ <div class="creative-change-progress-title" id="creativeChangeProgressTitle">No change request in progress</div>
+ </div>
+ <span class="creative-change-progress-state" id="creativeChangeProgressState">Idle</span>
+ </div>
+ <div class="creative-change-progress-steps" id="creativeChangeProgressSteps"></div>
+ <div class="creative-change-progress-detail" id="creativeChangeProgressDetail">Save and request changes to begin a new preview revision.</div>
+ </section>
+
+ <div class="form-message" id="creativeEditorMessage" aria-live="polite"></div>
+
+ <div class="creative-editor-actions">
+ <div class="creative-action-explainer">
+ <strong>Choose what happens next</strong>
+ <span>Save draft stores edits only. Save &amp; rerender creates a new preview. Approve preview records review approval; it does not publish.</span>
+ </div>
+ <button type="button" class="secondary-button" id="reloadCreativeEditor">Reset unsaved edits</button>
+ <div class="creative-editor-action-group">
+ <button type="button" class="primary-button" id="saveCreativeEditor">Save draft</button>
+ <button type="button" class="primary-button rerender-button" id="creativeRequestChanges">Save &amp; rerender preview</button>
+ <button type="button" class="primary-button review-approve-button" id="creativeApprovePreview">Approve preview</button>
+ </div>
+ </div>
+ </div>
+ </section>
+
+ <section class="panel"><div id="outputsList" class="table-wrap"></div></section>
+ </section>
+
+ <section id="page-music" class="page">
+ <div class="page-heading"><div><span class="eyebrow">Background audio</span><h1>Music library</h1><p>Browse the current Airtable background-music catalogue and preview available tracks before production.</p></div><button class="secondary-button" data-refresh="music">Refresh</button></div>
+ <section class="panel"><div id="musicList" class="music-grid"></div></section>
+ </section>
+ </main>
+ </div>
+
+
+ <div class="drawer-backdrop" id="ideaDrawerBackdrop" hidden></div>
+ <aside class="idea-drawer" id="ideaManageDrawer" aria-hidden="true" aria-label="Idea details">
+ <div class="drawer-header">
+ <div>
+ <span class="eyebrow">Idea candidate</span>
+ <h2 id="ideaDrawerHeading">Manage idea</h2>
+ </div>
+ <button type="button" class="icon-button" id="closeIdeaDrawer" aria-label="Close idea panel">×</button>
+ </div>
+
+ <div class="drawer-body">
+ <div class="idea-detail-meta">
+ <div><span>Status</span><strong id="ideaDetailStatus">—</strong></div>
+ <div><span>Candidate</span><strong id="ideaDetailCandidate">—</strong></div>
+ </div>
+
+ <form id="ideaEditForm" class="idea-form drawer-form">
+ <label class="form-field">
+ <span>Idea title</span>
+ <input id="editIdeaTitle" maxlength="160" required>
+ </label>
+ <label class="form-field">
+ <span>Summary <em>optional</em></span>
+ <textarea id="editIdeaSummary" maxlength="5000" rows="7"></textarea>
+ </label>
+
+ <div class="detail-section">
+ <h3>Production snapshot</h3>
+ <div class="detail-grid" id="ideaProductionSnapshot"></div>
+ </div>
+
+ <div class="production-request-launch" id="productionRequestLaunch">
+ <div>
+ <strong>Phase 2B Production Request</strong>
+ <span>Capture creative intent as a draft before approval and promotion.</span>
+ </div>
+ <button type="button" class="primary-button" id="configureProductionButton">Configure Production</button>
+ </div>
+
+ <div class="promotion-zone" id="ideaPromotionZone">
+ <div class="promotion-heading">
+ <div>
+ <strong>Approve &amp; Promote</strong>
+ <span>Uses the existing I3 approval workflow, which then triggers I4. Studio does not create Content Items directly.</span>
+ </div>
+ </div>
+
+ <label class="form-field">
+ <span>Master content type</span>
+ <select id="promoteContentType">
+ <option value="">Choose content type…</option>
+ <option>Vertical Short Video</option>
+ <option>Story</option>
+ <option>Carousel</option>
+ <option>Feed Post</option>
+ <option>Text Post</option>
+ <option>Thread</option>
+ <option>Longform Video</option>
+ <option>Thumbnail / Promo Still</option>
+ <option>Event / Flyer Post</option>
+ <option>Photo Set</option>
+ </select>
+ </label>
+
+ <fieldset class="platform-fieldset">
+ <legend>Target platforms</legend>
+ <div class="platform-checks">
+ <label><input type="checkbox" name="promotePlatform" value="Instagram"> Instagram</label>
+ <label><input type="checkbox" name="promotePlatform" value="Facebook"> Facebook</label>
+ <label><input type="checkbox" name="promotePlatform" value="TikTok"> TikTok</label>
+ <label><input type="checkbox" name="promotePlatform" value="YouTube"> YouTube</label>
+ </div>
+ </fieldset>
+
+ <div class="promotion-grid">
+ <label class="form-field"><span>Voiceover</span><select id="promoteVoiceover"><option>Use Profile Default</option><option>Yes</option><option>No</option></select></label>
+ <label class="form-field"><span>Background music</span><select id="promoteMusic"><option>Use Profile Default</option><option>Yes</option><option>No</option></select></label>
+ <label class="form-field"><span>Thumbnail / cover</span><select id="promoteThumbnail"><option>Use Profile Default</option><option>Yes</option><option>No</option></select></label>
+ </div>
+
+ <div class="promotion-subpanel" id="videoPromotionOptions" hidden>
+ <div class="promotion-grid">
+ <label class="form-field"><span>Video duration</span><select id="promoteVideoDuration"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option></select></label>
+ <label class="form-field"><span>Clip count</span><select id="promoteVideoClipCount"><option value="Auto" selected>Auto / pipeline default</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10</option></select></label>
+ <label class="form-field"><span>Video after voiceover</span><select id="promoteVoiceoverTail"><option value="0">0 seconds</option><option value="1">1 second</option><option value="2" selected>2 seconds</option><option value="2.5">2.5 seconds</option><option value="3">3 seconds</option><option value="4">4 seconds</option><option value="5">5 seconds</option></select></label>
+ </div>
+ </div>
+
+ <div class="promotion-subpanel" id="carouselPromotionOptions" hidden>
+ <div class="promotion-grid">
+ <label class="form-field"><span>Slide count</span><input id="promoteCarouselSlideCount" type="number" min="1" max="20" value="5"></label>
+ <label class="form-field"><span>Image mode</span><select id="promoteCarouselImageMode"><option value="Make AI Generated">Make AI Generated</option><option value="Manual Upload">Manual Upload</option></select></label>
+ </div>
+ </div>
+
+ <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction passed through the existing I3 approval flow."></textarea></label>
+ <button type="button" class="promote-button" id="promoteIdeaButton">Approve &amp; Promote</button>
+ </div>
+
+ <div class="form-message" id="ideaManageMessage" aria-live="polite"></div>
+
+ <div class="drawer-actions">
+ <button type="submit" class="primary-button" id="saveIdeaButton">Save changes</button>
+ <button type="button" class="secondary-button" id="holdIdeaButton">Hold idea</button>
+ <button type="button" class="secondary-button" id="restoreIdeaButton" hidden>Restore idea</button>
+ </div>
+
+ <div class="danger-zone">
+ <div>
+ <strong>Delete idea</strong>
+ <span>Permanently removes this unpromoted Idea Candidate.</span>
+ </div>
+ <button type="button" class="danger-button" id="deleteIdeaButton">Delete</button>
+ </div>
+ </form>
+ </div>
+ </aside>
+
+ <script src="/assets/config.js"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.19"></script>
+</body>
+</html>
