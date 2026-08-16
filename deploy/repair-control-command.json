@@ -10,5 +10,5 @@
   "deny_fixture_record_ids": ["recpiwWGrph3lsTn6"],
   "allow_public_publish": false,
   "expected_http_status": 200,
-  "control_attempt": 2
+  "control_attempt": 3
 }
