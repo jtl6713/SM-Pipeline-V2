@@ -1,6 +1,7 @@
 {
-  "correlation_id":"SUNSET-E2E-BRIDGE-PREFLIGHT-20260816-0209",
+  "correlation_id":"SUNSET-E2E-PROMOTE-20260816-0211",
   "requests":[
-    {"name":"bridge-preflight","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ/bridge-preflight"}
+    {"name":"promote-production-request","method":"POST","path":"/api/production-requests/recc9H8SXdUnKEMhQ/promote","body":{}},
+    {"name":"production-request-after-promote","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ"}
   ]
 }
