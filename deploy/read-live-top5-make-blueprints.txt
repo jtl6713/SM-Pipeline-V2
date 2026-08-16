@@ -1,4 +1,5 @@
-Read-only live Make blueprint topology audit trigger.
+Read-only live Make blueprint topology/state audit trigger.
 Targets include R3 5557966 and R4 5556716 plus reference orchestrators.
+Verify R4 is OFF with canonical 900-second schedule after bounded proof J hit the Worker subrequest ceiling.
 No scenario activation, no blueprint write, no publishing.
-Triggered: 2026-08-16T13:43-04:00 R3-to-R4 handoff audit.
+Triggered: 2026-08-16 continuation checkpoint.
