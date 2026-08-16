@@ -1,3 +1,4 @@
 Run one bounded R4 exact-input proof only: target Platform Output 153 / recPd2OnropiUpJzR; deny fixture Platform Output 154 / rec4t364GUMajl9T7; Do_Not_Publish required; scenario 5556716 max 1 run / 12 operations; verify denial fixture unchanged and R4 OFF in controller cleanup. Triggered 2026-08-16 checkpoint B.
 Retry after prior lease expiry and controller sweep: 2026-08-16T16:36Z.
 Retry after confirmed 16:36:02Z lease expiry.
+Diagnostic retry C after execution-status evidence deployment.
