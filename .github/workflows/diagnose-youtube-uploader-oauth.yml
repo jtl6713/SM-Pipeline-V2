@@ -34,22 +34,26 @@ jobs:
           d=json.load(open('/tmp/settings')); vals={r['fields']['Setting_Name']:str(r['fields'].get('Setting_Value','')).strip() for r in d.get('records',[])}
           base=vals.get('YOUTUBE_UPLOAD_SERVICE_URL','').rstrip('/'); secret=vals.get('YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET','')
           if not base: raise SystemExit('missing uploader URL')
-          paths=['/','/health','/status','/api/health','/oauth/status','/auth/status','/oauth','/auth','/authorize','/oauth/start','/auth/start']
-          headersets=[('plain',{}),('bearer',{'Authorization':'Bearer '+secret}),('shared-secret',{'X-Shared-Secret':secret}),('api-key',{'X-API-Key':secret})]
+          paths=[
+            '/','/health','/status','/api/health','/docs','/openapi.json','/swagger','/swagger.json',
+            '/youtube','/youtube/health','/youtube/status','/youtube/auth/status','/youtube/oauth/status',
+            '/youtube/credentials/status','/youtube/auth','/youtube/oauth','/youtube/authorize',
+            '/youtube/auth/start','/youtube/oauth/start','/youtube/reauthorize','/youtube/videos'
+          ]
+          headersets=[('plain',{}),('service-key',{'X-SM-Pipeline-Key':secret})]
           out={'base':base,'probes':[]}
           for path in paths:
             for hname,headers in headersets:
-              req=urllib.request.Request(base+path,method='GET',headers={**headers,'User-Agent':'SM-Pipeline-V2-YouTube-Diagnostic/1.0'})
+              req=urllib.request.Request(base+path,method='GET',headers={**headers,'User-Agent':'SM-Pipeline-V2-YouTube-Diagnostic/1.1'})
               try:
                 with urllib.request.urlopen(req,timeout=12) as r:
-                  body=r.read(4096).decode('utf-8','replace')
-                  out['probes'].append({'path':path,'auth':hname,'status':r.status,'content_type':r.headers.get('content-type'),'location':r.headers.get('location'),'body':body})
+                  body=r.read(8192).decode('utf-8','replace')
+                  out['probes'].append({'path':path,'auth':hname,'status':r.status,'content_type':r.headers.get('content-type'),'location':r.headers.get('location'),'allow':r.headers.get('allow'),'body':body})
               except urllib.error.HTTPError as e:
-                body=e.read(2048).decode('utf-8','replace')
-                out['probes'].append({'path':path,'auth':hname,'status':e.code,'content_type':e.headers.get('content-type'),'location':e.headers.get('location'),'body':body})
+                body=e.read(4096).decode('utf-8','replace')
+                out['probes'].append({'path':path,'auth':hname,'status':e.code,'content_type':e.headers.get('content-type'),'location':e.headers.get('location'),'allow':e.headers.get('allow'),'body':body})
               except Exception as e:
                 out['probes'].append({'path':path,'auth':hname,'error':type(e).__name__+': '+str(e)})
-          # redact configured secret from any echoed body
           raw=json.dumps(out,indent=2)
           if secret: raw=raw.replace(secret,'[REDACTED]')
           open('/tmp/youtube-oauth-diagnostic.json','w').write(raw)
