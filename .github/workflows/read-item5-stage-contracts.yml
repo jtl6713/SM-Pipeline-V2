@@ -1,0 +1,39 @@
+name: Read Item 5 Stage Contracts
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-item5-stage-contracts.txt']
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract stage constants and pulse contracts
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('apps/studio-api/worker.js').read_text(encoding='utf-8')
+          out=[]
+          # all relevant constant declarations
+          for line in s.splitlines():
+            if any(k in line for k in ['PHASE6_R2_SCENARIO_ID','PHASE6_R3_SCENARIO_ID','PHASE6_R4_SCENARIO_ID','PHASE6_R5_SCENARIO_ID','RR1_SCENARIO','R2_SCENARIO','R3_SCENARIO','R5_SCENARIO']):
+              out.append(line+'\n')
+          for needle in ['async function phase6PulseInactiveScenario','PHASE6_R4_SCENARIO_ID =','PHASE6_R5_SCENARIO_ID =']:
+            pos=s.find(needle)
+            out.append('\n===== '+needle+' =====\n')
+            if pos>=0: out.append(s[max(0,pos-2500):min(len(s),pos+12000)]+'\n')
+            else: out.append('NOT FOUND\n')
+          Path('/tmp/item5-stage-contracts.txt').write_text(''.join(out),encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: item5-stage-contracts-${{ github.run_id }}
+          path: /tmp/item5-stage-contracts.txt
+          retention-days: 7
