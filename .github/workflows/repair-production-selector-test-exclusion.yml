@@ -7,11 +7,11 @@ permissions: {contents: read}
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
     steps:
       - uses: actions/checkout@v6
-      - name: Add Test_Run_ID blank guard to production Platform Output selectors
+      - name: Add Test_Run_ID blank guard transactionally
         shell: bash
         run: |
           set -euo pipefail; umask 077
@@ -31,52 +31,76 @@ jobs:
           open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
           PY
           TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
+          SIDS='5557966 5556716 5565333 5864632 5813561 5806668 5823581 5791537'
           mkdir -p /tmp/selector-repair
-          : >/tmp/summary.ndjson
-          for sid in 5557966 5556716 5565333 5864632 5813561 5806668 5823581 5791537; do
+          : >/tmp/applied
+          rollback_all() {
+            rc=$?
+            trap - ERR
+            if [[ -s /tmp/applied ]]; then
+              echo 'transaction failed; rolling back applied scenario blueprints'
+              tac /tmp/applied | while read -r rsid; do
+                [[ -n "$rsid" ]] || continue
+                RSID="$rsid" python - <<'PY'
+          import json,os
+          sid=os.environ['RSID']; d=json.load(open(f'/tmp/selector-repair/{sid}.bp.before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          open(f'/tmp/selector-repair/{sid}.rollback','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+                curl -fsS -X PATCH "$BASE/scenarios/$rsid" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @"/tmp/selector-repair/$rsid.rollback" >/dev/null || true
+              done
+            fi
+            exit "$rc"
+          }
+          trap rollback_all ERR
+
+          # Phase 1: capture and validate every scenario before the first write.
+          for sid in $SIDS; do
             curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.sc.before"
             sleep 1
             curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.bp.before"
             SID=$sid python - <<'PY'
           import json,os
-          sid=int(os.environ['SID']); base='/tmp/selector-repair/'
-          s=json.load(open(f'{base}{sid}.sc.before')); sc=s.get('scenario') or s.get('response') or s
-          if sc.get('isActive') is not False: raise SystemExit(f'SAFETY scenario {sid} must be OFF, found active={sc.get("isActive")}')
-          d=json.load(open(f'{base}{sid}.bp.before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
-          changed=[]; platform_searches=[]
+          sid=int(os.environ['SID']); root='/tmp/selector-repair/'
+          s=json.load(open(f'{root}{sid}.sc.before')); sc=s.get('scenario') or s.get('response') or s
+          if sc.get('isActive') is not False: raise SystemExit(f'SAFETY scenario {sid} must be OFF before transaction')
+          d=json.load(open(f'{root}{sid}.bp.before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          searches=[]; changed=[]
           def walk(flow):
             for n in flow or []:
               if str(n.get('module') or '')=='airtable:ActionSearchRecords':
                 mp=n.get('mapper') or {}
                 if str(mp.get('table') or '')=='tblrlPeboBthkplH0':
-                  platform_searches.append(n.get('id'))
-                  f=str(mp.get('formula') or '').strip()
+                  searches.append(n.get('id')); f=str(mp.get('formula') or '').strip()
                   if '{Test_Run_ID}=BLANK()' not in f:
-                    mp['formula']=('{Test_Run_ID}=BLANK()' if not f else 'AND({Test_Run_ID}=BLANK(),'+f+')')
-                    changed.append(n.get('id'))
+                    mp['formula']='{Test_Run_ID}=BLANK()' if not f else 'AND({Test_Run_ID}=BLANK(),'+f+')'; changed.append(n.get('id'))
               for r in n.get('routes') or []: walk(r.get('flow') or [])
           walk(bp.get('flow') or [])
-          if not platform_searches: raise SystemExit(f'SAFETY scenario {sid} has no Platform Output SearchRecords modules')
-          if not changed:
-            print(json.dumps({'sid':sid,'already_guarded':True,'platform_search_modules':platform_searches}))
-            raise SystemExit(0)
-          open(f'{base}{sid}.patch','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
-          open(f'{base}{sid}.meta','w').write(json.dumps({'changed':changed,'platform_searches':platform_searches,'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling')}))
+          if not searches: raise SystemExit(f'SAFETY {sid} has no Platform Outputs SearchRecords entrance')
+          meta={'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'searches':searches,'changed':changed}
+          open(f'{root}{sid}.meta','w').write(json.dumps(meta))
+          if changed: open(f'{root}{sid}.patch','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          print(json.dumps({'prevalidated':sid,'platform_search_modules':searches,'needs_patch':changed}))
           PY
+          done
+
+          # Phase 2: apply, verify, and record each write; trap rolls back all applied writes on any failure.
+          : >/tmp/summary.ndjson
+          for sid in $SIDS; do
             if [[ -f "/tmp/selector-repair/$sid.patch" ]]; then
-              code=$(curl -sS -o "/tmp/selector-repair/$sid.patch.response" -w '%{http_code}' -X PATCH "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @"/tmp/selector-repair/$sid.patch")
-              [[ "$code" =~ ^2 ]] || { cat "/tmp/selector-repair/$sid.patch.response"; exit 1; }
+              code=$(curl -sS -o "/tmp/selector-repair/$sid.response" -w '%{http_code}' -X PATCH "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @"/tmp/selector-repair/$sid.patch")
+              [[ "$code" =~ ^2 ]] || { cat "/tmp/selector-repair/$sid.response"; false; }
+              echo "$sid" >>/tmp/applied
             fi
             sleep 2
             curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.sc.after"
             curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.bp.after"
             SID=$sid python - <<'PY' >>/tmp/summary.ndjson
           import json,os
-          sid=int(os.environ['SID']); base='/tmp/selector-repair/'
-          b=json.load(open(f'{base}{sid}.sc.before')); a=json.load(open(f'{base}{sid}.sc.after')); before=b.get('scenario') or b.get('response') or b; after=a.get('scenario') or a.get('response') or a
+          sid=int(os.environ['SID']); root='/tmp/selector-repair/'
+          b=json.load(open(f'{root}{sid}.sc.before')); a=json.load(open(f'{root}{sid}.sc.after')); before=b.get('scenario') or b.get('response') or b; after=a.get('scenario') or a.get('response') or a
           if after.get('isActive') is not False: raise SystemExit(f'{sid} not OFF after patch')
           if before.get('hookId')!=after.get('hookId') or before.get('scheduling')!=after.get('scheduling'): raise SystemExit(f'{sid} metadata drift')
-          d=json.load(open(f'{base}{sid}.bp.after')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          d=json.load(open(f'{root}{sid}.bp.after')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
           searches=[]; bad=[]
           def walk(flow):
             for n in flow or []:
@@ -85,13 +109,12 @@ jobs:
                 if '{Test_Run_ID}=BLANK()' not in f: bad.append(n.get('id'))
               for r in n.get('routes') or []: walk(r.get('flow') or [])
           walk(bp.get('flow') or [])
-          if bad or not searches: raise SystemExit(f'{sid} guard verification failed searches={searches} bad={bad}')
+          if not searches or bad: raise SystemExit(f'{sid} production test exclusion failed searches={searches} bad={bad}')
           print(json.dumps({'scenario_id':sid,'name':after.get('name'),'off':True,'platform_output_search_modules':searches,'all_exclude_test_records':True,'scheduling':after.get('scheduling')}))
           PY
           done
+          trap - ERR
           cat /tmp/summary.ndjson
-        # If any later scenario failed, rollback all earlier patched scenario blueprints.
-        # GitHub Actions shell exits immediately, so trap is installed in a separate compact step below.
       - name: Destroy credentials
         if: always()
-        run: rm -rf /tmp/selector-repair /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/summary.ndjson
+        run: rm -rf /tmp/selector-repair /tmp/applied /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/summary.ndjson
