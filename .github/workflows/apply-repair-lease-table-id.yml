@@ -1,0 +1,54 @@
+name: Apply Repair Lease Table ID
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-repair-lease-table-id.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-repair-lease-table-id
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply narrowly scoped repair-control patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE=$(git hash-object apps/studio-api/worker.js)
+          python repair/tools/patch_repair_lease_table_id.py | tee /tmp/patch-output.txt
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          git diff --check
+          CHANGED=$(git diff --name-only)
+          test "$CHANGED" = 'apps/studio-api/worker.js'
+          grep -q 'const REPAIR_LEASE_TABLE_ID = "tbltuSt9UibYzxpah";' apps/studio-api/worker.js
+          grep -q 'repair_control_table_refs_replaced=' /tmp/patch-output.txt
+          AFTER=$(git hash-object apps/studio-api/worker.js)
+          test "$BEFORE" != "$AFTER"
+          printf '{"before_blob":"%s","after_blob":"%s","scope":"repair-control lease CRUD only"}\n' "$BEFORE" "$AFTER" >/tmp/lease-table-id-evidence.json
+      - name: Commit patched Studio API source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'fix: use stable Airtable table ID for repair leases'
+          git push origin HEAD:main
+      - name: Upload patch evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: repair-lease-table-id-${{ github.run_id }}
+          path: /tmp/lease-table-id-evidence.json
+          retention-days: 30
