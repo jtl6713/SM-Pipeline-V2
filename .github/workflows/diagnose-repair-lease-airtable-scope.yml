@@ -1,0 +1,83 @@
+name: Diagnose Repair Lease Airtable Scope
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-repair-lease-airtable-scope.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Decrypt bootstrap Airtable PAT in temp only
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/bootstrap-pat.txt
+      - name: Test credential scopes without logging values
+        shell: bash
+        run: |
+          set -euo pipefail
+          BOOT=$(cat /tmp/bootstrap-pat.txt)
+          base='appe33zkZn35yirTL'; lease='tbltuSt9UibYzxpah'; settings='tblpHPWeEkyJaF7ql'
+          probe(){ local tok=$1 table=$2 out=$3; curl -sS -o "$out" -w '%{http_code}' "https://api.airtable.com/v0/$base/$table?maxRecords=1" -H "Authorization: Bearer $tok"; }
+          BOOT_LEASE=$(probe "$BOOT" "$lease" /tmp/bootstrap-lease.json)
+          BOOT_SETTINGS=$(probe "$BOOT" "$settings" /tmp/bootstrap-settings.json)
+          echo "bootstrap_settings_http=$BOOT_SETTINGS"
+          echo "bootstrap_lease_http=$BOOT_LEASE"
+          test "$BOOT_SETTINGS" = 200
+          # Retrieve the separately stored pipeline PAT using bootstrap access, but never print it.
+          python - <<'PY' >/tmp/settings-query.txt
+          import urllib.parse
+          print(urllib.parse.urlencode([('filterByFormula',"{Setting_Name}='Airtable_Personal_Access_Token'"),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/$base/$settings?$(cat /tmp/settings-query.txt)" -H "Authorization: Bearer $BOOT" -o /tmp/pipeline-pat-record.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/pipeline-pat-record.json'))
+          vals=[r.get('fields',{}).get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active') and r.get('fields',{}).get('Setting_Value')]
+          if len(vals)!=1: raise SystemExit('Expected exactly one active pipeline Airtable PAT setting')
+          open('/tmp/pipeline-pat.txt','w').write(str(vals[0]).strip())
+          PY
+          PIPE=$(cat /tmp/pipeline-pat.txt)
+          PIPE_LEASE=$(probe "$PIPE" "$lease" /tmp/pipeline-lease.json)
+          PIPE_OUTPUT=$(probe "$PIPE" 'tblrlPeboBthkplH0' /tmp/pipeline-output.json)
+          echo "pipeline_output_http=$PIPE_OUTPUT"
+          echo "pipeline_lease_http=$PIPE_LEASE"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          def err(path):
+            try:
+              d=json.load(open(path)); e=d.get('error') or {}
+              return e.get('type') if isinstance(e,dict) else None
+            except: return None
+          ev={
+            'bootstrap_lease_error_type':err('/tmp/bootstrap-lease.json'),
+            'pipeline_lease_error_type':err('/tmp/pipeline-lease.json'),
+          }
+          Path('/tmp/lease-scope-evidence.json').write_text(json.dumps(ev,indent=2,sort_keys=True))
+          PY
+      - name: Destroy credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/bootstrap-pat.txt /tmp/pipeline-pat.txt /tmp/pipeline-pat-record.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lease-airtable-scope-${{ github.run_id }}
+          path: /tmp/lease-scope-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
