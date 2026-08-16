@@ -1,0 +1,2 @@
+Terminal-execution-aware bounded AP0 revision proof for Output 157 only.
+Fresh lease AP0-REVISION-PROOF-20260816-B-L2. Wait for a new completed AP0 auto execution before stop; max four runs; publishing forbidden; publisher orchestrators must remain OFF.
