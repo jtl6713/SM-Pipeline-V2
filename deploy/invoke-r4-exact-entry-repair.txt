@@ -1,0 +1,1 @@
+Invoke the source-controlled R4 exact-output entrance repair once. R4 must remain OFF; create/attach only its dedicated webhook, replace broad Module 1 with exact GetRecord, verify all unrelated modules unchanged, rollback on failure. No R4 run or publishing. Triggered 2026-08-16.
