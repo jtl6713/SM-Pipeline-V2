@@ -9822,7 +9822,7 @@ async function repairProbeMakeStartScenarioSchema(env) {
       body: JSON.stringify({
         interface: {
           input: [{ name: 'output_record_id', type: 'text', default: null, required: true, multiline: false }],
-          output: null,
+          output: [],
         },
       }),
     });
