@@ -1,7 +1,7 @@
 {
-  "correlation_id":"SUNSET-E2E-VARIANTS-20260816-0203",
+  "correlation_id":"SUNSET-E2E-VARIANT-RECONCILE-20260816-0206",
   "requests":[
-    {"name":"prepare-variants","method":"POST","path":"/api/production-requests/recc9H8SXdUnKEMhQ/variants","body":{}},
-    {"name":"item4-after-variants","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ/item4"}
+    {"name":"reconcile-variants","method":"POST","path":"/api/production-requests/recc9H8SXdUnKEMhQ/variants","body":{}},
+    {"name":"item4-after-reconcile","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ/item4"}
   ]
 }
