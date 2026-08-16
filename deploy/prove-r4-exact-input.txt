@@ -3,3 +3,4 @@ Retry after prior lease expiry and controller sweep: 2026-08-16T16:36Z.
 Retry after confirmed 16:36:02Z lease expiry.
 Diagnostic retry C after execution-status evidence deployment.
 Corrected proof D after Module 1 var.input migration.
+Final bounded diagnostic E with delayed execution-status polling.
