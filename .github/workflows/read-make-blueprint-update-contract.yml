@@ -1,0 +1,36 @@
+name: Read Make Blueprint Update Contract
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-make-blueprint-update-contract.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract Make blueprint write source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re,json
+          files=['apps/studio-api/worker.js']
+          out=[]
+          pats=[r'UPDATE_BLUEPRINT',r'blueprint.*PATCH',r'PATCH.*blueprint',r'/scenarios/.*blueprint',r'Proposed_Blueprint_JSON']
+          for f in files:
+            lines=Path(f).read_text().splitlines()
+            for i,l in enumerate(lines,1):
+              if any(re.search(p,l,re.I) for p in pats):
+                lo=max(1,i-15); hi=min(len(lines),i+35)
+                out.append({'file':f,'line':i,'context':'\n'.join(f'{n}: {lines[n-1]}' for n in range(lo,hi+1))})
+          Path('/tmp/make-blueprint-update-contract.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: make-blueprint-update-contract-${{ github.run_id }}
+          path: /tmp/make-blueprint-update-contract.json
+          retention-days: 30
