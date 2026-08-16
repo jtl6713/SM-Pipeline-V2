@@ -1,0 +1,128 @@
+name: Rollback Studio API Production to Known-Good v86
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-production-rollback-v86.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      KNOWN_GOOD_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify known-good version and capture current state
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/before-deployments.json
+          jq -e '.success==true' /tmp/before-deployments.json >/dev/null
+          BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before-deployments.json)
+          echo "$BEFORE" >/tmp/before-version.txt
+          curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/before-version.json
+          curl -fsS "$API/versions/$KNOWN_GOOD_VERSION" -H "$AUTH" -o /tmp/good-version.json
+          jq -e '.success==true' /tmp/before-version.json >/dev/null
+          jq -e '.success==true' /tmp/good-version.json >/dev/null
+          test "$(jq -r '(.result.resources.bindings // [])|length' /tmp/good-version.json)" -eq 11
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
+            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          r=json.loads(Path('/tmp/good-version.json').read_text())['result']
+          got={str(x.get('name')):str(x.get('type')) for x in (r.get('resources') or {}).get('bindings') or []}
+          if got != expected: raise SystemExit('Known-good v86 binding contract mismatch')
+          PY
+
+      - name: Roll 100 percent traffic to known-good v86
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          cat >/tmp/rollback.json <<EOF
+          {
+            "strategy":"percentage",
+            "versions":[{"version_id":"$KNOWN_GOOD_VERSION","percentage":100}],
+            "annotations":{
+              "workers/message":"Rollback after production source deploy created a zero-binding Worker version",
+              "workers/triggered_by":"sm-pipeline-repair-stabilization"
+            }
+          }
+          EOF
+          code=$(curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" \
+            -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json)
+          echo "rollback_http=$code"
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/rollback-result.json >/dev/null
+
+      - name: Verify v86 active with all 11 bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          ACTIVE=''
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/after-deployments.json
+            ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after-deployments.json)
+            [[ "$ACTIVE" == "$KNOWN_GOOD_VERSION" ]] && break
+            sleep 2
+          done
+          test "$ACTIVE" = "$KNOWN_GOOD_VERSION"
+          curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/after-version.json
+          jq -e '.success==true' /tmp/after-version.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
+            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          r=json.loads(Path('/tmp/after-version.json').read_text())['result']
+          got={str(x.get('name')):str(x.get('type')) for x in (r.get('resources') or {}).get('bindings') or []}
+          if got != expected: raise SystemExit('Rollback version does not have expected 11 bindings')
+          before=json.loads(Path('/tmp/before-version.json').read_text())['result']
+          sanitized={
+            'worker':'chicagoshining-studio-api',
+            'before_version_id':before.get('id'),
+            'before_version_number':before.get('number'),
+            'before_binding_count':len((before.get('resources') or {}).get('bindings') or []),
+            'after_version_id':r.get('id'),
+            'after_version_number':r.get('number'),
+            'after_binding_count':len((r.get('resources') or {}).get('bindings') or []),
+            'after_bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name']),
+            'rollback_verified':True
+          }
+          Path('/tmp/rollback-evidence-sanitized.json').write_text(json.dumps(sanitized,indent=2,sort_keys=True))
+          print(json.dumps(sanitized,indent=2,sort_keys=True))
+          PY
+
+      - name: Save sanitized rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-api-v86-rollback-${{ github.run_id }}
+          path: /tmp/rollback-evidence-sanitized.json
+          retention-days: 30
