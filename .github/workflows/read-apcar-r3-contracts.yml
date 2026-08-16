@@ -1,0 +1,66 @@
+name: Read AP-CAR and R3 Contracts
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-apcar-r3-contracts.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read live AP-CAR and R3 contracts
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
+          for sid in 5791537 5557966; do
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/sc
+            sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
+            SID=$sid python - <<'PY'
+          import json,os,re
+          sid=int(os.environ['SID']); s=json.load(open('/tmp/sc')); d=json.load(open('/tmp/bp')); sc=s.get('scenario') or s.get('response') or s; bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          print('SCENARIO',json.dumps({'id':sid,'name':sc.get('name'),'active':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling')}))
+          def red(v,k=''):
+            kl=str(k).lower()
+            if any(x in kl for x in ('token','secret','password','authorization','connection','url','uri')): return '<redacted>'
+            if isinstance(v,dict):
+              # redact header value when header name indicates secret/auth
+              if 'name' in v and str(v.get('name','')).lower() in ('authorization','x-pipeline-secret'): return {'name':v.get('name'),'value':'<redacted>'}
+              return {a:red(b,a) for a,b in v.items()}
+            if isinstance(v,list): return [red(x,k) for x in v]
+            if isinstance(v,str) and re.search(r'https?://',v,re.I): return '<redacted-url>'
+            return v
+          def walk(flow):
+            for n in flow or []:
+              mod=str(n.get('module') or ''); name=str(((n.get('metadata') or {}).get('designer') or {}).get('name') or '')
+              blob=json.dumps([mod,name,n.get('mapper'),n.get('parameters'),n.get('filter')],default=str).lower()
+              if 'airtable:' in mod.lower() or any(x in blob for x in ['webhook','render_status','publish','review','output_record_id','test_run']):
+                print('MODULE',json.dumps({'id':n.get('id'),'module':mod,'name':name,'parameters':red(n.get('parameters')),'mapper':red(n.get('mapper')),'filter':red(n.get('filter'))},separators=(',',':')))
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          text=json.dumps(bp,default=str).lower(); print('TERMS',json.dumps({x:(x.lower() in text) for x in ['test_run_id','do_not_publish','render_status','publish_locked_by','output_record_id','studio_render_request_id']}))
+          PY
+            sleep 1
+          done
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/settings /tmp/bp /tmp/sc /tmp/q
