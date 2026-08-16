@@ -1,13 +1,6 @@
 {
-  "action": "acquire",
-  "test_run_id": "TR-DURABLE-20260816-A",
+  "action": "assert_output_allowed",
   "lease_id": "TR-DURABLE-20260816-A-L1",
-  "scenario_id": 5556716,
-  "expires_at": "RUNTIME_PLUS_10_MINUTES",
-  "max_runs": 1,
-  "max_operations": 5,
-  "allowed_platform_output_record_ids": ["recnS4DT5ilG0Qibz"],
-  "deny_fixture_record_ids": ["recih0Ks7JFltjXxl"],
-  "allow_public_publish": false,
+  "platform_output_record_id": "recnS4DT5ilG0Qibz",
   "expected_http_status": 200
 }
