@@ -1,0 +1,278 @@
+name: Repair MAKE-ADMIN-BRIDGE Module 19
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-make-admin-module19.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-make-admin-bridge-5893243
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SCENARIO_ID: '5893243'
+      EXPECTED_SCENARIO_NAME: 'MAKE-ADMIN-BRIDGE v1.3 - Airtable Controlled Make API - Direct Webhook Runner'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Decrypt Airtable credential only in runner temp
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -s deploy/credential-envelope/private.pem.enc
+          test -s deploy/credential-envelope/airtable_pat.ciphertext.b64
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/airtable-envelope-private.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/airtable-envelope-private.pem \
+            -in /tmp/airtable-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/airtable-pat.txt
+          python - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/airtable-pat.txt').read_text().strip()
+          if not token.startswith('pat') or len(token)<40:
+              raise SystemExit('Airtable credential structural validation failed')
+          Path('/tmp/airtable-pat.txt').write_text(token)
+          PY
+
+      - name: Load Make API configuration without logging values
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAT=$(cat /tmp/airtable-pat.txt)
+          code=$(curl -sS -o /tmp/pipeline-settings.json -w '%{http_code}' \
+            'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?maxRecords=100&fields%5B%5D=Setting_Name&fields%5B%5D=Setting_Value&fields%5B%5D=Active' \
+            -H "Authorization: Bearer $PAT")
+          test "$code" = '200'
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path('/tmp/pipeline-settings.json').read_text())
+          wanted={'MAKE_API_BASE_URL','MAKE_API_TOKEN','MAKE_ADMIN_BRIDGE_ENABLED'}
+          found={}
+          for r in data.get('records',[]):
+              f=r.get('fields',{})
+              if f.get('Setting_Name') in wanted and f.get('Active') is True:
+                  found[f['Setting_Name']]=str(f.get('Setting_Value',''))
+          missing=[k for k in wanted if not found.get(k)]
+          if missing: raise SystemExit('Missing active Make API configuration: '+','.join(missing))
+          if found['MAKE_ADMIN_BRIDGE_ENABLED'].strip().lower()!='true':
+              raise SystemExit('MAKE_ADMIN_BRIDGE_ENABLED must remain configured true; scenario activation is controlled separately')
+          Path('/tmp/make-base-url.txt').write_text(found['MAKE_API_BASE_URL'].rstrip('/'))
+          Path('/tmp/make-api-token.txt').write_text(found['MAKE_API_TOKEN'])
+          print('make_configuration_loaded=true')
+          PY
+          chmod 600 /tmp/make-base-url.txt /tmp/make-api-token.txt
+          rm -f /tmp/pipeline-settings.json
+
+      - name: Fetch state and live blueprint; require scenario OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=$(cat /tmp/make-base-url.txt)
+          TOKEN=$(cat /tmp/make-api-token.txt)
+          code=$(curl -sS -o /tmp/scenario-before.json -w '%{http_code}' \
+            "$BASE/scenarios/$SCENARIO_ID" \
+            -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
+          test "$code" = '200'
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          d=json.loads(Path('/tmp/scenario-before.json').read_text())
+          s=d.get('scenario') or d.get('response',{}).get('scenario') or d
+          if int(s.get('id',0)) != int(os.environ['SCENARIO_ID']): raise SystemExit('Unexpected scenario id')
+          if str(s.get('name','')) != os.environ['EXPECTED_SCENARIO_NAME']: raise SystemExit('Unexpected scenario name')
+          if s.get('isActive') is True: raise SystemExit('MAKE-ADMIN-BRIDGE must be OFF before blueprint repair')
+          print('scenario_before_off=true')
+          PY
+          code=$(curl -sS -o /tmp/blueprint-response-before.json -w '%{http_code}' \
+            "$BASE/scenarios/$SCENARIO_ID/blueprint" \
+            -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
+          test "$code" = '200'
+
+      - name: Build exact module 19 patch and encrypted rollback backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import copy, hashlib, json
+          from pathlib import Path
+          response=json.loads(Path('/tmp/blueprint-response-before.json').read_text())
+          bp=(response.get('response') or {}).get('blueprint') or response.get('blueprint')
+          if not isinstance(bp,dict): raise SystemExit('Make blueprint response did not contain a blueprint object')
+          original=copy.deepcopy(bp)
+          matches=[]
+          def walk_flow(flow):
+              for node in flow or []:
+                  if node.get('id')==19: matches.append(node)
+                  for route in node.get('routes') or []: walk_flow(route.get('flow'))
+          walk_flow(bp.get('flow'))
+          if len(matches)!=1: raise SystemExit(f'Expected exactly one module 19, found {len(matches)}')
+          m=matches[0]
+          if m.get('module')!='airtable:ActionUpdateRecords': raise SystemExit('Module 19 type changed unexpectedly')
+          if ((m.get('metadata') or {}).get('designer') or {}).get('name')!='19 - Record GET_BLUEPRINT Result':
+              raise SystemExit('Module 19 name changed unexpectedly')
+          record=((m.get('mapper') or {}).get('record') or {})
+          expected_result='{{18.data}}'
+          expected_error='{{if(18.statusCode >= 200; if(18.statusCode < 300; ""; 18.data); 18.data)}}'
+          if record.get('fldduyTQgkdN6E1wI') != expected_result:
+              raise SystemExit('Module 19 Result_JSON mapping no longer matches expected unsafe baseline')
+          if record.get('fld6x1xtUD3CxmXdv') != expected_error:
+              raise SystemExit('Module 19 Error_Message mapping no longer matches expected unsafe baseline')
+          record['fldduyTQgkdN6E1wI']='{"blueprint_omitted":true,"scenario_id":"{{1.Scenario_ID}}","http_status":"{{18.statusCode}}"}'
+          record['fld6x1xtUD3CxmXdv']='{{if(18.statusCode >= 200; if(18.statusCode < 300; ""; "GET_BLUEPRINT failed; response body omitted; HTTP " & 18.statusCode); "GET_BLUEPRINT failed; response body omitted")}}'
+          # Prove only the two intended mapper values changed.
+          reverted=copy.deepcopy(bp)
+          rmatches=[]
+          def walk2(flow):
+              for node in flow or []:
+                  if node.get('id')==19: rmatches.append(node)
+                  for route in node.get('routes') or []: walk2(route.get('flow'))
+          walk2(reverted.get('flow'))
+          rr=((rmatches[0].get('mapper') or {}).get('record') or {})
+          rr['fldduyTQgkdN6E1wI']=expected_result
+          rr['fld6x1xtUD3CxmXdv']=expected_error
+          if reverted != original: raise SystemExit('Patch construction changed more than the two approved module 19 mappings')
+          Path('/tmp/blueprint-original.json').write_text(json.dumps(original,separators=(',',':')))
+          Path('/tmp/blueprint-patched.json').write_text(json.dumps(bp,separators=(',',':')))
+          Path('/tmp/original-sha256.txt').write_text(hashlib.sha256(Path('/tmp/blueprint-original.json').read_bytes()).hexdigest())
+          Path('/tmp/patched-sha256.txt').write_text(hashlib.sha256(Path('/tmp/blueprint-patched.json').read_bytes()).hexdigest())
+          Path('/tmp/patch-request.json').write_text(json.dumps({'blueprint':Path('/tmp/blueprint-patched.json').read_text()},separators=(',',':')))
+          print('module19_patch_constructed=true')
+          PY
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in /tmp/blueprint-original.json \
+            -out /tmp/make-admin-5893243-blueprint-before.enc
+
+      - name: Apply blueprint patch with automatic rollback trap
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=$(cat /tmp/make-base-url.txt)
+          TOKEN=$(cat /tmp/make-api-token.txt)
+          APPLIED=0
+          VERIFIED=0
+          rollback() {
+            rc=$?
+            if [[ "$APPLIED" == '1' && "$VERIFIED" != '1' ]]; then
+              python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('/tmp/rollback-request.json').write_text(json.dumps({'blueprint':Path('/tmp/blueprint-original.json').read_text()},separators=(',',':')))
+          PY
+              curl -sS -X PATCH "$BASE/scenarios/$SCENARIO_ID?confirmed=true" \
+                -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
+                --data-binary @/tmp/rollback-request.json >/tmp/rollback-response.json || true
+            fi
+            exit $rc
+          }
+          trap rollback EXIT
+          code=$(curl -sS -o /tmp/patch-response.json -w '%{http_code}' -X PATCH \
+            "$BASE/scenarios/$SCENARIO_ID?confirmed=true" \
+            -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
+            --data-binary @/tmp/patch-request.json)
+          test "$code" -ge 200 -a "$code" -lt 300
+          APPLIED=1
+
+          code=$(curl -sS -o /tmp/blueprint-response-after.json -w '%{http_code}' \
+            "$BASE/scenarios/$SCENARIO_ID/blueprint" \
+            -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
+          test "$code" = '200'
+          python - <<'PY'
+          import copy, hashlib, json
+          from pathlib import Path
+          expected=json.loads(Path('/tmp/blueprint-patched.json').read_text())
+          response=json.loads(Path('/tmp/blueprint-response-after.json').read_text())
+          actual=(response.get('response') or {}).get('blueprint') or response.get('blueprint')
+          if actual != expected: raise SystemExit('Post-write blueprint does not exactly equal intended patched blueprint')
+          matches=[]
+          def walk(flow):
+              for node in flow or []:
+                  if node.get('id')==19: matches.append(node)
+                  for route in node.get('routes') or []: walk(route.get('flow'))
+          walk(actual.get('flow'))
+          rec=((matches[0].get('mapper') or {}).get('record') or {})
+          if rec.get('fldduyTQgkdN6E1wI') != '{"blueprint_omitted":true,"scenario_id":"{{1.Scenario_ID}}","http_status":"{{18.statusCode}}"}':
+              raise SystemExit('Compact Result_JSON mapping not verified')
+          print('blueprint_exact_postwrite_verification=PASS')
+          PY
+
+          code=$(curl -sS -o /tmp/scenario-after.json -w '%{http_code}' \
+            "$BASE/scenarios/$SCENARIO_ID" \
+            -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
+          test "$code" = '200'
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('/tmp/scenario-after.json').read_text())
+          s=d.get('scenario') or d.get('response',{}).get('scenario') or d
+          if s.get('isActive') is True: raise SystemExit('Scenario became active during blueprint repair')
+          print('scenario_after_off=true')
+          PY
+          VERIFIED=1
+          trap - EXIT
+
+      - name: Write sanitized repair evidence
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out={
+            'scenario_id':5893243,
+            'scenario_name':'MAKE-ADMIN-BRIDGE v1.3 - Airtable Controlled Make API - Direct Webhook Runner',
+            'scenario_off_before':True,
+            'scenario_off_after':True,
+            'changed_module_id':19,
+            'changed_module_name':'19 - Record GET_BLUEPRINT Result',
+            'changed_mapper_fields':['fldduyTQgkdN6E1wI','fld6x1xtUD3CxmXdv'],
+            'result_json_contract':'bounded summary; full blueprint omitted',
+            'original_sha256':Path('/tmp/original-sha256.txt').read_text().strip(),
+            'patched_sha256':Path('/tmp/patched-sha256.txt').read_text().strip(),
+            'exact_postwrite_verification':True
+          }
+          Path('/tmp/module19-repair-evidence.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Upload encrypted rollback and sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: make-admin-module19-repair-${{ github.run_id }}
+          path: |
+            /tmp/make-admin-5893243-blueprint-before.enc
+            /tmp/module19-repair-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Destroy transient credentials and plaintext blueprints
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc /tmp/airtable-pat.txt /tmp/make-api-token.txt /tmp/blueprint-response-before.json /tmp/blueprint-original.json /tmp/blueprint-patched.json /tmp/patch-request.json /tmp/rollback-request.json /tmp/blueprint-response-after.json; do
+            if [[ -e "$f" ]]; then shred -u "$f" 2>/dev/null || rm -f "$f"; fi
+          done
