@@ -9979,57 +9979,60 @@ function repairR4ModuleMap(blueprint) {
   return map;
 }
 
-function repairR4HooksArray(body) {
-  const hooks = body?.hooks || body?.response?.hooks || body?.result?.hooks || [];
-  return Array.isArray(hooks) ? hooks : [];
-}
-
 async function repairR4ExactOutputEntry(env) {
   const scenarioId = 5556716;
   const expectedNamePrefix = 'R4 - Start Remotion Render';
-  const hookName = 'R4 Exact Output Trigger';
   const outputTableId = 'tblrlPeboBthkplH0';
   const outputBaseId = 'appe33zkZn35yirTL';
   const expectedFormula = 'AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)';
+  const exactRecordExpression = '{{input.output_record_id}}';
+  const requiredInputs = [
+    { name: 'test_run_id', type: 'text', default: null, required: true, multiline: false },
+    { name: 'output_record_id', type: 'text', default: null, required: true, multiline: false },
+    { name: 'platform_output_id', type: 'text', default: null, required: true, multiline: false },
+    { name: 'intended_stage', type: 'text', default: 'R4', required: true, multiline: false },
+    { name: 'attempt_number', type: 'number', default: 1, required: true },
+    { name: 'idempotency_key', type: 'text', default: null, required: true, multiline: false },
+  ];
 
   const stateBefore = await phase6ScenarioState(env, scenarioId);
   if (stateBefore?.isActive) throw new HttpError(409, 'R4 must be OFF before exact-output entrance repair');
   const scenarioName = String(stateBefore?.scenario?.name || '');
   if (!scenarioName.startsWith(expectedNamePrefix)) throw new HttpError(409, `R4 scenario name changed unexpectedly: ${scenarioName}`);
-  const teamId = String(stateBefore?.scenario?.teamId || stateBefore?.scenario?.team?.id || '');
-  if (!teamId) throw new HttpError(502, 'R4 scenario metadata did not expose teamId required for a dedicated webhook');
 
   const live = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/blueprint?draft=false`, { method: 'GET' });
   const liveBlueprint = live?.response?.blueprint || live?.blueprint;
   if (!liveBlueprint || typeof liveBlueprint !== 'object') throw new HttpError(502, 'R4 live blueprint response did not contain a blueprint object');
+  const interfaceBody = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/interface`, { method: 'GET' });
+  const liveInterface = interfaceBody?.interface || interfaceBody?.response?.interface || {};
+  const originalInterface = {
+    input: Array.isArray(liveInterface?.input) ? repairInspectorClone(liveInterface.input) : [],
+    output: Array.isArray(liveInterface?.output) ? repairInspectorClone(liveInterface.output) : [],
+  };
 
   const existingMap = repairR4ModuleMap(liveBlueprint);
-  const existing900 = existingMap.get(900);
   const existing1 = existingMap.get(1);
   if (!existing1) throw new HttpError(409, 'R4 module 1 is missing');
-
-  if (existing900?.module === 'gateway:CustomWebHook' && existing1?.module === 'airtable:ActionGetRecord' && existing1?.mapper?.id === '{{900.output_record_id}}') {
-    const hookId = Number(existing900?.parameters?.hook);
-    if (!Number.isInteger(hookId) || hookId <= 0) throw new HttpError(409, 'R4 exact webhook module has an invalid hook id');
-    const ping = await phase6MakeApiJson(env, `/hooks/${hookId}/ping`, { method: 'GET' });
-    const pingBody = ping?.response || ping;
+  const hasExactInterface = requiredInputs.every((required) =>
+    originalInterface.input.some((actual) => actual?.name === required.name && actual?.type === required.type && actual?.required === true)
+  );
+  if (existing1?.module === 'airtable:ActionGetRecord' && existing1?.mapper?.id === exactRecordExpression && hasExactInterface) {
     const stateAlready = await phase6ScenarioState(env, scenarioId);
     if (stateAlready?.isActive) throw new HttpError(409, 'R4 became active during idempotent exact-entry verification');
-    if (pingBody?.attached !== true) throw new HttpError(409, 'R4 exact webhook exists but is not attached');
     return {
       scenario_id: scenarioId,
       scenario_name: scenarioName,
       already_repaired: true,
-      changed_modules: [900, 1],
-      hook_id: hookId,
-      hook_attached: true,
-      hook_url_present: Boolean(pingBody?.address),
+      changed_modules: [1],
+      interface_inputs: requiredInputs.map((item) => item.name),
+      exact_record_expression: exactRecordExpression,
+      preserved_module_count: existingMap.size - 1,
       scenario_off_before: true,
       scenario_off_after: true,
+      no_webhook_required: true,
     };
   }
 
-  if (existing900) throw new HttpError(409, 'R4 module 900 already exists but is not the approved exact-output webhook entrance');
   if (existing1?.module !== 'airtable:ActionSearchRecords') throw new HttpError(409, `R4 module 1 type changed unexpectedly: ${existing1?.module}`);
   if (String(existing1?.metadata?.designer?.name || '') !== 'Find One Platform Output Ready for Render - Rerender Safe - Cache Concurrency Guard') {
     throw new HttpError(409, 'R4 module 1 name changed unexpectedly');
@@ -10042,62 +10045,18 @@ async function repairR4ExactOutputEntry(env) {
     throw new HttpError(409, 'R4 module 2 no longer consumes module 1 by exact record id');
   }
 
-  const hookListBody = await phase6MakeApiJson(
-    env,
-    `/hooks?teamId=${encodeURIComponent(teamId)}&typeName=gateway-webhook&viewForScenarioId=${scenarioId}`,
-    { method: 'GET' },
-  );
-  const namedHooks = repairR4HooksArray(hookListBody).filter((h) => String(h?.name || '') === hookName);
-  if (namedHooks.length > 1) throw new HttpError(409, `Found multiple Make hooks named ${hookName}`);
-  let hook = namedHooks[0] || null;
-  let hookCreated = false;
-  if (!hook) {
-    const created = await phase6MakeApiJson(env, '/hooks', {
-      method: 'POST',
-      body: JSON.stringify({ name: hookName, teamId, typeName: 'gateway-webhook', method: false, headers: false, stringify: false }),
-    });
-    hook = created?.hook || created?.response?.hook || created?.result?.hook || null;
-    hookCreated = true;
-  }
-  const hookId = Number(hook?.id);
-  if (!Number.isInteger(hookId) || hookId <= 0) {
-    if (hookCreated && hook?.id) {
-      try { await phase6MakeApiJson(env, `/hooks/${hook.id}?confirmed=true`, { method: 'DELETE' }); } catch {}
-    }
-    throw new HttpError(502, 'Make did not return a valid R4 exact webhook id');
-  }
-
   const original = JSON.parse(JSON.stringify(liveBlueprint));
   const patched = JSON.parse(JSON.stringify(liveBlueprint));
-  if (!Array.isArray(patched.flow) || Number(patched.flow?.[0]?.id) !== 1) {
-    if (hookCreated) try { await phase6MakeApiJson(env, `/hooks/${hookId}?confirmed=true`, { method: 'DELETE' }); } catch {}
-    throw new HttpError(409, 'R4 module 1 is no longer the root entrance module');
-  }
   const exactRecord = repairR4FindModule(patched, 1);
   const originalX = Number(exactRecord?.metadata?.designer?.x || 0);
   const originalY = Number(exactRecord?.metadata?.designer?.y || 0);
   exactRecord.module = 'airtable:ActionGetRecord';
-  exactRecord.mapper = { id: '{{900.output_record_id}}', base: outputBaseId, table: outputTableId, useColumnId: false };
+  exactRecord.mapper = { id: exactRecordExpression, base: outputBaseId, table: outputTableId, useColumnId: false };
   exactRecord.metadata = { designer: { x: originalX, y: originalY, name: '1 - Get Exact Platform Output' } };
-  const webhookModule = {
-    id: 900,
-    module: 'gateway:CustomWebHook',
-    parameters: { hook: hookId, maxResults: 1 },
-    mapper: {},
-    metadata: {
-      restore: { parameters: { hook: { data: { editable: 'true' }, label: 'R4 Exact Output Webhook' } } },
-      designer: { x: originalX - 300, y: originalY, name: 'Webhook - R4 Exact Output Trigger' },
-      parameters: [
-        { name: 'hook', type: 'hook:gateway-webhook', label: 'Webhook', required: true },
-        { name: 'maxResults', type: 'number', label: 'Maximum number of results' },
-      ],
-    },
-  };
-  patched.flow.unshift(webhookModule);
 
   const patchedMap = repairR4ModuleMap(patched);
   const originalMap = repairR4ModuleMap(original);
-  if (patchedMap.size !== originalMap.size + 1) throw new HttpError(500, 'R4 exact-entry patch changed the module count unexpectedly');
+  if (patchedMap.size !== originalMap.size) throw new HttpError(500, 'R4 exact-entry patch changed the module count');
   for (const [id, module] of originalMap) {
     if (id === 1) continue;
     if (JSON.stringify(module) !== JSON.stringify(patchedMap.get(id))) throw new HttpError(500, `R4 exact-entry patch changed unrelated module ${id}`);
@@ -10106,64 +10065,85 @@ async function repairR4ExactOutputEntry(env) {
   const patchedTop = JSON.parse(JSON.stringify(patched)); delete patchedTop.flow;
   if (JSON.stringify(originalTop) !== JSON.stringify(patchedTop)) throw new HttpError(500, 'R4 exact-entry patch changed unrelated blueprint metadata');
 
-  let applied = false;
+  const patchedInterface = { input: requiredInputs, output: originalInterface.output };
+  let blueprintApplied = false;
+  let interfaceApplied = false;
   try {
     await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, {
       method: 'PATCH',
       body: JSON.stringify({ blueprint: JSON.stringify(patched) }),
     });
-    applied = true;
+    blueprintApplied = true;
+    await phase6MakeApiJson(env, `/scenarios/${scenarioId}/interface`, {
+      method: 'PATCH',
+      body: JSON.stringify({ interface: patchedInterface }),
+    });
+    interfaceApplied = true;
+
     const after = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/blueprint?draft=false`, { method: 'GET' });
     const actual = after?.response?.blueprint || after?.blueprint;
     if (!actual || typeof actual !== 'object') throw new HttpError(502, 'R4 post-write blueprint could not be read');
     const actualMap = repairR4ModuleMap(actual);
-    const actual900 = actualMap.get(900);
     const actual1 = actualMap.get(1);
-    if (actual900?.module !== 'gateway:CustomWebHook' || Number(actual900?.parameters?.hook) !== hookId) throw new HttpError(502, 'R4 exact webhook module did not verify');
-    if (actual1?.module !== 'airtable:ActionGetRecord' || actual1?.mapper?.id !== '{{900.output_record_id}}' || actual1?.mapper?.base !== outputBaseId || actual1?.mapper?.table !== outputTableId) {
+    if (actual1?.module !== 'airtable:ActionGetRecord' || actual1?.mapper?.id !== exactRecordExpression || actual1?.mapper?.base !== outputBaseId || actual1?.mapper?.table !== outputTableId) {
       throw new HttpError(502, 'R4 exact GetRecord module did not verify');
     }
-    if (actualMap.size !== originalMap.size + 1) throw new HttpError(502, 'R4 post-write module count changed unexpectedly');
+    if (actualMap.size !== originalMap.size) throw new HttpError(502, 'R4 post-write module count changed unexpectedly');
     for (const [id, module] of originalMap) {
       if (id === 1) continue;
       if (JSON.stringify(module) !== JSON.stringify(actualMap.get(id))) throw new HttpError(502, `R4 post-write verification found unrelated module change ${id}`);
     }
-    const ping = await phase6MakeApiJson(env, `/hooks/${hookId}/ping`, { method: 'GET' });
-    const pingBody = ping?.response || ping;
-    if (pingBody?.attached !== true || !pingBody?.address) throw new HttpError(502, 'R4 exact webhook is not attached with a usable address');
+    const afterInterfaceBody = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/interface`, { method: 'GET' });
+    const actualInterface = afterInterfaceBody?.interface || afterInterfaceBody?.response?.interface || {};
+    const actualInputs = Array.isArray(actualInterface?.input) ? actualInterface.input : [];
+    if (!requiredInputs.every((required) => actualInputs.some((actualInput) => actualInput?.name === required.name && actualInput?.type === required.type && actualInput?.required === true))) {
+      throw new HttpError(502, 'R4 exact input interface did not verify');
+    }
     const stateAfter = await phase6ScenarioState(env, scenarioId);
     if (stateAfter?.isActive) throw new HttpError(409, 'R4 became active during exact-output entrance repair');
     return {
       scenario_id: scenarioId,
       scenario_name: scenarioName,
-      changed_modules: [900, 1],
+      changed_modules: [1],
+      interface_inputs: requiredInputs.map((item) => item.name),
+      exact_record_expression: exactRecordExpression,
       preserved_module_count: originalMap.size - 1,
-      hook_id: hookId,
-      hook_created: hookCreated,
-      hook_attached: true,
-      hook_url_present: true,
       scenario_off_before: true,
       scenario_off_after: true,
       exact_postwrite_verification: true,
+      no_webhook_required: true,
     };
   } catch (error) {
-    if (applied) {
-      try {
+    let rollbackError = null;
+    try {
+      if (blueprintApplied) {
         await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, {
           method: 'PATCH',
           body: JSON.stringify({ blueprint: JSON.stringify(original) }),
         });
-        const rolled = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/blueprint?draft=false`, { method: 'GET' });
-        const rolledBlueprint = rolled?.response?.blueprint || rolled?.blueprint;
-        const rolledState = await phase6ScenarioState(env, scenarioId);
-        if (!rolledBlueprint || JSON.stringify(rolledBlueprint) !== JSON.stringify(original) || rolledState?.isActive) throw new Error('R4 blueprint rollback verification failed');
-      } catch (rollbackError) {
-        throw new HttpError(500, `R4 exact-entry repair failed and blueprint rollback could not be verified: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
       }
+      if (interfaceApplied || blueprintApplied) {
+        await phase6MakeApiJson(env, `/scenarios/${scenarioId}/interface`, {
+          method: 'PATCH',
+          body: JSON.stringify({ interface: originalInterface }),
+        });
+      }
+      const rolled = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/blueprint?draft=false`, { method: 'GET' });
+      const rolledBlueprint = rolled?.response?.blueprint || rolled?.blueprint;
+      const rolledInterfaceBody = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/interface`, { method: 'GET' });
+      const rolledInterface = rolledInterfaceBody?.interface || rolledInterfaceBody?.response?.interface || {};
+      const rolledState = await phase6ScenarioState(env, scenarioId);
+      const interfaceMatches = JSON.stringify({
+        input: Array.isArray(rolledInterface?.input) ? rolledInterface.input : [],
+        output: Array.isArray(rolledInterface?.output) ? rolledInterface.output : [],
+      }) === JSON.stringify(originalInterface);
+      if (!rolledBlueprint || JSON.stringify(rolledBlueprint) !== JSON.stringify(original) || !interfaceMatches || rolledState?.isActive) {
+        throw new Error('R4 blueprint/interface rollback verification failed');
+      }
+    } catch (rollbackFailure) {
+      rollbackError = rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure);
     }
-    if (hookCreated) {
-      try { await phase6MakeApiJson(env, `/hooks/${hookId}?confirmed=true`, { method: 'DELETE' }); } catch {}
-    }
+    if (rollbackError) throw new HttpError(500, `R4 exact-entry repair failed and rollback could not be verified: ${rollbackError}`);
     throw error;
   }
 }
