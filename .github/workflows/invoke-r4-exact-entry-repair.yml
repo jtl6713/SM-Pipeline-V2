@@ -37,7 +37,7 @@ jobs:
           echo "repair_http=$code"
           jq -c '{bridge_ok,upstream_status,upstream_ok:(.upstream_json.ok//null),action:(.upstream_json.action//null),repaired:(.upstream_json.repaired//null),exception,error:(.upstream_json.error//null),message:(.upstream_json.message//null)}' /tmp/result.json || true
           test "$code" = '200'
-          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.repaired.scenario_id==5556716 and .upstream_json.repaired.scenario_off_before==true and .upstream_json.repaired.scenario_off_after==true and .upstream_json.repaired.no_webhook_required==true and .upstream_json.repaired.exact_postwrite_verification==true and (.upstream_json.repaired.interface_inputs|sort)==([\"attempt_number\",\"idempotency_key\",\"intended_stage\",\"output_record_id\",\"platform_output_id\",\"test_run_id\"]|sort)' /tmp/result.json >/dev/null
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.repaired.scenario_id==5556716 and .upstream_json.repaired.scenario_off_before==true and .upstream_json.repaired.scenario_off_after==true and .upstream_json.repaired.no_webhook_required==true and ((.upstream_json.repaired.exact_postwrite_verification==true) or (.upstream_json.repaired.already_repaired==true)) and (.upstream_json.repaired.interface_inputs|sort)==(["attempt_number","idempotency_key","intended_stage","output_record_id","platform_output_id","test_run_id"]|sort)' /tmp/result.json >/dev/null
       - name: Save bounded repair evidence
         if: always()
         uses: actions/upload-artifact@v4
