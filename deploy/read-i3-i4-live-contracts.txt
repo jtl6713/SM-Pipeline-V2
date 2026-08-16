@@ -1,0 +1,1 @@
+Read-only I3/I4 live scenario resolution and promotion contract audit for Test_Run_ID propagation. No Make state changes or Airtable mutations.
