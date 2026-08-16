@@ -1,0 +1,63 @@
+name: Read Publisher Active States
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-publisher-active-states.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read Make publisher states
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json')); vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip()); open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
+          curl -fsS "$BASE/scenarios/5612096" -H "Authorization: Token $TOKEN" -o /tmp/ap0.json
+          TEAM=$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/ap0.json')); s=d.get('scenario') or d.get('response') or d
+          print(s.get('teamId') or s.get('team_id'))
+          PY
+          )
+          curl -fsS "$BASE/scenarios?teamId=$TEAM&pg%5Blimit%5D=100" -H "Authorization: Token $TOKEN" -o /tmp/scenarios.json
+          python - <<'PY'
+          import json,re
+          d=json.load(open('/tmp/scenarios.json')); rows=d.get('scenarios') or (d.get('response') or {}).get('scenarios') or d.get('data') or []
+          pats=re.compile(r'(AP1|PUB|PUBLISH|TIKTOK|TTD|YOUTUBE|FACEBOOK|INSTAGRAM|IG-|FB-|YT-)',re.I)
+          out=[]
+          for s in rows:
+            n=str(s.get('name') or '')
+            if pats.search(n): out.append({'id':s.get('id'),'name':n,'isActive':s.get('isActive')})
+          print(json.dumps(out,indent=2))
+          open('/tmp/publisher-states.json','w').write(json.dumps(out,indent=2))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/ap0.json /tmp/scenarios.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: publisher-states-${{ github.run_id }}
+          path: /tmp/publisher-states.json
+          retention-days: 30
