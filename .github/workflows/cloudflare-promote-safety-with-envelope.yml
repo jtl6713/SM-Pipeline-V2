@@ -1,0 +1,394 @@
+name: Promote Studio Safety Worker With Encrypted Credential
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-promote-safety-with-envelope.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-production
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      KNOWN_GOOD_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
+      VERIFY_WORKER: chicagoshining-studio-envelope-verify
+      WRANGLER_VERSION: 4.123.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate source and encrypted envelope inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -s apps/studio-api/worker.js
+          test -s deploy/credential-envelope/private.pem.enc
+          test -s deploy/credential-envelope/airtable_pat.ciphertext.b64
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+
+      - name: Decrypt Airtable PAT only into runner temp and validate it
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/airtable-envelope-private.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/airtable-envelope-private.pem \
+            -in /tmp/airtable-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/airtable-pat.txt
+          test -s /tmp/airtable-pat.txt
+          python - <<'PY'
+          from pathlib import Path
+          token=Path('/tmp/airtable-pat.txt').read_text().strip()
+          if not token.startswith('pat') or len(token) < 40:
+              raise SystemExit('Decrypted Airtable credential failed structural validation')
+          Path('/tmp/airtable-pat.txt').write_text(token)
+          PY
+          code=$(curl -sS -o /tmp/airtable-probe.json -w '%{http_code}' \
+            "https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0?maxRecords=1" \
+            -H "Authorization: Bearer $(cat /tmp/airtable-pat.txt)")
+          test "$code" = "200"
+          echo 'airtable_credential_probe=PASS'
+
+      - name: Install pinned Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/studio-envelope-rollout
+          cd /tmp/studio-envelope-rollout
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
+
+      - name: Verify v86 live and build non-secret Wrangler config
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          jq -e --arg v "$KNOWN_GOOD_VERSION" '(.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].version_id==$v and .result.deployments[0].versions[0].percentage==100' /tmp/deployments-before.json >/dev/null
+          curl -fsS "$API/versions/$KNOWN_GOOD_VERSION" -H "$AUTH" -o /tmp/v86.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
+            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          result=json.loads(Path('/tmp/v86.json').read_text())['result']
+          bindings=(result.get('resources') or {}).get('bindings') or []
+          by_name={str(x.get('name')):x for x in bindings}
+          got={k:str(v.get('type')) for k,v in by_name.items()}
+          if got != expected: raise SystemExit('Known-good v86 binding contract changed')
+          plain=[k for k,v in expected.items() if v=='plain_text']
+          vars_out={k:by_name[k].get('text') for k in plain}
+          if any(v is None for v in vars_out.values()): raise SystemExit('Could not recover all non-secret v86 values')
+          bucket=by_name['STUDIO_MEDIA'].get('bucket_name') or by_name['STUDIO_MEDIA'].get('bucket')
+          if not bucket: raise SystemExit('Could not recover STUDIO_MEDIA bucket identity')
+          cfg={
+            'name':'chicagoshining-studio-api',
+            'main':'worker.js',
+            'compatibility_date':'2026-08-02',
+            'workers_dev':False,
+            'keep_vars':True,
+            'vars':vars_out,
+            'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}]
+          }
+          work=Path('/tmp/studio-envelope-rollout')
+          (work/'wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
+          (work/'worker.js').write_bytes(Path('apps/studio-api/worker.js').read_bytes())
+          pat=Path('/tmp/airtable-pat.txt').read_text().strip()
+          Path('/tmp/secrets.json').write_text(json.dumps({'AIRTABLE_PAT':pat},separators=(',',':')))
+          Path('/tmp/v86-sanitized.json').write_text(json.dumps({'binding_count':len(got),'binding_names_types':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])},indent=2))
+          PY
+          chmod 600 /tmp/secrets.json
+
+      - name: Capture versions before upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/studio-envelope-rollout
+          ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-before.json
+          jq -e 'type=="array" and length>0' /tmp/versions-before.json >/dev/null
+
+      - name: Upload current safety source as non-live version with Airtable secret
+        id: upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/studio-envelope-rollout
+          if ! ./node_modules/.bin/wrangler versions upload \
+            --config wrangler.jsonc \
+            --keep-vars --strict \
+            --secrets-file /tmp/secrets.json \
+            --message "Repair safety source with encrypted Airtable credential ${GITHUB_SHA}" \
+            >/tmp/version-upload.log 2>&1; then
+            grep -E 'ERROR|Error|error|failed|Failed|missing|Missing|code' /tmp/version-upload.log | head -n 60 >&2 || true
+            exit 1
+          fi
+          shred -u /tmp/secrets.json /tmp/airtable-pat.txt /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc 2>/dev/null || rm -f /tmp/secrets.json /tmp/airtable-pat.txt /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc
+          ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('/tmp/versions-before.json').read_text())
+          after=json.loads(Path('/tmp/versions-after.json').read_text())
+          def vid(x): return str(x.get('id') or x.get('version_id') or x.get('versionId') or '')
+          old={vid(x) for x in before if vid(x)}
+          new=[vid(x) for x in after if vid(x) and vid(x) not in old]
+          if len(new)!=1: raise SystemExit(f'Expected exactly one newly staged version, found {len(new)}')
+          Path('/tmp/new-version.txt').write_text(new[0])
+          print('new_non_live_version_identified=true')
+          PY
+          echo "version_id=$(cat /tmp/new-version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify staged core binding contract and production unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NEW=$(cat /tmp/new-version.txt)
+          curl -fsS "$API/versions/$NEW" -H "$AUTH" -o /tmp/staged-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          core={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          allowed=dict(core); allowed['ELEVENLABS_API_KEY']='secret_text'
+          result=json.loads(Path('/tmp/staged-version.json').read_text())['result']
+          got={str(x.get('name')):str(x.get('type')) for x in ((result.get('resources') or {}).get('bindings') or [])}
+          missing={k:v for k,v in core.items() if got.get(k)!=v}
+          unexpected={k:v for k,v in got.items() if allowed.get(k)!=v}
+          if missing or unexpected:
+              raise SystemExit(f'Staged binding contract failed; missing={missing}, unexpected={unexpected}')
+          if len(got) not in (10,11): raise SystemExit(f'Unexpected staged binding count {len(got)}')
+          Path('/tmp/staged-binding-audit.json').write_text(json.dumps({'version_id':result.get('id'),'version_number':result.get('number'),'binding_count':len(got),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name']),'elevenlabs_direct_catalog_optional':got.get('ELEVENLABS_API_KEY')=='secret_text'},indent=2,sort_keys=True))
+          print('staged_core_binding_contract=PASS')
+          PY
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-pre-smoke.json
+          jq -e --arg v "$KNOWN_GOOD_VERSION" '(.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].version_id==$v and .result.deployments[0].versions[0].percentage==100' /tmp/deployments-pre-smoke.json >/dev/null
+          echo 'production_still_v86=true'
+
+      - name: Add staged version at zero percent traffic
+        id: split
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEW=$(cat /tmp/new-version.txt)
+          cd /tmp/studio-envelope-rollout
+          ./node_modules/.bin/wrangler versions deploy "$KNOWN_GOOD_VERSION@100%" "$NEW@0%" \
+            --name "$TARGET_WORKER" --message "0-percent repair safety smoke test" -y \
+            >/tmp/split-deploy.log 2>&1
+          echo 'created=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify zero-percent deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NEW=$(cat /tmp/new-version.txt)
+          ok=false
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/split-state.json
+            if jq -e --arg old "$KNOWN_GOOD_VERSION" --arg new "$NEW" '.result.deployments[0].versions as $v | ($v|length)==2 and any($v[];.version_id==$old and .percentage==100) and any($v[];.version_id==$new and .percentage==0)' /tmp/split-state.json >/dev/null; then ok=true; break; fi
+            sleep 2
+          done
+          test "$ok" = true
+
+      - name: Build exact-version verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEW=$(cat /tmp/new-version.txt)
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )
+          printf '%s' "$TOKEN" >/tmp/verify-token.txt
+          cat >/tmp/verify-worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              if (url.pathname !== "/$TOKEN") return new Response("Not found", {status:404});
+              const headers = {
+                "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                "Origin":"https://studio.chicagoshining.com",
+                "Accept":"application/json",
+                "Cloudflare-Workers-Version-Overrides": '$TARGET_WORKER="$NEW"'
+              };
+              async function call(path) {
+                const r = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path,{headers}));
+                const text = await r.text();
+                let body={}; try { body=text?JSON.parse(text):{}; } catch { body={parse_error:true}; }
+                return {status:r.status,body};
+              }
+              const session=await call("/api/session");
+              const health=await call("/api/health");
+              const voices=await call("/api/voices");
+              return Response.json({
+                session_status:session.status,
+                session_ok:session.body?.ok===true,
+                authenticated:session.body?.authenticated===true,
+                authorized:session.body?.authorized===true,
+                health_status:health.status,
+                health_ok:health.body?.ok===true,
+                airtable_configured:health.body?.airtable_configured===true,
+                repair_activation_leases_v1:health.body?.repair_activation_leases_v1===true,
+                repair_exact_output_test_mode_v1:health.body?.repair_exact_output_test_mode_v1===true,
+                repair_run_disabled_until_stage_addressing_verified:health.body?.repair_run_disabled_until_stage_addressing_verified===true,
+                elevenlabs_direct_catalog_configured:health.body?.elevenlabs_voice_catalog_configured===true,
+                voices_status:voices.status,
+                voices_ok:voices.body?.ok===true,
+                voice_count:Array.isArray(voices.body?.voices)?voices.body.voices.length:0,
+                voice_catalog_live:voices.body?.live_connected===true
+              });
+            }
+          };
+          EOF
+          cat >/tmp/verify-metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/verify-worker.js
+
+      - name: Smoke test exact staged version while it has zero normal traffic
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$VERIFY_WORKER" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/verify-upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$VERIFY_WORKER/content" \
+            -H "$AUTH" \
+            -F 'metadata=@/tmp/verify-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/verify-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/verify-upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$VERIFY_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/verify-enable.json
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
+          passed=false
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            code=$(curl -sS --max-time 60 -o /tmp/smoke.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.session_status==200 and .session_ok==true and .authenticated==true and .authorized==true and .health_status==200 and .health_ok==true and .airtable_configured==true and .repair_activation_leases_v1==true and .repair_exact_output_test_mode_v1==true and .repair_run_disabled_until_stage_addressing_verified==true and .voices_status==200 and .voices_ok==true and .voice_count>=2' /tmp/smoke.json >/dev/null 2>&1; then passed=true; break; fi
+            sleep 2
+          done
+          test "$passed" = true
+          jq '{session_status,authenticated,authorized,health_status,airtable_configured,repair_activation_leases_v1,repair_exact_output_test_mode_v1,repair_run_disabled_until_stage_addressing_verified,elevenlabs_direct_catalog_configured,voices_status,voice_count,voice_catalog_live}' /tmp/smoke.json
+
+      - name: Promote smoke-tested safety version to all traffic
+        id: promote
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEW=$(cat /tmp/new-version.txt)
+          cd /tmp/studio-envelope-rollout
+          ./node_modules/.bin/wrangler versions deploy "$NEW@100%" \
+            --name "$TARGET_WORKER" --message "Promote verified repair safety controls" -y \
+            >/tmp/promote.log 2>&1
+          echo 'promoted=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify final deployment remains healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NEW=$(cat /tmp/new-version.txt)
+          ok=false
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/final-deployment.json
+            if jq -e --arg new "$NEW" '(.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].version_id==$new and .result.deployments[0].versions[0].percentage==100' /tmp/final-deployment.json >/dev/null; then ok=true; break; fi
+            sleep 2
+          done
+          test "$ok" = true
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/verify-token.txt)
+          URL="https://$VERIFY_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
+          code=$(curl -sS --max-time 60 -o /tmp/final-smoke.json -w '%{http_code}' "$URL")
+          test "$code" = "200"
+          jq -e '.session_status==200 and .authorized==true and .airtable_configured==true and .repair_activation_leases_v1==true and .repair_exact_output_test_mode_v1==true and .voice_count>=2' /tmp/final-smoke.json >/dev/null
+
+      - name: Delete exact-version verifier
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/verify-delete.json -w '%{http_code}' -X DELETE "$ROOT/workers/scripts/$VERIFY_WORKER" -H "$AUTH")
+          if [[ "$code" != "404" && ( "$code" -lt 200 || "$code" -ge 300 ) ]]; then exit 1; fi
+
+      - name: Automatic rollback to v86 on any post-split failure
+        if: failure() && steps.split.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/studio-envelope-rollout
+          ./node_modules/.bin/wrangler versions deploy "$KNOWN_GOOD_VERSION@100%" \
+            --name "$TARGET_WORKER" --message "Automatic rollback after encrypted safety rollout failure" -y \
+            >/tmp/rollback.log 2>&1
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          ok=false
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/rollback-state.json
+            if jq -e --arg old "$KNOWN_GOOD_VERSION" '(.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].version_id==$old and .result.deployments[0].versions[0].percentage==100' /tmp/rollback-state.json >/dev/null; then ok=true; break; fi
+            sleep 2
+          done
+          test "$ok" = true
+
+      - name: Destroy transient decrypted material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in /tmp/secrets.json /tmp/airtable-pat.txt /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc; do
+            if [[ -e "$f" ]]; then shred -u "$f" 2>/dev/null || rm -f "$f"; fi
+          done
+
+      - name: Save sanitized rollout evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-safety-envelope-rollout-${{ github.run_id }}
+          path: |
+            /tmp/v86-sanitized.json
+            /tmp/staged-binding-audit.json
+            /tmp/smoke.json
+            /tmp/final-smoke.json
+          if-no-files-found: ignore
+          retention-days: 30
