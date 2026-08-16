@@ -1,4 +1,4 @@
 Dynamic safe update trigger for chicagoshining-studio-api.
 
-Deploy current main source with the exact Make interface correction interface.output=[] in repair_make_start_scenario_probe_v1 through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. No R4 mutation/run or publishing occurs during deployment.
-Triggered: 2026-08-16 — corrected Start Scenario schema probe.
+Deploy current main source containing the no-webhook R4 exact-input repair controller through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment does not mutate or run R4, Airtable records, R2, email, or publishing.
+Triggered: 2026-08-16 — no-webhook exact R4 input repair controller.
