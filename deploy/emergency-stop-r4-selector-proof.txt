@@ -1,3 +1,4 @@
 Emergency stop and verify R4 scenario 5556716 after selector-proof subrequest ceiling interrupted cleanup.
 No blueprint writes. No publishing. Stop only.
+Rerun with state-first and sanitized 422 diagnostics.
 Triggered 2026-08-16 continuation checkpoint.
