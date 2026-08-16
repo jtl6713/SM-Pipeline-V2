@@ -1,0 +1,4 @@
+Guarded live repair trigger for MAKE-ADMIN-BRIDGE scenario 5893243, module 19 only.
+
+Precondition satisfied: lease B expired and was independently swept at 2026-08-16T12:41:56.254Z with operations_used=0, runs_used=0, scenario_stopped=true. The invocation must refuse any new overlapping lease, sweep expired state, repair only module 19 through the authenticated Studio Worker control plane, verify scenario OFF before/after and exact post-write blueprint, delete its temporary bridge, and leave production Worker identity unchanged. No scenario activation/run/public publishing.
+Triggered: 2026-08-16.
