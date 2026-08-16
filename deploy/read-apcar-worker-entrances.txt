@@ -1,0 +1,1 @@
+Read-only AP0C-AP5C exact-output worker entrance verification. No state changes or publishing.
