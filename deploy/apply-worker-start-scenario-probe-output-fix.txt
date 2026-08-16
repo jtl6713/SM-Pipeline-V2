@@ -1,0 +1,1 @@
+Apply the exact Make validation correction interface.output=[] to the guarded disposable Start Scenario probe. Source only; no Make action until separately deployed/invoked. Triggered 2026-08-16.
