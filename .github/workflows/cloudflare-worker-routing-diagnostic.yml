@@ -1,0 +1,42 @@
+name: Cloudflare Worker Routing Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cloudflare-worker-routing-diagnostic.yml'
+      - 'deploy/cloudflare-worker-routing-diagnostic.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: chicagoshining-studio-api
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read Worker routing metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/scripts.json
+          echo 'TARGET_SCRIPT'
+          jq -c --arg name "$WORKER_NAME" '
+            [.result[]? | select(.id==$name) | {id,compatibility_date,routes:(.routes // []),tail_consumers:(.tail_consumers // []),usage_model:(.usage_model // null),created_on:(.created_on // null),modified_on:(.modified_on // null)}]
+          ' /tmp/scripts.json
+
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/domains.json
+          echo 'CUSTOM_DOMAINS'
+          jq -c --arg service "$WORKER_NAME" '[.result[]? | select(.service==$service) | {hostname,zone_name,environment}]' /tmp/domains.json
+
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          echo 'WORKERS_DEV'
+          jq -c '{enabled:.result.enabled,previews_enabled:.result.previews_enabled}' /tmp/subdomain.json
