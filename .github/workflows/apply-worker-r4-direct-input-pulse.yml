@@ -1,0 +1,52 @@
+name: Apply Worker R4 Direct Input Pulse
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-worker-r4-direct-input-pulse.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-worker-source-repair
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Patch Worker R4 direct-input pulse
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_worker_r4_direct_input_pulse.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          grep -q 'repair_r4_direct_input_pulse_v1: true' apps/studio-api/worker.js
+          grep -q 'output_record_id: recordId' apps/studio-api/worker.js
+          grep -q 'platform_output_id: platformOutputId' apps/studio-api/worker.js
+          grep -q 'intended_stage: "R4"' apps/studio-api/worker.js
+          grep -q 'phase6RunScenario(env, lease.scenario_id, runInput)' apps/studio-api/worker.js
+          if grep -A80 'if (action === "pulse_r4_exact_output")' apps/studio-api/worker.js | grep -q 'Studio_Render_Request_ID: token'; then
+            echo 'Obsolete token dispatch still present in R4 pulse' >&2
+            exit 1
+          fi
+      - name: Commit patched Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          if git diff --cached --quiet; then
+            echo 'R4 direct-input pulse already present.'
+            exit 0
+          fi
+          git commit -m 'Use exact R4 scenario inputs in repair pulse'
+          git push origin HEAD:main
