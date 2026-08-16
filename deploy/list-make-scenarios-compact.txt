@@ -1,0 +1,1 @@
+Read-only full team Make scenario inventory, compact metadata only, plus interfaces for on-demand scenarios. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16.
