@@ -1,0 +1,4 @@
+Apply only the repair-control R4 scheduled-selector polling cadence reduction: 45s/1s -> 24s/3s.
+Purpose: remain below Cloudflare Worker subrequest ceiling while preserving one-run lease and forced-off cleanup.
+No Make blueprint changes. No Airtable content mutations. No publishing.
+Triggered 2026-08-16 continuation checkpoint.
