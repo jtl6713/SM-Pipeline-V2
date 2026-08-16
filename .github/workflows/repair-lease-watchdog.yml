@@ -96,14 +96,20 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-subdomain.json
           jq -er '.result.subdomain' /tmp/account-subdomain.json >/tmp/account-subdomain.txt
 
-      - name: Sweep expired or exhausted leases
+      - name: Wait for propagation and sweep expired or exhausted leases
         shell: bash
         run: |
           set -euo pipefail
           SUBDOMAIN=$(cat /tmp/account-subdomain.txt)
           TOKEN=$(cat /tmp/path-token.txt)
           URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
-          code=$(curl -sS --retry 4 --retry-delay 2 --max-time 30 -o /tmp/result.json -w '%{http_code}' "$URL")
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -sS --max-time 30 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
+            [[ "$code" == "200" ]] && break
+            echo "watchdog_bridge_not_ready attempt=$i http=$code"
+            sleep 2
+          done
           test "$code" -eq 200
           jq -e '.ok==true and .action=="sweep"' /tmp/result.json >/dev/null
           jq -c '{ok,action,swept_count:(.swept|length),swept}' /tmp/result.json
