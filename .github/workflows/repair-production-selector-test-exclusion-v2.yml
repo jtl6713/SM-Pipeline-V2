@@ -1,0 +1,109 @@
+name: Repair Production Selector Test Exclusion v2
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-production-selector-test-exclusion-v2.txt']
+permissions: {contents: read}
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Transactionally exclude Test_Run_ID from production selectors
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b); SIDS='5557966 5556716 5565333 5864632 5813561 5806668 5823581 5791537'
+          ROOT=/tmp/selector-v2; mkdir -p "$ROOT"; : >"$ROOT/applied"
+          rollback() {
+            rc=$?; trap - ERR
+            if [[ -s "$ROOT/applied" ]]; then
+              echo 'rollback_started=true'
+              tac "$ROOT/applied" | while read -r sid; do
+                SID="$sid" ROOT="$ROOT" python - <<'PY'
+          import json,os
+          sid=os.environ['SID']; root=os.environ['ROOT']; d=json.load(open(f'{root}/{sid}.bp0')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          open(f'{root}/{sid}.rb','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+                curl -fsS -X PATCH "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @"$ROOT/$sid.rb" >/dev/null || true
+              done
+              echo 'rollback_finished=true'
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          # Capture and prevalidate all eight scenarios before first mutation.
+          for sid in $SIDS; do
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o "$ROOT/$sid.sc0"; sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o "$ROOT/$sid.bp0"
+            SID=$sid ROOT="$ROOT" python - <<'PY'
+          import json,os
+          sid=int(os.environ['SID']); root=os.environ['ROOT']; scd=json.load(open(f'{root}/{sid}.sc0')); sc=scd.get('scenario') or scd.get('response') or scd
+          if sc.get('isActive') is not False: raise SystemExit(f'SAFETY {sid} active')
+          d=json.load(open(f'{root}/{sid}.bp0')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          found=[]; changed=[]
+          def is_output_table(v): return str(v or '') in ('tblrlPeboBthkplH0','Platform Outputs')
+          def walk(flow):
+            for n in flow or []:
+              if str(n.get('module') or '')=='airtable:ActionSearchRecords':
+                mp=n.get('mapper') or {}
+                if is_output_table(mp.get('table')):
+                  found.append(n.get('id')); f=str(mp.get('formula') or '').strip()
+                  if '{Test_Run_ID}=BLANK()' not in f:
+                    mp['formula']='{Test_Run_ID}=BLANK()' if not f else 'AND({Test_Run_ID}=BLANK(),'+f+')'; changed.append(n.get('id'))
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if not found: raise SystemExit(f'SAFETY {sid} no Platform Output search found')
+          open(f'{root}/{sid}.meta','w').write(json.dumps({'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'found':found,'changed':changed}))
+          if changed: open(f'{root}/{sid}.patch','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          print(json.dumps({'prevalidated':sid,'modules':found,'needs_patch':changed}))
+          PY
+          done
+
+          : >"$ROOT/summary"
+          for sid in $SIDS; do
+            if [[ -f "$ROOT/$sid.patch" ]]; then
+              code=$(curl -sS -o "$ROOT/$sid.response" -w '%{http_code}' -X PATCH "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @"$ROOT/$sid.patch")
+              [[ "$code" =~ ^2 ]] || { cat "$ROOT/$sid.response"; false; }
+              echo "$sid" >>"$ROOT/applied"
+            fi
+            sleep 2; curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o "$ROOT/$sid.sc1"; curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o "$ROOT/$sid.bp1"
+            SID=$sid ROOT="$ROOT" python - <<'PY' >>"$ROOT/summary"
+          import json,os
+          sid=int(os.environ['SID']); root=os.environ['ROOT']; b=json.load(open(f'{root}/{sid}.sc0')); a=json.load(open(f'{root}/{sid}.sc1')); before=b.get('scenario') or b.get('response') or b; after=a.get('scenario') or a.get('response') or a
+          if after.get('isActive') is not False or before.get('hookId')!=after.get('hookId') or before.get('scheduling')!=after.get('scheduling'): raise SystemExit(f'{sid} state/metadata drift')
+          d=json.load(open(f'{root}/{sid}.bp1')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d; found=[]; bad=[]
+          def is_output_table(v): return str(v or '') in ('tblrlPeboBthkplH0','Platform Outputs')
+          def walk(flow):
+            for n in flow or []:
+              if str(n.get('module') or '')=='airtable:ActionSearchRecords' and is_output_table((n.get('mapper') or {}).get('table')):
+                found.append(n.get('id')); f=str((n.get('mapper') or {}).get('formula') or '')
+                if '{Test_Run_ID}=BLANK()' not in f: bad.append(n.get('id'))
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if not found or bad: raise SystemExit(f'{sid} verification failed found={found} bad={bad}')
+          print(json.dumps({'scenario_id':sid,'name':after.get('name'),'off':True,'guarded_modules':found,'scheduling':after.get('scheduling')}))
+          PY
+          done
+          trap - ERR; cat "$ROOT/summary"
+      - name: Destroy credentials
+        if: always()
+        run: rm -rf /tmp/selector-v2 /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings
