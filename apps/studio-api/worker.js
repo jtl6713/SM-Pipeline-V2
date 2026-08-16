@@ -1654,6 +1654,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
           fields: {
             Production_Request_Output_ID: makeProductionRequestOutputId(),
             Production_Request: [parent.id],
+            Test_Run_ID: String(f(parent, "Test_Run_ID") || "").trim() || null,
             Organization: [authorization.organization.record_id],
             Brand: [authorization.brand.record_id],
             Created_By: [authorization.user.record_id],
@@ -2652,6 +2653,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items) {
         method:"POST",
         body:JSON.stringify({fields:{
           Production_Request_Output_ID:makeProductionRequestOutputId(), Production_Request:[productionRequestId],
+          Test_Run_ID:String(f(requestRecord,"Test_Run_ID")||"").trim()||null,
           Organization:arrayOrEmpty(f(requestRecord,"Organization")), Brand:arrayOrEmpty(f(requestRecord,"Brand")), Created_By:arrayOrEmpty(f(requestRecord,"Created_By")),
           Platform:item.platform, Output_Type:item.output_type, Output_Status:"Draft", Output_Order:i+1, Enabled:true, Active:true,
           Carousel_Image_Mode_Override:"Manual Upload", Created_At:now, Updated_At:now,
@@ -3475,6 +3477,7 @@ function mapProductionRequest(record) {
   return {
     id: record.id,
     production_request_id: f(record, "Production_Request_ID"),
+    test_run_id: f(record, "Test_Run_ID") || null,
     idea_candidate_links: links("Idea_Candidate"),
     organization_links: links("Organization"),
     brand_links: links("Brand"),
@@ -3775,6 +3778,7 @@ async function createDraftForIdea(env, idea, authorization, input = null) {
   const fields = {
     Production_Request_ID: makeProductionRequestId(),
     Idea_Candidate: [idea.id],
+    Test_Run_ID: String(f(idea, "Test_Run_ID") || "").trim() || null,
     Organization: [authorization.organization.record_id],
     Brand: [authorization.brand.record_id],
     Created_By: [authorization.user.record_id],
@@ -4411,6 +4415,7 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
 
   const fields = {
     Production_Request: [requestRecord.id],
+    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,
     Requested_Title_Mode: String(f(requestRecord, "Title_Mode") || "AI decides"),
     Requested_Title: String(f(requestRecord, "Requested_Title") || "").trim() || null,
     Requested_Caption_Mode: String(f(requestRecord, "Caption_Mode") || "AI decides"),
@@ -5059,6 +5064,7 @@ function outputWorkItemFields(parentContentItem, requestRecord, outputRow, effec
   };
 
   return {
+    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,
     ...copyWritableParentFields(parentContentItem),
 
     Content_Title: String(f(parentContentItem, "Content_Title") || "").trim(),
@@ -5165,6 +5171,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     applied_at: new Date().toISOString(),
   };
   return {
+    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,
     Content_Item: [parentContentItem.id],
     Platform: effective.platform,
     Format: String(planItem.format || route.content_type || "").trim(),
