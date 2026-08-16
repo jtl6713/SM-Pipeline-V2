@@ -1,0 +1,3 @@
+Read-only inventory of filter operator tokens from live Make blueprints to resolve the exact machine token for text not-equal before AP0 revision hardening.
+No scenario activation. No blueprint writes. No Airtable mutation. No publishing.
+Triggered 2026-08-16 continuation checkpoint.
