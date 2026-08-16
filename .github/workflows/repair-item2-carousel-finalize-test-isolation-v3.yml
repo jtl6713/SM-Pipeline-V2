@@ -1,0 +1,137 @@
+name: Repair Item 2 Carousel Finalize + Test Isolation V3
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-item2-carousel-finalize-test-isolation-v3.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Preflight and apply exactness/isolation only if all contracts match
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          export TOKEN=$(cat /tmp/t); export BASE=$(cat /tmp/b); export PAT
+          python - <<'PY'
+          import json,os,copy,urllib.request,urllib.error,urllib.parse,time,sys
+          BASE=os.environ['BASE']; TOKEN=os.environ['TOKEN']; PAT=os.environ['PAT']
+          IDS={'C7':5589819,'C8':5589822,'PUB1':5576757,'PUB2':5576753,'M1':5569896,'A4':5578180}
+          HOOKS={'C7':2623586,'C8':2623594}
+          PO_TEST='fld5Ew2FySt51Jl2Q'; CI_TEST='fldA4dFKiiGpWNk7b'; CI_ID='fldmNgbvXvcKrZFKj'
+          def req_json(url,method='GET',body=None,auth=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            headers={'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-Repair/1.0'}
+            if auth: headers['Authorization']=auth
+            r=urllib.request.Request(url,data=data,method=method,headers=headers)
+            with urllib.request.urlopen(r,timeout=30) as h: return json.loads(h.read().decode() or '{}')
+          def make(path,method='GET',body=None): return req_json(BASE+path,method,body,'Token '+TOKEN)
+          def sc(d): return d.get('scenario') or d.get('response') or d
+          def bp(d):
+            x=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+            return json.loads(x) if isinstance(x,str) else x
+          def nodes(flow,out=None):
+            if out is None: out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []: nodes(r.get('flow') or [],out)
+            return out
+          def blank_guard(mapper):
+            f=str(mapper.get('formula') or '').strip()
+            if 'Test_Run_ID' not in f: mapper['formula']=f'AND({{Test_Run_ID}}=BLANK(),{f})' if f else '{Test_Run_ID}=BLANK()'
+          def safe_stop(reason,details=None):
+            ev={'passed':False,'safe_no_write':True,'reason':reason,'details':details or {}}
+            open('/tmp/evidence.json','w').write(json.dumps(ev,indent=2)); print(json.dumps(ev)); sys.exit(0)
+          before={}; patched={}; meta={}
+          try:
+            for k,sid in IDS.items():
+              meta[k]=copy.deepcopy(sc(make(f'/scenarios/{sid}'))); before[k]=bp(make(f'/scenarios/{sid}/blueprint?draft=false')); patched[k]=copy.deepcopy(before[k]); time.sleep(.15)
+          except Exception as e: safe_stop('preflight_read_failed',{'error':str(e)})
+          # Full live-shape preflight. No writes before this block completes.
+          try:
+            for k,h in HOOKS.items():
+              if meta[k].get('hookId')!=h: raise ValueError(f'{k} hook expected {h}, got {meta[k].get("hookId")}')
+            n7=nodes(patched['C7'].get('flow') or []); n8=nodes(patched['C8'].get('flow') or [])
+            if n7.get(900,{}).get('module')!='gateway:CustomWebHook' or n7.get(901,{}).get('module')!='airtable:ActionGetRecord' or n7.get(7002,{}).get('module')!='http:MakeRequest': raise ValueError('C7 module shape drift')
+            if str((n7[901].get('mapper') or {}).get('id') or '') not in ('recFXgtk8mkYb9jwB','{{900.content_record_id}}'): raise ValueError('C7 parent mapping unexpected')
+            if n8.get(900,{}).get('module')!='gateway:CustomWebHook' or n8.get(901,{}).get('module')!='airtable:ActionGetRecord' or str((n8[901].get('mapper') or {}).get('id'))!='{{900.content_record_id}}': raise ValueError('C8 exact webhook parent drift')
+            if n8.get(1,{}).get('module')!='builtin:BasicFeeder' or n8.get(902,{}).get('module')!='airtable:ActionGetRecord' or n8.get(8,{}).get('module')!='airtable:ActionSearchRecords': raise ValueError('C8 slide/upsert path drift')
+            if n8.get(4,{}).get('module')!='airtable:ActionCreateRecord' or 'UpdateRecord' not in str(n8.get(12,{}).get('module')): raise ValueError('C8 create/update drift')
+            for k,mid in [('PUB1',1),('PUB2',1),('M1',3),('A4',5)]:
+              n=nodes(patched[k].get('flow') or {}).get(mid)
+              if not n or n.get('module')!='airtable:ActionSearchRecords': raise ValueError(f'{k} Module {mid} drift')
+          except Exception as e: safe_stop('preflight_shape_mismatch',{'error':str(e)})
+          # Validate a literalized equivalent of the new Airtable formula before any Make write.
+          literal='AND(FIND(",999999,", "," & ARRAYJOIN({Content_Item}) & ",") > 0, {Platform}="Instagram", {Aspect_Ratio}="4:5", IF(""="", {Test_Run_ID}=BLANK(), {Test_Run_ID}="TEST"))'
+          q=urllib.parse.urlencode({'maxRecords':'1','filterByFormula':literal})
+          try: req_json('https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0?'+q,auth='Bearer '+PAT)
+          except Exception as e: safe_stop('preflight_formula_invalid',{'error':str(e)})
+          # Apply patch in memory.
+          n7=nodes(patched['C7'].get('flow') or []); n7[901].setdefault('mapper',{})['id']='{{900.content_record_id}}'
+          b7=json.loads(str((n7[7002].get('mapper') or {}).get('jsonStringBodyContent') or '{}')); b7['content_record_id']='{{901.id}}'; b7['test_run_id']='{{901.'+CI_TEST+'}}'; n7[7002]['mapper']['jsonStringBodyContent']=json.dumps(b7,separators=(',',':'))
+          n8=nodes(patched['C8'].get('flow') or []); sm=n8[8].setdefault('mapper',{}); sm['maxRecords']='1'
+          sm['formula']='AND(FIND(",{{901.'+CI_ID+'}},", "," & ARRAYJOIN({Content_Item}) & ",") > 0, {Platform}="{{get(get(3.array; 1); "platform")}}", {Aspect_Ratio}="{{get(get(3.array; 1); "ratio")}}", IF("{{901.'+CI_TEST+'}}"="", {Test_Run_ID}=BLANK(), {Test_Run_ID}="{{901.'+CI_TEST+'}}"))'
+          for mid in (4,12): n8[mid].setdefault('mapper',{}).setdefault('record',{})[PO_TEST]='{{901.'+CI_TEST+'}}'
+          for mid in (7071,7171):
+            if n8.get(mid,{}).get('module')=='http:MakeRequest':
+              ob=json.loads(str((n8[mid].get('mapper') or {}).get('jsonStringBodyContent') or '{}')); ob['test_run_id']='{{901.'+CI_TEST+'}}'; n8[mid]['mapper']['jsonStringBodyContent']=json.dumps(ob,separators=(',',':'))
+          for k,mid in [('PUB1',1),('PUB2',1),('M1',3),('A4',5)]: blank_guard(nodes(patched[k].get('flow') or [])[mid].setdefault('mapper',{}))
+          # Transaction + rollback on any unexpected mutation/verification failure.
+          written=[]
+          try:
+            for k in ('C7','C8','PUB1','PUB2','M1','A4'):
+              make(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(patched[k],separators=(',',':'))}); written.append(k); time.sleep(.5)
+            live={}; evidence={}
+            for k in ('C7','C8','PUB1','PUB2','M1','A4'):
+              smeta=sc(make(f'/scenarios/{IDS[k]}')); live[k]=nodes(bp(make(f'/scenarios/{IDS[k]}/blueprint?draft=false')).get('flow') or [])
+              if (smeta.get('hookId'),smeta.get('scheduling'),smeta.get('isActive'))!=(meta[k].get('hookId'),meta[k].get('scheduling'),meta[k].get('isActive')): raise RuntimeError(f'{k} metadata drift')
+              if set(live[k])!=set(nodes(before[k].get('flow') or [])): raise RuntimeError(f'{k} module ID drift')
+              evidence[k]={'scenario_id':IDS[k],'active':smeta.get('isActive'),'hookId':smeta.get('hookId')}; time.sleep(.15)
+            if str((live['C7'][901].get('mapper') or {}).get('id'))!='{{900.content_record_id}}': raise RuntimeError('C7 exact parent missing')
+            f8=str((live['C8'][8].get('mapper') or {}).get('formula') or '')
+            if str((live['C8'][8].get('mapper') or {}).get('maxRecords'))!='1' or not all(x in f8 for x in ('Content_Item','Platform','Aspect_Ratio','Test_Run_ID','901.')): raise RuntimeError('C8 exact lookup missing')
+            for mid in (4,12):
+              if (live['C8'][mid].get('mapper') or {}).get('record',{}).get(PO_TEST)!='{{901.'+CI_TEST+'}}': raise RuntimeError(f'C8 {mid} Test_Run_ID propagation missing')
+            for k,mid in [('PUB1',1),('PUB2',1),('M1',3),('A4',5)]:
+              f=str((live[k][mid].get('mapper') or {}).get('formula') or '')
+              if 'Test_Run_ID' not in f or 'BLANK()' not in f: raise RuntimeError(f'{k} test exclusion missing')
+            evidence['contracts']={'c7_exact_webhook_parent':True,'c8_exact_existing_output_parent_platform_ratio_identity':True,'c8_test_identity_propagation':True,'remaining_production_test_exclusions':True}
+            open('/tmp/evidence.json','w').write(json.dumps({'passed':True,'safe_no_write':False,'evidence':evidence},indent=2)); print(json.dumps({'passed':True,'item2_exactness':True,'item5_isolation':True}))
+          except Exception as e:
+            for k in reversed(written):
+              try: make(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(before[k],separators=(',',':'))})
+              except Exception as re: print('ROLLBACK_ERROR',k,str(re))
+            raise
+          PY
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item2-carousel-finalize-v3-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings
