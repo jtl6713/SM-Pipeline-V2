@@ -30,22 +30,23 @@ jobs:
         run: |
           set -euo pipefail
           test -s deploy/repair-control-command.json
-          jq -e '.action|type=="string"' deploy/repair-control-command.json >/dev/null
+          jq -e '(.action|type)=="string"' deploy/repair-control-command.json >/dev/null
           jq -e '(.action=="acquire") or (.action=="assert_output_allowed") or (.action=="pulse_admin_bridge") or (.action=="state") or (.action=="deactivate") or (.action=="release") or (.action=="sweep")' deploy/repair-control-command.json >/dev/null
+          jq -e '(.expected_http_status // 200)|type=="number" and .>=200 and .<=599' deploy/repair-control-command.json >/dev/null
           if [[ "$(jq -r '.action' deploy/repair-control-command.json)" != "sweep" ]]; then
-            jq -e '.test_run_id|type=="string" and length>0' deploy/repair-control-command.json >/dev/null
+            jq -e '(.test_run_id|type)=="string" and (.test_run_id|length)>0' deploy/repair-control-command.json >/dev/null
           fi
           if [[ "$(jq -r '.action' deploy/repair-control-command.json)" == "acquire" ]]; then
-            jq -e '.lease_id|type=="string" and length>0' deploy/repair-control-command.json >/dev/null
+            jq -e '(.lease_id|type)=="string" and (.lease_id|length)>0' deploy/repair-control-command.json >/dev/null
             jq -e '.scenario_id==5893243 or .scenario_id==5813561 or .scenario_id==5864632 or .scenario_id==5556716 or .scenario_id==5612096' deploy/repair-control-command.json >/dev/null
-            jq -e '.max_runs|type=="number" and .>=1 and .<=5' deploy/repair-control-command.json >/dev/null
-            jq -e '.max_operations|type=="number" and .>=1 and .<=50' deploy/repair-control-command.json >/dev/null
-            jq -e '.allowed_platform_output_record_ids|type=="array" and length>=1 and length<=20' deploy/repair-control-command.json >/dev/null
+            jq -e '(.max_runs|type)=="number" and .max_runs>=1 and .max_runs<=5' deploy/repair-control-command.json >/dev/null
+            jq -e '(.max_operations|type)=="number" and .max_operations>=1 and .max_operations<=50' deploy/repair-control-command.json >/dev/null
+            jq -e '(.allowed_platform_output_record_ids|type)=="array" and (.allowed_platform_output_record_ids|length)>=1 and (.allowed_platform_output_record_ids|length)<=20' deploy/repair-control-command.json >/dev/null
             jq -e '(.allow_public_publish // false)==false' deploy/repair-control-command.json >/dev/null
           fi
           if [[ "$(jq -r '.action' deploy/repair-control-command.json)" == "pulse_admin_bridge" ]]; then
             jq -e '.scenario_id==5893243' deploy/repair-control-command.json >/dev/null
-            jq -e '.exact_make_admin_command_record_id|type=="string" and test("^rec[A-Za-z0-9]{14}$")' deploy/repair-control-command.json >/dev/null
+            jq -e '(.exact_make_admin_command_record_id|type)=="string" and (.exact_make_admin_command_record_id|test("^rec[A-Za-z0-9]{14}$"))' deploy/repair-control-command.json >/dev/null
           fi
 
       - name: Capture production Worker identity
@@ -70,6 +71,7 @@ jobs:
           import json
           from pathlib import Path
           cmd = json.loads(Path('deploy/repair-control-command.json').read_text())
+          cmd.pop('expected_http_status', None)
           Path('/tmp/command.min.json').write_text(json.dumps(cmd,separators=(',',':')))
           PY
           CMD=$(cat /tmp/command.min.json)
@@ -139,30 +141,11 @@ jobs:
           TOKEN=$(cat /tmp/path-token.txt)
           URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
           code=$(curl -sS --retry 4 --retry-delay 2 --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL")
-          echo "repair_control_http=$code"
+          EXPECTED=$(jq -r '.expected_http_status // 200' deploy/repair-control-command.json)
+          echo "repair_control_http=$code expected_http=$EXPECTED"
           jq -c 'if .lease then {ok,action,lease:{record_id:.lease.record_id,lease_id:.lease.lease_id,test_run_id:.lease.test_run_id,scenario_id:.lease.scenario_id,expires_at:.lease.expires_at,operations_used:.lease.operations_used,runs_used:.lease.runs_used},output:(.output // null),outputs:(.outputs // null),before:(.before // null),after:(.after // null),error:(.error // null)} else {ok,action,error:(.error // null),message:(.message // null),swept:(.swept // null)} end' /tmp/result.json || cat /tmp/result.json
-          test "$code" -ge 200 -a "$code" -lt 300
-          jq -e '.ok==true' /tmp/result.json >/dev/null
-
-      - name: Guaranteed cleanup for scenario-bearing commands
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! -s /tmp/account-subdomain.txt || ! -s /tmp/path-token.txt ]]; then exit 0; fi
-          ACTION=$(jq -r '.action // ""' deploy/repair-control-command.json)
-          if [[ "$ACTION" == "acquire" || "$ACTION" == "assert_output_allowed" || "$ACTION" == "state" || "$ACTION" == "pulse_admin_bridge" ]]; then
-            if jq -e '.lease_id and .test_run_id and .scenario_id' deploy/repair-control-command.json >/dev/null 2>&1; then
-              python - <<'PY'
-              import json
-              from pathlib import Path
-              c=json.loads(Path('deploy/repair-control-command.json').read_text())
-              Path('/tmp/release.json').write_text(json.dumps({"action":"release","lease_id":c.get("lease_id"),"test_run_id":c.get("test_run_id"),"scenario_id":c.get("scenario_id")},separators=(',',':')))
-              PY
-              # Cleanup is best-effort because pulse_admin_bridge normally releases its lease itself.
-              # The scheduled watchdog independently handles any surviving expired lease.
-            fi
-          fi
+          test "$code" -eq "$EXPECTED"
+          if [[ "$EXPECTED" -ge 200 && "$EXPECTED" -lt 300 ]]; then jq -e '.ok==true' /tmp/result.json >/dev/null; else jq -e '.ok==false' /tmp/result.json >/dev/null; fi
 
       - name: Delete temporary exact bridge
         if: always()
