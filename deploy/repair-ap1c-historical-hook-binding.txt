@@ -1,0 +1,1 @@
+Restore AP1C 5790745 Module 900 to historical hook ID 2628156 recovered from live blueprint version 2. Preserve active/immediate state, exact Module 1 output_record_id mapping, all downstream topology, and rollback on any verification drift. Do not invoke the webhook.
