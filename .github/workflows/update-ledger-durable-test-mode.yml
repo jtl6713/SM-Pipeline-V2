@@ -1,0 +1,45 @@
+name: Update Ledger Durable Test Mode
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/update-ledger-durable-test-mode.txt']
+permissions: {contents: write}
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Update authoritative 21-item ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+          s=p.read_text()
+          lines=s.splitlines()
+          replacements={
+            2:'| 2 | Stage-specific, exact-output-addressable orchestrators | **In progress — materially advanced** | R4 `5556716` live proof and R5 controlled-pulse isolation remain valid. TTD-ORCH `5806668` and AP-CAR-ORCH `5791537` production selectors were explicitly hardened; TTD0–TTD3 and AP0C–AP5C are exact-output webhook workers. I4 `5524092` Module 1 was repaired from a global up-to-25-candidate scan to exact webhook `{{4.record_id}}` targeting. Production Platform Output selectors in R3/R4/R5 plus IG/FB/TikTok/YT/AP-CAR now explicitly exclude test-tagged rows with `{Test_Run_ID}=BLANK()`. | Continue the remaining stage/exact-addressing inventory and prove any still-unverified orchestrator entrances; preserve normal R5 production batching and all webhook identities. |',
+            5:'| 5 | Genuine hard test mode | **Partial — durable identity boundary live and controller-proven** | Durable `Test_Run_ID` is now present on Idea Candidates, Production Requests, Content Items, Production Request Outputs, and Platform Outputs, with I4 and Studio propagation live. Ordinary production selectors explicitly exclude tagged test rows. The repair controller now requires lease/input `test_run_id` to exactly equal Platform Output `Test_Run_ID`. Controller-only acceptance used disposable Outputs 158–161: matching identity lease succeeded; mismatched identity failed closed; blank durable identity failed closed; same-test but non-allowlisted output was rejected; lease release and expired-lease sweep succeeded; all fixtures were deleted. No Make stage execution/render/email/draft/post occurred. | Extend the durable test identity contract through any remaining non-Platform-Output workers/stages, prove deterministic cleanup/production-negative behavior end-to-end under the bounded controller, and complete Item 1 shutdown/budget matrix before marking Test Mode globally complete. |',
+            21:'| 21 | Repair scope/change-control and evidence-backed completion | **Partial — ledger active and current** | Permanent ordered ledger includes R4 target/denial proof, R5 controlled-pulse isolation, AP0 versioned behavioral proof, selector hardening, I4 exact-target repair, durable Test_Run_ID propagation/production exclusion, and the controller-only positive/mismatch/blank/non-allowlist acceptance matrix with fixture cleanup. | Continue ledger per repair and require deterministic positive/negative evidence before marking each remaining item complete. |'
+          }
+          seen=set()
+          for i,line in enumerate(lines):
+              for num,new in replacements.items():
+                  if line.startswith(f'| {num} |'):
+                      lines[i]=new; seen.add(num)
+          if seen != set(replacements): raise SystemExit(f'missing ledger rows: {set(replacements)-seen}')
+          s='\n'.join(lines)+'\n'
+          marker='## 2026-08-16 continuation delta — durable Test Mode identity boundary'
+          if marker not in s:
+              s += '''\n## 2026-08-16 continuation delta — durable Test Mode identity boundary\n\n### Item 2 / Item 5 hardening completed\n\n- Hardened **TTD-ORCH `5806668`** normal/retry selectors with explicit TikTok production eligibility, auto-publish, `Do_Not_Publish=0`, unpublished/unlocked and retry-due guards; TTD0–TTD3 remain exact-output webhook workers.\n- Hardened **AP-CAR-ORCH `5791537` Modules 10/12/14/16/18/20/22/24**; AP0C–AP5C remain exact-output webhook workers.\n- Repaired **I4 `5524092` Module 1** so the promotion webhook's `record_id` is the exact Airtable record fetched; removed the prior up-to-25 global-candidate scan without changing hook `2549733` or downstream topology.\n- Added durable `Test_Run_ID` text fields to Idea Candidates, Production Requests, Content Items, Production Request Outputs and Platform Outputs; existing production records were not backfilled.\n- I4 Module 2 and the Studio Worker now propagate `Test_Run_ID` through promotion/fanout. Studio source was deployed through the non-live candidate -> exact-version smoke -> 100% promotion path; rollback was not required.\n- Added `{Test_Run_ID}=BLANK()` to production Platform Output selectors in R3 `5557966`, R4 `5556716`, R5 `5565333`, IG-PUB-ORCH `5864632`, FB-ORCH `5813561`, TTD-ORCH `5806668`, YT-ORCH `5823581`, and AP-CAR-ORCH `5791537`. Transactional verification preserved each scenario's OFF state and schedule.\n- Repair controller now binds a test lease to durable record identity: lease/input `test_run_id` must equal Platform Output `Test_Run_ID`. Health capability flag: `repair_durable_test_run_identity_v1`.\n\n### Controller-only acceptance matrix\n\nDisposable Platform Outputs 158–161 contained only Test Mode metadata and no render/publish eligibility.\n\n| Proof | Result |\n| --- | --- |\n| Matching durable identity (Output 158 / `TR-DURABLE-20260816-A`) | PASS — lease acquired |\n| Mismatched durable identity (Output 159 tagged `...-B`, requested `...-A`) | PASS — failed closed before lease/stage execution |\n| Blank durable identity (Output 160) | PASS — failed closed before lease/stage execution |\n| Same test identity but outside lease allowlist (Output 161) | PASS — rejected as outside `test_run_id` allowlist |\n| Lease release | PASS |\n| Expired-lease sweep | PASS |\n| Fixture cleanup | PASS — Outputs 158–161 deleted |\n\nNo Make scenario stage was run, no renderer job was created, no email was sent, and no platform draft/post/video was created by this acceptance matrix.\n\n### Evidence anchors\n\n- Safe Studio rollout with durable identity controller hardening: GitHub Actions run `31972446672`.\n- Matching identity acquisition through stable control: run `31973039268`.\n- Same-test/non-allowlisted denial: run `31973081348`.\n- Lease release: run `31973108944`.\n- Expired-lease sweep: run `31973130952`.\n- Production-selector `Test_Run_ID` exclusion transaction: run `31969304633`.\n- Mismatch and blank-denial artifacts are retained in the stable repair-control workflow evidence.\n\n### Remaining gate\n\nItem 5 is materially advanced but remains **Partial** until the durable identity boundary is extended/proven across any remaining non-Platform-Output stages and Item 1's timeout/abandoned-chat/budget-exhaustion/immutable-ledger/guaranteed-shutdown acceptance matrix is complete. Broad E2E remains unauthorized.\n'''
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'repair: record durable Test Mode identity proof'
+          git push
