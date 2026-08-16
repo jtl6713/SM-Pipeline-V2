@@ -1,0 +1,58 @@
+name: Apply Worker P1 Test Mode Pulse
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-worker-p1-test-pulse.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-p1-test-pulse
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply narrowly scoped P1 Test Mode pulse patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE=$(git hash-object apps/studio-api/worker.js)
+          python repair/tools/patch_worker_p1_test_pulse.py | tee /tmp/patch-output.txt
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          git diff --check
+          CHANGED=$(git diff --name-only)
+          test "$CHANGED" = 'apps/studio-api/worker.js'
+          grep -q 'Installed lease-guarded exact P1 Test Mode selector pulse' /tmp/patch-output.txt
+          grep -q 'repair_p1_test_selector_pulse_v1: true' apps/studio-api/worker.js
+          grep -q 'action === "pulse_p1_test_selector"' apps/studio-api/worker.js
+          grep -q 'allowed_content_item_record_ids' apps/studio-api/worker.js
+          grep -q '5528742, // P1 content package scheduled root' apps/studio-api/worker.js
+          grep -q 'Standalone ACTIVATE/RUN is intentionally disabled' apps/studio-api/worker.js
+          AFTER=$(git hash-object apps/studio-api/worker.js)
+          test "$BEFORE" != "$AFTER"
+          printf '{"before_blob":"%s","after_blob":"%s","scope":"lease-guarded exact P1 Test Mode scheduled-root pulse"}\n' "$BEFORE" "$AFTER" >/tmp/evidence.json
+      - name: Commit patched Studio API source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'fix: add lease-guarded P1 Test Mode pulse'
+          git push origin HEAD:main
+      - name: Upload patch evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: p1-test-mode-pulse-source-${{ github.run_id }}
+          path: /tmp/evidence.json
+          retention-days: 30
