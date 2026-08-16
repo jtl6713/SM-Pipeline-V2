@@ -1,0 +1,38 @@
+name: Apply Studio Deploy Live Binding Contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-studio-deploy-live-binding-contract.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Patch only production deploy binding assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_studio_deploy_live_binding_contract.py | tee /tmp/patch-output.txt
+          git diff --check
+          CHANGED=$(git diff --name-only)
+          test "$CHANGED" = '.github/workflows/deploy-cloudflare-worker-production.yml'
+          grep -q 'binding_contract_occurrences_updated=2' /tmp/patch-output.txt
+          grep -q "'secrets':{'required':\['AIRTABLE_PAT'\]}" .github/workflows/deploy-cloudflare-worker-production.yml
+      - name: Commit deploy verifier correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/deploy-cloudflare-worker-production.yml
+          git commit -m 'fix: preserve current Studio API production binding contract'
+          git push origin HEAD:main
