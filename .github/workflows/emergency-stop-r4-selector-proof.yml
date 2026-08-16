@@ -1,0 +1,71 @@
+name: Emergency Stop R4 Selector Proof
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/emergency-stop-r4-selector-proof.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: emergency-stop-r4-5556716
+  cancel-in-progress: false
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Make API credentials without logging values
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json'))
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          t=str(vals.get('MAKE_API_TOKEN') or '').strip(); b=str(vals.get('MAKE_API_BASE_URL') or '').strip().rstrip('/')
+          if not t or not b: raise SystemExit('Missing active Make API settings')
+          open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
+          PY
+      - name: Stop R4 and verify inactive
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5556716
+          curl -fsS -X POST "$BASE/scenarios/$SID/stop" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/stop.json
+          for i in 1 2 3 4 5; do
+            curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/state.json
+            ACTIVE=$(jq -r '(.scenario // .response // .).isActive // false' /tmp/state.json)
+            if [[ "$ACTIVE" == "false" ]]; then echo '{"scenario_id":5556716,"isActive":false}' >/tmp/evidence.json; exit 0; fi
+            sleep 1
+          done
+          echo 'R4 remained active after stop request' >&2; exit 1
+      - name: Destroy transient credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emergency-stop-r4-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: warn
+          retention-days: 30
