@@ -94,13 +94,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ACTIVE_VERSION=$(cat /tmp/active-version.txt)
-          jq --arg alias "$PREVIEW_ALIAS" --arg version "$ACTIVE_VERSION" '
+          jq --arg alias "$PREVIEW_ALIAS" '
             .result.resources.script_runtime as $rt |
             {
               main_module:"worker.js",
               annotations:{"workers/alias":$alias,"workers/message":"ChicagoShining E2E inactive preview ping diagnostic"},
-              bindings:[.result.resources.bindings[] | {name:.name,type:"inherit",version_id:$version}]
+              bindings:[.result.resources.bindings[] | {name:.name,type:"inherit",version_id:"latest"}]
             }
             + (if $rt.compatibility_date then {compatibility_date:$rt.compatibility_date} else {} end)
             + {compatibility_flags:($rt.compatibility_flags // [])}
