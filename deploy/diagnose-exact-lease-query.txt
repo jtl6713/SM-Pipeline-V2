@@ -1,0 +1,1 @@
+Trigger exact read-only Make Admin Queue lease query used by Studio Worker after deterministic AIRTABLE_PAT rebind.
