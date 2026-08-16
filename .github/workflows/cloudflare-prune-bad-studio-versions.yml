@@ -1,0 +1,171 @@
+name: Prune Non-Serving Bad Studio API Versions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-prune-bad-studio-versions.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-version-maintenance
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      PROTECTED_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify v86 is the sole production target and resolve beta Worker ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments.json
+          jq -e '.success==true' /tmp/deployments.json >/dev/null
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments.json)
+          test "$ACTIVE" = "$PROTECTED_VERSION"
+          test "$(jq -r '.result.deployments[0].versions | length' /tmp/deployments.json)" -eq 1
+          test "$(jq -r '.result.deployments[0].versions[0].percentage' /tmp/deployments.json)" = "100"
+
+          curl -fsS "$ROOT/workers/workers" -H "$AUTH" -o /tmp/workers.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/workers.json').read_text()).get('result') or []
+          m=[w for w in r if isinstance(w,dict) and (w.get('name')=='chicagoshining-studio-api' or w.get('script_name')=='chicagoshining-studio-api')]
+          if len(m)!=1: raise SystemExit(f'Expected one beta worker match, found {len(m)}')
+          wid=str(m[0].get('id') or '')
+          if not wid: raise SystemExit('Beta Worker ID missing')
+          Path('/tmp/worker-id.txt').write_text(wid)
+          print('production_and_worker_id_preflight=PASS')
+          PY
+
+      - name: Build exact deletion manifest and verify every target contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/versions?per_page=100" -H "$AUTH" -o /tmp/versions.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/versions.json').read_text()).get('result') or []
+          bynum={v.get('number'):v for v in r if isinstance(v,dict) and isinstance(v.get('number'),int)}
+          expected_nums=list(range(87,94))
+          missing=[n for n in expected_nums if n not in bynum]
+          if missing: raise SystemExit(f'Missing expected cleanup versions: {missing}')
+          protected=bynum.get(86)
+          if not protected or protected.get('id')!='fbcf7fbd-7935-44dd-b195-094f505b7df6':
+              raise SystemExit('Protected v86 identity mismatch')
+          manifest=[{'number':n,'id':str(bynum[n].get('id'))} for n in sorted(expected_nums,reverse=True)]
+          Path('/tmp/delete-manifest.json').write_text(json.dumps(manifest,indent=2))
+          print(json.dumps({'delete_numbers':[x['number'] for x in manifest],'protected_number':86,'protected_id':protected.get('id')},indent=2))
+          PY
+
+          : > /tmp/predelete-bindings.ndjson
+          python - <<'PY' > /tmp/delete-lines.txt
+          import json
+          for x in json.load(open('/tmp/delete-manifest.json')): print(x['number'],x['id'])
+          PY
+          while read -r num vid; do
+            test "$vid" != "$PROTECTED_VERSION"
+            curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/versions/$vid" -H "$AUTH" -o /tmp/v.json
+            NUM="$num" VID="$vid" python - <<'PY' >> /tmp/predelete-bindings.ndjson
+          import json,os
+          r=json.load(open('/tmp/v.json')).get('result') or {}
+          bs=(r.get('resources') or {}).get('bindings') or []
+          got={str(b.get('name') or ''):str(b.get('type') or '') for b in bs}
+          n=int(os.environ['NUM'])
+          if n in range(87,93) and got:
+              raise SystemExit(f'v{n} expected zero bindings, got {sorted(got.items())}')
+          if n==93:
+              expected={
+                'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+                'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+                'ALLOWED_ORIGINS':'plain_text','I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+              }
+              if got!=expected: raise SystemExit(f'v93 nine-binding contract mismatch: {sorted(got.items())}')
+          print(json.dumps({'number':n,'id':os.environ['VID'],'binding_count':len(bs),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])}))
+          PY
+          done < /tmp/delete-lines.txt
+          cat /tmp/predelete-bindings.ndjson
+
+      - name: Delete only v93 through v87 using beta version API
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          WID=$(cat /tmp/worker-id.txt)
+          : > /tmp/delete-results.ndjson
+          while read -r num vid; do
+            test "$vid" != "$PROTECTED_VERSION"
+            code=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "$ROOT/workers/workers/$WID/versions/$vid" -H "$AUTH")
+            NUM="$num" VID="$vid" CODE="$code" python - <<'PY' >> /tmp/delete-results.ndjson
+          import json,os
+          try: raw=json.load(open('/tmp/delete.json'))
+          except Exception: raw={}
+          print(json.dumps({'number':int(os.environ['NUM']),'id':os.environ['VID'],'http_status':int(os.environ['CODE']),'success':raw.get('success'),'errors':[{'code':e.get('code'),'message':e.get('message')} for e in raw.get('errors') or []]}))
+          PY
+            test "$code" -ge 200 -a "$code" -lt 300
+            jq -e '.success==true' /tmp/delete.json >/dev/null
+
+            curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments-check.json
+            ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-check.json)
+            test "$ACTIVE" = "$PROTECTED_VERSION"
+          done < /tmp/delete-lines.txt
+          cat /tmp/delete-results.ndjson
+
+      - name: Verify v86 is now latest and still has exact 11 bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/versions?per_page=100" -H "$AUTH" -o /tmp/versions-after.json
+          LATEST=$(jq -er '.result[0].id' /tmp/versions-after.json)
+          LATEST_NUM=$(jq -er '.result[0].number' /tmp/versions-after.json)
+          test "$LATEST" = "$PROTECTED_VERSION"
+          test "$LATEST_NUM" -eq 86
+          for n in 87 88 89 90 91 92 93; do
+            test "$(jq --argjson n "$n" '[.result[]|select(.number==$n)]|length' /tmp/versions-after.json)" -eq 0
+          done
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/versions/$PROTECTED_VERSION" -H "$AUTH" -o /tmp/v86.json
+          python - <<'PY'
+          import json
+          r=json.load(open('/tmp/v86.json')).get('result') or {}
+          bs=(r.get('resources') or {}).get('bindings') or []
+          expected={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
+            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          got={str(b.get('name') or ''):str(b.get('type') or '') for b in bs}
+          if got!=expected: raise SystemExit(f'v86 post-cleanup binding contract mismatch: {sorted(got.items())}')
+          print(json.dumps({'latest_number':86,'latest_id':r.get('id'),'binding_count':len(bs),'binding_contract_ok':True},indent=2))
+          PY
+
+      - name: Upload sanitized cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-version-prune-${{ github.run_id }}
+          path: |
+            /tmp/delete-manifest.json
+            /tmp/predelete-bindings.ndjson
+            /tmp/delete-results.ndjson
+          if-no-files-found: ignore
+          retention-days: 30
