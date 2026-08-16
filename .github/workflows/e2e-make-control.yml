@@ -36,15 +36,46 @@ jobs:
           jq -e 'all(.commands[]; (.action == "state" or .action == "start" or .action == "stop" or .action == "run"))' deploy/e2e-make-command.json >/dev/null
           jq -e 'all(.commands[]; .scenario_id as $id | ([5517182,5524092,5528742,5530955,5531703,5894885,5569495,5557966,5556716,5565333,5576363,5576353,5612096,5862882,5816502,5806658,5806644,5806597,5806570,5806518,5830810,5830616,5823581,5893243] | index($id)) != null)' deploy/e2e-make-command.json >/dev/null
 
-      - name: Capture exact live Worker backup
+      - name: Capture exact live Worker module backup
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS \
+          cat >/tmp/extract_worker.py <<'PY'
+          import re, sys
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+
+          headers_path, body_path, out_path = sys.argv[1:4]
+          headers = Path(headers_path).read_text(encoding='latin-1', errors='replace')
+          body = Path(body_path).read_bytes()
+          matches = re.findall(r'(?im)^content-type:\s*([^\r\n]+)', headers)
+          content_type = matches[-1].strip() if matches else ''
+          if 'multipart/' not in content_type.lower():
+              Path(out_path).write_bytes(body)
+              raise SystemExit(0)
+          synthetic = ('Content-Type: ' + content_type + '\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1') + body
+          msg = BytesParser(policy=default).parsebytes(synthetic)
+          selected = None
+          for part in msg.walk():
+              if part.is_multipart():
+                  continue
+              filename = part.get_filename()
+              name = part.get_param('name', header='content-disposition')
+              if filename == 'worker.js' or name == 'worker.js':
+                  selected = part.get_payload(decode=True)
+                  break
+          if selected is None:
+              raise SystemExit('worker.js module not found in Cloudflare multipart response')
+          Path(out_path).write_bytes(selected)
+          PY
+          curl -fsS -D /tmp/worker-before.headers \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -o /tmp/worker-before.js
+            -o /tmp/worker-before.multipart
+          python /tmp/extract_worker.py /tmp/worker-before.headers /tmp/worker-before.multipart /tmp/worker-before.js
           test -s /tmp/worker-before.js
+          node --check /tmp/worker-before.js
           sha256sum /tmp/worker-before.js > /tmp/worker-before.sha256
 
       - name: Build ephemeral control Worker
@@ -117,7 +148,7 @@ jobs:
           set -euo pipefail
           URL="https://$WORKER_NAME.${{ steps.workersdev.outputs.subdomain }}.workers.dev/__github_e2e_make_control"
           HTTP_CODE=$(curl -sS --retry 4 --retry-delay 2 --max-time 180 -o /tmp/e2e-result.json -w '%{http_code}' "$URL")
-          cat /tmp/e2e-result.json | jq '{ok,correlation_id,results:[.results[]|{scenario_id,action,result,error,audit_error}]}'
+          jq '{ok,correlation_id,results:[.results[]|{scenario_id,action,result,error,audit_error}]}' /tmp/e2e-result.json
           test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
           jq -e '.ok == true' /tmp/e2e-result.json >/dev/null
 
@@ -134,10 +165,11 @@ jobs:
               -F 'worker.js=@/tmp/worker-before.js;type=application/javascript+module')
             test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
             jq -e '.success == true' /tmp/restore-result.json >/dev/null
-            curl -fsS \
+            curl -fsS -D /tmp/worker-restored.headers \
               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -o /tmp/worker-restored.js
+              -o /tmp/worker-restored.multipart
+            python /tmp/extract_worker.py /tmp/worker-restored.headers /tmp/worker-restored.multipart /tmp/worker-restored.js
             cmp --silent /tmp/worker-before.js /tmp/worker-restored.js
           fi
 
