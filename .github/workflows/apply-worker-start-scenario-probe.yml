@@ -1,0 +1,45 @@
+name: Apply Worker Start Scenario Probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-worker-start-scenario-probe.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-worker-source-repair
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply Start Scenario probe source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_worker_start_scenario_probe.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          grep -q 'repair_make_start_scenario_probe_v1: true' apps/studio-api/worker.js
+          grep -q 'action === "probe_make_start_scenario_schema"' apps/studio-api/worker.js
+      - name: Commit patched Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          if git diff --cached --quiet; then
+            echo 'Start Scenario probe already present.'
+            exit 0
+          fi
+          git commit -m 'Add guarded Make Start Scenario schema probe'
+          git push origin HEAD:main
