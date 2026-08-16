@@ -1,0 +1,3 @@
+One-time repair controller patch trigger.
+Purpose: change only service-bound internal request host from studio.chicagoshining.com to a neutral internal hostname in repair controller and watchdog.
+Triggered: 2026-08-16
