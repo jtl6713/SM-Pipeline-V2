@@ -20,7 +20,7 @@ jobs:
       WORKER_NAME: chicagoshining-studio-api
     steps:
       - uses: actions/checkout@v6
-      - name: Capture active version and source
+      - name: Capture active production version and source
         shell: bash
         run: |
           set -euo pipefail
@@ -28,8 +28,9 @@ jobs:
           ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/d.json)
           echo "$ACTIVE" >/tmp/active
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions/$ACTIVE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/v.json
-          jq -e '.success==true and ((.result.resources.bindings//[])|length)>0' /tmp/v.json >/dev/null
-          echo "active_bindings=$(jq '(.result.resources.bindings//[])|length' /tmp/v.json)"
+          jq -e '.success==true and ((.result.resources.bindings//[])|length)==11' /tmp/v.json >/dev/null
+          jq -er '.result.number' /tmp/v.json >/tmp/active-number
+          echo "active_number=$(cat /tmp/active-number) bindings=11"
           curl -fsS -D /tmp/h "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/m
           python - <<'PY'
           import re
@@ -44,18 +45,40 @@ jobs:
           else: raise SystemExit('worker.js not found')
           PY
           node --check /tmp/worker.js
-      - name: Upload inactive version inheriting exact active bindings
+
+      - name: Delete only newer inactive zero-binding API diagnostics
         shell: bash
         run: |
           set -euo pipefail
-          ACTIVE=$(cat /tmp/active)
-          jq --arg active "$ACTIVE" '.result.resources.script_runtime as $rt | {main_module:"worker.js",annotations:{"workers/message":"Binding inheritance safety test - inactive only"},bindings:[.result.resources.bindings[]|{name:.name,type:"inherit",version_id:$active}]} + (if $rt.compatibility_date then {compatibility_date:$rt.compatibility_date} else {} end) + {compatibility_flags:($rt.compatibility_flags//[])}' /tmp/v.json >/tmp/meta.json
+          ACTIVE=$(cat /tmp/active); AN=$(cat /tmp/active-number)
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions?per_page=30" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/list.json
+          jq -r --argjson an "$AN" '.result.items[] | select(.number>$an) | [.id,.number,(.metadata.source//"")] | @tsv' /tmp/list.json | while IFS=$'\t' read -r id num source; do
+            [[ "$source" == "api" ]] || { echo "Refusing non-API version $num" >&2; exit 1; }
+            curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions/$id" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/candidate.json
+            count=$(jq '(.result.resources.bindings//[])|length' /tmp/candidate.json)
+            [[ "$count" == "0" ]] || { echo "Refusing newer version $num with bindings" >&2; exit 1; }
+            code=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/$WORKER_NAME/versions/$id" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+            echo "deleted_diagnostic_version=$num http=$code"
+            test "$code" -ge 200 -a "$code" -lt 300
+            jq -e '.success==true' /tmp/delete.json >/dev/null
+          done
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions?per_page=5" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/list-after.json
+          LATEST=$(jq -er '.result.items|max_by(.number)|.id' /tmp/list-after.json)
+          echo "active_is_latest=$([[ "$LATEST" == "$ACTIVE" ]] && echo true || echo false)"
+          test "$LATEST" = "$ACTIVE"
+
+      - name: Upload inactive exact-code version inheriting all latest bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '.result.resources.script_runtime as $rt | {main_module:"worker.js",annotations:{"workers/message":"Safe binding-bearing base after E2E diagnostic cleanup"},bindings:[.result.resources.bindings[]|{name:.name,type:"inherit",version_id:"latest"}]} + (if $rt.compatibility_date then {compatibility_date:$rt.compatibility_date} else {} end) + {compatibility_flags:($rt.compatibility_flags//[])}' /tmp/v.json >/tmp/meta.json
           code=$(curl -sS -o /tmp/u.json -w '%{http_code}' -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions?bindings_inherit=strict" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -F 'metadata=@/tmp/meta.json;type=application/json' -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
           echo "upload_http=$code"
           if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then jq '{success,errors,messages}' /tmp/u.json >&2; exit 1; fi
-          jq -e '.success==true' /tmp/u.json >/dev/null
-          echo "new_bindings=$(jq '(.result.resources.bindings//[])|length' /tmp/u.json)"
+          jq -e '.success==true and ((.result.resources.bindings//[])|length)==11' /tmp/u.json >/dev/null
           jq -e --slurpfile old /tmp/v.json '([.result.resources.bindings[]|{name,type}]|sort_by(.name)) == ([$old[0].result.resources.bindings[]|{name,type}]|sort_by(.name))' /tmp/u.json >/dev/null
+          echo "new_inactive_bindings=11"
+
       - name: Verify production active version unchanged
         shell: bash
         run: |
