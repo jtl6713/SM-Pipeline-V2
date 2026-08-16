@@ -1,0 +1,1 @@
+Apply the exact R4 token selector + leased one-run pulse + lease/watchdog token cleanup control. Source-only patch; do not activate or run R4 and do not publish. Triggered 2026-08-16.
