@@ -1,0 +1,164 @@
+name: E2E Make Scenario Control
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/e2e-make-command.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-e2e-make-control
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: chicagoshining-studio-api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate command
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s deploy/e2e-make-command.json
+          jq -e '.correlation_id | type == "string" and length > 0' deploy/e2e-make-command.json >/dev/null
+          jq -e '.commands | type == "array" and length > 0 and length <= 20' deploy/e2e-make-command.json >/dev/null
+          jq -e 'all(.commands[]; (.action == "state" or .action == "start" or .action == "stop" or .action == "run"))' deploy/e2e-make-command.json >/dev/null
+          jq -e 'all(.commands[]; ([5517182,5524092,5528742,5530955,5531703,5894885,5569495,5557966,5556716,5565333,5576363,5576353,5612096,5862882,5816502,5806658,5806644,5806597,5806570,5806518,5830810,5830616,5823581,5893243] | index(.scenario_id)) != null)' deploy/e2e-make-command.json >/dev/null
+
+      - name: Capture exact live Worker backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -o /tmp/worker-before.js
+          test -s /tmp/worker-before.js
+          sha256sum /tmp/worker-before.js > /tmp/worker-before.sha256
+
+      - name: Build ephemeral control Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path('/tmp/worker-before.js').read_text(encoding='utf-8')
+          command = json.loads(Path('deploy/e2e-make-command.json').read_text(encoding='utf-8'))
+          allowed = {5517182,5524092,5528742,5530955,5531703,5894885,5569495,5557966,5556716,5565333,5576363,5576353,5612096,5862882,5816502,5806658,5806644,5806597,5806570,5806518,5830810,5830616,5823581,5893243}
+          commands = command['commands']
+          for item in commands:
+              if int(item['scenario_id']) not in allowed:
+                  raise SystemExit(f"Scenario not allowlisted: {item['scenario_id']}")
+              if item['action'] not in {'state','start','stop','run'}:
+                  raise SystemExit(f"Action not allowlisted: {item['action']}")
+          marker = '      const url = new URL(request.url);\n'
+          if marker not in source:
+              raise SystemExit('Worker URL marker not found')
+          js_commands = json.dumps(commands, separators=(',', ':'))
+          js_correlation = json.dumps(command['correlation_id'])
+          injected = f'''      const url = new URL(request.url);\n      if (url.pathname === "/__github_e2e_make_control") {{\n        requireConfig(env);\n        const commands = {js_commands};\n        const correlationId = {js_correlation};\n        const allowed = new Set([5517182,5524092,5528742,5530955,5531703,5894885,5569495,5557966,5556716,5565333,5576363,5576353,5612096,5862882,5816502,5806658,5806644,5806597,5806570,5806518,5830810,5830616,5823581,5893243]);\n        const results = [];\n        for (const command of commands) {{\n          const scenarioId = Number(command.scenario_id);\n          const action = String(command.action || "");\n          let result = null;\n          let error = null;\n          if (!allowed.has(scenarioId)) {{ error = "scenario-not-allowlisted"; }}\n          else try {{\n            if (action === "state") result = await phase6ScenarioState(env, scenarioId);\n            else if (action === "start") result = await phase6SetScenarioActive(env, scenarioId, true);\n            else if (action === "stop") result = await phase6StopScenarioVerified(env, scenarioId, 3);\n            else if (action === "run") result = await phase6RunScenario(env, scenarioId, command.data || null);\n            else error = "action-not-allowlisted";\n          }} catch (e) {{ error = e instanceof Error ? e.message : String(e); }}\n          results.push({{scenario_id:scenarioId,action,result,error}});\n          const auditAction = action === "state" ? "GET_SCENARIO" : action === "start" ? "ACTIVATE" : action === "stop" ? "DEACTIVATE" : "RUN";\n          try {{\n            const now = new Date().toISOString();\n            await airtableFetch(env, "Make Admin Queue", "", {{method:"POST",body:JSON.stringify({{records:[{{fields:{{\n              Command_ID:`GH-E2E-${{correlationId}}-${{scenarioId}}-${{action}}-${{Date.now()}}`,\n              Action:auditAction, Scenario_ID:scenarioId, Scenario_Name:`E2E controlled scenario ${{scenarioId}}`,\n              Write_Approved:action !== "state", Activation_Approved:action === "start" || action === "stop",\n              Status:error ? "Failed" : "Succeeded", Result_JSON:JSON.stringify(result || {{ok:!error}}), Error_Message:error || null,\n              Requested_At:now, Started_At:now, Completed_At:now, Requested_By:"github-e2e-make-control",\n              Correlation_ID:correlationId, Notes:"Ephemeral GitHub/Cloudflare E2E control. Production Worker source is restored byte-for-byte after this command."\n            }}}}],typecast:true}})}});\n          }} catch (auditError) {{\n            results[results.length - 1].audit_error = auditError instanceof Error ? auditError.message : String(auditError);\n          }}\n        }}\n        return new Response(JSON.stringify({{ok:results.every(x=>!x.error),correlation_id:correlationId,results}}), {{status:results.every(x=>!x.error)?200:500,headers:{{"Content-Type":"application/json","Cache-Control":"no-store"}}}});\n      }}\n'''
+          Path('/tmp/worker-e2e.js').write_text(source.replace(marker, injected, 1), encoding='utf-8')
+          PY
+          node --check /tmp/worker-e2e.js
+
+      - name: Capture workers.dev state and enable temporarily if needed
+        id: workersdev
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -o /tmp/script-subdomain-before.json || true
+          WAS_ENABLED=$(jq -r '.result.enabled // true' /tmp/script-subdomain-before.json 2>/dev/null || echo true)
+          echo "was_enabled=$WAS_ENABLED" >> "$GITHUB_OUTPUT"
+          if [[ "$WAS_ENABLED" != "true" ]]; then
+            curl -fsS -X POST \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data '{"enabled":true,"previews_enabled":false}' >/tmp/enable-workersdev.json
+          fi
+          curl -fsS \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -o /tmp/account-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          echo "subdomain=$SUBDOMAIN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy ephemeral control source
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl -sS -o /tmp/e2e-deploy.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata={"main_module":"worker.js"};type=application/json' \
+            -F 'worker.js=@/tmp/worker-e2e.js;type=application/javascript+module')
+          test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
+          jq -e '.success == true' /tmp/e2e-deploy.json >/dev/null
+
+      - name: Execute controlled Make commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$WORKER_NAME.${{ steps.workersdev.outputs.subdomain }}.workers.dev/__github_e2e_make_control"
+          HTTP_CODE=$(curl -sS --retry 4 --retry-delay 2 --max-time 180 -o /tmp/e2e-result.json -w '%{http_code}' "$URL")
+          cat /tmp/e2e-result.json | jq '{ok,correlation_id,results:[.results[]|{scenario_id,action,result,error,audit_error}]}'
+          test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
+          jq -e '.ok == true' /tmp/e2e-result.json >/dev/null
+
+      - name: Restore exact production Worker source
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s /tmp/worker-before.js ]]; then
+            HTTP_CODE=$(curl -sS -o /tmp/restore-result.json -w '%{http_code}' -X PUT \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -F 'metadata={"main_module":"worker.js"};type=application/json' \
+              -F 'worker.js=@/tmp/worker-before.js;type=application/javascript+module')
+            test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
+            jq -e '.success == true' /tmp/restore-result.json >/dev/null
+            curl -fsS \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -o /tmp/worker-restored.js
+            cmp --silent /tmp/worker-before.js /tmp/worker-restored.js
+          fi
+
+      - name: Restore workers.dev state
+        if: always() && steps.workersdev.outputs.was_enabled == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"enabled":false,"previews_enabled":false}' >/tmp/restore-workersdev.json
+
+      - name: Save control result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-make-control-${{ github.run_id }}
+          path: |
+            /tmp/e2e-result.json
+            /tmp/worker-before.sha256
+          if-no-files-found: ignore
+          retention-days: 7
