@@ -1,0 +1,44 @@
+name: Apply Worker Start Scenario Probe Output Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-worker-start-scenario-probe-output-fix.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-worker-source-repair
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply exact interface output correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/fix_worker_start_scenario_probe_output.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          grep -q "output: \[\]," apps/studio-api/worker.js
+      - name: Commit corrected Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          if git diff --cached --quiet; then
+            echo 'Start Scenario probe output correction already present.'
+            exit 0
+          fi
+          git commit -m 'Fix Start Scenario probe interface output schema'
+          git push origin HEAD:main
