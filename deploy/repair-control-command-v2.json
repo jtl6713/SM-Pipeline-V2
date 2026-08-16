@@ -1,0 +1,4 @@
+{
+  "action": "sweep",
+  "expected_http_status": 200
+}
