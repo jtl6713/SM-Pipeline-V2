@@ -1,0 +1,69 @@
+name: Cloudflare Worker Write Diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cloudflare-worker-write-diagnostic.yml'
+      - 'deploy/cloudflare-worker-write-diagnostic.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: chicagoshining-studio-api
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify token and read exact live Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS https://api.cloudflare.com/client/v4/user/tokens/verify \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -o /tmp/token.json
+          jq '{success,errors,messages,result:{status:(.result.status // null)}}' /tmp/token.json
+          curl -fsS -D /tmp/live.headers \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -o /tmp/live.multipart
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          headers=Path('/tmp/live.headers').read_text(encoding='latin-1',errors='replace')
+          body=Path('/tmp/live.multipart').read_bytes()
+          match=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          ct=match[-1].strip() if match else ''
+          if 'multipart/' not in ct.lower():
+              Path('/tmp/live.js').write_bytes(body)
+          else:
+              msg=BytesParser(policy=default).parsebytes(('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode('latin-1')+body)
+              for part in msg.walk():
+                  if not part.is_multipart() and (part.get_filename()=='worker.js' or part.get_param('name',header='content-disposition')=='worker.js'):
+                      Path('/tmp/live.js').write_bytes(part.get_payload(decode=True)); break
+              else: raise SystemExit('worker.js not found')
+          PY
+          node --check /tmp/live.js
+          sha256sum /tmp/live.js
+
+      - name: PUT identical live Worker bytes and print sanitized API response
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP_CODE=$(curl -sS -o /tmp/put.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata={"main_module":"worker.js"};type=application/json' \
+            -F 'worker.js=@/tmp/live.js;type=application/javascript+module')
+          echo "HTTP=$HTTP_CODE"
+          jq '{success,errors,messages}' /tmp/put.json || cat /tmp/put.json
+          test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
+          jq -e '.success == true' /tmp/put.json >/dev/null
