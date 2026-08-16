@@ -1,1 +1,1 @@
-Read-only full team Make scenario inventory, compact metadata only, plus interfaces for on-demand scenarios. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16.
+Read-only full team Make scenario inventory to verify disposable Start Scenario probe scratch 5961142 was deleted after interface validation failure. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16 cleanup verification.
