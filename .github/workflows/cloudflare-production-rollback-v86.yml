@@ -65,8 +65,7 @@ jobs:
             "strategy":"percentage",
             "versions":[{"version_id":"$KNOWN_GOOD_VERSION","percentage":100}],
             "annotations":{
-              "workers/message":"Rollback after production source deploy created a zero-binding Worker version",
-              "workers/triggered_by":"sm-pipeline-repair-stabilization"
+              "workers/message":"Rollback after production source deploy created a zero-binding Worker version"
             }
           }
           EOF
