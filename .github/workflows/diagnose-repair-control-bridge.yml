@@ -1,0 +1,58 @@
+name: Diagnose Stable Repair Control Bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-repair-control-bridge.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Audit active bridge version and binding names only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$BRIDGE_WORKER/deployments" -H "$AUTH" -o /tmp/deployments.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments.json)
+          curl -fsS "$ROOT/workers/scripts/$BRIDGE_WORKER/versions/$ACTIVE" -H "$AUTH" -o /tmp/version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/version.json').read_text()).get('result') or {}
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          print(json.dumps({'active_version':r.get('id'),'version_number':r.get('number'),'bindings':sorted([{'name':b.get('name'),'type':b.get('type')} for b in bindings],key=lambda x:str(x['name']))},sort_keys=True))
+          PY
+
+      - name: Probe ready, unauthorized, and authenticated invalid action
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          READY="https://$BRIDGE_WORKER.$SUB.workers.dev/ready"; CONTROL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          for i in $(seq 1 5); do
+            rc=$(curl -sS --max-time 20 -o /tmp/ready-$i.json -w '%{http_code}' "$READY" || true)
+            echo "ready_attempt=$i http=$rc body=$(cat /tmp/ready-$i.json 2>/dev/null | jq -c '{ok,service,error}' 2>/dev/null || echo nonjson)"
+            sleep 1
+          done
+          rc=$(curl -sS --max-time 20 -o /tmp/unauth.json -w '%{http_code}' -X POST "$CONTROL" -H 'Content-Type: application/json' --data '{"action":"__probe__"}' || true)
+          echo "unauth_http=$rc body=$(cat /tmp/unauth.json 2>/dev/null | jq -c '{ok,error}' 2>/dev/null || echo nonjson)"
+          DERIVED=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          for i in $(seq 1 8); do
+            rc=$(curl -sS --max-time 30 -o /tmp/auth-$i.json -w '%{http_code}' -X POST "$CONTROL" -H "Authorization: Bearer $DERIVED" -H 'Content-Type: application/json' --data '{"action":"__propagation_probe__"}' || true)
+            echo "auth_attempt=$i http=$rc body=$(cat /tmp/auth-$i.json 2>/dev/null | jq -c '{bridge_ok,upstream_status,upstream_error:(.upstream_json.error//null),upstream_message:(.upstream_json.message//null),exception,error}' 2>/dev/null || echo nonjson)"
+            sleep 2
+          done
+          unset DERIVED
