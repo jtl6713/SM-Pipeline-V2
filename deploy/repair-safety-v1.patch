@@ -1,0 +1,389 @@
+--- a/apps/studio-api/worker.js
++++ b/apps/studio-api/worker.js
+@@ -38,6 +38,7 @@
+       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
+       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
+       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
++      const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
+       const isVoiceCatalogRoute = url.pathname === "/api/voices";
+       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
+       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
+@@ -59,6 +60,7 @@
+       const isOutputCreativeReviewWrite = isOutputCreativeReviewRoute && request.method === "POST";
+       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
+       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
++      const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
+       const allowedMethod =
+         request.method === "GET" ||
+         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute)) ||
+@@ -81,8 +83,10 @@
+         isOutputCreativeReviewWrite ||
+         isOutputCreativeContinueWrite ||
+         (isAdminMakeDeployRoute && request.method === "GET") ||
++        (isAdminRepairControlRoute && request.method === "GET") ||
+         isVoiceCatalogRoute ||
+-        isAdminMakeDeployWrite;
++        isAdminMakeDeployWrite ||
++        isAdminRepairControlWrite;
+       if (!allowedMethod) {
+         return respond(request, env, { ok: false, error: "Method not allowed in Phase 2A" }, 405);
+       }
+@@ -113,6 +117,9 @@
+           phase6_slide_directives: true,
+           phase6_preview_rerender_prep: true,
+           server_side_admin_deployer: true,
++          repair_activation_leases_v1: true,
++          repair_exact_output_test_mode_v1: true,
++          repair_run_disabled_until_stage_addressing_verified: true,
+           local_airtable_pat_required_for_admin_deploys: false,
+           make_admin_blueprint_string_patch: true,
+           phase6_rendered_preview_proxy: true,
+@@ -221,6 +228,13 @@
+         return adminMakeDeploy(request, env, authorization);
+       }
+ 
++      if (isAdminRepairControlRoute) {
++        requirePermission(authorization, "tenant_admin");
++        if (request.method === "GET") return adminRepairControlStatus(request, env);
++        assertWriteRequest(request, env);
++        return adminRepairControl(request, env, authorization);
++      }
++
+       if (isVoiceCatalogRoute) {
+         return listPhase6Voices(request, env, authorization);
+       }
+@@ -9260,6 +9274,334 @@
+   return match ? String(match.fields.Setting_Value || "").trim() : "";
+ }
+ 
++
++const REPAIR_LEASE_NOTE_PREFIX = "REPAIR_LEASE_V1";
++const REPAIR_CONTROL_SCENARIOS = new Set([
++  5893243, // MAKE-ADMIN-BRIDGE
++  5813561, // FB-ORCH
++  5864632, // IG-PUB-ORCH
++  5556716, // R4 renderer handoff
++  5612096, // AP0 public asset preparation
++]);
++const REPAIR_LEASE_MAX_MS = 30 * 60 * 1000;
++const REPAIR_LEASE_MIN_MS = 60 * 1000;
++
++function repairJson(value, fallback = null) {
++  if (!value) return fallback;
++  if (typeof value === "object") return value;
++  try { return JSON.parse(String(value)); } catch { return fallback; }
++}
++
++function repairIsoMs(value) {
++  const ms = Date.parse(String(value || ""));
++  return Number.isFinite(ms) ? ms : NaN;
++}
++
++function repairString(value, name, max = 160) {
++  const text = String(value || "").trim();
++  if (!text || text.length > max) throw new HttpError(400, `${name} is required and must be <= ${max} characters`);
++  return text;
++}
++
++function repairRecordIds(value, name) {
++  const ids = Array.isArray(value) ? value.map((v) => String(v || "").trim()).filter(Boolean) : [];
++  if (!ids.length) throw new HttpError(400, `${name} must contain at least one exact Airtable record ID`);
++  if (ids.length > 20 || ids.some((id) => !/^rec[A-Za-z0-9]{14}$/.test(id))) {
++    throw new HttpError(400, `${name} contains an invalid Airtable record ID`);
++  }
++  return [...new Set(ids)];
++}
++
++function repairLeaseState(record) {
++  const contract = repairJson(record?.fields?.Request_JSON, {}) || {};
++  const state = repairJson(record?.fields?.Result_JSON, {}) || {};
++  return {
++    record_id: record?.id || null,
++    contract,
++    state,
++    status: String(record?.fields?.Status || ""),
++    scenario_id: Number(record?.fields?.Scenario_ID || contract.scenario_id || 0),
++    test_run_id: String(contract.test_run_id || record?.fields?.Correlation_ID || ""),
++    lease_id: String(contract.lease_id || ""),
++    expires_at: String(contract.expires_at || ""),
++    operations_used: Number(state.operations_used || 0),
++    runs_used: Number(state.runs_used || 0),
++  };
++}
++
++async function repairLeaseRecords(env, scenarioId = null) {
++  const formulas = ['{Status}="Processing"', `FIND("${REPAIR_LEASE_NOTE_PREFIX}", {Notes}&"")>0`];
++  if (Number.isInteger(Number(scenarioId)) && Number(scenarioId) > 0) formulas.push(`{Scenario_ID}=${Number(scenarioId)}`);
++  return listRecords(env, "Make Admin Queue", {
++    limit: 50,
++    sortField: "Requested_At",
++    sortDirection: "desc",
++    filterFormula: `AND(${formulas.join(",")})`,
++  });
++}
++
++async function repairCloseLease(env, lease, status, resultPatch = {}) {
++  if (!lease?.record_id) return;
++  const state = { ...(lease.state || {}), ...resultPatch, state: status, closed_at: new Date().toISOString() };
++  await airtableFetch(env, "Make Admin Queue", lease.record_id, {
++    method: "PATCH",
++    body: JSON.stringify({ fields: {
++      Status: status === "failed" ? "Failed" : "Succeeded",
++      Result_JSON: JSON.stringify(state),
++      Completed_At: new Date().toISOString(),
++      Error_Message: status === "failed" ? String(resultPatch.error || "Repair lease failed") : "",
++    } }),
++  });
++}
++
++async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = false) {
++  const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
++  if (!record?.id) throw new HttpError(404, `Platform Output ${recordId} not found`);
++  const fields = record.fields || {};
++  if (!allowPublicPublish && fields.Do_Not_Publish !== true) {
++    throw new HttpError(409, `Test mode requires Do_Not_Publish on Platform Output ${recordId}`);
++  }
++  return {
++    id: record.id,
++    output_id: fields.Output_ID ?? null,
++    platform: fields.Platform?.name || fields.Platform || null,
++    do_not_publish: fields.Do_Not_Publish === true,
++    output_status: fields.Output_Status?.name || fields.Output_Status || null,
++  };
++}
++
++async function repairSweepExpiredLeases(env) {
++  const records = await repairLeaseRecords(env);
++  const results = [];
++  const now = Date.now();
++  for (const record of records) {
++    const lease = repairLeaseState(record);
++    const expiry = repairIsoMs(lease.expires_at);
++    const exhausted = lease.operations_used >= Number(lease.contract.max_operations || 0) || lease.runs_used >= Number(lease.contract.max_runs || 0);
++    if (!(Number.isFinite(expiry) && expiry <= now) && !exhausted) continue;
++    let stopped = null;
++    let error = null;
++    try { stopped = await phase6StopScenarioVerified(env, lease.scenario_id, 2); }
++    catch (e) { error = e instanceof Error ? e.message : String(e); }
++    await repairCloseLease(env, lease, error || stopped?.inactive !== true ? "failed" : "expired", {
++      reason: exhausted ? "budget-exhausted" : "lease-expired",
++      scenario_stopped: stopped?.inactive === true,
++      stop_result: stopped || null,
++      error,
++    });
++    results.push({ lease_id: lease.lease_id, scenario_id: lease.scenario_id, exhausted, stopped: stopped?.inactive === true, error });
++  }
++  return results;
++}
++
++async function repairAcquireLease(env, input, authorization) {
++  const testRunId = repairString(input.test_run_id, "test_run_id");
++  const leaseId = repairString(input.lease_id, "lease_id");
++  const scenarioId = Number(input.scenario_id);
++  const maxRuns = Number(input.max_runs);
++  const maxOperations = Number(input.max_operations);
++  const expiresAt = repairString(input.expires_at, "expires_at");
++  const allowedOutputs = repairRecordIds(input.allowed_platform_output_record_ids, "allowed_platform_output_record_ids");
++  const denyFixtures = Array.isArray(input.deny_fixture_record_ids) ? input.deny_fixture_record_ids.map(String) : [];
++  const allowPublicPublish = input.allow_public_publish === true;
++
++  if (!Number.isInteger(scenarioId) || !REPAIR_CONTROL_SCENARIOS.has(scenarioId)) throw new HttpError(403, `Scenario ${scenarioId} is not repair-control allowlisted`);
++  if (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 5) throw new HttpError(400, "max_runs must be an integer from 1 to 5");
++  if (!Number.isInteger(maxOperations) || maxOperations < 1 || maxOperations > 50) throw new HttpError(400, "max_operations must be an integer from 1 to 50");
++  const expiryMs = repairIsoMs(expiresAt);
++  const delta = expiryMs - Date.now();
++  if (!Number.isFinite(expiryMs) || delta < REPAIR_LEASE_MIN_MS || delta > REPAIR_LEASE_MAX_MS) {
++    throw new HttpError(400, "expires_at must be between 1 and 30 minutes in the future");
++  }
++  if (denyFixtures.some((id) => allowedOutputs.includes(id))) throw new HttpError(400, "deny fixture cannot also be allowlisted");
++  if (allowPublicPublish) {
++    if (allowedOutputs.length !== 1 || !repairString(input.explicit_publish_platform, "explicit_publish_platform", 40)) {
++      throw new HttpError(400, "Public publish test mode requires exactly one output and explicit_publish_platform");
++    }
++  }
++
++  await repairSweepExpiredLeases(env);
++  const overlaps = (await repairLeaseRecords(env, scenarioId)).map(repairLeaseState).filter((l) => l.lease_id !== leaseId);
++  if (overlaps.length) throw new HttpError(409, `Scenario ${scenarioId} already has an active repair lease`);
++
++  const outputs = [];
++  for (const id of allowedOutputs) outputs.push(await repairVerifyOutputRecord(env, id, allowPublicPublish));
++
++  const contract = {
++    kind: REPAIR_LEASE_NOTE_PREFIX,
++    lease_id: leaseId,
++    test_run_id: testRunId,
++    scenario_id: scenarioId,
++    expires_at: new Date(expiryMs).toISOString(),
++    max_runs: maxRuns,
++    max_operations: maxOperations,
++    allowed_platform_output_record_ids: allowedOutputs,
++    deny_fixture_record_ids: denyFixtures,
++    allow_public_publish: allowPublicPublish,
++    explicit_publish_platform: allowPublicPublish ? String(input.explicit_publish_platform) : null,
++  };
++  const now = new Date().toISOString();
++  const created = await airtableFetch(env, "Make Admin Queue", "", {
++    method: "POST",
++    body: JSON.stringify({ records: [{ fields: {
++      Command_ID: `REPAIR-LEASE-${Date.now()}-${scenarioId}`,
++      Action: "GET_SCENARIO",
++      Scenario_ID: scenarioId,
++      Scenario_Name: `Repair activation lease ${scenarioId}`,
++      Request_JSON: JSON.stringify(contract),
++      Write_Approved: false,
++      Activation_Approved: false,
++      Status: "Processing",
++      Result_JSON: JSON.stringify({ kind: REPAIR_LEASE_NOTE_PREFIX, state: "active", operations_used: 0, runs_used: 0, acquired_at: now }),
++      Requested_At: now,
++      Started_At: now,
++      Requested_By: String(authorization?.email || "studio-admin"),
++      Correlation_ID: testRunId,
++      Notes: `${REPAIR_LEASE_NOTE_PREFIX} ${leaseId}; exact output allowlist enforced; RUN disabled until stage addressing is verified.`,
++    } }], typecast: true }),
++  });
++  const record = created?.records?.[0];
++  if (!record?.id) throw new HttpError(502, "Could not persist repair lease");
++  return { lease: repairLeaseState(record), outputs };
++}
++
++async function repairFindLease(env, input) {
++  const scenarioId = Number(input.scenario_id);
++  const leaseId = repairString(input.lease_id, "lease_id");
++  const testRunId = repairString(input.test_run_id, "test_run_id");
++  if (!Number.isInteger(scenarioId) || !REPAIR_CONTROL_SCENARIOS.has(scenarioId)) throw new HttpError(403, `Scenario ${scenarioId} is not repair-control allowlisted`);
++  await repairSweepExpiredLeases(env);
++  const candidates = (await repairLeaseRecords(env, scenarioId)).map(repairLeaseState);
++  const lease = candidates.find((l) => l.lease_id === leaseId && l.test_run_id === testRunId);
++  if (!lease) throw new HttpError(409, "Active repair lease not found or does not match test_run_id");
++  if (repairIsoMs(lease.expires_at) <= Date.now()) throw new HttpError(409, "Repair lease has expired");
++  return lease;
++}
++
++async function repairReserveBudget(env, lease, { operationCost = 1, runCost = 0, action = "operation" } = {}) {
++  const maxOperations = Number(lease.contract.max_operations || 0);
++  const maxRuns = Number(lease.contract.max_runs || 0);
++  const nextOps = lease.operations_used + operationCost;
++  const nextRuns = lease.runs_used + runCost;
++  if (nextOps > maxOperations || nextRuns > maxRuns) {
++    let stop = null;
++    try { stop = await phase6StopScenarioVerified(env, lease.scenario_id, 2); } catch {}
++    await repairCloseLease(env, lease, "expired", { reason: "budget-exhausted-before-operation", attempted_action: action, scenario_stopped: stop?.inactive === true });
++    throw new HttpError(409, "Repair lease operation/run budget exhausted; scenario shutdown requested");
++  }
++  lease.operations_used = nextOps;
++  lease.runs_used = nextRuns;
++  lease.state = { ...(lease.state || {}), state: "active", operations_used: nextOps, runs_used: nextRuns, last_action: action, updated_at: new Date().toISOString() };
++  await airtableFetch(env, "Make Admin Queue", lease.record_id, {
++    method: "PATCH",
++    body: JSON.stringify({ fields: { Result_JSON: JSON.stringify(lease.state) } }),
++  });
++  return lease;
++}
++
++async function repairControlAction(env, input) {
++  const action = repairString(input.action, "action", 40).toLowerCase();
++  const lease = await repairFindLease(env, input);
++
++  if (action === "assert_output_allowed") {
++    await repairReserveBudget(env, lease, { operationCost: 1, action });
++    const recordId = repairString(input.platform_output_record_id, "platform_output_record_id", 32);
++    if (!lease.contract.allowed_platform_output_record_ids.includes(recordId)) {
++      throw new HttpError(403, `Platform Output ${recordId} is outside this test_run_id allowlist`);
++    }
++    const output = await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true);
++    return { action, lease, output };
++  }
++
++  if (action === "run" || action === "activate") {
++    throw new HttpError(409, "Standalone ACTIVATE/RUN is intentionally disabled. Repair scenarios must use an exact one-run pulse or wait until stage-specific addressing is verified.");
++  }
++
++  if (action === "pulse_admin_bridge") {
++    if (lease.scenario_id !== 5893243) throw new HttpError(403, "pulse_admin_bridge is limited to MAKE-ADMIN-BRIDGE 5893243");
++    const exactQueueRecordId = repairString(input.exact_make_admin_command_record_id, "exact_make_admin_command_record_id", 32);
++    const pending = await listRecords(env, "Make Admin Queue", {
++      limit: 10,
++      sortField: "Requested_At",
++      sortDirection: "asc",
++      filterFormula: '{Status}="Pending"',
++    });
++    if (pending.length !== 1 || pending[0]?.id !== exactQueueRecordId) {
++      throw new HttpError(409, `MAKE-ADMIN-BRIDGE pulse requires exactly one Pending command and it must be ${exactQueueRecordId}`);
++    }
++    await repairReserveBudget(env, lease, { operationCost: 6, runCost: 1, action });
++    const before = await phase6ScenarioState(env, lease.scenario_id);
++    let execution = null;
++    let stop = null;
++    let failure = null;
++    try {
++      if (!before.isActive) await phase6SetScenarioActive(env, lease.scenario_id, true);
++      execution = await phase6RunScenario(env, lease.scenario_id, null);
++      return { action, lease, exact_make_admin_command_record_id: exactQueueRecordId, execution_id: execution.executionId, before: { isActive: before.isActive } };
++    } catch (error) {
++      failure = error instanceof Error ? error.message : String(error);
++      throw error;
++    } finally {
++      try { stop = await phase6StopScenarioVerified(env, lease.scenario_id, 2); } catch (stopError) {
++        if (!failure) failure = stopError instanceof Error ? stopError.message : String(stopError);
++      }
++      if (stop?.inactive !== true) {
++        try { await repairCloseLease(env, lease, "failed", { reason: "pulse-finally-shutdown-failed", error: failure || "Scenario did not verify inactive" }); } catch {}
++      } else if (!failure) {
++        try { await repairCloseLease(env, lease, "released", { reason: "one-run-pulse-complete", scenario_stopped: true, operations_used: lease.operations_used, runs_used: lease.runs_used }); } catch {}
++      }
++    }
++  }
++
++  if (action === "state") {
++    await repairReserveBudget(env, lease, { operationCost: 1, action });
++    return { action, lease, scenario: await phase6ScenarioState(env, lease.scenario_id) };
++  }
++
++  if (action === "deactivate" || action === "release") {
++    await repairReserveBudget(env, lease, { operationCost: 3, action });
++    const before = await phase6ScenarioState(env, lease.scenario_id);
++    if (before.isActive) await phase6SetScenarioActive(env, lease.scenario_id, false);
++    const after = await phase6ScenarioState(env, lease.scenario_id);
++    if (after.isActive) throw new HttpError(502, `Scenario ${lease.scenario_id} did not become inactive`);
++    await repairCloseLease(env, lease, "released", { reason: action, scenario_stopped: true, operations_used: lease.operations_used, runs_used: lease.runs_used });
++    return { action, lease: { ...lease, status: "released" }, before: { isActive: before.isActive }, after: { isActive: after.isActive } };
++  }
++
++  throw new HttpError(400, `Unsupported repair control action: ${action}`);
++}
++
++async function adminRepairControlStatus(request, env) {
++  const records = await repairLeaseRecords(env);
++  const leases = records.map(repairLeaseState).map((l) => ({
++    lease_id: l.lease_id,
++    test_run_id: l.test_run_id,
++    scenario_id: l.scenario_id,
++    expires_at: l.expires_at,
++    operations_used: l.operations_used,
++    max_operations: Number(l.contract.max_operations || 0),
++    runs_used: l.runs_used,
++    max_runs: Number(l.contract.max_runs || 0),
++    allowed_platform_output_record_ids: l.contract.allowed_platform_output_record_ids || [],
++    allow_public_publish: l.contract.allow_public_publish === true,
++  }));
++  return respond(request, env, { ok: true, repair_control: "lease-v1", run_enabled: false, leases });
++}
++
++async function adminRepairControl(request, env, authorization) {
++  const input = await request.json();
++  const action = repairString(input?.action, "action", 40).toLowerCase();
++  if (action === "sweep") {
++    return respond(request, env, { ok: true, action, swept: await repairSweepExpiredLeases(env) });
++  }
++  if (action === "acquire") {
++    const result = await repairAcquireLease(env, input, authorization);
++    return respond(request, env, { ok: true, action, ...result });
++  }
++  const result = await repairControlAction(env, input);
++  return respond(request, env, { ok: true, ...result });
++}
++
+ async function adminMakeDeployPage(request, env, authorization) {
+   const displayName = String(authorization?.user?.display_name || authorization?.email || "Studio admin");
+   const html = `<!doctype html>
