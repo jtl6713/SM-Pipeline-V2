@@ -1,0 +1,44 @@
+name: List Make Scenarios Compact
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/list-make-scenarios-compact.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Query compact Make scenario inventory read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n '{action:"list_make_scenarios_compact",confirm:"LIST-MAKE-SCENARIOS-COMPACT-V1"}' >/tmp/request.json
+          code=$(curl -sS --max-time 180 -o /tmp/result.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+          unset SECRET
+          echo "http=$code"
+          if [[ "$code" != '200' ]]; then jq -c '{bridge_ok,upstream_status,exception,error:(.upstream_json.error//null),message:(.upstream_json.message//null)}' /tmp/result.json || true; exit 1; fi
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/result.json >/dev/null
+          jq -c '{team_id:.upstream_json.inventory.team_id,returned_count:.upstream_json.inventory.returned_count,on_demand:[.upstream_json.inventory.on_demand_with_interfaces[]|{id,name,is_active,input_count,inputs,interface_error:(.interface_error//null)}]}' /tmp/result.json
+      - name: Save read-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: make-scenario-inventory-${{ github.run_id }}
+          path: /tmp/result.json
+          if-no-files-found: ignore
+          retention-days: 30
