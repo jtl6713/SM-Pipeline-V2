@@ -1,0 +1,4 @@
+Bounded repair trigger for R4 scenario 5556716 Module 1 only.
+Restore one-record scheduled Airtable selector for Render_Status=Ready for Render with required render fields.
+Preserve R4 OFF state, null hookId, 15-minute schedule, Module 1 ID/name/filter/connection, and all other modules.
+Triggered 2026-08-16T13:48-04:00.
