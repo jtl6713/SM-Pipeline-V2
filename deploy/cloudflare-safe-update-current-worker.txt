@@ -3,3 +3,4 @@ Dynamic safe update trigger for chicagoshining-studio-api.
 Deploy current main source containing repair_r4_direct_input_pulse_v1 through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run R4, mutate Platform Outputs, render, or publish.
 Triggered: 2026-08-16 — R4 direct six-field exact-input pulse.
 Deploy execution-status evidence patch 938d345b4f177ba600d253e1f43055b6e9999131 at 2026-08-16T16:41Z.
+Deploy guarded R4 var.input migration from ec80cc03a615d1f2af816eaa5fc51db06e7b839d.
