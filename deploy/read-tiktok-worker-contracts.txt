@@ -1,0 +1,1 @@
+Read-only TTD0-TTD3 worker contract audit. No Make state changes, emails, drafts, publishing, or Airtable mutations.
