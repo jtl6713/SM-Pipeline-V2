@@ -9586,14 +9586,15 @@ async function repairControlAction(env, input) {
     await repairReserveBudget(env, lease, { operationCost: 8, runCost: 1, action });
     const before = await phase6ScenarioState(env, lease.scenario_id);
     const beforeJobId = String(fields.Remotion_Job_ID || "");
-    const originalScheduling = repairInspectorClone(before?.scenario?.scheduling || {});
+    const originalScheduling = { type: "indefinitely", interval: 900 };
+    const observedScheduling = repairInspectorClone(before?.scenario?.scheduling || {});
     let schedulingTemporarilyChanged = false;
     let failure = null;
     let stop = null;
     let exactTargetConsumed = false;
     let finalTarget = target;
     try {
-      if (String(originalScheduling?.type || "") !== "on-demand") {
+      if (String(observedScheduling?.type || "") !== "on-demand") {
         await phase6MakeApiJson(env, `/scenarios/${lease.scenario_id}?confirmed=true`, {
           method: "PATCH",
           body: JSON.stringify({ scheduling: JSON.stringify({ type: "on-demand" }) }),
@@ -9603,13 +9604,13 @@ async function repairControlAction(env, input) {
       if (!before.isActive) await phase6SetScenarioActive(env, lease.scenario_id, true);
       const execution = await phase6RunScenario(env, lease.scenario_id, runInput);
       await new Promise((resolve) => setTimeout(resolve, 3000));
-      const executionState = await phase6WaitForScenarioExecution(env, lease.scenario_id, execution.executionId, 90000, 3000);
+      const executionState = await phase6WaitForScenarioExecution(env, lease.scenario_id, execution.executionId, 30000, 5000);
       if (!executionState.done || !executionState.success) {
         const detail = JSON.stringify(executionState.details || {}).slice(0, 1600);
         throw new HttpError(502, `R4 Make execution ${execution.executionId} ended ${executionState.status}: ${detail}`);
       }
-      for (let i = 0; i < 30; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      for (let i = 0; i < 6; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
         finalTarget = await airtableFetch(env, "Platform Outputs", recordId);
         const currentFields = finalTarget?.fields || {};
         const status = String(currentFields.Render_Status || "");
@@ -9641,7 +9642,7 @@ async function repairControlAction(env, input) {
       try { stop = await phase6StopScenarioVerified(env, lease.scenario_id, 2); } catch (stopError) {
         if (!failure) failure = stopError instanceof Error ? stopError.message : String(stopError);
       }
-      if (schedulingTemporarilyChanged) {
+      {
         try {
           await phase6MakeApiJson(env, `/scenarios/${lease.scenario_id}?confirmed=true`, {
             method: "PATCH",
@@ -10218,8 +10219,21 @@ async function repairR4ExactOutputEntry(env) {
     { name: 'idempotency_key', type: 'text', default: null, required: false, multiline: false },
   ];
 
-  const stateBefore = await phase6ScenarioState(env, scenarioId);
+  const canonicalScheduling = { type: 'indefinitely', interval: 900 };
+  let stateBefore = await phase6ScenarioState(env, scenarioId);
   if (stateBefore?.isActive) throw new HttpError(409, 'R4 must be OFF before exact-output entrance repair');
+  let schedulingRestored = false;
+  if (JSON.stringify(stateBefore?.scenario?.scheduling || {}) !== JSON.stringify(canonicalScheduling)) {
+    await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, {
+      method: 'PATCH',
+      body: JSON.stringify({ scheduling: JSON.stringify(canonicalScheduling) }),
+    });
+    stateBefore = await phase6ScenarioState(env, scenarioId);
+    if (stateBefore?.isActive || JSON.stringify(stateBefore?.scenario?.scheduling || {}) !== JSON.stringify(canonicalScheduling)) {
+      throw new HttpError(502, 'R4 canonical scheduling restore did not verify');
+    }
+    schedulingRestored = true;
+  }
   const scenarioName = String(stateBefore?.scenario?.name || '');
   if (!scenarioName.startsWith(expectedNamePrefix)) throw new HttpError(409, `R4 scenario name changed unexpectedly: ${scenarioName}`);
 
@@ -10255,6 +10269,7 @@ async function repairR4ExactOutputEntry(env) {
       no_webhook_required: true,
       make_interface_inputs_optional: true,
       invocation_contract_enforced_by_worker: true,
+      scheduling_restored: schedulingRestored,
     };
   }
 
