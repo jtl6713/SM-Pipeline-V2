@@ -1,0 +1,1 @@
+Read-only Make publisher active-state audit for AP0 isolated revision behavioral proof. No activation, no deactivation, no publishing, no Airtable mutation.
