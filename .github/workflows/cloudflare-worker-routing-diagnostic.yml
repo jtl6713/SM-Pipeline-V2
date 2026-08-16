@@ -17,23 +17,10 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WORKER_NAME: chicagoshining-studio-api
-      STUDIO_ORIGIN: https://studio.chicagoshining.com
+      ZONE_NAME: chicagoshining.com
     steps:
       - uses: actions/checkout@v6
-      - name: Read Worker routing metadata only
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/scripts.json
-          jq -c --arg name "$WORKER_NAME" '[.result[]? | select(.id==$name) | {id,routes:(.routes // [])}]' /tmp/scripts.json
-
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
-          jq -c '{workers_dev:{enabled:.result.enabled,previews_enabled:.result.previews_enabled}}' /tmp/subdomain.json
-
-      - name: Probe Access API permissions read-only
+      - name: Locate zone and Access applications read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -48,5 +35,21 @@ jobs:
               echo "$label non_json_response"
             fi
           }
-          call access_apps "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps"
-          call access_service_tokens "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens"
+
+          call zones "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME"
+          ZONE_ID=$(jq -er '.result[0].id' /tmp/zones.json)
+          echo "zone_found=true"
+
+          call zone_access_apps "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/access/apps"
+          if jq -e '.success==true' /tmp/zone_access_apps.json >/dev/null; then
+            echo 'ZONE_ACCESS_APPS_SANITIZED'
+            jq -c '[.result[]? | {id,name,domain,type,session_duration,service_auth_401_redirect,policies_count:((.policies // [])|length)}]' /tmp/zone_access_apps.json
+            APP_ID=$(jq -r '.result[]? | select(.domain|startswith("studio.chicagoshining.com")) | .id' /tmp/zone_access_apps.json | head -1)
+            if [[ -n "$APP_ID" ]]; then
+              call zone_access_policies "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/access/apps/$APP_ID/policies"
+              if jq -e '.success==true' /tmp/zone_access_policies.json >/dev/null; then
+                echo 'ZONE_ACCESS_POLICIES_SANITIZED'
+                jq -c '[.result[]? | {id,name,decision,precedence,include_kinds:[.include[]? | keys[]],require_kinds:[.require[]? | keys[]],exclude_kinds:[.exclude[]? | keys[]]}]' /tmp/zone_access_policies.json
+              fi
+            fi
+          fi
