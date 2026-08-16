@@ -30,9 +30,16 @@ jobs:
           echo "ACTIVE_VERSION=$ACTIVE"
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions?per_page=30" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/versions.json
-          jq -r '.result[] | [.id, (.metadata.created_on // ""), (.metadata.source // ""), (.number // 0)] | @tsv' /tmp/versions.json | while IFS=$'\t' read -r id created source number; do
+          jq -r '
+            (.result |
+              if type=="object" and has("versions") then .versions
+              elif type=="array" and length>0 and (.[0]|type)=="array" then add
+              elif type=="array" then .
+              else [] end
+            )[] | [.id, (.metadata.created_on // ""), (.metadata.source // ""), (.number // 0)] | @tsv
+          ' /tmp/versions.json | while IFS=$'\t' read -r id created source number; do
             curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions/$id" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/v.json
             jq -c --arg id "$id" --arg created "$created" --arg source "$source" --argjson number "$number" --arg active "$ACTIVE" '
-              {id:$id,created_on:$created,source:$source,number:$number,active:($id==$active),binding_count:(.result.resources.bindings // [] | length),binding_names:[.result.resources.bindings[]?.name] | sort,compatibility_date:(.result.resources.script_runtime.compatibility_date // null),compatibility_flags:(.result.resources.script_runtime.compatibility_flags // []),etag:(.result.resources.script.etag // null)}' /tmp/v.json
+              {id:$id,created_on:$created,source:$source,number:$number,active:($id==$active),binding_count:(.result.resources.bindings // [] | length),binding_names:([.result.resources.bindings[]?.name] | sort),compatibility_date:(.result.resources.script_runtime.compatibility_date // null),compatibility_flags:(.result.resources.script_runtime.compatibility_flags // []),etag:(.result.resources.script.etag // null)}' /tmp/v.json
           done
