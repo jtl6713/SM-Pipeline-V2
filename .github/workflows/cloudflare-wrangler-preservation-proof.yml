@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Prepare disposable names and Wrangler
+      - name: Prepare disposable names and pinned Wrangler
         shell: bash
         run: |
           set -euo pipefail
@@ -34,8 +34,9 @@ jobs:
           mkdir -p /tmp/wrangler-proof
           cd /tmp/wrangler-proof
           npm init -y >/dev/null 2>&1
-          npm install --no-save wrangler@latest >/dev/null
+          npm install --no-save wrangler@4.123.0 >/dev/null
           ./node_modules/.bin/wrangler --version | tee /tmp/wrangler-version.txt
+          test "$(tr -d '\r\n' </tmp/wrangler-version.txt)" = "4.123.0"
 
       - name: Create empty disposable R2 bucket
         shell: bash
@@ -69,42 +70,57 @@ jobs:
           PY
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/deploy-initial.log 2>&1
 
-      - name: Add disposable secret
+      - name: Add and verify disposable secret name
         shell: bash
         run: |
           set -euo pipefail
           cd /tmp/wrangler-proof
           printf '%s' "proof-secret-${GITHUB_RUN_ID}" | ./node_modules/.bin/wrangler secret put KEEP_SECRET --name "$WORKER" >/tmp/secret-put.log 2>&1
-          echo "secret_created=true"
+          ./node_modules/.bin/wrangler secret list --name "$WORKER" --format json >/tmp/secret-list.json
+          jq -e 'map(.name) | index("KEEP_SECRET") != null' /tmp/secret-list.json >/dev/null
+          echo "secret_name_verified=true"
 
-      - name: Audit first binding contract and extract R2 binding
+      - name: Audit declarative bindings and extract R2 binding from Cloudflare
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/first-deployments.json
-          FIRST=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/first-deployments.json)
-          curl -fsS "$API/versions/$FIRST" -H "$AUTH" -o /tmp/first-version.json
+          found=false
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/first-deployments.json
+            FIRST=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/first-deployments.json)
+            curl -fsS "$API/versions/$FIRST" -H "$AUTH" -o /tmp/first-version.json
+            if python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          r=json.loads(Path('/tmp/first-version.json').read_text())['result']
+          got={str(b.get('name')):str(b.get('type')) for b in ((r.get('resources') or {}).get('bindings') or [])}
+          sys.exit(0 if got.get('KEEP_ME')=='plain_text' and got.get('TEMP_BUCKET')=='r2_bucket' else 1)
+          PY
+            then found=true; break; fi
+            sleep 2
+          done
+          test "$found" = true
           python - <<'PY'
           import json
           from pathlib import Path
           r=json.loads(Path('/tmp/first-version.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(b.get('name')):str(b.get('type')) for b in bindings}
-          expected={'KEEP_ME':'plain_text','KEEP_SECRET':'secret_text','TEMP_BUCKET':'r2_bucket'}
-          if got != expected:
-              raise SystemExit(f'Initial disposable binding contract mismatch: {got}')
+          if got.get('KEEP_ME')!='plain_text' or got.get('TEMP_BUCKET')!='r2_bucket':
+              raise SystemExit(f'Initial disposable declarative binding contract mismatch: {got}')
           r2=next(b for b in bindings if b.get('name')=='TEMP_BUCKET')
           bucket=r2.get('bucket_name') or r2.get('bucket')
           if not bucket:
               raise SystemExit('Cloudflare version detail did not expose the disposable R2 bucket identifier')
           Path('/tmp/extracted-r2-bucket.txt').write_text(str(bucket))
-          Path('/tmp/first-binding-audit.json').write_text(json.dumps({'binding_count':len(bindings),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])},indent=2))
-          print(json.dumps({'initial_binding_count':len(bindings),'initial_binding_names_types':sorted(got.items())}))
+          safe={k:v for k,v in got.items() if k in {'KEEP_ME','KEEP_SECRET','TEMP_BUCKET'}}
+          Path('/tmp/first-binding-audit.json').write_text(json.dumps({'binding_count':len(safe),'bindings':sorted([{'name':k,'type':v} for k,v in safe.items()],key=lambda x:x['name'])},indent=2))
+          print(json.dumps({'initial_relevant_binding_names_types':sorted(safe.items())}))
           PY
 
-      - name: Redeploy changed source using keep-vars, required secret, and extracted R2 binding
+      - name: Redeploy changed source using keep-vars required secret and extracted R2 binding
         shell: bash
         run: |
           set -euo pipefail
@@ -131,15 +147,29 @@ jobs:
           PY
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/deploy-preserve.log 2>&1
 
-      - name: Verify second version preserved exact bindings
+      - name: Verify second version preserved exact relevant bindings
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/second-deployments.json
-          SECOND=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/second-deployments.json)
-          curl -fsS "$API/versions/$SECOND" -H "$AUTH" -o /tmp/second-version.json
+          passed=false
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/second-deployments.json
+            SECOND=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/second-deployments.json)
+            curl -fsS "$API/versions/$SECOND" -H "$AUTH" -o /tmp/second-version.json
+            if python - <<'PY'
+          import json, sys
+          from pathlib import Path
+          r=json.loads(Path('/tmp/second-version.json').read_text())['result']
+          got={str(b.get('name')):str(b.get('type')) for b in ((r.get('resources') or {}).get('bindings') or [])}
+          expected={'KEEP_ME':'plain_text','KEEP_SECRET':'secret_text','TEMP_BUCKET':'r2_bucket'}
+          sys.exit(0 if got==expected else 1)
+          PY
+            then passed=true; break; fi
+            sleep 2
+          done
+          test "$passed" = true
           python - <<'PY'
           import json
           from pathlib import Path
