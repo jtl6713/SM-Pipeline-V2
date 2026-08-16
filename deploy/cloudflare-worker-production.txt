@@ -11,3 +11,5 @@ Last deployment trigger: 2026-08-16 — edge-to-edge 9:16 crop contract; source 
 Verification rerun: 2026-08-16 — extract multipart Worker module before comparing source.
 
 Verification rerun: 2026-08-16 — canonical multipart parser syntax validated.
+
+Repair safety deployment: 2026-08-16 — leased activation control, exact-output test allowlists, one-run admin pulse shutdown, and independent lease watchdog; source merge 89c5a02562ba4d40137d0a08fd4e43a29f30c556.
