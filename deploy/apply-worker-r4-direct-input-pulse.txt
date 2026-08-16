@@ -1,0 +1,1 @@
+Replace only the obsolete token-based R4 repair pulse with the final six-field exact scenario-input contract. Source-only; do not activate/run R4, mutate outputs, render, or publish. Triggered 2026-08-16.
