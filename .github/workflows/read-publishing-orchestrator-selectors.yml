@@ -1,0 +1,69 @@
+name: Read Publishing Orchestrator Selectors
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-publishing-orchestrator-selectors.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read selector and handoff modules
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
+          for sid in 5864632 5813561 5806668 5823581; do
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
+            SID=$sid python - <<'PY'
+          import json,os,re
+          sid=int(os.environ['SID']); d=json.load(open('/tmp/bp')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          print('SCENARIO',sid)
+          def scalar(v):
+            if isinstance(v,(str,int,float,bool)) or v is None: return v
+            return None
+          def redact(v,k=''):
+            kl=str(k).lower()
+            if any(x in kl for x in ('token','secret','password','authorization','connection','url','uri','hook')): return '<redacted>'
+            if isinstance(v,dict): return {a:redact(b,a) for a,b in v.items()}
+            if isinstance(v,list): return [redact(x,k) for x in v]
+            if isinstance(v,str) and re.search(r'https?://',v,re.I): return '<redacted-url>'
+            return v
+          def walk(flow):
+            for n in flow or []:
+              mod=str(n.get('module') or ''); name=str(((n.get('metadata') or {}).get('designer') or {}).get('name') or '')
+              blob=json.dumps([n.get('mapper'),n.get('parameters'),n.get('filter'),name,mod],default=str)
+              is_air='airtable:' in mod.lower(); is_handoff=any(x in blob.lower() for x in ['webhook','http:','publish','handoff','stage webhook'])
+              if is_air or is_handoff:
+                o={'id':n.get('id'),'module':mod,'name':name}
+                if is_air:
+                  o['parameters']=redact(n.get('parameters')); o['mapper']=redact(n.get('mapper')); o['filter']=redact(n.get('filter'))
+                else:
+                  o['filter']=redact(n.get('filter')); o['mapper_keys']=sorted(list((n.get('mapper') or {}).keys()))
+                print(json.dumps(o,separators=(',',':')))
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          PY
+            sleep 1
+          done
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/settings /tmp/bp /tmp/q
