@@ -1,0 +1,39 @@
+name: Read Phase6 Pulse Function
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-phase6-pulse-function.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract exact shared pulse source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          lines=Path('apps/studio-api/worker.js').read_text().splitlines()
+          start=None
+          for i,l in enumerate(lines):
+            if re.search(r'async function phase6PulseInactiveScenario\(',l): start=i; break
+          if start is None: raise SystemExit('phase6PulseInactiveScenario not found')
+          depth=0; seen=False; end=None
+          for i in range(start,len(lines)):
+            depth += lines[i].count('{')-lines[i].count('}')
+            if '{' in lines[i]: seen=True
+            if seen and depth==0:
+              end=i; break
+          block='\n'.join(f'{n+1}: {lines[n]}' for n in range(start,end+1))
+          Path('/tmp/phase6-pulse-function.txt').write_text(block)
+          print(block)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase6-pulse-function-${{ github.run_id }}
+          path: /tmp/phase6-pulse-function.txt
+          retention-days: 30
