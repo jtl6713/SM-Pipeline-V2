@@ -6,3 +6,4 @@ Exact deletion scope: non-serving versions 87, 88, 89, 90, 91, 92, 93 only.
 Preconditions: v86 is sole 100% production target; v87-v92 have zero bindings; v93 has only the nine expected non-secret bindings.
 Purpose: make v86 the latest version again so strict inherit-latest can copy its encrypted binding contract without recovering secret values.
 Triggered: 2026-08-16
+Attempt: 2 — wrapper-tolerant script-version parser.
