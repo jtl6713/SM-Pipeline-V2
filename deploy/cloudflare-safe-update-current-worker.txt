@@ -1,7 +1,7 @@
 Dynamic safe update trigger for chicagoshining-studio-api.
 
-Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run R4/R5, mutate Platform Outputs, render, or publish.
+Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run Make scenarios, mutate Platform Outputs, render, email, draft, upload, or publish.
 
-Purpose of this run: deterministically rebind AIRTABLE_PAT from the encrypted bootstrap credential that was freshly verified HTTP 200 against both Platform Outputs and Make Admin Queue tbltuSt9UibYzxpah after the Item 1 lease-store INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND fault. Preserve all other active core binding values and current Worker source.
+Purpose of this run: promote the read-only sanitized Make blueprint-history inspection action used to recover an existing AP1C webhook identity from scenario version history. No webhook creation, rotation, or scenario mutation is permitted by this deployment.
 
-Retain existing repair-control stable lease table-ID hardening, bounded R4 scheduled-selector pulse control, poll-budget reduction, Phase 6 controlled-pulse isolation, durable Test_Run_ID propagation, and durable Test_Run_ID controller equality hardening.
+Retain existing repair-control lease hardening, bounded R4 controls, Phase 6 pulse isolation, durable Test_Run_ID propagation/equality hardening, and all active core bindings.
