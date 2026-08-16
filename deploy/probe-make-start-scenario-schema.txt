@@ -1,1 +1,1 @@
-Run the guarded disposable Make Start Scenario schema discovery exactly once. Scratch scenario must be deleted in finally. No R4 mutation/run, Airtable record mutation, or publishing. Triggered 2026-08-16.
+Retry the guarded disposable Make Start Scenario schema discovery with validated interface.output=[]. Scratch scenario must be deleted in finally. No R4 mutation/run, Airtable record mutation, or publishing. Triggered 2026-08-16 corrected pass.
