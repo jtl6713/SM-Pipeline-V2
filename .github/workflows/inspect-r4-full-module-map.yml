@@ -1,0 +1,46 @@
+name: Inspect R4 Full Module Map
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/inspect-r4-full-module-map.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Inspect R4 module types and route map read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5556716}' >/tmp/request.json
+          code=$(curl -sS --max-time 120 -o /tmp/r4.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+          unset SECRET
+          test "$code" = '200'
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/r4.json >/dev/null
+          jq -c '{scenario_id:.upstream_json.inspected.scenario_id,scenario_name:.upstream_json.inspected.scenario_name,active:.upstream_json.inspected.scenario_active,module_count:.upstream_json.inspected.module_count_returned,modules:[.upstream_json.inspected.modules[]|{id:.module.id,module:.module.module,name:(.module.metadata.designer.name//null),route_path:.route_path}]}' /tmp/r4.json
+          if jq -e '[.upstream_json.inspected.modules[]|select((.module.module|ascii_downcase|contains("webhook")) or (.module.module|ascii_downcase|contains("gateway")))]|length>0' /tmp/r4.json >/dev/null; then
+            echo 'r4_existing_webhook_or_gateway=true'
+          else
+            echo 'r4_existing_webhook_or_gateway=false'
+          fi
+      - name: Save read-only evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4-full-module-map-${{ github.run_id }}
+          path: /tmp/r4.json
+          retention-days: 30
