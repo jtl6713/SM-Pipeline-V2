@@ -1,0 +1,55 @@
+name: Stable Repair Control Command
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/stable-repair-control-command.json']
+permissions: {contents: read}
+concurrency:
+  group: sm-pipeline-stable-repair-control-command
+  cancel-in-progress: false
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - uses: actions/checkout@v6
+      - name: Invoke exact command through stable bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s deploy/stable-repair-control-command.json
+          EXPECT=$(jq -er '.expected_upstream_status' deploy/stable-repair-control-command.json)
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('deploy/stable-repair-control-command.json').read_text())
+          d.pop('expected_upstream_status',None)
+          if d.get('action')=='acquire' and d.get('expires_at')=='RUNTIME_PLUS_10_MINUTES':
+              from datetime import datetime,timezone,timedelta
+              d['expires_at']=(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat().replace('+00:00','Z')
+          Path('/tmp/cmd.json').write_text(json.dumps(d,separators=(',',':')))
+          PY
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/cmd.json || true)
+          unset SECRET
+          echo "bridge_http=$code expected_upstream=$EXPECT"
+          jq -c '{bridge_ok,upstream_status,upstream:{ok:(.upstream_json.ok//null),action:(.upstream_json.action//null),error:(.upstream_json.error//null),lease:(.upstream_json.lease//null),output:(.upstream_json.output//null)}}' /tmp/result.json || true
+          test "$code" = '200'
+          jq -e --argjson expect "$EXPECT" '.bridge_ok==true and .upstream_status==$expect' /tmp/result.json >/dev/null
+          if [[ "$EXPECT" -ge 200 && "$EXPECT" -lt 300 ]]; then jq -e '.upstream_json.ok==true' /tmp/result.json >/dev/null; else jq -e '.upstream_json.ok==false' /tmp/result.json >/dev/null; fi
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-repair-control-${{ github.run_id }}
+          path: /tmp/result.json
+          if-no-files-found: ignore
+          retention-days: 30
