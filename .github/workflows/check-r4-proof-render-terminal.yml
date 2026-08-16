@@ -1,0 +1,29 @@
+name: Check R4 Proof Render Terminal
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/check-r4-proof-render-terminal.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check proof render status without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://render.chicagoshining.com/status/job-20260816181047-476f4d89'
+          code=$(curl -sS --max-time 20 -o /tmp/status.json -w '%{http_code}' "$URL" || true)
+          test "$code" = 200
+          jq -c '{status:(.status//.state//null),jobId:(.jobId//.job_id//null),outputUrlPresent:((.outputUrl//.output_url//.url//"")|length>0),error:(.error//null)}' /tmp/status.json
+          STATUS=$(jq -r '(.status//.state//"")|ascii_downcase' /tmp/status.json)
+          case "$STATUS" in
+            completed|complete|done|success|succeeded|failed|error) exit 0 ;;
+            *) echo "render_not_terminal status=$STATUS" >&2; exit 2 ;;
+          esac
