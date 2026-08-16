@@ -1,0 +1,39 @@
+name: Inspect R4 Exact Seam
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/inspect-r4-exact-seam.txt']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Inspect exact R4 selector and Make Admin trigger pattern
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json); URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"; SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN"|sha256sum|cut -d' ' -f1)
+          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5556716,module_ids:[1,2]}' >/tmp/r4req.json
+          curl -fsS --max-time 120 -o /tmp/r4.json -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/r4req.json
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/r4.json >/dev/null
+          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5893243}' >/tmp/adminreq.json
+          curl -fsS --max-time 120 -o /tmp/admin.json -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/adminreq.json
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/admin.json >/dev/null
+          jq -c '{r4:[.upstream_json.inspected.modules[]|{id:.module.id,module:.module.module,name:(.module.metadata.designer.name//null),parameters:.module.parameters,mapper:.module.mapper}]}' /tmp/r4.json
+          jq -c '{make_admin_modules:[.upstream_json.inspected.modules[]|{id:.module.id,module:.module.module,name:(.module.metadata.designer.name//null)}]}' /tmp/admin.json
+          unset SECRET
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r4-exact-seam-${{ github.run_id }}
+          path: |
+            /tmp/r4.json
+            /tmp/admin.json
+          retention-days: 30
