@@ -1,0 +1,118 @@
+name: Audit Studio API Production Bindings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-production-bindings-audit.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-bindings-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      KNOWN_GOOD_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read active deployment and version details
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments.json
+          jq -e '.success==true' /tmp/deployments.json >/dev/null
+          jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/deployments.json >/tmp/active-version.txt
+          ACTIVE=$(cat /tmp/active-version.txt)
+
+          curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/active-version.json
+          curl -fsS "$API/versions/$KNOWN_GOOD_VERSION" -H "$AUTH" -o /tmp/good-version.json
+          jq -e '.success==true' /tmp/active-version.json >/dev/null
+          jq -e '.success==true' /tmp/good-version.json >/dev/null
+
+      - name: Produce sanitized binding evidence only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          expected = [
+              ("AIRTABLE_BASE_ID", "plain_text"),
+              ("AIRTABLE_CONTENT_TABLE_ID", "plain_text"),
+              ("AIRTABLE_IDEA_TABLE_ID", "plain_text"),
+              ("AIRTABLE_MEDIA_TABLE_ID", "plain_text"),
+              ("AIRTABLE_MUSIC_VIEW_ID", "plain_text"),
+              ("AIRTABLE_OUTPUT_TABLE_ID", "plain_text"),
+              ("AIRTABLE_PAT", "secret_text"),
+              ("ALLOWED_ORIGINS", "plain_text"),
+              ("ELEVENLABS_API_KEY", "secret_text"),
+              ("I3_DECISION_WEBHOOK_URL", "plain_text"),
+              ("STUDIO_MEDIA", "r2_bucket"),
+          ]
+
+          def clean(path):
+              raw=json.loads(Path(path).read_text())
+              r=raw.get('result') or {}
+              bindings=(r.get('resources') or {}).get('bindings') or []
+              clean_bindings=sorted(
+                  [{"name":str(b.get("name") or ""),"type":str(b.get("type") or "")} for b in bindings],
+                  key=lambda x:(x['name'],x['type'])
+              )
+              pairs=sorted((b['name'],b['type']) for b in clean_bindings)
+              return {
+                  "version_id": r.get("id"),
+                  "version_number": r.get("number"),
+                  "binding_count": len(clean_bindings),
+                  "bindings": clean_bindings,
+                  "matches_expected_11": pairs == sorted(expected),
+              }
+
+          out={
+              "worker":"chicagoshining-studio-api",
+              "active":clean('/tmp/active-version.json'),
+              "known_good_v86":clean('/tmp/good-version.json'),
+          }
+          Path('/tmp/bindings-audit-sanitized.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,indent=2,sort_keys=True))
+          if not out['known_good_v86']['matches_expected_11']:
+              raise SystemExit('Known-good v86 no longer reports the expected 11 bindings')
+          PY
+
+      - name: Summarize audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE=$(jq -r '.active.version_id' /tmp/bindings-audit-sanitized.json)
+          ACTIVE_COUNT=$(jq -r '.active.binding_count' /tmp/bindings-audit-sanitized.json)
+          ACTIVE_OK=$(jq -r '.active.matches_expected_11' /tmp/bindings-audit-sanitized.json)
+          GOOD_COUNT=$(jq -r '.known_good_v86.binding_count' /tmp/bindings-audit-sanitized.json)
+          {
+            echo '### Studio API production binding audit'
+            echo "- Active version: $ACTIVE"
+            echo "- Active binding count: $ACTIVE_COUNT"
+            echo "- Active matches expected 11: $ACTIVE_OK"
+            echo "- Known-good v86 binding count: $GOOD_COUNT"
+            echo '- Evidence includes binding names/types only; no binding values are emitted.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save sanitized evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-api-bindings-audit-${{ github.run_id }}
+          path: /tmp/bindings-audit-sanitized.json
+          retention-days: 30
