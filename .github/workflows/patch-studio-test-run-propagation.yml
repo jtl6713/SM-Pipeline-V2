@@ -1,0 +1,91 @@
+name: Patch Studio Test Run Propagation
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/patch-studio-test-run-propagation.txt']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch Test_Run_ID propagation with strict guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/studio-api/worker.js')
+          s=p.read_text()
+          reps=[]
+          def replace_once(old,new,label):
+              global s
+              c=s.count(old)
+              if c!=1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {c}')
+              s=s.replace(old,new,1)
+              reps.append(label)
+
+          replace_once(
+          '''    Idea_Candidate: [idea.id],\n    Organization: [authorization.organization.record_id],''',
+          '''    Idea_Candidate: [idea.id],\n    Test_Run_ID: String(f(idea, "Test_Run_ID") || "").trim() || null,\n    Organization: [authorization.organization.record_id],''',
+          'Production Request inherits Idea Test_Run_ID')
+
+          replace_once(
+          '''  const fields = {\n    Production_Request: [requestRecord.id],\n    Requested_Title_Mode:''',
+          '''  const fields = {\n    Production_Request: [requestRecord.id],\n    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,\n    Requested_Title_Mode:''',
+          'Content Item directive sync preserves Test_Run_ID')
+
+          replace_once(
+          '''            Production_Request_Output_ID: makeProductionRequestOutputId(),\n            Production_Request: [parent.id],\n            Organization: [authorization.organization.record_id],''',
+          '''            Production_Request_Output_ID: makeProductionRequestOutputId(),\n            Production_Request: [parent.id],\n            Test_Run_ID: String(f(parent, "Test_Run_ID") || "").trim() || null,\n            Organization: [authorization.organization.record_id],''',
+          'Production Request Output normal path inherits Test_Run_ID')
+
+          replace_once(
+          '''          Production_Request_Output_ID:makeProductionRequestOutputId(), Production_Request:[productionRequestId],\n          Organization:arrayOrEmpty(f(requestRecord,"Organization")),''',
+          '''          Production_Request_Output_ID:makeProductionRequestOutputId(), Production_Request:[productionRequestId],\n          Test_Run_ID:String(f(requestRecord,"Test_Run_ID")||"").trim()||null,\n          Organization:arrayOrEmpty(f(requestRecord,"Organization")),''',
+          'Production Request Output compact path inherits Test_Run_ID')
+
+          # Locate Platform Output seed function and add exactly once after its return opening.
+          marker='function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage = null) {'
+          if s.count(marker)!=1:
+              raise SystemExit(f'platformOutputSeedFields marker count {s.count(marker)}')
+          start=s.index(marker)
+          ret=s.index('  return {',start)
+          insert='  return {\n    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,'
+          if s[ret:ret+len('  return {')+120].find('Test_Run_ID')!=-1:
+              raise SystemExit('platformOutputSeedFields already contains Test_Run_ID unexpectedly')
+          s=s[:ret]+insert+s[ret+len('  return {'):]
+          reps.append('Platform Output seed inherits Test_Run_ID')
+
+          # Keep older output-work-item path consistent if it is still invoked.
+          marker2='function outputWorkItemFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage = null) {'
+          if s.count(marker2)!=1:
+              raise SystemExit(f'outputWorkItemFields marker count {s.count(marker2)}')
+          start2=s.index(marker2)
+          ret2=s.index('  return {',start2)
+          nearby=s[ret2:ret2+220]
+          if 'Test_Run_ID' not in nearby:
+              insert2='  return {\n    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,'
+              s=s[:ret2]+insert2+s[ret2+len('  return {'):]
+          reps.append('Legacy output work item inherits Test_Run_ID')
+
+          # Expose identity in API mappings for deterministic verification.
+          replace_once(
+          '''    production_request_id: f(record, "Production_Request_ID"),\n    idea_candidate_links:''',
+          '''    production_request_id: f(record, "Production_Request_ID"),\n    test_run_id: f(record, "Test_Run_ID") || null,\n    idea_candidate_links:''',
+          'Production Request API exposes Test_Run_ID')
+
+          p.write_text(s)
+          print('patched:', ', '.join(reps))
+          PY
+          node --check apps/studio-api/worker.js
+          git diff --check
+          git diff -- apps/studio-api/worker.js
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'repair: propagate durable Test_Run_ID through Studio'
+          git push
