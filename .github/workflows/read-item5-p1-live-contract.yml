@@ -1,0 +1,76 @@
+name: Read Item 5 P1 Live Contract
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-item5-p1-live-contract.txt']
+
+permissions: {contents: read}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read P1 metadata and Module 1 only
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json, os, urllib.request
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          token=str(v['MAKE_API_TOKEN']).strip(); base=str(v['MAKE_API_BASE_URL']).strip().rstrip('/')
+          def get(path):
+            req=urllib.request.Request(base+path,headers={'Authorization':'Token '+token,'User-Agent':'SM-Pipeline-V2-ReadOnly/1.0'})
+            with urllib.request.urlopen(req,timeout=30) as r: return json.loads(r.read().decode() or '{}')
+          sc=get('/scenarios/5528742'); sc=sc.get('scenario') or sc.get('response') or sc
+          raw=get('/scenarios/5528742/blueprint?draft=false'); bp=raw.get('blueprint') or (raw.get('response') or {}).get('blueprint') or raw
+          if isinstance(bp,str): bp=json.loads(bp)
+          found=None
+          def walk(flow):
+            global found
+            for n in flow or []:
+              if int(n.get('id',-1))==1: found=n
+              for route in n.get('routes') or []: walk(route.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if not found: raise SystemExit('P1 Module 1 not found')
+          mapper=found.get('mapper') or {}
+          out={
+            'scenario_id':5528742,
+            'name':sc.get('name'),
+            'isActive':sc.get('isActive'),
+            'scheduling':sc.get('scheduling'),
+            'hookId':sc.get('hookId'),
+            'module_1':{
+              'module':found.get('module'),
+              'name':((found.get('metadata') or {}).get('designer') or {}).get('name'),
+              'table':mapper.get('table'),
+              'view':mapper.get('view'),
+              'formula':mapper.get('formula'),
+              'maxRecords':mapper.get('maxRecords'),
+            }
+          }
+          open('/tmp/p1-contract.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps({'ok':True,'scenario_id':5528742,'module_1_type':found.get('module')}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: item5-p1-live-contract-${{ github.run_id }}
+          path: /tmp/p1-contract.json
+          retention-days: 7
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings
