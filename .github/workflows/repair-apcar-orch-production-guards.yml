@@ -1,0 +1,93 @@
+name: Repair AP-CAR Orchestrator Production Guards
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-apcar-orch-production-guards.txt']
+permissions: {contents: read}
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch AP-CAR selectors with rollback
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b); SID=5791537
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -o /tmp/sc-before
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp-before
+          python - <<'PY'
+          import json
+          s=json.load(open('/tmp/sc-before')); sc=s.get('scenario') or s.get('response') or s
+          if sc.get('isActive') is not False: raise SystemExit('SAFETY: AP-CAR-ORCH must be OFF before repair')
+          d=json.load(open('/tmp/bp-before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          target={10,12,14,16,18,20,22,24}; found={}
+          def walk(flow):
+            for n in flow or []:
+              if n.get('id') in target: found[n['id']]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if set(found)!=target: raise SystemExit(f'SAFETY missing target modules {sorted(target-set(found))}')
+          common='{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Locked_By}=BLANK(),{Publish_Locked_At}=BLANK(),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW()))'
+          for mid,n in found.items():
+            f=str((n.get('mapper') or {}).get('formula') or '').strip()
+            if not f: raise SystemExit(f'SAFETY module {mid} has no formula')
+            if '{Platform}="Instagram"' in f and '{Do_Not_Publish}=0' in f: continue
+            n['mapper']['formula']='AND('+common+','+f+')'
+          open('/tmp/patch-body.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+          code=$(curl -sS -o /tmp/patch-response -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/patch-body.json)
+          if [[ ! "$code" =~ ^2 ]]; then cat /tmp/patch-response; exit 1; fi
+          sleep 2
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -o /tmp/sc-after
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp-after
+          if ! python - <<'PY'; then
+          import json
+          sb=json.load(open('/tmp/sc-before')); sa=json.load(open('/tmp/sc-after')); d=json.load(open('/tmp/bp-after'))
+          before=sb.get('scenario') or sb.get('response') or sb; after=sa.get('scenario') or sa.get('response') or sa; bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          if after.get('isActive') is not False: raise SystemExit('scenario not OFF after repair')
+          if before.get('hookId')!=after.get('hookId') or before.get('scheduling')!=after.get('scheduling'): raise SystemExit('scenario metadata drift')
+          target={10,12,14,16,18,20,22,24}; found={}; ids=[]
+          def walk(flow):
+            for n in flow or []:
+              ids.append(n.get('id'))
+              if n.get('id') in target: found[n['id']]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if set(found)!=target: raise SystemExit('target topology drift')
+          req=['{Platform}="Instagram"','{Auto_Publish_Enabled}=1','{Do_Not_Publish}=0','{Published_At}=BLANK()','{Publish_Locked_By}=BLANK()','{Publish_Locked_At}=BLANK()','{Publish_Next_Retry_At}']
+          for mid,n in found.items():
+            f=str((n.get('mapper') or {}).get('formula') or '')
+            if not all(x in f for x in req): raise SystemExit(f'module {mid} missing production guard')
+            if str((n.get('mapper') or {}).get('maxRecords'))!='1': raise SystemExit(f'module {mid} maxRecords changed')
+          print(json.dumps({'passed':True,'scenario_id':5791537,'name':after.get('name'),'isActive':after.get('isActive'),'hookId':after.get('hookId'),'scheduling':after.get('scheduling'),'guarded_modules':sorted(target),'module_count':len(ids)}))
+          PY
+            echo 'verification failed; rolling back'
+            python - <<'PY'
+          import json
+          d=json.load(open('/tmp/bp-before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          open('/tmp/rollback.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+            curl -fsS -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json >/tmp/rollback-response
+            exit 1
+          fi
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/settings /tmp/q /tmp/sc-before /tmp/sc-after /tmp/bp-before /tmp/bp-after /tmp/patch-body.json /tmp/patch-response /tmp/rollback.json /tmp/rollback-response
