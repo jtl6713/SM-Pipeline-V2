@@ -1,0 +1,3 @@
+Read-only terminal check for proof render job job-20260816181047-476f4d89 before deleting disposable Airtable fixtures.
+No Make activation, no Airtable mutation, no publishing.
+Triggered 2026-08-16 continuation checkpoint.
