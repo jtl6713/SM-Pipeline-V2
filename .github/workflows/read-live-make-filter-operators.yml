@@ -1,0 +1,84 @@
+name: Read Live Make Filter Operators
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-live-make-filter-operators.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Make credentials
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json')); vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip()); open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+      - name: Inventory filter operator tokens from live team scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
+          curl -fsS "$BASE/scenarios/5556716" -H "Authorization: Token $TOKEN" -o /tmp/known.json
+          TEAM=$(jq -er '(.scenario // .response // .).teamId // (.scenario // .response // .).team_id' /tmp/known.json)
+          curl -fsS "$BASE/scenarios?teamId=$TEAM&pg%5Blimit%5D=100" -H "Authorization: Token $TOKEN" -o /tmp/scenarios.json
+          python - <<'PY' >/tmp/ids.txt
+          import json
+          d=json.load(open('/tmp/scenarios.json')); rows=d.get('scenarios') or (d.get('response') or {}).get('scenarios') or d.get('data') or []
+          for s in rows[:100]:
+            if s.get('id'): print(s['id'])
+          PY
+          : >/tmp/operators.ndjson
+          while read -r SID; do
+            code=$(curl -sS -o /tmp/bp.json -w '%{http_code}' "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" || true)
+            [[ "$code" == 200 ]] || continue
+            SID="$SID" python - <<'PY' >>/tmp/operators.ndjson
+          import json,os
+          b=json.load(open('/tmp/bp.json')); bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          ops=set()
+          def walk(v):
+            if isinstance(v,dict):
+              for k,x in v.items():
+                if k=='o' and isinstance(x,str): ops.add(x)
+                walk(x)
+            elif isinstance(v,list):
+              for x in v: walk(x)
+          walk(bp)
+          if ops: print(json.dumps({'scenario_id':int(os.environ['SID']),'operators':sorted(ops)}))
+          PY
+          done </tmp/ids.txt
+          python - <<'PY'
+          import json
+          rows=[json.loads(x) for x in open('/tmp/operators.ndjson') if x.strip()]
+          ops=sorted({op for r in rows for op in r['operators']})
+          out={'operators':ops,'not_equal_candidates':[x for x in ops if 'not' in x.lower() or 'equal' in x.lower()]}
+          open('/tmp/live-filter-operators.json','w').write(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - name: Destroy credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/known.json /tmp/scenarios.json /tmp/bp.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-make-filter-operators-${{ github.run_id }}
+          path: /tmp/live-filter-operators.json
+          retention-days: 30
