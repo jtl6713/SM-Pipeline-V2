@@ -1,4 +1,4 @@
 Dynamic safe update trigger for chicagoshining-studio-api.
 
-Deploy current main source containing the no-webhook R4 exact-input repair controller through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment does not mutate or run R4, Airtable records, R2, email, or publishing.
-Triggered: 2026-08-16 — no-webhook exact R4 input repair controller.
+Deploy current main source with the Make-compatible optional R4 input interface; the Worker still hard-requires all six exact invocation fields before any run. Use non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion, retaining rollback anchor. Deployment does not mutate/run R4 or touch Airtable/platforms.
+Triggered: 2026-08-16 — corrected IM016-compatible exact R4 controller.
