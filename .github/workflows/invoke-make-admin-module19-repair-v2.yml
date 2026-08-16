@@ -1,0 +1,202 @@
+name: Invoke Guarded MAKE-ADMIN Module 19 Repair V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/invoke-make-admin-module19-repair-v2.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-make-admin-bridge-5893243
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-module19-v2-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Decrypt Airtable PAT in runner temp only
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/airtable-envelope-private.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/airtable-envelope-private.pem -in /tmp/airtable-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/airtable-pat.txt
+          chmod 600 /tmp/airtable-pat.txt
+
+      - name: Refuse overlap with any unexpired active lease for scenario 5893243
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAT=$(cat /tmp/airtable-pat.txt)
+          QUERY=$(python - <<'PY'
+          import urllib.parse
+          formula='AND({Scenario_ID}=5893243,FIND("REPAIR_LEASE_V1",{Notes})>0,{Status}="Processing")'
+          print(urllib.parse.urlencode([('maxRecords','50'),('fields[]','Command_ID'),('fields[]','Request_JSON'),('fields[]','Result_JSON'),('fields[]','Status'),('filterByFormula',formula)]))
+          PY
+          )
+          code=$(curl -sS -o /tmp/leases.json -w '%{http_code}' "https://api.airtable.com/v0/appe33zkZn35yirTL/tbltuSt9UibYzxpah?$QUERY" -H "Authorization: Bearer $PAT")
+          test "$code" = '200'
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          data=json.loads(Path('/tmp/leases.json').read_text())
+          now=datetime.now(timezone.utc)
+          blocking=[]; expired=[]
+          for r in data.get('records',[]):
+              f=r.get('fields',{})
+              try:req=json.loads(f.get('Request_JSON') or '{}')
+              except:req={}
+              try:res=json.loads(f.get('Result_JSON') or '{}')
+              except:res={}
+              if res.get('state')!='active': continue
+              raw=req.get('expires_at')
+              try: exp=datetime.fromisoformat(str(raw).replace('Z','+00:00'))
+              except: exp=None
+              item={'record_id':r.get('id'),'lease_id':req.get('lease_id'),'expires_at':raw}
+              (blocking if exp and exp>now else expired).append(item)
+          Path('/tmp/lease-preflight.json').write_text(json.dumps({'blocking':blocking,'expired':expired},indent=2,sort_keys=True))
+          if blocking:
+              print(json.dumps({'repair_refused':'unexpired_active_lease','blocking':blocking},sort_keys=True))
+              raise SystemExit(3)
+          print(json.dumps({'lease_overlap_check':'PASS','expired_count':len(expired)},sort_keys=True))
+          PY
+
+      - name: Capture exact active production version
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)
+          PCT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.percentage' /tmp/deployments-before.json)
+          test "$PCT" = '100'
+          printf '%s' "$ACTIVE" >/tmp/active-before.txt
+          curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/active-version.json
+          jq -e '.success==true' /tmp/active-version.json >/dev/null
+          echo "active_version=$ACTIVE"
+
+      - name: Build exact-version service bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets; print(secrets.token_urlsafe(36))
+          PY
+          )
+          ACTIVE=$(cat /tmp/active-before.txt)
+          printf '%s' "$TOKEN" >/tmp/path-token.txt
+          cat >/tmp/bridge.js <<EOF
+          export default {async fetch(request,env){
+            const u=new URL(request.url);
+            if(u.pathname==="/$TOKEN/ready")return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});
+            if(u.pathname!=="/$TOKEN/execute")return new Response("Not found",{status:404});
+            const headers={
+              "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+              "Origin":"https://studio.chicagoshining.com",
+              "Content-Type":"application/json",
+              "Accept":"application/json",
+              "Cloudflare-Workers-Version-Overrides":"$TARGET_WORKER=\"$ACTIVE\""
+            };
+            async function post(body){
+              const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers,body:JSON.stringify(body)}));
+              const text=await r.text(); let json={}; try{json=JSON.parse(text)}catch{}
+              return {status:r.status,json};
+            }
+            const swept=await post({action:"sweep"});
+            if(swept.status!==200||swept.json?.ok!==true)return Response.json({ok:false,stage:"sweep",status:swept.status,error:swept.json?.error||swept.json?.message||"sweep failed"},{status:502});
+            const repaired=await post({action:"repair_make_admin_module19",confirm:"REPAIR-MAKE-ADMIN-MODULE19-V1"});
+            return Response.json({ok:repaired.status===200&&repaired.json?.ok===true,sweep_status:swept.status,swept_count:Array.isArray(swept.json?.swept)?swept.json.swept.length:null,repair_status:repaired.status,repaired:repaired.json?.repaired||null,error:repaired.json?.error||repaired.json?.message||null},{status:repaired.status===200&&repaired.json?.ok===true?200:502});
+          }};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"bridge.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/bridge.js
+
+      - name: Upload temporary bridge and wait for readiness only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'bridge.js=@/tmp/bridge.js;type=application/javascript+module;filename=bridge.js')
+          test "$code" -ge 200 -a "$code" -lt 300; jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/subdomain.json >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); TOKEN=$(cat /tmp/path-token.txt)
+          URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN/ready"
+          ready=false
+          for i in $(seq 1 20); do
+            code=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" == '200' ]] && jq -e '.ok==true and .ready==true' /tmp/ready.json >/dev/null 2>&1; then ready=true; break; fi
+            sleep 2
+          done
+          test "$ready" = true
+
+      - name: Execute sweep plus exact Module 19 repair once
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); TOKEN=$(cat /tmp/path-token.txt)
+          URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN/execute"
+          code=$(curl -sS --max-time 180 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
+          echo "module19_repair_http=$code"
+          jq '{ok,sweep_status,swept_count,repair_status,repaired,error}' /tmp/result.json
+          test "$code" = '200'
+          jq -e '.ok==true and .repair_status==200 and (.repaired.scenario_id==5893243) and (.repaired.module_id==19) and (.repaired.scenario_off_before==true) and (.repaired.scenario_off_after==true) and (.repaired.full_blueprint_omitted==true) and ((.repaired.exact_postwrite_verification==true) or (.repaired.already_repaired==true))' /tmp/result.json >/dev/null
+
+      - name: Delete temporary bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH")
+          if [[ "$code" != '404' && ( "$code" -lt 200 || "$code" -ge 300 ) ]]; then exit 1; fi
+
+      - name: Verify production identity unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+          AFTER=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)
+          test "$(cat /tmp/active-before.txt)" = "$AFTER"
+
+      - name: Destroy transient Airtable credential material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc /tmp/airtable-pat.txt; do if [[ -e "$f" ]]; then shred -u "$f" 2>/dev/null || rm -f "$f"; fi; done
+
+      - name: Upload bounded evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: module19-live-repair-v2-${{ github.run_id }}
+          path: |
+            /tmp/lease-preflight.json
+            /tmp/result.json
+          if-no-files-found: ignore
+          retention-days: 30
