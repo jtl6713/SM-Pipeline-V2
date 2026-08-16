@@ -1,6 +1,7 @@
 {
-  "action": "inspect_make_scenario",
-  "confirm": "INSPECT-MAKE-MODULES-V1",
-  "scenario_id": 5786899,
+  "action": "inspect_make_blueprint_history",
+  "confirm": "INSPECT-MAKE-BLUEPRINT-HISTORY-V1",
+  "scenario_id": 5790745,
+  "module_id": 900,
   "expected_upstream_status": 200
 }
