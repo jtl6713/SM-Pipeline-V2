@@ -1,0 +1,45 @@
+name: Apply Worker Make Scenario Inventory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-worker-make-scenario-inventory.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-worker-source-repair
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply compact inventory source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_worker_make_scenario_inventory.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          grep -q 'repair_make_scenario_inventory_v1: true' apps/studio-api/worker.js
+          grep -q 'action === "list_make_scenarios_compact"' apps/studio-api/worker.js
+      - name: Commit patched Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          if git diff --cached --quiet; then
+            echo 'Compact Make scenario inventory already present.'
+            exit 0
+          fi
+          git commit -m 'Add compact Make scenario inventory repair control'
+          git push origin HEAD:main
