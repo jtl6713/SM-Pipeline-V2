@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Capture current active Worker source and runtime
+      - name: Capture active Worker, bindings, deployment and preview state
         shell: bash
         run: |
           set -euo pipefail
@@ -41,21 +41,31 @@ jobs:
                   Path(op).write_bytes(part.get_payload(decode=True)); break
           else: raise SystemExit('worker.js not found')
           PY
+
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/deployments.json
+          ACTIVE_VERSION=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/deployments.json)
+          printf '%s' "$ACTIVE_VERSION" >/tmp/active-version.txt
+
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions/$ACTIVE_VERSION" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/version.json
+          jq -e '.success==true and ((.result.resources.bindings // [])|length)>0' /tmp/version.json >/dev/null
+          echo "active_binding_count=$(jq '(.result.resources.bindings // [])|length' /tmp/version.json)"
+
           curl -fsS -D /tmp/live.headers \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/live.multipart
           python /tmp/extract_worker.py /tmp/live.headers /tmp/live.multipart /tmp/live.js
           node --check /tmp/live.js
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/deployments" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/deployments.json
-          ACTIVE_VERSION=$(jq -er '.result.deployments[0].versions | max_by(.percentage) | .version_id' /tmp/deployments.json)
-          echo "$ACTIVE_VERSION" >/tmp/active-version.txt
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions/$ACTIVE_VERSION" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/version.json
-          jq -e '.success==true' /tmp/version.json >/dev/null
+
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
-          jq -er '.result.subdomain' /tmp/subdomain.json >/tmp/subdomain.txt
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-subdomain.json
+          jq -er '.result.subdomain' /tmp/account-subdomain.json >/tmp/subdomain.txt
+
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/script-subdomain-before.json
+          jq -e '.success==true' /tmp/script-subdomain-before.json >/dev/null
+          jq -c '{enabled:.result.enabled,previews_enabled:.result.previews_enabled}' /tmp/script-subdomain-before.json
 
       - name: Build one-time no-subrequest preview Worker
         shell: bash
@@ -63,7 +73,7 @@ jobs:
           set -euo pipefail
           TOKEN=$(python - <<'PY'
           import secrets
-          print(secrets.token_urlsafe(24))
+          print(secrets.token_urlsafe(32))
           PY
           )
           printf '%s' "$TOKEN" >/tmp/path-token.txt
@@ -80,26 +90,45 @@ jobs:
           PY
           node --check /tmp/preview.js
 
-      - name: Upload inactive preview version with alias
+      - name: Upload inactive preview version with strict binding inheritance
         shell: bash
         run: |
           set -euo pipefail
           ACTIVE_VERSION=$(cat /tmp/active-version.txt)
           jq --arg alias "$PREVIEW_ALIAS" --arg version "$ACTIVE_VERSION" '
             .result.resources.script_runtime as $rt |
-            {main_module:"worker.js", annotations:{"workers/alias":$alias,"workers/message":"ChicagoShining E2E inactive preview ping diagnostic"}}
+            {
+              main_module:"worker.js",
+              annotations:{"workers/alias":$alias,"workers/message":"ChicagoShining E2E inactive preview ping diagnostic"},
+              bindings:[.result.resources.bindings[] | {name:.name,type:"inherit",version_id:$version}]
+            }
             + (if $rt.compatibility_date then {compatibility_date:$rt.compatibility_date} else {} end)
             + {compatibility_flags:($rt.compatibility_flags // [])}
           ' /tmp/version.json >/tmp/metadata.json
+
           code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X POST \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions?bindings_inherit=strict" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -F 'metadata=@/tmp/metadata.json;type=application/json' \
             -F 'worker.js=@/tmp/preview.js;type=application/javascript+module;filename=worker.js')
           echo "upload_http=$code"
           if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then jq '{success,errors,messages}' /tmp/upload.json >&2 || cat /tmp/upload.json >&2; exit 1; fi
-          jq -e '.success==true' /tmp/upload.json >/dev/null
-          jq '{success,result:{id:.result.id,number:.result.number,metadata:{hasPreview:.result.metadata.hasPreview}}}' /tmp/upload.json
+          jq -e '.success==true and ((.result.resources.bindings // [])|length)>0' /tmp/upload.json >/dev/null
+          echo "preview_binding_count=$(jq '(.result.resources.bindings // [])|length' /tmp/upload.json)"
+
+      - name: Enable Preview URLs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENABLED=$(jq -r '.result.enabled' /tmp/script-subdomain-before.json)
+          jq -n --argjson enabled "$ENABLED" '{enabled:$enabled,previews_enabled:true}' >/tmp/preview-enable.json
+          code=$(curl -sS -o /tmp/preview-enabled.json -w '%{http_code}' -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/preview-enable.json)
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true and .result.previews_enabled==true' /tmp/preview-enabled.json >/dev/null
+          jq -c '{enabled:.result.enabled,previews_enabled:.result.previews_enabled}' /tmp/preview-enabled.json
 
       - name: Invoke inactive preview alias
         shell: bash
@@ -108,11 +137,28 @@ jobs:
           SUBDOMAIN=$(cat /tmp/subdomain.txt)
           TOKEN=$(cat /tmp/path-token.txt)
           URL="https://$PREVIEW_ALIAS-$WORKER_NAME.$SUBDOMAIN.workers.dev/__github_e2e_preview_ping_$TOKEN"
-          code=$(curl -sS --retry 3 --retry-delay 2 -o /tmp/result.txt -w '%{http_code}' "$URL")
+          code=$(curl -sS --retry 4 --retry-delay 2 -o /tmp/result.txt -w '%{http_code}' "$URL")
           echo "preview_http=$code"
           cat /tmp/result.txt
           test "$code" -eq 200
           jq -e '.ok==true and .kind=="inactive-version-preview-ping"' /tmp/result.txt >/dev/null
+
+      - name: Restore Preview URL settings exactly
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s /tmp/script-subdomain-before.json ]]; then
+            jq '{enabled:.result.enabled,previews_enabled:.result.previews_enabled}' /tmp/script-subdomain-before.json >/tmp/restore-subdomain.json
+            code=$(curl -sS -o /tmp/restored-subdomain.json -w '%{http_code}' -X POST \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+              --data-binary @/tmp/restore-subdomain.json)
+            test "$code" -ge 200 -a "$code" -lt 300
+            jq -e '.success==true' /tmp/restored-subdomain.json >/dev/null
+            jq -e --slurpfile before /tmp/script-subdomain-before.json '.result.enabled==$before[0].result.enabled and .result.previews_enabled==$before[0].result.previews_enabled' /tmp/restored-subdomain.json >/dev/null
+            jq -c '{restored:{enabled:.result.enabled,previews_enabled:.result.previews_enabled}}' /tmp/restored-subdomain.json
+          fi
 
       - name: Verify active deployment unchanged
         if: always()
