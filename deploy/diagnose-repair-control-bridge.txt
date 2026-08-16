@@ -1,0 +1,1 @@
+Read-only/safe stable bridge diagnostic trigger. Audits active bridge binding names/types only, probes /ready, proves unauthenticated /control denial, and sends only invalid-action authenticated probes. No lease acquisition, scenario activation/run, or record mutation. Triggered 2026-08-16.
