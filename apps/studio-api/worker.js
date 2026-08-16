@@ -2837,7 +2837,7 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
         Source_Drive_File_ID: sourceDriveId,
         Source_Media_Asset: [sourceMediaAssetId],
         Target_Production_Request_Outputs: targetOutputs,
-        Variant_Style: ratio === "9:16" ? "Blur Fill" : "Center Crop",
+        Variant_Style: "Center Crop",
       };
 
       if (!preserveStatus) {
@@ -3001,7 +3001,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
         preview_url: previewUrl,
         preview_status: previewStatus || null,
         file_name: String(f(q, "Target_File_Name") || item4VariantTargetFileName(asset, ratio)),
-        presentation: ratio === "9:16" ? "full-photo foreground with blurred fill" : "center crop",
+        presentation: ratio === "9:16" ? "edge-to-edge center crop" : "center crop",
         authoritative_storage: "google_drive",
         persistent_cloudflare_storage: false,
       };
