@@ -1,0 +1,1 @@
+Patch the Studio repair controller so every test lease/output validation requires the lease/input test_run_id to equal the Platform Output durable Test_Run_ID. Preserve Do_Not_Publish and allowlist controls. Add health evidence flag. Source patch only; deployment occurs through the safe current-worker rollout.
