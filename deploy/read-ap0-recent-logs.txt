@@ -1,0 +1,1 @@
+Read-only AP0 scenario/module log audit after Output 157 baseline webhook. No activation/deactivation, no record mutation, no publishing.
