@@ -12,7 +12,7 @@ The top-five repair program remains in progress. **Do not begin Item 6.** No bro
 | # | Repair item | Status | Verified completion / current state | Next required proof |
 | ---: | --- | --- | --- | --- |
 | 1 | Activation leases and operation limits | **Partial** | Repair-control lease code is deployed. Module 19 compact-result repair and bounded proofs exist in prior workflow evidence. Cost-driving scenarios were kept OFF throughout this checkpoint. | Complete success, failure, timeout, abandoned-chat, budget-exhaustion, immutable-ledger, and guaranteed-shutdown acceptance matrix. |
-| 2 | Stage-specific, exact-output-addressable orchestrators | **In progress — R4 entrance complete** | R4 `5556716` Module 1 now uses exact `airtable:ActionGetRecord` from `{{input.output_record_id}}`; six-field input contract installed; 15 other modules preserved; R4 remained OFF. AP0 `5612096` exact entrance was previously verified live. | Create an isolated R4 test output; prove target-only execution, unrelated-record negative case, replay idempotency, and wrong-stage rejection. Then apply contract to all remaining orchestrators. |
+| 2 | Stage-specific, exact-output-addressable orchestrators | **In progress — R4 blocked at Make trigger contract** | R4 `5556716` Module 1 is exact `airtable:ActionGetRecord` using corrected Make mapping `{{var.input.output_record_id}}`; six-field interface installed; denial fixture and lease controls passed. Live executions prove that an interface alone produces zero bundles because R4 has no Make **Start Scenario** trigger module. AP0 `5612096` exact entrance remains verified. | Obtain the exact Start Scenario module schema (current token lacks `templates:read`), add it without disturbing Modules 2–32, then rerun one isolated target/denial proof. Do not repeat direct-input runs before that topology fix. |
 | 3 | Renderer native overlap transitions | **Not started** | No renderer source mutation or render occurred in this checkpoint. | Confirm authoritative renderer source; implement overlap transitions; prove frame, timing, and A/V acceptance after Items 1, 2, and 5 pass. |
 | 4 | AP0 versioned re-stage | **Not started** | AP0 exact entrance is live, but content-fingerprint/versioned R2 staging is not implemented. | Implement immutable version keys, atomic pointer update, replay, rollback, and lifecycle evidence. |
 | 5 | Genuine hard test mode | **Partial** | Repair controller hard-requires exact Airtable IDs, `Do_Not_Publish`, allowlists, `test_run_id`, and denies generic ACTIVATE/RUN. | Extend enforcement to every stage worker and prove scoped/production-negative fixtures before any live path test. |
@@ -108,3 +108,49 @@ The five successful Make writes were the initial blueprint patch, rollback bluep
 ## Destructive exclusions honored
 
 No existing record was reset, no durable Drive file changed, no R2 object created or deleted, no render started, no email sent, no draft/post/video published or removed, no webhook identity rotated, and no scenario activated.
+
+
+## 2026-08-16 continuation delta — isolated R4 execution proof
+
+### What was completed
+
+- Created isolated Platform Output 153 (`recPd2OnropiUpJzR`) as the allowlisted target and Output 154 (`rec4t364GUMajl9T7`) as the eligible unrelated denial control.
+- Both fixtures were `Do_Not_Publish=true`, `Ready for Render`, and used unique filenames.
+- The denial-control request was rejected before any scenario run on every bounded proof.
+- Corrected R4 Module 1 mapping from the invalid `{{input.output_record_id}}` form to Make's `{{var.input.output_record_id}}` form.
+- Added execution-status evidence, Make execution consistency delay, canonical schedule recovery, reduced polling, and transient required-input restoration guards.
+- Proved the original mapping failure exactly: execution `566a21d836484912901914d6f7ae3e88` failed in R4 Module 1 `ActionGetRecord` because its record ID was null.
+- Proved the corrected mapping no longer throws; later executions reported `SUCCESS` but produced zero bundles and did not advance the exact target.
+- Root cause is now narrowed to the missing Make **Start Scenario** trigger module. Make's current scenario-input contract requires this trigger; R4 currently starts directly with ordinary data modules.
+- The available Make token cannot read public template blueprints (`templates:read` missing), so the exact safe module schema could not be retrieved automatically.
+- Restored R4's canonical schedule from preserved evidence: `{"type":"indefinitely","interval":900}`.
+- Final read-only verification: R4 OFF, 16 modules, no on-demand scenario left behind.
+- Deleted both temporary Platform Output fixtures after confirming that no render or downstream effect was created.
+
+### Bounded proof accounting
+
+| Measure | Actual |
+| --- | ---: |
+| Proof workflow attempts blocked before scenario execution | 2 |
+| Exact R4 scenario executions | 7 |
+| Maximum runs per lease | 1 |
+| Platform Output fixtures created | 2 |
+| Platform Output fixtures deleted | 2 |
+| Production/unrelated Platform Output mutations | 0 |
+| Render jobs created | 0 |
+| R2 objects created/deleted | 0 |
+| Emails sent | 0 |
+| Platform drafts/posts/videos created | 0 |
+
+### Key evidence
+
+- Initial null-record execution failure: https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/31959421508
+- Module 1 `var.input` migration: https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/31959604708
+- Canonical schedule recovery: https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/31960300701
+- Successful Make execution with zero target advancement: https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/31960522256
+- Final R4 OFF/topology verification: https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/31960677653
+- Final scheduling inventory (`on_demand: []`): https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/31960677677
+
+### Updated next safe checkpoint
+
+Do **not** run R4 again until the exact Make Start Scenario module blueprint schema is available. Acquire `templates:read` or obtain a credential-free exported example, add one Start Scenario trigger ahead of Module 1, map its `output_record_id` to Module 1, preserve Modules 2–32, and then recreate one isolated allowlisted target plus one denial control for a single bounded proof.
