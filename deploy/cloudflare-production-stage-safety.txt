@@ -1,0 +1,6 @@
+Non-live Studio safety staging proof trigger.
+
+Production must remain exactly Worker version 86 at 100% throughout this workflow.
+The workflow uploads current safety source as a non-live version with Wrangler 4.123.0 and --keep-vars, reconstructs only non-secret v86 vars plus STUDIO_MEDIA R2 binding, then verifies whether the staged version independently contains the full 11-binding contract including the two opaque secret bindings.
+No deployment/traffic change is permitted.
+Triggered: 2026-08-16.
