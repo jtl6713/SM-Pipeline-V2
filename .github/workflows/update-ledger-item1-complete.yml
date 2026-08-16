@@ -1,0 +1,44 @@
+name: Update Ledger Item 1 Complete
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/update-ledger-item1-complete.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Mark Item 1 complete and append evidence delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+from pathlib import Path
+p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+s=p.read_text()
+old='| 1 | Activation leases and operation limits | **Partial — materially hardened** | Repair leases are live in Make Admin Queue with exact output allowlists, run/operation ceilings, expiry, closure state, and verified shutdown. R4 and AP0 bounded proofs exercised positive/denial, stale-lease recovery, low-operation one-run control, and AP0 final failure proof L4 completed in 17 control operations with AP0 OFF afterward. | Complete the remaining timeout, abandoned-chat, budget-exhaustion, immutable-ledger, and guaranteed-shutdown acceptance matrix before marking globally complete. |'
+new='| 1 | Activation leases and operation limits | **Complete — controller acceptance proven** | Repair leases are live in Make Admin Queue with exact output allowlists, run/operation ceilings, expiry, closure state, and verified shutdown. Controller-only Item 1 acceptance proved a one-operation ceiling (`TR-ITEM1-20260816-BUDGET-L1`) closing with `reason=budget-exhausted`, `operations_used=1`, `scenario_stopped=true`; an intentionally abandoned minimum-duration lease (`TR-ITEM1-20260816-ABANDON-L1`) closed automatically after sweep with `reason=lease-expired`, zero runs/operations, and verified inactive shutdown; a subsequent sweep left the terminal audit record byte-for-byte unchanged in its request/result/closed state. No live repair leases or test fixtures remained afterward. | Closed for lease/operation control. Reopen only on new evidence of a control-plane regression. |'
+if old not in s:
+    raise SystemExit('Item 1 row did not match expected precondition')
+s=s.replace(old,new,1)
+marker='## Delta completed since the preceding handoff checkpoint\n'
+delta='''## 2026-08-16 Item 1 acceptance completion delta\n\n- Root cause of the apparent Airtable lease-store failure was an orphaned expired R4 lease from an earlier Test Mode proof whose allowlisted/deny fixtures had been deleted before closure. Direct credential, binding, table-ID, field-schema, and exact-query probes all passed. The orphan was manually reconciled as failed and explicitly not counted as automatic recovery evidence.\n- Stable sweep immediately succeeded after that reconciliation, proving the lease-store runtime path healthy.\n- Budget acceptance fixture `TR-ITEM1-20260816-B` / lease `TR-ITEM1-20260816-BUDGET-L1` used OFF IG-PUB-ORCH `5864632`, `max_operations=1`, `max_runs=1`. The first exact allowlist assertion succeeded. The controller then auto-closed the exhausted lease with `reason=budget-exhausted`, `operations_used=1`, `runs_used=0`, `scenario_stopped=true`, and `already_inactive=true`. The disposable Platform Output remained unchanged and was deleted only after terminal closure.\n- Abandoned-chat/timeout acceptance fixture `TR-ITEM1-20260816-C` / lease `TR-ITEM1-20260816-ABANDON-L1` was intentionally left without client follow-up beyond its minimum-duration expiry while its exact fixture remained present. Sweep returned HTTP 200 and the lease closed `Succeeded` with `reason=lease-expired`, zero runs/operations, `scenario_stopped=true`, and `already_inactive=true`. The fixture remained unchanged and was deleted only after closure.\n- A later sweep succeeded and left the closed abandoned-lease audit record unchanged, proving terminal ledger stability.\n- Final direct Airtable check found zero Processing `REPAIR_LEASE_V1` records.\n- No Make scenario activation, render, email, draft, upload, or public platform operation occurred in this Item 1 acceptance matrix.\n\nEvidence runs: budget acquire `31974401076`; first allowed operation `31974455484`; abandoned-lease workflow `31974601447` (its final parser expected the wrong `swept.results` shape, but the sweep itself returned HTTP 200 and the Airtable terminal lease record independently proved recovery); terminal-ledger follow-up sweep `31974740309`.\n\n'''
+if marker not in s:
+    raise SystemExit('Delta marker not found')
+s=s.replace(marker,delta+marker,1)
+p.write_text(s)
+PY
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git diff --cached --check
+          git commit -m 'repair: mark Item 1 lease controls complete'
+          git push origin HEAD:main
