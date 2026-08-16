@@ -1,0 +1,1 @@
+Read-only credential-scope diagnostic for Airtable lease table tbltuSt9UibYzxpah. Tests bootstrap and pipeline-stored Airtable PATs without logging values or mutating records. Triggered 2026-08-16 continuation checkpoint.
