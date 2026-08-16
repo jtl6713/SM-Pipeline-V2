@@ -1,13 +1,4 @@
 {
-  "action": "acquire",
-  "test_run_id": "TR-ITEM1-20260816-A",
-  "lease_id": "TR-ITEM1-20260816-BUDGET-L1",
-  "scenario_id": 5813561,
-  "expires_at": "RUNTIME_PLUS_10_MINUTES",
-  "max_runs": 1,
-  "max_operations": 1,
-  "allowed_platform_output_record_ids": ["recBZUTWdNWNoSQ0X"],
-  "deny_fixture_record_ids": [],
-  "allow_public_publish": false,
+  "action": "sweep",
   "expected_upstream_status": 200
 }
