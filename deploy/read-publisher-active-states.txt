@@ -1,1 +1,1 @@
-Read-only Make publisher active-state audit for AP0 isolated revision behavioral proof. No activation, no deactivation, no publishing, no Airtable mutation.
+Read-only Make publisher active-state audit for Item 2 exact-addressing inventory. No activation, deactivation, publishing, or Airtable mutation. Trigger 2026-08-16 continuation.
