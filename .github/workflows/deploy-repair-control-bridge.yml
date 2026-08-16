@@ -1,0 +1,100 @@
+name: Deploy Stable Repair Control Bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-control-bridge.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-repair-control-bridge-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+      TARGET_WORKER: chicagoshining-studio-api
+      WRANGLER_VERSION: 4.123.0
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate bridge source and install pinned Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check apps/repair-control-bridge/worker.js
+          mkdir -p /tmp/repair-bridge
+          cd /tmp/repair-bridge
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
+          cp "$GITHUB_WORKSPACE/apps/repair-control-bridge/worker.js" worker.js
+          cat >wrangler.jsonc <<EOF
+          {
+            "name":"$BRIDGE_WORKER",
+            "main":"worker.js",
+            "compatibility_date":"2026-08-02",
+            "workers_dev":true,
+            "services":[{"binding":"STUDIO_API","service":"$TARGET_WORKER"}]
+          }
+          EOF
+
+      - name: Deploy stable bridge source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/repair-bridge
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/bridge-deploy.log 2>&1
+
+      - name: Set derived control secret without storing the Cloudflare token itself
+        shell: bash
+        run: |
+          set -euo pipefail
+          DERIVED=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          cd /tmp/repair-bridge
+          printf '%s' "$DERIVED" | ./node_modules/.bin/wrangler secret put CONTROL_SECRET --config wrangler.jsonc >/tmp/bridge-secret.log 2>&1
+          unset DERIVED
+
+      - name: Wait for stable ready and verify authenticated proxy behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          READY="https://$BRIDGE_WORKER.$SUB.workers.dev/ready"
+          CONTROL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          ready=false
+          for i in $(seq 1 30); do code=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$READY" || true); if [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ready.json >/dev/null 2>&1; then ready=true; break; fi; sleep 2; done
+          test "$ready" = true
+          code=$(curl -sS --max-time 30 -o /tmp/unauth.json -w '%{http_code}' -X POST "$CONTROL" -H 'Content-Type: application/json' --data '{"action":"__probe__"}' || true)
+          test "$code" = '401'
+          DERIVED=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          proxy=false
+          for i in $(seq 1 15); do
+            code=$(curl -sS --max-time 30 -o /tmp/auth-probe.json -w '%{http_code}' -X POST "$CONTROL" -H "Authorization: Bearer $DERIVED" -H 'Content-Type: application/json' --data '{"action":"__propagation_probe__"}' || true)
+            if [[ "$code" == '200' ]] && jq -e '.bridge_ok==true and (.upstream_status>=400)' /tmp/auth-probe.json >/dev/null 2>&1; then proxy=true; break; fi
+            sleep 2
+          done
+          unset DERIVED
+          test "$proxy" = true
+          jq -c '{bridge_ok,upstream_status,upstream_error:(.upstream_json.error//null)}' /tmp/auth-probe.json
+
+      - name: Save sanitized deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: repair-control-bridge-${{ github.run_id }}
+          path: |
+            /tmp/ready.json
+            /tmp/unauth.json
+            /tmp/auth-probe.json
+          retention-days: 30
