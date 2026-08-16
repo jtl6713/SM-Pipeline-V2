@@ -1,1 +1,1 @@
-Read-only Item 2 live contract audit for R2, R2B, RR1, RR2, P1, P2, P3, C1. No activation, Make mutation, Airtable write, render, email, draft, upload, or publishing.
+Read-only Item 2 live contract audit for R2, R2B, RR1, RR2, P1, P2, P3, C1. Use current module-detail reader. No activation, Make mutation, Airtable write, render, email, draft, upload, or publishing.
