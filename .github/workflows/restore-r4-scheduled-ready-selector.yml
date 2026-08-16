@@ -1,0 +1,182 @@
+name: Restore R4 Scheduled Ready Selector
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/restore-r4-scheduled-ready-selector.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Decrypt Airtable PAT in runner temp only
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+      - name: Resolve Make API settings without logging values
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/settings-query.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          code=$(curl -sS -o /tmp/settings.json -w '%{http_code}' "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/settings-query.txt)" -H "Authorization: Bearer $PAT")
+          test "$code" = 200
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json'))
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          token=str(vals.get('MAKE_API_TOKEN') or '').strip(); base=str(vals.get('MAKE_API_BASE_URL') or '').strip().rstrip('/')
+          if not token or not base: raise SystemExit('Missing active Make API settings')
+          open('/tmp/make-token.txt','w').write(token); open('/tmp/make-base.txt','w').write(base)
+          print('make_api_settings_resolved=true')
+          PY
+      - name: Restore only R4 Module 1 scheduled selector
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5556716
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/scenario-before.json
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/blueprint-before-response.json
+          python - <<'PY'
+          import json,hashlib
+          s=json.load(open('/tmp/scenario-before.json')); b=json.load(open('/tmp/blueprint-before-response.json'))
+          scenario=s.get('scenario') or s.get('response') or s
+          bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          if scenario.get('isActive') is True: raise SystemExit('R4 must remain OFF for repair')
+          if scenario.get('hookId') not in (None,''): raise SystemExit('R4 hookId changed unexpectedly')
+          sched=scenario.get('scheduling') or {}
+          if sched.get('type')!='indefinitely' or int(sched.get('interval') or 0)!=900: raise SystemExit(f'R4 schedule changed unexpectedly: {sched}')
+          mods=[]
+          def walk(flow):
+            for n in flow or []:
+              mods.append(n)
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if len(mods)!=16: raise SystemExit(f'Expected 16 R4 modules; found {len(mods)}')
+          m1=[n for n in mods if int(n.get('id') or -1)==1]
+          if len(m1)!=1: raise SystemExit('Expected exactly one R4 Module 1')
+          m1=m1[0]
+          if m1.get('module')!='airtable:ActionGetRecord': raise SystemExit(f'Unexpected Module 1 type: {m1.get("module")}')
+          if (m1.get('mapper') or {}).get('id')!='{{var.input.output_record_id}}': raise SystemExit('Module 1 is no longer at the disproven exact-input seam')
+          if ((m1.get('metadata') or {}).get('designer') or {}).get('name')!='1 - Get Exact Platform Output': raise SystemExit('Module 1 display name changed unexpectedly')
+          original=json.loads(json.dumps(bp))
+          patched=json.loads(json.dumps(bp))
+          target=[]
+          def find(flow):
+            for n in flow or []:
+              if int(n.get('id') or -1)==1: target.append(n)
+              for r in n.get('routes') or []: find(r.get('flow') or [])
+          find(patched.get('flow') or [])
+          n=target[0]
+          # Preserve id, metadata/name, parameters/connection, and filter. Only restore module type + selector mapping.
+          n['module']='airtable:ActionSearchRecords'
+          n['mapper']={
+            'base':'appe33zkZn35yirTL',
+            'formula':'AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)',
+            'maxRecords':'1',
+            'table':'Platform Outputs',
+            'useColumnId':False,
+          }
+          # Verify exactly one module changed and only approved keys inside it.
+          def mmap(x):
+            out={}
+            def w(flow):
+              for z in flow or []:
+                out[int(z['id'])]=z
+                for rr in z.get('routes') or []: w(rr.get('flow') or [])
+            w(x.get('flow') or []); return out
+          a=mmap(original); p=mmap(patched)
+          if set(a)!=set(p): raise SystemExit('Module identity set changed')
+          for mid in a:
+            if mid==1: continue
+            if a[mid]!=p[mid]: raise SystemExit(f'Unrelated module {mid} changed')
+          am=json.loads(json.dumps(a[1])); pm=json.loads(json.dumps(p[1]))
+          am.pop('module',None); am.pop('mapper',None); pm.pop('module',None); pm.pop('mapper',None)
+          if am!=pm: raise SystemExit('Module 1 changed outside approved module/mapper keys')
+          ot=json.loads(json.dumps(original)); pt=json.loads(json.dumps(patched)); ot.pop('flow',None); pt.pop('flow',None)
+          if ot!=pt: raise SystemExit('Top-level blueprint metadata changed')
+          open('/tmp/blueprint-before.json','w').write(json.dumps(original,separators=(',',':')))
+          open('/tmp/blueprint-patched.json','w').write(json.dumps(patched,separators=(',',':')))
+          print('preconditions_ok=true')
+          print('before_sha256='+hashlib.sha256(json.dumps(original,sort_keys=True).encode()).hexdigest())
+          PY
+          python - <<'PY' >/tmp/patch-body.json
+          import json
+          bp=json.load(open('/tmp/blueprint-patched.json'))
+          print(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+          code=$(curl -sS -o /tmp/patch-result.json -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID?confirmed=true" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/patch-body.json)
+          test "$code" = 200
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/scenario-after.json
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/blueprint-after-response.json
+          python - <<'PY'
+          import json,hashlib
+          before=json.load(open('/tmp/blueprint-before.json'))
+          sr=json.load(open('/tmp/scenario-after.json')); br=json.load(open('/tmp/blueprint-after-response.json'))
+          scenario=sr.get('scenario') or sr.get('response') or sr
+          after=br.get('blueprint') or (br.get('response') or {}).get('blueprint') or br
+          if scenario.get('isActive') is True: raise SystemExit('R4 became active unexpectedly')
+          if scenario.get('hookId') not in (None,''): raise SystemExit('R4 hookId changed unexpectedly')
+          sched=scenario.get('scheduling') or {}
+          if sched.get('type')!='indefinitely' or int(sched.get('interval') or 0)!=900: raise SystemExit('R4 schedule changed unexpectedly')
+          def mmap(x):
+            out={}
+            def w(flow):
+              for z in flow or []:
+                out[int(z['id'])]=z
+                for rr in z.get('routes') or []: w(rr.get('flow') or [])
+            w(x.get('flow') or []); return out
+          a=mmap(before); p=mmap(after)
+          if len(p)!=16 or set(a)!=set(p): raise SystemExit('R4 module identities/count changed')
+          for mid in a:
+            if mid==1: continue
+            if a[mid]!=p[mid]: raise SystemExit(f'Post-write unrelated module {mid} changed')
+          m=p[1]
+          if m.get('module')!='airtable:ActionSearchRecords': raise SystemExit('Module 1 search type did not persist')
+          mp=m.get('mapper') or {}
+          expected='AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)'
+          if mp.get('formula')!=expected or str(mp.get('maxRecords'))!='1': raise SystemExit('Module 1 selector did not persist exactly')
+          if ((m.get('metadata') or {}).get('designer') or {}).get('name')!='1 - Get Exact Platform Output': raise SystemExit('Module 1 display name changed')
+          am=json.loads(json.dumps(a[1])); pm=json.loads(json.dumps(m)); am.pop('module',None);am.pop('mapper',None);pm.pop('module',None);pm.pop('mapper',None)
+          if am!=pm: raise SystemExit('Module 1 non-selector contract changed')
+          bt=json.loads(json.dumps(before)); at=json.loads(json.dumps(after)); bt.pop('flow',None);at.pop('flow',None)
+          if bt!=at: raise SystemExit('Top-level blueprint metadata changed')
+          evidence={
+            'scenario_id':5556716,'scenario_off_after':True,'hook_id_preserved_null':True,
+            'schedule_preserved':{'type':'indefinitely','interval':900},'module_count':16,
+            'changed_module_id':1,'changed_module_name':'1 - Get Exact Platform Output',
+            'module_type_after':'airtable:ActionSearchRecords','max_records':1,
+            'selector_contract':'Ready for Render + required render fields','unrelated_modules_unchanged':True,
+            'after_sha256':hashlib.sha256(json.dumps(after,sort_keys=True).encode()).hexdigest()
+          }
+          open('/tmp/r4-scheduled-selector-restore-evidence.json','w').write(json.dumps(evidence,indent=2,sort_keys=True))
+          print(json.dumps(evidence,indent=2))
+          PY
+      - name: Destroy transient credentials and raw blueprints
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/scenario-before.json /tmp/scenario-after.json /tmp/blueprint-before-response.json /tmp/blueprint-after-response.json /tmp/blueprint-before.json /tmp/blueprint-patched.json /tmp/patch-body.json /tmp/patch-result.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload bounded repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4-scheduled-selector-restore-${{ github.run_id }}
+          path: /tmp/r4-scheduled-selector-restore-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
