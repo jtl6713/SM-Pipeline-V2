@@ -1,0 +1,4 @@
+Repair trigger for MAKE-ADMIN-BRIDGE scenario 5893243, module 19 only.
+
+Requirements enforced by workflow: scenario OFF before and after; exact scenario name; exact module 19 identity; only Result_JSON and Error_Message payload mappings may change; full live blueprint fetched directly from Make; encrypted rollback backup; automatic rollback if exact post-write verification fails; no scenario activation/run; no public publishing.
+Triggered: 2026-08-16.
