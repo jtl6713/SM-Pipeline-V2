@@ -1,13 +1,8 @@
 {
-  "action": "acquire",
+  "action": "assert_output_allowed",
   "test_run_id": "REPAIR-TOP5-SAFETY-20260816-B",
   "lease_id": "REPAIR-TOP5-SAFETY-20260816-B-L1",
   "scenario_id": 5893243,
-  "expires_at": "RUNTIME_PLUS_10_MINUTES",
-  "max_runs": 1,
-  "max_operations": 8,
-  "allowed_platform_output_record_ids": ["recrSWeLpsA5TtpX5"],
-  "deny_fixture_record_ids": ["recpiwWGrph3lsTn6"],
-  "allow_public_publish": false,
+  "platform_output_record_id": "recrSWeLpsA5TtpX5",
   "expected_http_status": 200
 }
