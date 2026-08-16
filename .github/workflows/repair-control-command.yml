@@ -79,7 +79,12 @@ jobs:
           export default {
             async fetch(request, env) {
               const url = new URL(request.url);
-              if (url.pathname !== "/$TOKEN") return new Response("Not found", { status: 404 });
+              const readyPath = "/$TOKEN/ready";
+              const executePath = "/$TOKEN/execute";
+              if (url.pathname === readyPath) {
+                return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});
+              }
+              if (url.pathname !== executePath) return new Response("Not found", { status: 404 });
               const command = $CMD;
               if (command.action === "acquire" && (!command.expires_at || command.expires_at === "RUNTIME_PLUS_10_MINUTES")) {
                 command.expires_at = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -131,21 +136,31 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-subdomain.json
           jq -er '.result.subdomain' /tmp/account-subdomain.json >/tmp/account-subdomain.txt
 
-      - name: Wait for propagation and execute exact repair command
+      - name: Wait for bridge readiness without invoking Studio
         shell: bash
         run: |
           set -euo pipefail
           SUBDOMAIN=$(cat /tmp/account-subdomain.txt)
           TOKEN=$(cat /tmp/path-token.txt)
-          URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
-          EXPECTED=$(jq -r '.expected_http_status // 200' deploy/repair-control-command.json)
-          code=000
+          READY_URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN/ready"
+          ready=false
           for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-            code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
-            [[ "$code" == "$EXPECTED" ]] && break
-            echo "bridge_not_ready_or_unexpected attempt=$i http=$code expected=$EXPECTED"
+            code=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$READY_URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .ready==true' /tmp/ready.json >/dev/null 2>&1; then ready=true; break; fi
+            echo "bridge_not_ready attempt=$i http=$code"
             sleep 2
           done
+          test "$ready" = true
+
+      - name: Execute exact repair command once
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(cat /tmp/account-subdomain.txt)
+          TOKEN=$(cat /tmp/path-token.txt)
+          EXECUTE_URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN/execute"
+          EXPECTED=$(jq -r '.expected_http_status // 200' deploy/repair-control-command.json)
+          code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' "$EXECUTE_URL" || true)
           echo "repair_control_http=$code expected_http=$EXPECTED"
           if jq empty /tmp/result.json >/dev/null 2>&1; then
             jq -c 'if .lease then {ok,action,lease:{record_id:.lease.record_id,lease_id:.lease.lease_id,test_run_id:.lease.test_run_id,scenario_id:.lease.scenario_id,expires_at:.lease.expires_at,operations_used:.lease.operations_used,runs_used:.lease.runs_used},output:(.output // null),outputs:(.outputs // null),before:(.before // null),after:(.after // null),error:(.error // null)} else {ok,action,error:(.error // null),message:(.message // null),swept:(.swept // null)} end' /tmp/result.json
