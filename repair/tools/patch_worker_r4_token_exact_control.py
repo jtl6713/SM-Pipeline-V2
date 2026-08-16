@@ -127,8 +127,9 @@ if close_body_new not in text:
         raise SystemExit('repairCloseLease body anchor not found')
     text = text.replace(close_body_anchor, close_body_new, 1)
 
-# Blueprint selector repair helper.
-helper_anchor = 'function repairR4HooksArray(body) {\n'
+# Blueprint selector repair helper. Anchor on the already present R4 exact-output
+# repair function rather than the older hook-array helper, which moved as source evolved.
+helper_anchor = 'async function repairR4ExactOutputEntry(env) {\n'
 helper = r'''async function repairR4TokenSelector(env) {
   const scenarioId = 5556716;
   const expectedNamePrefix = 'R4 - Start Remotion Render';
@@ -210,7 +211,7 @@ helper = r'''async function repairR4TokenSelector(env) {
 '''
 if 'async function repairR4TokenSelector' not in text:
     if helper_anchor not in text:
-        raise SystemExit('R4 helper anchor not found')
+        raise SystemExit('R4 exact-output function anchor not found')
     text = text.replace(helper_anchor, helper + helper_anchor, 1)
 
 path.write_text(text)
