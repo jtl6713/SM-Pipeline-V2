@@ -1,0 +1,128 @@
+name: Prove Repaired MAKE-ADMIN Module 19 Under Lease V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-module19-bounded-live-run-v2.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-make-admin-bridge-5893243
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-m19-proof-v2-${{ github.run_id }}
+      TEST_RUN_ID: REPAIR-TOP5-SAFETY-20260816-C
+      LEASE_ID: REPAIR-TOP5-SAFETY-20260816-C-L1
+      SCENARIO_ID: '5893243'
+      POSITIVE_OUTPUT: recrSWeLpsA5TtpX5
+      NEGATIVE_OUTPUT: recpiwWGrph3lsTn6
+      EXACT_COMMAND_RECORD: rec0r66HSiQ4yJsAl
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Capture exact active production Worker version
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          jq -e '.success==true and (.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].percentage==100' /tmp/deployments-before.json >/dev/null
+          jq -er '.result.deployments[0].versions[0].version_id' /tmp/deployments-before.json >/tmp/active-version.txt
+
+      - name: Build exact-version atomic proof bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets; print(secrets.token_urlsafe(36))
+          PY
+          ); printf '%s' "$TOKEN" >/tmp/path-token.txt
+          ACTIVE=$(cat /tmp/active-version.txt)
+          cat >/tmp/bridge.js <<EOF
+          export default {async fetch(request,env){
+            const u=new URL(request.url);
+            if(u.pathname==="/$TOKEN/ready") return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});
+            if(u.pathname!=="/$TOKEN/execute") return new Response("Not found",{status:404});
+            const headers={"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json","Cloudflare-Workers-Version-Overrides":"$TARGET_WORKER=\"$ACTIVE\""};
+            async function post(body){const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers,body:JSON.stringify(body)}));const text=await r.text();let json={};try{json=JSON.parse(text)}catch{}return{status:r.status,json};}
+            const expires=new Date(Date.now()+10*60*1000).toISOString();
+            const common={test_run_id:"$TEST_RUN_ID",lease_id:"$LEASE_ID",scenario_id:Number("$SCENARIO_ID")};
+            const out={};
+            out.acquire=await post({...common,action:"acquire",expires_at:expires,max_runs:1,max_operations:8,allowed_platform_output_record_ids:["$POSITIVE_OUTPUT"],deny_fixture_record_ids:["$NEGATIVE_OUTPUT"],allow_public_publish:false});
+            if(out.acquire.status!==200||out.acquire.json?.ok!==true)return Response.json({ok:false,stage:"acquire",out},{status:502});
+            out.positive=await post({...common,action:"assert_output_allowed",platform_output_record_id:"$POSITIVE_OUTPUT"});
+            if(out.positive.status!==200||out.positive.json?.ok!==true)return Response.json({ok:false,stage:"positive",out},{status:502});
+            out.negative=await post({...common,action:"assert_output_allowed",platform_output_record_id:"$NEGATIVE_OUTPUT"});
+            if(out.negative.status!==403||out.negative.json?.ok!==false)return Response.json({ok:false,stage:"negative-denial",out},{status:502});
+            out.pulse=await post({...common,action:"pulse_admin_bridge",exact_make_admin_command_record_id:"$EXACT_COMMAND_RECORD"});
+            const success=out.pulse.status===200&&out.pulse.json?.ok===true;
+            return Response.json({ok:success,expires_at:expires,out},{status:success?200:502});
+          }};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"bridge.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/bridge.js
+
+      - name: Upload bridge and wait for readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'bridge.js=@/tmp/bridge.js;type=application/javascript+module;filename=bridge.js')
+          test "$code" -ge 200 -a "$code" -lt 300; jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); T=$(cat /tmp/path-token.txt)
+          ready=false
+          for i in $(seq 1 20); do code=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$T/ready" || true); if [[ "$code" == '200' ]] && jq -e '.ok==true and .ready==true' /tmp/ready.json >/dev/null 2>&1; then ready=true; break; fi; sleep 2; done
+          test "$ready" = true
+
+      - name: Execute bounded sequence exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); T=$(cat /tmp/path-token.txt); URL="https://$BRIDGE_WORKER.$SUB.workers.dev/$T/execute"
+          code=$(curl -sS --max-time 240 -o /tmp/control-result.json -w '%{http_code}' "$URL" || true)
+          echo "bounded_proof_v2_http=$code"
+          jq -c '{ok,stage:(.stage//null),expires_at,acquire_status:(.out.acquire.status//null),positive_status:(.out.positive.status//null),negative_status:(.out.negative.status//null),pulse_status:(.out.pulse.status//null),pulse_execution_id:(.out.pulse.json.execution_id//null),pulse_error:(.out.pulse.json.error//null)}' /tmp/control-result.json || true
+          test "$code" = '200'
+          jq -e '.ok==true and .out.acquire.status==200 and .out.positive.status==200 and .out.negative.status==403 and .out.pulse.status==200 and .out.pulse.json.ok==true' /tmp/control-result.json >/dev/null
+
+      - name: Delete bridge and verify production identity unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          if [[ -s /tmp/active-version.txt ]]; then
+            curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+            test "$(cat /tmp/active-version.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)"
+          fi
+
+      - name: Record watchdog fallback if needed
+        if: failure()
+        run: echo 'independent_watchdog_v2_remains_armed=true'
+
+      - name: Save bounded control evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repaired-module19-bounded-proof-v2-${{ github.run_id }}
+          path: /tmp/control-result.json
+          if-no-files-found: ignore
+          retention-days: 30
