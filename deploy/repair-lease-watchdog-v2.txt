@@ -1,0 +1,3 @@
+Manual watchdog V2 proof trigger.
+
+Expected while lease B is unexpired: sweep succeeds with swept_count=0, production Worker identity unchanged, and scenario 5893243 remains untouched/off. Triggered 2026-08-16 before lease B expiry.
