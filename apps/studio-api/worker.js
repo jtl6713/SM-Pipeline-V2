@@ -127,6 +127,7 @@ export default {
           repair_r4_direct_input_pulse_v1: true,
           repair_r4_scheduled_selector_pulse_v1: true,
           repair_exact_output_test_mode_v1: true,
+          repair_durable_test_run_identity_v1: true,
           repair_run_disabled_until_stage_addressing_verified: true,
           local_airtable_pat_required_for_admin_deploys: false,
           make_admin_blueprint_string_patch: true,
@@ -9411,10 +9412,19 @@ async function repairCloseLease(env, lease, status, resultPatch = {}) {
   });
 }
 
-async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = false) {
+async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = false, expectedTestRunId = null) {
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
   if (!record?.id) throw new HttpError(404, `Platform Output ${recordId} not found`);
   const fields = record.fields || {};
+  const durableTestRunId = String(fields.Test_Run_ID || "").trim();
+  if (expectedTestRunId !== null) {
+    const expected = String(expectedTestRunId || "").trim();
+    if (!expected) throw new HttpError(409, `Test execution requires a non-empty test_run_id for Platform Output ${recordId}`);
+    if (!durableTestRunId) throw new HttpError(409, `Platform Output ${recordId} is not tagged with a durable Test_Run_ID`);
+    if (durableTestRunId !== expected) {
+      throw new HttpError(409, `Platform Output ${recordId} Test_Run_ID does not match this test_run_id`);
+    }
+  }
   if (!allowPublicPublish && fields.Do_Not_Publish !== true) {
     throw new HttpError(409, `Test mode requires Do_Not_Publish on Platform Output ${recordId}`);
   }
@@ -9423,6 +9433,7 @@ async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = fals
     output_id: fields.Output_ID ?? null,
     platform: fields.Platform?.name || fields.Platform || null,
     do_not_publish: fields.Do_Not_Publish === true,
+    test_run_id: durableTestRunId || null,
     output_status: fields.Output_Status?.name || fields.Output_Status || null,
   };
 }
@@ -9482,7 +9493,7 @@ async function repairAcquireLease(env, input, authorization) {
   if (overlaps.length) throw new HttpError(409, `Scenario ${scenarioId} already has an active repair lease`);
 
   const outputs = [];
-  for (const id of allowedOutputs) outputs.push(await repairVerifyOutputRecord(env, id, allowPublicPublish));
+  for (const id of allowedOutputs) outputs.push(await repairVerifyOutputRecord(env, id, allowPublicPublish, testRunId));
 
   const contract = {
     kind: REPAIR_LEASE_NOTE_PREFIX,
@@ -9566,7 +9577,7 @@ async function repairControlAction(env, input) {
     if (!lease.contract.allowed_platform_output_record_ids.includes(recordId)) {
       throw new HttpError(403, `Platform Output ${recordId} is outside this test_run_id allowlist`);
     }
-    const output = await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true);
+    const output = await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true, lease.contract.test_run_id);
     return { action, lease, output };
   }
 
@@ -9583,7 +9594,7 @@ async function repairControlAction(env, input) {
     if (lease.contract.deny_fixture_record_ids.includes(recordId)) {
       throw new HttpError(403, `Platform Output ${recordId} is an explicit denial fixture`);
     }
-    const output = await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true);
+    const output = await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true, lease.contract.test_run_id);
     const selectorFormula = 'AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)';
     const eligible = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 3, filterFormula: selectorFormula });
     if (eligible.length !== 1 || eligible[0]?.id !== recordId) {
