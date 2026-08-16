@@ -1,3 +1,4 @@
 Run one idempotent verification of the completed R4 exact-output entrance repair. Expect already_repaired=true, R4 OFF before/after, six exact-input fields present, and zero blueprint/interface writes, scenario runs, Airtable writes, renders, or platform effects. Triggered 2026-08-16 evidence-only pass.
 
 Migrate Module 1 to {{var.input.output_record_id}} after execution 566a21d836484912901914d6f7ae3e88 proved legacy mapping null.
+Restore canonical R4 schedule indefinitely/900 after bounded proof cleanup ceiling.
