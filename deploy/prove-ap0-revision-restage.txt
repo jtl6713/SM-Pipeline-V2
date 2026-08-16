@@ -1,0 +1,4 @@
+Bounded AP0 revision-safe behavioral proof for Output 157 only.
+Lease: AP0-REVISION-PROOF-20260816-A-L1.
+Four runs maximum: baseline stage, unchanged no-op, revised stage, failed revision preservation.
+Public publishing forbidden; platform publisher orchestrators must remain OFF; AP0 must return OFF after every invocation.
