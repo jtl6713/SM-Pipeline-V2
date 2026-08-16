@@ -1,0 +1,71 @@
+name: Patch Studio Durable Test Run Identity
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/patch-studio-durable-test-run-identity.txt']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch durable Test_Run_ID equality into repair controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/studio-api/worker.js')
+          s=p.read_text()
+          reps=[]
+          def once(old,new,label):
+              global s
+              c=s.count(old)
+              if c!=1: raise SystemExit(f'{label}: expected 1 match, found {c}')
+              s=s.replace(old,new,1); reps.append(label)
+
+          once(
+          'async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = false) {',
+          'async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = false, expectedTestRunId = null) {',
+          'extend verifier signature')
+
+          once(
+          '''  const fields = record.fields || {};\n  if (!allowPublicPublish && fields.Do_Not_Publish !== true) {''',
+          '''  const fields = record.fields || {};\n  const durableTestRunId = String(fields.Test_Run_ID || "").trim();\n  if (expectedTestRunId !== null) {\n    const expected = String(expectedTestRunId || "").trim();\n    if (!expected) throw new HttpError(409, `Test execution requires a non-empty test_run_id for Platform Output ${recordId}`);\n    if (!durableTestRunId) throw new HttpError(409, `Platform Output ${recordId} is not tagged with a durable Test_Run_ID`);\n    if (durableTestRunId !== expected) {\n      throw new HttpError(409, `Platform Output ${recordId} Test_Run_ID does not match this test_run_id`);\n    }\n  }\n  if (!allowPublicPublish && fields.Do_Not_Publish !== true) {''',
+          'enforce durable test identity')
+
+          once(
+          '''    do_not_publish: fields.Do_Not_Publish === true,\n    output_status:''',
+          '''    do_not_publish: fields.Do_Not_Publish === true,\n    test_run_id: durableTestRunId || null,\n    output_status:''',
+          'expose verified durable test identity')
+
+          once(
+          'for (const id of allowedOutputs) outputs.push(await repairVerifyOutputRecord(env, id, allowPublicPublish));',
+          'for (const id of allowedOutputs) outputs.push(await repairVerifyOutputRecord(env, id, allowPublicPublish, testRunId));',
+          'lease acquisition verifies durable identity')
+
+          old='const output = await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true);'
+          if s.count(old)!=2: raise SystemExit(f'expected exactly 2 lease verifier calls, found {s.count(old)}')
+          s=s.replace(old,'const output = await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true, lease.contract.test_run_id);')
+          reps.append('runtime and R4 pulse verify durable identity')
+
+          once(
+          '          repair_exact_output_test_mode_v1: true,',
+          '          repair_exact_output_test_mode_v1: true,\n          repair_durable_test_run_identity_v1: true,',
+          'health capability flag')
+
+          p.write_text(s)
+          print('patched:', ', '.join(reps))
+          PY
+          node --check apps/studio-api/worker.js
+          git diff --check
+          git diff -- apps/studio-api/worker.js
+          grep -q 'repair_durable_test_run_identity_v1: true' apps/studio-api/worker.js
+          grep -q 'Test_Run_ID does not match this test_run_id' apps/studio-api/worker.js
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'repair: bind test leases to durable Test_Run_ID'
+          git push
