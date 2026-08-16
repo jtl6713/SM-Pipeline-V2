@@ -1,0 +1,60 @@
+name: Read AP0 Recent Logs
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-ap0-recent-logs.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read AP0 scenario and module logs
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json')); vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip()); open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5612096
+          curl -fsS "$BASE/scenarios/$SID/logs?pg%5Blimit%5D=10" -H "Authorization: Token $TOKEN" -o /tmp/scenario-logs.json
+          for MID in 900 1 2 4 9 6 7 8; do
+            curl -fsS "$BASE/scenarios/$SID/modules/$MID/logs?pg%5Blimit%5D=10" -H "Authorization: Token $TOKEN" -o "/tmp/module-$MID.json" || echo '{}' > "/tmp/module-$MID.json"
+          done
+          python - <<'PY'
+          import json
+          def slim_log(r): return {k:r.get(k) for k in ('id','timestamp','status','duration','operations','type','instant') if k in r}
+          d=json.load(open('/tmp/scenario-logs.json')); rows=d.get('scenarioLogs') or []
+          out={'scenario_logs':[slim_log(r) for r in rows[:10]],'modules':{}}
+          for mid in (900,1,2,4,9,6,7,8):
+            try: x=json.load(open(f'/tmp/module-{mid}.json')); rs=x.get('moduleLogs') or []
+            except Exception: rs=[]
+            out['modules'][str(mid)]=[{k:r.get(k) for k in ('executionId','timestamp','status','bundles') if k in r} for r in rs[:10]]
+          print(json.dumps(out,indent=2))
+          open('/tmp/ap0-recent-logs.json','w').write(json.dumps(out,indent=2))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/scenario-logs.json /tmp/module-*.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ap0-recent-logs-${{ github.run_id }}
+          path: /tmp/ap0-recent-logs.json
+          retention-days: 30
