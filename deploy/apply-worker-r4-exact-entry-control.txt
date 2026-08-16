@@ -1,0 +1,1 @@
+Apply the source-controlled R4 exact-output entry repair action only. This changes Worker source on main but does not deploy it and does not touch Make until separately invoked. Triggered 2026-08-16.
