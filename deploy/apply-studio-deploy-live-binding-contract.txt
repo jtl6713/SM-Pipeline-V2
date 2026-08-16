@@ -1,0 +1,3 @@
+Patch only the Studio API production deployment verifier to preserve the current live 10-binding contract exactly.
+No Worker deployment, Make activation, render, Airtable business-record mutation, or publishing in this workflow.
+Triggered 2026-08-16 continuation checkpoint.
