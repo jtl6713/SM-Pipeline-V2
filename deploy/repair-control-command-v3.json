@@ -2,5 +2,6 @@
   "action": "assert_output_allowed",
   "lease_id": "TR-DURABLE-20260816-A-L1",
   "platform_output_record_id": "recnS4DT5ilG0Qibz",
-  "expected_http_status": 200
+  "expected_http_status": 200,
+  "evidence_nonce": "internal-binding-retry-1"
 }
