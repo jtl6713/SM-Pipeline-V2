@@ -2,9 +2,6 @@ Dynamic safe update trigger for chicagoshining-studio-api.
 
 Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run R4/R5, mutate Platform Outputs, render, or publish.
 
-Deploy repair-control stable lease table-ID hardening from c3bb24ec5d35ff9ec4f5bc3905e6d518968eebe4.
-Deploy bounded R4 scheduled-selector pulse control from 7ee92db59d89b03d8f3b7bc0e208572634363a6b.
-Deploy R4 scheduled-selector proof poll-budget reduction (24s timeout / 3s poll).
-Deploy Phase 6 shared controlled-pulse isolation hardening: refuse active R4/R5 takeover and require exactly one production-selector-eligible output equal to the requested output before activation. Production Make selectors remain unchanged.
-Deploy durable Test_Run_ID propagation through Production Request, Content Item directive sync, Production Request Outputs, and Platform Output seeding.
-Deploy durable Test_Run_ID controller equality hardening: lease/input test_run_id must equal Platform Output Test_Run_ID for test verification and controlled pulses.
+Purpose of this run: deterministically rebind AIRTABLE_PAT from the encrypted bootstrap credential that was freshly verified HTTP 200 against both Platform Outputs and Make Admin Queue tbltuSt9UibYzxpah after the Item 1 lease-store INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND fault. Preserve all other active core binding values and current Worker source.
+
+Retain existing repair-control stable lease table-ID hardening, bounded R4 scheduled-selector pulse control, poll-budget reduction, Phase 6 controlled-pulse isolation, durable Test_Run_ID propagation, and durable Test_Run_ID controller equality hardening.
