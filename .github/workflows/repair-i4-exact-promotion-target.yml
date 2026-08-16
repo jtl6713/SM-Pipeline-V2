@@ -1,0 +1,108 @@
+name: Repair I4 Exact Promotion Target
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-i4-exact-promotion-target.txt']
+permissions: {contents: read}
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch I4 Module 1 to exact webhook record with rollback
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b); I3=5517182; I4=5524092
+          curl -fsS "$BASE/scenarios/$I3/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/i3bp
+          curl -fsS "$BASE/scenarios/$I4" -H "Authorization: Token $TOKEN" -o /tmp/i4sc-before
+          curl -fsS "$BASE/scenarios/$I4/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/i4bp-before
+          python - <<'PY'
+          import json
+          # Precondition 1: every I3 -> I4 trigger branch carries the exact candidate record_id.
+          d=json.load(open('/tmp/i3bp')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          found={}
+          def walk(flow):
+            for n in flow or []:
+              if n.get('id') in {16,17,18,19}: found[n['id']]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if set(found)!={16,17,18,19}: raise SystemExit('SAFETY: I3 trigger module set changed')
+          for mid,n in found.items():
+            url=str((n.get('mapper') or {}).get('url') or '')
+            if 'record_id=' not in url or '{{1.record_id}}' not in url:
+              raise SystemExit(f'SAFETY: I3 module {mid} does not carry exact record_id')
+          # Precondition 2: I4 live entrance/topology is the audited shape.
+          s=json.load(open('/tmp/i4sc-before')); sc=s.get('scenario') or s.get('response') or s
+          if sc.get('isActive') is not True or sc.get('hookId')!=2549733: raise SystemExit('SAFETY: I4 live state/hook drift')
+          d=json.load(open('/tmp/i4bp-before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          nodes={}
+          def walk2(flow):
+            for n in flow or []:
+              nodes[n.get('id')]=n
+              for r in n.get('routes') or []: walk2(r.get('flow') or [])
+          walk2(bp.get('flow') or [])
+          m1=nodes.get(1); wh=nodes.get(4)
+          if not m1 or m1.get('module')!='airtable:ActionSearchRecords': raise SystemExit('SAFETY: I4 Module 1 no longer audited SearchRecords')
+          if not wh or 'CustomWebHook' not in str(wh.get('module')): raise SystemExit('SAFETY: I4 webhook module drift')
+          mapper=m1.get('mapper') or {}
+          if str(mapper.get('table'))!='tblTQapddqD47GOIG' or str(mapper.get('maxRecords'))!='25': raise SystemExit('SAFETY: I4 Module 1 selector drift')
+          # Exact targeting: preserve module id, name, route position and downstream modules; change only module type/mapping.
+          m1['module']='airtable:ActionGetRecord'
+          m1['mapper']={'base':'appe33zkZn35yirTL','table':'tblTQapddqD47GOIG','id':'{{4.record_id}}','useColumnId':False}
+          m1['parameters']={k:v for k,v in (m1.get('parameters') or {}).items() if k in ('__IMTCONN__',)}
+          open('/tmp/i4-patch.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+          code=$(curl -sS -o /tmp/patch-response -w '%{http_code}' -X PATCH "$BASE/scenarios/$I4" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/i4-patch.json)
+          if [[ ! "$code" =~ ^2 ]]; then cat /tmp/patch-response; exit 1; fi
+          sleep 2
+          curl -fsS "$BASE/scenarios/$I4" -H "Authorization: Token $TOKEN" -o /tmp/i4sc-after
+          curl -fsS "$BASE/scenarios/$I4/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/i4bp-after
+          if ! python - <<'PY'; then
+          import json
+          sb=json.load(open('/tmp/i4sc-before')); sa=json.load(open('/tmp/i4sc-after')); before=sb.get('scenario') or sb.get('response') or sb; after=sa.get('scenario') or sa.get('response') or sa
+          if after.get('isActive') is not True: raise SystemExit('I4 did not remain active')
+          if before.get('hookId')!=after.get('hookId') or before.get('scheduling')!=after.get('scheduling'): raise SystemExit('I4 metadata drift')
+          d=json.load(open('/tmp/i4bp-after')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          nodes={}; ids=[]
+          def walk(flow):
+            for n in flow or []:
+              ids.append(n.get('id')); nodes[n.get('id')]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          m1=nodes.get(1); m5=nodes.get(5); m2=nodes.get(2); m3=nodes.get(3)
+          if m1.get('module')!='airtable:ActionGetRecord': raise SystemExit('Module 1 not exact GetRecord')
+          mp=m1.get('mapper') or {}
+          if mp.get('id')!='{{4.record_id}}' or mp.get('table')!='tblTQapddqD47GOIG': raise SystemExit('Module 1 exact mapping wrong')
+          if not all(x is not None for x in (m5,m2,m3)): raise SystemExit('downstream promotion topology drift')
+          print(json.dumps({'passed':True,'scenario_id':5524092,'name':after.get('name'),'active':after.get('isActive'),'hookId':after.get('hookId'),'scheduling':after.get('scheduling'),'module_1':{'id':1,'module':m1.get('module'),'name':((m1.get('metadata') or {}).get('designer') or {}).get('name'),'record_id_expr':mp.get('id')},'module_count':len(ids)}))
+          PY
+            echo 'verification failed; rolling back I4 blueprint'
+            python - <<'PY'
+          import json
+          d=json.load(open('/tmp/i4bp-before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          open('/tmp/rollback.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+            curl -fsS -X PATCH "$BASE/scenarios/$I4" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json >/tmp/rollback-response
+            exit 1
+          fi
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/i3bp /tmp/i4sc-before /tmp/i4sc-after /tmp/i4bp-before /tmp/i4bp-after /tmp/i4-patch.json /tmp/patch-response /tmp/rollback.json /tmp/rollback-response
