@@ -1,0 +1,48 @@
+name: Invoke Guarded R4 Exact Entry Repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/invoke-r4-exact-entry-repair.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-r4-exact-entry-5556716
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Invoke exact R4 entrance repair once
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n '{action:"repair_r4_exact_output_entry",confirm:"REPAIR-R4-EXACT-OUTPUT-ENTRY-V1"}' >/tmp/request.json
+          code=$(curl -sS --max-time 180 -o /tmp/result.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+          unset SECRET
+          echo "repair_http=$code"
+          jq -c '{bridge_ok,upstream_status,upstream_ok:(.upstream_json.ok//null),action:(.upstream_json.action//null),repaired:(.upstream_json.repaired//null),exception,error:(.upstream_json.error//null),message:(.upstream_json.message//null)}' /tmp/result.json || true
+          test "$code" = '200'
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.repaired.scenario_id==5556716 and .upstream_json.repaired.scenario_off_before==true and .upstream_json.repaired.scenario_off_after==true and .upstream_json.repaired.hook_attached==true' /tmp/result.json >/dev/null
+      - name: Save bounded repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4-exact-entry-repair-${{ github.run_id }}
+          path: /tmp/result.json
+          if-no-files-found: ignore
+          retention-days: 30
