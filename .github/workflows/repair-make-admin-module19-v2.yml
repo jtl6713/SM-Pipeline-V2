@@ -1,0 +1,80 @@
+name: Repair MAKE-ADMIN-BRIDGE Module 19 v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-make-admin-module19-v2.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-make-admin-bridge-5893243
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AIRTABLE_PAT_PATH: /tmp/airtable-pat.txt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Decrypt Airtable credential only in runner temp
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -s deploy/credential-envelope/private.pem.enc
+          test -s deploy/credential-envelope/airtable_pat.ciphertext.b64
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/airtable-envelope-private.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/airtable-envelope-private.pem \
+            -in /tmp/airtable-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/airtable-pat.txt
+          chmod 600 /tmp/airtable-pat.txt
+
+      - name: Validate repair utility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile repair/tools/repair_make_admin_module19.py
+
+      - name: Execute exact module 19 repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/repair_make_admin_module19.py
+
+      - name: Upload encrypted rollback and sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: make-admin-module19-v2-${{ github.run_id }}
+          path: |
+            /tmp/make-admin-5893243-blueprint-before.enc
+            /tmp/module19-repair-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Destroy transient credentials and plaintext blueprints
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc /tmp/airtable-pat.txt /tmp/blueprint-original.json /tmp/blueprint-patched.json; do
+            if [[ -e "$f" ]]; then shred -u "$f" 2>/dev/null || rm -f "$f"; fi
+          done
