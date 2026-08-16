@@ -1,7 +1,4 @@
 {
-  "action": "release",
-  "test_run_id": "TR-DURABLE-20260816-A",
-  "lease_id": "TR-DURABLE-20260816-A-L2",
-  "scenario_id": 5864632,
+  "action": "sweep",
   "expected_upstream_status": 200
 }
