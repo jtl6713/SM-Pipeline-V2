@@ -4,3 +4,4 @@ Deploy current main source through the proven non-live candidate -> core binding
 
 Deploy repair-control stable lease table-ID hardening from c3bb24ec5d35ff9ec4f5bc3905e6d518968eebe4.
 Deploy bounded R4 scheduled-selector pulse control from 7ee92db59d89b03d8f3b7bc0e208572634363a6b at 2026-08-16 continuation checkpoint. This adds test control only; production R4 blueprint/selector remains unchanged.
+Deploy R4 scheduled-selector proof poll-budget reduction (24s timeout / 3s poll) after Cloudflare subrequest ceiling. Test-control change only; no Make blueprint change.
