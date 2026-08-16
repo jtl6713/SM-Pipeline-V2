@@ -1,0 +1,4 @@
+Dynamic safe update trigger for chicagoshining-studio-api.
+
+The workflow captures the current healthy 100% active version as the rollback anchor, reconstructs only core non-secret config plus STUDIO_MEDIA, injects AIRTABLE_PAT from the encrypted envelope only in runner temp, uploads current main source as a non-live candidate, verifies core bindings, attaches candidate at 0% traffic, exact-version smoke-tests authenticated session/Airtable/cached voices plus repair_make_admin_module19_v1, promotes only on success, and automatically rolls back to the captured prior version on any post-split failure.
+Triggered: 2026-08-16.
