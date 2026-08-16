@@ -21,7 +21,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
-      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+      BRIDGE_WORKER: chicagoshining-repair-control-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v6
 
@@ -115,8 +115,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
           code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/content" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -142,7 +140,7 @@ jobs:
           URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
           EXPECTED=$(jq -r '.expected_http_status // 200' deploy/repair-control-command.json)
           code=000
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
             code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
             [[ "$code" == "$EXPECTED" ]] && break
             echo "bridge_not_ready_or_unexpected attempt=$i http=$code expected=$EXPECTED"
