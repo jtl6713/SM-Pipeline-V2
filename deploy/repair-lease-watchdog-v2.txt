@@ -1,3 +1,4 @@
-Manual watchdog V2 proof trigger.
+Manual watchdog V2 post-expiry proof trigger.
 
-Expected while lease B is unexpired: sweep succeeds with swept_count=0, production Worker identity unchanged, and scenario 5893243 remains untouched/off. Triggered 2026-08-16 before lease B expiry.
+Lease B expired at 2026-08-16T12:41:18.458Z. Expected now: sweep succeeds, exactly the expired lease B is swept, scenario 5893243 is verified OFF, production Worker identity remains unchanged, and no unrelated lease/output is touched.
+Triggered: 2026-08-16 after expiry.
