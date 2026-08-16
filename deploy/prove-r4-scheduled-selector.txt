@@ -1,5 +1,6 @@
 One bounded R4 scheduled-selector proof using the production selector as-is.
-Positive fixture: Output 155 / rechqCjRY66zZzjBg.
-Denial fixture: Output 156 / recfp2sPnpBKfibQl.
-Publishing disabled on both; fresh lease J max_runs=1; R4 must return OFF after pulse.
-Triggered 2026-08-16 correct scheduled-selector proof.
+Positive fixture: Output 155 / rechqCjRY66zZzjBg, now carrying only the donor Content_Item relationship required by R4 downstream Module 17.
+Denial fixture: Output 156 / recfp2sPnpBKfibQl remains intentionally ineligible.
+Publishing disabled on both; fresh lease K max_runs=1; R4 must return OFF after pulse.
+Repair-control polling budget reduced to 24s/3s to remain below Cloudflare subrequest ceiling.
+Triggered 2026-08-16 corrected scheduled-selector proof K.
