@@ -1,0 +1,1 @@
+Create/delete-only credential capability probe against Make Admin Queue using inert NOOP records. No Make activation/run, no Platform Output mutation, no rendering, no publishing. Triggered 2026-08-16 continuation checkpoint.
