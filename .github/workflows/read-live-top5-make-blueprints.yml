@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
           : >/tmp/audit.ndjson
-          for spec in '5893243:19' '5813561:10,12,14,16,30,32,34,36' '5864632:14' '5556716:1,15,29' '5612096:2,4'; do
+          for spec in '5893243:19' '5813561:10,12,14,16,30,32,34,36' '5864632:14' '5557966:' '5556716:1,15,29' '5612096:2,4'; do
             sid=${spec%%:*}; mods=${spec#*:}
             curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/scenario.json
             curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/blueprint.json
@@ -79,7 +79,8 @@ jobs:
               name=((n.get('metadata') or {}).get('designer') or {}).get('name')
               allmods.append({'id':mid,'module':mod,'name':name})
               triggerish=any(x in str(mod).lower() for x in ('webhook','hook','scenario')) or any(x in str(name).lower() for x in ('webhook','hook','scenario','trigger','start'))
-              if mid in wanted or triggerish or sid==5556716:
+              stateish=any(x in str(mod).lower() for x in ('airtable','setvariable')) or any(x in str(name).lower() for x in ('status','state','render','output','ready','prep'))
+              if mid in wanted or triggerish or (sid in (5556716,5557966) and stateish):
                 selected[mid]={
                   'id':mid,'module':mod,'name':name,
                   'mapper':redact(n.get('mapper')),'parameters':redact(n.get('parameters')),'filter':redact(n.get('filter'))
