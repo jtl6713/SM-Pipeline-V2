@@ -10183,7 +10183,8 @@ async function repairR4ExactOutputEntry(env) {
   const outputTableId = 'tblrlPeboBthkplH0';
   const outputBaseId = 'appe33zkZn35yirTL';
   const expectedFormula = 'AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)';
-  const exactRecordExpression = '{{input.output_record_id}}';
+  const exactRecordExpression = '{{var.input.output_record_id}}';
+  const legacyNullRecordExpression = '{{input.output_record_id}}';
   const requiredInputs = [
     { name: 'test_run_id', type: 'text', default: null, required: false, multiline: false },
     { name: 'output_record_id', type: 'text', default: null, required: false, multiline: false },
@@ -10233,12 +10234,20 @@ async function repairR4ExactOutputEntry(env) {
     };
   }
 
-  if (existing1?.module !== 'airtable:ActionSearchRecords') throw new HttpError(409, `R4 module 1 type changed unexpectedly: ${existing1?.module}`);
-  if (String(existing1?.metadata?.designer?.name || '') !== 'Find One Platform Output Ready for Render - Rerender Safe - Cache Concurrency Guard') {
-    throw new HttpError(409, 'R4 module 1 name changed unexpectedly');
-  }
-  if (String(existing1?.mapper?.formula || '') !== expectedFormula || String(existing1?.mapper?.maxRecords || '') !== '1') {
-    throw new HttpError(409, 'R4 module 1 broad selector no longer matches the approved repair baseline');
+  const migratingLegacyNullInput =
+    existing1?.module === 'airtable:ActionGetRecord' &&
+    existing1?.mapper?.id === legacyNullRecordExpression &&
+    existing1?.mapper?.base === outputBaseId &&
+    existing1?.mapper?.table === outputTableId &&
+    String(existing1?.metadata?.designer?.name || '') === '1 - Get Exact Platform Output';
+  if (!migratingLegacyNullInput) {
+    if (existing1?.module !== 'airtable:ActionSearchRecords') throw new HttpError(409, `R4 module 1 type changed unexpectedly: ${existing1?.module}`);
+    if (String(existing1?.metadata?.designer?.name || '') !== 'Find One Platform Output Ready for Render - Rerender Safe - Cache Concurrency Guard') {
+      throw new HttpError(409, 'R4 module 1 name changed unexpectedly');
+    }
+    if (String(existing1?.mapper?.formula || '') !== expectedFormula || String(existing1?.mapper?.maxRecords || '') !== '1') {
+      throw new HttpError(409, 'R4 module 1 broad selector no longer matches the approved repair baseline');
+    }
   }
   const module2 = existingMap.get(2);
   if (module2?.module !== 'airtable:ActionUpdateRecords' || module2?.mapper?.id !== '{{1.id}}') {
