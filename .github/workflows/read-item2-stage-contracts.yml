@@ -5,77 +5,76 @@ on:
     branches: [main]
     paths: ['deploy/read-item2-stage-contracts.txt']
 
-permissions:
-  contents: read
+permissions: {contents: read}
 
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    timeout-minutes: 10
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
     steps:
       - uses: actions/checkout@v6
-      - name: Resolve Make config from Pipeline Settings
+      - name: Resolve Make config and read live blueprints
         shell: bash
         run: |
           set -euo pipefail; umask 077
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
           base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
           openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
-          AT=$(cat /tmp/pat.txt)
-          curl -fsS -G 'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql' -H "Authorization: Bearer $AT" \
-            --data-urlencode "filterByFormula=AND({Active}=1,OR({Setting_Name}='MAKE_API_BASE_URL',{Setting_Name}='MAKE_API_TOKEN'))" -o /tmp/settings.json
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          print(urllib.parse.urlencode([('filterByFormula',"AND({Active}=1,OR({Setting_Name}='MAKE_API_BASE_URL',{Setting_Name}='MAKE_API_TOKEN'))"),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
           python - <<'PY'
           import json
-          r=json.load(open('/tmp/settings.json'))['records']; d={x['fields']['Setting_Name']:x['fields']['Setting_Value'] for x in r}
-          assert d.get('MAKE_API_BASE_URL') and d.get('MAKE_API_TOKEN')
-          open('/tmp/make-base','w').write(d['MAKE_API_BASE_URL'].rstrip('/')); open('/tmp/make-token','w').write(d['MAKE_API_TOKEN'])
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          open('/tmp/t','w').write(v['MAKE_API_TOKEN'].strip());open('/tmp/b','w').write(v['MAKE_API_BASE_URL'].strip().rstrip('/'))
           PY
-      - name: Read selected live scenario contracts
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, subprocess
-          ids=[5569495,5576620,5576363,5576353,5528742,5530955,5531703,5582062]
-          base=open('/tmp/make-base').read().strip(); token=open('/tmp/make-token').read().strip()
-          out=[]
-          for sid in ids:
-            raw=subprocess.check_output(['curl','-fsS',f'{base}/scenarios/{sid}','-H',f'Authorization: Token {token}','-H','Accept: application/json'])
-            d=json.loads(raw); s=d.get('scenario') or d.get('response',{}).get('scenario') or d
-            bp=s.get('blueprint')
-            if isinstance(bp,str):
-              try: bp=json.loads(bp)
-              except: bp={}
-            mods=[]
-            def walk(x):
-              if isinstance(x,dict):
-                if 'module' in x and 'id' in x:
-                  m=x; mapper=m.get('mapper') or {}; params=m.get('parameters') or {}; meta=m.get('metadata') or {}
-                  text=json.dumps({'mapper':mapper,'parameters':params,'filter':m.get('filter'),'metadata':meta},separators=(',',':'))
-                  keys=['recordId','formula','filterByFormula','maxRecords','limit','table','tableId','view','viewId','webhook','hook','status','Platform','Do_Not_Publish','Test_Run_ID','Content_Item','Output_ID','Render_Status']
-                  excerpt={k:v for k,v in {**params,**mapper}.items() if any(t.lower() in str(k).lower() for t in ['record','formula','max','limit','table','view','hook','status'])}
-                  mods.append({'id':m.get('id'),'module':m.get('module'),'name':meta.get('designer',{}).get('name') or meta.get('name') or m.get('name'), 'excerpt':excerpt, 'has_test_run_id':'Test_Run_ID' in text, 'has_do_not_publish':'Do_Not_Publish' in text, 'has_output_record_id':'output_record_id' in text})
-                for v in x.values(): walk(v)
-              elif isinstance(x,list):
-                for v in x: walk(v)
-            walk(bp or {})
-            out.append({'id':sid,'name':s.get('name'),'isActive':s.get('isActive'),'hookId':s.get('hookId'),'scheduling':s.get('scheduling'),'modules':mods})
-          open('/tmp/item2-contracts.json','w').write(json.dumps(out,indent=2))
-          for s in out:
-            print(json.dumps({'id':s['id'],'name':s['name'],'active':s['isActive'],'hookId':s['hookId'],'scheduling':s['scheduling'],'modules':s['modules']},separators=(',',':')))
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
+          : >/tmp/contracts.ndjson
+          for sid in 5569495 5576620 5576363 5576353 5528742 5530955 5531703 5582062; do
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/sc
+            sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
+            SID=$sid python - <<'PY' >>/tmp/contracts.ndjson
+          import json,os
+          sid=int(os.environ['SID']); sd=json.load(open('/tmp/sc')); bd=json.load(open('/tmp/bp'))
+          sc=sd.get('scenario') or sd.get('response') or sd
+          bp=bd.get('blueprint') or (bd.get('response') or {}).get('blueprint') or bd
+          if isinstance(bp,str): bp=json.loads(bp)
+          mods=[]
+          def walk(flow):
+            for n in flow or []:
+              mod=str(n.get('module') or ''); meta=n.get('metadata') or {}; name=str((meta.get('designer') or {}).get('name') or meta.get('name') or '')
+              mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; filt=n.get('filter')
+              blob=json.dumps({'module':mod,'name':name,'mapper':mapper,'parameters':params,'filter':filt},default=str)
+              interesting=('airtable:' in mod.lower() or 'gateway:' in mod.lower() or 'webhook' in mod.lower() or 'http:' in mod.lower() or n.get('id') in [1,2,3,4,5,10])
+              if interesting:
+                safe={}
+                for k,v in {**params,**mapper}.items():
+                  kl=str(k).lower()
+                  if any(x in kl for x in ['authorization','token','secret','api_key','apikey']): safe[k]='<redacted>'
+                  elif any(x in kl for x in ['record','formula','max','limit','table','view','hook','status','url']): safe[k]=v
+                mods.append({'id':n.get('id'),'module':mod,'name':name,'config':safe,'filter':filt,'has_test_run_id':'Test_Run_ID' in blob,'has_do_not_publish':'Do_Not_Publish' in blob,'has_output_record_id':'output_record_id' in blob,'has_record_id':'record_id' in blob})
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          text=json.dumps(bp,default=str)
+          print(json.dumps({'id':sid,'name':sc.get('name'),'active':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'terms':{'Test_Run_ID':'Test_Run_ID' in text,'Do_Not_Publish':'Do_Not_Publish' in text,'output_record_id':'output_record_id' in text,'record_id':'record_id' in text},'modules':mods},separators=(',',':')))
           PY
-      - name: Destroy secrets
+            sleep 1
+          done
+          cat /tmp/contracts.ndjson
+      - name: Destroy credentials
         if: always()
         shell: bash
-        run: |
-          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/settings.json /tmp/make-base /tmp/make-token; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/sc /tmp/bp
       - name: Save evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: item2-stage-contracts-${{ github.run_id }}
-          path: /tmp/item2-contracts.json
+          path: /tmp/contracts.ndjson
           if-no-files-found: ignore
           retention-days: 30
