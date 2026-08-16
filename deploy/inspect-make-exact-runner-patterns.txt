@@ -1,0 +1,1 @@
+Read-only inspection trigger for live R4 scenario 5556716 and TTD0 scenario 5613069 through the bounded Make module inspector. Returns module definitions only; no blueprint write, activation/run, Airtable mutation, or publishing. Triggered 2026-08-16.
