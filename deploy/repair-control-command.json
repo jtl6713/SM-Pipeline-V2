@@ -9,5 +9,6 @@
   "allowed_platform_output_record_ids": ["recrSWeLpsA5TtpX5"],
   "deny_fixture_record_ids": ["recpiwWGrph3lsTn6"],
   "allow_public_publish": false,
-  "expected_http_status": 200
+  "expected_http_status": 200,
+  "control_attempt": 2
 }
