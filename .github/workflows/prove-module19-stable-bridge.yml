@@ -1,0 +1,105 @@
+name: Prove Repaired MAKE-ADMIN Module 19 Via Stable Bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-module19-stable-bridge.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-make-admin-bridge-5893243
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+      TEST_RUN_ID: REPAIR-TOP5-SAFETY-20260816-C
+      LEASE_ID: REPAIR-TOP5-SAFETY-20260816-C-L1
+      SCENARIO_ID: '5893243'
+      POSITIVE_OUTPUT: recrSWeLpsA5TtpX5
+      NEGATIVE_OUTPUT: recpiwWGrph3lsTn6
+      EXACT_COMMAND_RECORD: rec0r66HSiQ4yJsAl
+    steps:
+      - name: Resolve stable bridge and derived auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          printf '%s' "https://$BRIDGE_WORKER.$SUB.workers.dev/control" >/tmp/control-url.txt
+          printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1 >/tmp/control-secret.txt
+          code=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/ready")
+          test "$code" = '200'; jq -e '.ok==true' /tmp/ready.json >/dev/null
+
+      - name: Acquire exact 3-minute lease C once
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(cat /tmp/control-url.txt); SECRET=$(cat /tmp/control-secret.txt)
+          EXPIRES=$(python - <<'PY'
+          from datetime import datetime,timedelta,timezone
+          print((datetime.now(timezone.utc)+timedelta(minutes=3)).isoformat().replace('+00:00','Z'))
+          PY
+          )
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg e "$EXPIRES" --arg p "$POSITIVE_OUTPUT" --arg n "$NEGATIVE_OUTPUT" '{action:"acquire",test_run_id:$tr,lease_id:$l,scenario_id:$s,expires_at:$e,max_runs:1,max_operations:8,allowed_platform_output_record_ids:[$p],deny_fixture_record_ids:[$n],allow_public_publish:false}' >/tmp/acquire-request.json
+          code=$(curl -sS --max-time 90 -o /tmp/acquire.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/acquire-request.json || true)
+          echo "acquire_http=$code"; jq -c '{bridge_ok,upstream_status,upstream_ok:(.upstream_json.ok//null),exception}' /tmp/acquire.json || true
+          test "$code" = '200'; jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/acquire.json >/dev/null
+
+      - name: Assert positive output is allowed
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(cat /tmp/control-url.txt); SECRET=$(cat /tmp/control-secret.txt)
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg p "$POSITIVE_OUTPUT" '{action:"assert_output_allowed",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$p}' >/tmp/positive-request.json
+          code=$(curl -sS --max-time 60 -o /tmp/positive.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/positive-request.json || true)
+          test "$code" = '200'; jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/positive.json >/dev/null
+
+      - name: Assert negative fixture is denied
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(cat /tmp/control-url.txt); SECRET=$(cat /tmp/control-secret.txt)
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg n "$NEGATIVE_OUTPUT" '{action:"assert_output_allowed",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$n}' >/tmp/negative-request.json
+          code=$(curl -sS --max-time 60 -o /tmp/negative.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/negative-request.json || true)
+          echo "negative_http=$code"; jq -c '{bridge_ok,upstream_status,exception,upstream_ok:(.upstream_json.ok//null)}' /tmp/negative.json || true
+          # Denial may surface as an upstream 403 response or a service-binding exception normalized by the bridge.
+          jq -e '((.bridge_ok==true and .upstream_status==403 and .upstream_json.ok==false) or (.bridge_ok==false and (.exception|type=="string")))' /tmp/negative.json >/dev/null
+
+      - name: Pulse exact Make Admin record once
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(cat /tmp/control-url.txt); SECRET=$(cat /tmp/control-secret.txt)
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg r "$EXACT_COMMAND_RECORD" '{action:"pulse_admin_bridge",test_run_id:$tr,lease_id:$l,scenario_id:$s,exact_make_admin_command_record_id:$r}' >/tmp/pulse-request.json
+          code=$(curl -sS --max-time 180 -o /tmp/pulse.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/pulse-request.json || true)
+          echo "pulse_http=$code"; jq -c '{bridge_ok,upstream_status,upstream_ok:(.upstream_json.ok//null),execution_id:(.upstream_json.execution_id//null),exception}' /tmp/pulse.json || true
+          test "$code" = '200'; jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/pulse.json >/dev/null
+
+      - name: Destroy derived bridge secret
+        if: always()
+        shell: bash
+        run: |
+          shred -u /tmp/control-secret.txt 2>/dev/null || rm -f /tmp/control-secret.txt
+
+      - name: Save bounded evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: module19-stable-bridge-proof-${{ github.run_id }}
+          path: |
+            /tmp/acquire.json
+            /tmp/positive.json
+            /tmp/negative.json
+            /tmp/pulse.json
+          if-no-files-found: ignore
+          retention-days: 30
