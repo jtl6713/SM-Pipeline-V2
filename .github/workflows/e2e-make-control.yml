@@ -138,8 +138,11 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -F 'metadata={"main_module":"worker.js"};type=application/json' \
-            -F 'worker.js=@/tmp/worker-e2e.js;type=application/javascript+module')
-          test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
+            -F 'worker.js=@/tmp/worker-e2e.js;type=application/javascript+module;filename=worker.js')
+          if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
+            jq '{success,errors,messages}' /tmp/e2e-deploy.json >&2 || cat /tmp/e2e-deploy.json >&2
+            exit 1
+          fi
           jq -e '.success == true' /tmp/e2e-deploy.json >/dev/null
 
       - name: Execute controlled Make commands
@@ -162,8 +165,11 @@ jobs:
               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -F 'metadata={"main_module":"worker.js"};type=application/json' \
-              -F 'worker.js=@/tmp/worker-before.js;type=application/javascript+module')
-            test "$HTTP_CODE" -ge 200 -a "$HTTP_CODE" -lt 300
+              -F 'worker.js=@/tmp/worker-before.js;type=application/javascript+module;filename=worker.js')
+            if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then
+              jq '{success,errors,messages}' /tmp/restore-result.json >&2 || cat /tmp/restore-result.json >&2
+              exit 1
+            fi
             jq -e '.success == true' /tmp/restore-result.json >/dev/null
             curl -fsS -D /tmp/worker-restored.headers \
               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" \
