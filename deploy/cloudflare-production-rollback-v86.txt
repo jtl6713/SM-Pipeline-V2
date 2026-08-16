@@ -5,3 +5,4 @@ From: active version 92 / 0 bindings
 To: known-good version 86 / expected 11 bindings
 Reason: production source deployment created a zero-binding Worker version.
 Triggered: 2026-08-16
+Attempt: 2 — capture Cloudflare error code/message if rollback is rejected.
