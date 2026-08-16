@@ -9586,11 +9586,20 @@ async function repairControlAction(env, input) {
     await repairReserveBudget(env, lease, { operationCost: 8, runCost: 1, action });
     const before = await phase6ScenarioState(env, lease.scenario_id);
     const beforeJobId = String(fields.Remotion_Job_ID || "");
+    const originalScheduling = repairInspectorClone(before?.scenario?.scheduling || {});
+    let schedulingTemporarilyChanged = false;
     let failure = null;
     let stop = null;
     let exactTargetConsumed = false;
     let finalTarget = target;
     try {
+      if (String(originalScheduling?.type || "") !== "on-demand") {
+        await phase6MakeApiJson(env, `/scenarios/${lease.scenario_id}?confirmed=true`, {
+          method: "PATCH",
+          body: JSON.stringify({ scheduling: JSON.stringify({ type: "on-demand" }) }),
+        });
+        schedulingTemporarilyChanged = true;
+      }
       if (!before.isActive) await phase6SetScenarioActive(env, lease.scenario_id, true);
       const execution = await phase6RunScenario(env, lease.scenario_id, runInput);
       await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -9631,6 +9640,20 @@ async function repairControlAction(env, input) {
     } finally {
       try { stop = await phase6StopScenarioVerified(env, lease.scenario_id, 2); } catch (stopError) {
         if (!failure) failure = stopError instanceof Error ? stopError.message : String(stopError);
+      }
+      if (schedulingTemporarilyChanged) {
+        try {
+          await phase6MakeApiJson(env, `/scenarios/${lease.scenario_id}?confirmed=true`, {
+            method: "PATCH",
+            body: JSON.stringify({ scheduling: JSON.stringify(originalScheduling) }),
+          });
+          const restored = await phase6ScenarioState(env, lease.scenario_id);
+          if (JSON.stringify(restored?.scenario?.scheduling || {}) !== JSON.stringify(originalScheduling) || restored?.isActive) {
+            throw new Error("R4 scheduling/OFF state did not verify after pulse");
+          }
+        } catch (scheduleError) {
+          if (!failure) failure = scheduleError instanceof Error ? scheduleError.message : String(scheduleError);
+        }
       }
       try { await repairClearR4LeaseToken(env, lease); } catch (cleanupError) {
         if (!failure) failure = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
