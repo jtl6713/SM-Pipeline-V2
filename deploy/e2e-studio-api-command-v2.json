@@ -1,7 +1,6 @@
 {
-  "correlation_id":"SUNSET-E2E-VARIANT-RECONCILE-20260816-0206",
+  "correlation_id":"SUNSET-E2E-BRIDGE-PREFLIGHT-20260816-0209",
   "requests":[
-    {"name":"reconcile-variants","method":"POST","path":"/api/production-requests/recc9H8SXdUnKEMhQ/variants","body":{}},
-    {"name":"item4-after-reconcile","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ/item4"}
+    {"name":"bridge-preflight","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ/bridge-preflight"}
   ]
 }
