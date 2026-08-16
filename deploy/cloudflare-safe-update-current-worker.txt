@@ -1,4 +1,4 @@
 Dynamic safe update trigger for chicagoshining-studio-api.
 
-Deploy current main source containing repair_r4_token_exact_entry_v1 (exact R4 token selector, leased one-run pulse, and lease/watchdog token cleanup) through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run R4 or publish.
-Triggered: 2026-08-16 — R4 token exact-output controls.
+Deploy current main source containing repair_r4_direct_input_pulse_v1 through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run R4, mutate Platform Outputs, render, or publish.
+Triggered: 2026-08-16 — R4 direct six-field exact-input pulse.
