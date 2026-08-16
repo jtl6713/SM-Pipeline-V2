@@ -120,6 +120,7 @@ export default {
           repair_activation_leases_v1: true,
           repair_make_admin_module19_v1: true,
           repair_make_module_inspector_v1: true,
+          repair_make_scenario_inventory_v1: true,
           repair_r4_exact_output_entry_v1: true,
           repair_exact_output_test_mode_v1: true,
           repair_run_disabled_until_stage_addressing_verified: true,
@@ -9714,6 +9715,66 @@ function repairInspectorClone(value, depth = 0) {
   return String(value);
 }
 
+
+async function repairListMakeScenariosCompact(env) {
+  const anchorScenarioId = 5556716;
+  const anchorState = await phase6ScenarioState(env, anchorScenarioId);
+  const teamId = Number(anchorState?.scenario?.teamId || anchorState?.scenario?.team?.id || 0);
+  if (!Number.isInteger(teamId) || teamId <= 0) throw new HttpError(502, 'Make scenario metadata did not expose a usable teamId');
+
+  const body = await phase6MakeApiJson(
+    env,
+    `/scenarios?teamId=${teamId}&pg%5Blimit%5D=100&pg%5Boffset%5D=0&pg%5BsortBy%5D=id&pg%5BsortDir%5D=desc`,
+    { method: 'GET' },
+  );
+  const scenarios = body?.scenarios || body?.response?.scenarios || [];
+  if (!Array.isArray(scenarios)) throw new HttpError(502, 'Make list scenarios response did not contain scenarios');
+  const compact = scenarios.slice(0, 100).map((scenario) => ({
+    id: Number(scenario?.id || 0),
+    name: String(scenario?.name || ''),
+    is_active: scenario?.isActive === true,
+    scheduling_type: String(scenario?.scheduling?.type || ''),
+    hook_id_present: scenario?.hookId != null,
+    type: String(scenario?.type || ''),
+  }));
+  const onDemand = compact.filter((scenario) => scenario.scheduling_type === 'on-demand').slice(0, 30);
+  const inputDetails = [];
+  for (const scenario of onDemand) {
+    try {
+      const ifaceBody = await phase6MakeApiJson(env, `/scenarios/${scenario.id}/interface`, { method: 'GET' });
+      const iface = ifaceBody?.interface || ifaceBody?.response?.interface || {};
+      const input = Array.isArray(iface?.input) ? iface.input : [];
+      inputDetails.push({
+        id: scenario.id,
+        name: scenario.name,
+        is_active: scenario.is_active,
+        input_count: input.length,
+        inputs: input.slice(0, 20).map((item) => ({
+          name: String(item?.name || ''),
+          type: String(item?.type || ''),
+          required: item?.required === true,
+        })),
+      });
+    } catch (error) {
+      inputDetails.push({
+        id: scenario.id,
+        name: scenario.name,
+        is_active: scenario.is_active,
+        input_count: null,
+        inputs: [],
+        interface_error: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+      });
+    }
+  }
+  return {
+    team_id: teamId,
+    returned_count: compact.length,
+    page_limit: 100,
+    scenarios: compact,
+    on_demand_with_interfaces: inputDetails,
+  };
+}
+
 async function repairInspectMakeScenarioModules(env, scenarioId, requestedIds) {
   const id = Number(scenarioId);
   if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "scenario_id must be a positive integer");
@@ -9996,6 +10057,12 @@ async function adminRepairControlStatus(request, env) {
 async function adminRepairControl(request, env, authorization) {
   const input = await request.json();
   const action = repairString(input?.action, "action", 40).toLowerCase();
+  if (action === "list_make_scenarios_compact") {
+    const confirm = repairString(input?.confirm, "confirm", 80);
+    if (confirm !== "LIST-MAKE-SCENARIOS-COMPACT-V1") throw new HttpError(400, "Compact Make scenario inventory confirmation is required");
+    const inventory = await repairListMakeScenariosCompact(env);
+    return respond(request, env, { ok: true, action, inventory });
+  }
   if (action === "repair_r4_exact_output_entry") {
     const confirm = repairString(input?.confirm, "confirm", 80);
     if (confirm !== "REPAIR-R4-EXACT-OUTPUT-ENTRY-V1") throw new HttpError(400, "Exact R4 entrance repair confirmation is required");
