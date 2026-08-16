@@ -3,3 +3,4 @@ Disposable deployment preservation proof trigger.
 No production Worker is modified by this workflow.
 It creates one temporary Worker, one empty temporary R2 bucket, and one dummy secret; proves a second Wrangler deployment preserves the var and secret while explicitly reconstructing the R2 binding; then deletes all disposable resources.
 Triggered: 2026-08-16
+Attempt: 2 — pinned Wrangler 4.123.0; secret name verified separately; bounded deployment propagation polls added.
