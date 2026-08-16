@@ -1,0 +1,1 @@
+Update the authoritative 21-item ledger with the latest Test_Run_ID propagation, production-selector exclusion, durable controller identity enforcement, controller-only positive/mismatch/blank/non-allowlist proof, lease cleanup, and fixture deletion evidence. Preserve the top-five gate and do not unlock broad E2E.
