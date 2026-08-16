@@ -38,12 +38,12 @@ jobs:
           r=json.loads(Path('/tmp/workers.json').read_text()).get('result') or []
           matches=[]
           for w in r:
+              if not isinstance(w,dict): continue
               label=str(w.get('name') or w.get('script_name') or w.get('id') or '')
               if label=='chicagoshining-studio-api' or str(w.get('name') or '')=='chicagoshining-studio-api':
                   matches.append(w)
           if len(matches)!=1:
-              # Produce only safe structural keys for debugging.
-              safe=[{'id':w.get('id'),'name':w.get('name'),'script_name':w.get('script_name')} for w in r]
+              safe=[{'id':w.get('id'),'name':w.get('name'),'script_name':w.get('script_name')} for w in r if isinstance(w,dict)]
               Path('/tmp/worker-catalog-safe.json').write_text(json.dumps(safe,indent=2))
               raise SystemExit(f'Expected one beta worker match, found {len(matches)}')
           w=matches[0]
@@ -68,13 +68,39 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          beta=json.loads(Path('/tmp/beta-versions.json').read_text()).get('result') or []
-          script=json.loads(Path('/tmp/script-versions.json').read_text()).get('result') or []
+
+          def versions(payload):
+              r=payload.get('result')
+              if isinstance(r,list): return [x for x in r if isinstance(x,dict)]
+              if isinstance(r,dict):
+                  for key in ('versions','items','results','data'):
+                      v=r.get(key)
+                      if isinstance(v,list): return [x for x in v if isinstance(x,dict)]
+                  found=[]
+                  def walk(x):
+                      if isinstance(x,dict):
+                          if isinstance(x.get('number'),int) and isinstance(x.get('id') or x.get('version_id'),str): found.append(x)
+                          for v in x.values(): walk(v)
+                      elif isinstance(x,list):
+                          for v in x: walk(v)
+                  walk(r)
+                  return found
+              return []
+
           def safe(v):
-              return {'id':v.get('id') or v.get('version_id'),'number':v.get('number'),'created_on':v.get('created_on') or (v.get('metadata') or {}).get('created_on')}
+              md=v.get('metadata') if isinstance(v.get('metadata'),dict) else {}
+              return {'id':v.get('id') or v.get('version_id'),'number':v.get('number'),'created_on':v.get('created_on') or md.get('created_on')}
+
+          beta=versions(json.loads(Path('/tmp/beta-versions.json').read_text()))
+          script=versions(json.loads(Path('/tmp/script-versions.json').read_text()))
+          beta=sorted(beta,key=lambda x:int(x.get('number') or -1),reverse=True)
+          script=sorted(script,key=lambda x:int(x.get('number') or -1),reverse=True)
           out={'beta_versions':[safe(v) for v in beta],'script_versions':[safe(v) for v in script]}
           Path('/tmp/version-correlation-safe.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          Path('/tmp/script-version-items.json').write_text(json.dumps(script))
+          Path('/tmp/beta-version-items.json').write_text(json.dumps(beta))
           print(json.dumps({'beta_count':len(beta),'script_count':len(script),'beta_latest':safe(beta[0]) if beta else None,'script_latest':safe(script[0]) if script else None},indent=2))
+          if not beta or not script: raise SystemExit('Could not parse both beta and script version lists')
           PY
 
       - name: Read sanitized binding counts for versions newer than 86
@@ -85,20 +111,18 @@ jobs:
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           python - <<'PY'
           import json
-          from pathlib import Path
-          script=json.loads(Path('/tmp/script-versions.json').read_text()).get('result') or []
+          script=json.load(open('/tmp/script-version-items.json'))
           candidates=[]
           for v in script:
               n=v.get('number')
-              if isinstance(n,int) and n>86:
-                  candidates.append({'id':str(v.get('id')),'number':n})
-          Path('/tmp/candidates.json').write_text(json.dumps(candidates))
+              vid=v.get('id') or v.get('version_id')
+              if isinstance(n,int) and n>86 and isinstance(vid,str): candidates.append({'id':vid,'number':n})
+          json.dump(candidates,open('/tmp/candidates.json','w'))
           print('candidate_count=',len(candidates))
           PY
           python - <<'PY' > /tmp/candidate-lines.txt
           import json
-          for x in json.load(open('/tmp/candidates.json')):
-              print(x['number'],x['id'])
+          for x in json.load(open('/tmp/candidates.json')): print(x['number'],x['id'])
           PY
           : > /tmp/candidate-bindings.ndjson
           while read -r num vid; do
