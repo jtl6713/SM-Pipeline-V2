@@ -1,0 +1,31 @@
+name: Validate Repair Safety Branch
+
+on:
+  push:
+    branches: [repair/top5-safety-20260816]
+    paths:
+      - '.github/workflows/validate-repair-safety-branch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: repair/top5-safety-20260816
+      - name: Validate Worker and workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp apps/studio-api/worker.js /tmp/worker.mjs
+          node --check /tmp/worker.mjs
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/repair-control-command.yml', aliases: true); YAML.load_file('.github/workflows/repair-lease-watchdog.yml', aliases: true)"
+          grep -q 'repair_activation_leases_v1: true' apps/studio-api/worker.js
+          grep -q 'repair_exact_output_test_mode_v1: true' apps/studio-api/worker.js
+          grep -q 'Standalone ACTIVATE/RUN is intentionally disabled' apps/studio-api/worker.js
+          grep -q "cron: '\*/5 \* \* \* \*'" .github/workflows/repair-lease-watchdog.yml
+          grep -q 'expected_http_status' .github/workflows/repair-control-command.yml
