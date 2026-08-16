@@ -1,0 +1,1 @@
+Transactional v2 Test_Run_ID production selector exclusion. Recognize Platform Outputs by stable table ID or live display name. Prevalidate all eight scenarios OFF before first write; rollback every applied blueprint on any later failure.
