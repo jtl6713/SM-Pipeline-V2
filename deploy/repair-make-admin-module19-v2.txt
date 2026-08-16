@@ -1,0 +1,4 @@
+V2 exact repair trigger for MAKE-ADMIN-BRIDGE scenario 5893243, module 19 only.
+
+The Python repair utility performs an exact filtered Airtable settings lookup, requires the scenario OFF, fetches the live Make blueprint, changes only module 19 Result_JSON and Error_Message payload mappings, writes an encrypted rollback backup, verifies the post-write blueprint exactly, verifies the scenario remains OFF, and rolls back automatically on verification failure. No activation/run/public publishing is permitted.
+Triggered: 2026-08-16.
