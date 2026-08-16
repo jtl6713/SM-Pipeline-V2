@@ -1,0 +1,67 @@
+name: Read Item 5 P1 Controller Functions
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-item5-p1-controller-functions.txt']
+
+permissions: {contents: read}
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract exact functions
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('apps/studio-api/worker.js').read_text(encoding='utf-8')
+          def func(name):
+            token=('async function '+name+'(') if ('async function '+name+'(') in s else ('function '+name+'(')
+            start=s.find(token)
+            if start<0: return f'===== {name} =====\nNOT FOUND\n'
+            brace=s.find('{',start)
+            depth=0; i=brace; quote=None; esc=False; tmpl_depth=0
+            # JS brace matcher good enough for function extraction: account for strings/comments/template literals.
+            state='code'
+            while i<len(s):
+              c=s[i]; n=s[i+1] if i+1<len(s) else ''
+              if state=='line':
+                if c=='\n': state='code'
+              elif state=='block':
+                if c=='*' and n=='/': state='code'; i+=1
+              elif state in ('sq','dq','bt'):
+                q={'sq':"'",'dq':'"','bt':'`'}[state]
+                if esc: esc=False
+                elif c=='\\': esc=True
+                elif c==q: state='code'
+              else:
+                if c=='/' and n=='/': state='line'; i+=1
+                elif c=='/' and n=='*': state='block'; i+=1
+                elif c=="'": state='sq'
+                elif c=='"': state='dq'
+                elif c=='`': state='bt'
+                elif c=='{': depth+=1
+                elif c=='}':
+                  depth-=1
+                  if depth==0:
+                    return f'===== {name} =====\n'+s[start:i+1]+'\n'
+              i+=1
+            return f'===== {name} =====\nUNTERMINATED\n'
+          names=['repairAcquireLease','repairLeaseState','repairRecordIds','repairReserveBudget','repairCloseLease','phase6MakeApiJson','phase6ScenarioState','repairInspectorClone']
+          out='\n\n'.join(func(n) for n in names)
+          # Include acquisition dispatch + existing R4 pulse neighborhood.
+          for needle in ['action === "acquire"','action === "pulse_r4_scheduled_selector"']:
+            pos=s.find(needle)
+            out+='\n\n===== neighborhood '+needle+' =====\n'
+            out+=(s[max(0,pos-2000):min(len(s),pos+9000)] if pos>=0 else 'NOT FOUND')
+          Path('/tmp/p1-controller-functions.txt').write_text(out,encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: item5-p1-controller-functions-${{ github.run_id }}
+          path: /tmp/p1-controller-functions.txt
+          retention-days: 7
