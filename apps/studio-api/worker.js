@@ -9593,6 +9593,11 @@ async function repairControlAction(env, input) {
     try {
       if (!before.isActive) await phase6SetScenarioActive(env, lease.scenario_id, true);
       const execution = await phase6RunScenario(env, lease.scenario_id, runInput);
+      const executionState = await phase6WaitForScenarioExecution(env, lease.scenario_id, execution.executionId, 90000, 3000);
+      if (!executionState.done || !executionState.success) {
+        const detail = JSON.stringify(executionState.details || {}).slice(0, 1600);
+        throw new HttpError(502, `R4 Make execution ${execution.executionId} ended ${executionState.status}: ${detail}`);
+      }
       for (let i = 0; i < 30; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         finalTarget = await airtableFetch(env, "Platform Outputs", recordId);
