@@ -1,0 +1,4 @@
+Apply only the Studio API repair-control action pulse_r4_scheduled_selector.
+The action must preserve the production R4 blueprint, require one allowlisted selector target, consume one run budget, and restore R4 OFF in finally.
+No Make scenario execution, render, Airtable Platform Output mutation, or publishing occurs in this source-patch workflow.
+Triggered 2026-08-16 continuation checkpoint.
