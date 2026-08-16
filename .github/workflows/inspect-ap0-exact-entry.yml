@@ -27,7 +27,7 @@ jobs:
           SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
           URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
           SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
-          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5612096,module_ids:[900,1]}' >/tmp/request.json
+          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5578011,module_ids:[900,1]}' >/tmp/request.json
           code=$(curl -sS --max-time 120 -o /tmp/ap0.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
           unset SECRET
           echo "http=$code"
