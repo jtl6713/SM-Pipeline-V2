@@ -1,0 +1,156 @@
+name: Stage Studio Safety Version Without Traffic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-production-stage-safety.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-production-stage
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      KNOWN_GOOD_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
+      WRANGLER_VERSION: 4.123.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate source and install pinned Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/studio-api/worker.js
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          mkdir -p /tmp/stage-proof
+          cd /tmp/stage-proof
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
+
+      - name: Verify v86 is the only live version and capture binding anchor
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          jq -e --arg v "$KNOWN_GOOD_VERSION" '.success==true and (.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].version_id==$v and .result.deployments[0].versions[0].percentage==100' /tmp/deployments-before.json >/dev/null
+          curl -fsS "$API/versions/$KNOWN_GOOD_VERSION" -H "$AUTH" -o /tmp/v86.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
+            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          r=json.loads(Path('/tmp/v86.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          by_name={str(x.get('name')):x for x in bindings}
+          got={k:str(v.get('type')) for k,v in by_name.items()}
+          if got!=expected: raise SystemExit(f'v86 binding contract mismatch: {sorted(got.items())}')
+          plain_names=[k for k,v in expected.items() if v=='plain_text']
+          vars_out={k:by_name[k].get('text') for k in plain_names}
+          if any(v is None for v in vars_out.values()): raise SystemExit('Missing recoverable v86 plain-text values')
+          bucket=by_name['STUDIO_MEDIA'].get('bucket_name') or by_name['STUDIO_MEDIA'].get('bucket')
+          if not bucket: raise SystemExit('Missing recoverable STUDIO_MEDIA bucket identity')
+          cfg={
+            'name':'chicagoshining-studio-api',
+            'main':'worker.js',
+            'compatibility_date':'2026-08-02',
+            'workers_dev':False,
+            'keep_vars':True,
+            'vars':vars_out,
+            'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}]
+          }
+          Path('/tmp/stage-proof/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
+          Path('/tmp/stage-proof/worker.js').write_bytes(Path('apps/studio-api/worker.js').read_bytes())
+          Path('/tmp/v86-binding-audit.json').write_text(json.dumps({'binding_count':len(got),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])},indent=2,sort_keys=True))
+          print('v86_anchor=PASS')
+          PY
+
+      - name: Capture versions before staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/stage-proof
+          ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-before.json
+          jq -e 'type=="array" and length>0' /tmp/versions-before.json >/dev/null
+
+      - name: Upload source as non-live version with keep-vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/stage-proof
+          if ! ./node_modules/.bin/wrangler versions upload --config wrangler.jsonc --keep-vars --message "Repair safety non-live staging proof ${GITHUB_SHA}" >/tmp/stage-upload.log 2>&1; then
+            grep -E 'ERROR|Error|error|code|failed|Failed|missing|Missing|secret|Secret' /tmp/stage-upload.log | head -n 40 >&2 || true
+            exit 1
+          fi
+          ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('/tmp/versions-before.json').read_text())
+          after=json.loads(Path('/tmp/versions-after.json').read_text())
+          def vid(x): return str(x.get('id') or x.get('version_id') or x.get('versionId') or '')
+          old={vid(x) for x in before if vid(x)}
+          new=[vid(x) for x in after if vid(x) and vid(x) not in old]
+          if len(new)!=1: raise SystemExit(f'Expected exactly one new non-live version, found {len(new)}')
+          Path('/tmp/new-version.txt').write_text(new[0])
+          print(f'new_version_id={new[0]}')
+          PY
+
+      - name: Verify staged version has all 11 bindings and remains non-live
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NEW=$(cat /tmp/new-version.txt)
+          curl -fsS "$API/versions/$NEW" -H "$AUTH" -o /tmp/staged-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
+            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          r=json.loads(Path('/tmp/staged-version.json').read_text())['result']
+          got={str(x.get('name')):str(x.get('type')) for x in ((r.get('resources') or {}).get('bindings') or [])}
+          if got!=expected:
+              raise SystemExit(f'Staged version does not have exact 11-binding contract: {sorted(got.items())}')
+          Path('/tmp/staged-binding-audit.json').write_text(json.dumps({'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(got),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])},indent=2,sort_keys=True))
+          print('staged_binding_contract=PASS')
+          PY
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+          jq -e --arg v "$KNOWN_GOOD_VERSION" '(.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].version_id==$v and .result.deployments[0].versions[0].percentage==100' /tmp/deployments-after.json >/dev/null
+          echo "production_unchanged=true"
+
+      - name: Upload sanitized staging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-safety-stage-${{ github.run_id }}
+          path: |
+            /tmp/v86-binding-audit.json
+            /tmp/staged-binding-audit.json
+            /tmp/new-version.txt
+          if-no-files-found: ignore
+          retention-days: 30
