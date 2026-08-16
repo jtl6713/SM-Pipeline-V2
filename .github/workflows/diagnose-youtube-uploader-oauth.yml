@@ -1,0 +1,65 @@
+name: Diagnose YouTube Uploader OAuth
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/diagnose-youtube-uploader-oauth.txt']
+
+permissions: {contents: read}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read configured uploader and probe read-only endpoints
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='YOUTUBE_UPLOAD_SERVICE_URL',{Setting_Name}='YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json,urllib.request,urllib.error
+          d=json.load(open('/tmp/settings')); vals={r['fields']['Setting_Name']:str(r['fields'].get('Setting_Value','')).strip() for r in d.get('records',[])}
+          base=vals.get('YOUTUBE_UPLOAD_SERVICE_URL','').rstrip('/'); secret=vals.get('YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET','')
+          if not base: raise SystemExit('missing uploader URL')
+          paths=['/','/health','/status','/api/health','/oauth/status','/auth/status','/oauth','/auth','/authorize','/oauth/start','/auth/start']
+          headersets=[('plain',{}),('bearer',{'Authorization':'Bearer '+secret}),('shared-secret',{'X-Shared-Secret':secret}),('api-key',{'X-API-Key':secret})]
+          out={'base':base,'probes':[]}
+          for path in paths:
+            for hname,headers in headersets:
+              req=urllib.request.Request(base+path,method='GET',headers={**headers,'User-Agent':'SM-Pipeline-V2-YouTube-Diagnostic/1.0'})
+              try:
+                with urllib.request.urlopen(req,timeout=12) as r:
+                  body=r.read(4096).decode('utf-8','replace')
+                  out['probes'].append({'path':path,'auth':hname,'status':r.status,'content_type':r.headers.get('content-type'),'location':r.headers.get('location'),'body':body})
+              except urllib.error.HTTPError as e:
+                body=e.read(2048).decode('utf-8','replace')
+                out['probes'].append({'path':path,'auth':hname,'status':e.code,'content_type':e.headers.get('content-type'),'location':e.headers.get('location'),'body':body})
+              except Exception as e:
+                out['probes'].append({'path':path,'auth':hname,'error':type(e).__name__+': '+str(e)})
+          # redact configured secret from any echoed body
+          raw=json.dumps(out,indent=2)
+          if secret: raw=raw.replace(secret,'[REDACTED]')
+          open('/tmp/youtube-oauth-diagnostic.json','w').write(raw)
+          print(json.dumps({'ok':True,'base':base,'probe_count':len(out['probes'])}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: youtube-uploader-oauth-diagnostic-${{ github.run_id }}
+          path: /tmp/youtube-oauth-diagnostic.json
+          retention-days: 7
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings
