@@ -1,0 +1,1 @@
+Rollback-safe selector-only repair for TTD-ORCH 5806668. Preserve OFF state, schedule, views, module IDs and webhook identities. Add explicit TikTok/non-test/unlocked/due production guards only.
