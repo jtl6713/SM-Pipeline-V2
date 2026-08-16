@@ -3,5 +3,6 @@
   "test_run_id": "REPAIR-TOP5-SAFETY-20260816-A",
   "lease_id": "REPAIR-TOP5-SAFETY-20260816-A-L1",
   "scenario_id": 5893243,
-  "expected_http_status": 200
+  "expected_http_status": 200,
+  "control_attempt": 2
 }
