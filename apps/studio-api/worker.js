@@ -10526,6 +10526,56 @@ async function repairR4ExactOutputEntry(env) {
   }
 }
 
+
+async function repairInspectMakeBlueprintHistory(env, scenarioId, moduleId) {
+  const id = Number(scenarioId);
+  const targetModuleId = Number(moduleId || 900);
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "scenario_id must be a positive integer");
+  if (!Number.isInteger(targetModuleId) || targetModuleId <= 0) throw new HttpError(400, "module_id must be a positive integer");
+
+  const rawVersions = await phase6MakeApiJson(env, `/scenarios/${id}/blueprints`, { method: "GET" });
+  const candidates = rawVersions?.response?.scenariosBlueprints
+    || rawVersions?.scenariosBlueprints
+    || rawVersions?.response?.blueprints
+    || rawVersions?.blueprints
+    || (Array.isArray(rawVersions?.response) ? rawVersions.response : null)
+    || (Array.isArray(rawVersions) ? rawVersions : null)
+    || [];
+  if (!Array.isArray(candidates)) throw new HttpError(502, "Make blueprint versions response was not an array");
+
+  const versions = [];
+  const recent = candidates.slice(0, 60);
+  for (const version of recent) {
+    const blueprintId = Number(version?.id ?? version?.blueprintId ?? version?.blueprint_id);
+    if (!Number.isInteger(blueprintId) || blueprintId <= 0) continue;
+    const body = await phase6MakeApiJson(env, `/scenarios/${id}/blueprint?blueprintId=${blueprintId}`, { method: "GET" });
+    const blueprint = body?.response?.blueprint || body?.blueprint;
+    let target = null;
+    const walk = (flow) => {
+      for (const node of Array.isArray(flow) ? flow : []) {
+        if (Number(node?.id) === targetModuleId) target = node;
+        for (const route of Array.isArray(node?.routes) ? node.routes : []) walk(route?.flow);
+      }
+    };
+    if (blueprint && typeof blueprint === "object") walk(blueprint.flow);
+    versions.push({
+      blueprint_id: blueprintId,
+      created_at: String(version?.createdAt || version?.created_at || version?.timestamp || ""),
+      is_draft: Boolean(version?.draft ?? version?.isDraft ?? version?.is_draft),
+      target_module_present: Boolean(target),
+      target_module_type: target ? String(target?.module || "") : null,
+      target_hook_id: target ? Number(target?.parameters?.hook || target?.mapper?.hook || 0) || null : null,
+      target_module_name: target ? String(target?.metadata?.designer?.name || "") : null,
+    });
+  }
+  return {
+    scenario_id: id,
+    module_id: targetModuleId,
+    version_count_returned: versions.length,
+    versions,
+  };
+}
+
 async function adminRepairControlStatus(request, env) {
   const records = await repairLeaseRecords(env);
   const leases = records.map(repairLeaseState).map((l) => ({
@@ -10574,6 +10624,12 @@ async function adminRepairControl(request, env, authorization) {
     const confirm = repairString(input?.confirm, "confirm", 80);
     if (confirm !== "INSPECT-MAKE-MODULES-V1") throw new HttpError(400, "Exact Make module inspection confirmation is required");
     const inspected = await repairInspectMakeScenarioModules(env, input?.scenario_id, input?.module_ids);
+    return respond(request, env, { ok: true, action, inspected });
+  }
+  if (action === "inspect_make_blueprint_history") {
+    const confirm = repairString(input?.confirm, "confirm", 80);
+    if (confirm !== "INSPECT-MAKE-BLUEPRINT-HISTORY-V1") throw new HttpError(400, "Make blueprint history inspection confirmation is required");
+    const inspected = await repairInspectMakeBlueprintHistory(env, input?.scenario_id, input?.module_id);
     return respond(request, env, { ok: true, action, inspected });
   }
   if (action === "repair_make_admin_module19") {
