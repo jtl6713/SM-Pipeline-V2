@@ -1,1 +1,1 @@
-Mark Item 1 Activation leases and operation limits complete after budget-exhaustion, abandoned-lease recovery, shutdown verification, terminal-ledger stability, cleanup, and zero-live-lease proof.
+Mark Item 1 Activation leases and operation limits complete after budget-exhaustion, abandoned-lease recovery, shutdown verification, terminal-ledger stability, cleanup, and zero-live-lease proof. Retrigger corrected workflow.
