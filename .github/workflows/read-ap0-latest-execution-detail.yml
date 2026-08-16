@@ -1,0 +1,64 @@
+name: Read AP0 Latest Execution Detail
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-ap0-latest-execution-detail.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read latest AP0 auto execution detail
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json')); vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip()); open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5612096
+          curl -fsS "$BASE/scenarios/$SID/logs?pg%5Blimit%5D=20" -H "Authorization: Token $TOKEN" -o /tmp/logs.json
+          EID=$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/logs.json')); rows=d.get('scenarioLogs') or []
+          x=next((r for r in rows if r.get('type')=='auto'),None)
+          if not x or not x.get('id'): raise SystemExit('No auto execution found')
+          print(x['id'])
+          PY
+          )
+          code=$(curl -sS -o /tmp/detail.json -w '%{http_code}' "$BASE/scenarios/$SID/executions/$EID" -H "Authorization: Token $TOKEN")
+          echo "detail_http=$code"
+          [[ "$code" == 200 ]] || { cat /tmp/detail.json; exit 1; }
+          python - <<'PY'
+          import json,hashlib
+          d=json.load(open('/tmp/detail.json')); x=d.get('execution') or d.get('response') or d
+          out={k:x.get(k) for k in ('status','operations','duration','startedAt','finishedAt','type') if k in x}
+          out['execution_id_fingerprint']=hashlib.sha256(str(x.get('id') or '').encode()).hexdigest()[:12]
+          print(json.dumps(out,indent=2)); open('/tmp/ap0-latest-execution-detail.json','w').write(json.dumps(out,indent=2))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/logs.json /tmp/detail.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ap0-latest-execution-detail-${{ github.run_id }}
+          path: /tmp/ap0-latest-execution-detail.json
+          if-no-files-found: warn
+          retention-days: 30
