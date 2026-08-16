@@ -1,0 +1,162 @@
+name: Repair Item 2 Carousel Finalize + Remaining Test Isolation
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-item2-carousel-finalize-test-isolation.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch C7/C8 exact parent/output scope and production test exclusions with rollback
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          export TOKEN=$(cat /tmp/t); export BASE=$(cat /tmp/b)
+          python - <<'PY'
+          import json, os, copy, urllib.request, urllib.error, time
+          BASE=os.environ['BASE']; TOKEN=os.environ['TOKEN']
+          IDS={'C7':5589819,'C8':5589822,'PUB1':5576757,'PUB2':5576753,'M1':5569896,'A4':5578180}
+          expected_hooks={'C7':2623586,'C8':2623594}
+          expected_names={
+            'C7':'C7 - Finalize Approved Carousel v2.3 - Single Parent Bundle Fan-Out Fix - Webhook Preserved',
+            'C8':'C8 - Create Platform Outputs v2.0 - Single Parent Bundle Exact Reconciliation',
+          }
+          PO_TEST='fld5Ew2FySt51Jl2Q'; CI_TEST='fldA4dFKiiGpWNk7b'; CI_CONTENT_ID='fldmNgbvXvcKrZFKj'
+
+          def api(path, method='GET', body=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            req=urllib.request.Request(BASE+path,data=data,method=method,headers={'Authorization':'Token '+TOKEN,'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-Repair/1.0'})
+            try:
+              with urllib.request.urlopen(req,timeout=30) as r: return json.loads(r.read().decode() or '{}')
+            except urllib.error.HTTPError as e:
+              raise RuntimeError(f'Make {method} {path} HTTP {e.code}: '+e.read().decode()[:500])
+          def unsc(d): return d.get('scenario') or d.get('response') or d
+          def unbp(d):
+            bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+            return json.loads(bp) if isinstance(bp,str) else bp
+          def walk(flow,out=None):
+            if out is None: out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [],out)
+            return out
+          def add_blank_guard(mapper):
+            f=str(mapper.get('formula') or '').strip()
+            if 'Test_Run_ID' in f: return
+            mapper['formula']=f'AND({{Test_Run_ID}}=BLANK(),{f})' if f else '{Test_Run_ID}=BLANK()'
+
+          before={}; patched={}; meta={}; written=[]
+          for key,sid in IDS.items():
+            sc=unsc(api(f'/scenarios/{sid}')); bp=unbp(api(f'/scenarios/{sid}/blueprint?draft=false'))
+            if key in expected_names and sc.get('name')!=expected_names[key]: raise RuntimeError(f'{key} name drift')
+            if key in expected_hooks and sc.get('hookId')!=expected_hooks[key]: raise RuntimeError(f'{key} hook drift')
+            # C7/C8 are immediate webhook workers; the scheduled production owners must remain OFF.
+            if key in ('PUB1','PUB2','M1','A4') and sc.get('isActive') is not False: raise RuntimeError(f'{key} must be OFF')
+            before[key]=bp; patched[key]=copy.deepcopy(bp); meta[key]=copy.deepcopy(sc); time.sleep(.25)
+
+          # C7 exact parent repair.
+          c7=walk(patched['C7'].get('flow') or [])
+          h7=c7.get(900); p7=c7.get(901); t8=c7.get(11)
+          if not h7 or h7.get('module')!='gateway:CustomWebHook' or (h7.get('parameters') or {}).get('hook')!=2623586: raise RuntimeError('C7 webhook drift')
+          if not p7 or p7.get('module')!='airtable:ActionGetRecord': raise RuntimeError('C7 Module 901 drift')
+          oldid=str((p7.get('mapper') or {}).get('id') or '')
+          if oldid!='recFXgtk8mkYb9jwB': raise RuntimeError(f'C7 hard-coded parent precondition drift: {oldid}')
+          p7.setdefault('mapper',{})['id']='{{900.content_record_id}}'
+          if t8 and t8.get('module')=='http:MakeRequest':
+            body=str((t8.get('mapper') or {}).get('jsonStringBodyContent') or '')
+            if body and 'content_record_id' in body and 'test_run_id' not in body:
+              # Append test identity by parsing/replacing final object conservatively.
+              try:
+                obj=json.loads(body)
+                obj['test_run_id']='{{901.'+CI_TEST+'}}'
+                t8['mapper']['jsonStringBodyContent']=json.dumps(obj,separators=(',',':'))
+              except Exception:
+                pass
+
+          # C8 exact existing-output scope + test identity propagation.
+          c8=walk(patched['C8'].get('flow') or [])
+          h8=c8.get(900); parent=c8.get(2); search=c8.get(8); create=c8.get(4); update=c8.get(12)
+          if not h8 or h8.get('module')!='gateway:CustomWebHook' or (h8.get('parameters') or {}).get('hook')!=2623594: raise RuntimeError('C8 webhook drift')
+          if not parent or parent.get('module')!='airtable:ActionGetRecord' or str((parent.get('mapper') or {}).get('id'))!='{{900.content_record_id}}': raise RuntimeError('C8 parent exactness drift')
+          if not search or search.get('module')!='airtable:ActionSearchRecords': raise RuntimeError('C8 Module 8 drift')
+          sm=search.setdefault('mapper',{})
+          if str(sm.get('maxRecords'))!='100': raise RuntimeError('C8 Module 8 maxRecords precondition drift')
+          if str(sm.get('formula') or '').strip(): raise RuntimeError('C8 Module 8 unexpectedly already has formula')
+          sm['maxRecords']='1'
+          sm['formula']='AND(FIND(",{{2.'+CI_CONTENT_ID+'}},", "," & ARRAYJOIN({Content_Item}) & ",") > 0, {Platform}="{{get(get(3.array; 1); "platform")}}", {Aspect_Ratio}="{{get(get(3.array; 1); "ratio")}}")'
+          if not create or create.get('module')!='airtable:ActionCreateRecord': raise RuntimeError('C8 Module 4 drift')
+          if not update or 'UpdateRecord' not in str(update.get('module')): raise RuntimeError('C8 Module 12 drift')
+          create.setdefault('mapper',{}).setdefault('record',{})[PO_TEST]='{{2.'+CI_TEST+'}}'
+          update.setdefault('mapper',{}).setdefault('record',{})[PO_TEST]='{{2.'+CI_TEST+'}}'
+
+          # Remaining production Platform Output selectors: PUB1/PUB2/M1 and A4 Module 5.
+          for key,mid in [('PUB1',1),('PUB2',1),('M1',1),('A4',5)]:
+            nodes=walk(patched[key].get('flow') or []); n=nodes.get(mid)
+            if not n or n.get('module')!='airtable:ActionSearchRecords': raise RuntimeError(f'{key} Module {mid} selector drift')
+            add_blank_guard(n.setdefault('mapper',{}))
+
+          try:
+            for key in ('C7','C8','PUB1','PUB2','M1','A4'):
+              api(f'/scenarios/{IDS[key]}?confirmed=true','PATCH',{'blueprint':json.dumps(patched[key],separators=(',',':'))})
+              written.append(key); time.sleep(.6)
+
+            evidence={}
+            for key in ('C7','C8','PUB1','PUB2','M1','A4'):
+              sc=unsc(api(f'/scenarios/{IDS[key]}')); bp=unbp(api(f'/scenarios/{IDS[key]}/blueprint?draft=false')); nodes=walk(bp.get('flow') or [])
+              if sc.get('hookId')!=meta[key].get('hookId') or sc.get('scheduling')!=meta[key].get('scheduling') or sc.get('isActive')!=meta[key].get('isActive'): raise RuntimeError(f'{key} metadata drift')
+              if set(nodes)!=set(walk(before[key].get('flow') or [])): raise RuntimeError(f'{key} module ID set changed')
+              evidence[key]={'scenario_id':IDS[key],'active':sc.get('isActive'),'hookId':sc.get('hookId')}
+              time.sleep(.2)
+            c7v=walk(unbp(api(f'/scenarios/{IDS["C7"]}/blueprint?draft=false')).get('flow') or [])
+            c8v=walk(unbp(api(f'/scenarios/{IDS["C8"]}/blueprint?draft=false')).get('flow') or [])
+            if str((c7v[901].get('mapper') or {}).get('id'))!='{{900.content_record_id}}': raise RuntimeError('C7 exact parent not live')
+            f8=str((c8v[8].get('mapper') or {}).get('formula') or '')
+            if 'Content_Item' not in f8 or 'Platform' not in f8 or 'Aspect_Ratio' not in f8 or str((c8v[8].get('mapper') or {}).get('maxRecords'))!='1': raise RuntimeError('C8 exact existing-output scope not live')
+            if (c8v[4].get('mapper') or {}).get('record',{}).get(PO_TEST)!='{{2.'+CI_TEST+'}}': raise RuntimeError('C8 create Test_Run_ID missing')
+            if (c8v[12].get('mapper') or {}).get('record',{}).get(PO_TEST)!='{{2.'+CI_TEST+'}}': raise RuntimeError('C8 update Test_Run_ID missing')
+            for key,mid in [('PUB1',1),('PUB2',1),('M1',1),('A4',5)]:
+              nv=walk(unbp(api(f'/scenarios/{IDS[key]}/blueprint?draft=false')).get('flow') or [])[mid]
+              ff=str((nv.get('mapper') or {}).get('formula') or '')
+              if 'Test_Run_ID' not in ff or 'BLANK()' not in ff: raise RuntimeError(f'{key} test exclusion missing')
+            evidence['carousel_exactness']={'c7_exact_parent':True,'c8_exact_existing_output':True,'c8_test_identity_propagation':True}
+            open('/tmp/evidence.json','w').write(json.dumps({'passed':True,'evidence':evidence},indent=2))
+            print(json.dumps({'passed':True,'carousel_exactness':True,'remaining_test_exclusions':True}))
+          except Exception:
+            for key in reversed(written):
+              try: api(f'/scenarios/{IDS[key]}?confirmed=true','PATCH',{'blueprint':json.dumps(before[key],separators=(',',':'))})
+              except Exception as re: print('ROLLBACK_ERROR',key,str(re))
+            raise
+          PY
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item2-carousel-finalize-test-isolation-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings
