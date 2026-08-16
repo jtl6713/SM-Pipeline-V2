@@ -1,6 +1,7 @@
 {
-  "correlation_id":"SUNSET-E2E-ITEM4-STATUS-20260816-0201",
+  "correlation_id":"SUNSET-E2E-VARIANTS-20260816-0203",
   "requests":[
-    {"name":"item4-status","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ/item4"}
+    {"name":"prepare-variants","method":"POST","path":"/api/production-requests/recc9H8SXdUnKEMhQ/variants","body":{}},
+    {"name":"item4-after-variants","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ/item4"}
   ]
 }
