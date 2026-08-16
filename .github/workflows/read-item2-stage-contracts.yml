@@ -39,14 +39,22 @@ jobs:
             sleep 1
             curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
             SID=$sid python - <<'PY' >>/tmp/contracts.ndjson
-          import json,os
+          import json,os,re,urllib.parse
           sid=int(os.environ['SID']); sd=json.load(open('/tmp/sc')); bd=json.load(open('/tmp/bp'))
           sc=sd.get('scenario') or sd.get('response') or sd
           bp=bd.get('blueprint') or (bd.get('response') or {}).get('blueprint') or bd
           if isinstance(bp,str): bp=json.loads(bp)
           mods=[]
-          def walk(flow):
-            for n in flow or []:
+          def safe_url(v):
+            s=str(v or '')
+            if not s: return s
+            try:
+              u=urllib.parse.urlsplit(s)
+              return (u.path or '/') + (('?' + u.query) if u.query else '')
+            except Exception: return '<url-redacted>'
+          def walk(flow,path='root'):
+            for idx,n in enumerate(flow or []):
+              nodepath=f'{path}/{idx}:{n.get("id")}'
               mod=str(n.get('module') or ''); meta=n.get('metadata') or {}; name=str((meta.get('designer') or {}).get('name') or meta.get('name') or '')
               mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; filt=n.get('filter')
               blob=json.dumps({'module':mod,'name':name,'mapper':mapper,'parameters':params,'filter':filt},default=str)
@@ -56,9 +64,10 @@ jobs:
                 for k,v in {**params,**mapper}.items():
                   kl=str(k).lower()
                   if any(x in kl for x in ['authorization','token','secret','api_key','apikey']): safe[k]='<redacted>'
-                  elif kl in ['id','body','method'] or any(x in kl for x in ['record','formula','max','limit','table','view','hook','status']): safe[k]=v
-                mods.append({'id':n.get('id'),'module':mod,'name':name,'config':safe,'filter':filt,'has_test_run_id':'Test_Run_ID' in blob,'has_do_not_publish':'Do_Not_Publish' in blob,'has_output_record_id':'output_record_id' in blob,'has_record_id':'record_id' in blob})
-              for r in n.get('routes') or []: walk(r.get('flow') or [])
+                  elif 'url' in kl: safe[k]=safe_url(v)
+                  elif kl in ['id','body','method','jsonstringbodycontent','bodycontent','requestbody','data'] or 'body' in kl or any(x in kl for x in ['record','formula','max','limit','table','view','hook','status']): safe[k]=v
+                mods.append({'path':nodepath,'id':n.get('id'),'module':mod,'name':name,'config':safe,'filter':filt,'has_test_run_id':'Test_Run_ID' in blob,'has_do_not_publish':'Do_Not_Publish' in blob,'has_output_record_id':'output_record_id' in blob,'has_record_id':'record_id' in blob})
+              for ridx,r in enumerate(n.get('routes') or []): walk(r.get('flow') or [],f'{nodepath}/route{ridx}')
           walk(bp.get('flow') or [])
           text=json.dumps(bp,default=str)
           print(json.dumps({'id':sid,'name':sc.get('name'),'active':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'terms':{'Test_Run_ID':'Test_Run_ID' in text,'Do_Not_Publish':'Do_Not_Publish' in text,'output_record_id':'output_record_id' in text,'record_id':'record_id' in text},'modules':mods},separators=(',',':')))
