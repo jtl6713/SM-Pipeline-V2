@@ -15,8 +15,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BRIDGE_WORKER: chicagoshining-repair-control-bridge
-      TEST_RUN_ID: REPAIR-R4-SCHEDULED-20260816-I
-      LEASE_ID: REPAIR-R4-SCHEDULED-20260816-I-L1
+      TEST_RUN_ID: REPAIR-R4-SCHEDULED-20260816-J
+      LEASE_ID: REPAIR-R4-SCHEDULED-20260816-J-L1
       SCENARIO_ID: '5556716'
       TARGET_OUTPUT: rechqCjRY66zZzjBg
       DENY_OUTPUT: recfp2sPnpBKfibQl
@@ -38,9 +38,9 @@ jobs:
           test "$(call /tmp/pos-req.json /tmp/positive.json)" = 200; jq -e '.bridge_ok==true and .upstream_json.ok==true' /tmp/positive.json >/dev/null
           jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg r "$DENY_OUTPUT" '{action:"assert_output_allowed",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$r}' >/tmp/neg-req.json
           call /tmp/neg-req.json /tmp/negative.json >/dev/null; jq -e '((.bridge_ok==true and .upstream_status==403) or (.bridge_ok==false and (.exception|type=="string")))' /tmp/negative.json >/dev/null
-          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg r "$TARGET_OUTPUT" '{action:"pulse_r4_exact_output",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$r,intended_stage:"R4",attempt_number:1,idempotency_key:($tr+":R4:"+$r+":1")}' >/tmp/pulse-req.json
-          CODE=$(call /tmp/pulse-req.json /tmp/pulse.json); echo "pulse_http=$CODE"; jq -c '{bridge_ok,upstream_status,upstream_ok:(.upstream_json.ok//null),exception}' /tmp/pulse.json || true
-          test "$CODE" = 200; jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/pulse.json >/dev/null
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg r "$TARGET_OUTPUT" '{action:"pulse_r4_scheduled_selector",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$r}' >/tmp/pulse-req.json
+          CODE=$(call /tmp/pulse-req.json /tmp/pulse.json); echo "pulse_http=$CODE"; jq -c '{bridge_ok,upstream_status,upstream_ok:(.upstream_json.ok//null),exception,observed_status:(.upstream_json.observed_status//null),selector_target_only:(.upstream_json.selector_target_only//null)}' /tmp/pulse.json || true
+          test "$CODE" = 200; jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.selector_target_only==true' /tmp/pulse.json >/dev/null
           unset SECRET
       - name: Save bounded evidence
         if: always()
