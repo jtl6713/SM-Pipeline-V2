@@ -133,17 +133,27 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-subdomain.json
           jq -er '.result.subdomain' /tmp/account-subdomain.json >/tmp/account-subdomain.txt
 
-      - name: Execute exact repair command
+      - name: Wait for propagation and execute exact repair command
         shell: bash
         run: |
           set -euo pipefail
           SUBDOMAIN=$(cat /tmp/account-subdomain.txt)
           TOKEN=$(cat /tmp/path-token.txt)
           URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
-          code=$(curl -sS --retry 4 --retry-delay 2 --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL")
           EXPECTED=$(jq -r '.expected_http_status // 200' deploy/repair-control-command.json)
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
+            [[ "$code" == "$EXPECTED" ]] && break
+            echo "bridge_not_ready_or_unexpected attempt=$i http=$code expected=$EXPECTED"
+            sleep 2
+          done
           echo "repair_control_http=$code expected_http=$EXPECTED"
-          jq -c 'if .lease then {ok,action,lease:{record_id:.lease.record_id,lease_id:.lease.lease_id,test_run_id:.lease.test_run_id,scenario_id:.lease.scenario_id,expires_at:.lease.expires_at,operations_used:.lease.operations_used,runs_used:.lease.runs_used},output:(.output // null),outputs:(.outputs // null),before:(.before // null),after:(.after // null),error:(.error // null)} else {ok,action,error:(.error // null),message:(.message // null),swept:(.swept // null)} end' /tmp/result.json || cat /tmp/result.json
+          if jq empty /tmp/result.json >/dev/null 2>&1; then
+            jq -c 'if .lease then {ok,action,lease:{record_id:.lease.record_id,lease_id:.lease.lease_id,test_run_id:.lease.test_run_id,scenario_id:.lease.scenario_id,expires_at:.lease.expires_at,operations_used:.lease.operations_used,runs_used:.lease.runs_used},output:(.output // null),outputs:(.outputs // null),before:(.before // null),after:(.after // null),error:(.error // null)} else {ok,action,error:(.error // null),message:(.message // null),swept:(.swept // null)} end' /tmp/result.json
+          else
+            head -c 500 /tmp/result.json >&2 || true
+          fi
           test "$code" -eq "$EXPECTED"
           if [[ "$EXPECTED" -ge 200 && "$EXPECTED" -lt 300 ]]; then jq -e '.ok==true' /tmp/result.json >/dev/null; else jq -e '.ok==false' /tmp/result.json >/dev/null; fi
 
