@@ -1,0 +1,67 @@
+name: Cloudflare Binding Inheritance Safety Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cloudflare-binding-inherit-test.yml'
+      - 'deploy/cloudflare-binding-inherit-test.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: chicagoshining-studio-api
+    steps:
+      - uses: actions/checkout@v6
+      - name: Capture active version and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/d.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/d.json)
+          echo "$ACTIVE" >/tmp/active
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions/$ACTIVE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/v.json
+          jq -e '.success==true and ((.result.resources.bindings//[])|length)>0' /tmp/v.json >/dev/null
+          echo "active_bindings=$(jq '(.result.resources.bindings//[])|length' /tmp/v.json)"
+          curl -fsS -D /tmp/h "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/content/v2" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/m
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          h=Path('/tmp/h').read_text(encoding='latin-1'); b=Path('/tmp/m').read_bytes(); ct=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',h)[-1].strip()
+          msg=BytesParser(policy=default).parsebytes(('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+b)
+          for p in msg.walk():
+            if not p.is_multipart() and (p.get_filename()=='worker.js' or p.get_param('name',header='content-disposition')=='worker.js'):
+              Path('/tmp/worker.js').write_bytes(p.get_payload(decode=True)); break
+          else: raise SystemExit('worker.js not found')
+          PY
+          node --check /tmp/worker.js
+      - name: Upload inactive version inheriting exact active bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE=$(cat /tmp/active)
+          jq --arg active "$ACTIVE" '.result.resources.script_runtime as $rt | {main_module:"worker.js",annotations:{"workers/message":"Binding inheritance safety test - inactive only"},bindings:[.result.resources.bindings[]|{name:.name,type:"inherit",version_id:$active}]} + (if $rt.compatibility_date then {compatibility_date:$rt.compatibility_date} else {} end) + {compatibility_flags:($rt.compatibility_flags//[])}' /tmp/v.json >/tmp/meta.json
+          code=$(curl -sS -o /tmp/u.json -w '%{http_code}' -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions?bindings_inherit=strict" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -F 'metadata=@/tmp/meta.json;type=application/json' -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          echo "upload_http=$code"
+          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then jq '{success,errors,messages}' /tmp/u.json >&2; exit 1; fi
+          jq -e '.success==true' /tmp/u.json >/dev/null
+          echo "new_bindings=$(jq '(.result.resources.bindings//[])|length' /tmp/u.json)"
+          jq -e --slurpfile old /tmp/v.json '([.result.resources.bindings[]|{name,type}]|sort_by(.name)) == ([$old[0].result.resources.bindings[]|{name,type}]|sort_by(.name))' /tmp/u.json >/dev/null
+      - name: Verify production active version unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE=$(cat /tmp/active)
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
+          AFTER=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)
+          echo "production_unchanged=$([[ "$BEFORE" == "$AFTER" ]] && echo true || echo false)"
+          test "$BEFORE" = "$AFTER"
