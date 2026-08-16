@@ -1,0 +1,9 @@
+Rollback-safe AP0 v5.2 revision restage hardening for scenario 5612096.
+Expected scope only:
+- preserve exact webhook input and nine-module topology;
+- version R2 object key by Final_File_ID;
+- allow restage when stored Publish_Asset_File_Name does not match current Final_File_ID revision;
+- leave prior successful Publish_Asset_URL/Ready_At untouched unless new upload succeeds;
+- verify scenario remains OFF, hook 2653029, same module IDs; rollback on mismatch.
+No scenario activation. No publishing invocation.
+Triggered 2026-08-16 continuation checkpoint.
