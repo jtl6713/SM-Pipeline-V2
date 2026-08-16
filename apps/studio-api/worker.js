@@ -9987,12 +9987,12 @@ async function repairR4ExactOutputEntry(env) {
   const expectedFormula = 'AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0)';
   const exactRecordExpression = '{{input.output_record_id}}';
   const requiredInputs = [
-    { name: 'test_run_id', type: 'text', default: null, required: true, multiline: false },
-    { name: 'output_record_id', type: 'text', default: null, required: true, multiline: false },
-    { name: 'platform_output_id', type: 'text', default: null, required: true, multiline: false },
-    { name: 'intended_stage', type: 'text', default: 'R4', required: true, multiline: false },
-    { name: 'attempt_number', type: 'number', default: 1, required: true },
-    { name: 'idempotency_key', type: 'text', default: null, required: true, multiline: false },
+    { name: 'test_run_id', type: 'text', default: null, required: false, multiline: false },
+    { name: 'output_record_id', type: 'text', default: null, required: false, multiline: false },
+    { name: 'platform_output_id', type: 'text', default: null, required: false, multiline: false },
+    { name: 'intended_stage', type: 'text', default: 'R4', required: false, multiline: false },
+    { name: 'attempt_number', type: 'number', default: 1, required: false },
+    { name: 'idempotency_key', type: 'text', default: null, required: false, multiline: false },
   ];
 
   const stateBefore = await phase6ScenarioState(env, scenarioId);
@@ -10014,7 +10014,7 @@ async function repairR4ExactOutputEntry(env) {
   const existing1 = existingMap.get(1);
   if (!existing1) throw new HttpError(409, 'R4 module 1 is missing');
   const hasExactInterface = requiredInputs.every((required) =>
-    originalInterface.input.some((actual) => actual?.name === required.name && actual?.type === required.type && actual?.required === true)
+    originalInterface.input.some((actual) => actual?.name === required.name && actual?.type === required.type && actual?.required === false)
   );
   if (existing1?.module === 'airtable:ActionGetRecord' && existing1?.mapper?.id === exactRecordExpression && hasExactInterface) {
     const stateAlready = await phase6ScenarioState(env, scenarioId);
@@ -10030,6 +10030,8 @@ async function repairR4ExactOutputEntry(env) {
       scenario_off_before: true,
       scenario_off_after: true,
       no_webhook_required: true,
+      make_interface_inputs_optional: true,
+      invocation_contract_enforced_by_worker: true,
     };
   }
 
@@ -10096,7 +10098,7 @@ async function repairR4ExactOutputEntry(env) {
     const afterInterfaceBody = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/interface`, { method: 'GET' });
     const actualInterface = afterInterfaceBody?.interface || afterInterfaceBody?.response?.interface || {};
     const actualInputs = Array.isArray(actualInterface?.input) ? actualInterface.input : [];
-    if (!requiredInputs.every((required) => actualInputs.some((actualInput) => actualInput?.name === required.name && actualInput?.type === required.type && actualInput?.required === true))) {
+    if (!requiredInputs.every((required) => actualInputs.some((actualInput) => actualInput?.name === required.name && actualInput?.type === required.type && actualInput?.required === false))) {
       throw new HttpError(502, 'R4 exact input interface did not verify');
     }
     const stateAfter = await phase6ScenarioState(env, scenarioId);
@@ -10112,6 +10114,8 @@ async function repairR4ExactOutputEntry(env) {
       scenario_off_after: true,
       exact_postwrite_verification: true,
       no_webhook_required: true,
+      make_interface_inputs_optional: true,
+      invocation_contract_enforced_by_worker: true,
     };
   } catch (error) {
     let rollbackError = null;
