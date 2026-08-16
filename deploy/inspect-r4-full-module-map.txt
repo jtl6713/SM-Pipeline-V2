@@ -1,1 +1,3 @@
 Read-only final verification for repaired R4 scenario 5556716. Confirm R4 OFF, 16 total modules, Module 1 is Airtable GetRecord named Get Exact Platform Output using input.output_record_id, no webhook/gateway, and Modules 2-32 retain their prior types/names/routes. No Make mutation, activation/run, Airtable write, render, or publishing. Triggered 2026-08-16 final exact-entry evidence.
+
+Emergency read-only R4 OFF/topology verification after subrequest-limit failure run 31960010498.
