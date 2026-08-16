@@ -1,0 +1,1 @@
+Update authoritative 21-item ledger with completed R4/R5 controlled orchestration delta and live-proven AP0 immutable revision staging/failure-preservation evidence. Preserve top-five gate; no scenario activation or production mutation.
