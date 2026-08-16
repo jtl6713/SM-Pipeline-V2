@@ -10,7 +10,7 @@ permissions: {contents: read}
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
     steps:
       - uses: actions/checkout@v6
@@ -34,12 +34,12 @@ jobs:
           PY
           TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
           : >/tmp/contracts.ndjson
-          for sid in 5569495 5576620 5576363 5576353 5528742 5530955 5531703 5582062; do
+          for sid in 5514334 5533802 5536624 5582071 5586579 5587853 5587860 5582074 5589218 5589819 5589822 5589932 5592384 5576753 5576757 5580354 5602193 5715530 5715500 5531974 5568863 5569035 5578180 5894885 5546623 5893683 5569896 5764543; do
             curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/sc
-            sleep 1
+            sleep .4
             curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
             SID=$sid python - <<'PY' >>/tmp/contracts.ndjson
-          import json,os,re,urllib.parse
+          import json,os,urllib.parse
           sid=int(os.environ['SID']); sd=json.load(open('/tmp/sc')); bd=json.load(open('/tmp/bp'))
           sc=sd.get('scenario') or sd.get('response') or sd
           bp=bd.get('blueprint') or (bd.get('response') or {}).get('blueprint') or bd
@@ -72,7 +72,7 @@ jobs:
           text=json.dumps(bp,default=str)
           print(json.dumps({'id':sid,'name':sc.get('name'),'active':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'terms':{'Test_Run_ID':'Test_Run_ID' in text,'Do_Not_Publish':'Do_Not_Publish' in text,'output_record_id':'output_record_id' in text,'record_id':'record_id' in text},'modules':mods},separators=(',',':')))
           PY
-            sleep 1
+            sleep .4
           done
           cat /tmp/contracts.ndjson
       - name: Destroy credentials
