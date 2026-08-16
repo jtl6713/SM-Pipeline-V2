@@ -1,4 +1,4 @@
 Read-only live Make blueprint topology audit trigger.
-Targets: scenarios 5893243, 5813561, 5864632, 5556716, 5612096.
+Targets include R3 5557966 and R4 5556716 plus reference orchestrators.
 No scenario activation, no blueprint write, no publishing.
-Triggered: 2026-08-16T13:36-04:00 topology-aware retry.
+Triggered: 2026-08-16T13:43-04:00 R3-to-R4 handoff audit.
