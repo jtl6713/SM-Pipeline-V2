@@ -9574,8 +9574,8 @@ async function repairControlAction(env, input) {
       const observed = await phase6WaitForOutputStatus(env, recordId, (record) => {
         const status = String(f(record, "Render_Status") || "");
         return ["Rendering", "Rendered", "Failed"].includes(status);
-      }, 45000, 1000);
-      if (!observed?.matched) throw new HttpError(502, `R4 scheduled selector did not advance Platform Output ${recordId} within 45 seconds`);
+      }, 24000, 3000);
+      if (!observed?.matched) throw new HttpError(502, `R4 scheduled selector did not advance Platform Output ${recordId} within 24 seconds`);
       const afterFields = observed?.record?.fields || {};
       return {
         action,
