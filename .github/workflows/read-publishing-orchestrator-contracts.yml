@@ -1,0 +1,90 @@
+name: Read Publishing Orchestrator Contracts
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-publishing-orchestrator-contracts.txt']
+
+permissions: {contents: read}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read four live orchestrator contracts
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json')); vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip()); open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
+          : >/tmp/audit.ndjson
+          for sid in 5864632 5813561 5806668 5823581; do
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/scenario.json
+            sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/blueprint.json
+            SID="$sid" python - <<'PY' >>/tmp/audit.ndjson
+          import json,os,re
+          sid=int(os.environ['SID']); s=json.load(open('/tmp/scenario.json')); b=json.load(open('/tmp/blueprint.json'))
+          scenario=s.get('scenario') or s.get('response') or s
+          bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          mods=[]
+          def clean(v,key=''):
+            kl=str(key).lower()
+            if any(x in kl for x in ('token','secret','password','authorization','connection','url','uri')): return '<redacted>'
+            if isinstance(v,dict): return {k:clean(x,k) for k,x in v.items()}
+            if isinstance(v,list): return [clean(x,key) for x in v]
+            if isinstance(v,str) and re.search(r'https?://',v,re.I): return '<redacted-url>'
+            return v
+          def walk(flow,depth=0):
+            for n in flow or []:
+              name=((n.get('metadata') or {}).get('designer') or {}).get('name')
+              mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; filt=n.get('filter')
+              blob=json.dumps([mapper,params,filt,name,n.get('module')],default=str)
+              keep=depth==0 or any(k.lower() in blob.lower() for k in ['airtable','webhook','output','publish','lock','status','due','ready','platform','do_not_publish','test_run','idempot'])
+              if keep:
+                mods.append({'id':n.get('id'),'module':n.get('module'),'name':name,'depth':depth,'mapper':clean(mapper),'parameters':clean(params),'filter':clean(filt)})
+              for r in n.get('routes') or []: walk(r.get('flow') or [],depth+1)
+          walk(bp.get('flow') or [])
+          text=json.dumps(bp,default=str).lower()
+          terms={k:(k.lower() in text) for k in ['test_run_id','Do_Not_Publish','Publish_Lock','Publishing_Lock','idempotency','Published','Ready to Publish','Publish_Status']}
+          out={'scenario_id':sid,'name':scenario.get('name'),'isActive':scenario.get('isActive'),'hookId':scenario.get('hookId'),'scheduling':scenario.get('scheduling'),'module_count':len(mods),'terms':terms,'modules':mods}
+          print(json.dumps(out,separators=(',',':')))
+          PY
+            sleep 1
+          done
+          python - <<'PY'
+          import json
+          rows=[json.loads(x) for x in open('/tmp/audit.ndjson') if x.strip()]
+          open('/tmp/publishing-orchestrator-contracts.json','w').write(json.dumps(rows,indent=2))
+          for x in rows:
+            first=x['modules'][0] if x['modules'] else {}
+            print(json.dumps({'id':x['scenario_id'],'name':x['name'],'active':x['isActive'],'hookId':x['hookId'],'scheduling':x['scheduling'],'first_module':{'id':first.get('id'),'module':first.get('module'),'name':first.get('name')},'terms':x['terms']}))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/scenario.json /tmp/blueprint.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: publishing-orchestrator-contracts-${{ github.run_id }}
+          path: /tmp/publishing-orchestrator-contracts.json
+          retention-days: 30
