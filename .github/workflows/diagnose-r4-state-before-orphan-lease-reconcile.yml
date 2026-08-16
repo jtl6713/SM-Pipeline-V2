@@ -1,0 +1,39 @@
+name: Diagnose R4 State Before Orphan Lease Reconcile
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/diagnose-r4-state-before-orphan-lease-reconcile.txt']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Make config and check R4
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          AT=$(cat /tmp/pat.txt)
+          curl -fsS -G 'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql' -H "Authorization: Bearer $AT" --data-urlencode "filterByFormula=AND({Active}=1,OR({Setting_Name}='MAKE_API_BASE_URL',{Setting_Name}='MAKE_API_TOKEN'))" -o /tmp/settings.json
+          python - <<'PY'
+import json
+r=json.load(open('/tmp/settings.json'))['records']; d={x['fields']['Setting_Name']:x['fields']['Setting_Value'] for x in r}
+assert d.get('MAKE_API_BASE_URL') and d.get('MAKE_API_TOKEN')
+open('/tmp/make-base','w').write(d['MAKE_API_BASE_URL'].rstrip('/')); open('/tmp/make-token','w').write(d['MAKE_API_TOKEN'])
+PY
+          code=$(curl -sS -o /tmp/r4.json -w '%{http_code}' "$(cat /tmp/make-base)/scenarios/5556716" -H "Authorization: Token $(cat /tmp/make-token)" -H 'Accept: application/json')
+          echo "make_http=$code"
+          test "$code" = 200
+          jq -c '{id:(.scenario.id // .response.scenario.id // .id // null), name:(.scenario.name // .response.scenario.name // .name // null), isActive:(.scenario.isActive // .response.scenario.isActive // .isActive // null), scheduling:(.scenario.scheduling // .response.scenario.scheduling // .scheduling // null)}' /tmp/r4.json
+      - name: Destroy secrets
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-base /tmp/make-token /tmp/settings.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
