@@ -9593,6 +9593,7 @@ async function repairControlAction(env, input) {
     try {
       if (!before.isActive) await phase6SetScenarioActive(env, lease.scenario_id, true);
       const execution = await phase6RunScenario(env, lease.scenario_id, runInput);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const executionState = await phase6WaitForScenarioExecution(env, lease.scenario_id, execution.executionId, 90000, 3000);
       if (!executionState.done || !executionState.success) {
         const detail = JSON.stringify(executionState.details || {}).slice(0, 1600);
