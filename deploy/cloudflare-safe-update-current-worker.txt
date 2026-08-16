@@ -5,3 +5,4 @@ Triggered: 2026-08-16 — R4 direct six-field exact-input pulse.
 Deploy execution-status evidence patch 938d345b4f177ba600d253e1f43055b6e9999131 at 2026-08-16T16:41Z.
 Deploy guarded R4 var.input migration from ec80cc03a615d1f2af816eaa5fc51db06e7b839d.
 Deploy R4 execution polling consistency delay from 59dc1690575ce5aa1b4f859fd9234e1d44cc229f.
+Deploy exact R4 temporary on-demand pulse guard from 239e685f840048f9f43e53d2b91b6650c3e697f3.
