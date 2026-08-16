@@ -2,7 +2,7 @@
   "action": "acquire",
   "test_run_id": "TR-DURABLE-20260816-A",
   "lease_id": "TR-DURABLE-20260816-A-L2",
-  "scenario_id": 5565333,
+  "scenario_id": 5864632,
   "expires_at": "RUNTIME_PLUS_10_MINUTES",
   "max_runs": 1,
   "max_operations": 8,
