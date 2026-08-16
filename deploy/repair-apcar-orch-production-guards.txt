@@ -1,0 +1,1 @@
+Rollback-safe selector-only repair for AP-CAR-ORCH 5791537. Preserve OFF state, 15-minute schedule, views, module IDs and worker webhooks; add explicit Instagram/non-test/unlocked/due production guards only.
