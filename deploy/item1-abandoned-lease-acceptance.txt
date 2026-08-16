@@ -1,0 +1,1 @@
+Item 1 acceptance: acquire one exact controller-only IG-PUB-ORCH lease for TR-ITEM1-20260816-C, intentionally abandon it through expiry while its fixture remains present, then sweep and require verified inactive shutdown.
