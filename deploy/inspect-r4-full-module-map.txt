@@ -1,1 +1,1 @@
-Read-only full module-type/route inventory for R4 scenario 5556716. Confirm whether any webhook/gateway entrance already exists before designing exact-output addressing. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16.
+Read-only post-rollback verification for R4 scenario 5556716 after Make rejected required inputs on a non-on-demand schedule. Confirm R4 OFF, Module 1 restored to broad baseline, no module 900, and 16 total modules. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16 IM016 rollback check.
