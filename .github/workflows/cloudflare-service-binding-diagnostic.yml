@@ -114,7 +114,7 @@ jobs:
           code=$(curl -sS --retry 4 --retry-delay 2 --max-time 30 -o /tmp/result.json -w '%{http_code}' "$URL")
           echo "bridge_call_http=$code"
           if jq empty /tmp/result.json >/dev/null 2>&1; then
-            jq -c '{ok:(.ok // null),authenticated:(.authenticated // null),authorized:(.authorized // null),email:(.email // null),role:(.role.name // .role // null),error:(.error // null)}' /tmp/result.json
+            jq -c '{ok:(.ok // null),authenticated:(.authenticated // null),authorized:(.authorized // null),email:(.email // null),role:(if (.role|type)=="object" then (.role.name // null) else (.role // null) end),error:(.error // null)}' /tmp/result.json
           else
             echo "non_json_result" >&2
             head -c 500 /tmp/result.json >&2
