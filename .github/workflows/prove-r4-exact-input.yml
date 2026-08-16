@@ -1,0 +1,57 @@
+name: Prove R4 Exact Input
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/prove-r4-exact-input.txt']
+permissions: {contents: read}
+concurrency:
+  group: repair-r4-exact-input-5556716
+  cancel-in-progress: false
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+      TEST_RUN_ID: REPAIR-R4-EXACT-20260816-A
+      LEASE_ID: REPAIR-R4-EXACT-20260816-A-L1
+      SCENARIO_ID: '5556716'
+      TARGET_OUTPUT: recWLLWQ2HgE9Vjf5
+      DENY_OUTPUT: recpiwWGrph3lsTn6
+    steps:
+      - name: Run bounded exact proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/sub.json
+          SUB=$(jq -er '.result.subdomain' /tmp/sub.json); URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN"|sha256sum|cut -d' ' -f1)
+          call(){ local f=$1 o=$2; curl -sS --max-time 180 -o "$o" -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @"$f" || true; }
+          echo '{"action":"sweep"}' >/tmp/sweep-req.json; test "$(call /tmp/sweep-req.json /tmp/sweep.json)" = 200; jq -e '.bridge_ok==true and .upstream_json.ok==true' /tmp/sweep.json >/dev/null
+          EXP=$(python -c 'from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat().replace("+00:00","Z"))')
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg e "$EXP" --arg p "$TARGET_OUTPUT" --arg n "$DENY_OUTPUT" '{action:"acquire",test_run_id:$tr,lease_id:$l,scenario_id:$s,expires_at:$e,max_runs:1,max_operations:12,allowed_platform_output_record_ids:[$p],deny_fixture_record_ids:[$n],allow_public_publish:false}' >/tmp/acquire-req.json
+          test "$(call /tmp/acquire-req.json /tmp/acquire.json)" = 200; jq -e '.bridge_ok==true and .upstream_json.ok==true' /tmp/acquire.json >/dev/null
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg r "$TARGET_OUTPUT" '{action:"assert_output_allowed",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$r}' >/tmp/pos-req.json
+          test "$(call /tmp/pos-req.json /tmp/positive.json)" = 200; jq -e '.bridge_ok==true and .upstream_json.ok==true' /tmp/positive.json >/dev/null
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg r "$DENY_OUTPUT" '{action:"assert_output_allowed",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$r}' >/tmp/neg-req.json
+          call /tmp/neg-req.json /tmp/negative.json >/dev/null; jq -e '((.bridge_ok==true and .upstream_status==403) or (.bridge_ok==false and (.exception|type=="string")))' /tmp/negative.json >/dev/null
+          jq -n --arg tr "$TEST_RUN_ID" --arg l "$LEASE_ID" --argjson s "$SCENARIO_ID" --arg r "$TARGET_OUTPUT" '{action:"pulse_r4_exact_output",test_run_id:$tr,lease_id:$l,scenario_id:$s,platform_output_record_id:$r,intended_stage:"R4",attempt_number:1,idempotency_key:($tr+":R4:"+$r+":1")}' >/tmp/pulse-req.json
+          CODE=$(call /tmp/pulse-req.json /tmp/pulse.json); echo "pulse_http=$CODE"; jq -c '{bridge_ok,upstream_status,upstream_ok:(.upstream_json.ok//null),exception}' /tmp/pulse.json || true
+          test "$CODE" = 200; jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/pulse.json >/dev/null
+          unset SECRET
+      - name: Save bounded evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4-exact-input-proof-${{ github.run_id }}
+          path: |
+            /tmp/sweep.json
+            /tmp/acquire.json
+            /tmp/positive.json
+            /tmp/negative.json
+            /tmp/pulse.json
+          if-no-files-found: ignore
+          retention-days: 30
