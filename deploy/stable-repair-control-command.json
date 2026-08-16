@@ -1,8 +1,4 @@
 {
-  "action": "assert_output_allowed",
-  "test_run_id": "TR-ITEM1-20260816-B",
-  "lease_id": "TR-ITEM1-20260816-BUDGET-L1",
-  "scenario_id": 5864632,
-  "platform_output_record_id": "recZCYFcYii6rWHDd",
-  "expected_exception_substring": "Repair lease operation/run budget exhausted"
+  "action": "sweep",
+  "expected_upstream_status": 200
 }
