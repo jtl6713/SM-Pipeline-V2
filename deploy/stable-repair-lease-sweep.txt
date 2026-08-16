@@ -1,0 +1,1 @@
+Stable authenticated lease sweep trigger. Expected: close the stale expired lease-C record from the earlier failed proof attempt (runs_used=0), verify scenario 5893243 remains OFF, and leave the successful released lease-C proof unchanged. No activation/run/public publish. Triggered 2026-08-16.
