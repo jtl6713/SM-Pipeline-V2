@@ -6,3 +6,4 @@ Deploy repair-control stable lease table-ID hardening from c3bb24ec5d35ff9ec4f5b
 Deploy bounded R4 scheduled-selector pulse control from 7ee92db59d89b03d8f3b7bc0e208572634363a6b.
 Deploy R4 scheduled-selector proof poll-budget reduction (24s timeout / 3s poll).
 Deploy Phase 6 shared controlled-pulse isolation hardening: refuse active R4/R5 takeover and require exactly one production-selector-eligible output equal to the requested output before activation. Production Make selectors remain unchanged.
+Deploy durable Test_Run_ID propagation through Production Request, Content Item directive sync, Production Request Outputs, and Platform Output seeding.
