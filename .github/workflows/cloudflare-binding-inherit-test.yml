@@ -51,13 +51,16 @@ jobs:
         run: |
           set -euo pipefail
           ACTIVE=$(cat /tmp/active); AN=$(cat /tmp/active-number)
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers?per_page=100" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/beta-workers.json
+          WORKER_ID=$(jq -er --arg n "$WORKER_NAME" '.result[]|select(.name==$n)|.id' /tmp/beta-workers.json | head -1)
+          test -n "$WORKER_ID"
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions?per_page=30" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/list.json
           jq -r --argjson an "$AN" '.result.items[] | select(.number>$an) | [.id,.number,(.metadata.source//"")] | @tsv' /tmp/list.json | while IFS=$'\t' read -r id num source; do
             [[ "$source" == "api" ]] || { echo "Refusing non-API version $num" >&2; exit 1; }
             curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/versions/$id" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/candidate.json
             count=$(jq '(.result.resources.bindings//[])|length' /tmp/candidate.json)
             [[ "$count" == "0" ]] || { echo "Refusing newer version $num with bindings" >&2; exit 1; }
-            code=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/$WORKER_NAME/versions/$id" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+            code=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/$WORKER_ID/versions/$id" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
             echo "deleted_diagnostic_version=$num http=$code"
             test "$code" -ge 200 -a "$code" -lt 300
             jq -e '.success==true' /tmp/delete.json >/dev/null
