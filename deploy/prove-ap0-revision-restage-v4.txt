@@ -1,0 +1,2 @@
+Three-phase AP0 revision behavioral proof for Output 157 only, using execution-detail terminal status before stop.
+Fresh lease AP0-REVISION-PROOF-20260816-C-L3. Preverified baseline is preserved; remaining phases: unchanged no-op, revised success, failed revision preservation. Public publishing forbidden.
