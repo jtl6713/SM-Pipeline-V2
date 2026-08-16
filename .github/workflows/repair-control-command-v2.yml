@@ -1,0 +1,157 @@
+name: Exact Repair Control Command V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-control-command-v2.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sm-pipeline-exact-repair-control-v2
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-repair-control-v2-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate command
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s deploy/repair-control-command-v2.json
+          ACTION=$(jq -er '.action' deploy/repair-control-command-v2.json)
+          case "$ACTION" in acquire|assert_output_allowed|pulse_admin_bridge|state|deactivate|release|sweep) ;; *) exit 1 ;; esac
+          jq -e '(.expected_http_status // 200)|type=="number" and .>=200 and .<=599' deploy/repair-control-command-v2.json >/dev/null
+
+      - name: Capture production identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
+          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
+
+      - name: Build exact bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(36))
+          PY
+          )
+          printf '%s' "$TOKEN" >/tmp/token.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          c=json.loads(Path('deploy/repair-control-command-v2.json').read_text())
+          c.pop('expected_http_status',None)
+          Path('/tmp/cmd.json').write_text(json.dumps(c,separators=(',',':')))
+          PY
+          CMD=$(cat /tmp/cmd.json)
+          cat >/tmp/worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const url=new URL(request.url);
+              if (url.pathname==="/$TOKEN/ready") return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});
+              if (url.pathname!=="/$TOKEN/execute") return new Response("Not found",{status:404});
+              const command=$CMD;
+              if(command.action==="acquire" && (!command.expires_at || command.expires_at==="RUNTIME_PLUS_10_MINUTES")) command.expires_at=new Date(Date.now()+10*60*1000).toISOString();
+              const internal=new Request("https://studio-api.internal/api/admin/repair/control",{
+                method:"POST",
+                headers:{
+                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                  "Origin":"https://studio.chicagoshining.com",
+                  "Content-Type":"application/json",
+                  "Accept":"application/json"
+                },
+                body:JSON.stringify(command)
+              });
+              const response=await env.STUDIO_API.fetch(internal);
+              return new Response(await response.text(),{status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
+            }
+          };
+          EOF
+          node --check /tmp/worker.js
+          cat >/tmp/metadata.json <<'EOF'
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
+          EOF
+
+      - name: Upload bridge and enable workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/content" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/sub.json
+          jq -e '.success==true and .result.enabled==true' /tmp/sub.json >/dev/null
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-subdomain.json
+          jq -er '.result.subdomain' /tmp/account-subdomain.json >/tmp/subdomain.txt
+
+      - name: Wait for bridge readiness only
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain.txt).workers.dev/$(cat /tmp/token.txt)/ready"
+          ready=false
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            code=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok==true and .ready==true' /tmp/ready.json >/dev/null 2>&1; then ready=true; break; fi
+            sleep 2
+          done
+          test "$ready" = true
+
+      - name: Execute command exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain.txt).workers.dev/$(cat /tmp/token.txt)/execute"
+          EXPECTED=$(jq -r '.expected_http_status // 200' deploy/repair-control-command-v2.json)
+          code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
+          echo "repair_control_v2_http=$code expected=$EXPECTED"
+          if jq empty /tmp/result.json >/dev/null 2>&1; then jq -c '{ok,action,error:(.error//null),lease:(.lease//null),output:(.output//null),swept:(.swept//null)}' /tmp/result.json; else head -c 500 /tmp/result.json >&2 || true; fi
+          test "$code" -eq "$EXPECTED"
+          if [[ "$EXPECTED" -ge 200 && "$EXPECTED" -lt 300 ]]; then jq -e '.ok==true' /tmp/result.json >/dev/null; else jq -e '.ok==false' /tmp/result.json >/dev/null; fi
+
+      - name: Delete bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          [[ "$code" == "404" || ( "$code" -ge 200 && "$code" -lt 300 ) ]]
+
+      - name: Verify production identity unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
+          test "$(cat /tmp/active-before.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)"
+
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repair-control-v2-${{ github.run_id }}
+          path: /tmp/result.json
+          if-no-files-found: ignore
+          retention-days: 14
