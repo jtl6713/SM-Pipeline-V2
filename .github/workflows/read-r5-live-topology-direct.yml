@@ -1,0 +1,89 @@
+name: Read R5 Live Topology Direct
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/read-r5-live-topology-direct.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve R5 id from source and Make credentials
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          python - <<'PY'
+          import re
+          text=open('apps/studio-api/worker.js').read()
+          pats=[r'PHASE6_R5_SCENARIO_ID\s*=\s*(\d+)',r'R5_SCENARIO_ID\s*=\s*(\d+)']
+          vals=[]
+          for p in pats: vals += re.findall(p,text)
+          vals=list(dict.fromkeys(vals))
+          if len(vals)!=1: raise SystemExit(f'Expected exactly one R5 scenario ID in source, found {vals}')
+          open('/tmp/r5-id.txt','w').write(vals[0])
+          print('r5_scenario_id='+vals[0])
+          PY
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json')); vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip()); open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+      - name: Read live R5 scenario and blueprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          SID=$(cat /tmp/r5-id.txt); TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -o /tmp/scenario.json
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp.json
+          python - <<'PY'
+          import json,re
+          s=json.load(open('/tmp/scenario.json')); b=json.load(open('/tmp/bp.json'))
+          sc=s.get('scenario') or s.get('response') or s; bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          mods=[]
+          def clean(v,k=''):
+            kl=str(k).lower()
+            if any(x in kl for x in ('token','secret','password','authorization','connection')): return '<redacted>'
+            if isinstance(v,dict): return {a:clean(x,a) for a,x in v.items()}
+            if isinstance(v,list): return [clean(x,k) for x in v]
+            if isinstance(v,str) and re.search(r'https?://',v,re.I): return '<redacted-url>'
+            return v
+          def walk(flow):
+            for n in flow or []:
+              mods.append({'id':n.get('id'),'module':n.get('module'),'name':((n.get('metadata') or {}).get('designer') or {}).get('name'),'filter':clean(n.get('filter')),'mapper':clean(n.get('mapper')),'parameters':clean(n.get('parameters'))})
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          out={'scenario_id':sc.get('id'),'name':sc.get('name'),'isActive':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'module_count':len(mods),'modules':mods}
+          open('/tmp/r5-live-topology-direct.json','w').write(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps({'scenario_id':out['scenario_id'],'name':out['name'],'isActive':out['isActive'],'hookId':out['hookId'],'scheduling':out['scheduling'],'module_count':out['module_count'],'module_index':[{'id':m['id'],'module':m['module'],'name':m['name']} for m in mods]},indent=2))
+          PY
+      - name: Destroy credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/scenario.json /tmp/bp.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-live-topology-direct-${{ github.run_id }}
+          path: /tmp/r5-live-topology-direct.json
+          retention-days: 30
