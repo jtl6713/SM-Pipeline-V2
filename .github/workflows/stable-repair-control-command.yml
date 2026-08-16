@@ -22,12 +22,14 @@ jobs:
         run: |
           set -euo pipefail
           test -s deploy/stable-repair-control-command.json
-          EXPECT=$(jq -er '.expected_upstream_status' deploy/stable-repair-control-command.json)
+          EXPECT_STATUS=$(jq -r '.expected_upstream_status // empty' deploy/stable-repair-control-command.json)
+          EXPECT_EXCEPTION=$(jq -r '.expected_exception_substring // empty' deploy/stable-repair-control-command.json)
+          test -n "$EXPECT_STATUS" -o -n "$EXPECT_EXCEPTION"
           python - <<'PY'
           import json
           from pathlib import Path
           d=json.loads(Path('deploy/stable-repair-control-command.json').read_text())
-          d.pop('expected_upstream_status',None)
+          d.pop('expected_upstream_status',None); d.pop('expected_exception_substring',None)
           if d.get('action')=='acquire' and d.get('expires_at')=='RUNTIME_PLUS_10_MINUTES':
               from datetime import datetime,timezone,timedelta
               d['expires_at']=(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat().replace('+00:00','Z')
@@ -40,11 +42,16 @@ jobs:
           SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
           code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/cmd.json || true)
           unset SECRET
-          echo "bridge_http=$code expected_upstream=$EXPECT"
-          jq -c '{bridge_ok,upstream_status,upstream:{ok:(.upstream_json.ok//null),action:(.upstream_json.action//null),error:(.upstream_json.error//null),lease:(.upstream_json.lease//null),output:(.upstream_json.output//null)}}' /tmp/result.json || true
-          test "$code" = '200'
-          jq -e --argjson expect "$EXPECT" '.bridge_ok==true and .upstream_status==$expect' /tmp/result.json >/dev/null
-          if [[ "$EXPECT" -ge 200 && "$EXPECT" -lt 300 ]]; then jq -e '.upstream_json.ok==true' /tmp/result.json >/dev/null; else jq -e '.upstream_json.ok==false' /tmp/result.json >/dev/null; fi
+          echo "bridge_http=$code expected_status=${EXPECT_STATUS:-none} expected_exception=${EXPECT_EXCEPTION:-none}"
+          jq -c '{bridge_ok,exception:(.exception//null),upstream_status,upstream:{ok:(.upstream_json.ok//null),action:(.upstream_json.action//null),error:(.upstream_json.error//null),lease:(.upstream_json.lease//null),output:(.upstream_json.output//null)}}' /tmp/result.json || true
+          if [[ -n "$EXPECT_EXCEPTION" ]]; then
+            test "$code" = '502'
+            jq -e --arg needle "$EXPECT_EXCEPTION" '.bridge_ok==false and ((.exception//"")|contains($needle))' /tmp/result.json >/dev/null
+          else
+            test "$code" = '200'
+            jq -e --argjson expect "$EXPECT_STATUS" '.bridge_ok==true and .upstream_status==$expect' /tmp/result.json >/dev/null
+            if [[ "$EXPECT_STATUS" -ge 200 && "$EXPECT_STATUS" -lt 300 ]]; then jq -e '.upstream_json.ok==true' /tmp/result.json >/dev/null; else jq -e '.upstream_json.ok==false' /tmp/result.json >/dev/null; fi
+          fi
       - name: Save evidence
         if: always()
         uses: actions/upload-artifact@v4
