@@ -1,0 +1,1 @@
+Add the read-only inspect_make_scenario repair-control action and repair_make_module_inspector_v1 health flag. No Make mutation, scenario activation/run, or publishing. Triggered 2026-08-16.
