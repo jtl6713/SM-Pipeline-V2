@@ -3,3 +3,4 @@ Read-only beta Worker version audit trigger.
 Target: chicagoshining-studio-api
 Purpose: correlate beta Worker/version IDs with script versions and inspect binding names/types/counts for versions newer than v86. No secret values are requested or logged.
 Triggered: 2026-08-16
+Attempt: 2 — wrapper-tolerant beta/script version parser.
