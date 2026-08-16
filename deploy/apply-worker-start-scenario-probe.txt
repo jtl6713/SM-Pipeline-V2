@@ -1,0 +1,1 @@
+Apply the source-controlled guarded Make Start Scenario schema probe. Source only; no Make action until separately deployed/invoked. Triggered 2026-08-16.
