@@ -27,39 +27,26 @@ jobs:
           set -euo pipefail
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/scripts.json
-          echo 'TARGET_SCRIPT'
-          jq -c --arg name "$WORKER_NAME" '
-            [.result[]? | select(.id==$name) | {id,compatibility_date,routes:(.routes // []),tail_consumers:(.tail_consumers // []),usage_model:(.usage_model // null),created_on:(.created_on // null),modified_on:(.modified_on // null)}]
-          ' /tmp/scripts.json
-
-          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/domains.json
-          echo 'CUSTOM_DOMAINS'
-          jq -c --arg service "$WORKER_NAME" '[.result[]? | select(.service==$service) | {hostname,zone_name,environment}]' /tmp/domains.json
+          jq -c --arg name "$WORKER_NAME" '[.result[]? | select(.id==$name) | {id,routes:(.routes // [])}]' /tmp/scripts.json
 
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/subdomain" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
-          echo 'WORKERS_DEV'
-          jq -c '{enabled:.result.enabled,previews_enabled:.result.previews_enabled}' /tmp/subdomain.json
+          jq -c '{workers_dev:{enabled:.result.enabled,previews_enabled:.result.previews_enabled}}' /tmp/subdomain.json
 
-      - name: Probe Studio health and session ingress read-only
+      - name: Probe Access API permissions read-only
         shell: bash
         run: |
           set -euo pipefail
-          probe() {
-            local label="$1"; shift
-            local url="$1"; shift
-            local out="/tmp/${label}.body" hdr="/tmp/${label}.headers"
+          call() {
+            local label="$1" url="$2" out="/tmp/${1}.json"
             local code
-            code=$(curl -sS -L --max-redirs 3 --max-time 20 -D "$hdr" -o "$out" -w '%{http_code}' "$@" "$url" || true)
+            code=$(curl -sS -o "$out" -w '%{http_code}' "$url" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
             echo "$label HTTP=$code"
             if jq empty "$out" >/dev/null 2>&1; then
-              jq -c '{ok:(.ok // null),service:(.service // null),version:(.version // null),authenticated:(.authenticated // null),authorized:(.authorized // null),email:(.email // null),role:(.role.name // .role // null),error:(.error // null)}' "$out"
+              jq -c --arg label "$label" '{label:$label,success:(.success // false),error_codes:[.errors[]?.code],error_messages:[.errors[]?.message],result_count:(if (.result|type)=="array" then (.result|length) elif (.result|type)=="object" and (.result.items|type)=="array" then (.result.items|length) else null end)}' "$out"
             else
-              echo "content_type=$(grep -i '^content-type:' "$hdr" | tail -1 | tr -d '\r' | cut -d' ' -f2- || true)"
-              echo "body_marker=$(tr '\n' ' ' < "$out" | sed -E 's/[[:space:]]+/ /g' | grep -o -E '<title>[^<]+|Cloudflare Access|Access denied|Forbidden|Unauthorized' | head -1 || true)"
+              echo "$label non_json_response"
             fi
           }
-          probe health "$STUDIO_ORIGIN/api/health"
-          probe session_no_header "$STUDIO_ORIGIN/api/session"
-          probe session_spoofed_header "$STUDIO_ORIGIN/api/session" -H 'Cf-Access-Authenticated-User-Email: joseph.t.logan@gmail.com'
+          call access_apps "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps"
+          call access_service_tokens "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens"
