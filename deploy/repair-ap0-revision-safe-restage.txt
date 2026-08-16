@@ -5,5 +5,6 @@ Expected scope only:
 - allow restage when stored Publish_Asset_File_Name does not match current Final_File_ID revision;
 - leave prior successful Publish_Asset_URL/Ready_At untouched unless new upload succeeds;
 - verify scenario remains OFF, hook 2653029, same module IDs; rollback on mismatch.
+Make PATCH blueprint parameter serialized as required JSON string.
 No scenario activation. No publishing invocation.
-Triggered 2026-08-16 continuation checkpoint.
+Triggered 2026-08-16 continuation checkpoint rerun 2.
