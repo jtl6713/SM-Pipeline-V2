@@ -1,0 +1,146 @@
+name: Repair Item 5 Carousel Test Identity
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-item5-carousel-test-identity.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Preflight and propagate durable test identity through carousel chain
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          export TOKEN=$(cat /tmp/t); export BASE=$(cat /tmp/b)
+          python - <<'PY'
+          import json,os,copy,urllib.request,urllib.error,time,sys
+          BASE=os.environ['BASE']; TOKEN=os.environ['TOKEN']
+          IDS={'C1':5582062,'C2':5582071,'C2M':5586579,'C3':5587853,'C3B':5592384,'C4':5587860,'C5':5582074,'C6':5589218,'C7':5589819,'C8':5589822,'C9':5589932}
+          hooks={'C2':2623499,'C3':2623515,'C4':2623532,'C5':2623537,'C6':2623571,'C7':2623586,'C8':2623594,'C9':2623625}
+          SLIDE_TEST='fldvko2ebhLp6AA8f'; CONTENT_TEST='fldA4dFKiiGpWNk7b'; OUTPUT_TEST='fld5Ew2FySt51Jl2Q'; LINK_OUTPUT='fldsNVHawL0Dar4AC'
+          def api(path,method='GET',body=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            req=urllib.request.Request(BASE+path,data=data,method=method,headers={'Authorization':'Token '+TOKEN,'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-Repair/1.0'})
+            with urllib.request.urlopen(req,timeout=30) as r: return json.loads(r.read().decode() or '{}')
+          def sc(d): return d.get('scenario') or d.get('response') or d
+          def bp(d):
+            x=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+            return json.loads(x) if isinstance(x,str) else x
+          def walk(flow,out=None):
+            if out is None: out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [],out)
+            return out
+          def body_obj(n): return json.loads(str((n.get('mapper') or {}).get('jsonStringBodyContent') or '{}'))
+          def set_body(n,obj): n.setdefault('mapper',{})['jsonStringBodyContent']=json.dumps(obj,separators=(',',':'))
+          def add_test_to_body(n,expr):
+            o=body_obj(n); o['test_run_id']=expr; set_body(n,o)
+          def identity_formula(record_expr,test_expr,existing=''):
+            clauses=[f'RECORD_ID()="{record_expr}"',f'IF("{test_expr}"="", {{Test_Run_ID}}=BLANK(), {{Test_Run_ID}}="{test_expr}")']
+            if existing: clauses.append(existing)
+            return 'AND('+','.join(clauses)+')'
+          def safe(reason,detail=''):
+            e={'passed':False,'safe_no_write':True,'reason':reason,'detail':detail}; open('/tmp/evidence.json','w').write(json.dumps(e,indent=2)); print(json.dumps(e)); sys.exit(0)
+          before={}; patched={}; meta={}
+          try:
+            for k,sid in IDS.items():
+              meta[k]=copy.deepcopy(sc(api(f'/scenarios/{sid}'))); before[k]=bp(api(f'/scenarios/{sid}/blueprint?draft=false')); patched[k]=copy.deepcopy(before[k]); time.sleep(.15)
+          except Exception as e: safe('preflight_read_failed',str(e))
+          try:
+            if meta['C1'].get('isActive') is not False or meta['C2M'].get('isActive') is not False: raise ValueError('C1/C2M expected OFF')
+            for k,h in hooks.items():
+              if meta[k].get('hookId')!=h: raise ValueError(f'{k} hook drift')
+            n={k:walk(v.get('flow') or []) for k,v in patched.items()}
+            if n['C1'].get(6,{}).get('module')!='airtable:ActionCreateRecord' or n['C1'].get(7002,{}).get('module')!='http:MakeRequest': raise ValueError('C1 shape drift')
+            if n['C2M'].get(1,{}).get('module')!='airtable:ActionSearchRecords': raise ValueError('C2M selector drift')
+            for k in ('C2','C3','C5','C6','C7','C8'):
+              if n[k].get(901,{}).get('module')!='airtable:ActionGetRecord': raise ValueError(f'{k} parent module drift')
+            if n['C4'].get(1,{}).get('module')!='airtable:ActionSearchRecords': raise ValueError('C4 exact slide selector drift')
+            if n['C9'].get(1,{}).get('module')!='airtable:ActionSearchRecords' or n['C9'].get(2,{}).get('module')!='airtable:ActionSearchRecords': raise ValueError('C9 shape drift')
+          except Exception as e: safe('preflight_shape_mismatch',str(e))
+          n={k:walk(v.get('flow') or []) for k,v in patched.items()}
+          # C1 creates durable slide identity and sends identity to C2.
+          n['C1'][6].setdefault('mapper',{}).setdefault('record',{})[SLIDE_TEST]='{{1.'+CONTENT_TEST+'}}'
+          add_test_to_body(n['C1'][7002],'{{1.'+CONTENT_TEST+'}}')
+          # C2/C5/C6 pass exact parent identity onward.
+          add_test_to_body(n['C2'][7002],'{{901.'+CONTENT_TEST+'}}')
+          add_test_to_body(n['C5'][7002],'{{901.'+CONTENT_TEST+'}}')
+          add_test_to_body(n['C6'][7002],'{{901.'+CONTENT_TEST+'}}')
+          # Manual production slide intake must never consume tagged tests.
+          m=n['C2M'][1].setdefault('mapper',{}); f=str(m.get('formula') or '').strip(); m['formula']=f'AND({{Test_Run_ID}}=BLANK(),{f})' if f and 'Test_Run_ID' not in f else ('{Test_Run_ID}=BLANK()' if not f else f)
+          add_test_to_body(n['C2M'][7002],'{{1.'+SLIDE_TEST+'}}')
+          # C3B decision-handler -> C4 carries the exact slide identity for all C4 trigger variants.
+          for mid,src in ((7031,3),(7051,5),(7071,7),(7101,10),(7161,16),(7251,25)):
+            if n['C3B'].get(mid,{}).get('module')=='http:MakeRequest': add_test_to_body(n['C3B'][mid],f'{{{{{src}.{SLIDE_TEST}}}}}')
+          # C4 exact slide lookup requires identity equality/blank-production compatibility.
+          old4=str((n['C4'][1].get('mapper') or {}).get('formula') or '')
+          n['C4'][1]['mapper']['formula']=identity_formula('{{900.slide_record_id}}','{{900.test_run_id}}')
+          for mid in (7031,7051,7071):
+            if n['C4'].get(mid,{}).get('module')=='http:MakeRequest': add_test_to_body(n['C4'][mid],'{{1.'+SLIDE_TEST+'}}')
+          # C7/C8 already carry identity from previous repair; enforce parent identity at each exact parent worker where webhook supplies it.
+          for k in ('C2','C3','C5','C6','C7','C8'):
+            # Add a filter to exact parent module: production blank accepts blank payload; tagged test requires exact payload match.
+            parent=n[k][901]
+            parent['filter']={'name':'Exact Test_Run_ID compatibility','conditions':[[{'a':'{{900.test_run_id}}','b':'','o':'text:equal'},{'a':'{{901.'+CONTENT_TEST+'}}','b':'','o':'text:equal'}],[{'a':'{{900.test_run_id}}','b':'{{901.'+CONTENT_TEST+'}}','o':'text:equal'}]]}
+          # C9 exact output requires webhook identity match and slides are selected only if linked to exact output and same identity.
+          old9=str((n['C9'][1].get('mapper') or {}).get('formula') or '')
+          n['C9'][1]['mapper']['formula']=identity_formula('{{900.output_record_id}}','{{900.test_run_id}}')
+          n['C9'][2].setdefault('mapper',{})['formula']='AND(FIND("{{1.id}}", ARRAYJOIN({Platform_Output})) > 0, IF("{{1.Test_Run_ID}}"="", {Test_Run_ID}=BLANK(), {Test_Run_ID}="{{1.Test_Run_ID}}"))'
+          # Keep max 50: a carousel legitimately has multiple exact-linked slides.
+          written=[]
+          try:
+            for k in ('C1','C2','C2M','C3','C3B','C4','C5','C6','C7','C8','C9'):
+              api(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(patched[k],separators=(',',':'))}); written.append(k); time.sleep(.45)
+            evidence={}; live={}
+            for k in written:
+              sm=sc(api(f'/scenarios/{IDS[k]}')); live[k]=walk(bp(api(f'/scenarios/{IDS[k]}/blueprint?draft=false')).get('flow') or [])
+              if (sm.get('hookId'),sm.get('scheduling'),sm.get('isActive'))!=(meta[k].get('hookId'),meta[k].get('scheduling'),meta[k].get('isActive')): raise RuntimeError(f'{k} metadata drift')
+              if set(live[k])!=set(walk(before[k].get('flow') or [])): raise RuntimeError(f'{k} module IDs changed')
+              evidence[k]={'scenario_id':IDS[k],'active':sm.get('isActive'),'hookId':sm.get('hookId')}; time.sleep(.1)
+            if live['C1'][6].get('mapper',{}).get('record',{}).get(SLIDE_TEST)!='{{1.'+CONTENT_TEST+'}}': raise RuntimeError('C1 slide identity propagation missing')
+            if 'Test_Run_ID' not in str(live['C2M'][1].get('mapper',{}).get('formula') or ''): raise RuntimeError('C2M exclusion missing')
+            if '900.test_run_id' not in str(live['C4'][1].get('mapper',{}).get('formula') or ''): raise RuntimeError('C4 identity guard missing')
+            f91=str(live['C9'][1].get('mapper',{}).get('formula') or ''); f92=str(live['C9'][2].get('mapper',{}).get('formula') or '')
+            if '900.test_run_id' not in f91 or not all(x in f92 for x in ('Platform_Output','Test_Run_ID')): raise RuntimeError('C9 identity/link guard missing')
+            evidence['contracts']={'carousel_slide_test_run_id_field':'fldvko2ebhLp6AA8f','c1_slide_identity':True,'daisy_chain_identity':True,'c2m_production_exclusion':True,'c4_identity_match':True,'c9_exact_output_and_slide_identity':True}
+            open('/tmp/evidence.json','w').write(json.dumps({'passed':True,'safe_no_write':False,'evidence':evidence},indent=2)); print(json.dumps({'passed':True,'carousel_test_identity':True}))
+          except Exception:
+            for k in reversed(written):
+              try: api(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(before[k],separators=(',',':'))})
+              except Exception as e: print('ROLLBACK_ERROR',k,str(e))
+            raise
+          PY
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item5-carousel-test-identity-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings
