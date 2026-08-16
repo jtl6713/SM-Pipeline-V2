@@ -56,7 +56,7 @@ jobs:
                 for k,v in {**params,**mapper}.items():
                   kl=str(k).lower()
                   if any(x in kl for x in ['authorization','token','secret','api_key','apikey']): safe[k]='<redacted>'
-                  elif any(x in kl for x in ['record','formula','max','limit','table','view','hook','status','url']): safe[k]=v
+                  elif kl in ['id','body','method'] or any(x in kl for x in ['record','formula','max','limit','table','view','hook','status']): safe[k]=v
                 mods.append({'id':n.get('id'),'module':mod,'name':name,'config':safe,'filter':filt,'has_test_run_id':'Test_Run_ID' in blob,'has_do_not_publish':'Do_Not_Publish' in blob,'has_output_record_id':'output_record_id' in blob,'has_record_id':'record_id' in blob})
               for r in n.get('routes') or []: walk(r.get('flow') or [])
           walk(bp.get('flow') or [])
