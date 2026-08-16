@@ -1,0 +1,44 @@
+name: Inspect AP1C Scenario Input Pattern
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/inspect-ap1c-input-pattern.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Inspect AP1C modules read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5790745}' >/tmp/request.json
+          code=$(curl -sS --max-time 120 -o /tmp/ap1c.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+          unset SECRET
+          echo "http=$code"
+          if [[ "$code" != '200' ]]; then jq -c '{bridge_ok,upstream_status,exception,error:(.upstream_json.error//null),message:(.upstream_json.message//null)}' /tmp/ap1c.json || true; exit 1; fi
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/ap1c.json >/dev/null
+          jq -c '{scenario_id:.upstream_json.inspected.scenario_id,scenario_name:.upstream_json.inspected.scenario_name,active:.upstream_json.inspected.scenario_active,module_count:.upstream_json.inspected.module_count_returned,modules:[.upstream_json.inspected.modules[]|{id:.module.id,module:.module.module,name:(.module.metadata.designer.name//null),parameters:.module.parameters,mapper:.module.mapper,route_path:.route_path}]}' /tmp/ap1c.json
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ap1c-input-pattern-${{ github.run_id }}
+          path: /tmp/ap1c.json
+          if-no-files-found: ignore
+          retention-days: 30
