@@ -45,50 +45,72 @@ jobs:
           open('/tmp/make-token.txt','w').write(token); open('/tmp/make-base.txt','w').write(base)
           print('make_api_settings_resolved=true')
           PY
-      - name: Read scenario state and blueprint for exact targets
+      - name: Read fresh scenario topology and selected module contracts
         shell: bash
         run: |
           set -euo pipefail
           TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
           : >/tmp/audit.ndjson
-          for spec in '5893243:19' '5813561:10,12,14,16,30,32,34,36' '5864632:14' '5556716:15,29' '5612096:2,4'; do
+          for spec in '5893243:19' '5813561:10,12,14,16,30,32,34,36' '5864632:14' '5556716:1,15,29' '5612096:2,4'; do
             sid=${spec%%:*}; mods=${spec#*:}
             curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/scenario.json
             curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/blueprint.json
             SID="$sid" MODS="$mods" python - <<'PY' >>/tmp/audit.ndjson
-          import json,os
-          sid=int(os.environ['SID']); wanted={int(x) for x in os.environ['MODS'].split(',')}
+          import json,os,re
+          sid=int(os.environ['SID']); wanted={int(x) for x in os.environ['MODS'].split(',') if x}
           s=json.load(open('/tmp/scenario.json')); b=json.load(open('/tmp/blueprint.json'))
           scenario=s.get('scenario') or s.get('response') or s
           bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
-          found={}
+          allmods=[]; selected={}
+          def redact(v, key=''):
+            kl=str(key).lower()
+            if any(x in kl for x in ('token','secret','password','authorization','connection')):
+              return '<redacted>'
+            if isinstance(v,dict): return {k:redact(x,k) for k,x in v.items()}
+            if isinstance(v,list): return [redact(x,key) for x in v]
+            if isinstance(v,str):
+              if re.search(r'https?://',v,re.I): return '<redacted-url>'
+              return v
+            return v
           def walk(flow):
             for n in flow or []:
-              if int(n.get('id') or -1) in wanted:
-                # Sanitized module structure: mapping/formula/config only, no connections/tokens.
-                found[int(n['id'])]={
-                  'id':n.get('id'),'module':n.get('module'),'name':((n.get('metadata') or {}).get('designer') or {}).get('name'),
-                  'mapper':n.get('mapper'),'parameters':n.get('parameters'),'filter':n.get('filter')
+              mid=int(n.get('id') or -1)
+              mod=n.get('module')
+              name=((n.get('metadata') or {}).get('designer') or {}).get('name')
+              allmods.append({'id':mid,'module':mod,'name':name})
+              triggerish=any(x in str(mod).lower() for x in ('webhook','hook','scenario')) or any(x in str(name).lower() for x in ('webhook','hook','scenario','trigger','start'))
+              if mid in wanted or triggerish or sid==5556716:
+                selected[mid]={
+                  'id':mid,'module':mod,'name':name,
+                  'mapper':redact(n.get('mapper')),'parameters':redact(n.get('parameters')),'filter':redact(n.get('filter'))
                 }
               for r in n.get('routes') or []: walk(r.get('flow') or [])
           walk(bp.get('flow') or [])
-          missing=sorted(wanted-set(found))
-          out={'scenario_id':sid,'name':scenario.get('name'),'isActive':scenario.get('isActive'),'target_module_ids':sorted(wanted),'missing':missing,'modules':[found[k] for k in sorted(found)]}
+          present={m['id'] for m in allmods}
+          out={
+            'scenario_id':sid,'name':scenario.get('name'),'isActive':scenario.get('isActive'),
+            'hookId':scenario.get('hookId'),'scheduling':scenario.get('scheduling'),
+            'module_count':len(allmods),'module_index':allmods,
+            'requested_module_ids':sorted(wanted),'missing_requested_module_ids':sorted(wanted-present),
+            'selected_modules':[selected[k] for k in sorted(selected)]
+          }
           print(json.dumps(out,separators=(',',':')))
-          if missing: raise SystemExit(f'{sid} missing modules {missing}')
           PY
           done
           python - <<'PY'
           import json
           rows=[json.loads(x) for x in open('/tmp/audit.ndjson') if x.strip()]
           open('/tmp/top5-make-blueprint-audit.json','w').write(json.dumps(rows,indent=2,sort_keys=True))
-          print(json.dumps([{'scenario_id':x['scenario_id'],'name':x['name'],'isActive':x['isActive'],'modules':x['target_module_ids']} for x in rows],indent=2))
+          print(json.dumps([{
+            'scenario_id':x['scenario_id'],'name':x['name'],'isActive':x['isActive'],'hookId':x['hookId'],
+            'module_count':x['module_count'],'missing_requested_module_ids':x['missing_requested_module_ids']
+          } for x in rows],indent=2))
           PY
       - name: Destroy transient credentials
         if: always()
         shell: bash
         run: |
-          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/settings.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/scenario.json /tmp/blueprint.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
       - name: Upload sanitized evidence
         uses: actions/upload-artifact@v4
         with:
