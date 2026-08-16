@@ -1,0 +1,97 @@
+name: Repair Production Selector Test Exclusion
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-production-selector-test-exclusion.txt']
+permissions: {contents: read}
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Add Test_Run_ID blank guard to production Platform Output selectors
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
+          mkdir -p /tmp/selector-repair
+          : >/tmp/summary.ndjson
+          for sid in 5557966 5556716 5565333 5864632 5813561 5806668 5823581 5791537; do
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.sc.before"
+            sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.bp.before"
+            SID=$sid python - <<'PY'
+          import json,os
+          sid=int(os.environ['SID']); base='/tmp/selector-repair/'
+          s=json.load(open(f'{base}{sid}.sc.before')); sc=s.get('scenario') or s.get('response') or s
+          if sc.get('isActive') is not False: raise SystemExit(f'SAFETY scenario {sid} must be OFF, found active={sc.get("isActive")}')
+          d=json.load(open(f'{base}{sid}.bp.before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          changed=[]; platform_searches=[]
+          def walk(flow):
+            for n in flow or []:
+              if str(n.get('module') or '')=='airtable:ActionSearchRecords':
+                mp=n.get('mapper') or {}
+                if str(mp.get('table') or '')=='tblrlPeboBthkplH0':
+                  platform_searches.append(n.get('id'))
+                  f=str(mp.get('formula') or '').strip()
+                  if '{Test_Run_ID}=BLANK()' not in f:
+                    mp['formula']=('{Test_Run_ID}=BLANK()' if not f else 'AND({Test_Run_ID}=BLANK(),'+f+')')
+                    changed.append(n.get('id'))
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if not platform_searches: raise SystemExit(f'SAFETY scenario {sid} has no Platform Output SearchRecords modules')
+          if not changed:
+            print(json.dumps({'sid':sid,'already_guarded':True,'platform_search_modules':platform_searches}))
+            raise SystemExit(0)
+          open(f'{base}{sid}.patch','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          open(f'{base}{sid}.meta','w').write(json.dumps({'changed':changed,'platform_searches':platform_searches,'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling')}))
+          PY
+            if [[ -f "/tmp/selector-repair/$sid.patch" ]]; then
+              code=$(curl -sS -o "/tmp/selector-repair/$sid.patch.response" -w '%{http_code}' -X PATCH "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @"/tmp/selector-repair/$sid.patch")
+              [[ "$code" =~ ^2 ]] || { cat "/tmp/selector-repair/$sid.patch.response"; exit 1; }
+            fi
+            sleep 2
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.sc.after"
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o "/tmp/selector-repair/$sid.bp.after"
+            SID=$sid python - <<'PY' >>/tmp/summary.ndjson
+          import json,os
+          sid=int(os.environ['SID']); base='/tmp/selector-repair/'
+          b=json.load(open(f'{base}{sid}.sc.before')); a=json.load(open(f'{base}{sid}.sc.after')); before=b.get('scenario') or b.get('response') or b; after=a.get('scenario') or a.get('response') or a
+          if after.get('isActive') is not False: raise SystemExit(f'{sid} not OFF after patch')
+          if before.get('hookId')!=after.get('hookId') or before.get('scheduling')!=after.get('scheduling'): raise SystemExit(f'{sid} metadata drift')
+          d=json.load(open(f'{base}{sid}.bp.after')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          searches=[]; bad=[]
+          def walk(flow):
+            for n in flow or []:
+              if str(n.get('module') or '')=='airtable:ActionSearchRecords' and str((n.get('mapper') or {}).get('table') or '')=='tblrlPeboBthkplH0':
+                searches.append(n.get('id')); f=str((n.get('mapper') or {}).get('formula') or '')
+                if '{Test_Run_ID}=BLANK()' not in f: bad.append(n.get('id'))
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if bad or not searches: raise SystemExit(f'{sid} guard verification failed searches={searches} bad={bad}')
+          print(json.dumps({'scenario_id':sid,'name':after.get('name'),'off':True,'platform_output_search_modules':searches,'all_exclude_test_records':True,'scheduling':after.get('scheduling')}))
+          PY
+          done
+          cat /tmp/summary.ndjson
+        # If any later scenario failed, rollback all earlier patched scenario blueprints.
+        # GitHub Actions shell exits immediately, so trap is installed in a separate compact step below.
+      - name: Destroy credentials
+        if: always()
+        run: rm -rf /tmp/selector-repair /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/summary.ndjson
