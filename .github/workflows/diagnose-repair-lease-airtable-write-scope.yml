@@ -1,0 +1,80 @@
+name: Diagnose Repair Lease Airtable Write Scope
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-repair-lease-airtable-write-scope.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve both existing Airtable PATs without logging values
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/bootstrap-pat.txt
+          BOOT=$(cat /tmp/bootstrap-pat.txt)
+          python - <<'PY' >/tmp/settings-query.txt
+          import urllib.parse
+          print(urllib.parse.urlencode([('filterByFormula',"{Setting_Name}='Airtable_Personal_Access_Token'"),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/settings-query.txt)" -H "Authorization: Bearer $BOOT" -o /tmp/pipeline-pat-record.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/pipeline-pat-record.json'))
+          vals=[r.get('fields',{}).get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active') and r.get('fields',{}).get('Setting_Value')]
+          if len(vals)!=1: raise SystemExit('Expected one active pipeline PAT setting')
+          open('/tmp/pipeline-pat.txt','w').write(str(vals[0]).strip())
+          PY
+      - name: Probe create/delete capability with inert records
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='appe33zkZn35yirTL'; table='tbltuSt9UibYzxpah'; url="https://api.airtable.com/v0/$base/$table"
+          : >/tmp/write-scope.ndjson
+          for kind in bootstrap pipeline; do
+            tok=$(cat "/tmp/${kind}-pat.txt")
+            cid="REPAIR-PAT-WRITE-PROBE-${kind}-${GITHUB_RUN_ID}"
+            jq -n --arg c "$cid" --arg n "Credential write-scope probe; inert; delete immediately." '{records:[{fields:{Command_ID:$c,Action:"NOOP_SCOPE_PROBE",Status:"Succeeded",Notes:$n}}]}' >/tmp/create.json
+            code=$(curl -sS -o /tmp/create-result.json -w '%{http_code}' -X POST "$url" -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' --data-binary @/tmp/create.json)
+            rid=''
+            if [[ "$code" == 200 ]]; then rid=$(jq -er '.records[0].id' /tmp/create-result.json); fi
+            delcode='not_attempted'
+            if [[ -n "$rid" ]]; then
+              delcode=$(curl -sS -o /tmp/delete-result.json -w '%{http_code}' -X DELETE "$url/$rid" -H "Authorization: Bearer $tok")
+            fi
+            KIND="$kind" CREATE="$code" DELETE="$delcode" python - <<'PY' >>/tmp/write-scope.ndjson
+          import json,os
+          print(json.dumps({'credential':os.environ['KIND'],'create_http':os.environ['CREATE'],'delete_http':os.environ['DELETE']}))
+          PY
+          done
+          python - <<'PY'
+          import json
+          rows=[json.loads(x) for x in open('/tmp/write-scope.ndjson') if x.strip()]
+          open('/tmp/write-scope-evidence.json','w').write(json.dumps(rows,indent=2,sort_keys=True))
+          print(json.dumps(rows,indent=2))
+          PY
+      - name: Destroy credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/bootstrap-pat.txt /tmp/pipeline-pat.txt /tmp/pipeline-pat-record.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lease-airtable-write-scope-${{ github.run_id }}
+          path: /tmp/write-scope-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
