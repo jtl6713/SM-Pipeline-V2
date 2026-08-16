@@ -18,6 +18,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: chicagoshining-studio-api
+      STUDIO_ORIGIN: https://studio.chicagoshining.com
     steps:
       - uses: actions/checkout@v6
       - name: Read Worker routing metadata only
@@ -40,3 +41,25 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
           echo 'WORKERS_DEV'
           jq -c '{enabled:.result.enabled,previews_enabled:.result.previews_enabled}' /tmp/subdomain.json
+
+      - name: Probe Studio health and session ingress read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe() {
+            local label="$1"; shift
+            local url="$1"; shift
+            local out="/tmp/${label}.body" hdr="/tmp/${label}.headers"
+            local code
+            code=$(curl -sS -L --max-redirs 3 --max-time 20 -D "$hdr" -o "$out" -w '%{http_code}' "$@" "$url" || true)
+            echo "$label HTTP=$code"
+            if jq empty "$out" >/dev/null 2>&1; then
+              jq -c '{ok:(.ok // null),service:(.service // null),version:(.version // null),authenticated:(.authenticated // null),authorized:(.authorized // null),email:(.email // null),role:(.role.name // .role // null),error:(.error // null)}' "$out"
+            else
+              echo "content_type=$(grep -i '^content-type:' "$hdr" | tail -1 | tr -d '\r' | cut -d' ' -f2- || true)"
+              echo "body_marker=$(tr '\n' ' ' < "$out" | sed -E 's/[[:space:]]+/ /g' | grep -o -E '<title>[^<]+|Cloudflare Access|Access denied|Forbidden|Unauthorized' | head -1 || true)"
+            fi
+          }
+          probe health "$STUDIO_ORIGIN/api/health"
+          probe session_no_header "$STUDIO_ORIGIN/api/session"
+          probe session_spoofed_header "$STUDIO_ORIGIN/api/session" -H 'Cf-Access-Authenticated-User-Email: joseph.t.logan@gmail.com'
