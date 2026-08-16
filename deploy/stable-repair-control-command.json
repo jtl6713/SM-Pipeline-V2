@@ -1,8 +1,8 @@
 {
-  "action": "inspect_make_blueprint_history",
-  "confirm": "INSPECT-MAKE-BLUEPRINT-HISTORY-V1",
-  "scenario_id": 5790745,
-  "module_id": 900,
+  "action": "inspect_make_scenario",
+  "confirm": "INSPECT-MAKE-MODULES-V1",
+  "scenario_id": 5589822,
+  "module_ids": [8, 9, 20],
   "expected_upstream_status": 200,
-  "note": "corrected Make scenariosBlueprints/version parser"
+  "note": "read-only C8 duplicate-match scope verification"
 }
