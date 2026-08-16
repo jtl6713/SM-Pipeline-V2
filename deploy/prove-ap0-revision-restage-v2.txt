@@ -1,0 +1,3 @@
+Curl-safe bounded AP0 revision behavioral proof for Output 157 only.
+Lease AP0-REVISION-PROOF-20260816-A-L1 reopened after prior zero-run HTTP transport failure.
+Max four AP0 runs; max 120 control operations; publishing forbidden; publisher orchestrators must remain OFF.
