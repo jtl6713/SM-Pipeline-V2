@@ -1,0 +1,29 @@
+name: Apply Worker Make Inspector Patch
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/apply-worker-make-inspector.txt']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with: {fetch-depth: 0}
+      - run: |
+          set -euo pipefail
+          python repair/tools/patch_worker_make_inspector.py
+          cp apps/studio-api/worker.js /tmp/worker.mjs
+          node --check /tmp/worker.mjs
+          grep -q 'repair_make_module_inspector_v1: true' apps/studio-api/worker.js
+          grep -q 'action === "inspect_make_scenario"' apps/studio-api/worker.js
+      - run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Add bounded read-only Make module inspector'
+          git push origin HEAD:main
