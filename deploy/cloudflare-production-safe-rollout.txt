@@ -1,0 +1,6 @@
+Safe Studio API rollout trigger.
+
+Target: chicagoshining-studio-api
+Known-good rollback anchor: Worker version 86.
+Method: reconstruct v86 non-secret config, preserve/require existing secrets, upload non-live version, verify exact 11 bindings, deploy new version at 0% with v86 at 100%, smoke-test the exact new version using a service-binding version override, then promote to 100% only on success. Automatic rollback to v86 on failure.
+Triggered: 2026-08-16
