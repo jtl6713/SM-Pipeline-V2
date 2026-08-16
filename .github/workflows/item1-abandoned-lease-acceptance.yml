@@ -1,0 +1,77 @@
+name: Item 1 Abandoned Lease Acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/item1-abandoned-lease-acceptance.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+      TEST_RUN_ID: TR-ITEM1-20260816-C
+      LEASE_ID: TR-ITEM1-20260816-ABANDON-L1
+      SCENARIO_ID: '5864632'
+      OUTPUT_RECORD_ID: rec57RWi9KzmFNaSn
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve stable bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          echo "CONTROL_URL=https://$BRIDGE_WORKER.$SUB.workers.dev/control" >> "$GITHUB_ENV"
+          DERIVED=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          echo "CONTROL_SECRET=$DERIVED" >> "$GITHUB_ENV"
+      - name: Acquire minimum-duration lease and intentionally abandon it
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPIRES=$(date -u -d '+65 seconds' '+%Y-%m-%dT%H:%M:%SZ')
+          jq -n \
+            --arg action acquire \
+            --arg test "$TEST_RUN_ID" \
+            --arg lease "$LEASE_ID" \
+            --argjson scenario "$SCENARIO_ID" \
+            --arg expires "$EXPIRES" \
+            --arg output "$OUTPUT_RECORD_ID" \
+            '{action:$action,test_run_id:$test,lease_id:$lease,scenario_id:$scenario,expires_at:$expires,max_runs:1,max_operations:2,allowed_platform_output_record_ids:[$output],deny_fixture_record_ids:[],allow_public_publish:false}' > /tmp/acquire.json
+          code=$(curl -sS --max-time 60 -o /tmp/acquire-result.json -w '%{http_code}' -X POST "$CONTROL_URL" -H "Authorization: Bearer $CONTROL_SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/acquire.json)
+          echo "acquire_bridge_http=$code"
+          test "$code" = 200
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.action=="acquire"' /tmp/acquire-result.json >/dev/null
+          echo "Lease acquired; no follow-up action will be issued before expiry."
+      - name: Allow lease to expire without client follow-up
+        shell: bash
+        run: sleep 75
+      - name: Sweep expired lease and verify automatic recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' '{"action":"sweep"}' >/tmp/sweep.json
+          code=$(curl -sS --max-time 90 -o /tmp/sweep-result.json -w '%{http_code}' -X POST "$CONTROL_URL" -H "Authorization: Bearer $CONTROL_SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/sweep.json)
+          echo "sweep_bridge_http=$code"
+          test "$code" = 200
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.action=="sweep"' /tmp/sweep-result.json >/dev/null
+          jq -e --arg lease "$LEASE_ID" '.upstream_json.swept.results | any(.lease_id==$lease and .stopped==true and (.error==null))' /tmp/sweep-result.json >/dev/null
+          jq -c --arg lease "$LEASE_ID" '{lease:$lease,swept:[.upstream_json.swept.results[]|select(.lease_id==$lease)|{scenario_id,exhausted,stopped,error}]}' /tmp/sweep-result.json
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item1-abandoned-lease-${{ github.run_id }}
+          path: |
+            /tmp/acquire-result.json
+            /tmp/sweep-result.json
+          if-no-files-found: ignore
+          retention-days: 30
