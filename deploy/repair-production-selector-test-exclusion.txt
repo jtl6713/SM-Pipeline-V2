@@ -1,0 +1,1 @@
+Transactional rollback-safe Item 5 boundary repair. Add Test_Run_ID=BLANK() to ordinary production Platform Output SearchRecords selectors in R3/R4/R5 and IG/FB/TikTok/YT/AP-CAR orchestrators. All scenarios must be OFF; preserve schedule, hook metadata, views, maxRecords, module IDs and routes.
