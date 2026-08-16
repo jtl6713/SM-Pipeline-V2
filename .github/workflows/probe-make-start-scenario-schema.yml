@@ -1,0 +1,51 @@
+name: Probe Make Start Scenario Schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/probe-make-start-scenario-schema.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-make-start-scenario-schema-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Run guarded disposable schema probe once
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n '{action:"probe_make_start_scenario_schema",confirm:"PROBE-MAKE-START-SCENARIO-SCHEMA-V1"}' >/tmp/request.json
+          code=$(curl -sS --max-time 300 -o /tmp/result.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+          unset SECRET
+          echo "probe_http=$code"
+          if [[ "$code" != '200' ]]; then
+            jq -c '{bridge_ok,upstream_status,exception,error:(.upstream_json.error//null),message:(.upstream_json.message//null)}' /tmp/result.json || true
+            exit 1
+          fi
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.probe.scratch.deleted==true' /tmp/result.json >/dev/null
+          jq -c '{template_catalog:{accessible:.upstream_json.probe.template_catalog.accessible,templates_scanned:.upstream_json.probe.template_catalog.templates_scanned,scenario_service_modules:.upstream_json.probe.template_catalog.scenario_service_modules,error:.upstream_json.probe.template_catalog.error},scratch:{created:.upstream_json.probe.scratch.created,deleted:.upstream_json.probe.scratch.deleted,scenario_id:.upstream_json.probe.scratch.scenario_id,interface_set:.upstream_json.probe.scratch.interface_set,scheduling_type:.upstream_json.probe.scratch.scheduling_type,modules_after_interface:.upstream_json.probe.scratch.modules_after_interface}}' /tmp/result.json
+      - name: Save bounded probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: make-start-scenario-schema-${{ github.run_id }}
+          path: /tmp/result.json
+          if-no-files-found: ignore
+          retention-days: 30
