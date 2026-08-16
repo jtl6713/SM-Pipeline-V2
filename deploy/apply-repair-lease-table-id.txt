@@ -1,4 +1,4 @@
 Apply the scoped repair-control lease table-ID hardening only.
 Target table ID: tbltuSt9UibYzxpah.
 No Make scenario activation, render, Airtable business-record mutation, or publishing in this workflow.
-Triggered 2026-08-16 continuation checkpoint.
+Triggered 2026-08-16 continuation checkpoint retry 2.
