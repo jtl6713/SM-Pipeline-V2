@@ -1,0 +1,43 @@
+name: Patch Repair Service Binding URL
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/patch-repair-service-url.txt']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Patch service-bound request host
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          old='https://studio.chicagoshining.com/api/admin/repair/control'
+          new='https://studio-api.internal/api/admin/repair/control'
+          files=[Path('.github/workflows/repair-control-command.yml'),Path('.github/workflows/repair-lease-watchdog.yml')]
+          for p in files:
+              text=p.read_text()
+              count=text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{p}: expected exactly one service-bound URL, found {count}')
+              p.write_text(text.replace(old,new))
+          PY
+          git diff --check
+          grep -q 'https://studio-api.internal/api/admin/repair/control' .github/workflows/repair-control-command.yml
+          grep -q 'https://studio-api.internal/api/admin/repair/control' .github/workflows/repair-lease-watchdog.yml
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Repair Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/repair-control-command.yml .github/workflows/repair-lease-watchdog.yml
+          git commit -m 'Use neutral host for repair service-binding requests'
+          git pull --rebase origin main
+          git push origin HEAD:main
