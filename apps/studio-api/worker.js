@@ -10534,19 +10534,19 @@ async function repairInspectMakeBlueprintHistory(env, scenarioId, moduleId) {
   if (!Number.isInteger(targetModuleId) || targetModuleId <= 0) throw new HttpError(400, "module_id must be a positive integer");
 
   const rawVersions = await phase6MakeApiJson(env, `/scenarios/${id}/blueprints`, { method: "GET" });
-  const candidates = rawVersions?.response?.scenariosBlueprints
-    || rawVersions?.scenariosBlueprints
-    || rawVersions?.response?.blueprints
-    || rawVersions?.blueprints
-    || (Array.isArray(rawVersions?.response) ? rawVersions.response : null)
-    || (Array.isArray(rawVersions) ? rawVersions : null)
-    || [];
-  if (!Array.isArray(candidates)) throw new HttpError(502, "Make blueprint versions response was not an array");
+  const rawCandidates = rawVersions?.response?.scenariosBlueprints
+    ?? rawVersions?.scenariosBlueprints
+    ?? rawVersions?.response?.blueprints
+    ?? rawVersions?.blueprints
+    ?? (Array.isArray(rawVersions?.response) ? rawVersions.response : null)
+    ?? (Array.isArray(rawVersions) ? rawVersions : null)
+    ?? [];
+  const candidates = Array.isArray(rawCandidates) ? rawCandidates : (rawCandidates && typeof rawCandidates === "object" ? [rawCandidates] : []);
 
   const versions = [];
   const recent = candidates.slice(0, 60);
   for (const version of recent) {
-    const blueprintId = Number(version?.id ?? version?.blueprintId ?? version?.blueprint_id);
+    const blueprintId = Number(version?.id ?? version?.blueprintId ?? version?.blueprint_id ?? version?.version);
     if (!Number.isInteger(blueprintId) || blueprintId <= 0) continue;
     const body = await phase6MakeApiJson(env, `/scenarios/${id}/blueprint?blueprintId=${blueprintId}`, { method: "GET" });
     const blueprint = body?.response?.blueprint || body?.blueprint;
@@ -10560,7 +10560,7 @@ async function repairInspectMakeBlueprintHistory(env, scenarioId, moduleId) {
     if (blueprint && typeof blueprint === "object") walk(blueprint.flow);
     versions.push({
       blueprint_id: blueprintId,
-      created_at: String(version?.createdAt || version?.created_at || version?.timestamp || ""),
+      created_at: String(version?.createdAt || version?.created_at || version?.created || version?.timestamp || ""),
       is_draft: Boolean(version?.draft ?? version?.isDraft ?? version?.is_draft),
       target_module_present: Boolean(target),
       target_module_type: target ? String(target?.module || "") : null,
