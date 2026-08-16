@@ -1,1 +1,1 @@
-Strict source patch for pipeline-wide Test_Run_ID propagation through Studio. No deployment in this workflow; syntax/diff validation and commit only.
+Strict source patch for pipeline-wide Test_Run_ID propagation through Studio. No deployment in this workflow; syntax/diff validation and commit only. Retry against live platformOutputSeedFields signature.
