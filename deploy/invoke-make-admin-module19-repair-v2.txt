@@ -1,0 +1,9 @@
+Guarded live repair trigger.
+
+Scenario: MAKE-ADMIN-BRIDGE 5893243
+Module: 19 Record GET_BLUEPRINT Result
+Exact mutation: responseBody bounded to 1200 chars; responseContentType application/json.
+Precondition: no unexpired repair lease for scenario 5893243. Expired leases are swept first.
+Production Worker: dynamically capture current 100% active version and pin service invocation to that exact version.
+Scenario must remain OFF before and after; blueprint rollback is automatic on failed exact verification.
+Triggered: 2026-08-16
