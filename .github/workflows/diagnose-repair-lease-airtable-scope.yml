@@ -24,50 +24,70 @@ jobs:
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
           base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
           openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/bootstrap-pat.txt
-      - name: Test credential scopes without logging values
+      - name: Test credential scopes and exact lease query without logging values
         shell: bash
         run: |
           set -euo pipefail
           BOOT=$(cat /tmp/bootstrap-pat.txt)
           base='appe33zkZn35yirTL'; lease='tbltuSt9UibYzxpah'; settings='tblpHPWeEkyJaF7ql'
           probe(){ local tok=$1 table=$2 out=$3; curl -sS -o "$out" -w '%{http_code}' "https://api.airtable.com/v0/$base/$table?maxRecords=1" -H "Authorization: Bearer $tok"; }
+          exact_probe(){ local tok=$1 out=$2; python - <<'PY' >/tmp/exact-query.txt
+import urllib.parse
+print(urllib.parse.urlencode([
+ ('maxRecords','50'),
+ ('sort[0][field]','Requested_At'),
+ ('sort[0][direction]','desc'),
+ ('filterByFormula','AND({Status}="Processing",FIND("REPAIR_LEASE_V1", {Notes}&"")>0)')
+]))
+PY
+            curl -sS -o "$out" -w '%{http_code}' "https://api.airtable.com/v0/$base/$lease?$(cat /tmp/exact-query.txt)" -H "Authorization: Bearer $tok"; }
           BOOT_LEASE=$(probe "$BOOT" "$lease" /tmp/bootstrap-lease.json)
           BOOT_SETTINGS=$(probe "$BOOT" "$settings" /tmp/bootstrap-settings.json)
+          BOOT_EXACT=$(exact_probe "$BOOT" /tmp/bootstrap-exact.json)
           echo "bootstrap_settings_http=$BOOT_SETTINGS"
           echo "bootstrap_lease_http=$BOOT_LEASE"
+          echo "bootstrap_exact_lease_query_http=$BOOT_EXACT"
           test "$BOOT_SETTINGS" = 200
-          # Retrieve the separately stored pipeline PAT using bootstrap access, but never print it.
           python - <<'PY' >/tmp/settings-query.txt
-          import urllib.parse
-          print(urllib.parse.urlencode([('filterByFormula',"{Setting_Name}='Airtable_Personal_Access_Token'"),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
-          PY
+import urllib.parse
+print(urllib.parse.urlencode([('filterByFormula',"{Setting_Name}='Airtable_Personal_Access_Token'"),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+PY
           curl -fsS "https://api.airtable.com/v0/$base/$settings?$(cat /tmp/settings-query.txt)" -H "Authorization: Bearer $BOOT" -o /tmp/pipeline-pat-record.json
           python - <<'PY'
-          import json
-          d=json.load(open('/tmp/pipeline-pat-record.json'))
-          vals=[r.get('fields',{}).get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active') and r.get('fields',{}).get('Setting_Value')]
-          if len(vals)!=1: raise SystemExit('Expected exactly one active pipeline Airtable PAT setting')
-          open('/tmp/pipeline-pat.txt','w').write(str(vals[0]).strip())
-          PY
+import json
+d=json.load(open('/tmp/pipeline-pat-record.json'))
+vals=[r.get('fields',{}).get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active') and r.get('fields',{}).get('Setting_Value')]
+if len(vals)!=1: raise SystemExit('Expected exactly one active pipeline Airtable PAT setting')
+open('/tmp/pipeline-pat.txt','w').write(str(vals[0]).strip())
+PY
           PIPE=$(cat /tmp/pipeline-pat.txt)
           PIPE_LEASE=$(probe "$PIPE" "$lease" /tmp/pipeline-lease.json)
           PIPE_OUTPUT=$(probe "$PIPE" 'tblrlPeboBthkplH0' /tmp/pipeline-output.json)
+          PIPE_EXACT=$(exact_probe "$PIPE" /tmp/pipeline-exact.json)
           echo "pipeline_output_http=$PIPE_OUTPUT"
           echo "pipeline_lease_http=$PIPE_LEASE"
+          echo "pipeline_exact_lease_query_http=$PIPE_EXACT"
+          test "$BOOT_LEASE" = 200
+          test "$BOOT_EXACT" = 200
+          test "$PIPE_OUTPUT" = 200
+          test "$PIPE_LEASE" = 200
+          test "$PIPE_EXACT" = 200
           python - <<'PY'
-          import json
-          from pathlib import Path
-          def err(path):
-            try:
-              d=json.load(open(path)); e=d.get('error') or {}
-              return e.get('type') if isinstance(e,dict) else None
-            except: return None
-          ev={
-            'bootstrap_lease_error_type':err('/tmp/bootstrap-lease.json'),
-            'pipeline_lease_error_type':err('/tmp/pipeline-lease.json'),
-          }
-          Path('/tmp/lease-scope-evidence.json').write_text(json.dumps(ev,indent=2,sort_keys=True))
-          PY
+import json
+from pathlib import Path
+def err(path):
+  try:
+    d=json.load(open(path)); e=d.get('error') or {}
+    return e.get('type') if isinstance(e,dict) else None
+  except: return None
+ev={
+ 'bootstrap_lease_error_type':err('/tmp/bootstrap-lease.json'),
+ 'bootstrap_exact_error_type':err('/tmp/bootstrap-exact.json'),
+ 'pipeline_lease_error_type':err('/tmp/pipeline-lease.json'),
+ 'pipeline_exact_error_type':err('/tmp/pipeline-exact.json'),
+}
+Path('/tmp/lease-scope-evidence.json').write_text(json.dumps(ev,indent=2,sort_keys=True))
+PY
       - name: Destroy credentials
         if: always()
         shell: bash
