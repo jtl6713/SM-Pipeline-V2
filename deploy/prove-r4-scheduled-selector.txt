@@ -2,4 +2,4 @@ One bounded R4 scheduled-selector proof.
 Positive fixture: Output 155 / rechqCjRY66zZzjBg.
 Denial fixture: Output 156 / recfp2sPnpBKfibQl.
 Publishing disabled on both; lease max_runs=1; R4 must return OFF after pulse.
-Triggered 2026-08-16T13:52-04:00.
+Triggered 2026-08-16 continuation checkpoint after lease-store hardening.
