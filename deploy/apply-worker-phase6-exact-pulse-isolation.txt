@@ -1,0 +1,7 @@
+Apply only Studio API shared controlled-pulse isolation hardening:
+- refuse to take over an already-active R4/R5 scenario;
+- before activation, require the production selector eligible set to contain exactly the requested output;
+- preserve forced OFF cleanup.
+Production R4/R5 scheduled selectors remain unchanged.
+No Make activation. No Airtable mutation. No publishing during patch.
+Triggered 2026-08-16 continuation checkpoint.
