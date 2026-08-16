@@ -87,7 +87,6 @@ jobs:
           if rec7.get('fld42gDl967o76R7m')!='platform-output-{{1.Output_ID}}.mp4': raise SystemExit('AP0 Module 7 baseline staged filename changed')
           rec8=mods[8].get('mapper',{}).get('record') or {}
           if 'fldHHE9w1gQ9WeQYt' in rec8 or 'fldLCrDXKw1YY07hv' in rec8: raise SystemExit('AP0 failure path unexpectedly mutates known-good asset URL/ready time')
-          # Patch only revision semantics.
           expected='platform-output-{{1.Output_ID}}-{{1.Final_File_ID}}.mp4'
           newgroups=[]
           for g in groups:
@@ -104,14 +103,15 @@ jobs:
           for key in ('fldAjQHJwwTbCQESx','fldaQ2Wj4Vlh90QrJ'):
             if key in rec7 and isinstance(rec7[key],str):
               rec7[key]=rec7[key].replace('platform-output-{{1.Output_ID}}.mp4',expected)
-          payload={'blueprint':bp}
+          blueprint_string=json.dumps(bp,separators=(',',':'))
+          payload={'blueprint':blueprint_string}
           open('/tmp/ap0-patch-payload.json','w').write(json.dumps(payload,separators=(',',':')))
           evidence={
             'scenario_id':5612096,'hook_id':2653029,'module_ids':sorted(mods),
             'before_sha256':hashlib.sha256(json.dumps(json.load(open('/tmp/ap0-blueprint-before.json')),sort_keys=True,separators=(',',':')).encode()).hexdigest(),
             'expected_filename':expected,'expected_r2_key':'publish/platform-output-{{1.Output_ID}}/{{1.Final_File_ID}}.mp4',
             'eligibility_branches_before':4,'eligibility_branches_after':8,'not_equal_operator':'text:notequal',
-            'failure_preserves_prior_asset':True,
+            'failure_preserves_prior_asset':True,'make_blueprint_parameter_type':'string',
           }
           open('/tmp/ap0-prewrite-evidence.json','w').write(json.dumps(evidence,indent=2,sort_keys=True))
           print(json.dumps(evidence,indent=2,sort_keys=True))
@@ -122,7 +122,11 @@ jobs:
           set -euo pipefail
           TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5612096
           rollback(){
-            jq -n --slurpfile bp /tmp/ap0-blueprint-before.json '{blueprint:$bp[0]}' >/tmp/rollback-payload.json
+            python - <<'PY'
+          import json
+          bp=json.load(open('/tmp/ap0-blueprint-before.json'))
+          open('/tmp/rollback-payload.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
             curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data-binary @/tmp/rollback-payload.json >/tmp/rollback-http.txt || true
           }
           code=$(curl -sS -o /tmp/patch-result.json -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data-binary @/tmp/ap0-patch-payload.json || true)
