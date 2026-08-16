@@ -1,0 +1,80 @@
+name: Read I3 I4 Live Contracts
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-i3-i4-live-contracts.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve and inspect I3 I4
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
+          curl -fsS "$BASE/scenarios/5557966" -H "Authorization: Token $TOKEN" -o /tmp/seed
+          TEAM=$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/seed')); s=d.get('scenario') or d.get('response') or d
+          print(s.get('teamId') or s.get('team_id') or '')
+          PY
+          )
+          [[ -n "$TEAM" ]] || { echo 'Could not resolve team'; exit 1; }
+          curl -fsS "$BASE/scenarios?teamId=$TEAM&pg%5Blimit%5D=200" -H "Authorization: Token $TOKEN" -o /tmp/list
+          python - <<'PY' >/tmp/ids
+          import json,re
+          d=json.load(open('/tmp/list')); rows=d.get('scenarios') or d.get('response') or []
+          if isinstance(rows,dict): rows=rows.get('scenarios') or []
+          for s in rows:
+            name=str(s.get('name') or '')
+            if re.search(r'(^|\s)(I3|I4)(\s|—|-)',name,re.I) or re.search(r'\b(I3|I4)\b',name,re.I):
+              print(s.get('id'))
+              print('MATCH',s.get('id'),name,file=__import__('sys').stderr)
+          PY
+          : >/tmp/contracts.ndjson
+          while read -r sid; do
+            [[ "$sid" =~ ^[0-9]+$ ]] || continue
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/sc
+            sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
+            SID=$sid python - <<'PY' >>/tmp/contracts.ndjson
+          import json,os,re
+          sid=int(os.environ['SID']); s=json.load(open('/tmp/sc')); d=json.load(open('/tmp/bp')); sc=s.get('scenario') or s.get('response') or s; bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          mods=[]
+          def walk(flow):
+            for n in flow or []:
+              name=str(((n.get('metadata') or {}).get('designer') or {}).get('name') or '')
+              blob=json.dumps([n.get('module'),name,n.get('mapper'),n.get('filter')],default=str).lower()
+              if 'airtable:' in str(n.get('module','')).lower() or any(x in blob for x in ['webhook','content item','candidate','promot']):
+                mapper=n.get('mapper') or {}; safe={k:('<redacted>' if any(x in str(k).lower() for x in ['url','token','secret','authorization']) else v) for k,v in mapper.items() if k not in ['headers']}
+                mods.append({'id':n.get('id'),'module':n.get('module'),'name':name,'mapper_keys':sorted(mapper.keys()),'mapper':safe,'filter':n.get('filter')})
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          text=json.dumps(bp,default=str).lower()
+          print(json.dumps({'id':sid,'name':sc.get('name'),'active':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'terms':{x:(x in text) for x in ['test_run_id','promoted_content_record_id','content items','production_content_type']},'modules':mods},separators=(',',':')))
+          PY
+            sleep 1
+          done </tmp/ids
+          cat /tmp/contracts.ndjson
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/seed /tmp/list /tmp/ids /tmp/sc /tmp/bp /tmp/contracts.ndjson
