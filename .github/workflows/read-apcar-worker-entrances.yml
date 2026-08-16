@@ -1,0 +1,63 @@
+name: Read AP-CAR Worker Entrances
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-apcar-worker-entrances.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify AP0C through AP5C exact entrances
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b)
+          for sid in 5786899 5790745 5791231 5791273 5791336 5791356 5791396 5791424; do
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/sc
+            sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp
+            SID=$sid python - <<'PY'
+          import json,os
+          sid=int(os.environ['SID']); s=json.load(open('/tmp/sc')); d=json.load(open('/tmp/bp')); sc=s.get('scenario') or s.get('response') or s; bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          mods=[]
+          def walk(flow):
+            for n in flow or []:
+              mods.append(n)
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          first=mods[0] if mods else {}; exact=[]
+          for n in mods[:6]:
+            blob=json.dumps([n.get('module'),n.get('mapper'),n.get('filter'),((n.get('metadata') or {}).get('designer') or {}).get('name')],default=str).lower()
+            if 'actiongetrecord' in str(n.get('module','')).lower() or 'output_record_id' in blob:
+              exact.append({'id':n.get('id'),'module':n.get('module'),'name':((n.get('metadata') or {}).get('designer') or {}).get('name'),'has_output_record_id':'output_record_id' in blob})
+          text=json.dumps(bp,default=str).lower()
+          out={'id':sid,'name':sc.get('name'),'active':sc.get('isActive'),'hookId':sc.get('hookId'),'scheduling':sc.get('scheduling'),'first':{'id':first.get('id'),'module':first.get('module'),'name':((first.get('metadata') or {}).get('designer') or {}).get('name')},'exact_modules':exact,'terms':{x:(x in text) for x in ['do_not_publish','platform','ig_carousel_status','publish_locked_by','test_run_id']}}
+          print(json.dumps(out,separators=(',',':')))
+          if sc.get('isActive') is not True: raise SystemExit(f'worker {sid} unexpectedly inactive')
+          if 'webhook' not in str(first.get('module','')).lower(): raise SystemExit(f'worker {sid} first module is not webhook')
+          if not exact: raise SystemExit(f'worker {sid} lacks exact output_record_id get in first modules')
+          PY
+            sleep 1
+          done
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/settings /tmp/bp /tmp/sc /tmp/q
