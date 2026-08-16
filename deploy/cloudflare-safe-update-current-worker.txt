@@ -1,4 +1,4 @@
 Dynamic safe update trigger for chicagoshining-studio-api.
 
-Deploy current main source containing repair_make_scenario_inventory_v1 through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor; this adds read-only Make inventory only. No Make scenario activation/run, Airtable write, or publishing occurs during deployment.
-Triggered: 2026-08-16 — compact Make scenario inventory.
+Deploy current main source containing repair_make_start_scenario_probe_v1 through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. This only adds a guarded discovery action; it does not run or modify R4 during deployment.
+Triggered: 2026-08-16 — Start Scenario schema probe.
