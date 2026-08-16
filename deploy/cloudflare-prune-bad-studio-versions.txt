@@ -1,0 +1,8 @@
+Bounded Cloudflare Worker version cleanup trigger.
+
+Target: chicagoshining-studio-api
+Protected serving version: v86 / fbcf7fbd-7935-44dd-b195-094f505b7df6
+Exact deletion scope: non-serving versions 87, 88, 89, 90, 91, 92, 93 only.
+Preconditions: v86 is sole 100% production target; v87-v92 have zero bindings; v93 has only the nine expected non-secret bindings.
+Purpose: make v86 the latest version again so strict inherit-latest can copy its encrypted binding contract without recovering secret values.
+Triggered: 2026-08-16
