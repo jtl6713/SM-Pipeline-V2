@@ -33,7 +33,7 @@ jobs:
           echo "http=$code"
           if [[ "$code" != '200' ]]; then jq -c '{bridge_ok,upstream_status,exception,error:(.upstream_json.error//null),message:(.upstream_json.message//null)}' /tmp/result.json || true; exit 1; fi
           jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/result.json >/dev/null
-          jq -c '{team_id:.upstream_json.inventory.team_id,returned_count:.upstream_json.inventory.returned_count,on_demand:[.upstream_json.inventory.on_demand_with_interfaces[]|{id,name,is_active,input_count,inputs,interface_error:(.interface_error//null)}]}' /tmp/result.json
+          jq -c '{team_id:.upstream_json.inventory.team_id,returned_count:.upstream_json.inventory.returned_count,scenarios:[.upstream_json.inventory.scenarios[]|{id,name,is_active,scheduling,hook_id:(.hook_id//null)}],on_demand:[.upstream_json.inventory.on_demand_with_interfaces[]|{id,name,is_active,input_count,inputs,interface_error:(.interface_error//null)}]}' /tmp/result.json
       - name: Save read-only evidence
         if: always()
         uses: actions/upload-artifact@v4
