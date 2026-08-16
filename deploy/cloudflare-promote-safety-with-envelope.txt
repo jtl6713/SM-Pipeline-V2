@@ -1,0 +1,4 @@
+Encrypted zero-traffic Studio safety rollout trigger.
+
+The runner decrypts the authorized Airtable PAT only in temporary memory/files protected by the existing Cloudflare Actions secret, validates it directly against Airtable, uploads it with current safety source using Wrangler --secrets-file into a non-live version, verifies the core binding contract, adds the new version at 0% traffic, smoke-tests that exact version with a Cloudflare version override, and promotes only on success. Automatic rollback to v86 on any post-split failure. Direct ElevenLabs catalog refresh is optional; cached Airtable voices remain authoritative fallback.
+Triggered: 2026-08-16.
