@@ -1,0 +1,87 @@
+name: Repair I4 Test Run Propagation
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-i4-test-run-propagation.txt']
+permissions: {contents: read}
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Add exact Test_Run_ID copy to I4 Content Item creation
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b); SID=5524092
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -o /tmp/sc-before
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp-before
+          python - <<'PY'
+          import json
+          s=json.load(open('/tmp/sc-before')); sc=s.get('scenario') or s.get('response') or s
+          if sc.get('isActive') is not True or sc.get('hookId')!=2549733: raise SystemExit('SAFETY: I4 state/hook drift')
+          d=json.load(open('/tmp/bp-before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          nodes={}
+          def walk(flow):
+            for n in flow or []:
+              nodes[n.get('id')]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          m1=nodes.get(1); m2=nodes.get(2)
+          if not m1 or m1.get('module')!='airtable:ActionGetRecord' or (m1.get('mapper') or {}).get('id')!='{{4.record_id}}': raise SystemExit('SAFETY: exact I4 entrance missing')
+          if not m2 or m2.get('module')!='airtable:ActionCreateRecord': raise SystemExit('SAFETY: I4 Content Item create module drift')
+          rec=(m2.get('mapper') or {}).get('record')
+          if not isinstance(rec,dict): raise SystemExit('SAFETY: I4 Content Item record mapping missing')
+          if rec.get('Test_Run_ID') not in (None,'{{1.Test_Run_ID}}'): raise SystemExit('SAFETY: unexpected Test_Run_ID mapping')
+          rec['Test_Run_ID']='{{1.Test_Run_ID}}'
+          open('/tmp/patch.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+          code=$(curl -sS -o /tmp/patch-response -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/patch.json)
+          [[ "$code" =~ ^2 ]] || { cat /tmp/patch-response; exit 1; }
+          sleep 2
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -o /tmp/sc-after
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/bp-after
+          if ! python - <<'PY'; then
+          import json
+          sb=json.load(open('/tmp/sc-before')); sa=json.load(open('/tmp/sc-after')); before=sb.get('scenario') or sb.get('response') or sb; after=sa.get('scenario') or sa.get('response') or sa
+          if after.get('isActive') is not True or after.get('hookId')!=before.get('hookId') or after.get('scheduling')!=before.get('scheduling'): raise SystemExit('I4 metadata drift')
+          d=json.load(open('/tmp/bp-after')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          nodes={}; ids=[]
+          def walk(flow):
+            for n in flow or []:
+              ids.append(n.get('id')); nodes[n.get('id')]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          m1=nodes.get(1); m2=nodes.get(2)
+          if m1.get('module')!='airtable:ActionGetRecord' or (m1.get('mapper') or {}).get('id')!='{{4.record_id}}': raise SystemExit('exact I4 entrance regressed')
+          if ((m2.get('mapper') or {}).get('record') or {}).get('Test_Run_ID')!='{{1.Test_Run_ID}}': raise SystemExit('Test_Run_ID not propagated')
+          print(json.dumps({'passed':True,'scenario_id':5524092,'active':after.get('isActive'),'hookId':after.get('hookId'),'module_count':len(ids),'content_item_test_run_mapping':'{{1.Test_Run_ID}}'}))
+          PY
+            python - <<'PY'
+          import json
+          d=json.load(open('/tmp/bp-before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          open('/tmp/rollback.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+            curl -fsS -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json >/dev/null
+            exit 1
+          fi
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/sc-before /tmp/sc-after /tmp/bp-before /tmp/bp-after /tmp/patch.json /tmp/patch-response /tmp/rollback.json
