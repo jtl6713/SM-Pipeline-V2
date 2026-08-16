@@ -61,7 +61,7 @@ jobs:
             if(u.pathname!=="/$TOKEN/execute") return new Response("Not found",{status:404});
             const command=$CMD;
             if(command.action==="acquire" && (!command.expires_at || command.expires_at==="RUNTIME_PLUS_10_MINUTES")) command.expires_at=new Date(Date.now()+10*60*1000).toISOString();
-            const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{
+            const r=await env.STUDIO_API.fetch(new Request("https://studio-api.internal/api/admin/repair/control",{
               method:"POST",
               headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json","Cloudflare-Workers-Version-Overrides":"$TARGET_WORKER=\"$ACTIVE\""},
               body:JSON.stringify(command)
