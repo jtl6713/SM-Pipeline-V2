@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: chicagoshining-studio-api-production
+  group: chicagoshining-studio-api-production-deploy
   cancel-in-progress: false
 
 jobs:
@@ -22,40 +22,27 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
-      KNOWN_GOOD_BINDING_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
       VERIFY_BRIDGE: chicagoshining-studio-deploy-verify
+      WRANGLER_VERSION: 4.123.0
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Validate source and known-good binding anchor
+      - name: Validate source and install pinned Wrangler
         shell: bash
         run: |
           set -euo pipefail
           test -s apps/studio-api/worker.js
-          grep -q 'chicagoshining-studio-api' apps/studio-api/worker.js
           cp apps/studio-api/worker.js /tmp/studio-worker.mjs
           node --check /tmp/studio-worker.mjs
+          mkdir -p /tmp/wrangler-production
+          cd /tmp/wrangler-production
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
 
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS "$API/versions/$KNOWN_GOOD_BINDING_VERSION" -H "$AUTH" -o /tmp/binding-anchor.json
-          jq -e '.success==true' /tmp/binding-anchor.json >/dev/null
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          expected={
-            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
-            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
-            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
-            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
-          }
-          r=json.loads(Path('/tmp/binding-anchor.json').read_text())['result']
-          got={str(x.get('name')):str(x.get('type')) for x in (r.get('resources') or {}).get('bindings') or []}
-          if got != expected: raise SystemExit('Known-good binding anchor no longer has the expected 11 bindings')
-          PY
-
-      - name: Capture current production deployment
+      - name: Capture production rollback point and exact binding contract
+        id: capture
         shell: bash
         run: |
           set -euo pipefail
@@ -63,58 +50,11 @@ jobs:
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
           jq -e '.success==true' /tmp/deployments-before.json >/dev/null
-          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json >/tmp/active-before.txt
-
-      - name: Upload non-deployed version with strict inherited bindings
-        id: upload
-        shell: bash
-        run: |
-          set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          anchor="fbcf7fbd-7935-44dd-b195-094f505b7df6"
-          names=[
-            "AIRTABLE_BASE_ID","AIRTABLE_CONTENT_TABLE_ID","AIRTABLE_IDEA_TABLE_ID","AIRTABLE_MEDIA_TABLE_ID",
-            "AIRTABLE_MUSIC_VIEW_ID","AIRTABLE_OUTPUT_TABLE_ID","AIRTABLE_PAT","ALLOWED_ORIGINS",
-            "ELEVENLABS_API_KEY","I3_DECISION_WEBHOOK_URL","STUDIO_MEDIA"
-          ]
-          metadata={
-            "main_module":"worker.js",
-            "compatibility_date":"2026-08-02",
-            "bindings":[{"name":name,"type":"inherit","version_id":anchor} for name in names],
-            "annotations":{"workers/message":"Binding-safe Studio API deployment from GitHub"}
-          }
-          Path('/tmp/version-metadata.json').write_text(json.dumps(metadata,separators=(',',':')))
-          PY
-
-          code=$(curl -sS -o /tmp/version-upload.json -w '%{http_code}' -X POST \
-            "$API/versions?bindings_inherit=strict" \
-            -H "$AUTH" \
-            -F 'metadata=@/tmp/version-metadata.json;type=application/json' \
-            -F 'worker.js=@apps/studio-api/worker.js;type=application/javascript+module;filename=worker.js')
-          echo "version_upload_http=$code"
-          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
-            jq -c '{success,errors:[.errors[]?|{code,message}],messages:[.messages[]?|{code,message}]}' /tmp/version-upload.json >&2 || true
-            exit 1
-          fi
-          jq -e '.success==true' /tmp/version-upload.json >/dev/null
-          NEW_VERSION=$(jq -er '.result.id' /tmp/version-upload.json)
-          echo "$NEW_VERSION" >/tmp/new-version.txt
-          echo "version_id=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Verify non-deployed version has exactly 11 resolved bindings
-        shell: bash
-        run: |
-          set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          NEW_VERSION=$(cat /tmp/new-version.txt)
-          curl -fsS "$API/versions/$NEW_VERSION" -H "$AUTH" -o /tmp/new-version.json
-          jq -e '.success==true' /tmp/new-version.json >/dev/null
+          BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)
+          printf '%s' "$BEFORE" >/tmp/active-before.txt
+          echo "before_version=$BEFORE" >> "$GITHUB_OUTPUT"
+          curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/version-before.json
+          jq -e '.success==true' /tmp/version-before.json >/dev/null
           python - <<'PY'
           import json
           from pathlib import Path
@@ -124,55 +64,72 @@ jobs:
             'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
             'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
           }
-          r=json.loads(Path('/tmp/new-version.json').read_text())['result']
-          got={str(x.get('name')):str(x.get('type')) for x in (r.get('resources') or {}).get('bindings') or []}
+          r=json.loads(Path('/tmp/version-before.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got={str(x.get('name')):str(x.get('type')) for x in bindings}
           if got != expected:
-              raise SystemExit(f'Non-deployed version binding verification failed: {sorted(got.items())}')
-          print('non_deployed_binding_verification=PASS')
+              raise SystemExit(f'Predeploy binding contract mismatch: {sorted(got.items())}')
+          r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
+          bucket=r2.get('bucket_name') or r2.get('bucket')
+          if not bucket:
+              raise SystemExit('STUDIO_MEDIA R2 binding has no recoverable bucket identifier')
+          Path('/tmp/studio-media-bucket.txt').write_text(str(bucket))
+          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])}
+          Path('/tmp/predeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
+          print('predeploy_binding_contract=PASS')
           PY
 
-      - name: Deploy verified version at 100 percent
-        id: deploy
+      - name: Generate binding-preserving Wrangler config and dry run
         shell: bash
         run: |
           set -euo pipefail
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          NEW_VERSION=$(cat /tmp/new-version.txt)
-          cat >/tmp/deployment.json <<EOF
-          {
-            "strategy":"percentage",
-            "versions":[{"version_id":"$NEW_VERSION","percentage":100}],
-            "annotations":{"workers/message":"Binding-safe Studio API production deployment"}
+          cp apps/studio-api/worker.js /tmp/wrangler-production/worker.js
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          bucket=Path('/tmp/studio-media-bucket.txt').read_text().strip()
+          cfg={
+            'name':os.environ['TARGET_WORKER'],
+            'main':'worker.js',
+            'compatibility_date':'2026-08-02',
+            'workers_dev':False,
+            'keep_vars':True,
+            'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
+            'secrets':{'required':['AIRTABLE_PAT','ELEVENLABS_API_KEY']}
           }
-          EOF
-          code=$(curl -sS -o /tmp/deployment-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" \
-            -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/deployment.json)
-          echo "deployment_http=$code"
-          if [[ "$code" -lt 200 || "$code" -ge 300 ]]; then
-            jq -c '{success,errors:[.errors[]?|{code,message}],messages:[.messages[]?|{code,message}]}' /tmp/deployment-result.json >&2 || true
-            exit 1
-          fi
-          jq -e '.success==true' /tmp/deployment-result.json >/dev/null
+          Path('/tmp/wrangler-production/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
+          PY
+          cd /tmp/wrangler-production
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --dry-run >/tmp/wrangler-dry-run.log 2>&1
+          echo "wrangler_dry_run=PASS"
 
-      - name: Verify active source and resolved bindings
+      - name: Deploy source with preserved vars secrets and explicit R2 binding
+        id: deploy_source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/wrangler-production
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/wrangler-deploy.log 2>&1
+          echo "wrangler_deploy=PASS"
+
+      - name: Verify active source and exact 11-binding contract
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          NEW_VERSION=$(cat /tmp/new-version.txt)
-
+          BEFORE=$(cat /tmp/active-before.txt)
           ACTIVE=''
           for i in 1 2 3 4 5 6 7 8 9 10; do
             curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json
             ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)
-            [[ "$ACTIVE" == "$NEW_VERSION" ]] && break
+            [[ -n "$ACTIVE" && "$ACTIVE" != "$BEFORE" ]] && break
             sleep 2
           done
-          test "$ACTIVE" = "$NEW_VERSION"
-
-          curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/active-version.json
+          test -n "$ACTIVE"
+          test "$ACTIVE" != "$BEFORE"
+          printf '%s' "$ACTIVE" >/tmp/active-after.txt
+          curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/version-after.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -182,44 +139,44 @@ jobs:
             'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
             'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
           }
-          r=json.loads(Path('/tmp/active-version.json').read_text())['result']
-          got={str(x.get('name')):str(x.get('type')) for x in (r.get('resources') or {}).get('bindings') or []}
-          if got != expected: raise SystemExit('Active version does not retain expected 11 bindings')
+          r=json.loads(Path('/tmp/version-after.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got={str(x.get('name')):str(x.get('type')) for x in bindings}
+          if got != expected:
+              raise SystemExit(f'Postdeploy binding contract mismatch: {sorted(got.items())}')
+          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])}
+          Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
+          print('postdeploy_binding_contract=PASS')
           PY
 
           curl -fsS "$API/content/v2" -H "$AUTH" -D /tmp/worker-after-headers.txt -o /tmp/worker-after-body.bin
-          python3 - <<'PY'
+          python - <<'PY'
           from email.parser import BytesParser
           from email.policy import default
           from pathlib import Path
           import re
-          headers=Path('/tmp/worker-after-headers.txt').read_bytes()
-          body=Path('/tmp/worker-after-body.bin').read_bytes()
-          text_headers=headers.decode('latin-1',errors='replace')
-          matches=re.findall(r'(?im)^content-type:\s*(.+?)\r?$',text_headers)
+          headers=Path('/tmp/worker-after-headers.txt').read_bytes(); body=Path('/tmp/worker-after-body.bin').read_bytes()
+          text=headers.decode('latin-1',errors='replace')
+          matches=re.findall(r'(?im)^content-type:\s*(.+?)\r?$',text)
           content_type=matches[-1].strip() if matches else ''
           out=Path('/tmp/worker-after.js')
           if content_type.lower().startswith('multipart/'):
-              msg=BytesParser(policy=default).parsebytes(
-                  f'Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n'.encode()+body
-              )
+              msg=BytesParser(policy=default).parsebytes(f'Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n'.encode()+body)
               candidates=[]
               for part in msg.walk():
                   if part.is_multipart(): continue
-                  ctype=part.get_content_type().lower()
-                  filename=part.get_filename() or ''
-                  payload=part.get_payload(decode=True) or b''
-                  if 'javascript' in ctype or filename.lower().endswith(('.js','.mjs')):
-                      candidates.append((filename,payload))
-              if not candidates: raise SystemExit('No JavaScript module in active Worker response')
+                  ctype=part.get_content_type().lower(); filename=part.get_filename() or ''; payload=part.get_payload(decode=True) or b''
+                  if 'javascript' in ctype or filename.lower().endswith(('.js','.mjs')): candidates.append((filename,payload))
+              if not candidates: raise SystemExit('No JavaScript module found in active Worker content')
               preferred=next((x for x in candidates if x[0] in ('worker.js','index.js','src/index.js')),candidates[0])
               out.write_bytes(preferred[1])
           else:
               out.write_bytes(body)
           PY
           cmp --silent apps/studio-api/worker.js /tmp/worker-after.js
+          echo "active_source_byte_match=PASS"
 
-      - name: Build functional verification bridge
+      - name: Build and upload one-time functional verification bridge
         shell: bash
         run: |
           set -euo pipefail
@@ -236,17 +193,10 @@ jobs:
               if (url.pathname !== "/$TOKEN") return new Response("Not found", {status:404});
               const internal = new Request("https://studio.chicagoshining.com/api/session", {
                 method:"GET",
-                headers:{
-                  "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
-                  "Origin":"https://studio.chicagoshining.com",
-                  "Accept":"application/json"
-                }
+                headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"}
               });
               const response = await env.STUDIO_API.fetch(internal);
-              return new Response(await response.text(), {
-                status:response.status,
-                headers:{"Content-Type":"application/json","Cache-Control":"no-store"}
-              });
+              return new Response(await response.text(), {status:response.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
             }
           };
           EOF
@@ -254,6 +204,17 @@ jobs:
           {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
           EOF
           node --check /tmp/verify-worker.js
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/verify-upload.json -w '%{http_code}' -X PUT "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/verify-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/verify-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/verify-upload.json >/dev/null
+          curl -fsS -X POST "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' >/tmp/verify-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/verify-subdomain.json >/dev/null
 
       - name: Verify authenticated Studio session through service binding
         shell: bash
@@ -261,17 +222,6 @@ jobs:
           set -euo pipefail
           API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -sS -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" >/dev/null || true
-          code=$(curl -sS -o /tmp/verify-upload.json -w '%{http_code}' -X PUT \
-            "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/content" \
-            -H "$AUTH" \
-            -F 'metadata=@/tmp/verify-metadata.json;type=application/json' \
-            -F 'worker.js=@/tmp/verify-worker.js;type=application/javascript+module;filename=worker.js')
-          test "$code" -ge 200 -a "$code" -lt 300
-          jq -e '.success==true' /tmp/verify-upload.json >/dev/null
-          curl -fsS -X POST "$API_ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" \
-            -H "$AUTH" -H 'Content-Type: application/json' \
-            --data '{"enabled":true,"previews_enabled":false}' >/tmp/verify-subdomain-enable.json
           curl -fsS "$API_ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
           SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
           TOKEN=$(cat /tmp/verify-token.txt)
@@ -279,11 +229,12 @@ jobs:
           SESSION_CODE=000
           for i in 1 2 3 4 5 6 7 8 9 10; do
             SESSION_CODE=$(curl -sS --max-time 60 -o /tmp/session.json -w '%{http_code}' "$URL" || true)
-            [[ "$SESSION_CODE" == "200" ]] && jq -e '.ok==true and .authenticated==true and .authorized==true' /tmp/session.json >/dev/null 2>&1 && break
+            if [[ "$SESSION_CODE" == "200" ]] && jq -e '.ok==true and .authenticated==true and .authorized==true' /tmp/session.json >/dev/null 2>&1; then break; fi
             sleep 2
           done
           test "$SESSION_CODE" = "200"
-          jq -e '.ok==true and .authenticated==true and .authorized==true' /tmp/session.json >/dev/null
+          jq -e '.ok==true and .authenticated==true and .authorized==true and .email=="joseph.t.logan@gmail.com"' /tmp/session.json >/dev/null
+          echo "functional_session_check=PASS"
 
       - name: Delete functional verification bridge
         if: always()
@@ -292,82 +243,44 @@ jobs:
           set -euo pipefail
           API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          code=$(curl -sS -o /tmp/verify-delete.json -w '%{http_code}' -X DELETE \
-            "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH")
-          if [[ "$code" -ge 200 && "$code" -lt 300 ]]; then
-            jq -e '.success==true' /tmp/verify-delete.json >/dev/null || true
-          elif [[ "$code" != "404" ]]; then
-            exit 1
-          fi
+          code=$(curl -sS -o /tmp/verify-delete.json -w '%{http_code}' -X DELETE "$API_ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH")
+          if [[ "$code" -ge 200 && "$code" -lt 300 ]]; then jq -e '.success==true' /tmp/verify-delete.json >/dev/null || true; elif [[ "$code" != "404" ]]; then exit 1; fi
 
-      - name: Roll back to known-good v86 on any deployment verification failure
-        if: failure() && steps.deploy.outcome == 'success'
+      - name: Roll back to captured production version on any failure
+        if: failure() && steps.capture.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          cat >/tmp/emergency-rollback.json <<EOF
-          {"strategy":"percentage","versions":[{"version_id":"$KNOWN_GOOD_BINDING_VERSION","percentage":100}],"annotations":{"workers/message":"Automatic rollback after binding-safe deployment verification failure"}}
+          BEFORE=$(cat /tmp/active-before.txt)
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/current-deployments.json
+          CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/current-deployments.json)
+          if [[ "$CURRENT" != "$BEFORE" ]]; then
+            cat >/tmp/rollback.json <<EOF
+          {"strategy":"percentage","versions":[{"version_id":"$BEFORE","percentage":100}],"annotations":{"workers/message":"Automatic rollback after Studio API deployment verification failure"}}
           EOF
-          code=$(curl -sS -o /tmp/emergency-rollback-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" \
-            -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/emergency-rollback.json)
-          test "$code" -ge 200 -a "$code" -lt 300
-          jq -e '.success==true' /tmp/emergency-rollback-result.json >/dev/null
-          ACTIVE=''
+            code=$(curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json)
+            test "$code" -ge 200 -a "$code" -lt 300
+            jq -e '.success==true' /tmp/rollback-result.json >/dev/null
+          fi
           for i in 1 2 3 4 5 6 7 8 9 10; do
             curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/rollback-check.json
-            ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rollback-check.json)
-            [[ "$ACTIVE" == "$KNOWN_GOOD_BINDING_VERSION" ]] && break
+            CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/rollback-check.json)
+            [[ "$CURRENT" == "$BEFORE" ]] && break
             sleep 2
           done
-          test "$ACTIVE" = "$KNOWN_GOOD_BINDING_VERSION"
+          test "$CURRENT" = "$BEFORE"
+          echo "automatic_rollback_verified=true"
 
-      - name: Save deployment evidence
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          def load(path):
-              p=Path(path)
-              if not p.exists(): return None
-              try: return json.loads(p.read_text())
-              except Exception: return None
-          new=load('/tmp/new-version.json') or {}
-          active=load('/tmp/active-version.json') or {}
-          rnew=new.get('result') or {}
-          ractive=active.get('result') or {}
-          out={
-            'worker':'chicagoshining-studio-api',
-            'binding_anchor_version':'fbcf7fbd-7935-44dd-b195-094f505b7df6',
-            'new_version_id':rnew.get('id'),
-            'new_version_number':rnew.get('number'),
-            'new_binding_count':len((rnew.get('resources') or {}).get('bindings') or []),
-            'active_version_id':ractive.get('id'),
-            'active_version_number':ractive.get('number'),
-            'active_binding_count':len((ractive.get('resources') or {}).get('bindings') or []),
-            'source_sha256':None
-          }
-          import hashlib
-          p=Path('apps/studio-api/worker.js')
-          if p.exists(): out['source_sha256']=hashlib.sha256(p.read_bytes()).hexdigest()
-          Path('/tmp/deployment-evidence.json').write_text(json.dumps(out,indent=2,sort_keys=True))
-          print(json.dumps(out,indent=2,sort_keys=True))
-          PY
-
-      - name: Upload deployment evidence
+      - name: Upload sanitized deployment evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: chicagoshining-studio-api-binding-safe-${{ github.run_id }}
+          name: studio-api-production-deploy-${{ github.run_id }}
           path: |
-            /tmp/deployment-evidence.json
-            /tmp/version-upload.json
-            /tmp/deployment-result.json
+            /tmp/predeploy-contract-sanitized.json
+            /tmp/postdeploy-contract-sanitized.json
             /tmp/session.json
-            /tmp/emergency-rollback-result.json
           if-no-files-found: ignore
           retention-days: 30
