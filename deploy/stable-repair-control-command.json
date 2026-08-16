@@ -1,5 +1,6 @@
 {
-  "action": "list_make_scenarios_compact",
-  "confirm": "LIST-MAKE-SCENARIOS-COMPACT-V1",
+  "action": "inspect_make_scenario",
+  "confirm": "INSPECT-MAKE-MODULES-V1",
+  "scenario_id": 5790745,
   "expected_upstream_status": 200
 }
