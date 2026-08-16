@@ -1,0 +1,48 @@
+name: Apply Worker R4 Token Exact Control
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-worker-r4-token-exact-control.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-worker-source-repair
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Patch Worker exact R4 token controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_worker_r4_token_exact_control.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          grep -q 'repair_r4_token_exact_entry_v1: true' apps/studio-api/worker.js
+          grep -q 'action === "repair_r4_token_selector"' apps/studio-api/worker.js
+          grep -q 'action === "pulse_r4_exact_output"' apps/studio-api/worker.js
+          grep -q 'Studio_Render_Request_ID' apps/studio-api/worker.js
+          grep -q 'fld8BooS423HQr3KS' apps/studio-api/worker.js
+      - name: Commit patched Worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          if git diff --cached --quiet; then
+            echo 'R4 token exact control already present.'
+            exit 0
+          fi
+          git commit -m 'Add R4 token exact-output control'
+          git push origin HEAD:main
