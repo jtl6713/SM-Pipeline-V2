@@ -1,0 +1,41 @@
+name: Inspect AP0 Exact Entry Pattern
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/inspect-ap0-exact-entry.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - name: Inspect AP0 first six modules read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5612096,module_ids:[1,2,3,4,5,6]}' >/tmp/request.json
+          code=$(curl -sS --max-time 120 -o /tmp/ap0.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+          unset SECRET
+          test "$code" = '200'
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true' /tmp/ap0.json >/dev/null
+          jq -c '{scenario_id:.upstream_json.inspected.scenario_id,scenario_name:.upstream_json.inspected.scenario_name,active:.upstream_json.inspected.scenario_active,modules:[.upstream_json.inspected.modules[]|{id:.module.id,module:.module.module,name:(.module.metadata.designer.name//null),parameters:.module.parameters,mapper:.module.mapper,route_path:.route_path}]}' /tmp/ap0.json
+      - name: Save read-only evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ap0-exact-entry-${{ github.run_id }}
+          path: /tmp/ap0.json
+          retention-days: 30
