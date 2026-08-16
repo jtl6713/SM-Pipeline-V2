@@ -1,4 +1,5 @@
 {
-  "action": "sweep",
+  "action": "list_make_scenarios_compact",
+  "confirm": "LIST-MAKE-SCENARIOS-COMPACT-V1",
   "expected_upstream_status": 200
 }
