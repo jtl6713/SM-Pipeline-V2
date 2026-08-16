@@ -30,10 +30,10 @@ for required in (
     'async function repairLeaseRecords',
     'async function repairAcquireLease',
     'async function repairCloseLease',
-    'async function repairConsumeLease',
+    'budget-exhausted-before-operation',
 ):
     if required not in section:
-        raise SystemExit(f'required repair function missing: {required}')
+        raise SystemExit(f'required repair-control contract missing: {required}')
 
 patched = prefix + section + suffix
 if patched == text:
