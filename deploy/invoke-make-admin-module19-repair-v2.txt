@@ -7,3 +7,4 @@ Precondition: no unexpired repair lease for scenario 5893243. Expired leases are
 Production Worker: dynamically capture current 100% active version and pin service invocation to that exact version.
 Scenario must remain OFF before and after; blueprint rollback is automatic on failed exact verification.
 Triggered: 2026-08-16
+Attempt: 2 — lease B is now expired with zero operations and zero runs.
