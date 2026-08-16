@@ -1,0 +1,124 @@
+name: Audit Studio API Beta Worker Versions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-beta-version-audit.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      KNOWN_GOOD_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Query production deployment and beta Worker catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments.json)
+          test "$ACTIVE" = "$KNOWN_GOOD_VERSION"
+          curl -fsS "$ROOT/workers/workers" -H "$AUTH" -o /tmp/workers.json
+          jq -e '.success==true' /tmp/workers.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/workers.json').read_text()).get('result') or []
+          matches=[]
+          for w in r:
+              label=str(w.get('name') or w.get('script_name') or w.get('id') or '')
+              if label=='chicagoshining-studio-api' or str(w.get('name') or '')=='chicagoshining-studio-api':
+                  matches.append(w)
+          if len(matches)!=1:
+              # Produce only safe structural keys for debugging.
+              safe=[{'id':w.get('id'),'name':w.get('name'),'script_name':w.get('script_name')} for w in r]
+              Path('/tmp/worker-catalog-safe.json').write_text(json.dumps(safe,indent=2))
+              raise SystemExit(f'Expected one beta worker match, found {len(matches)}')
+          w=matches[0]
+          wid=str(w.get('id') or '')
+          if not wid: raise SystemExit('Beta worker match has no id')
+          Path('/tmp/worker-id.txt').write_text(wid)
+          Path('/tmp/worker-match-safe.json').write_text(json.dumps({'id':wid,'name':w.get('name'),'script_name':w.get('script_name')},indent=2))
+          print('beta_worker_match=PASS')
+          PY
+          WID=$(cat /tmp/worker-id.txt)
+          curl -fsS "$ROOT/workers/workers/$WID/versions" -H "$AUTH" -o /tmp/beta-versions.json
+          jq -e '.success==true' /tmp/beta-versions.json >/dev/null
+
+      - name: Correlate beta and script versions without secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/versions?per_page=100" -H "$AUTH" -o /tmp/script-versions.json
+          jq -e '.success==true' /tmp/script-versions.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          beta=json.loads(Path('/tmp/beta-versions.json').read_text()).get('result') or []
+          script=json.loads(Path('/tmp/script-versions.json').read_text()).get('result') or []
+          def safe(v):
+              return {'id':v.get('id') or v.get('version_id'),'number':v.get('number'),'created_on':v.get('created_on') or (v.get('metadata') or {}).get('created_on')}
+          out={'beta_versions':[safe(v) for v in beta],'script_versions':[safe(v) for v in script]}
+          Path('/tmp/version-correlation-safe.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps({'beta_count':len(beta),'script_count':len(script),'beta_latest':safe(beta[0]) if beta else None,'script_latest':safe(script[0]) if script else None},indent=2))
+          PY
+
+      - name: Read sanitized binding counts for versions newer than 86
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          script=json.loads(Path('/tmp/script-versions.json').read_text()).get('result') or []
+          candidates=[]
+          for v in script:
+              n=v.get('number')
+              if isinstance(n,int) and n>86:
+                  candidates.append({'id':str(v.get('id')),'number':n})
+          Path('/tmp/candidates.json').write_text(json.dumps(candidates))
+          print('candidate_count=',len(candidates))
+          PY
+          python - <<'PY' > /tmp/candidate-lines.txt
+          import json
+          for x in json.load(open('/tmp/candidates.json')):
+              print(x['number'],x['id'])
+          PY
+          : > /tmp/candidate-bindings.ndjson
+          while read -r num vid; do
+            test -n "$vid" || continue
+            curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/versions/$vid" -H "$AUTH" -o /tmp/v.json
+            NUM="$num" VID="$vid" python - <<'PY' >> /tmp/candidate-bindings.ndjson
+          import json,os
+          r=json.load(open('/tmp/v.json')).get('result') or {}
+          bs=(r.get('resources') or {}).get('bindings') or []
+          print(json.dumps({'number':int(os.environ['NUM']),'id':os.environ['VID'],'binding_count':len(bs),'bindings':sorted([{'name':str(b.get('name') or ''),'type':str(b.get('type') or '')} for b in bs],key=lambda x:(x['name'],x['type']))}))
+          PY
+          done < /tmp/candidate-lines.txt
+          cat /tmp/candidate-bindings.ndjson
+
+      - name: Upload sanitized audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta-version-audit-${{ github.run_id }}
+          path: |
+            /tmp/worker-match-safe.json
+            /tmp/version-correlation-safe.json
+            /tmp/candidate-bindings.ndjson
+          retention-days: 30
