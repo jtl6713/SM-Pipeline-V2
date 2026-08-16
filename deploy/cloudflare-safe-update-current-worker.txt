@@ -2,6 +2,6 @@ Dynamic safe update trigger for chicagoshining-studio-api.
 
 Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run Make scenarios, mutate Platform Outputs, render, email, draft, upload, or publish.
 
-Purpose of this run: promote the read-only sanitized Make blueprint-history inspection action used to recover an existing AP1C webhook identity from scenario version history. No webhook creation, rotation, or scenario mutation is permitted by this deployment.
+Purpose of this run: promote the corrected read-only Make blueprint-history inspector. Correction only: accept Make's documented single-object scenariosBlueprints response and use its version value as blueprintId. No webhook creation, rotation, or scenario mutation is permitted.
 
-Retain existing repair-control lease hardening, bounded R4 controls, Phase 6 pulse isolation, durable Test_Run_ID propagation/equality hardening, and all active core bindings.
+Retain all existing repair-control lease hardening, bounded R4 controls, Phase 6 pulse isolation, durable Test_Run_ID propagation/equality hardening, and active core bindings.
