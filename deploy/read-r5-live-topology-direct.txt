@@ -1,0 +1,3 @@
+Read-only direct R5 topology audit using the scenario ID already referenced by Studio API source.
+No broad scenario list. No activation. No blueprint writes. No Airtable mutations. No publishing.
+Triggered 2026-08-16 after R4 scheduled-selector proof closed.
