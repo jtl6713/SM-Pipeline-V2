@@ -8,3 +8,4 @@ Deploy R4 execution polling consistency delay from 59dc1690575ce5aa1b4f859fd9234
 Deploy exact R4 temporary on-demand pulse guard from 239e685f840048f9f43e53d2b91b6650c3e697f3.
 Deploy R4 canonical schedule restore and bounded polling from c46956180bf9dff2b50869f120b6cec5839d7d88.
 Deploy transient required-input pulse from 20ac68e1526c25ea75dbd96fde1f838f7cad1318.
+Deploy repair-control stable lease table-ID hardening from c3bb24ec5d35ff9ec4f5bc3905e6d518968eebe4 at 2026-08-16 continuation checkpoint.
