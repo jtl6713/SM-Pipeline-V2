@@ -1,5 +1,5 @@
-One bounded R4 scheduled-selector proof.
+One bounded R4 scheduled-selector proof using the production selector as-is.
 Positive fixture: Output 155 / rechqCjRY66zZzjBg.
 Denial fixture: Output 156 / recfp2sPnpBKfibQl.
-Publishing disabled on both; lease max_runs=1; R4 must return OFF after pulse.
-Triggered 2026-08-16 after stale Processing lease cleanup; proof attempt 3.
+Publishing disabled on both; fresh lease J max_runs=1; R4 must return OFF after pulse.
+Triggered 2026-08-16 correct scheduled-selector proof.
