@@ -1,0 +1,56 @@
+name: Read Studio R5 Control Path
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/read-studio-r5-control-path.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract R5-related Studio API source context
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re,json
+          p=Path('apps/studio-api/worker.js')
+          lines=p.read_text().splitlines()
+          pats=[
+            r'PHASE6_R5_SCENARIO_ID',
+            r'phase6[^\n]*R5',
+            r'R5[^\n]*phase6',
+            r'phase6SetScenarioActive\(env,\s*PHASE6_R5_SCENARIO_ID',
+            r'phase6RunScenario\(env,\s*PHASE6_R5_SCENARIO_ID',
+            r'pulse_r5',
+            r'Studio_Render_Request_ID',
+            r'Render_Status',
+          ]
+          hits=[]
+          for i,line in enumerate(lines,1):
+            if any(re.search(pat,line,re.I) for pat in pats):
+              lo=max(1,i-8); hi=min(len(lines),i+16)
+              block='\n'.join(f'{n}: {lines[n-1]}' for n in range(lo,hi+1))
+              hits.append({'line':i,'context':block})
+          # Deduplicate heavily overlapping blocks by hit line distance.
+          out=[]; last=-999
+          for h in hits:
+            if h['line']-last<10: continue
+            out.append(h); last=h['line']
+          Path('/tmp/studio-r5-control-path.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-r5-control-path-${{ github.run_id }}
+          path: /tmp/studio-r5-control-path.json
+          retention-days: 30
