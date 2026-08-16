@@ -80,10 +80,47 @@ jobs:
           curl -fsS \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/chicagoshining-studio-api/content/v2" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -o /tmp/worker-after.js
+            -D /tmp/worker-after-headers.txt \
+            -o /tmp/worker-after-body.bin
+
+          python3 - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          from pathlib import Path
+          import re
+
+          headers = Path('/tmp/worker-after-headers.txt').read_bytes()
+          body = Path('/tmp/worker-after-body.bin').read_bytes()
+          text_headers = headers.decode('latin-1', errors='replace')
+          matches = re.findall(r'(?im)^content-type:\\s*(.+?)\\r?, text_headers)
+          content_type = matches[-1].strip() if matches else ''
+          out = Path('/tmp/worker-after.js')
+
+          if content_type.lower().startswith('multipart/'):
+              msg = BytesParser(policy=default).parsebytes(
+                  f'Content-Type: {content_type}\\r\\nMIME-Version: 1.0\\r\\n\\r\\n'.encode() + body
+              )
+              candidates = []
+              for part in msg.iter_parts():
+                  ctype = part.get_content_type().lower()
+                  filename = part.get_filename() or ''
+                  payload = part.get_payload(decode=True) or b''
+                  if 'javascript' in ctype or filename.lower().endswith(('.js', '.mjs')):
+                      candidates.append((filename, ctype, payload))
+              if not candidates:
+                  raise SystemExit('No JavaScript module found in Worker multipart response')
+              preferred = next(
+                  (x for x in candidates if x[0] in ('worker.js', 'index.js', 'src/index.js')),
+                  candidates[0],
+              )
+              out.write_bytes(preferred[2])
+          else:
+              out.write_bytes(body)
+          PY
+
           test -s /tmp/worker-after.js
           cmp --silent apps/studio-api/worker.js /tmp/worker-after.js || {
-            echo 'Post-deploy source does not exactly match the GitHub Worker source.' >&2
+            echo 'Post-deploy source does not exactly match the extracted Cloudflare Worker module.' >&2
             echo "GitHub:    $(sha256sum apps/studio-api/worker.js | cut -d' ' -f1)" >&2
             echo "Cloudflare: $(sha256sum /tmp/worker-after.js | cut -d' ' -f1)" >&2
             exit 1
