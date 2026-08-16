@@ -73,6 +73,11 @@ jobs:
           code=$(curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X POST "$API/deployments?force=true" \
             -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json)
           echo "rollback_http=$code"
+          if jq empty /tmp/rollback-result.json >/dev/null 2>&1; then
+            jq -c '{success,errors:[.errors[]?|{code,message}],messages:[.messages[]?|{code,message}]}' /tmp/rollback-result.json
+          else
+            echo 'Cloudflare response was not JSON' >&2
+          fi
           test "$code" -ge 200 -a "$code" -lt 300
           jq -e '.success==true' /tmp/rollback-result.json >/dev/null
 
@@ -120,9 +125,32 @@ jobs:
           print(json.dumps(sanitized,indent=2,sort_keys=True))
           PY
 
-      - name: Save sanitized rollback evidence
+      - name: Save sanitized rollback response evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          out={}
+          p=Path('/tmp/rollback-result.json')
+          if p.exists():
+              try:
+                  r=json.loads(p.read_text())
+                  out={'success':r.get('success'),'errors':[{'code':x.get('code'),'message':x.get('message')} for x in r.get('errors') or []],'messages':[{'code':x.get('code'),'message':x.get('message')} for x in r.get('messages') or []]}
+              except Exception:
+                  out={'success':False,'errors':[{'code':'non_json','message':'Cloudflare response was not JSON'}]}
+          Path('/tmp/rollback-response-sanitized.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Upload sanitized rollback evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: studio-api-v86-rollback-${{ github.run_id }}
-          path: /tmp/rollback-evidence-sanitized.json
+          path: |
+            /tmp/rollback-evidence-sanitized.json
+            /tmp/rollback-response-sanitized.json
+          if-no-files-found: ignore
           retention-days: 30
