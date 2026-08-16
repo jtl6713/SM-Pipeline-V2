@@ -1,0 +1,1 @@
+Rollback-safe Item 5 propagation patch: I4 5524092 Module 2 must copy exact candidate Test_Run_ID into the created Content Item, preserving exact Module 1 entrance and hook identity.
