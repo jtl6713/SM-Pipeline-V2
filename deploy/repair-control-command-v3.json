@@ -1,13 +1,13 @@
 {
   "action": "acquire",
-  "test_run_id": "AP0-REVISION-PROOF-20260816-A",
-  "lease_id": "AP0-REVISION-PROOF-20260816-A-L1",
-  "scenario_id": 5612096,
+  "test_run_id": "TR-DURABLE-20260816-A",
+  "lease_id": "TR-DURABLE-20260816-A-L1",
+  "scenario_id": 5556716,
   "expires_at": "RUNTIME_PLUS_10_MINUTES",
-  "max_runs": 3,
-  "max_operations": 40,
-  "allowed_platform_output_record_ids": ["recEIjeldw4lFvcYy"],
-  "deny_fixture_record_ids": [],
+  "max_runs": 1,
+  "max_operations": 5,
+  "allowed_platform_output_record_ids": ["recnS4DT5ilG0Qibz"],
+  "deny_fixture_record_ids": ["recih0Ks7JFltjXxl"],
   "allow_public_publish": false,
   "expected_http_status": 200
 }
