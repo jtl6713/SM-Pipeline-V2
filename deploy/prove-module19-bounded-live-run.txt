@@ -1,0 +1,6 @@
+Bounded live proof trigger for repaired MAKE-ADMIN-BRIDGE module 19.
+
+Exact queue row: rec0r66HSiQ4yJsAl (GET_BLUEPRINT 5893243).
+Lease C: REPAIR-TOP5-SAFETY-20260816-C-L1 / test run REPAIR-TOP5-SAFETY-20260816-C, max_runs=1, max_operations=8, allowlist only Output 125 recrSWeLpsA5TtpX5, deny fixture Output 130 recpiwWGrph3lsTn6, public publishing false.
+Expected proof: positive allowlist succeeds, negative fixture is denied, bridge executes exactly once, scenario is verified OFF and lease auto-released, GET_BLUEPRINT Result_JSON is compact with blueprint_omitted=true, Output 130 exact tracked snapshot is unchanged, temporary bridge deleted, production Worker version unchanged.
+Triggered: 2026-08-16.
