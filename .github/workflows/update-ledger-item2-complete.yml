@@ -1,0 +1,56 @@
+name: Update Ledger — Item 2 Complete
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/update-ledger-item2-complete.txt']
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Update authoritative 21-item ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+          s=p.read_text()
+          lines=s.splitlines()
+          item2='| 2 | Stage-specific, exact-output-addressable orchestrators | **Complete — structural exact-addressing and production isolation verified** | R4/R5 controlled execution safety remains valid; I4 exact promotion targeting is live; TTD-ORCH/AP-CAR and the IG/FB/TikTok/YT publishing chains are guarded; AP1C historical hook `2628156` was restored without identity rotation; P1→P2→P3 now carries exact Content Item identity and Test_Run_ID; C7 Module 901 now consumes the exact webhook parent; C8 existing-output reconciliation is exact to parent/platform/aspect/Test_Run_ID with maxRecords=1; production batch owners R2/R2B/RR1/P1/C1/PUB1/PUB2/M1/A4 exclude tagged tests where they touch production outputs. All repaired scheduled owners retained their schedules/states and webhook identities. | Closed for structural exact-addressing. Reopen only on new cross-record evidence; runtime normal-path acceptance remains Item 7 and platform-specific acceptance remains later items. |'
+          item5='| 5 | Genuine hard test mode | **Partial — durable identity boundary live and substantially propagated** | Durable `Test_Run_ID` is present on Idea Candidates, Production Requests, Content Items, Production Request Outputs, and Platform Outputs; I4/Studio/P3/C8 propagation is live. Production selectors and maintenance/reminder output selectors now exclude tagged tests. Controller equality/allowlist acceptance passed for match, mismatch, blank-production, and non-allowlisted cases. C7→C8 and C8→C9 now carry test identity, and C8 upsert matching includes Test_Run_ID so test runs cannot update a production carousel output. | Close remaining non-Platform-Output identity gaps—especially Carousel Slides / slide-stage execution—and prove one bounded cross-stage Test Mode run plus deterministic cleanup before marking globally complete. |'
+          found2=found5=False
+          for i,line in enumerate(lines):
+            if line.startswith('| 2 |'):
+              lines[i]=item2; found2=True
+            elif line.startswith('| 5 |'):
+              lines[i]=item5; found5=True
+          if not (found2 and found5): raise SystemExit('ledger row precondition failed')
+          delta='''
+
+## 2026-08-16 Item 2 completion / Item 5 propagation delta
+
+- AP1C `5790745` Module 900 historical webhook identity `2628156` was recovered from Make blueprint history and restored; Module 1 remains exact to `{{900.output_record_id}}`; no webhook invocation occurred.
+- P1 `5528742` → P2 `5530955` → P3 `5531703` was repaired from global eligible-record scans to exact Content Item handoff. P1 triggers P2 only after the exact Content Item update; P2/P3 consume `content_record_id`; Test_Run_ID propagates to P3-created legacy Platform Outputs. Evidence: run `31977325956`.
+- Production Test_Run_ID blank exclusions were extended to R2 `5569495`, R2B `5576620`, RR1 `5576363`, P1 `5528742`, C1 `5582062`, PUB1 `5576757`, PUB2 `5576753`, M1 `5569896` Module 3, and A4 `5578180` Module 5.
+- Remaining-stage audit identified and then repaired C7/C8 cross-record ambiguity. C7 `5589819` Module 901 now uses `{{900.content_record_id}}`. C8 `5589822` Module 8 now matches at most one existing output by exact parent/platform/aspect/Test_Run_ID; Modules 4/12 propagate the parent's Test_Run_ID. C7→C8 and C8→C9 carry test identity. Final successful preflight-first transaction: run `31977891141`.
+- Two earlier C7/C8 repair attempts (`31977669478`, `31977802428`) stopped before any Make mutation on stale preconditions; the successful V3 workflow was changed to green `safe_no_write` preflight behavior for future assumption mismatches.
+- The remaining live stage inventory found no additional active cross-record orchestrator blocker within Item 2 scope: P4 is exact by webhook `output_id`; RR2 and publishing workers are exact webhook consumers; P5/asset-maintenance/reminder scenarios are intentional batch owners rather than controlled exact-output orchestrators.
+- No scenario activation, render, review email, draft, upload, or public publishing operation occurred in this Item 2 completion work.
+'''
+          marker='## 2026-08-16 Item 2 completion / Item 5 propagation delta'
+          out='\n'.join(lines)
+          if marker not in out: out += delta
+          p.write_text(out.rstrip()+'\n')
+          PY
+          git config user.name 'SM Pipeline Repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git diff --cached --check
+          git commit -m 'ledger: mark Item 2 complete and record Test Mode propagation'
+          git push
