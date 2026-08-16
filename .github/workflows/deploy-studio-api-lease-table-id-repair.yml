@@ -1,0 +1,220 @@
+name: Deploy Studio API Lease Table ID Repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/studio-api-lease-table-id-repair.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-studio-api-lease-repair-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      VERIFY_BRIDGE: chicagoshining-studio-lease-repair-verify
+      WRANGLER_VERSION: 4.123.0
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate exact repair source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/studio-api/worker.js
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          grep -q 'const REPAIR_LEASE_TABLE_ID = "tbltuSt9UibYzxpah";' apps/studio-api/worker.js
+          mkdir -p /tmp/wrangler-repair
+          cd /tmp/wrangler-repair
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
+
+      - name: Capture rollback point and current binding contract
+        id: capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          jq -e '.success==true' /tmp/deployments-before.json >/dev/null
+          BEFORE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)
+          printf '%s' "$BEFORE" >/tmp/active-before.txt
+          curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/version-before.json
+          jq -e '.success==true' /tmp/version-before.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          expected={
+            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
+            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
+            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
+          }
+          r=json.loads(Path('/tmp/version-before.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got={str(x.get('name')):str(x.get('type')) for x in bindings}
+          if got != expected: raise SystemExit(f'Live binding contract changed: {sorted(got.items())}')
+          r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
+          bucket=r2.get('bucket_name') or r2.get('bucket')
+          if not bucket: raise SystemExit('STUDIO_MEDIA bucket not recoverable')
+          Path('/tmp/studio-media-bucket.txt').write_text(str(bucket))
+          Path('/tmp/bindings-before.json').write_text(json.dumps(sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name']),indent=2))
+          print('predeploy_binding_contract=PASS')
+          PY
+
+      - name: Dry run binding-preserving deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp apps/studio-api/worker.js /tmp/wrangler-repair/worker.js
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          bucket=Path('/tmp/studio-media-bucket.txt').read_text().strip()
+          cfg={
+            'name':os.environ['TARGET_WORKER'],'main':'worker.js','compatibility_date':'2026-08-02','workers_dev':False,
+            'keep_vars':True,'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
+            'secrets':{'required':['AIRTABLE_PAT']}
+          }
+          Path('/tmp/wrangler-repair/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
+          PY
+          cd /tmp/wrangler-repair
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --dry-run >/tmp/wrangler-dry-run.log 2>&1
+          echo 'wrangler_dry_run=PASS'
+
+      - name: Deploy repair source
+        id: deploy_source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/wrangler-repair
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/wrangler-deploy.log 2>&1
+          echo 'wrangler_deploy=PASS'
+
+      - name: Verify source and binding identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          BEFORE=$(cat /tmp/active-before.txt); ACTIVE=''
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+            ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)
+            [[ -n "$ACTIVE" && "$ACTIVE" != "$BEFORE" ]] && break
+            sleep 2
+          done
+          test -n "$ACTIVE"; test "$ACTIVE" != "$BEFORE"
+          printf '%s' "$ACTIVE" >/tmp/active-after.txt
+          curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/version-after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/version-after.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got=sorted([{'name':str(x.get('name')),'type':str(x.get('type'))} for x in bindings],key=lambda x:x['name'])
+          before=json.loads(Path('/tmp/bindings-before.json').read_text())
+          if got != before: raise SystemExit(f'Binding identity changed: {got}')
+          Path('/tmp/bindings-after.json').write_text(json.dumps(got,indent=2))
+          print('postdeploy_binding_identity=PASS')
+          PY
+          curl -fsS "$API/content/v2" -H "$AUTH" -D /tmp/worker-after-headers.txt -o /tmp/worker-after-body.bin
+          python - <<'PY'
+          from email.parser import BytesParser
+          from email.policy import default
+          from pathlib import Path
+          import re
+          headers=Path('/tmp/worker-after-headers.txt').read_bytes(); body=Path('/tmp/worker-after-body.bin').read_bytes()
+          text=headers.decode('latin-1',errors='replace')
+          matches=re.findall(r'(?im)^content-type:\s*(.+?)\r?$',text); ctype=matches[-1].strip() if matches else ''
+          out=Path('/tmp/worker-after.js')
+          if ctype.lower().startswith('multipart/'):
+            msg=BytesParser(policy=default).parsebytes(f'Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n'.encode()+body)
+            candidates=[]
+            for part in msg.walk():
+              if part.is_multipart(): continue
+              pt=part.get_content_type().lower(); fn=part.get_filename() or ''; payload=part.get_payload(decode=True) or b''
+              if 'javascript' in pt or fn.lower().endswith(('.js','.mjs')): candidates.append((fn,payload))
+            if not candidates: raise SystemExit('No JavaScript module in deployed Worker')
+            preferred=next((x for x in candidates if x[0] in ('worker.js','index.js','src/index.js')),candidates[0])
+            out.write_bytes(preferred[1])
+          else: out.write_bytes(body)
+          PY
+          cmp --silent apps/studio-api/worker.js /tmp/worker-after.js
+          echo 'active_source_byte_match=PASS'
+
+      - name: Verify authenticated Studio session through temporary service binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          printf '%s' "$TOKEN" >/tmp/verify-token.txt
+          cat >/tmp/verify-worker.js <<EOF
+          export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/session",{headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Accept":"application/json"}}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});}};
+          EOF
+          cat >/tmp/verify-metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/verify-worker.js
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/verify-upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$VERIFY_BRIDGE/content" -H "$AUTH" -F 'metadata=@/tmp/verify-metadata.json;type=application/json' -F 'worker.js=@/tmp/verify-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300; jq -e '.success==true' /tmp/verify-upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$VERIFY_BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/verify-subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/verify-subdomain.json >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); SESSION_CODE=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            SESSION_CODE=$(curl -sS --max-time 60 -o /tmp/session.json -w '%{http_code}' "https://$VERIFY_BRIDGE.$SUB.workers.dev/$TOKEN" || true)
+            if [[ "$SESSION_CODE" == 200 ]] && jq -e '.ok==true and .authenticated==true and .authorized==true' /tmp/session.json >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          test "$SESSION_CODE" = 200
+          jq -e '.ok==true and .authenticated==true and .authorized==true' /tmp/session.json >/dev/null
+          echo 'functional_session_check=PASS'
+
+      - name: Delete verification bridge
+        if: always()
+        shell: bash
+        run: |
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/verify-delete.json -w '%{http_code}' -X DELETE "$ROOT/workers/scripts/$VERIFY_BRIDGE" -H "$AUTH" || true)
+          [[ "$code" == 404 || ( "$code" -ge 200 && "$code" -lt 300 ) ]]
+
+      - name: Roll back on any post-capture failure
+        if: failure() && steps.capture.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          BEFORE=$(cat /tmp/active-before.txt)
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/current-deployments.json
+          CURRENT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/current-deployments.json)
+          if [[ "$CURRENT" != "$BEFORE" ]]; then
+            printf '{"strategy":"percentage","versions":[{"version_id":"%s","percentage":100}]}' "$BEFORE" >/tmp/rollback.json
+            curl -fsS -X POST "$API/deployments" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json >/tmp/rollback-result.json
+            jq -e '.success==true' /tmp/rollback-result.json >/dev/null
+          fi
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-api-lease-repair-deploy-${{ github.run_id }}
+          path: |
+            /tmp/bindings-before.json
+            /tmp/bindings-after.json
+            /tmp/session.json
+          if-no-files-found: ignore
+          retention-days: 30
