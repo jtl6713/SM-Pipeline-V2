@@ -5,3 +5,4 @@ Diagnostic retry C after execution-status evidence deployment.
 Corrected proof D after Module 1 var.input migration.
 Final bounded diagnostic E with delayed execution-status polling.
 Bounded proof F with temporary on-demand scheduling and guaranteed restore.
+Recovered bounded proof G after canonical schedule restoration and polling cap.
