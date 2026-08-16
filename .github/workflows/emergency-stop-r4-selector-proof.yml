@@ -48,19 +48,35 @@ jobs:
         run: |
           set -euo pipefail
           TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5556716
-          curl -fsS -X POST "$BASE/scenarios/$SID/stop" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/stop.json
-          for i in 1 2 3 4 5; do
+          read_state(){
             curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/state.json
-            ACTIVE=$(jq -r '(.scenario // .response // .).isActive // false' /tmp/state.json)
-            if [[ "$ACTIVE" == "false" ]]; then echo '{"scenario_id":5556716,"isActive":false}' >/tmp/evidence.json; exit 0; fi
+            jq -r '(.scenario // .response // .).isActive // false' /tmp/state.json
+          }
+          BEFORE=$(read_state)
+          if [[ "$BEFORE" == "false" ]]; then
+            echo '{"scenario_id":5556716,"before_active":false,"stop_http":"not_needed","after_active":false}' >/tmp/evidence.json
+            exit 0
+          fi
+          CODE=$(curl -sS -o /tmp/stop.json -w '%{http_code}' -X POST "$BASE/scenarios/$SID/stop" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' || true)
+          for i in 1 2 3 4 5; do
+            ACTIVE=$(read_state)
+            if [[ "$ACTIVE" == "false" ]]; then
+              STOP_HTTP="$CODE" python - <<'PY'
+          import json,os
+          open('/tmp/evidence.json','w').write(json.dumps({'scenario_id':5556716,'before_active':True,'stop_http':os.environ['STOP_HTTP'],'after_active':False},sort_keys=True))
+          PY
+              exit 0
+            fi
             sleep 1
           done
-          echo 'R4 remained active after stop request' >&2; exit 1
+          jq -c '{message:(.message//null),code:(.code//null),detail:(.detail//null),error:(.error//null)}' /tmp/stop.json 2>/dev/null || true
+          echo "R4 remained active after stop request; stop_http=$CODE" >&2
+          exit 1
       - name: Destroy transient credentials
         if: always()
         shell: bash
         run: |
-          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/stop.json /tmp/state.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
       - name: Upload sanitized evidence
         if: always()
         uses: actions/upload-artifact@v4
