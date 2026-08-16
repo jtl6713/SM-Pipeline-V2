@@ -9589,6 +9589,8 @@ async function repairControlAction(env, input) {
     const originalScheduling = { type: "indefinitely", interval: 900 };
     const observedScheduling = repairInspectorClone(before?.scenario?.scheduling || {});
     let schedulingTemporarilyChanged = false;
+    let originalPulseInterface = null;
+    let interfaceTemporarilyRequired = false;
     let failure = null;
     let stop = null;
     let exactTargetConsumed = false;
@@ -9601,6 +9603,18 @@ async function repairControlAction(env, input) {
         });
         schedulingTemporarilyChanged = true;
       }
+      const pulseInterfaceBody = await phase6MakeApiJson(env, `/scenarios/${lease.scenario_id}/interface`, { method: "GET" });
+      const pulseInterface = pulseInterfaceBody?.interface || pulseInterfaceBody?.response?.interface || {};
+      originalPulseInterface = {
+        input: repairInspectorClone(Array.isArray(pulseInterface?.input) ? pulseInterface.input : []),
+        output: repairInspectorClone(Array.isArray(pulseInterface?.output) ? pulseInterface.output : []),
+      };
+      const requiredPulseInputs = originalPulseInterface.input.map((item) => ({ ...item, required: true }));
+      await phase6MakeApiJson(env, `/scenarios/${lease.scenario_id}/interface`, {
+        method: "PATCH",
+        body: JSON.stringify({ interface: { input: requiredPulseInputs, output: originalPulseInterface.output } }),
+      });
+      interfaceTemporarilyRequired = true;
       if (!before.isActive) await phase6SetScenarioActive(env, lease.scenario_id, true);
       const execution = await phase6RunScenario(env, lease.scenario_id, runInput);
       await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -9620,7 +9634,10 @@ async function repairControlAction(env, input) {
           break;
         }
       }
-      if (!exactTargetConsumed) throw new HttpError(504, "R4 exact input did not advance the targeted output within 30 seconds");
+      if (!exactTargetConsumed) {
+        const detail = JSON.stringify(executionState.details || {}).slice(0, 1600);
+        throw new HttpError(504, `R4 exact input execution ${execution.executionId} did not advance the target; status=${executionState.status}; details=${detail}`);
+      }
       return {
         action,
         lease,
@@ -9641,6 +9658,16 @@ async function repairControlAction(env, input) {
     } finally {
       try { stop = await phase6StopScenarioVerified(env, lease.scenario_id, 2); } catch (stopError) {
         if (!failure) failure = stopError instanceof Error ? stopError.message : String(stopError);
+      }
+      if (interfaceTemporarilyRequired && originalPulseInterface) {
+        try {
+          await phase6MakeApiJson(env, `/scenarios/${lease.scenario_id}/interface`, {
+            method: "PATCH",
+            body: JSON.stringify({ interface: originalPulseInterface }),
+          });
+        } catch (interfaceError) {
+          if (!failure) failure = interfaceError instanceof Error ? interfaceError.message : String(interfaceError);
+        }
       }
       {
         try {
