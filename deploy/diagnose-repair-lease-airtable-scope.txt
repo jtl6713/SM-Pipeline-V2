@@ -1,1 +1,1 @@
-Read-only credential-scope diagnostic for Airtable lease table tbltuSt9UibYzxpah. Tests bootstrap and pipeline-stored Airtable PATs without logging values or mutating records. Rerun 2026-08-16 after Item 1 lease acquire INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND.
+Read-only credential-scope diagnostic for Airtable lease table tbltuSt9UibYzxpah. Tests bootstrap and pipeline-stored Airtable PATs, including the exact Processing + REPAIR_LEASE_V1 + Requested_At sort query used by the Worker. Triggered 2026-08-16 after Item 1 lease acquire fault.
