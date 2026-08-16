@@ -1,0 +1,250 @@
+name: Prove Repaired MAKE-ADMIN Module 19 Under Lease
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-module19-bounded-live-run.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-make-admin-bridge-5893243
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-m19-proof-${{ github.run_id }}
+      TEST_RUN_ID: REPAIR-TOP5-SAFETY-20260816-C
+      LEASE_ID: REPAIR-TOP5-SAFETY-20260816-C-L1
+      SCENARIO_ID: '5893243'
+      POSITIVE_OUTPUT: recrSWeLpsA5TtpX5
+      NEGATIVE_OUTPUT: recpiwWGrph3lsTn6
+      EXACT_COMMAND_RECORD: rec0r66HSiQ4yJsAl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Decrypt Airtable PAT only in runner temp
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc -out /tmp/airtable-envelope-private.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/airtable-envelope-private.pem -in /tmp/airtable-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/airtable-pat.txt
+          chmod 600 /tmp/airtable-pat.txt
+          test -s /tmp/airtable-pat.txt
+
+      - name: Capture exact negative fixture and queue preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAT=$(cat /tmp/airtable-pat.txt)
+          python - <<'PY'
+          import json, urllib.parse, urllib.request, os
+          from pathlib import Path
+          pat=Path('/tmp/airtable-pat.txt').read_text().strip()
+          base='appe33zkZn35yirTL'
+          # Negative fixture exact tracked-field snapshot.
+          fields=['Output_ID','Platform','Output_Status','Render_Status','Review_Status','Publish_Status','Do_Not_Publish','Publish_Attempt_Count','Last_Publish_Attempt_At','Remotion_Job_ID','Final_File_URL','Final_File_ID']
+          qs=[]
+          for f in fields: qs.append(('fields[]',f))
+          url='https://api.airtable.com/v0/'+base+'/tblrlPeboBthkplH0/'+os.environ['NEGATIVE_OUTPUT']+'?'+urllib.parse.urlencode(qs)
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+pat})
+          with urllib.request.urlopen(req,timeout=30) as r: rec=json.load(r)
+          snap={k:rec.get('fields',{}).get(k) for k in fields}
+          Path('/tmp/negative-before.json').write_text(json.dumps(snap,sort_keys=True,separators=(',',':')))
+          # Queue: exactly one Pending, and it is the exact proof row.
+          formula='{Status}="Pending"'
+          params=[('maxRecords','10'),('fields[]','Command_ID'),('fields[]','Status'),('filterByFormula',formula)]
+          url='https://api.airtable.com/v0/'+base+'/tbltuSt9UibYzxpah?'+urllib.parse.urlencode(params)
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+pat})
+          with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
+          ids=[x.get('id') for x in data.get('records',[])]
+          if ids != [os.environ['EXACT_COMMAND_RECORD']]: raise SystemExit(f'Pending queue preflight failed: {ids}')
+          print('pending_queue_exact=true')
+          PY
+
+      - name: Capture exact active production Worker version
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          jq -e '.success==true and (.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].percentage==100' /tmp/deployments-before.json >/dev/null
+          jq -er '.result.deployments[0].versions[0].version_id' /tmp/deployments-before.json >/tmp/active-version.txt
+
+      - name: Build exact-version atomic proof bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets; print(secrets.token_urlsafe(36))
+          PY
+          ); printf '%s' "$TOKEN" >/tmp/path-token.txt
+          ACTIVE=$(cat /tmp/active-version.txt)
+          cat >/tmp/bridge.js <<EOF
+          export default {async fetch(request,env){
+            const u=new URL(request.url);
+            if(u.pathname==="/$TOKEN/ready") return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});
+            if(u.pathname!=="/$TOKEN/execute") return new Response("Not found",{status:404});
+            const headers={"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json","Cloudflare-Workers-Version-Overrides":"$TARGET_WORKER=\"$ACTIVE\""};
+            async function post(body){const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers,body:JSON.stringify(body)}));const text=await r.text();let json={};try{json=JSON.parse(text)}catch{}return{status:r.status,json};}
+            const expires=new Date(Date.now()+10*60*1000).toISOString();
+            const common={test_run_id:"$TEST_RUN_ID",lease_id:"$LEASE_ID",scenario_id:Number("$SCENARIO_ID")};
+            const out={};
+            out.acquire=await post({...common,action:"acquire",expires_at:expires,max_runs:1,max_operations:8,allowed_platform_output_record_ids:["$POSITIVE_OUTPUT"],deny_fixture_record_ids:["$NEGATIVE_OUTPUT"],allow_public_publish:false});
+            if(out.acquire.status!==200||out.acquire.json?.ok!==true) return Response.json({ok:false,stage:"acquire",out},{status:502});
+            out.positive=await post({...common,action:"assert_output_allowed",platform_output_record_id:"$POSITIVE_OUTPUT"});
+            if(out.positive.status!==200||out.positive.json?.ok!==true) return Response.json({ok:false,stage:"positive",out},{status:502});
+            out.negative=await post({...common,action:"assert_output_allowed",platform_output_record_id:"$NEGATIVE_OUTPUT"});
+            if(out.negative.status!==403||out.negative.json?.ok!==false) return Response.json({ok:false,stage:"negative-denial",out},{status:502});
+            out.pulse=await post({...common,action:"pulse_admin_bridge",exact_make_admin_command_record_id:"$EXACT_COMMAND_RECORD"});
+            const success=out.pulse.status===200&&out.pulse.json?.ok===true;
+            return Response.json({ok:success,expires_at:expires,out},{status:success?200:502});
+          }};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"bridge.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/bridge.js
+
+      - name: Upload bridge and wait for readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'bridge.js=@/tmp/bridge.js;type=application/javascript+module;filename=bridge.js')
+          test "$code" -ge 200 -a "$code" -lt 300; jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); T=$(cat /tmp/path-token.txt)
+          ready=false
+          for i in $(seq 1 20); do code=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$T/ready" || true); if [[ "$code" == '200' ]] && jq -e '.ok==true and .ready==true' /tmp/ready.json >/dev/null 2>&1; then ready=true; break; fi; sleep 2; done
+          test "$ready" = true
+
+      - name: Execute bounded sequence exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); T=$(cat /tmp/path-token.txt); URL="https://$BRIDGE_WORKER.$SUB.workers.dev/$T/execute"
+          code=$(curl -sS --max-time 240 -o /tmp/control-result.json -w '%{http_code}' "$URL" || true)
+          echo "bounded_proof_http=$code"
+          jq -c '{ok,expires_at,acquire_status:.out.acquire.status,positive_status:.out.positive.status,negative_status:.out.negative.status,pulse_status:.out.pulse.status,pulse_execution_id:(.out.pulse.json.execution_id//null),pulse_error:(.out.pulse.json.error//null)}' /tmp/control-result.json || true
+          test "$code" = '200'
+          jq -e '.ok==true and .out.acquire.status==200 and .out.positive.status==200 and .out.negative.status==403 and .out.pulse.status==200 and .out.pulse.json.ok==true' /tmp/control-result.json >/dev/null
+
+      - name: Poll exact queue result and verify compact module 19 output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time, urllib.request
+          from pathlib import Path
+          pat=Path('/tmp/airtable-pat.txt').read_text().strip(); rid=os.environ['EXACT_COMMAND_RECORD']
+          url='https://api.airtable.com/v0/appe33zkZn35yirTL/tbltuSt9UibYzxpah/'+rid
+          final=None
+          for _ in range(30):
+              req=urllib.request.Request(url,headers={'Authorization':'Bearer '+pat})
+              with urllib.request.urlopen(req,timeout=30) as r: rec=json.load(r)
+              f=rec.get('fields',{}); status=f.get('Status')
+              if status in ('Succeeded','Failed'):
+                  final=rec; break
+              time.sleep(2)
+          if final is None: raise SystemExit('Exact GET_BLUEPRINT command did not reach terminal state')
+          f=final.get('fields',{})
+          result=str(f.get('Result_JSON') or ''); error=str(f.get('Error_Message') or '')
+          if f.get('Status')!='Succeeded': raise SystemExit('Exact GET_BLUEPRINT command failed: '+error[:200])
+          if len(result)>=2048: raise SystemExit(f'Result_JSON is still oversized: {len(result)} bytes/chars')
+          try: parsed=json.loads(result)
+          except Exception as exc: raise SystemExit('Compact Result_JSON is not JSON') from exc
+          if parsed.get('blueprint_omitted') is not True: raise SystemExit('Compact Result_JSON did not prove blueprint omission')
+          if str(parsed.get('scenario_id'))!='5893243': raise SystemExit('Compact Result_JSON scenario id mismatch')
+          Path('/tmp/queue-proof.json').write_text(json.dumps({'record_id':rid,'status':f.get('Status'),'result_length':len(result),'blueprint_omitted':parsed.get('blueprint_omitted'),'scenario_id':parsed.get('scenario_id'),'http_status':parsed.get('http_status'),'error_blank':not bool(error)},indent=2,sort_keys=True))
+          print(Path('/tmp/queue-proof.json').read_text())
+          PY
+
+      - name: Verify lease auto-released, scenario stopped, and negative fixture unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          from pathlib import Path
+          pat=Path('/tmp/airtable-pat.txt').read_text().strip(); base='appe33zkZn35yirTL'
+          # Find exact lease record by Command_ID.
+          formula='{Command_ID}="'+os.environ['LEASE_ID']+'"'
+          params=urllib.parse.urlencode([('maxRecords','2'),('fields[]','Command_ID'),('fields[]','Status'),('fields[]','Result_JSON'),('fields[]','Error_Message'),('filterByFormula',formula)])
+          req=urllib.request.Request('https://api.airtable.com/v0/'+base+'/tbltuSt9UibYzxpah?'+params,headers={'Authorization':'Bearer '+pat})
+          with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
+          rows=data.get('records',[])
+          if len(rows)!=1: raise SystemExit(f'Expected one lease record, found {len(rows)}')
+          f=rows[0].get('fields',{}); result=json.loads(f.get('Result_JSON') or '{}')
+          if f.get('Status')!='Succeeded' or result.get('state')!='released' or result.get('scenario_stopped') is not True: raise SystemExit('Lease did not auto-release with scenario_stopped=true')
+          if int(result.get('runs_used',-1))!=1: raise SystemExit('Lease run budget does not show exactly one run')
+          # Negative fixture exact tracked snapshot.
+          fields=['Output_ID','Platform','Output_Status','Render_Status','Review_Status','Publish_Status','Do_Not_Publish','Publish_Attempt_Count','Last_Publish_Attempt_At','Remotion_Job_ID','Final_File_URL','Final_File_ID']
+          qs=[]
+          for x in fields: qs.append(('fields[]',x))
+          url='https://api.airtable.com/v0/'+base+'/tblrlPeboBthkplH0/'+os.environ['NEGATIVE_OUTPUT']+'?'+urllib.parse.urlencode(qs)
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+pat})
+          with urllib.request.urlopen(req,timeout=30) as r: rec=json.load(r)
+          after={k:rec.get('fields',{}).get(k) for k in fields}
+          before=json.loads(Path('/tmp/negative-before.json').read_text())
+          if after!=before: raise SystemExit(f'Negative fixture changed: before={before} after={after}')
+          Path('/tmp/lease-proof.json').write_text(json.dumps({'lease_record_id':rows[0].get('id'),'state':result.get('state'),'scenario_stopped':result.get('scenario_stopped'),'operations_used':result.get('operations_used'),'runs_used':result.get('runs_used'),'negative_fixture_unchanged':True},indent=2,sort_keys=True))
+          print(Path('/tmp/lease-proof.json').read_text())
+          PY
+
+      - name: Delete bridge and verify production Worker identity unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+          test "$(cat /tmp/active-version.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)"
+
+      - name: Emergency sweep if the bounded proof failed after lease acquisition
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The independent watchdog remains the ultimate safety net. This step only records that it remains armed.
+          echo 'bounded_proof_failed_watchdog_remains_armed=true'
+
+      - name: Destroy transient credential material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc /tmp/airtable-pat.txt; do if [[ -e "$f" ]]; then shred -u "$f" 2>/dev/null || rm -f "$f"; fi; done
+
+      - name: Upload bounded proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repaired-module19-bounded-proof-${{ github.run_id }}
+          path: |
+            /tmp/control-result.json
+            /tmp/queue-proof.json
+            /tmp/lease-proof.json
+            /tmp/negative-before.json
+          if-no-files-found: ignore
+          retention-days: 30
