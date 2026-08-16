@@ -17,3 +17,5 @@ Repair safety deployment: 2026-08-16 — leased activation control, exact-output
 Binding-safe redeploy: 2026-08-16 — upload a non-deployed Worker Version with strict server-side inheritance from known-good v86, verify all 11 bindings before traffic switch, verify authenticated Studio session after switch, and automatically roll back to v86 on failure.
 
 Wrangler-safe repair safety redeploy: 2026-08-16 — pinned Wrangler 4.123.0; keep-vars; required AIRTABLE_PAT and ELEVENLABS_API_KEY secrets; live-reconstructed STUDIO_MEDIA R2 binding; exact 11-binding pre/post checks; deployed-source byte verification; authenticated Studio session verification; automatic rollback to captured production version on any failure.
+
+Lease-store hardening deployment: 2026-08-16 — repair-control lease CRUD now uses stable Airtable table ID tbltuSt9UibYzxpah instead of display-name lookup; source commit c3bb24ec5d35ff9ec4f5bc3905e6d518968eebe4.
