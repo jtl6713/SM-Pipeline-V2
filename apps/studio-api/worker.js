@@ -9283,6 +9283,7 @@ function pipelineSettingValue(records, name) {
 
 
 const REPAIR_LEASE_NOTE_PREFIX = "REPAIR_LEASE_V1";
+const REPAIR_LEASE_TABLE_ID = "tbltuSt9UibYzxpah";
 const REPAIR_CONTROL_SCENARIOS = new Set([
   5893243, // MAKE-ADMIN-BRIDGE
   5813561, // FB-ORCH
@@ -9339,7 +9340,7 @@ function repairLeaseState(record) {
 async function repairLeaseRecords(env, scenarioId = null) {
   const formulas = ['{Status}="Processing"', `FIND("${REPAIR_LEASE_NOTE_PREFIX}", {Notes}&"")>0`];
   if (Number.isInteger(Number(scenarioId)) && Number(scenarioId) > 0) formulas.push(`{Scenario_ID}=${Number(scenarioId)}`);
-  return listRecords(env, "Make Admin Queue", {
+  return listRecords(env, REPAIR_LEASE_TABLE_ID, {
     limit: 50,
     sortField: "Requested_At",
     sortDirection: "desc",
@@ -9369,7 +9370,7 @@ async function repairCloseLease(env, lease, status, resultPatch = {}) {
   if (!lease?.record_id) return;
   await repairClearR4LeaseToken(env, lease);
   const state = { ...(lease.state || {}), ...resultPatch, state: status, closed_at: new Date().toISOString() };
-  await airtableFetch(env, "Make Admin Queue", lease.record_id, {
+  await airtableFetch(env, REPAIR_LEASE_TABLE_ID, lease.record_id, {
     method: "PATCH",
     body: JSON.stringify({ fields: {
       Status: status === "failed" ? "Failed" : "Succeeded",
@@ -9467,7 +9468,7 @@ async function repairAcquireLease(env, input, authorization) {
     explicit_publish_platform: allowPublicPublish ? String(input.explicit_publish_platform) : null,
   };
   const now = new Date().toISOString();
-  const created = await airtableFetch(env, "Make Admin Queue", "", {
+  const created = await airtableFetch(env, REPAIR_LEASE_TABLE_ID, "", {
     method: "POST",
     body: JSON.stringify({ records: [{ fields: {
       Command_ID: `REPAIR-LEASE-${Date.now()}-${scenarioId}`,
@@ -9518,7 +9519,7 @@ async function repairReserveBudget(env, lease, { operationCost = 1, runCost = 0,
   lease.operations_used = nextOps;
   lease.runs_used = nextRuns;
   lease.state = { ...(lease.state || {}), state: "active", operations_used: nextOps, runs_used: nextRuns, last_action: action, updated_at: new Date().toISOString() };
-  await airtableFetch(env, "Make Admin Queue", lease.record_id, {
+  await airtableFetch(env, REPAIR_LEASE_TABLE_ID, lease.record_id, {
     method: "PATCH",
     body: JSON.stringify({ fields: { Result_JSON: JSON.stringify(lease.state) } }),
   });
@@ -9697,7 +9698,7 @@ async function repairControlAction(env, input) {
   if (action === "pulse_admin_bridge") {
     if (lease.scenario_id !== 5893243) throw new HttpError(403, "pulse_admin_bridge is limited to MAKE-ADMIN-BRIDGE 5893243");
     const exactQueueRecordId = repairString(input.exact_make_admin_command_record_id, "exact_make_admin_command_record_id", 32);
-    const pending = await listRecords(env, "Make Admin Queue", {
+    const pending = await listRecords(env, REPAIR_LEASE_TABLE_ID, {
       limit: 10,
       sortField: "Requested_At",
       sortDirection: "asc",
