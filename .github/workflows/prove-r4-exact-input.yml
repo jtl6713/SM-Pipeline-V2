@@ -15,11 +15,11 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BRIDGE_WORKER: chicagoshining-repair-control-bridge
-      TEST_RUN_ID: REPAIR-R4-EXACT-20260816-A
-      LEASE_ID: REPAIR-R4-EXACT-20260816-A-L1
+      TEST_RUN_ID: REPAIR-R4-EXACT-20260816-B
+      LEASE_ID: REPAIR-R4-EXACT-20260816-B-L1
       SCENARIO_ID: '5556716'
-      TARGET_OUTPUT: recWLLWQ2HgE9Vjf5
-      DENY_OUTPUT: recpiwWGrph3lsTn6
+      TARGET_OUTPUT: recPd2OnropiUpJzR
+      DENY_OUTPUT: rec4t364GUMajl9T7
     steps:
       - name: Run bounded exact proof
         shell: bash
