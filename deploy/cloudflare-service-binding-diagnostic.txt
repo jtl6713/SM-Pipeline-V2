@@ -1,0 +1,5 @@
+Read-only post-rollback runtime health trigger.
+Target: chicagoshining-studio-api
+Expected active version: fbcf7fbd-7935-44dd-b195-094f505b7df6 (v86)
+Purpose: verify /api/session through internal service binding after rollback.
+Triggered: 2026-08-16
