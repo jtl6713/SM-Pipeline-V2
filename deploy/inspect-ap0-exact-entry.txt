@@ -1,0 +1,1 @@
+Read-only inspection of AP0 scenario 5612096 modules 1-6 to derive a proven exact-output webhook/GetRecord entrance pattern for R4. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16.
