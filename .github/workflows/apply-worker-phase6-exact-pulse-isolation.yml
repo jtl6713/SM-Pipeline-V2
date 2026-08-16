@@ -1,0 +1,55 @@
+name: Apply Worker Phase6 Exact Pulse Isolation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-worker-phase6-exact-pulse-isolation.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-phase6-exact-pulse-isolation
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply exact pulse isolation patch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE=$(git hash-object apps/studio-api/worker.js)
+          python repair/tools/patch_worker_phase6_exact_pulse_isolation.py | tee /tmp/patch-output.txt
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          git diff --check
+          test "$(git diff --name-only)" = 'apps/studio-api/worker.js'
+          grep -q 'phase6_exact_pulse_isolation_patch=applied' /tmp/patch-output.txt
+          grep -q 'Phase 6 refuses to pulse active scenario' apps/studio-api/worker.js
+          grep -q "R5 - Rendering Jobs to Poll" apps/studio-api/worker.js
+          grep -q 'exact_selector_isolation: true' apps/studio-api/worker.js
+          AFTER=$(git hash-object apps/studio-api/worker.js)
+          test "$BEFORE" != "$AFTER"
+          printf '{"before_blob":"%s","after_blob":"%s","scope":"Phase 6 R4/R5 controlled pulse isolation only"}\n' "$BEFORE" "$AFTER" >/tmp/evidence.json
+      - name: Commit patched Studio API source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'fix: isolate Phase 6 R4/R5 controlled pulses'
+          git push origin HEAD:main
+      - name: Upload patch evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-exact-pulse-isolation-${{ github.run_id }}
+          path: /tmp/evidence.json
+          retention-days: 30
