@@ -1,5 +1,5 @@
 Sanitized read-only binding audit trigger.
 
 Target: chicagoshining-studio-api
-Purpose: compare the currently active Worker version with known-good version 86 using binding names/types only.
-Triggered: 2026-08-16
+Purpose: compare the currently active Worker version with known-good version 86 using binding names/types only after Item 1 lease-store access failure.
+Triggered: 2026-08-16 rerun
