@@ -1,0 +1,1 @@
+Read-only live Make inspection of R4 modules 1/2 and MAKE-ADMIN-BRIDGE module sequence to derive the exact trigger/GetRecord runner pattern. No Make mutation, activation/run, Airtable write, or publishing. Triggered 2026-08-16.
