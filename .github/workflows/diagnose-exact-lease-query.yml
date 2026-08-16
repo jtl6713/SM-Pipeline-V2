@@ -1,0 +1,47 @@
+name: Diagnose Exact Lease Query
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-exact-lease-query.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Decrypt verified Airtable PAT
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+      - name: Run exact Worker lease-list query
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://api.airtable.com/v0/appe33zkZn35yirTL/tbltuSt9UibYzxpah'
+          code=$(curl -sS -G -o /tmp/exact.json -w '%{http_code}' "$URL" \
+            -H "Authorization: Bearer $(cat /tmp/pat.txt)" \
+            --data-urlencode 'pageSize=50' \
+            --data-urlencode 'maxRecords=50' \
+            --data-urlencode 'sort[0][field]=Requested_At' \
+            --data-urlencode 'sort[0][direction]=desc' \
+            --data-urlencode 'filterByFormula=AND({Status}="Processing",FIND("REPAIR_LEASE_V1", {Notes}&"")>0)')
+          echo "exact_query_http=$code"
+          jq -c '{record_count:(.records|length? // 0), error_type:(.error.type // null), error_message:(.error.message // null)}' /tmp/exact.json
+          test "$code" = '200'
+      - name: Destroy credential material
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
