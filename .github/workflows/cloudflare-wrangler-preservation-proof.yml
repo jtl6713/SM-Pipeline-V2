@@ -1,0 +1,201 @@
+name: Prove Wrangler Binding Preservation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cloudflare-wrangler-preservation-proof.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-wrangler-preservation-proof
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prepare disposable names and Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKER="sm-pipeline-deploy-proof-${GITHUB_RUN_ID}"
+          BUCKET="sm-pipeline-deploy-proof-${GITHUB_RUN_ID}"
+          echo "WORKER=$WORKER" >> "$GITHUB_ENV"
+          echo "BUCKET=$BUCKET" >> "$GITHUB_ENV"
+          mkdir -p /tmp/wrangler-proof
+          cd /tmp/wrangler-proof
+          npm init -y >/dev/null 2>&1
+          npm install --no-save wrangler@latest >/dev/null
+          ./node_modules/.bin/wrangler --version | tee /tmp/wrangler-version.txt
+
+      - name: Create empty disposable R2 bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/wrangler-proof
+          ./node_modules/.bin/wrangler r2 bucket create "$BUCKET" >/tmp/r2-create.log 2>&1
+          echo "r2_bucket_created=true"
+
+      - name: Deploy initial disposable Worker with var and R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/wrangler-proof
+          cat >worker.js <<'EOF'
+          export default { async fetch(_request, env) {
+            return Response.json({ok:true,has_var:!!env.KEEP_ME,has_secret:!!env.KEEP_SECRET,has_bucket:!!env.TEMP_BUCKET,revision:1});
+          }};
+          EOF
+          python - <<'PY'
+          import json, os
+          cfg={
+            "name":os.environ["WORKER"],
+            "main":"worker.js",
+            "compatibility_date":"2026-08-02",
+            "workers_dev":False,
+            "vars":{"KEEP_ME":"sentinel"},
+            "r2_buckets":[{"binding":"TEMP_BUCKET","bucket_name":os.environ["BUCKET"]}]
+          }
+          open('wrangler.jsonc','w').write(json.dumps(cfg,indent=2))
+          PY
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc >/tmp/deploy-initial.log 2>&1
+
+      - name: Add disposable secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/wrangler-proof
+          printf '%s' "proof-secret-${GITHUB_RUN_ID}" | ./node_modules/.bin/wrangler secret put KEEP_SECRET --name "$WORKER" >/tmp/secret-put.log 2>&1
+          echo "secret_created=true"
+
+      - name: Audit first binding contract and extract R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/first-deployments.json
+          FIRST=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/first-deployments.json)
+          curl -fsS "$API/versions/$FIRST" -H "$AUTH" -o /tmp/first-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/first-version.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got={str(b.get('name')):str(b.get('type')) for b in bindings}
+          expected={'KEEP_ME':'plain_text','KEEP_SECRET':'secret_text','TEMP_BUCKET':'r2_bucket'}
+          if got != expected:
+              raise SystemExit(f'Initial disposable binding contract mismatch: {got}')
+          r2=next(b for b in bindings if b.get('name')=='TEMP_BUCKET')
+          bucket=r2.get('bucket_name') or r2.get('bucket')
+          if not bucket:
+              raise SystemExit('Cloudflare version detail did not expose the disposable R2 bucket identifier')
+          Path('/tmp/extracted-r2-bucket.txt').write_text(str(bucket))
+          Path('/tmp/first-binding-audit.json').write_text(json.dumps({'binding_count':len(bindings),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])},indent=2))
+          print(json.dumps({'initial_binding_count':len(bindings),'initial_binding_names_types':sorted(got.items())}))
+          PY
+
+      - name: Redeploy changed source using keep-vars, required secret, and extracted R2 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/wrangler-proof
+          cat >worker.js <<'EOF'
+          export default { async fetch(_request, env) {
+            return Response.json({ok:true,has_var:!!env.KEEP_ME,has_secret:!!env.KEEP_SECRET,has_bucket:!!env.TEMP_BUCKET,revision:2});
+          }};
+          EOF
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          bucket=Path('/tmp/extracted-r2-bucket.txt').read_text().strip()
+          cfg={
+            "name":os.environ["WORKER"],
+            "main":"worker.js",
+            "compatibility_date":"2026-08-02",
+            "workers_dev":False,
+            "keep_vars":True,
+            "r2_buckets":[{"binding":"TEMP_BUCKET","bucket_name":bucket}],
+            "secrets":{"required":["KEEP_SECRET"]}
+          }
+          open('wrangler.jsonc','w').write(json.dumps(cfg,indent=2))
+          PY
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/deploy-preserve.log 2>&1
+
+      - name: Verify second version preserved exact bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/second-deployments.json
+          SECOND=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/second-deployments.json)
+          curl -fsS "$API/versions/$SECOND" -H "$AUTH" -o /tmp/second-version.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('/tmp/second-version.json').read_text())['result']
+          bindings=(r.get('resources') or {}).get('bindings') or []
+          got={str(b.get('name')):str(b.get('type')) for b in bindings}
+          expected={'KEEP_ME':'plain_text','KEEP_SECRET':'secret_text','TEMP_BUCKET':'r2_bucket'}
+          if got != expected:
+              raise SystemExit(f'Preservation failed: {got}')
+          out={
+            'proof':'wrangler-binding-preservation',
+            'wrangler_version':Path('/tmp/wrangler-version.txt').read_text().strip(),
+            'second_binding_count':len(bindings),
+            'second_bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name']),
+            'plain_var_preserved_without_redeclaring':True,
+            'secret_preserved_without_value_reupload':True,
+            'r2_preserved_by_explicit_runtime_reconstruction':True,
+            'passed':True
+          }
+          Path('/tmp/wrangler-preservation-proof.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+
+      - name: Delete disposable Worker and empty R2 bucket
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${WORKER:-}" ]]; then
+            code=$(curl -sS -o /tmp/worker-delete.json -w '%{http_code}' -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+            if [[ "$code" != "404" && ( "$code" -lt 200 || "$code" -ge 300 ) ]]; then
+              echo "worker_cleanup_http=$code" >&2
+              exit 1
+            fi
+          fi
+          if [[ -n "${BUCKET:-}" ]]; then
+            code=$(curl -sS -o /tmp/bucket-delete.json -w '%{http_code}' -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+            if [[ "$code" != "404" && ( "$code" -lt 200 || "$code" -ge 300 ) ]]; then
+              echo "bucket_cleanup_http=$code" >&2
+              exit 1
+            fi
+          fi
+          echo "disposable_cleanup_complete=true"
+
+      - name: Upload sanitized proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrangler-preservation-proof-${{ github.run_id }}
+          path: |
+            /tmp/wrangler-preservation-proof.json
+            /tmp/first-binding-audit.json
+            /tmp/wrangler-version.txt
+          if-no-files-found: ignore
+          retention-days: 30
