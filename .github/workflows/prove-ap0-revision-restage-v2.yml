@@ -1,0 +1,39 @@
+name: Prove AP0 Revision Restage v2
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/prove-ap0-revision-restage-v2.txt']
+permissions: {contents: read}
+concurrency:
+  group: prove-ap0-revision-restage-5612096
+  cancel-in-progress: false
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Airtable credential without logging it
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+      - name: Execute four-phase bounded AP0 proof
+        run: python repair/tools/prove_ap0_revision_restage_v2.py
+      - name: Destroy credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ap0-revision-proof-v2-${{ github.run_id }}
+          path: /tmp/ap0-revision-proof.json
+          if-no-files-found: warn
+          retention-days: 30
