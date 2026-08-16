@@ -48,31 +48,27 @@ jobs:
           '''          Production_Request_Output_ID:makeProductionRequestOutputId(), Production_Request:[productionRequestId],\n          Test_Run_ID:String(f(requestRecord,"Test_Run_ID")||"").trim()||null,\n          Organization:arrayOrEmpty(f(requestRecord,"Organization")),''',
           'Production Request Output compact path inherits Test_Run_ID')
 
-          # Locate Platform Output seed function and add exactly once after its return opening.
-          marker='function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage = null) {'
+          marker='function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage) {'
           if s.count(marker)!=1:
               raise SystemExit(f'platformOutputSeedFields marker count {s.count(marker)}')
           start=s.index(marker)
           ret=s.index('  return {',start)
           insert='  return {\n    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,'
-          if s[ret:ret+len('  return {')+120].find('Test_Run_ID')!=-1:
+          if 'Test_Run_ID' in s[ret:ret+220]:
               raise SystemExit('platformOutputSeedFields already contains Test_Run_ID unexpectedly')
           s=s[:ret]+insert+s[ret+len('  return {'):]
           reps.append('Platform Output seed inherits Test_Run_ID')
 
-          # Keep older output-work-item path consistent if it is still invoked.
           marker2='function outputWorkItemFields(parentContentItem, requestRecord, outputRow, effective, sourcePackage = null) {'
           if s.count(marker2)!=1:
               raise SystemExit(f'outputWorkItemFields marker count {s.count(marker2)}')
           start2=s.index(marker2)
           ret2=s.index('  return {',start2)
-          nearby=s[ret2:ret2+220]
-          if 'Test_Run_ID' not in nearby:
+          if 'Test_Run_ID' not in s[ret2:ret2+220]:
               insert2='  return {\n    Test_Run_ID: String(f(requestRecord, "Test_Run_ID") || "").trim() || null,'
               s=s[:ret2]+insert2+s[ret2+len('  return {'):]
           reps.append('Legacy output work item inherits Test_Run_ID')
 
-          # Expose identity in API mappings for deterministic verification.
           replace_once(
           '''    production_request_id: f(record, "Production_Request_ID"),\n    idea_candidate_links:''',
           '''    production_request_id: f(record, "Production_Request_ID"),\n    test_run_id: f(record, "Test_Run_ID") || null,\n    idea_candidate_links:''',
