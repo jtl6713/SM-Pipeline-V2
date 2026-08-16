@@ -1,0 +1,196 @@
+name: Repair Item 2 Exact Handoff + Test Isolation
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-item2-exact-handoff-test-isolation.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch P1-P3 exact handoff and production Test_Run_ID exclusions with rollback
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip()); open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          export TOKEN=$(cat /tmp/t); export BASE=$(cat /tmp/b)
+          python - <<'PY'
+          import json, os, copy, urllib.request, urllib.error, time
+
+          BASE=os.environ['BASE']; TOKEN=os.environ['TOKEN']
+          IDS={
+            'R2':5569495,'R2B':5576620,'RR1':5576363,'P1':5528742,'P2':5530955,'P3':5531703,'C1':5582062,
+          }
+          expected_names={
+            'R2':'R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility',
+            'R2B':'R2B - Retry Asset Selection v5.4.1 - Fail Fast Timestamp Fix',
+            'RR1':'RR1 - Render Review Email v1.2 - Native Photo Set Eligible',
+            'P1':'P1 - Content Package Generation - Scalable Configuration v2.2 - Advanced Production Directives',
+            'P2':'P2 - Voiceover and Thumbnail Generation - Daisy Chain v2.1 - Sequential P3 Trigger',
+            'P3':'P3 - Platform Output Generation v4.9.1 - Formula-Ready Single Parent Studio Outputs + Legacy',
+            'C1':'C1 - Carousel Scene Planner v26 - Advanced Slide Count Directives - Daisy Chain Owner to C2',
+          }
+          expected_hooks={'P2':2567880,'P3':2567877}
+
+          def api(path, method='GET', body=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            req=urllib.request.Request(BASE+path,data=data,method=method,headers={'Authorization':'Token '+TOKEN,'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-Repair/1.0'})
+            try:
+              with urllib.request.urlopen(req,timeout=30) as r: return json.loads(r.read().decode() or '{}')
+            except urllib.error.HTTPError as e:
+              raise RuntimeError(f'Make {method} {path} HTTP {e.code}: '+e.read().decode()[:500])
+
+          def unwrap_scenario(d): return d.get('scenario') or d.get('response') or d
+          def unwrap_bp(d):
+            bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+            return json.loads(bp) if isinstance(bp,str) else bp
+          def walk(flow, out=None):
+            if out is None: out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [],out)
+            return out
+          def add_prod_test_exclusion(mapper):
+            f=str(mapper.get('formula') or '').strip()
+            if 'Test_Run_ID' in f: return
+            if not f:
+              mapper['formula']='{Test_Run_ID}=BLANK()'
+            else:
+              mapper['formula']='AND({Test_Run_ID}=BLANK(),'+f+')'
+          def exact_test_formula(record_expr, existing=None):
+            clauses=[f"RECORD_ID() = '{record_expr}'", "OR({Test_Run_ID}=BLANK(), {Test_Run_ID}='{{900.test_run_id}}')"]
+            if existing: clauses.append(existing)
+            return 'AND('+','.join(clauses)+')'
+
+          before={}; meta={}; patched={}; written=[]
+          for key,sid in IDS.items():
+            sc=unwrap_scenario(api(f'/scenarios/{sid}'))
+            bp=unwrap_bp(api(f'/scenarios/{sid}/blueprint?draft=false'))
+            if sc.get('name')!=expected_names[key]: raise RuntimeError(f'{key} scenario name drift')
+            if sc.get('isActive') is not False: raise RuntimeError(f'{key} must be OFF before repair')
+            if key in expected_hooks and sc.get('hookId')!=expected_hooks[key]: raise RuntimeError(f'{key} hook drift: {sc.get("hookId")}')
+            before[key]=bp; meta[key]=copy.deepcopy(sc); patched[key]=copy.deepcopy(bp)
+            time.sleep(.35)
+
+          # Preconditions and production selector isolation.
+          for key in ('R2','R2B','RR1','P1','C1'):
+            nodes=walk(patched[key].get('flow') or [])
+            m1=nodes.get(1)
+            if not m1 or m1.get('module')!='airtable:ActionSearchRecords': raise RuntimeError(f'{key} Module 1 selector drift')
+            add_prod_test_exclusion(m1.setdefault('mapper',{}))
+
+          # P1: its sibling router branch fired P2 globally. Move the same module after successful exact Content Item update.
+          p1=patched['P1']; n1=walk(p1.get('flow') or [])
+          router=n1.get(901); m1=n1.get(1); m6=n1.get(6); m902=n1.get(902)
+          if not router or router.get('module')!='builtin:BasicRouter': raise RuntimeError('P1 router 901 drift')
+          routes=router.get('routes') or []
+          if len(routes)!=2: raise RuntimeError('P1 router expected exactly two routes')
+          r0=routes[0].get('flow') or []; r1=routes[1].get('flow') or []
+          if len(r1)!=1 or int(r1[0].get('id'))!=902: raise RuntimeError('P1 global P2 trigger branch drift')
+          if not r0 or int(r0[-1].get('id'))!=6: raise RuntimeError('P1 package route no longer ends at Module 6 update')
+          if m902.get('module')!='http:MakeRequest': raise RuntimeError('P1 Module 902 type drift')
+          m902.setdefault('mapper',{})['jsonStringBodyContent']='{"source":"P-series daisy chain","target":"P2","content_record_id":"{{6.id}}","test_run_id":"{{1.Test_Run_ID}}","requested_at":"{{formatDate(now; \\"YYYY-MM-DDTHH:mm:ssZ\\"; \\"UTC\\")}}"}'
+          r0.append(copy.deepcopy(m902)); router['routes']=[routes[0]]
+
+          # P2: exact webhook-addressed Content Item, preserving the existing view eligibility.
+          p2=patched['P2']; n2=walk(p2.get('flow') or [])
+          h2=n2.get(900); s2=n2.get(1); t2=n2.get(902)
+          if not h2 or h2.get('module')!='gateway:CustomWebHook' or (h2.get('parameters') or {}).get('hook')!=2567880: raise RuntimeError('P2 webhook drift')
+          if not s2 or s2.get('module')!='airtable:ActionSearchRecords': raise RuntimeError('P2 Module 1 selector drift')
+          if not t2 or t2.get('module')!='http:MakeRequest': raise RuntimeError('P2 Module 902 trigger drift')
+          s2.setdefault('mapper',{})['formula']=exact_test_formula('{{900.content_record_id}}')
+          s2['mapper']['maxRecords']='1'
+          t2.setdefault('mapper',{})['jsonStringBodyContent']='{"source":"P-series daisy chain","target":"P3","content_record_id":"{{9.id}}","test_run_id":"{{1.Test_Run_ID}}","requested_at":"{{formatDate(now; \\"YYYY-MM-DDTHH:mm:ssZ\\"; \\"UTC\\")}}"}'
+
+          # P3: both Studio-parent and legacy branches must be exact to the webhook Content Item.
+          p3=patched['P3']; n3=walk(p3.get('flow') or [])
+          h3=n3.get(900); s101=n3.get(101); s1=n3.get(1); c6=n3.get(6)
+          if not h3 or h3.get('module')!='gateway:CustomWebHook' or (h3.get('parameters') or {}).get('hook')!=2567877: raise RuntimeError('P3 webhook drift')
+          if not s101 or s101.get('module')!='airtable:ActionSearchRecords': raise RuntimeError('P3 Module 101 drift')
+          if not s1 or s1.get('module')!='airtable:ActionSearchRecords': raise RuntimeError('P3 Module 1 drift')
+          old101=str((s101.get('mapper') or {}).get('formula') or '').strip()
+          old1=str((s1.get('mapper') or {}).get('formula') or '').strip()
+          if not old101 or not old1: raise RuntimeError('P3 expected branch formulas missing')
+          s101['mapper']['formula']=exact_test_formula('{{900.content_record_id}}',old101)
+          s1['mapper']['formula']=exact_test_formula('{{900.content_record_id}}',old1)
+          s1['mapper']['maxRecords']='1'
+          if not c6 or c6.get('module')!='airtable:ActionCreateRecord': raise RuntimeError('P3 Module 6 create-output drift')
+          c6.setdefault('mapper',{}).setdefault('record',{})['Test_Run_ID']='{{1.Test_Run_ID}}'
+
+          # Write transaction with full rollback on any post-write failure.
+          try:
+            for key in ('R2','R2B','RR1','P1','P2','P3','C1'):
+              sid=IDS[key]
+              api(f'/scenarios/{sid}?confirmed=true','PATCH',{'blueprint':json.dumps(patched[key],separators=(',',':'))})
+              written.append(key)
+              time.sleep(.7)
+
+            # Independent post-write verification.
+            evidence={}
+            for key in ('R2','R2B','RR1','P1','P2','P3','C1'):
+              sid=IDS[key]; sc=unwrap_scenario(api(f'/scenarios/{sid}')); bp=unwrap_bp(api(f'/scenarios/{sid}/blueprint?draft=false')); nodes=walk(bp.get('flow') or [])
+              if sc.get('isActive') is not False: raise RuntimeError(f'{key} did not remain OFF')
+              if sc.get('scheduling')!=meta[key].get('scheduling'): raise RuntimeError(f'{key} scheduling changed')
+              if sc.get('hookId')!=meta[key].get('hookId'): raise RuntimeError(f'{key} hook identity changed')
+              if set(nodes)!=set(walk(before[key].get('flow') or [])): raise RuntimeError(f'{key} module ID set changed')
+              evidence[key]={'scenario_id':sid,'off':True,'hookId':sc.get('hookId')}
+              if key in ('R2','R2B','RR1','P1','C1'):
+                f=str((nodes[1].get('mapper') or {}).get('formula') or '')
+                if 'Test_Run_ID' not in f or 'BLANK()' not in f: raise RuntimeError(f'{key} production Test_Run_ID exclusion missing')
+              time.sleep(.35)
+
+            # Exact handoff proof by static live contract.
+            b1=walk(unwrap_bp(api(f'/scenarios/{IDS["P1"]}/blueprint?draft=false')).get('flow') or [])
+            b2=walk(unwrap_bp(api(f'/scenarios/{IDS["P2"]}/blueprint?draft=false')).get('flow') or [])
+            b3=walk(unwrap_bp(api(f'/scenarios/{IDS["P3"]}/blueprint?draft=false')).get('flow') or [])
+            p1body=str((b1[902].get('mapper') or {}).get('jsonStringBodyContent') or '')
+            p2body=str((b2[902].get('mapper') or {}).get('jsonStringBodyContent') or '')
+            if 'content_record_id' not in p1body or '{{6.id}}' not in p1body: raise RuntimeError('P1 exact P2 handoff body missing')
+            if 'content_record_id' not in p2body or '{{9.id}}' not in p2body: raise RuntimeError('P2 exact P3 handoff body missing')
+            if 'RECORD_ID()' not in str((b2[1].get('mapper') or {}).get('formula') or '') or '900.content_record_id' not in str((b2[1].get('mapper') or {}).get('formula') or ''): raise RuntimeError('P2 exact selector missing')
+            for mid in (101,1):
+              f=str((b3[mid].get('mapper') or {}).get('formula') or '')
+              if 'RECORD_ID()' not in f or '900.content_record_id' not in f: raise RuntimeError(f'P3 Module {mid} exact selector missing')
+            if (b3[6].get('mapper') or {}).get('record',{}).get('Test_Run_ID')!='{{1.Test_Run_ID}}': raise RuntimeError('P3 Test_Run_ID propagation missing')
+            evidence['P1_P2_P3']={'exact_record_handoff':True,'test_identity_match_guard':True,'p3_test_run_propagation':True}
+            open('/tmp/evidence.json','w').write(json.dumps({'passed':True,'evidence':evidence},indent=2))
+            print(json.dumps({'passed':True,'scenarios':list(IDS.values()),'exact_handoff':True,'test_isolation':True}))
+          except Exception:
+            for key in reversed(written):
+              try:
+                api(f'/scenarios/{IDS[key]}?confirmed=true','PATCH',{'blueprint':json.dumps(before[key],separators=(',',':'))})
+              except Exception as re:
+                print('ROLLBACK_ERROR',key,str(re))
+            raise
+          PY
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item2-exact-handoff-test-isolation-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings
