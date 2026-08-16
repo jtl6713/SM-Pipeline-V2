@@ -1,0 +1,121 @@
+name: Repair AP1C Historical Hook Binding
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-ap1c-historical-hook-binding.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore only AP1C Module 900 historical hook with rollback
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings'))
+          v={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/t','w').write(str(v['MAKE_API_TOKEN']).strip())
+          open('/tmp/b','w').write(str(v['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/t); BASE=$(cat /tmp/b); AP1C=5790745; HISTORICAL_HOOK=2628156
+          curl -fsS "$BASE/scenarios/$AP1C" -H "Authorization: Token $TOKEN" -o /tmp/sc-before
+          curl -fsS "$BASE/scenarios/$AP1C/blueprint?draft=false" -H "Authorization: Token $TOKEN" -o /tmp/bp-before
+          python - <<'PY'
+          import json, copy
+          sid=5790745; hook=2628156
+          s=json.load(open('/tmp/sc-before')); sc=s.get('scenario') or s.get('response') or s
+          if sc.get('isActive') is not True: raise SystemExit('SAFETY: AP1C is no longer active')
+          sched=sc.get('scheduling') or {}
+          if str(sched.get('type') or '').lower()!='immediately': raise SystemExit(f'SAFETY: AP1C scheduling drift: {sched}')
+          if sc.get('hookId') not in (None,0): raise SystemExit(f'SAFETY: AP1C already has unexpected scenario hookId {sc.get("hookId")}')
+          d=json.load(open('/tmp/bp-before')); bp=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          nodes={}
+          def walk(flow):
+            for n in flow or []:
+              nodes[n.get('id')]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          m900=nodes.get(900); m1=nodes.get(1)
+          if not m900 or m900.get('module')!='gateway:CustomWebHook': raise SystemExit('SAFETY: AP1C Module 900 trigger shape drift')
+          if ((m900.get('metadata') or {}).get('designer') or {}).get('name')!='Webhook - AP1C Exact Output Trigger': raise SystemExit('SAFETY: AP1C Module 900 name drift')
+          params=m900.get('parameters') or {}
+          if params.get('hook') not in (None,0,''): raise SystemExit(f'SAFETY: AP1C Module 900 already has unexpected hook {params.get("hook")}')
+          if str(params.get('maxResults'))!='1': raise SystemExit('SAFETY: AP1C Module 900 maxResults drift')
+          if not m1 or m1.get('module')!='airtable:ActionGetRecord': raise SystemExit('SAFETY: AP1C Module 1 exact GetRecord drift')
+          if str((m1.get('mapper') or {}).get('id'))!='{{900.output_record_id}}': raise SystemExit('SAFETY: AP1C Module 1 no longer consumes exact webhook output_record_id')
+          patched=copy.deepcopy(bp)
+          pnodes={}
+          def walkp(flow):
+            for n in flow or []:
+              pnodes[n.get('id')]=n
+              for r in n.get('routes') or []: walkp(r.get('flow') or [])
+          walkp(patched.get('flow') or [])
+          pnodes[900].setdefault('parameters',{})['hook']=hook
+          open('/tmp/patch.json','w').write(json.dumps({'blueprint':json.dumps(patched,separators=(',',':'))},separators=(',',':')))
+          open('/tmp/expected.json','w').write(json.dumps(patched,separators=(',',':')))
+          open('/tmp/rollback.json','w').write(json.dumps({'blueprint':json.dumps(bp,separators=(',',':'))},separators=(',',':')))
+          PY
+          code=$(curl -sS -o /tmp/patch-response -w '%{http_code}' -X PATCH "$BASE/scenarios/$AP1C?confirmed=true" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/patch.json)
+          if [[ ! "$code" =~ ^2 ]]; then
+            echo "AP1C patch rejected with HTTP $code; no successful mutation to verify"
+            exit 1
+          fi
+          sleep 2
+          curl -fsS "$BASE/scenarios/$AP1C" -H "Authorization: Token $TOKEN" -o /tmp/sc-after
+          curl -fsS "$BASE/scenarios/$AP1C/blueprint?draft=false" -H "Authorization: Token $TOKEN" -o /tmp/bp-after
+          if ! python - <<'PY'; then
+          import json, copy
+          hook=2628156
+          sb=json.load(open('/tmp/sc-before')); sa=json.load(open('/tmp/sc-after'))
+          before=sb.get('scenario') or sb.get('response') or sb; after=sa.get('scenario') or sa.get('response') or sa
+          if after.get('isActive') is not True: raise SystemExit('AP1C did not remain active')
+          if before.get('scheduling')!=after.get('scheduling'): raise SystemExit('AP1C scheduling changed')
+          d=json.load(open('/tmp/bp-after')); actual=d.get('blueprint') or (d.get('response') or {}).get('blueprint') or d
+          expected=json.load(open('/tmp/expected.json'))
+          nodes={}
+          def walk(flow):
+            for n in flow or []:
+              nodes[n.get('id')]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(actual.get('flow') or [])
+          m900=nodes.get(900); m1=nodes.get(1)
+          if (m900.get('parameters') or {}).get('hook')!=hook: raise SystemExit('Module 900 historical hook was not restored')
+          if str((m900.get('parameters') or {}).get('maxResults'))!='1': raise SystemExit('Module 900 maxResults changed')
+          if str((m1.get('mapper') or {}).get('id'))!='{{900.output_record_id}}': raise SystemExit('Module 1 exact target mapping changed')
+          # Make may normalize blueprint metadata, so compare the full flow after masking only the restored hook field.
+          before_bp=json.load(open('/tmp/bp-before')); before_bp=before_bp.get('blueprint') or (before_bp.get('response') or {}).get('blueprint') or before_bp
+          a=copy.deepcopy(actual); b=copy.deepcopy(before_bp)
+          def mask(flow):
+            for n in flow or []:
+              if n.get('id')==900: n.setdefault('parameters',{})['hook']=None
+              for r in n.get('routes') or []: mask(r.get('flow') or [])
+          mask(a.get('flow') or []); mask(b.get('flow') or [])
+          if a.get('flow')!=b.get('flow'): raise SystemExit('AP1C flow changed beyond Module 900 hook binding')
+          print(json.dumps({'passed':True,'scenario_id':5790745,'module_900_hook':hook,'active':after.get('isActive'),'scenario_hookId':after.get('hookId'),'scheduling':after.get('scheduling'),'module_1_exact_record':'{{900.output_record_id}}'}))
+          PY
+            echo 'verification failed; rolling back AP1C blueprint'
+            curl -fsS -X PATCH "$BASE/scenarios/$AP1C?confirmed=true" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/rollback.json >/tmp/rollback-response
+            exit 1
+          fi
+      - name: Destroy credentials and transient blueprints
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/t /tmp/b /tmp/q /tmp/settings /tmp/sc-before /tmp/sc-after /tmp/bp-before /tmp/bp-after /tmp/patch.json /tmp/expected.json /tmp/rollback.json /tmp/patch-response /tmp/rollback-response
