@@ -1,0 +1,190 @@
+name: Repair AP0 Revision Safe Restage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-ap0-revision-safe-restage.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-ap0-5612096-revision-safe-restage
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Make credentials without logging values
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json'))
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          t=str(vals.get('MAKE_API_TOKEN') or '').strip(); b=str(vals.get('MAKE_API_BASE_URL') or '').strip().rstrip('/')
+          if not t or not b: raise SystemExit('Missing active Make API settings')
+          open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
+          PY
+      - name: Capture current AP0 scenario and blueprint with rate-limit retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5612096
+          get_retry(){
+            local url=$1 out=$2 code
+            for delay in 0 2 5 10; do
+              [[ "$delay" == 0 ]] || sleep "$delay"
+              code=$(curl -sS -o "$out" -w '%{http_code}' "$url" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' || true)
+              [[ "$code" == 200 ]] && return 0
+              [[ "$code" == 429 ]] || { echo "GET failed http=$code url=$url" >&2; cat "$out" >&2 || true; return 1; }
+            done
+            echo "GET rate-limit retries exhausted url=$url" >&2; return 1
+          }
+          get_retry "$BASE/scenarios/$SID" /tmp/scenario-before.json
+          get_retry "$BASE/scenarios/$SID/blueprint" /tmp/blueprint-wrapper-before.json
+          python - <<'PY'
+          import json,copy,hashlib
+          s=json.load(open('/tmp/scenario-before.json')); sc=s.get('scenario') or s.get('response') or s
+          if int(sc.get('id') or 0)!=5612096: raise SystemExit('Unexpected AP0 scenario id')
+          if sc.get('name')!='AP0 - Prepare Public Publish Asset - Worker R2 Upload v5.2 - Exact Video Output Webhook': raise SystemExit('Unexpected AP0 scenario name')
+          if sc.get('isActive') is not False: raise SystemExit('AP0 must be OFF before blueprint repair')
+          if int(sc.get('hookId') or 0)!=2653029: raise SystemExit('Unexpected AP0 hook id')
+          b=json.load(open('/tmp/blueprint-wrapper-before.json')); bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          open('/tmp/ap0-blueprint-before.json','w').write(json.dumps(bp,indent=2,sort_keys=True))
+          mods={}
+          def walk(flow):
+            for n in flow or []:
+              mods[int(n.get('id'))]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          if set(mods)!={1,2,3,4,6,7,8,9,900}: raise SystemExit(f'Unexpected AP0 module IDs: {sorted(mods)}')
+          if mods[1].get('module')!='airtable:ActionGetRecord' or mods[900].get('module')!='gateway:CustomWebHook': raise SystemExit('AP0 exact-input topology changed')
+          if mods[2].get('mapper',{}).get('value')!='publish/platform-output-{{1.Output_ID}}.mp4': raise SystemExit('AP0 Module 2 baseline R2 key changed')
+          f=mods[2].get('filter') or {}; groups=f.get('conditions') or []
+          if len(groups)!=4: raise SystemExit(f'Expected four AP0 eligibility branches, got {len(groups)}')
+          for i,g in enumerate(groups):
+            hits=[c for c in g if c.get('a')=='{{1.Publish_Asset_URL}}' and c.get('o')=='notexist']
+            if len(hits)!=1: raise SystemExit(f'AP0 branch {i} missing exact Publish_Asset_URL notexist baseline')
+          rec7=mods[7].get('mapper',{}).get('record') or {}
+          if rec7.get('fld42gDl967o76R7m')!='platform-output-{{1.Output_ID}}.mp4': raise SystemExit('AP0 Module 7 baseline staged filename changed')
+          rec8=mods[8].get('mapper',{}).get('record') or {}
+          if 'fldHHE9w1gQ9WeQYt' in rec8 or 'fldLCrDXKw1YY07hv' in rec8: raise SystemExit('AP0 failure path unexpectedly mutates known-good asset URL/ready time')
+          # Patch only revision semantics.
+          expected='platform-output-{{1.Output_ID}}-{{1.Final_File_ID}}.mp4'
+          newgroups=[]
+          for g in groups:
+            keep=copy.deepcopy(g)
+            revised=copy.deepcopy(g)
+            for c in revised:
+              if c.get('a')=='{{1.Publish_Asset_URL}}' and c.get('o')=='notexist':
+                c.clear(); c.update({'a':'{{1.Publish_Asset_File_Name}}','b':expected,'o':'text:notequal'})
+            newgroups.extend([keep,revised])
+          mods[2]['filter']['conditions']=newgroups
+          mods[2]['filter']['name']='Exact approved video eligible for new or revised public asset prep'
+          mods[2]['mapper']['value']='publish/platform-output-{{1.Output_ID}}/{{1.Final_File_ID}}.mp4'
+          rec7['fld42gDl967o76R7m']=expected
+          for key in ('fldAjQHJwwTbCQESx','fldaQ2Wj4Vlh90QrJ'):
+            if key in rec7 and isinstance(rec7[key],str):
+              rec7[key]=rec7[key].replace('platform-output-{{1.Output_ID}}.mp4',expected)
+          payload={'blueprint':bp}
+          open('/tmp/ap0-patch-payload.json','w').write(json.dumps(payload,separators=(',',':')))
+          evidence={
+            'scenario_id':5612096,'hook_id':2653029,'module_ids':sorted(mods),
+            'before_sha256':hashlib.sha256(json.dumps(json.load(open('/tmp/ap0-blueprint-before.json')),sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+            'expected_filename':expected,'expected_r2_key':'publish/platform-output-{{1.Output_ID}}/{{1.Final_File_ID}}.mp4',
+            'eligibility_branches_before':4,'eligibility_branches_after':8,'not_equal_operator':'text:notequal',
+            'failure_preserves_prior_asset':True,
+          }
+          open('/tmp/ap0-prewrite-evidence.json','w').write(json.dumps(evidence,indent=2,sort_keys=True))
+          print(json.dumps(evidence,indent=2,sort_keys=True))
+          PY
+      - name: Patch AP0 blueprint and verify, rollback on mismatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID=5612096
+          rollback(){
+            jq -n --slurpfile bp /tmp/ap0-blueprint-before.json '{blueprint:$bp[0]}' >/tmp/rollback-payload.json
+            curl -sS -o /tmp/rollback-result.json -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data-binary @/tmp/rollback-payload.json >/tmp/rollback-http.txt || true
+          }
+          code=$(curl -sS -o /tmp/patch-result.json -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Content-Type: application/json' -H 'Accept: application/json' --data-binary @/tmp/ap0-patch-payload.json || true)
+          if [[ "$code" != 200 && "$code" != 201 ]]; then echo "AP0 PATCH failed http=$code" >&2; cat /tmp/patch-result.json >&2 || true; exit 1; fi
+          sleep 2
+          fresh(){ local url=$1 out=$2 c; for d in 0 2 5 10; do [[ "$d" == 0 ]] || sleep "$d"; c=$(curl -sS -o "$out" -w '%{http_code}' "$url" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' || true); [[ "$c" == 200 ]] && return 0; [[ "$c" == 429 ]] || return 1; done; return 1; }
+          if ! fresh "$BASE/scenarios/$SID" /tmp/scenario-after.json || ! fresh "$BASE/scenarios/$SID/blueprint" /tmp/blueprint-wrapper-after.json; then rollback; echo 'Post-write AP0 read failed; rollback requested' >&2; exit 1; fi
+          if ! python - <<'PY'
+          import json,hashlib,sys
+          s=json.load(open('/tmp/scenario-after.json')); sc=s.get('scenario') or s.get('response') or s
+          b=json.load(open('/tmp/blueprint-wrapper-after.json')); bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          mods={}
+          def walk(flow):
+            for n in flow or []:
+              mods[int(n.get('id'))]=n
+              for r in n.get('routes') or []: walk(r.get('flow') or [])
+          walk(bp.get('flow') or [])
+          checks=[]
+          checks.append(int(sc.get('id') or 0)==5612096)
+          checks.append(sc.get('isActive') is False)
+          checks.append(int(sc.get('hookId') or 0)==2653029)
+          checks.append(sc.get('name')=='AP0 - Prepare Public Publish Asset - Worker R2 Upload v5.2 - Exact Video Output Webhook')
+          checks.append(set(mods)=={1,2,3,4,6,7,8,9,900})
+          checks.append(mods[2].get('mapper',{}).get('value')=='publish/platform-output-{{1.Output_ID}}/{{1.Final_File_ID}}.mp4')
+          groups=(mods[2].get('filter') or {}).get('conditions') or []
+          checks.append(len(groups)==8)
+          expected='platform-output-{{1.Output_ID}}-{{1.Final_File_ID}}.mp4'
+          missing=sum(1 for g in groups for c in g if c.get('a')=='{{1.Publish_Asset_URL}}' and c.get('o')=='notexist')
+          revised=sum(1 for g in groups for c in g if c.get('a')=='{{1.Publish_Asset_File_Name}}' and c.get('b')==expected and c.get('o')=='text:notequal')
+          checks.extend([missing==4,revised==4])
+          checks.append((mods[7].get('mapper',{}).get('record') or {}).get('fld42gDl967o76R7m')==expected)
+          rec8=mods[8].get('mapper',{}).get('record') or {}
+          checks.append('fldHHE9w1gQ9WeQYt' not in rec8 and 'fldLCrDXKw1YY07hv' not in rec8)
+          if not all(checks):
+            print(json.dumps({'verification':checks},indent=2)); sys.exit(1)
+          canonical=json.dumps(bp,sort_keys=True,separators=(',',':'))
+          out={'scenario_id':5612096,'verified':True,'isActive':False,'hook_id':2653029,'module_ids':sorted(mods),'eligibility_branches':8,'new_asset_branches':4,'revision_changed_branches':4,'revision_keyed_r2_object':True,'failure_preserves_prior_asset':True,'after_sha256':hashlib.sha256(canonical.encode()).hexdigest()}
+          open('/tmp/ap0-postwrite-evidence.json','w').write(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+          then
+            rollback
+            sleep 2
+            fresh "$BASE/scenarios/$SID/blueprint" /tmp/blueprint-wrapper-rollback-check.json || true
+            echo 'AP0 verification mismatch; rollback requested' >&2
+            exit 1
+          fi
+      - name: Destroy transient credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/ap0-patch-payload.json /tmp/rollback-payload.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload repair evidence and rollback anchor
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ap0-revision-safe-restage-${{ github.run_id }}
+          path: |
+            /tmp/ap0-blueprint-before.json
+            /tmp/ap0-prewrite-evidence.json
+            /tmp/ap0-postwrite-evidence.json
+            /tmp/patch-result.json
+            /tmp/rollback-result.json
+          if-no-files-found: ignore
+          retention-days: 30
