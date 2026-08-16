@@ -1,0 +1,65 @@
+name: Read Item 5 P1 Write Contract
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-item5-p1-write-contract.txt']
+
+permissions: {contents: read}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read P1 module write map
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json,urllib.request
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          token=str(v['MAKE_API_TOKEN']).strip(); base=str(v['MAKE_API_BASE_URL']).strip().rstrip('/')
+          req=urllib.request.Request(base+'/scenarios/5528742/blueprint?draft=false',headers={'Authorization':'Token '+token,'User-Agent':'SM-Pipeline-V2-ReadOnly/1.0'})
+          with urllib.request.urlopen(req,timeout=30) as r: raw=json.loads(r.read().decode() or '{}')
+          bp=raw.get('blueprint') or (raw.get('response') or {}).get('blueprint') or raw
+          if isinstance(bp,str): bp=json.loads(bp)
+          out=[]
+          def clean(v,depth=0):
+            if depth>7:return '[depth]'
+            if isinstance(v,dict):
+              return {k:clean(x,depth+1) for k,x in v.items() if k not in ('connection','__IMTCONN__')}
+            if isinstance(v,list):return [clean(x,depth+1) for x in v]
+            if isinstance(v,str) and len(v)>2000:return v[:2000]+'...[truncated]'
+            return v
+          def walk(flow):
+            for n in flow or []:
+              mod=str(n.get('module') or '')
+              if any(x in mod.lower() for x in ['airtable','http']):
+                out.append({'id':n.get('id'),'module':mod,'name':((n.get('metadata') or {}).get('designer') or {}).get('name'),'mapper':clean(n.get('mapper') or {}),'parameters':clean(n.get('parameters') or {})})
+              for route in n.get('routes') or []: walk(route.get('flow') or [])
+          walk(bp.get('flow') or [])
+          open('/tmp/p1-write-contract.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps({'ok':True,'modules':len(out)}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: item5-p1-write-contract-${{ github.run_id }}
+          path: /tmp/p1-write-contract.json
+          retention-days: 7
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings
