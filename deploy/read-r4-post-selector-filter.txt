@@ -1,0 +1,3 @@
+Read-only diagnostic for R4 Module 1 selector mapping and the immediate Module 17/2 route contract.
+No activation. No blueprint writes. No Airtable mutations. No publishing.
+Triggered 2026-08-16 continuation checkpoint.
