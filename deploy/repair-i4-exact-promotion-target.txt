@@ -1,0 +1,1 @@
+Rollback-safe Item 2 repair: I4 5524092 Module 1 must consume the exact I3 webhook record_id instead of globally searching up to 25 approved candidates. Preserve hook, active immediate state, downstream modules and identities.
