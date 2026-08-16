@@ -9,3 +9,5 @@ Initialized: 2026-08-15
 Last deployment trigger: 2026-08-16 — edge-to-edge 9:16 crop contract; source commit 7d47e43a6187d5fb5cab9ecd11a9a3b103d3fdbd.
 
 Verification rerun: 2026-08-16 — extract multipart Worker module before comparing source.
+
+Verification rerun: 2026-08-16 — canonical multipart parser syntax validated.
