@@ -1,0 +1,35 @@
+name: Check Item7 Render Job
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-item7-render-job.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read exact render job
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          code=$(curl -sS --max-time 30 -o evidence/render-status.json -w '%{http_code}' 'https://render.chicagoshining.com/status/job-20260817220701-bc03f06f' || true)
+          echo "render_status_http=$code"
+          cat evidence/render-status.json | jq . || cat evidence/render-status.json
+          test "$code" = 200
+          jq -e '.jobId=="job-20260817220701-bc03f06f" or .job_id=="job-20260817220701-bc03f06f" or .id=="job-20260817220701-bc03f06f"' evidence/render-status.json >/dev/null
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-render-job-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 30
