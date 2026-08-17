@@ -1,0 +1,5 @@
+Item 8 SMV1 recipe repair trigger: 2026-08-17
+
+Patch only module 33 to request recipe=fill-crop-v2, preserve the inactive
+scenario and scheduling state, audit queued platform variants, and upload
+sanitized verification evidence with automatic blueprint rollback on failure.

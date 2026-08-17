@@ -1,0 +1,244 @@
+name: Repair Item 8 SMV1 Fill Crop V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/repair-item8-smv1-fill-crop-v2.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Patch exact SMV1 render recipe and audit queued variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/key.pem \
+            -in /tmp/pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/pat.txt
+          PAT=$(tr -d '\r\n' </tmp/pat.txt)
+          python - <<'PY' >/tmp/settings-query.txt
+          import urllib.parse
+          formula = "AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([
+              ("filterByFormula", formula),
+              ("fields[]", "Setting_Name"),
+              ("fields[]", "Setting_Value"),
+          ]))
+          PY
+          curl -fsS \
+            "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/settings-query.txt)" \
+            -H "Authorization: Bearer $PAT" \
+            -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("/tmp/settings.json").read_text())
+          values = {
+              row["fields"].get("Setting_Name"): row["fields"].get("Setting_Value")
+              for row in data.get("records", [])
+          }
+          Path("/tmp/make-token.txt").write_text(str(values["MAKE_API_TOKEN"]).strip())
+          Path("/tmp/make-base.txt").write_text(
+              str(values["MAKE_API_BASE_URL"]).strip().rstrip("/")
+          )
+          PY
+          python - <<'PY' >/tmp/queue-query.txt
+          import urllib.parse
+          formula = 'AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded",{Transfer_Status}="Processing"))'
+          print(urllib.parse.urlencode([
+              ("filterByFormula", formula),
+              ("maxRecords", "100"),
+              ("fields[]", "Transfer_ID"),
+              ("fields[]", "Transfer_Status"),
+          ]))
+          PY
+          curl -fsS \
+            "https://api.airtable.com/v0/appe33zkZn35yirTL/tblBZLXPd1p2NRWRK?$(cat /tmp/queue-query.txt)" \
+            -H "Authorization: Bearer $PAT" \
+            -o /tmp/queued-variants.json
+          TOKEN=$(cat /tmp/make-token.txt)
+          BASE=$(cat /tmp/make-base.txt)
+          SID=5894885
+          curl -fsS "$BASE/scenarios/$SID" \
+            -H "Authorization: Token $TOKEN" \
+            -o /tmp/scenario-before.json
+          curl -fsS "$BASE/scenarios/$SID/blueprint?draft=false" \
+            -H "Authorization: Token $TOKEN" \
+            -o /tmp/blueprint-before.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          scenario_raw = json.loads(Path("/tmp/scenario-before.json").read_text())
+          scenario = scenario_raw.get("scenario") or scenario_raw.get("response") or scenario_raw
+          if scenario.get("isActive") is not False or scenario.get("hookId") is not None:
+              raise SystemExit("SAFETY: SMV1 must remain inactive and hookless")
+
+          raw = json.loads(Path("/tmp/blueprint-before.json").read_text())
+          blueprint = raw.get("blueprint") or (raw.get("response") or {}).get("blueprint") or raw
+          if isinstance(blueprint, str):
+              blueprint = json.loads(blueprint)
+
+          def find(flow, module_id):
+              for node in flow or []:
+                  if int(node.get("id", -1)) == module_id:
+                      return node
+                  for route in node.get("routes") or []:
+                      match = find(route.get("flow") or [], module_id)
+                      if match:
+                          return match
+              return None
+
+          module = find(blueprint.get("flow") or [], 33)
+          if not module or module.get("module") != "http:ActionSendData":
+              raise SystemExit("SAFETY: SMV1 module 33 render contract drifted")
+          mapper = module.get("mapper") or {}
+          if not str(mapper.get("url") or "").endswith("/render"):
+              raise SystemExit("SAFETY: SMV1 module 33 endpoint drifted")
+          query = mapper.get("qs")
+          if not isinstance(query, list):
+              raise SystemExit("SAFETY: SMV1 module 33 query mapping is invalid")
+          ratio = [row for row in query if row.get("name") == "ratio"]
+          recipe = [row for row in query if row.get("name") == "recipe"]
+          if len(ratio) != 1 or len(recipe) > 1:
+              raise SystemExit("SAFETY: SMV1 module 33 query shape drifted")
+          if recipe and recipe[0].get("value") not in ("fill-crop-v2",):
+              raise SystemExit("SAFETY: refusing to replace an unknown recipe")
+          if recipe:
+              recipe[0]["value"] = "fill-crop-v2"
+          else:
+              query.append({"name": "recipe", "value": "fill-crop-v2"})
+          designer = (module.get("metadata") or {}).get("designer")
+          if isinstance(designer, dict):
+              designer["name"] = "33 - Render Versioned Fill-Crop Platform Variant"
+
+          Path("/tmp/patch.json").write_text(json.dumps({
+              "blueprint": json.dumps(blueprint, separators=(",", ":")),
+          }, separators=(",", ":")))
+          PY
+          code=$(curl -sS -o /tmp/patch-response.json -w '%{http_code}' \
+            -X PATCH "$BASE/scenarios/$SID?confirmed=true" \
+            -H "Authorization: Token $TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/patch.json)
+          [[ "$code" =~ ^2 ]] || { cat /tmp/patch-response.json; exit 1; }
+          sleep 2
+          curl -fsS "$BASE/scenarios/$SID" \
+            -H "Authorization: Token $TOKEN" \
+            -o /tmp/scenario-after.json
+          curl -fsS "$BASE/scenarios/$SID/blueprint?draft=false" \
+            -H "Authorization: Token $TOKEN" \
+            -o /tmp/blueprint-after.json
+          if ! python - <<'PY'; then
+          import json
+          from pathlib import Path
+
+          def unwrap(path, key):
+              raw = json.loads(Path(path).read_text())
+              value = raw.get(key) or (raw.get("response") or {}).get(key) or raw
+              return json.loads(value) if isinstance(value, str) else value
+
+          def find(flow, module_id):
+              for node in flow or []:
+                  if int(node.get("id", -1)) == module_id:
+                      return node
+                  for route in node.get("routes") or []:
+                      match = find(route.get("flow") or [], module_id)
+                      if match:
+                          return match
+              return None
+
+          before_scenario = unwrap("/tmp/scenario-before.json", "scenario")
+          after_scenario = unwrap("/tmp/scenario-after.json", "scenario")
+          if (
+              after_scenario.get("isActive") is not False
+              or after_scenario.get("hookId") != before_scenario.get("hookId")
+              or after_scenario.get("scheduling") != before_scenario.get("scheduling")
+          ):
+              raise SystemExit("SMV1 metadata drifted")
+
+          blueprint = unwrap("/tmp/blueprint-after.json", "blueprint")
+          module = find(blueprint.get("flow") or [], 33)
+          query = (module.get("mapper") or {}).get("qs") or []
+          recipe = [row for row in query if row.get("name") == "recipe"]
+          if len(recipe) != 1 or recipe[0].get("value") != "fill-crop-v2":
+              raise SystemExit("SMV1 fill-crop-v2 recipe verification failed")
+
+          queued = json.loads(Path("/tmp/queued-variants.json").read_text()).get("records") or []
+          evidence = {
+              "passed": True,
+              "scenario_id": 5894885,
+              "recipe_version": "fill-crop-v2",
+              "module_id": 33,
+              "scenario_active_before": before_scenario.get("isActive"),
+              "scenario_active_after": after_scenario.get("isActive"),
+              "scheduling_preserved": True,
+              "queued_platform_variants_before": len(queued),
+              "queued_regeneration_required": len(queued) > 0,
+              "cache_invalidation": "forward recipe-versioned identities; existing ready development artifacts retained",
+          }
+          Path("/tmp/item8-smv1-proof.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True)
+          )
+          print("item8_smv1_recipe=PASS")
+          PY
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          raw = json.loads(Path("/tmp/blueprint-before.json").read_text())
+          blueprint = raw.get("blueprint") or (raw.get("response") or {}).get("blueprint") or raw
+          if isinstance(blueprint, str):
+              blueprint = json.loads(blueprint)
+          Path("/tmp/rollback.json").write_text(json.dumps({
+              "blueprint": json.dumps(blueprint, separators=(",", ":")),
+          }, separators=(",", ":")))
+          PY
+            curl -fsS -X PATCH "$BASE/scenarios/$SID?confirmed=true" \
+              -H "Authorization: Token $TOKEN" \
+              -H 'Content-Type: application/json' \
+              --data-binary @/tmp/rollback.json >/dev/null
+            exit 1
+          fi
+
+      - name: Upload sanitized Item 8 SMV1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item8-smv1-fill-crop-v2-${{ github.run_id }}
+          path: /tmp/item8-smv1-proof.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Destroy transient credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/settings-query.txt \
+            /tmp/settings.json /tmp/make-token.txt /tmp/make-base.txt \
+            /tmp/queue-query.txt /tmp/queued-variants.json \
+            /tmp/scenario-before.json /tmp/scenario-after.json \
+            /tmp/blueprint-before.json /tmp/blueprint-after.json \
+            /tmp/patch.json /tmp/patch-response.json /tmp/rollback.json \
+            /tmp/item8-smv1-proof.json
