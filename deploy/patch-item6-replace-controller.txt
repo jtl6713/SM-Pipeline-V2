@@ -1,1 +1,1 @@
-Patch the Studio repair controller with Item 6 exact-output replace transaction actions. No Cloudflare deployment from this workflow; source-only patch with node syntax validation. Trigger 2026-08-17 08:12 CT.
+Patch the Studio repair controller with Item 6 exact-output replace transaction actions using the external source payload; validate with node --check before commit. No Cloudflare deployment in this workflow. Retrigger 2026-08-17 08:18 CT.
