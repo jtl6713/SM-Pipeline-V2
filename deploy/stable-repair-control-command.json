@@ -1,15 +1,12 @@
 {
-  "action": "acquire",
+  "action": "prepare_replace_transaction",
   "lease_id": "ITEM6_REPLACE_LEASE_20260817_0836",
   "scenario_id": 5813561,
   "test_run_id": "ITEM6_REPLACE_20260817T0836CT",
-  "max_runs": 1,
-  "max_operations": 8,
-  "expires_at": "RUNTIME_PLUS_10_MINUTES",
-  "allowed_platform_output_record_ids": ["recfiTvMN0nsw0MNF"],
-  "allowed_content_item_record_ids": [],
-  "deny_fixture_record_ids": ["rec3djtxIMcDy89Az"],
+  "platform_output_record_id": "recfiTvMN0nsw0MNF",
+  "replace_transaction_id": "ITEM6_TXN_20260817_0836",
+  "replace_fingerprint": "sha256:item6-fixture-v1",
   "allow_public_publish": false,
   "expected_upstream_status": 200,
-  "note": "Item 6 isolated nonpublic replacement controller proof; no scenario run or public publish"
+  "note": "Item 6 prepare must snapshot last-good state without resetting publication fields"
 }
