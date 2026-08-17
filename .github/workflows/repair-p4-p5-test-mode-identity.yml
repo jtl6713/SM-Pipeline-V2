@@ -1,0 +1,146 @@
+name: Repair P4 P5 Test Mode Identity
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-p4-p5-test-mode-identity.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Preflight and patch R2 P4 P5 exact Test Mode identity
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          export PAT
+          python - <<'PY'
+          import json,os,copy,urllib.request,urllib.parse,time,sys
+          ad=json.load(open('/tmp/settings')); vals={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in ad['records']}
+          BASE=str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'); TOKEN=str(vals['MAKE_API_TOKEN']).strip(); PAT=os.environ['PAT']
+          IDS={'R2':5569495,'P4':5533802,'P5':5536624}; P4_HOOK=2567873
+          PO_TEST='fld5Ew2FySt51Jl2Q'; AR_TEST='fldZFl683gtrEurEM'; SHOT_TEST='fldg2LWKkmu7w1Yyj'
+          def req(url,method='GET',body=None,auth=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            h={'Content-Type':'application/json','User-Agent':'SM-Pipeline-Repair/1.0'}
+            if auth: h['Authorization']=auth
+            q=urllib.request.Request(url,data=data,headers=h,method=method)
+            with urllib.request.urlopen(q,timeout=30) as x:
+              raw=x.read().decode(); return json.loads(raw) if raw else {}
+          def make(path,method='GET',body=None): return req(BASE+path,method,body,'Token '+TOKEN)
+          def sc(x): return x.get('scenario') or x.get('response') or x
+          def bp(x):
+            b=x.get('blueprint') or (x.get('response') or {}).get('blueprint') or x
+            return json.loads(b) if isinstance(b,str) else b
+          def nodes(flow,out=None):
+            if out is None: out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []: nodes(r.get('flow') or [],out)
+            return out
+          def safe_stop(reason,details=None):
+            e={'passed':False,'safe_no_write':True,'reason':reason,'details':details or {}}
+            open('/tmp/evidence.json','w').write(json.dumps(e,indent=2)); print(json.dumps(e)); sys.exit(0)
+          before={}; patched={}; meta={}
+          try:
+            for k,sid in IDS.items():
+              meta[k]=copy.deepcopy(sc(make(f'/scenarios/{sid}')))
+              before[k]=bp(make(f'/scenarios/{sid}/blueprint?draft=false')); patched[k]=copy.deepcopy(before[k]); time.sleep(.15)
+          except Exception as e: safe_stop('preflight_read_failed',{'error':str(e)})
+          # Exact live-shape preflight before any Make write.
+          try:
+            rn=nodes(patched['R2'].get('flow') or []); p4=nodes(patched['P4'].get('flow') or []); p5=nodes(patched['P5'].get('flow') or [])
+            if meta['P4'].get('hookId')!=P4_HOOK or not meta['P4'].get('isActive'): raise ValueError('P4 hook/active contract drift')
+            if rn.get(1,{}).get('module')!='airtable:ActionSearchRecords' or rn.get(20,{}).get('module')!='http:MakeRequest' or rn.get(21,{}).get('module')!='http:MakeRequest': raise ValueError('R2 module shape drift')
+            if p4.get(900,{}).get('module')!='gateway:CustomWebHook' or p4.get(42,{}).get('module')!='airtable:ActionSearchRecords': raise ValueError('P4 entrance shape drift')
+            for mid,mod in [(10,'airtable:ActionCreateRecord'),(17,'airtable:ActionCreateRecord'),(43,'airtable:ActionGetRecord'),(44,'airtable:ActionUpdateRecords'),(50,'airtable:ActionCreateRecord'),(12,'google-email:sendAnEmail')]:
+              if p4.get(mid,{}).get('module')!=mod: raise ValueError(f'P4 Module {mid} drift')
+            if p5.get(1,{}).get('module')!='airtable:ActionSearchRecords' or p5.get(5,{}).get('module')!='google-email:sendAnEmail': raise ValueError('P5 module shape drift')
+            if str((p4[42].get('mapper') or {}).get('maxRecords'))!='1': raise ValueError('P4 Module 42 not max1')
+            if str((p4[42].get('mapper') or {}).get('formula') or '').strip()!='{Output_ID} = {{900.output_id}}': raise ValueError('P4 Module 42 formula drift')
+          except Exception as e: safe_stop('preflight_shape_mismatch',{'error':str(e)})
+          # Validate literal Airtable formulas before Make mutation.
+          for lit in [
+            'AND({Output_ID}=999999,IF(""="",{Test_Run_ID}=BLANK(),{Test_Run_ID}=""))',
+            'AND({Output_ID}=999999,IF("TR-PREFLIGHT"="",{Test_Run_ID}=BLANK(),{Test_Run_ID}="TR-PREFLIGHT"))',
+            '{Test_Run_ID}=BLANK()']:
+            q=urllib.parse.urlencode({'maxRecords':'1','filterByFormula':lit})
+            table='tblrlPeboBthkplH0' if 'Output_ID' in lit else 'tblwRuCZOTabghYr6'
+            try: req(f'https://api.airtable.com/v0/appe33zkZn35yirTL/{table}?{q}',auth='Bearer '+PAT)
+            except Exception as e: safe_stop('preflight_formula_invalid',{'formula':lit,'error':str(e)})
+          # Patch R2: expose durable identity into both P4 handoffs. Production remains blank/backward-compatible.
+          rn=nodes(patched['R2'].get('flow') or [])
+          flds=(rn[1].get('mapper') or {}).get('fields')
+          if isinstance(flds,list) and 'Test_Run_ID' not in flds: flds.append('Test_Run_ID')
+          for mid in (20,21):
+            m=rn[mid].setdefault('mapper',{}); body=json.loads(str(m.get('jsonStringBodyContent') or '{}')); body['test_run_id']='{{1.Test_Run_ID}}'; m['jsonStringBodyContent']=json.dumps(body,separators=(',',':'))
+          # Patch P4 exact entrance and durable propagation.
+          p4=nodes(patched['P4'].get('flow') or []); m42=p4[42].setdefault('mapper',{})
+          fields=m42.get('fields')
+          if isinstance(fields,list) and 'Test_Run_ID' not in fields: fields.append('Test_Run_ID')
+          m42['formula']='AND({Output_ID} = {{900.output_id}}, IF("{{900.test_run_id}}" = "", {Test_Run_ID}=BLANK(), {Test_Run_ID}="{{900.test_run_id}}"))'
+          for mid,fid in [(10,AR_TEST),(17,SHOT_TEST),(44,AR_TEST),(50,SHOT_TEST)]:
+            p4[mid].setdefault('mapper',{}).setdefault('record',{})[fid]='{{42.Test_Run_ID}}'
+          # Existing Asset Request reconciliation must match same identity, never cross test/production boundary.
+          baseconds=copy.deepcopy((p4[44].get('filter') or {}).get('conditions') or [[]])
+          core=baseconds[0] if baseconds else []
+          prod=copy.deepcopy(core)+[{'a':'{{42.Test_Run_ID}}','o':'notexist'},{'a':'{{43.Test_Run_ID}}','o':'notexist'}]
+          test=copy.deepcopy(core)+[{'a':'{{42.Test_Run_ID}}','o':'exist'},{'a':'{{43.Test_Run_ID}}','b':'{{42.Test_Run_ID}}','o':'text:equal'}]
+          p4[44]['filter']={'name':'Reconcile only same Test_Run_ID boundary','conditions':[prod,test]}
+          # Never emit the real P4 request email for a test-tagged output.
+          p4[12]['filter']={'name':'Production only - suppress Test Mode asset request email','conditions':[[{'a':'{{42.Test_Run_ID}}','o':'notexist'}]]}
+          # P5 reminders must never enumerate test shots.
+          p5=nodes(patched['P5'].get('flow') or []); p5[1].setdefault('mapper',{})['formula']='{Test_Run_ID}=BLANK()'
+          written=[]
+          try:
+            for k in ('R2','P4','P5'):
+              make(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(patched[k],separators=(',',':'))}); written.append(k); time.sleep(.6)
+            live={}; ev={}
+            for k in ('R2','P4','P5'):
+              sm=sc(make(f'/scenarios/{IDS[k]}')); live[k]=nodes(bp(make(f'/scenarios/{IDS[k]}/blueprint?draft=false')).get('flow') or [])
+              if (sm.get('hookId'),sm.get('isActive'),sm.get('scheduling'))!=(meta[k].get('hookId'),meta[k].get('isActive'),meta[k].get('scheduling')): raise RuntimeError(f'{k} metadata drift')
+              if set(live[k])!=set(nodes(before[k].get('flow') or [])): raise RuntimeError(f'{k} module topology drift')
+              ev[k]={'scenario_id':IDS[k],'hookId':sm.get('hookId'),'active':sm.get('isActive')}
+            for mid in (20,21):
+              if 'test_run_id' not in str((live['R2'][mid].get('mapper') or {}).get('jsonStringBodyContent')): raise RuntimeError(f'R2 {mid} test identity missing')
+            f42=str((live['P4'][42].get('mapper') or {}).get('formula') or '')
+            if not all(x in f42 for x in ('Output_ID','900.test_run_id','Test_Run_ID','BLANK()')): raise RuntimeError('P4 42 identity formula missing')
+            for mid,fid in [(10,AR_TEST),(17,SHOT_TEST),(44,AR_TEST),(50,SHOT_TEST)]:
+              if (live['P4'][mid].get('mapper') or {}).get('record',{}).get(fid)!='{{42.Test_Run_ID}}': raise RuntimeError(f'P4 {mid} identity propagation missing')
+            if 'Test_Run_ID' not in json.dumps(live['P4'][44].get('filter') or {}): raise RuntimeError('P4 44 identity reconciliation guard missing')
+            if 'Test_Run_ID' not in json.dumps(live['P4'][12].get('filter') or {}): raise RuntimeError('P4 12 test email suppression missing')
+            if str((live['P5'][1].get('mapper') or {}).get('formula') or '')!='{Test_Run_ID}=BLANK()': raise RuntimeError('P5 production-only selector missing')
+            evidence={'passed':True,'contracts':{'r2_p4_identity_handoff':True,'p4_exact_identity_match':True,'asset_request_identity_propagation':True,'asset_request_shot_identity_propagation':True,'p4_test_email_suppressed':True,'p5_test_rows_excluded':True,'same_identity_reconciliation_only':True},'scenarios':ev}
+            open('/tmp/evidence.json','w').write(json.dumps(evidence,indent=2)); print(json.dumps(evidence))
+          except Exception as e:
+            for k in reversed(written):
+              try: make(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(before[k],separators=(',',':'))})
+              except Exception as re: print('ROLLBACK_ERROR',k,str(re))
+            raise
+          PY
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p4-p5-test-mode-identity-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings /tmp/evidence.json
