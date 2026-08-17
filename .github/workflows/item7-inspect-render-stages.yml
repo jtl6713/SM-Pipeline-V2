@@ -1,0 +1,95 @@
+name: Item7 Inspect Render Stages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/item7-inspect-render-stages.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-item7-inspect-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build exact-version forwarding bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|select(.percentage==100)|.version_id' /tmp/deployments-before.json)
+          printf '%s' "$ACTIVE" >/tmp/active.txt
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))'); printf '%s' "$TOKEN" >/tmp/token.txt
+          cat >/tmp/bridge.js <<EOF
+          export default {async fetch(request,env){
+            const u=new URL(request.url);
+            if(u.pathname==="/$TOKEN/ready") return Response.json({ok:true});
+            if(u.pathname!=="/$TOKEN/execute"||request.method!=="POST") return new Response("Not found",{status:404});
+            const body=await request.text();
+            const r=await env.STUDIO_API.fetch(new Request("https://studio-api.internal/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json","Cloudflare-Workers-Version-Overrides":"$TARGET_WORKER=\"$ACTIVE\""},body}));
+            return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});
+          }};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"bridge.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/bridge.js
+      - name: Upload bridge and inspect four stage scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -X PUT "$ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'bridge.js=@/tmp/bridge.js;type=application/javascript+module;filename=bridge.js' -o /tmp/upload.json
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json); T=$(cat /tmp/token.txt); ENDPOINT="https://$BRIDGE_WORKER.$SUB.workers.dev/$T/execute"
+          for i in $(seq 1 20); do code=$(curl -sS -o /tmp/ready.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$T/ready" || true); [[ "$code" == 200 ]] && break; sleep 1; done; test "$code" = 200
+          call_inspect(){
+            local label="$1" sid="$2"; local body out code attempt
+            body=$(jq -cn --argjson sid "$sid" '{action:"inspect_make_scenario",scenario_id:$sid,module_ids:[1,2,3,4,5,6,7,8],confirm:"INSPECT-MAKE-MODULES-V1"}')
+            out="/tmp/${label}.json"
+            for attempt in 1 2 3; do
+              code=$(curl -sS --max-time 90 -o "$out" -w '%{http_code}' -X POST "$ENDPOINT" -H 'Content-Type: application/json' --data "$body" || true)
+              [[ "$code" == 200 ]] && break
+              sleep "$attempt"
+            done
+            echo "$label http=$code"; test "$code" = 200; jq -e '.ok==true' "$out" >/dev/null
+            jq -c '{scenario:.inspected.scenario_name,active:.inspected.scenario_active,modules:[.inspected.modules[]|{id:.module.id,type:.module.module,name:.module.metadata.designer.name,mapper:.module.mapper,parameters:.module.parameters}]}' "$out"
+          }
+          call_inspect r2 5569495
+          call_inspect r3 5557966
+          call_inspect r5 5565333
+          call_inspect rr1 5576363
+      - name: Delete bridge and verify target unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"; AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+          test "$(cat /tmp/active.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)"
+      - name: Save inspection evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-render-stage-inspection-${{ github.run_id }}
+          path: |
+            /tmp/r2.json
+            /tmp/r3.json
+            /tmp/r5.json
+            /tmp/rr1.json
+            /tmp/deployments-before.json
+            /tmp/deployments-after.json
+          if-no-files-found: ignore
+          retention-days: 30
