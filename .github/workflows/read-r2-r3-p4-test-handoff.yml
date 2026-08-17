@@ -14,7 +14,7 @@ jobs:
     env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
     steps:
       - uses: actions/checkout@v6
-      - name: Read R2/R2B/R3/P4 live contracts
+      - name: Read exact R2/R2B/R3/P4 live contracts
         shell: bash
         run: |
           set -euo pipefail; umask 077
@@ -29,21 +29,14 @@ jobs:
           PY
           curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
           python - <<'PY'
-          import json,urllib.request,os,re
+          import json,urllib.request
           d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
           token=str(v['MAKE_API_TOKEN']).strip(); base=str(v['MAKE_API_BASE_URL']).strip().rstrip('/')
+          TARGETS=[(5569495,'R2'),(5576620,'R2B'),(5557966,'R3'),(5533802,'P4')]
           def get(path):
             q=urllib.request.Request(base+path,headers={'Authorization':'Token '+token,'User-Agent':'SM-Pipeline-Audit/1.0'})
             with urllib.request.urlopen(q,timeout=30) as h:return json.loads(h.read().decode())
-          # list scenarios and select only R2/R2B/R3/P4 by live names
-          raw=get('/scenarios')
-          rows=raw.get('scenarios') or raw.get('response') or raw
-          if isinstance(rows,dict): rows=rows.get('scenarios') or rows.get('data') or []
-          chosen=[]
-          for s in rows:
-            name=str(s.get('name') or '')
-            if re.match(r'^(R2\b|R2B\b|R3\b|P4\b)',name,re.I): chosen.append((s.get('id'),name))
-          print('SCENARIOS',json.dumps(chosen))
+          def unwrap(x): return x.get('scenario') or x.get('response') or x
           def bp(x):
             b=x.get('blueprint') or (x.get('response') or {}).get('blueprint') or x
             return json.loads(b) if isinstance(b,str) else b
@@ -51,23 +44,26 @@ jobs:
             for n in flow or []:
               yield n
               for r in n.get('routes') or []: yield from walk(r.get('flow') or [])
-          for sid,name in chosen:
+          for sid,label in TARGETS:
+            meta=unwrap(get(f'/scenarios/{sid}'))
             b=bp(get(f'/scenarios/{sid}/blueprint?draft=false'))
-            print('\n===',sid,name,'===')
+            print('\n===',label,sid,meta.get('name'),'active=',meta.get('isActive'),'hook=',meta.get('hookId'),'===')
             text=json.dumps(b,default=str)
             print('TEST_RUN_ID_PRESENT', 'Test_Run_ID' in text)
             for n in walk(b.get('flow') or []):
               mod=str(n.get('module') or ''); nm=str(((n.get('metadata') or {}).get('designer') or {}).get('name') or '')
-              mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; blob=json.dumps({'m':mapper,'p':params,'f':n.get('filter')},default=str)
-              # show only entrances, Airtable selectors, and HTTP handoffs mentioning P4/output/test identity
-              if ('gateway:CustomWebHook' in mod or 'airtable:ActionSearchRecords' in mod or 'airtable:ActionGetRecord' in mod or 'http:' in mod) and (n.get('id') in (1,2,3,4,5,900,901) or 'P4' in nm or 'P4' in blob or 'output_id' in blob or 'Test_Run_ID' in blob):
-                safe={}
-                for k,val in {**params,**mapper}.items():
-                  kl=str(k).lower()
-                  if any(x in kl for x in ('authorization','token','secret','apikey','api_key')): safe[k]='<redacted>'
-                  elif 'url' in kl: safe[k]='<url-redacted>'
-                  elif any(x in kl for x in ('body','formula','record','max','hook','id','method')): safe[k]=val
-                print(json.dumps({'id':n.get('id'),'module':mod,'name':nm,'config':safe,'filter':n.get('filter'),'has_test_run_id':'Test_Run_ID' in blob},default=str,separators=(',',':')))
+              mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; filt=n.get('filter')
+              blob=json.dumps({'m':mapper,'p':params,'f':filt},default=str)
+              relevant=('gateway:CustomWebHook' in mod or 'airtable:ActionSearchRecords' in mod or 'airtable:ActionGetRecord' in mod or 'http:' in mod)
+              relevant=relevant and (n.get('id') in (1,2,3,4,5,42,43,44,45,46,47,48,49,900,901) or 'P4' in nm or 'P4' in blob or 'output_id' in blob or 'Test_Run_ID' in blob)
+              if not relevant: continue
+              safe={}
+              for k,val in {**params,**mapper}.items():
+                kl=str(k).lower()
+                if any(x in kl for x in ('authorization','token','secret','apikey','api_key')): safe[k]='<redacted>'
+                elif 'url' in kl: safe[k]='<url-redacted>'
+                elif any(x in kl for x in ('body','formula','record','max','hook','id','method','json')): safe[k]=val
+              print(json.dumps({'id':n.get('id'),'module':mod,'name':nm,'config':safe,'filter':filt,'has_test_run_id':'Test_Run_ID' in blob},default=str,separators=(',',':')))
           PY
       - name: Destroy credentials
         if: always()
