@@ -1,1 +1,1 @@
-Read-only R2/R2B/R3/P4 test identity handoff audit. No Make mutation, activation, Airtable write, render, email, or publish. 2026-08-16.
+Read-only exact-ID R2/R2B/R3/P4 test identity handoff audit. No Make mutation, activation, Airtable write, render, email, or publish. Retry after compact inventory resolved IDs — 2026-08-16.
