@@ -1,0 +1,27 @@
+{
+  "repair_item": 9,
+  "checkpoint": "native-cover-attach-contracts",
+  "timestamp_utc": "2026-08-17T23:49:28Z",
+  "status": "CONTRACTS_PATCHED_NO_PUBLIC_PUBLISH",
+  "github_run_id": 32082039243,
+  "github_run_url": "https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32082039243",
+  "public_platform_operations": 0,
+  "scheduled_orchestrators_left_off": true,
+  "root_cause": {
+    "instagram_ap1_ig_5862882": "cover_url appended ?v= onto Drive query URLs and always sent thumb_offset=1, so Meta used a first-frame fallback",
+    "youtube_yt0_5823572": "YouTube_Thumbnail_Status was preserved blank, so YTS2 skipped thumbnails.set",
+    "facebook_fbs3_5816502": "finish/publish route documented no cover API and relied on repaired MP4 first frame",
+    "facebook_fbs4_5816520": "finalize ran after the Reel was ready but never posted /{video-id}/thumbnails"
+  },
+  "patched_contracts": {
+    "5862882": "cover_url={{1.Thumbnail_URL}}; thumb_offset only when Thumbnail_URL is blank",
+    "5823572": "YouTube_Thumbnail_Status=Pending when Thumbnail_URL exists and status is blank",
+    "5830616": "call /youtube/thumbnail unless status is already Uploaded or Thumbnail_URL is missing",
+    "5816520": "module 70 POST /{video-id}/thumbnails?is_preferred=true&url={{1.Thumbnail_URL}} after finalize"
+  },
+  "not_claimed": [
+    "No live Facebook, Instagram, or YouTube post was created",
+    "No platform grid screenshot or native cover acceptance from Meta/YouTube",
+    "YouTube OAuth durability remains Item 11"
+  ]
+}
