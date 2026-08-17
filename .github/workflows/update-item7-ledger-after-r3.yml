@@ -1,0 +1,36 @@
+name: Update Item7 Ledger After R3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/update-item7-ledger-after-r3.py'
+      - '.github/workflows/update-item7-ledger-after-r3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Update ledger
+        run: |
+          set -euo pipefail
+          python repair/scripts/update-item7-ledger-after-r3.py
+          git diff --check
+          grep -q 'R2 + R3 accepted; R4 is next' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -q '32073675521' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+      - name: Commit ledger
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'docs(item7): checkpoint R3 acceptance'
+          git pull --rebase origin main
+          git push origin HEAD:main
