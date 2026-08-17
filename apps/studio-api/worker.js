@@ -133,6 +133,7 @@ export default {
           repair_item7_subrequest_reserve_v4: true,
           repair_item7_fresh_invocation_cleanup_v5: true,
           repair_item7_standalone_selector_recovery_v6: true,
+          repair_item7_selector_recovery_v6_1: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
@@ -10430,8 +10431,11 @@ async function repairRecoverItem7ExactSelector(env, input) {
   if (!config) throw new HttpError(403, `Scenario ${scenarioId} is outside the Item 7 exact-stage allowlist`);
   const recordId = repairString(input.platform_output_record_id, "platform_output_record_id", 32);
   const testRunId = repairString(input.test_run_id, "test_run_id", 160);
-  const output = await repairVerifyOutputRecord(env, recordId, false, testRunId);
-  if (output?.fields?.Do_Not_Publish !== true) throw new HttpError(409, "Standalone selector recovery requires Do_Not_Publish=true on the exact test output");
+  // ITEM7_SELECTOR_RECOVERY_V6_1: repairVerifyOutputRecord already enforces the
+  // exact Test_Run_ID and Do_Not_Publish=true when allowPublicPublish=false.
+  // Its return value is a normalized projection (not the raw Airtable fields),
+  // so do not redundantly re-read output.fields.Do_Not_Publish here.
+  await repairVerifyOutputRecord(env, recordId, false, testRunId);
 
   const beforeState = await phase6ScenarioState(env, scenarioId);
   if (beforeState.isActive) throw new HttpError(409, `${config.stage} must be inactive before standalone selector recovery`);
