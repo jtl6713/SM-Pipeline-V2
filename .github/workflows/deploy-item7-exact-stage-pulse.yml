@@ -50,7 +50,7 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Capture live R2 Module 1 selector safely
+      - name: Capture raw redacted R2 inspection and ledger checkpoint
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -59,39 +59,29 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
-          inspect='{"action":"inspect_make_scenario","confirm":"INSPECT-MAKE-MODULES-V1","scenario_id":5569495,"module_ids":[1]}'
-          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" -o /tmp/preflight.json
-          jq -e '.ok==true and .inspected.scenario_active==false' /tmp/preflight.json >/dev/null
-          mkdir -p repair/evidence
-          jq '{captured_at:(now|todate),scenario_id:.inspected.scenario_id,scenario_name:.inspected.scenario_name,scenario_active:.inspected.scenario_active,module_1:.inspected.modules[0].module}' /tmp/preflight.json > repair/evidence/item7-r2-selector-preflight-20260817.json
-          cat repair/evidence/item7-r2-selector-preflight-20260817.json
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add repair/evidence/item7-r2-selector-preflight-20260817.json
-          git commit -m 'evidence(item7): capture R2 selector preflight'
-          git push origin HEAD:main
-
-      - name: Update Item 7 ledger with controlled R2 no-advance
-        shell: bash
-        run: |
-          set -euo pipefail
+          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary '{"action":"inspect_make_scenario","confirm":"INSPECT-MAKE-MODULES-V1","scenario_id":5569495,"module_ids":[1]}' -o /tmp/preflight.json
+          jq -e '.ok==true and .inspected.scenario_active==false and (.inspected.modules|length)==1' /tmp/preflight.json >/dev/null
           git pull --rebase origin main
+          mkdir -p repair/evidence
+          cp /tmp/preflight.json repair/evidence/item7-r2-selector-preflight-20260817.json
           python - <<'PY'
           from pathlib import Path
           import re
           p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
           s=p.read_text()
-          row='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — controller proven; R2 prerequisite diagnosis active** | Controller deploy run `32060507474` PASS. Fresh CI 75 / Output 168 exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. First bounded R2 run `32061240553` made no target progress and did not mark R2 complete; PASS ledger step was skipped and evidence was retained. | Resolve only the exact live R2 selector prerequisite mismatch, then retry R2 under a new one-output lease. R3 remains blocked. |'
+          row='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — controller proven; R2 prerequisite diagnosis active** | Controller deploy run `32060507474` PASS. Fresh CI 75 / Output 168 exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. First bounded R2 run `32061240553` made no target progress; R2 PASS was not recorded. Live Module 1 inspection is preserved in `repair/evidence/item7-r2-selector-preflight-20260817.json`. | Resolve only the exact R2 selector prerequisite mismatch, then retry R2 under a new one-output lease. R3 remains blocked. |'
           s,n=re.subn(r'^\| 7 \| Fresh edge-to-edge 9:16 normal-path regression \|.*$',row,s,count=1,flags=re.M)
           if n != 1: raise SystemExit('Item 7 row not found')
           marker='- R2 pending; no later Item 7 stage or publishing action has run.'
-          repl='- First R2 exact pulse run `32061240553` made no target progress; no R2 PASS was recorded. Controller cleanup/evidence steps ran, and R3 remained blocked.\n- Live R2 Module 1 selector prerequisite capture is stored at `repair/evidence/item7-r2-selector-preflight-20260817.json` for narrow fixture diagnosis.'
+          repl='- First R2 exact pulse run `32061240553` made no target progress; no R2 PASS was recorded. R3 remained blocked.\n- Live R2 Module 1 inspection is stored at `repair/evidence/item7-r2-selector-preflight-20260817.json` for narrow fixture diagnosis.'
           if marker in s: s=s.replace(marker,repl)
           elif 'First R2 exact pulse run `32061240553`' not in s: s += '\n'+repl+'\n'
           p.write_text(s)
           PY
-          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          git commit -m 'docs(item7): record R2 prerequisite diagnostic checkpoint'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/item7-r2-selector-preflight-20260817.json repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'evidence(item7): persist R2 selector diagnosis'
           git push origin HEAD:main
 
       - name: Remove temporary bridge
