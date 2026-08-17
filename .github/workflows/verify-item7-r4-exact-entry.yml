@@ -1,4 +1,4 @@
-name: Verify Item7 R4 Exact Entry
+name: Verify Item7 R4 Exact Entry Post L15
 
 on:
   push:
@@ -40,7 +40,7 @@ jobs:
           if not t or not b: raise SystemExit('Missing active Make API settings')
           open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
           PY
-      - name: Verify live R4 exact contract
+      - name: Verify live R4 exact contract after L15
         shell: bash
         run: |
           set -euo pipefail
@@ -49,7 +49,7 @@ jobs:
           curl -fsS "$BASE/scenarios/$SCENARIO_ID/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/bp-wrap.json
           curl -fsS "$BASE/scenarios/$SCENARIO_ID/interface" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/interface.json
           python - <<'PY'
-          import json,os
+          import json
           def scen(d):
               x=d.get('response',d) if isinstance(d,dict) else {}
               if isinstance(x,dict) and isinstance(x.get('scenario'),dict):x=x['scenario']
@@ -66,15 +66,14 @@ jobs:
                       z=find(r.get('flow'),mid)
                       if z:return z
               return None
-          s=scen(json.load(open('/tmp/scenario.json'))); b=bp(json.load(open('/tmp/bp-wrap.json'))); m=find(b.get('flow'),1); iw=json.load(open('/tmp/interface.json')); iw=iw.get('response',iw); iw=iw.get('interface',iw) if isinstance(iw,dict) else {}; inputs=iw.get('input',[]) if isinstance(iw,dict) else []
-          ev={'scenario_active':s.get('isActive',s.get('active')),'schedule':s.get('scheduling',s.get('schedule')),'hook_id':s.get('hookId',s.get('hook_id')),'module_count':len([1 for _ in []]),'module_1_type':m.get('module') if m else None,'module_1_id':(m.get('mapper') or {}).get('id') if m else None,'module_1_base':(m.get('mapper') or {}).get('base') if m else None,'module_1_table':(m.get('mapper') or {}).get('table') if m else None,'module_1_name':((m.get('metadata') or {}).get('designer') or {}).get('name') if m else None,'interface_inputs':[{'name':x.get('name'),'required':x.get('required')} for x in inputs if isinstance(x,dict)]}
           def count(flow):
               n=0
               for x in flow if isinstance(flow,list) else []:
                   n+=1
                   for r in x.get('routes',[]) if isinstance(x.get('routes'),list) else []:n+=count(r.get('flow'))
               return n
-          ev['module_count']=count(b.get('flow'))
+          s=scen(json.load(open('/tmp/scenario.json'))); b=bp(json.load(open('/tmp/bp-wrap.json'))); m=find(b.get('flow'),1); iw=json.load(open('/tmp/interface.json')); iw=iw.get('response',iw); iw=iw.get('interface',iw) if isinstance(iw,dict) else {}; inputs=iw.get('input',[]) if isinstance(iw,dict) else []
+          ev={'scenario_active':s.get('isActive',s.get('active')),'schedule':s.get('scheduling',s.get('schedule')),'hook_id':s.get('hookId',s.get('hook_id')),'module_count':count(b.get('flow')),'module_1_type':m.get('module') if m else None,'module_1_id':(m.get('mapper') or {}).get('id') if m else None,'module_1_base':(m.get('mapper') or {}).get('base') if m else None,'module_1_table':(m.get('mapper') or {}).get('table') if m else None,'module_1_name':((m.get('metadata') or {}).get('designer') or {}).get('name') if m else None,'interface_inputs':[{'name':x.get('name'),'required':x.get('required')} for x in inputs if isinstance(x,dict)]}
           print(json.dumps(ev,indent=2,sort_keys=True)); open('evidence/r4-exact-postflight.json','w').write(json.dumps(ev,indent=2,sort_keys=True))
           expected={'test_run_id','output_record_id','platform_output_id','intended_stage','attempt_number','idempotency_key'}
           assert ev['scenario_active'] is False
