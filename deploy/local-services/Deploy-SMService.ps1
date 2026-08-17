@@ -17,6 +17,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$FrameworkVersion = '1.0.1-ps51-collections'
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Join-Path $PipelineRoot 'Source Control\SM-Pipeline-V2'
@@ -206,7 +207,7 @@ function Get-SafeLiveFiles {
             Relative = $relative
         })
     }
-    return @($result)
+    return $result.ToArray()
 }
 
 function Get-DeployableSourceFiles {
@@ -228,7 +229,7 @@ function Get-DeployableSourceFiles {
             Relative = $relative
         })
     }
-    return @($result)
+    return $result.ToArray()
 }
 
 function Get-FileHashOrEmpty([string]$Path) {
@@ -487,7 +488,7 @@ function New-SourceBackup {
         Copy-Item -LiteralPath $deploymentManifest -Destination (Join-Path $BackupRoot 'prior-deployment.json') -Force
     }
 
-    return @($backed)
+    return $backed.ToArray()
 }
 
 function Restore-SourceBackup {
@@ -558,6 +559,7 @@ $SourceManifestPath = Join-Path $RuntimeRoot '.smv2-deployment.json'
 
 Write-Host ''
 Write-Host 'SM Pipeline V2 - Controlled Local Service Deployment' -ForegroundColor Cyan
+Write-Host "Framework:    $FrameworkVersion" -ForegroundColor DarkGray
 Write-Host "Service:      $($Config.DisplayName)"
 Write-Host "Runtime:      $RuntimeRoot"
 Write-Host "Git checkout: $RepoRoot"
