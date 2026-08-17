@@ -1,0 +1,35 @@
+name: Update Ledger Item5 Final Seams
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/update-ledger-item5-final-seams.txt']
+permissions: {contents: write}
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Update permanent ledger with C3 C3B PUB3 SMV1 delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md'); s=p.read_text()
+          old='''| 5 | Genuine hard test mode | **Partial — durable identity boundary live and controller-proven** |'''
+          if old not in s: raise SystemExit('Item 5 row anchor drifted')
+          s=s.replace(old,'''| 5 | Genuine hard test mode | **Partial — durable identity boundary live; final SMV1 behavioral proof pending** |''',1)
+          marker='''## 2026-08-16 Item 1 acceptance completion delta'''
+          if marker not in s: raise SystemExit('ledger insertion marker missing')
+          delta='''## 2026-08-17 Item 5 continuation delta — C3/C3B/PUB3/SMV1 hard isolation\n\n- **C3 `5587853`, Module 4 — Send One Review Email Per Content Item:** production email path now requires blank parent `Test_Run_ID`; test-tagged carousel review runs cannot send the real review email. Hook `2623515`, topology, active state, and normal production behavior were preserved. Corrected repair run `31990171575` succeeded. The preceding run `31990016152` stopped before any Make write because of a workflow Python boolean typo and is safe no-write evidence.\n- **C3B `5592384`, hook `2545695`:** exact Airtable slide pre-read identity guards were inserted before every approve/regenerate/delete/manual mutation, plus parent and linked-slide identity checks on the two global update paths. Missing/mismatched `test_run_id` fails before mutation. All pre-existing module IDs and downstream C4 handoffs were preserved. Repair run `31990328432` succeeded; topology audit run `31990224163` preceded it.\n- **PUB3 `5580354`, Module 5 — Mark Published in Airtable:** production confirmation now requires blank test context; a test-tagged output requires exact incoming/output `Test_Run_ID` equality **and** explicit `allow_test_publish=true`, while the existing `Do_Not_Publish=false` and publish-state guards remain intact. Repair run `31990171575` succeeded.\n- **SMV1 queue authority:** durable `Test_Run_ID` field `fldrUASIRo91tMnmZ` was added to Studio Media Transfer Queue `tblBZLXPd1p2NRWRK`. Studio now derives the owning Production Request identity inside both `item4UpsertMasterQueue` and `item4UpsertVariantQueue`, so Master Original and Platform Variant rows cannot silently lose test identity. Source patch run `31990631302` and guarded 0%-traffic rollout/promotion `31990685644` succeeded.\n- **SMV1 `5894885`, Module 1 — Get One Production Authority or Browser Preview Work Item:** ordinary scheduled selection is still max-one but now requires `{Test_Run_ID}=BLANK()` around the existing eligibility formula. Scenario remained OFF/no-hook and topology was preserved. Repair run `31990739903` succeeded.\n- **Studio controlled SMV1 test pulse:** a test-tagged Production Request now refuses to seize an already-active SMV1; every queue row for the request must match the same `Test_Run_ID`; Studio temporarily installs an exact selector for that Production Request + test identity, pulses one max-one cycle, deactivates SMV1, and restores the production-only selector in both inner and outer `finally` paths. The first patch attempt `31990922155` stopped before commit because an anchor was non-unique; scoped V2 source patch `31991001553` succeeded; guarded 0%-traffic rollout/promotion `31991048868` succeeded.\n- No broad E2E, renderer, platform publishing, review email, or historical-output replay was used for this tranche. **Item 5 remains Partial until a disposable behavioral matrix executes the new SMV1 exact test pulse and proves matching target progress, blank-production denial, other-test denial, selector restoration, scenario OFF recovery, and deterministic fixture cleanup.**\n\n'''
+          s=s.replace(marker,delta+marker,1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'final SMV1 behavioral proof pending' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -q '31991048868' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git config user.name 'SM Pipeline Repair Bot'; git config user.email 'actions@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'ledger: record C3 C3B PUB3 SMV1 Test Mode hardening'
+          git push
