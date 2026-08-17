@@ -56,7 +56,7 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Release exact stale L2 lease
+      - name: Release exact stale L2 lease after bridge readiness
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -66,7 +66,12 @@ jobs:
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           release=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$STALE_LEASE_ID" --argjson sid "$SCENARIO_ID" '{action:"release",test_run_id:$tr,lease_id:$lease,scenario_id:$sid}')
-          code=$(curl -sS -o /tmp/release.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$release")
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -sS --max-time 60 -o /tmp/release.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$release" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/release.json >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
           cat /tmp/release.json | jq .
           test "$code" = 200
           jq -e '.ok==true and .scenario.isActive==false' /tmp/release.json >/dev/null
@@ -81,14 +86,14 @@ jobs:
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
-          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" -o /tmp/preflight.json
+          curl -fsS --retry 5 --retry-delay 2 -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" -o /tmp/preflight.json
           jq -e '.ok==true and .inspected.scenario_active==false' /tmp/preflight.json >/dev/null
           EXPIRES=$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')
           acquire=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg exp "$EXPIRES" --arg out "$OUTPUT_RECORD_ID" --arg ci "$CONTENT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"acquire",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,max_runs:1,max_operations:30,expires_at:$exp,allowed_platform_output_record_ids:[$out],allowed_content_item_record_ids:[$ci],deny_fixture_record_ids:[],allow_public_publish:false}')
-          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" -o /tmp/acquire.json
+          curl -fsS --retry 5 --retry-delay 2 -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" -o /tmp/acquire.json
           jq -e --arg lease "$LEASE_ID" '.ok==true and .lease.lease_id==$lease' /tmp/acquire.json >/dev/null
           pulse=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"pulse_item7_exact_stage",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out,max_cycles:1}')
-          code=$(curl -sS -o /tmp/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse")
+          code=$(curl -sS --max-time 150 -o /tmp/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse")
           cat /tmp/pulse.json | jq .
           test "$code" = 200
           jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .stage=="R2" and .platform_output_record_id==$out and .test_run_id==$tr and .checkpoint.asset_selection_status=="Selected" and .checkpoint.selected_assets_present==true and (.checkpoint.selected_clip_count>0) and .scenario_stopped==true and .selector_restored==true and .schedule_preserved==true and .do_not_publish_preserved==true' /tmp/pulse.json >/dev/null
