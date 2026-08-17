@@ -128,6 +128,7 @@ export default {
           repair_r4_scheduled_selector_pulse_v1: true,
           repair_p1_test_selector_pulse_v1: true,
           repair_item7_exact_stage_pulse_v1: true,
+          repair_item7_explicit_run_stop_recovery_v2: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
@@ -8555,17 +8556,39 @@ async function phase6AutoRunRenderPipeline(env, outputRecordId) {
 async function phase6StopScenarioVerified(env, scenarioId, attempts = 3) {
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    let before = null;
     try {
-      const before = await phase6ScenarioState(env, scenarioId);
+      before = await phase6ScenarioState(env, scenarioId);
       if (!before.isActive) return { inactive: true, attempts: attempt, already_inactive: true };
-      await phase6SetScenarioActive(env, scenarioId, false);
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const after = await phase6ScenarioState(env, scenarioId);
-      if (!after.isActive) return { inactive: true, attempts: attempt + 1, already_inactive: false };
     } catch (error) {
       lastError = error;
     }
-    await new Promise((resolve) => setTimeout(resolve, 750));
+
+    if (before?.isActive) {
+      try {
+        await phase6SetScenarioActive(env, scenarioId, false);
+      } catch (error) {
+        // Make can report a stop-side race (for example already stopped) while the
+        // durable state is already inactive. Always verify state after the request.
+        lastError = error;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      const after = await phase6ScenarioState(env, scenarioId);
+      if (!after.isActive) {
+        return {
+          inactive: true,
+          attempts: attempt + 1,
+          already_inactive: false,
+          stop_error: lastError instanceof Error ? lastError.message : null,
+        };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 750));
   }
   return { inactive: false, attempts, error: lastError instanceof Error ? lastError.message : null };
 }
@@ -9998,8 +10021,11 @@ async function repairPulseItem7ExactStage(env, lease, input, action) {
     for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
       cyclesRun = cycle;
       await phase6SetScenarioActive(env, scenarioId, true);
+      // ITEM7_EXACT_STAGE_EXPLICIT_RUN_V2: activation alone does not prove a scheduled scenario executed.
+      // Dispatch one explicit Make run for this already exact-addressed, maxRecords=1 leased cycle.
+      await phase6RunScenario(env, scenarioId, null);
       observed = await repairWaitItem7Checkpoint(env, scenarioId, recordId, lease.test_run_id, config.wait_ms_per_cycle);
-      stop = await phase6StopScenarioVerified(env, scenarioId, 4);
+      stop = await phase6StopScenarioVerified(env, scenarioId, 6);
       if (stop?.inactive !== true) throw new HttpError(502, `${config.stage} did not verify inactive after exact cycle ${cycle}`);
       if (observed?.checkpoint?.failed) throw new HttpError(502, `${config.stage} reported a failed checkpoint: ${JSON.stringify(observed.checkpoint.summary)}`);
       if (observed?.checkpoint?.complete) break;
