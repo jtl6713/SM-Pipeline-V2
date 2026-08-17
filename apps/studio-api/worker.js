@@ -9859,7 +9859,7 @@ async function repairPulseP1TestSelector(env, lease, input, action) {
 const ITEM7_EXACT_STAGE_CONFIG = Object.freeze({
   5569495: Object.freeze({ stage: "R2", max_cycles: 1, wait_ms_per_cycle: 90000 }),
   5557966: Object.freeze({ stage: "R3", max_cycles: 1, wait_ms_per_cycle: 90000 }),
-  5565333: Object.freeze({ stage: "R5", max_cycles: 12, wait_ms_per_cycle: 18000 }),
+  5565333: Object.freeze({ stage: "R5", max_cycles: 5, wait_ms_per_cycle: 18000 }),
   5576363: Object.freeze({ stage: "RR1", max_cycles: 1, wait_ms_per_cycle: 90000 }),
 });
 
@@ -9913,7 +9913,7 @@ async function repairWaitItem7Checkpoint(env, scenarioId, recordId, testRunId, t
     const checkpoint = repairItem7StageCheckpoint(scenarioId, record.fields || {});
     last = { record, checkpoint };
     if (checkpoint.complete || checkpoint.failed) return last;
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 6000));
   }
   return last;
 }
@@ -9937,13 +9937,40 @@ async function repairPulseItem7ExactStage(env, lease, input, action) {
   if (beforeState?.scenario?.hookId != null) throw new HttpError(409, `${config.stage} unexpectedly has a webhook identity; refusing scheduled-stage seizure`);
   const originalScheduling = JSON.stringify(beforeState?.scenario?.scheduling || {});
 
-  const read = await repairReadMakeBlueprint(env, scenarioId);
-  const originalBlueprint = read.blueprint;
+  let read = await repairReadMakeBlueprint(env, scenarioId);
+  let originalBlueprint = read.blueprint;
+  let root = repairScenarioModuleById(originalBlueprint?.flow || [], 1);
+  if (!root || root.module !== "airtable:ActionSearchRecords") throw new HttpError(409, `${config.stage} Module 1 is not the expected Airtable Search Records selector`);
+  let originalFormula = String(root?.mapper?.formula || "");
+  let strandedSelectorRecovered = false;
+
+  // A prior invocation can hit a platform subrequest ceiling after installing the exact selector but before rollback.
+  // Recover only the exact selector for this same output + Test_Run_ID, while the scenario is already verified OFF.
+  if (!originalFormula.includes('{Test_Run_ID}=BLANK()')) {
+    const exactRunToken = `{Test_Run_ID}=${JSON.stringify(lease.test_run_id)}`;
+    const exactWrapper = `AND(RECORD_ID()=${JSON.stringify(recordId)},`;
+    if (!originalFormula.startsWith(exactWrapper) || !originalFormula.endsWith(")") || !originalFormula.includes(exactRunToken)) {
+      throw new HttpError(409, `${config.stage} production selector no longer contains the verified Test_Run_ID exclusion`);
+    }
+    let recoveredFormula = originalFormula.slice(exactWrapper.length, -1).replace(exactRunToken, '{Test_Run_ID}=BLANK()');
+    if (scenarioId === 5569495) recoveredFormula = recoveredFormula.replace('{Do_Not_Publish}=1', 'NOT({Do_Not_Publish})');
+    if (!recoveredFormula.includes('{Test_Run_ID}=BLANK()')) throw new HttpError(409, `${config.stage} stranded selector recovery could not reconstruct Test_Run_ID exclusion`);
+    if (scenarioId === 5569495 && !recoveredFormula.includes('NOT({Do_Not_Publish})')) throw new HttpError(409, "R2 stranded selector recovery could not reconstruct Do_Not_Publish exclusion");
+
+    const recoveredBlueprint = JSON.parse(JSON.stringify(originalBlueprint));
+    const recoveredRoot = repairScenarioModuleById(recoveredBlueprint?.flow || [], 1);
+    recoveredRoot.mapper.formula = recoveredFormula;
+    await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, { method: "PATCH", body: JSON.stringify({ blueprint: JSON.stringify(recoveredBlueprint) }) });
+    read = await repairReadMakeBlueprint(env, scenarioId);
+    originalBlueprint = read.blueprint;
+    root = repairScenarioModuleById(originalBlueprint?.flow || [], 1);
+    originalFormula = String(root?.mapper?.formula || "");
+    if (originalFormula !== recoveredFormula) throw new HttpError(502, `${config.stage} stranded selector recovery did not verify live`);
+    strandedSelectorRecovered = true;
+  }
+
   const originalSerialized = JSON.stringify(originalBlueprint);
   const originalIds = repairScenarioModuleIds(originalBlueprint?.flow || []).sort((a, b) => a - b);
-  const root = repairScenarioModuleById(originalBlueprint?.flow || [], 1);
-  if (!root || root.module !== "airtable:ActionSearchRecords") throw new HttpError(409, `${config.stage} Module 1 is not the expected Airtable Search Records selector`);
-  const originalFormula = String(root?.mapper?.formula || "");
   if (!originalFormula.includes('{Test_Run_ID}=BLANK()')) throw new HttpError(409, `${config.stage} production selector no longer contains the verified Test_Run_ID exclusion`);
   if (scenarioId === 5569495 && !originalFormula.includes('NOT({Do_Not_Publish})')) throw new HttpError(409, "R2 production selector no longer contains the verified Do_Not_Publish exclusion");
 
@@ -9999,7 +10026,7 @@ async function repairPulseItem7ExactStage(env, lease, input, action) {
     }
   }
   if (failure || !restored) throw new HttpError(502, failure || `${config.stage} Item 7 exact-stage restoration failed`);
-  return { stage: config.stage, scenario_id: scenarioId, platform_output_record_id: recordId, test_run_id: lease.test_run_id, cycles_run: cyclesRun, checkpoint: observed?.checkpoint?.summary || null, scenario_started: true, scenario_stopped: stop?.inactive === true, selector_restored: true, schedule_preserved: true, do_not_publish_preserved: true };
+  return { stage: config.stage, scenario_id: scenarioId, platform_output_record_id: recordId, test_run_id: lease.test_run_id, cycles_run: cyclesRun, checkpoint: observed?.checkpoint?.summary || null, scenario_started: true, scenario_stopped: stop?.inactive === true, selector_restored: true, schedule_preserved: true, do_not_publish_preserved: true, stranded_selector_recovered: strandedSelectorRecovered };
 }
 // ITEM7_EXACT_STAGE_TEST_MODE_V1_END
 
