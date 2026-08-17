@@ -1,14 +1,8 @@
 {
-  "action": "acquire",
+  "action": "state",
   "test_run_id": "ITEM6_CLEANUP_20260817_1217A",
-  "lease_id": "ITEM6_EXACT_LEASE_20260817_1319D",
+  "lease_id": "ITEM6_DIAG_NONEXISTENT_LEASE",
   "scenario_id": 5813561,
-  "expires_at": "RUNTIME_PLUS_10_MINUTES",
-  "max_runs": 1,
-  "max_operations": 20,
-  "allowed_platform_output_record_ids": ["recdCzUqxwQMYcK6g"],
-  "deny_fixture_record_ids": [],
-  "allow_public_publish": false,
-  "expected_http_status": 200,
-  "proof_nonce": "item6-exact-followup-acquire-004"
+  "expected_http_status": 409,
+  "proof_nonce": "item6-exact-state-miss-001"
 }
