@@ -26,7 +26,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Replace scenario-list lookup with exact lease address
+      - name: Await repair-control route handlers inside outer error boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -34,45 +34,32 @@ jobs:
           from pathlib import Path
           p = Path('apps/studio-api/worker.js')
           s = p.read_text()
+          old_get = '        if (request.method === "GET") return adminRepairControlStatus(request, env);'
+          new_get = '        if (request.method === "GET") return await adminRepairControlStatus(request, env);'
+          old_post = '        return adminRepairControl(request, env, authorization);'
+          new_post = '        return await adminRepairControl(request, env, authorization);'
+          if s.count(old_get) != 1:
+              raise SystemExit(f'Expected one non-awaited repair GET route, found {s.count(old_get)}')
+          if s.count(old_post) != 1:
+              raise SystemExit(f'Expected one non-awaited repair POST route, found {s.count(old_post)}')
+          s = s.replace(old_get, new_get, 1).replace(old_post, new_post, 1)
+          p.write_text(s)
+          if s.count(new_get) != 1 or s.count(new_post) != 1:
+              raise SystemExit('Awaited repair route boundary not installed exactly once')
           a = s.index('async function repairFindLease(env, input) {')
           b = s.index('\nasync function repairReserveBudget', a)
-          old = s[a:b]
-          if 'repairLeaseRecords(env, scenarioId)' not in old:
-              raise SystemExit('Expected scenario-list repairFindLease implementation not found')
-          lines = [
-              'async function repairFindLease(env, input) {',
-              '  const scenarioId = Number(input.scenario_id);',
-              '  const leaseId = repairString(input.lease_id, "lease_id");',
-              '  const testRunId = repairString(input.test_run_id, "test_run_id");',
-              '  if (!Number.isInteger(scenarioId) || !REPAIR_CONTROL_SCENARIOS.has(scenarioId)) throw new HttpError(403, `Scenario ${scenarioId} is not repair-control allowlisted`);',
-              '  const exactMarker = `${REPAIR_LEASE_NOTE_PREFIX} ${leaseId};`;',
-              '  const formula = `AND({Status}="Processing",{Scenario_ID}=${scenarioId},{Correlation_ID}=${JSON.stringify(testRunId)},FIND(${JSON.stringify(exactMarker)}, {Notes}&"")>0)`;',
-              '  const params = new URLSearchParams();',
-              '  params.set("pageSize", "2");',
-              '  params.set("maxRecords", "2");',
-              '  params.set("filterByFormula", formula);',
-              '  params.set("sort[0][field]", "Requested_At");',
-              '  params.set("sort[0][direction]", "desc");',
-              '  const body = await airtableFetch(env, REPAIR_LEASE_TABLE_ID, `?${params.toString()}`);',
-              '  const candidates = (Array.isArray(body?.records) ? body.records : []).map(repairLeaseState);',
-              '  const lease = candidates.find((l) => l.lease_id === leaseId && l.test_run_id === testRunId && l.scenario_id === scenarioId);',
-              '  if (!lease) throw new HttpError(409, "Active repair lease not found or does not match test_run_id");',
-              '  if (repairIsoMs(lease.expires_at) <= Date.now()) throw new HttpError(409, "Repair lease has expired");',
-              '  return lease;',
-              '}',
-          ]
-          new = '\n'.join(lines) + '\n'
-          s = s[:a] + new + s[b:]
-          p.write_text(s)
-          check = s[a:s.index('\nasync function repairReserveBudget', a)]
-          if 'repairLeaseRecords(env, scenarioId)' in check:
-              raise SystemExit('Scenario-list lookup still present')
-          if 'const exactMarker' not in check or 'Correlation_ID' not in check:
-              raise SystemExit('Exact lookup contract missing')
-          print('exact_scenario_lease_test_run_query=PASS')
+          exact = s[a:b]
+          if 'const exactMarker' not in exact or 'Correlation_ID' not in exact:
+              raise SystemExit('Exact lease address implementation missing')
+          if 'repairLeaseRecords(env, scenarioId)' in exact:
+              raise SystemExit('Scenario-list follow-up lookup unexpectedly restored')
+          print('repair_get_async_rejection_caught=PASS')
+          print('repair_post_async_rejection_caught=PASS')
+          print('exact_lease_lookup_preserved=PASS')
           PY
           node --check apps/studio-api/worker.js
           git diff --check
+          git diff -- apps/studio-api/worker.js
 
       - name: Commit authoritative source
         id: commit
@@ -82,7 +69,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add apps/studio-api/worker.js
-          git commit -m 'fix(item6): exact-address repair lease followups'
+          git commit -m 'fix(item6): catch async repair-control failures'
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git push origin HEAD:main
 
