@@ -68,7 +68,9 @@ def http(url, method="GET", headers=None, body=None, timeout=60):
         data = json.dumps(body).encode()
     elif isinstance(body, str):
         data = body.encode()
-    req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+    request_headers = {"User-Agent": "SM-Pipeline-V2-Item9/1.0"}
+    request_headers.update(headers or {})
+    req = urllib.request.Request(url, data=data, method=method, headers=request_headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             raw = response.read()
@@ -177,7 +179,9 @@ def assert_orchestrators_off(make_base, token):
             f"{make_base}/scenarios/{scenario_id}",
             headers={"Authorization": f"Token {token}", "Content-Type": "application/json"},
         )
-        meta = unwrap(payload, "scenario") if status == 200 else payload
+        if status != 200:
+            raise SystemExit(f"Make scenario {name} ({scenario_id}) read failed {status}")
+        meta = unwrap(payload, "scenario")
         active = bool(meta.get("isActive"))
         states[scenario_id] = {
             "name": meta.get("name") or name,
@@ -192,12 +196,24 @@ def assert_orchestrators_off(make_base, token):
 
 def verify_instagram_contract(make_base, token):
     status, _, payload = json_http(
-        f"{make_base}/scenarios/{IG_SCENARIO}/blueprint?draft=false",
+        f"{make_base}/scenarios/{IG_SCENARIO}",
         headers={"Authorization": f"Token {token}", "Content-Type": "application/json"},
     )
     if status != 200:
-        raise SystemExit(f"AP1-IG blueprint read failed {status}")
-    module = find_module(unwrap(payload, "blueprint").get("flow") or [], 3)
+        raise SystemExit(f"AP1-IG scenario read failed {status}")
+    meta = unwrap(payload, "scenario")
+    blueprint = meta.get("blueprint")
+    if isinstance(blueprint, str):
+        blueprint = json.loads(blueprint)
+    if not (blueprint or {}).get("flow"):
+        status, _, raw_blueprint = json_http(
+            f"{make_base}/scenarios/{IG_SCENARIO}/blueprint?draft=false",
+            headers={"Authorization": f"Token {token}", "Content-Type": "application/json"},
+        )
+        if status != 200:
+            raise SystemExit(f"AP1-IG blueprint read failed {status}")
+        blueprint = unwrap(raw_blueprint, "blueprint")
+    module = find_module((blueprint or {}).get("flow") or [], 3)
     mapper = (module or {}).get("mapper") or {}
     if mapper.get("cover_url") != COVER_URL or mapper.get("thumb_offset") != THUMB_OFFSET:
         raise SystemExit("AP1-IG live cover contract drifted")
