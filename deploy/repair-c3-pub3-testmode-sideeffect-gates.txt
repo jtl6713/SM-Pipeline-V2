@@ -1,0 +1,1 @@
+Trigger rollback-safe C3/PUB3 Test Mode side-effect hardening.
