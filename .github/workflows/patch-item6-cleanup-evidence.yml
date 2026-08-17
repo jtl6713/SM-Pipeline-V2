@@ -1,0 +1,28 @@
+name: Patch Item6 Cleanup Evidence
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/patch-item6-cleanup-evidence.txt']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+        with: {fetch-depth: 0}
+      - run: |
+          set -euo pipefail
+          python repair/scripts/patch-item6-cleanup-evidence.py
+          cp apps/studio-api/worker.js /tmp/worker.mjs
+          node --check /tmp/worker.mjs
+          git diff --check
+      - run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Item 6: require exact cleanup verification evidence'
+          git push origin HEAD:main
