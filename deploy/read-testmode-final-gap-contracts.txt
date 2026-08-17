@@ -1,0 +1,1 @@
+Read-only exact contract audit for C3 5587853, C3B 5592384, PUB3 5580354, and SMV1 5894885. No Make mutation, activation, Airtable write, email, render, draft, upload, or publishing. 2026-08-16.
