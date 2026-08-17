@@ -1,0 +1,134 @@
+name: Repair C3B Premutation Test Identity
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-c3b-premutation-test-identity.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Preflight and add exact identity guards before C3B mutations
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json,urllib.request,copy,time,sys
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          BASE=str(v['MAKE_API_BASE_URL']).strip().rstrip('/'); TOKEN=str(v['MAKE_API_TOKEN']).strip()
+          SID=5592384; HOOK=2545695; SLIDE_TEST='fldvko2ebhLp6AA8f'; CONTENT_TEST='fldA4dFKiiGpWNk7b'
+          NEWIDS={3:8003,5:8005,7:8007,10:8010,19:8019,23:8023,25:8025,16:8016,31:8031}
+          def api(path,method='GET',body=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            q=urllib.request.Request(BASE+path,data=data,method=method,headers={'Authorization':'Token '+TOKEN,'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-Repair/1.0'})
+            with urllib.request.urlopen(q,timeout=30) as h: return json.loads(h.read().decode() or '{}')
+          def sc(x): return x.get('scenario') or x.get('response') or x
+          def bp(x):
+            b=x.get('blueprint') or (x.get('response') or {}).get('blueprint') or x
+            return json.loads(b) if isinstance(b,str) else b
+          def allnodes(flow,out=None):
+            if out is None: out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []: allnodes(r.get('flow') or [],out)
+            return out
+          def add_guard_to_filter(node,guard_id):
+            f=copy.deepcopy(node.get('filter') or {'name':'','conditions':[[]]}); groups=f.get('conditions') or [[]]
+            node['filter']={'name':(f.get('name') or '')+' + exact Test_Run_ID guard','conditions':[copy.deepcopy(g)+[{'a':'{{'+str(guard_id)+'.id}}','o':'exist'}] for g in groups]}
+          def identity_filter(mid,test_expr):
+            return {'name':'Exact Test_Run_ID compatibility before mutation','conditions':[
+              [{'a':test_expr,'b':'','o':'text:equal'},{'a':'{{'+str(mid)+'.'+SLIDE_TEST+'}}','b':'','o':'text:equal'}],
+              [{'a':test_expr,'b':'{{'+str(mid)+'.'+SLIDE_TEST+'}}','o':'text:equal'}]
+            ]}
+          def safe(reason,detail=''):
+            e={'passed':False,'safe_no_write':True,'reason':reason,'detail':detail}; open('/tmp/evidence.json','w').write(json.dumps(e,indent=2)); print(json.dumps(e)); sys.exit(0)
+          try:
+            meta=copy.deepcopy(sc(api(f'/scenarios/{SID}'))); before=bp(api(f'/scenarios/{SID}/blueprint?draft=false')); patched=copy.deepcopy(before)
+          except Exception as e: safe('preflight_read_failed',str(e))
+          try:
+            n=allnodes(patched.get('flow') or [])
+            if meta.get('hookId')!=HOOK or not meta.get('isActive'): raise ValueError('C3B hook/active drift')
+            if n.get(1,{}).get('module')!='gateway:CustomWebHook' or n.get(99,{}).get('module')!='builtin:BasicRouter': raise ValueError('C3B entrance/router drift')
+            for target in NEWIDS:
+              if target not in n: raise ValueError(f'missing target {target}')
+            for x in NEWIDS.values():
+              if x in n: raise ValueError(f'new guard id {x} already exists')
+            if n.get(2,{}).get('module')!='airtable:ActionGetRecord': raise ValueError('slide GetRecord template drift')
+            if n.get(14,{}).get('module')!='airtable:ActionGetRecord' or n.get(29,{}).get('module')!='airtable:ActionGetRecord': raise ValueError('global parent read drift')
+          except Exception as e: safe('preflight_shape_mismatch',str(e))
+          # Route-aware insertion: add a copied Airtable slide GetRecord immediately before each mutation.
+          router=next(x for x in patched['flow'] if int(x.get('id'))==99)
+          template=copy.deepcopy(allnodes(before.get('flow') or [])[2])
+          for route in router.get('routes') or []:
+            flow=route.get('flow') or []
+            ids=[int(x.get('id')) for x in flow]
+            for target,newid in NEWIDS.items():
+              if target not in ids: continue
+              idx=ids.index(target)
+              g=copy.deepcopy(template); g['id']=newid
+              g.setdefault('metadata',{}).setdefault('designer',{})['name']=f'{newid} - Validate Exact Slide Test Identity Before Module {target}'
+              if target in (16,31):
+                feeder=15 if target==16 else 30; parent=14 if target==16 else 29
+                g.setdefault('mapper',{})['id']='{{'+str(feeder)+'.bundle}}'
+                g['filter']=identity_filter(newid,'{{'+str(parent)+'.'+CONTENT_TEST+'}}')
+                # Require exact test identity at the parent read too, before iterating linked slides.
+                pn=next(x for x in flow if int(x.get('id'))==parent)
+                original=copy.deepcopy(pn.get('filter') or {'name':'','conditions':[[]]})
+                groups=original.get('conditions') or [[]]
+                prod=[{'a':'{{1.test_run_id}}','b':'','o':'text:equal'},{'a':'{{'+str(parent)+'.'+CONTENT_TEST+'}}','b':'','o':'text:equal'}]
+                test=[{'a':'{{1.test_run_id}}','b':'{{'+str(parent)+'.'+CONTENT_TEST+'}}','o':'text:equal'}]
+                pn['filter']={'name':(original.get('name') or '')+' + exact parent Test_Run_ID','conditions':[copy.deepcopy(groups[0])+prod,copy.deepcopy(groups[0])+test]}
+              else:
+                g.setdefault('mapper',{})['id']='{{1.slide_id}}'
+                g['filter']=identity_filter(newid,'{{1.test_run_id}}')
+              flow.insert(idx,g)
+              add_guard_to_filter(next(x for x in flow if int(x.get('id'))==target),newid)
+              break
+          written=False
+          try:
+            api(f'/scenarios/{SID}?confirmed=true','PATCH',{'blueprint':json.dumps(patched,separators=(',',':'))}); written=True; time.sleep(.8)
+            sm=sc(api(f'/scenarios/{SID}')); livebp=bp(api(f'/scenarios/{SID}/blueprint?draft=false')); live=allnodes(livebp.get('flow') or []); old=allnodes(before.get('flow') or [])
+            if (sm.get('hookId'),sm.get('isActive'),sm.get('scheduling'))!=(meta.get('hookId'),meta.get('isActive'),meta.get('scheduling')): raise RuntimeError('C3B metadata drift')
+            if not set(old).issubset(set(live)): raise RuntimeError('existing C3B module ID lost')
+            if set(live)-set(old)!=set(NEWIDS.values()): raise RuntimeError('unexpected new C3B module IDs')
+            for target,newid in NEWIDS.items():
+              if live[newid].get('module')!='airtable:ActionGetRecord': raise RuntimeError(f'guard {newid} wrong module')
+              fs=json.dumps(live[newid].get('filter') or {}); tf=json.dumps(live[target].get('filter') or {})
+              if SLIDE_TEST not in fs or str(newid) not in tf: raise RuntimeError(f'identity contract missing for {target}')
+            for parent in (14,29):
+              if CONTENT_TEST not in json.dumps(live[parent].get('filter') or {}): raise RuntimeError(f'global parent guard missing {parent}')
+            ev={'passed':True,'contracts':{'slide_specific_mutations_pre_read_identity':True,'global_parent_identity':True,'global_linked_slide_identity':True,'existing_module_ids_preserved':True,'hook_preserved':True},'scenario_id':SID,'hookId':sm.get('hookId'),'added_guard_modules':NEWIDS}
+            open('/tmp/evidence.json','w').write(json.dumps(ev,indent=2)); print(json.dumps(ev))
+          except Exception:
+            if written:
+              try: api(f'/scenarios/{SID}?confirmed=true','PATCH',{'blueprint':json.dumps(before,separators=(',',':'))})
+              except Exception as re: print('ROLLBACK_ERROR',str(re))
+            raise
+          PY
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c3b-premutation-test-identity-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings /tmp/evidence.json
