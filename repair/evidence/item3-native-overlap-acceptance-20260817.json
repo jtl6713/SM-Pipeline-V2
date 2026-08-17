@@ -1,0 +1,86 @@
+{
+  "item": 3,
+  "repair": "Renderer native overlap transitions",
+  "status": "PASS",
+  "accepted_at_local": "2026-08-17T07:16:15.5269910-05:00",
+  "evidence_zip": {
+    "name": "Item3_Native_Overlap_Evidence_20260817-071452.zip",
+    "sha256": "c485fed3eae8d9e13d19b8f5e7e45df7a594378aa12a36ad66426d7999124ad8"
+  },
+  "renderer": {
+    "root": "D:\\Content Creation\\ChicagoShining Pipeline\\Services\\Remotion_Renderer",
+    "health_before_version": "2026-08-14-scene-caption-overlays",
+    "health_after_version": "2026-08-17-native-overlap-transitions",
+    "health_after_ok": true,
+    "port": 3333,
+    "remotion_version": "4.0.484",
+    "transitions_version": "4.0.484"
+  },
+  "validation": {
+    "eslint_item3_errors_before": 2,
+    "eslint_item3_errors_after": 2,
+    "new_eslint_errors": 0,
+    "typescript_item3_errors_before": 0,
+    "typescript_item3_errors_after": 0,
+    "baseline_full_remotion_bundle": "PASS",
+    "patched_full_remotion_bundle": "PASS"
+  },
+  "render": {
+    "job_id": "item3-native-overlap-20260817-071452",
+    "composition": "ChicagoShiningPhotoSequence",
+    "status": "completed",
+    "exit_code": 0,
+    "width": 360,
+    "height": 640,
+    "fps": 30,
+    "video_frames": 135,
+    "video_stream_duration_seconds": 4.5,
+    "container_duration_seconds": 4.544,
+    "audio_stream_present": true,
+    "audio_codec": "aac",
+    "audio_sample_rate_hz": 48000,
+    "independent_audio_decode_non_silent": true,
+    "independent_audio_rms_s16": 596.809629563267,
+    "independent_audio_peak_s16": 854
+  },
+  "transition_proof": {
+    "fade_sample_time_seconds": 1.7,
+    "fade_midpoint_rgba": [63, 127, 0, 255],
+    "fade_overlap_pass": true,
+    "slide_sample_time_seconds": 3.2,
+    "slide_left_rgba": [0, 254, 1, 255],
+    "slide_right_rgba": [0, 0, 254, 255],
+    "slide_overlap_pass": true,
+    "independent_temporal_check": {
+      "fade": "1.5s red -> 1.6s mixed -> 1.7s mixed -> 1.8s mixed -> 1.9s green",
+      "slide": "3.0s green -> 3.1s green/blue overlap -> 3.2s green-left/blue-right -> 3.3s overlap -> 3.4s blue"
+    }
+  },
+  "source_after_sha256": {
+    "src/ChicagoShiningPhotoSequence.tsx": "312e761eccf92731a624427799938205b05e7ad47d53c046b10fa4f40b8e1935",
+    "src/Root.tsx": "e796ea5dc4ba83109606817a443a88bb8026dc83bcabaa67ce5c34b9cba6761a",
+    "render-server.js": "d4f51b0c074926ebd2c7b8f01c31a0ed272645e69096b337374764c3e82e130c",
+    "package.json": "d93542ee351f65ea8e5019c0f2dc1ca824696e91d04f2167e24b171dde141dcb",
+    "package-lock.json": "6e3a95203795fa4ab9459c3d3764864b79d87c2eb496c174c5b9e557c2afd46d"
+  },
+  "source_reconciliation": {
+    "included_file_hashes_verified": [
+      "src/ChicagoShiningPhotoSequence.tsx",
+      "render-server.js",
+      "package.json",
+      "package-lock.json"
+    ],
+    "root_tsx_hash_from_installer_report_only": true,
+    "native_transition_series_present": true,
+    "duration_neutral_overlap_compensation_present": true,
+    "native_fade_present": true,
+    "native_slide_left_right_present": true
+  },
+  "external_side_effects": {
+    "airtable_writes": 0,
+    "make_runs": 0,
+    "r2_writes": 0,
+    "emails": 0,
+    "platform_drafts_or_posts": 0
+  }
+}
