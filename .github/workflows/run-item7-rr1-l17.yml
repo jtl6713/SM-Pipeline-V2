@@ -25,7 +25,7 @@ jobs:
       CONTENT_RECORD_ID: recA0WClSp6SR6vvl
       OUTPUT_RECORD_ID: recByMge4QPlCOsD2
       SCENARIO_ID: '5576363'
-      LEASE_ID: ITEM7-RR1-RUN32060507474-L17
+      LEASE_ID: ITEM7-RR1-RUN32060507474-L18
     steps:
       - uses: actions/checkout@v4
       - name: Create temporary authenticated service bridge
@@ -73,7 +73,7 @@ jobs:
           cat evidence/preflight.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
           test "$code" = 200
           jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.module=="airtable:ActionSearchRecords" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()"))' evidence/preflight.json >/dev/null
-      - name: Acquire L17 and pulse RR1 once
+      - name: Acquire L18 and pulse RR1 once
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -128,7 +128,7 @@ jobs:
           echo "postflight_http=$code"
           cat evidence/postflight.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
           test "$code" = 200
-          jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()"))' evidence/postflight.json >/dev/null
+          jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="10" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()"))' evidence/postflight.json >/dev/null
       - name: Save L17 evidence
         if: always()
         uses: actions/upload-artifact@v4
