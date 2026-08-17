@@ -2,4 +2,4 @@ Dynamic safe update trigger for chicagoshining-studio-api.
 
 Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run Make scenarios, mutate production Airtable records, render, email, draft, upload, or publish.
 
-Purpose of this run: promote the lease-guarded P1 Test Mode exact scheduled-root selector pulse and optional Content Item repair-lease allowlist. Preserve all existing output lease controls, standalone RUN prohibition, durable Test_Run_ID isolation, scenario schedules, webhook identities, and production selectors.
+Purpose of this run: promote durable Test_Run_ID propagation into both Master Original and Platform Variant SMV1 queue upserts. Preserve all existing repair controls, durable test isolation, scenario schedules, webhook identities, and production selectors.
