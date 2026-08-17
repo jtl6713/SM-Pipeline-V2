@@ -1,0 +1,105 @@
+name: Repair C3 PUB3 Test Mode Side Effect Gates
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-c3-pub3-testmode-sideeffect-gates.txt']
+
+permissions: {contents: read}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Preflight and patch C3 email plus PUB3 test-publish gate
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json,urllib.request,os,copy,time,sys
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          BASE=str(v['MAKE_API_BASE_URL']).strip().rstrip('/'); TOKEN=str(v['MAKE_API_TOKEN']).strip()
+          IDS={'C3':5587853,'PUB3':5580354}; HOOKS={'C3':2623515,'PUB3':2540387}
+          CONTENT_TEST='fldA4dFKiiGpWNk7b'
+          def api(path,method='GET',body=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            q=urllib.request.Request(BASE+path,data=data,method=method,headers={'Authorization':'Token '+TOKEN,'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-Repair/1.0'})
+            with urllib.request.urlopen(q,timeout=30) as h: return json.loads(h.read().decode() or '{}')
+          def sc(x): return x.get('scenario') or x.get('response') or x
+          def bp(x):
+            b=x.get('blueprint') or (x.get('response') or {}).get('blueprint') or x
+            return json.loads(b) if isinstance(b,str) else b
+          def nodes(flow,out=None):
+            if out is None: out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []: nodes(r.get('flow') or [],out)
+            return out
+          def safe(reason,detail=''):
+            e={'passed':False,'safe_no_write':True,'reason':reason,'detail':detail}; open('/tmp/evidence.json','w').write(json.dumps(e,indent=2)); print(json.dumps(e)); sys.exit(0)
+          before={}; patched={}; meta={}
+          try:
+            for k,sid in IDS.items():
+              meta[k]=copy.deepcopy(sc(api(f'/scenarios/{sid}'))); before[k]=bp(api(f'/scenarios/{sid}/blueprint?draft=false')); patched[k]=copy.deepcopy(before[k]); time.sleep(.2)
+          except Exception as e: safe('preflight_read_failed',str(e))
+          try:
+            n3=nodes(patched['C3'].get('flow') or []); np=nodes(patched['PUB3'].get('flow') or [])
+            for k,h in HOOKS.items():
+              if meta[k].get('hookId')!=h or not meta[k].get('isActive'): raise ValueError(f'{k} hook/active drift')
+            if n3.get(901,{}).get('module')!='airtable:ActionGetRecord' or n3.get(4,{}).get('module')!='google-email:sendAnEmail': raise ValueError('C3 shape drift')
+            if np.get(1,{}).get('module')!='gateway:CustomWebHook' or np.get(2,{}).get('module')!='airtable:ActionGetRecord' or np.get(5,{}).get('module')!='airtable:ActionUpdateRecords': raise ValueError('PUB3 shape drift')
+          except Exception as e: safe('preflight_shape_mismatch',str(e))
+          n3=nodes(patched['C3'].get('flow') or []); np=nodes(patched['PUB3'].get('flow') or [])
+          old_c3=copy.deepcopy(n3[4].get('filter') or {'name':'','conditions':[[]]})
+          core=(old_c3.get('conditions') or [[]])[0]
+          n3[4]['filter']={'name':'Production only - suppress Test Mode carousel review email','conditions':[copy.deepcopy(core)+[{'a':'{{901.'+CONTENT_TEST+'}}','o':'notexist'}]]}
+          old_pub=copy.deepcopy(np[5].get('filter') or {'name':'','conditions':[[]]})
+          corep=(old_pub.get('conditions') or [[]])[0]
+          prod=copy.deepcopy(corep)+[{'a':'{{2.Test_Run_ID}}','o':'notexist'},{'a':'{{1.test_run_id}}','o':'notexist'}]
+          test=copy.deepcopy(corep)+[{'a':'{{2.Test_Run_ID}}','o':'exist'},{'a':'{{1.test_run_id}}','b':'{{2.Test_Run_ID}}','o':'text:equal'},{'a':'{{1.allow_test_publish}}','b':true,'o':'boolean:equal'}]
+          np[5]['filter']={'name':'Valid publish confirmation + explicit Test Mode authorization','conditions':[prod,test]}
+          written=[]
+          try:
+            for k in ('C3','PUB3'):
+              api(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(patched[k],separators=(',',':'))}); written.append(k); time.sleep(.6)
+            live={}; evidence={}
+            for k in written:
+              sm=sc(api(f'/scenarios/{IDS[k]}')); live[k]=nodes(bp(api(f'/scenarios/{IDS[k]}/blueprint?draft=false')).get('flow') or [])
+              if (sm.get('hookId'),sm.get('isActive'),sm.get('scheduling'))!=(meta[k].get('hookId'),meta[k].get('isActive'),meta[k].get('scheduling')): raise RuntimeError(f'{k} metadata drift')
+              if set(live[k])!=set(nodes(before[k].get('flow') or [])): raise RuntimeError(f'{k} topology drift')
+              evidence[k]={'scenario_id':IDS[k],'hookId':sm.get('hookId'),'active':sm.get('isActive')}
+            c3f=json.dumps(live['C3'][4].get('filter') or {}); pf=json.dumps(live['PUB3'][5].get('filter') or {})
+            if CONTENT_TEST not in c3f or 'notexist' not in c3f: raise RuntimeError('C3 production-only email gate missing')
+            if not all(x in pf for x in ('Test_Run_ID','test_run_id','allow_test_publish','boolean:equal')): raise RuntimeError('PUB3 explicit test publish gate missing')
+            ev={'passed':True,'contracts':{'c3_test_email_suppressed':True,'pub3_production_requires_blank_test_context':True,'pub3_test_requires_exact_identity':True,'pub3_test_requires_explicit_allow':True,'do_not_publish_guard_preserved':True},'scenarios':evidence}
+            open('/tmp/evidence.json','w').write(json.dumps(ev,indent=2)); print(json.dumps(ev))
+          except Exception:
+            for k in reversed(written):
+              try: api(f'/scenarios/{IDS[k]}?confirmed=true','PATCH',{'blueprint':json.dumps(before[k],separators=(',',':'))})
+              except Exception as re: print('ROLLBACK_ERROR',k,str(re))
+            raise
+          PY
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c3-pub3-testmode-gates-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings /tmp/evidence.json
