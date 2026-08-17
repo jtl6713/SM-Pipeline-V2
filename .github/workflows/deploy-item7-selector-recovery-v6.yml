@@ -1,10 +1,10 @@
-name: Deploy Item7 Selector Recovery V6
+name: Deploy Item7 Selector Recovery V6.1
 
 on:
   push:
     branches: [main]
     paths:
-      - 'repair/scripts/patch-item7-standalone-selector-recovery-v6.py'
+      - 'repair/scripts/patch-item7-selector-recovery-v6-1.py'
       - '.github/workflows/deploy-item7-selector-recovery-v6.yml'
 
 permissions:
@@ -26,18 +26,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply standalone selector recovery patch
+      - name: Apply selector recovery v6.1 patch
         shell: bash
         run: |
           set -euo pipefail
-          python repair/scripts/patch-item7-standalone-selector-recovery-v6.py apps/studio-api/worker.js
+          python repair/scripts/patch-item7-selector-recovery-v6-1.py apps/studio-api/worker.js
           node --check apps/studio-api/worker.js
-          grep -q 'ITEM7_STANDALONE_SELECTOR_RECOVERY_V6' apps/studio-api/worker.js
+          grep -q 'ITEM7_SELECTOR_RECOVERY_V6_1' apps/studio-api/worker.js
           grep -q 'recover_item7_exact_selector' apps/studio-api/worker.js
-          grep -q 'repair_item7_standalone_selector_recovery_v6: true' apps/studio-api/worker.js
+          grep -q 'repair_item7_selector_recovery_v6_1: true' apps/studio-api/worker.js
           git diff --check
-          git diff -- apps/studio-api/worker.js > /tmp/item7-selector-recovery-v6.diff
-          test -s /tmp/item7-selector-recovery-v6.diff
+          git diff -- apps/studio-api/worker.js > /tmp/item7-selector-recovery-v6-1.diff
+          test -s /tmp/item7-selector-recovery-v6-1.diff
 
       - name: Deploy patched Studio API worker with rollback guard
         shell: bash
@@ -52,7 +52,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add apps/studio-api/worker.js
-          git commit -m 'fix(item7): add standalone exact selector recovery'
+          git commit -m 'fix(item7): correct standalone selector recovery DNP guard'
           git pull --rebase origin main
           git push origin HEAD:main
 
@@ -60,9 +60,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-selector-recovery-v6-${{ github.run_id }}
+          name: item7-selector-recovery-v6-1-${{ github.run_id }}
           path: |
-            /tmp/item7-selector-recovery-v6.diff
+            /tmp/item7-selector-recovery-v6-1.diff
             /tmp/item6v2-active-before.txt
             /tmp/item6v2-active-after.txt
             /tmp/item6v2-source-sha256.txt
@@ -73,5 +73,3 @@ jobs:
             /tmp/item6v2-session.json
           if-no-files-found: ignore
           retention-days: 30
-
-# Trigger touch after workflow creation; no runtime behavior change.
