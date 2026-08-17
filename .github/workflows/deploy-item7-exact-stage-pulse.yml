@@ -1,4 +1,4 @@
-name: Item7 Isolated R2 Pulse
+name: Item7 R2 Selector Diagnostic
 
 on:
   push:
@@ -14,45 +14,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  r2:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TEST_RUN_ID: ITEM7_9X16_REGRESSION_RUN32060507474
-      CONTENT_RECORD_ID: recA0WClSp6SR6vvl
-      OUTPUT_RECORD_ID: recByMge4QPlCOsD2
-      SCENARIO_ID: '5569495'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Checkpoint controller deployment and fresh fixture in ledger
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
-          s=p.read_text()
-          row='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — exact-stage controller deployed; fresh isolated fixture created** | Controller deploy run `32060507474` PASS. Fresh fixture: Content Item 75 `recA0WClSp6SR6vvl` + Platform Output 168 `recByMge4QPlCOsD2`, exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`; Output 168 is 9:16 and `Do_Not_Publish=true`. | Pulse R2 `5569495` under a one-output lease; continue only after exact checkpoint and restoration proof. |'
-          s,n=re.subn(r'^\| 7 \| Fresh edge-to-edge 9:16 normal-path regression \|.*$',row,s,count=1,flags=re.M)
-          if n != 1: raise SystemExit('Item 7 row not found')
-          marker='## 2026-08-17 Item 7 exact-stage regression delta\n'
-          if marker not in s:
-              s += '\n\n'+marker+'\n- Controller deployment run `32060507474` PASS; active Worker exact-stage marker verified.\n- Fresh fixture: Content Item 75 `recA0WClSp6SR6vvl`, Platform Output 168 `recByMge4QPlCOsD2`, exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`.\n- R2 pending; no later Item 7 stage or publishing action has run.\n'
-          p.write_text(s)
-          PY
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          if ! git diff --cached --quiet; then
-            git commit -m 'docs(item7): checkpoint controller and fresh fixture'
-            git push origin HEAD:main
-          fi
 
       - name: Create temporary authenticated service bridge
         id: bridge
@@ -61,7 +32,7 @@ jobs:
           set -euo pipefail
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r2-bridge"
+          BRIDGE="chicagoshining-item7-r2-diagnostic"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
           export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});}};
@@ -79,7 +50,7 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Inspect R2 then acquire exact lease and pulse once
+      - name: Capture live R2 Module 1 selector safely
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -88,52 +59,40 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
-          inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
+          inspect='{"action":"inspect_make_scenario","confirm":"INSPECT-MAKE-MODULES-V1","scenario_id":5569495,"module_ids":[1]}'
           curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" -o /tmp/preflight.json
           jq -e '.ok==true and .inspected.scenario_active==false' /tmp/preflight.json >/dev/null
-          EXPIRES=$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')
-          acquire=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "ITEM7-R2-RUN32060507474-L1" --arg exp "$EXPIRES" --arg out "$OUTPUT_RECORD_ID" --arg ci "$CONTENT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"acquire",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,max_runs:1,max_operations:30,expires_at:$exp,allowed_platform_output_record_ids:[$out],allowed_content_item_record_ids:[$ci],deny_fixture_record_ids:[],allow_public_publish:false}')
-          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" -o /tmp/acquire.json
-          jq -e '.ok==true' /tmp/acquire.json >/dev/null
-          pulse=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "ITEM7-R2-RUN32060507474-L1" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"pulse_item7_exact_stage",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out,max_cycles:1}')
-          code=$(curl -sS -o /tmp/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse")
-          cat /tmp/pulse.json | jq .
-          test "$code" = 200
-          jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .stage=="R2" and .platform_output_record_id==$out and .test_run_id==$tr and .checkpoint.asset_selection_status=="Selected" and .checkpoint.selected_assets_present==true and (.checkpoint.selected_clip_count>0) and .scenario_stopped==true and .selector_restored==true and .schedule_preserved==true and .do_not_publish_preserved==true' /tmp/pulse.json >/dev/null
+          mkdir -p repair/evidence
+          jq '{captured_at:(now|todate),scenario_id:.inspected.scenario_id,scenario_name:.inspected.scenario_name,scenario_active:.inspected.scenario_active,module_1:.inspected.modules[0].module}' /tmp/preflight.json > repair/evidence/item7-r2-selector-preflight-20260817.json
+          cat repair/evidence/item7-r2-selector-preflight-20260817.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/item7-r2-selector-preflight-20260817.json
+          git commit -m 'evidence(item7): capture R2 selector preflight'
+          git push origin HEAD:main
 
-      - name: Record R2 PASS in ledger
+      - name: Update Item 7 ledger with controlled R2 no-advance
         shell: bash
         run: |
           set -euo pipefail
           git pull --rebase origin main
-          CLIPS=$(jq -r '.checkpoint.selected_clip_count' /tmp/pulse.json)
-          python - "$CLIPS" <<'PY'
+          python - <<'PY'
           from pathlib import Path
-          import re,sys
-          clips=sys.argv[1]
+          import re
           p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
           s=p.read_text()
-          row=f'| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — controller + R2 proven** | Controller deploy run `32060507474` PASS. Fresh CI 75 / Output 168 exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. R2 `5569495` exact pulse PASS: Asset Selection `Selected`, selected assets present, selected clip count {clips}; scenario OFF and production selector/schedule restored. | Pulse R3 `5557966` under a fresh exact lease; proceed only after complete Ready-for-Render package and restoration proof. |'
+          row='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — controller proven; R2 prerequisite diagnosis active** | Controller deploy run `32060507474` PASS. Fresh CI 75 / Output 168 exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. First bounded R2 run `32061240553` made no target progress and did not mark R2 complete; PASS ledger step was skipped and evidence was retained. | Resolve only the exact live R2 selector prerequisite mismatch, then retry R2 under a new one-output lease. R3 remains blocked. |'
           s,n=re.subn(r'^\| 7 \| Fresh edge-to-edge 9:16 normal-path regression \|.*$',row,s,count=1,flags=re.M)
           if n != 1: raise SystemExit('Item 7 row not found')
-          s=s.replace('- R2 pending; no later Item 7 stage or publishing action has run.',f'- R2 `5569495` PASS: exact Output 168 selector, Asset Selection `Selected`, selected assets present, selected clip count {clips}; scenario OFF and production blueprint/schedule restored.\n- R3 pending; no later Item 7 stage or publishing action has run.')
+          marker='- R2 pending; no later Item 7 stage or publishing action has run.'
+          repl='- First R2 exact pulse run `32061240553` made no target progress; no R2 PASS was recorded. Controller cleanup/evidence steps ran, and R3 remained blocked.\n- Live R2 Module 1 selector prerequisite capture is stored at `repair/evidence/item7-r2-selector-preflight-20260817.json` for narrow fixture diagnosis.'
+          if marker in s: s=s.replace(marker,repl)
+          elif 'First R2 exact pulse run `32061240553`' not in s: s += '\n'+repl+'\n'
           p.write_text(s)
           PY
           git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          git commit -m 'docs(item7): record isolated R2 pass'
+          git commit -m 'docs(item7): record R2 prerequisite diagnostic checkpoint'
           git push origin HEAD:main
-
-      - name: Save evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: item7-r2-${{ github.run_id }}
-          path: |
-            /tmp/preflight.json
-            /tmp/acquire.json
-            /tmp/pulse.json
-          if-no-files-found: ignore
-          retention-days: 30
 
       - name: Remove temporary bridge
         if: always()
