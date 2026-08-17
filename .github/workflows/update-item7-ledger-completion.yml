@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           python repair/scripts/update-item7-ledger-completion.py
           git diff --check
-          grep -q 'Complete — R2→R3→R4→R5→RR1 accepted on Output 168' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -q 'Complete - R2/R3/R4/R5/RR1 accepted on Output 168' repair/SM_PIPELINE_21_ITEM_LEDGER.md
           grep -q '32077730040' repair/SM_PIPELINE_21_ITEM_LEDGER.md
           grep -q '32078647065' repair/SM_PIPELINE_21_ITEM_LEDGER.md
       - name: Commit ledger
