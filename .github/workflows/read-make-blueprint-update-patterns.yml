@@ -1,0 +1,23 @@
+name: Read Make Blueprint Update Patterns
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-make-blueprint-update-patterns.txt']
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Search repository for Make scenario update patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== direct scenario/blueprint API patterns ==='
+          grep -RInE 'scenarios/.+blueprint|/blueprint|scenarios/.+-X (PUT|PATCH)|-X (PUT|PATCH).+scenarios|MAKE_API_BASE_URL|MAKE_API_TOKEN' .github repair deploy apps scripts 2>/dev/null || true
+          echo '=== blueprint mutation words ==='
+          grep -RInE 'update.*blueprint|blueprint.*update|clone.*blueprint|scenario.*blueprint' .github repair deploy apps scripts 2>/dev/null || true
