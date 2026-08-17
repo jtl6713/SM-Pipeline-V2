@@ -1,0 +1,96 @@
+name: Inspect Item7 R4 Baseline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-item7-r4-baseline.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SCENARIO_ID: '5556716'
+      OUTPUT_RECORD_ID: recByMge4QPlCOsD2
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Make API credentials without logging values
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json')); vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          t=str(vals.get('MAKE_API_TOKEN') or '').strip(); b=str(vals.get('MAKE_API_BASE_URL') or '').strip().rstrip('/')
+          if not t or not b: raise SystemExit('Missing active Make API settings')
+          open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
+          PY
+      - name: Read R4 scenario, interface, fixture, and renderer health
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); PAT=$(cat /tmp/pat.txt)
+          curl -fsS "$BASE/scenarios/$SCENARIO_ID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/scenario.json
+          curl -fsS "$BASE/scenarios/$SCENARIO_ID/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/bp-wrap.json
+          curl -fsS "$BASE/scenarios/$SCENARIO_ID/interface" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/interface.json
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblrlPeboBthkplH0/$OUTPUT_RECORD_ID" -H "Authorization: Bearer $PAT" -o /tmp/output.json
+          health_code=$(curl -sS --max-time 20 -o /tmp/renderer-health.json -w '%{http_code}' https://render.chicagoshining.com/health || true)
+          echo "$health_code" >/tmp/renderer-health-code.txt
+          python - <<'PY'
+          import json,os
+          def scen(d):
+              x=d.get('response',d) if isinstance(d,dict) else {}
+              if isinstance(x,dict) and isinstance(x.get('scenario'),dict):x=x['scenario']
+              return x if isinstance(x,dict) else {}
+          def bp(d):
+              x=d.get('response',d) if isinstance(d,dict) else d
+              if isinstance(x,dict) and 'blueprint' in x:x=x['blueprint']
+              if isinstance(x,str):x=json.loads(x)
+              return x
+          def find(flow,mid):
+              for n in flow if isinstance(flow,list) else []:
+                  if str(n.get('id'))==str(mid):return n
+                  for r in n.get('routes',[]) if isinstance(n.get('routes'),list) else []:
+                      z=find(r.get('flow'),mid)
+                      if z:return z
+              return None
+          s=scen(json.load(open('/tmp/scenario.json'))); b=bp(json.load(open('/tmp/bp-wrap.json'))); m=find(b.get('flow'),1); out=json.load(open('/tmp/output.json')); f=out.get('fields',{}); iface=json.load(open('/tmp/interface.json')); iw=iface.get('response',iface); iw=iw.get('interface',iw) if isinstance(iw,dict) else {}; inputs=iw.get('input',[]) if isinstance(iw,dict) else []
+          try: health=json.load(open('/tmp/renderer-health.json'))
+          except: health={'raw':open('/tmp/renderer-health.json').read()[:500] if os.path.exists('/tmp/renderer-health.json') else ''}
+          ev={'scenario_id':int(os.environ['SCENARIO_ID']),'scenario_name':s.get('name'),'scenario_active':s.get('isActive',s.get('active')),'schedule':s.get('scheduling',s.get('schedule')),'hook_id':s.get('hookId',s.get('hook_id')),'module_1_type':m.get('module') if m else None,'module_1_name':((m.get('metadata') or {}).get('designer') or {}).get('name') if m else None,'module_1_record_id':(m.get('mapper') or {}).get('recordId') if m else None,'interface_inputs':[{'name':x.get('name'),'required':x.get('required')} for x in inputs if isinstance(x,dict)],'output_id':f.get('Output_ID'),'test_run_id':f.get('Test_Run_ID'),'do_not_publish':f.get('Do_Not_Publish'),'render_status':f.get('Render_Status'),'composition_id':f.get('Composition_ID'),'output_filename':f.get('Output_Filename'),'render_total_frames':f.get('Render_Total_Frames'),'render_clip_list_present':bool(str(f.get('Render_Clip_List_JSON') or '').strip()),'remotion_job_id':f.get('Remotion_Job_ID'),'remotion_status_url':f.get('Remotion_Status_URL'),'renderer_health_http':open('/tmp/renderer-health-code.txt').read().strip(),'renderer_health':health}
+          print(json.dumps(ev,indent=2,sort_keys=True)); open('evidence/r4-baseline.json','w').write(json.dumps(ev,indent=2,sort_keys=True))
+          if ev['scenario_active'] is not False: raise SystemExit('R4 is not OFF')
+          if ev['schedule'] != {'type':'indefinitely','interval':900}: raise SystemExit(f'R4 schedule drift: {ev["schedule"]}')
+          if ev['hook_id'] is not None: raise SystemExit('R4 unexpectedly has hook identity')
+          if ev['module_1_type']!='airtable:ActionGetRecord': raise SystemExit('R4 Module 1 is not exact GetRecord')
+          if ev['renderer_health_http']!='200': raise SystemExit('Renderer health did not return 200')
+          PY
+      - name: Destroy transient credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/q.txt /tmp/scenario.json /tmp/bp-wrap.json /tmp/interface.json /tmp/output.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Save baseline evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-r4-baseline-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 30
