@@ -137,6 +137,7 @@ export default {
           repair_item7_selector_recovery_v6_1: true,
           repair_item7_r3_canonical_maxrecords_v7: true,
           repair_item7_r5_canonical_maxrecords_v8: true,
+          repair_item7_rr1_canonical_maxrecords_v9: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
@@ -9908,6 +9909,7 @@ function repairItem7CanonicalMaxRecords(scenarioId) {
   const sid = Number(scenarioId);
   if (sid === 5557966) return "10";
   if (sid === 5565333) return "5";
+  if (sid === 5576363) return "10";
   return "1";
 }
 
@@ -10035,6 +10037,7 @@ async function repairPulseItem7ExactStage(env, lease, input, action) {
 
   // ITEM7_R3_CANONICAL_MAXRECORDS_V7: R3 production intentionally batches up to 10;
   // ITEM7_R5_CANONICAL_MAXRECORDS_V8: R5 production intentionally batches up to 5;
+  // ITEM7_RR1_CANONICAL_MAXRECORDS_V9: RR1 production intentionally batches up to 10;
   // the temporary exact Item 7 selector uses maxRecords=1 and must restore the
   // canonical production value after every success, failure, retry, or cleanup.
   const canonicalMaxRecords = repairItem7CanonicalMaxRecords(scenarioId);
