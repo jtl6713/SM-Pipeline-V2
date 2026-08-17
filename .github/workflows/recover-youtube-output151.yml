@@ -31,7 +31,7 @@ jobs:
           OUTPUTS='tblrlPeboBthkplH0'
           SETTINGS='tblpHPWeEkyJaF7ql'
           REC='recXaaWhSZmQ9oOsw'
-          EXPECTED_KEY='YT-151-recXaaWhSZmQ9oOsw-oauthretry-1'
+          EXPECTED_KEY='YT-151-recXaaWhSZmQ9oOsw-oauthretry-2'
           pat=open('/tmp/pat.txt').read().strip()
           headers={'Authorization':f'Bearer {pat}','Content-Type':'application/json'}
 
@@ -103,7 +103,6 @@ jobs:
           if str(f.get('YouTube_Stage',''))!='YT2' or not f.get('YouTube_Upload_Job_ID'):
               raise RuntimeError('YTP1 did not create a fresh upload job')
 
-          # Poll exact YTS1 until upload completes with a video ID.
           for i in range(30):
               f=get_output()
               if f.get('YouTube_Video_ID'):
@@ -116,7 +115,6 @@ jobs:
           else:
               raise RuntimeError('Timed out waiting for YouTube upload completion')
 
-          # Poll exact YTS2 until YouTube processing reaches YT4/Succeeded.
           for i in range(24):
               f=get_output()
               if str(f.get('YouTube_Stage',''))=='YT4' and str(f.get('YouTube_Processing_Status','')).lower()=='succeeded':
