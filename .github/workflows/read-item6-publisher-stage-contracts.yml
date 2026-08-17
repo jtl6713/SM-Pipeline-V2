@@ -1,0 +1,105 @@
+name: Read Item6 Publisher Stage Contracts
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-item6-publisher-stage-contracts.txt']
+
+permissions: {contents: read}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read Item 6 publisher stage contracts
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json'))
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          open('/tmp/make-token.txt','w').write(str(vals['MAKE_API_TOKEN']).strip())
+          open('/tmp/make-base.txt','w').write(str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'))
+          PY
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
+          : >/tmp/item6-stage-contracts.ndjson
+          for sid in 5862882 5612664 5845193 5791356 5791396 5791424 5813463 5813487 5813511 5813534 5806644 5806597 5806518 5823572 5830810 5830609 5830616 5830623; do
+            curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/scenario.json
+            sleep 1
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/blueprint.json
+            SID="$sid" python - <<'PY' >>/tmp/item6-stage-contracts.ndjson
+          import json,os,re,urllib.parse
+          sid=int(os.environ['SID'])
+          s=json.load(open('/tmp/scenario.json')); b=json.load(open('/tmp/blueprint.json'))
+          scenario=s.get('scenario') or s.get('response') or s
+          bp=b.get('blueprint') or (b.get('response') or {}).get('blueprint') or b
+          sensitive=('token','secret','password','authorization','connection','api_key','apikey')
+          def scrub_string(v,key=''):
+            if re.search(r'https?://',v,re.I):
+              try:
+                p=urllib.parse.urlsplit(v)
+                host=p.netloc
+                path=re.sub(r'(?<=/)[0-9]{7,}(?=/|$)','<id>',p.path)
+                return urllib.parse.urlunsplit((p.scheme,host,path,'',''))
+              except Exception:
+                return '<redacted-url>'
+            if len(v)>1800: return v[:1800]+'<truncated>'
+            return v
+          def clean(v,key=''):
+            kl=str(key).lower()
+            if any(x in kl for x in sensitive): return '<redacted>'
+            if isinstance(v,dict): return {k:clean(x,k) for k,x in v.items()}
+            if isinstance(v,list): return [clean(x,key) for x in v]
+            if isinstance(v,str): return scrub_string(v,key)
+            return v
+          modules=[]
+          def walk(flow,depth=0):
+            for n in flow or []:
+              name=((n.get('metadata') or {}).get('designer') or {}).get('name')
+              mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; filt=n.get('filter')
+              blob=json.dumps([mapper,params,filt,name,n.get('module')],default=str)
+              keep=depth==0 or any(k in blob.lower() for k in ['airtable','http:','webhook','publish','post_id','media_id','video_id','delete','remove','reconcile','fingerprint','revision','idempot','test_run','do_not_publish','published_at','publish_status','lock'])
+              if keep:
+                modules.append({'id':n.get('id'),'module':n.get('module'),'name':name,'depth':depth,'mapper':clean(mapper),'parameters':clean(params),'filter':clean(filt)})
+              for r in n.get('routes') or []: walk(r.get('flow') or [],depth+1)
+          walk(bp.get('flow') or [])
+          text=json.dumps(bp,default=str).lower()
+          needles=['test_run_id','do_not_publish','published_at','platform_post_id','platform_media_id','ig_carousel_published_media_id','fb_post_fingerprint','fb_package_revision','tiktok_draft_public_post_ids_json','youtube_idempotency_key','youtube_video_id','delete','remove','reconcile','idempotency','publish_lock','publish_status']
+          terms={k:(k in text) for k in needles}
+          out={'scenario_id':sid,'name':scenario.get('name'),'isActive':scenario.get('isActive'),'hookId':scenario.get('hookId'),'scheduling':scenario.get('scheduling'),'terms':terms,'modules':modules}
+          print(json.dumps(out,separators=(',',':')))
+          PY
+            sleep 1
+          done
+          python - <<'PY'
+          import json
+          rows=[json.loads(x) for x in open('/tmp/item6-stage-contracts.ndjson') if x.strip()]
+          open('/tmp/item6-publisher-stage-contracts.json','w').write(json.dumps(rows,indent=2))
+          for x in rows:
+            print(json.dumps({'id':x['scenario_id'],'name':x['name'],'active':x['isActive'],'hookId':x['hookId'],'terms':x['terms'],'module_count':len(x['modules'])},separators=(',',':')))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/scenario.json /tmp/blueprint.json /tmp/q.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: item6-publisher-stage-contracts-${{ github.run_id }}
+          path: /tmp/item6-publisher-stage-contracts.json
+          retention-days: 30
