@@ -1,1 +1,2 @@
 Read-only consolidated Item 2 gap audit for remaining stage owners: I1, P4/P5, carousel C2-C9/C3B/C2M, PUB1-3, asset-chain A0-A4/A1S/A1P, SMV1, P020-1/P020-2, M1/A1M. Capture webhook/search/get-record contracts and sanitized bodies. No activation, Make mutation, Airtable write, render, email, draft, upload, or publishing.
+Recheck live contracts after YouTube recovery — 2026-08-16.
