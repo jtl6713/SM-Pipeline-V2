@@ -29,6 +29,10 @@ jobs:
       - name: Commit ledger
         run: |
           set -euo pipefail
+          if git diff --quiet -- repair/SM_PIPELINE_21_ITEM_LEDGER.md; then
+            echo 'Ledger already contains the verified Item 7 completion.'
+            exit 0
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
