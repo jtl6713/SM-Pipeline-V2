@@ -1,0 +1,51 @@
+name: Diagnose Item6 Acquire Data
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-item6-acquire-data.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Decrypt verified Airtable PAT
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+      - name: Read Output 167 and exact scenario lease rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $(cat /tmp/pat.txt)"
+          BASE='https://api.airtable.com/v0/appe33zkZn35yirTL'
+          curl -fsS "$BASE/tblrlPeboBthkplH0/recdCzUqxwQMYcK6g" -H "$AUTH" -o /tmp/output.json
+          curl -fsS -G "$BASE/tbltuSt9UibYzxpah" -H "$AUTH" \
+            --data-urlencode 'pageSize=100' \
+            --data-urlencode 'maxRecords=100' \
+            --data-urlencode 'sort[0][field]=Requested_At' \
+            --data-urlencode 'sort[0][direction]=desc' \
+            --data-urlencode 'filterByFormula=AND(FIND("REPAIR_LEASE_V1", {Notes}&"")>0,FIND("5813561", {Notes}&"")>0)' \
+            -o /tmp/leases.json
+          echo 'OUTPUT_167='
+          jq -c '{id,fields:{Platform_Output_ID:.fields.Platform_Output_ID,Platform:.fields.Platform,Do_Not_Publish:.fields.Do_Not_Publish,Test_Run_ID:.fields.Test_Run_ID,Output_Status:.fields.Output_Status,Remote_Post_ID:.fields.Remote_Post_ID,Published_URL:.fields.Published_URL,Replace_Transaction_ID:.fields.Replace_Transaction_ID,Replace_State:.fields.Replace_State,Replace_Old_Remote_ID:.fields.Replace_Old_Remote_ID,Replace_New_Remote_ID:.fields.Replace_New_Remote_ID,Replace_Cleanup_Verified_At:.fields.Replace_Cleanup_Verified_At}}' /tmp/output.json
+          echo 'LEASE_ROWS='
+          jq -c '[.records[]|{id,Status:.fields.Status,Requested_At:.fields.Requested_At,Completed_At:.fields.Completed_At,Error_Message:.fields.Error_Message,Notes:.fields.Notes}]' /tmp/leases.json
+          echo "lease_row_count=$(jq '.records|length' /tmp/leases.json)"
+      - name: Destroy credential material
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
