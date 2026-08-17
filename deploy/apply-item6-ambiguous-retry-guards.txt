@@ -1,0 +1,1 @@
+Apply reversible Item 6 fail-closed sibling routes to ambiguous failure/retry branches only. Live blueprints are snapshotted first; scenario active state must remain unchanged; no scenario execution; automatic rollback on any verification failure. Trigger 2026-08-17 08:48 CT.
