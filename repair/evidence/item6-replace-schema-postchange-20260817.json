@@ -1,0 +1,26 @@
+{
+  "repair_item": 6,
+  "checkpoint": "replace-schema-postchange",
+  "timestamp_ct": "2026-08-17T08:09:00-05:00",
+  "base_id": "appe33zkZn35yirTL",
+  "table_id": "tblrlPeboBthkplH0",
+  "result": "VERIFIED",
+  "created_fields": [
+    {"id":"fld5ivTb4IBUuNBTb","name":"Replace_Transaction_ID","type":"singleLineText"},
+    {"id":"fldQM3jp1nJvdUGMh","name":"Replace_State","type":"singleLineText"},
+    {"id":"fldAzrazct9ADb1VB","name":"Replace_Fingerprint","type":"singleLineText"},
+    {"id":"fldH4FE1MCMwKviH7","name":"Replace_Last_Good_JSON","type":"multilineText"},
+    {"id":"fldFtJWz2sovYnEki","name":"Replace_Obsolete_JSON","type":"multilineText"},
+    {"id":"fldxtu8Rw9GFEdw6d","name":"Replace_Cleanup_State","type":"singleLineText"},
+    {"id":"fldvDDPAHL3W2FgvI","name":"Replace_Cleanup_Attempt_Count","type":"number precision 0"},
+    {"id":"fldqqEDWMZQ30O9IU","name":"Replace_Error","type":"multilineText"},
+    {"id":"fldN5AbpylYxayXuB","name":"Replace_Started_At","type":"dateTime UTC"},
+    {"id":"fld9o4V9hlpqh0aA5","name":"Replace_Updated_At","type":"dateTime UTC"}
+  ],
+  "existing_field_mutations": 0,
+  "record_mutations": 0,
+  "make_scenario_mutations": 0,
+  "public_platform_operations": 0,
+  "normal_path_effect": "None. Existing Make selectors and Studio code do not reference these additive fields yet.",
+  "rollback_position": "The fields are inert and additive. If controller implementation fails validation, no normal-path rollback is needed; the fields can remain unused without affecting current publishing."
+}
