@@ -1,0 +1,73 @@
+name: Update Ledger Item 3 Prepared
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/update-ledger-item3-prepared-v1.txt
+
+permissions:
+  contents: write
+
+jobs:
+  update-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Record authoritative Item 3 preparation checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+          s = p.read_text()
+          lines = s.splitlines()
+
+          row = "| 3 | Renderer native overlap transitions | **Partial — authoritative live source verified; native overlap patch prepared; runtime acceptance pending** | Authoritative 2026-08-17 renderer snapshot was taken from `D:\\Content Creation\\ChicagoShining Pipeline\\Services\\Remotion_Renderer`. Current defect is confirmed: `ChicagoShiningPhotoSequence` uses back-to-back `Sequence` blocks with per-scene opacity/transform transitions, so adjacent scenes do not overlap. A guarded patch now replaces interscene faux transitions with Remotion `TransitionSeries`, exact-duration compensation, native fade/slide presentations, transition-context zoom scaling, bounded clip audio, and service version `2026-08-17-native-overlap-transitions`. Local static TypeScript/render-server checks passed; no live renderer mutation or render has occurred yet. | Run the bundled hash-gated local installer; require lint/build, exact `/health` version, 135-frame/4.5s A/V preservation, red→green fade overlap and green→blue slide overlap pixel proof, then inspect the emitted evidence ZIP before marking Complete. |"
+
+          found = False
+          for i, line in enumerate(lines):
+              if line.startswith('| 3 |'):
+                  lines[i] = row
+                  found = True
+                  break
+          if not found:
+              raise SystemExit('Item 3 ledger row not found')
+
+          out = '\n'.join(lines)
+          marker = '## 2026-08-17 Item 3 preparation delta — authoritative renderer native-overlap patch'
+          if marker not in out:
+              delta = '''
+
+## 2026-08-17 Item 3 preparation delta — authoritative renderer native-overlap patch
+
+- Authoritative source snapshot came from `D:\\Content Creation\\ChicagoShining Pipeline\\Services\\Remotion_Renderer`; live `/health` returned HTTP 200 before any change. `src\\ChicagoShiningPhotoSequence.tsx` snapshot SHA-256 is `e8b0244347e9256fc32581e0a6c5ec09bf2d5dd1bc22e0da71d3b83cf0a053d3`; `render-server.js` is `0491c52ccb35fec4dcb713e79a3e5f18905e2cb08601470a269eebca1c775936`.
+- Root defect confirmed in the authoritative source: image scenes are consecutive `Sequence` blocks; opacity/translate/scale are animated within each isolated scene, so outgoing and incoming scenes are never rendered simultaneously.
+- Prepared repair uses Remotion `TransitionSeries` with the existing Remotion package line pinned to `4.0.484`. Fade and slide become native overlap presentations; zoom retains scale behavior while using native transition progress/overlap context.
+- Exact-duration compensation extends each outgoing transition wrapper by the transition overlap that `TransitionSeries` subtracts, preserving the renderer's existing total frame count, voiceover-aware duration, music/caption timing, and end-tail contract. Per-clip audio remains bounded to the original clip slot.
+- Static preparation gates passed: patched TSX TypeScript transpilation, `render-server.js` syntax, and structural assertions for native overlap, duration compensation, slide/fade mappings, removal of legacy transition opacity, and bounded clip audio.
+- Repair bundle: `SM_Pipeline_V2_Item3_Native_Overlap_Repair_2026-08-17.zip`, SHA-256 `a0ce20a6f2f51fa41ab3ac8afa0299628b14a17671726639827073feefadbf61`. The installer hash-checks the uploaded authoritative snapshot, backs up modified files, pins `@remotion/transitions@4.0.484`, runs lint/build, restarts only the renderer, and rolls back on a failed gate.
+- Runtime acceptance is intentionally still pending. The bounded local matrix must prove exactly 135 frames / 4.5 seconds, an audio stream, simultaneous red→green fade overlap, simultaneous green→blue slide overlap, and healthy service version `2026-08-17-native-overlap-transitions`. No Airtable, Make, R2, email, draft, upload, or platform mutation is part of this test.
+'''
+              out += delta
+
+          p.write_text(out.rstrip() + '\n')
+          PY
+
+          git diff --check
+          grep -Fq '| 3 | Renderer native overlap transitions | **Partial — authoritative live source verified' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -Fq 'a0ce20a6f2f51fa41ab3ac8afa0299628b14a17671726639827073feefadbf61' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+
+          if git diff --quiet -- repair/SM_PIPELINE_21_ITEM_LEDGER.md; then
+            echo 'Ledger already current.'
+            exit 0
+          fi
+
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'ledger: record Item 3 native-overlap patch preparation'
+          git push
