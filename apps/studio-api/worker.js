@@ -2745,6 +2745,7 @@ async function getItem4OutputPlan(request, env, url, authorization) {
 
 const ITEM4_VARIANT_QUEUE_TABLE = "tblBZLXPd1p2NRWRK";
 const ITEM4_SMV1_SCENARIO_ID = 5894885;
+const ITEM4_VARIANT_RECIPE_VERSION = "fill-crop-v2";
 const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
@@ -2775,11 +2776,11 @@ function item4VariantRatioKey(ratio) {
 function item4VariantTargetFileName(asset, ratio) {
   const original = String(asset?.name || "photo").trim() || "photo";
   const base = original.replace(/\.[^.]+$/, "") || "photo";
-  return `${item4SafeFileName(base)}__${item4VariantRatioKey(ratio)}.jpg`;
+  return `${item4SafeFileName(base)}__${item4VariantRatioKey(ratio)}__${ITEM4_VARIANT_RECIPE_VERSION}.jpg`;
 }
 
 function item4QueueTransferId(recordId, assetId, ratio) {
-  return `ITEM4-VARIANT-${recordId}-${assetId}-${item4VariantRatioKey(ratio)}`;
+  return `ITEM4-VARIANT-${ITEM4_VARIANT_RECIPE_VERSION}-${recordId}-${assetId}-${item4VariantRatioKey(ratio)}`;
 }
 
 function item4QueueStatus(row) {
@@ -2917,6 +2918,7 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
         transfer_id: transferId,
         asset_id: String(asset.id),
         ratio,
+        recipe_version: ITEM4_VARIANT_RECIPE_VERSION,
         target_file_name: targetFileName,
         queue_record_id: row?.id || current?.id || null,
       });
@@ -3035,7 +3037,8 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
   );
 
   const manifest = {
-    schema_version: "item4.variant-manifest.1",
+    schema_version: "item4.variant-manifest.2",
+    recipe_version: ITEM4_VARIANT_RECIPE_VERSION,
     production_request_record_id: recordId,
     authoritative_storage: "google_drive",
     persistent_cloudflare_storage: false,
@@ -3076,6 +3079,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
       const spec = ITEM4_RATIO_SPECS[ratio];
       row.variants[ratio] = {
         aspect_ratio: ratio,
+        recipe_version: ITEM4_VARIANT_RECIPE_VERSION,
         width: spec.width,
         height: spec.height,
         format: "JPEG",
@@ -6074,7 +6078,10 @@ function item4PreviewRouteBlueprint() {
                 },
                 mapper: {
                   ca: "",
-                  qs: [{ name: "ratio", value: "4:5" }],
+                  qs: [
+                    { name: "ratio", value: "4:5" },
+                    { name: "recipe", value: ITEM4_VARIANT_RECIPE_VERSION },
+                  ],
                   url: `${item4PreviewSettingValueExpr("STUDIO_VARIANT_SERVICE_BASE_URL")}/render`,
                   data: "{{62.data}}",
                   gzip: true,
@@ -6852,6 +6859,7 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
 
   const module21 = phase6FindModule(blueprint.flow, 21);
   const module23 = phase6FindModule(blueprint.flow, 23);
+  const module33 = phase6FindModule(blueprint.flow, 33);
   const module35 = phase6FindModule(blueprint.flow, 35);
   const module23Record = module23?.mapper?.record || {};
   const module35Record = module35?.mapper?.record || {};
@@ -6877,8 +6885,15 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
 
   const module21Query = String(module21?.mapper?.qs?.find?.((row) => row?.key === "q")?.value || "");
   const safeVariantReuse = module21Query.includes("__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__");
+  const liveVariantRecipe = String(module33?.mapper?.qs?.find?.((row) => row?.name === "recipe")?.value || "");
+  const variantRecipeReady = liveVariantRecipe === ITEM4_VARIANT_RECIPE_VERSION;
 
-  const alreadyReady = previewReady && selectorSafe && safeVariantReuse && !legacyLinkMappingsPresent;
+  const alreadyReady =
+    previewReady &&
+    selectorSafe &&
+    safeVariantReuse &&
+    variantRecipeReady &&
+    !legacyLinkMappingsPresent;
 
   if (alreadyReady) {
     return { ok: true, already_ready: true, live_name: blueprint.name };
@@ -6889,6 +6904,7 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
   const patchedRouter = phase6FindModule(patched.flow, 2);
   const patchedModule21 = phase6FindModule(patched.flow, 21);
   const patchedModule23 = phase6FindModule(patched.flow, 23);
+  const patchedModule33 = phase6FindModule(patched.flow, 33);
   const patchedModule35 = phase6FindModule(patched.flow, 35);
 
   // Module 10 already provides safe idempotency by unique Studio_Transfer_ID.
@@ -6904,6 +6920,17 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
   if (qRow) qRow.value = "name = '__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__' and trashed = false";
   else patchedModule21.mapper.qs.unshift({ key: "q", value: "name = '__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__' and trashed = false" });
   if (patchedModule21?.metadata?.designer) patchedModule21.metadata.designer.name = "21 - Disable Unsafe Filename-Only Variant Reuse";
+
+  if (!patchedModule33 || patchedModule33.module !== "http:ActionSendData") {
+    throw new HttpError(409, "SMV1 module 33 no longer matches the validated variant-render baseline");
+  }
+  patchedModule33.mapper.qs = Array.isArray(patchedModule33.mapper.qs) ? patchedModule33.mapper.qs : [];
+  const recipeRow = patchedModule33.mapper.qs.find((row) => row?.name === "recipe");
+  if (recipeRow) recipeRow.value = ITEM4_VARIANT_RECIPE_VERSION;
+  else patchedModule33.mapper.qs.push({ name: "recipe", value: ITEM4_VARIANT_RECIPE_VERSION });
+  if (patchedModule33?.metadata?.designer) {
+    patchedModule33.metadata.designer.name = "33 - Render Versioned Fill-Crop Platform Variant";
+  }
 
   for (const module of [patchedModule23, patchedModule35]) {
     if (module?.mapper?.record) {
@@ -6970,7 +6997,7 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
             Started_At: requestedAt,
             Requested_By: "chicagoshining-studio-api",
             Correlation_ID: "ITEM4-R2-BROWSER-PREVIEW-CACHE",
-            Notes: "Worker 0.10.1. Automatic Item 4 preview self-drain uses one SMV1 activation pulse per pending preview row when SMV1 is normally inactive. Keeps versioned Drive-file preview keys, safe transfer-ID-only variant reuse, Google Drive + Media Assets durable authority, and preserves scheduling/activation state.",
+            Notes: `Worker Item 8 ${ITEM4_VARIANT_RECIPE_VERSION}. Automatic Item 4 preview self-drain uses one SMV1 activation pulse per pending preview row when SMV1 is normally inactive. Requires the explicit fill-crop recipe on variant renders, keeps recipe-versioned transfer identities and Drive-file preview keys, preserves safe transfer-ID-only reuse and Google Drive + Media Assets durable authority, and does not alter scheduling/activation state.`,
           },
         }],
         typecast: true,
@@ -7007,13 +7034,16 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
     const verifiedFormula = String(verifiedSearch?.mapper?.formula || "");
     const verifiedModule21 = phase6FindModule(verified?.flow, 21);
     const verifiedModule21Query = String(verifiedModule21?.mapper?.qs?.find?.((row) => row?.key === "q")?.value || "");
+    const verifiedModule33 = phase6FindModule(verified?.flow, 33);
+    const verifiedVariantRecipe = String(verifiedModule33?.mapper?.qs?.find?.((row) => row?.name === "recipe")?.value || "");
     if (!verifiedSearch ||
         !verifiedFormula.includes("Preview_Status") ||
         !verifiedFormula.includes('AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending")') ||
         verifiedFormula.includes('OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded",AND({Transfer_Status}="Ready"') ||
         !phase6FindModule(verified?.flow, 60) ||
         !phase6FindModule(verified?.flow, 70) ||
-        !verifiedModule21Query.includes("__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__")) {
+        !verifiedModule21Query.includes("__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__") ||
+        verifiedVariantRecipe !== ITEM4_VARIANT_RECIPE_VERSION) {
       throw new HttpError(502, "SMV1 post-deploy verification did not match the safe authority/preview selector contract");
     }
 

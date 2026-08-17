@@ -19,3 +19,5 @@ Binding-safe redeploy: 2026-08-16 — upload a non-deployed Worker Version with 
 Wrangler-safe repair safety redeploy: 2026-08-16 — pinned Wrangler 4.123.0; keep-vars; required AIRTABLE_PAT and ELEVENLABS_API_KEY secrets; live-reconstructed STUDIO_MEDIA R2 binding; exact 11-binding pre/post checks; deployed-source byte verification; authenticated Studio session verification; automatic rollback to captured production version on any failure.
 
 Lease-store hardening deployment: 2026-08-16 — repair-control lease CRUD now uses stable Airtable table ID tbltuSt9UibYzxpah instead of display-name lookup; source commit c3bb24ec5d35ff9ec4f5bc3905e6d518968eebe4.
+
+Item 8 recipe-versioning deployment: 2026-08-17 — `fill-crop-v2` scopes variant transfer IDs, Google Drive filenames, manifest metadata, and SMV1 render queries so targeted rebuilds create distinct downstream cache identities.
