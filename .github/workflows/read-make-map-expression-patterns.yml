@@ -1,0 +1,103 @@
+name: Read Make Map Expression Patterns
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/read-make-map-expression-patterns.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Make API credentials without logging values
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json'))
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          t=str(vals.get('MAKE_API_TOKEN') or '').strip(); b=str(vals.get('MAKE_API_BASE_URL') or '').strip().rstrip('/')
+          if not t or not b: raise SystemExit('Missing active Make API settings')
+          open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
+          PY
+      - name: Scan related live blueprints for map expressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
+          mkdir -p /tmp/mapscan
+          # Related selection/review/render/carousel scenarios most likely to exercise complex arrays.
+          for SID in 5569495 5576620 5576363 5557966 5533802 5587853 5589819 5589822 5806658 5786899 5893683 5546623; do
+            code=$(curl -sS -o "/tmp/mapscan/$SID.json" -w '%{http_code}' "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
+            echo "scenario_${SID}_http=$code"
+            [[ "$code" == 200 ]] || echo '{}' > "/tmp/mapscan/$SID.json"
+          done
+          python - <<'PY'
+          import json, glob, os, re
+          names={
+            5569495:'R2',5576620:'R2B',5576363:'RR1',5557966:'R3',5533802:'P4',5587853:'C3',
+            5589819:'C7',5589822:'C8',5806658:'TTD0',5786899:'AP0C',5893683:'P020-2',5546623:'P020-1'
+          }
+          def as_obj(v):
+              if isinstance(v,dict): return v
+              if isinstance(v,str):
+                  try:return json.loads(v)
+                  except:return None
+              return None
+          def bp_from(d):
+              x=(d.get('response',{}).get('blueprint') if isinstance(d.get('response'),dict) else None) or d.get('blueprint') or d.get('response')
+              return as_obj(x)
+          def walk(v,path=''):
+              if isinstance(v,dict):
+                  for k,x in v.items():
+                      yield from walk(x,f'{path}.{k}' if path else str(k))
+              elif isinstance(v,list):
+                  for i,x in enumerate(v): yield from walk(x,f'{path}[{i}]')
+              elif isinstance(v,str) and re.search(r'\bmap\s*\(',v,re.I):
+                  yield path,v
+          out=[]
+          for p in glob.glob('/tmp/mapscan/*.json'):
+              sid=int(os.path.basename(p).split('.')[0])
+              try:d=json.load(open(p))
+              except:continue
+              bp=bp_from(d)
+              if not isinstance(bp,dict): continue
+              for path,expr in walk(bp):
+                  # Sanitized: map expressions only; no unrelated mapper payloads.
+                  out.append({'scenario_id':sid,'scenario_name':names.get(sid,''),'path':path,'expression':expr})
+          open('/tmp/make-map-expression-patterns.json','w').write(json.dumps({'matches':out},indent=2,sort_keys=True))
+          print(json.dumps({'match_count':len(out),'matches':out},indent=2,sort_keys=True))
+          PY
+      - name: Destroy transient credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/q.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+          rm -rf /tmp/mapscan
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: make-map-expression-patterns-${{ github.run_id }}
+          path: /tmp/make-map-expression-patterns.json
+          if-no-files-found: warn
+          retention-days: 30
