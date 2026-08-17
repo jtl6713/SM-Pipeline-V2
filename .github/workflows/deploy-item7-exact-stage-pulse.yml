@@ -58,34 +58,47 @@ jobs:
           SUB: ${{ steps.bridge.outputs.sub }}
         run: |
           set -euo pipefail
+          mkdir -p evidence
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
-          curl -fsS --max-time 60 -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" -o /tmp/before.json
-          cat /tmp/before.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
-          jq -e '.ok==true' /tmp/before.json >/dev/null
 
-          if jq -e '.inspected.scenario_active==true' /tmp/before.json >/dev/null; then
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -sS --max-time 60 -o evidence/before.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' evidence/before.json >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          echo "before_http=$code"
+          cat evidence/before.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
+          test "$code" = 200
+          jq -e '.ok==true' evidence/before.json >/dev/null
+
+          if jq -e '.inspected.scenario_active==true' evidence/before.json >/dev/null; then
             release=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --argjson sid "$SCENARIO_ID" '{action:"release",test_run_id:$tr,lease_id:$lease,scenario_id:$sid}')
-            code=$(curl -sS --max-time 90 -o /tmp/release.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$release" || true)
-            echo "release_http=$code"
-            cat /tmp/release.json || true
+            rcode=$(curl -sS --max-time 90 -o evidence/release.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$release" || true)
+            echo "release_http=$rcode"
+            cat evidence/release.json || true
           else
-            echo '{"skipped":true,"reason":"scenario already inactive"}' > /tmp/release.json
+            echo '{"skipped":true,"reason":"scenario already inactive"}' > evidence/release.json
           fi
 
-          curl -fsS --max-time 60 -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" -o /tmp/after.json
-          cat /tmp/after.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
-          jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1"' /tmp/after.json >/dev/null
+          acode=000
+          for i in 1 2 3 4 5; do
+            acode=$(curl -sS --max-time 60 -o evidence/after.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
+            if [[ "$acode" == 200 ]] && jq -e '.ok==true and .inspected.scenario_active==false' evidence/after.json >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          echo "after_http=$acode"
+          cat evidence/after.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
+          test "$acode" = 200
+          jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1"' evidence/after.json >/dev/null
 
       - name: Save safety evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: item7-r2-l5-post-expiry-${{ github.run_id }}
-          path: |
-            /tmp/before.json
-            /tmp/release.json
-            /tmp/after.json
+          path: evidence/
           if-no-files-found: ignore
           retention-days: 30
 
