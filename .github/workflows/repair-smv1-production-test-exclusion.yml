@@ -1,0 +1,84 @@
+name: Repair SMV1 Production Test Exclusion
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/repair-smv1-production-test-exclusion.txt']
+permissions: {contents: read}
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Preflight and patch SMV1 Module 1 production-only selector
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json,urllib.request,copy,time,sys
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}; BASE=str(v['MAKE_API_BASE_URL']).strip().rstrip('/'); TOKEN=str(v['MAKE_API_TOKEN']).strip()
+          SID=5894885
+          EXPECTED='OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))'
+          def api(path,method='GET',body=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode(); q=urllib.request.Request(BASE+path,data=data,method=method,headers={'Authorization':'Token '+TOKEN,'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-Repair/1.0'}); 
+            with urllib.request.urlopen(q,timeout=30) as h:return json.loads(h.read().decode() or '{}')
+          def sc(x):return x.get('scenario') or x.get('response') or x
+          def bp(x):
+            b=x.get('blueprint') or (x.get('response') or {}).get('blueprint') or x; return json.loads(b) if isinstance(b,str) else b
+          def nodes(flow,out=None):
+            if out is None:out={}
+            for n in flow or []:
+              out[int(n.get('id'))]=n
+              for r in n.get('routes') or []:nodes(r.get('flow') or [],out)
+            return out
+          def safe(reason,detail=''):
+            e={'passed':False,'safe_no_write':True,'reason':reason,'detail':detail};open('/tmp/evidence.json','w').write(json.dumps(e,indent=2));print(json.dumps(e));sys.exit(0)
+          try:
+            meta=copy.deepcopy(sc(api(f'/scenarios/{SID}'))); before=bp(api(f'/scenarios/{SID}/blueprint?draft=false')); patched=copy.deepcopy(before); n=nodes(patched.get('flow') or [])
+            if meta.get('hookId') is not None or meta.get('isActive') is not False:raise ValueError('SMV1 state/hook drift')
+            m=n.get(1); 
+            if not m or m.get('module')!='airtable:ActionSearchRecords':raise ValueError('SMV1 Module 1 shape drift')
+            mapper=m.get('mapper') or {}
+            if str(mapper.get('maxRecords'))!='1':raise ValueError('SMV1 maxRecords drift')
+            current=str(mapper.get('formula') or '').strip()
+            if current not in (EXPECTED,'AND({Test_Run_ID}=BLANK(),'+EXPECTED+')'):raise ValueError('SMV1 eligibility formula drift: '+current)
+          except Exception as e:safe('preflight_shape_mismatch',str(e))
+          n=nodes(patched.get('flow') or []); n[1].setdefault('mapper',{})['formula']='AND({Test_Run_ID}=BLANK(),'+EXPECTED+')'; n[1].setdefault('metadata',{}).setdefault('designer',{})['name']='1 - Get One Production Authority or Browser Preview Work Item'
+          written=False
+          try:
+            if str((nodes(before.get('flow') or [])[1].get('mapper') or {}).get('formula') or '').strip()!=str((n[1].get('mapper') or {}).get('formula') or '').strip():
+              api(f'/scenarios/{SID}?confirmed=true','PATCH',{'blueprint':json.dumps(patched,separators=(',',':'))});written=True;time.sleep(.7)
+            sm=sc(api(f'/scenarios/{SID}')); livebp=bp(api(f'/scenarios/{SID}/blueprint?draft=false')); live=nodes(livebp.get('flow') or []); old=nodes(before.get('flow') or [])
+            if (sm.get('hookId'),sm.get('isActive'),sm.get('scheduling'))!=(meta.get('hookId'),meta.get('isActive'),meta.get('scheduling')):raise RuntimeError('SMV1 metadata drift')
+            if set(live)!=set(old):raise RuntimeError('SMV1 topology drift')
+            f=str((live[1].get('mapper') or {}).get('formula') or '')
+            if f!='AND({Test_Run_ID}=BLANK(),'+EXPECTED+')' or str((live[1].get('mapper') or {}).get('maxRecords'))!='1':raise RuntimeError('SMV1 production selector verification failed')
+            ev={'passed':True,'scenario_id':SID,'module_1':'production_only','test_exclusion':True,'max_records':1,'active':sm.get('isActive'),'hookId':sm.get('hookId'),'write_performed':written};open('/tmp/evidence.json','w').write(json.dumps(ev,indent=2));print(json.dumps(ev))
+          except Exception:
+            if written:
+              try:api(f'/scenarios/{SID}?confirmed=true','PATCH',{'blueprint':json.dumps(before,separators=(',',':'))})
+              except Exception as re:print('ROLLBACK_ERROR',str(re))
+            raise
+          PY
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smv1-production-test-exclusion-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings /tmp/evidence.json
