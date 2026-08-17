@@ -1,0 +1,1 @@
+Checkpoint Item 6 as IN PROGRESS after read-only live publisher/orchestrator/schema inventory. Evidence: repair/evidence/item6-republish-inventory-20260817.json. Trigger 2026-08-17 08:05 CT.
