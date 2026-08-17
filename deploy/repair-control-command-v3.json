@@ -4,5 +4,5 @@
   "lease_id": "ITEM6_DIAG_NONEXISTENT_LEASE",
   "scenario_id": 5813561,
   "expected_http_status": 409,
-  "proof_nonce": "item6-exact-state-miss-001"
+  "proof_nonce": "item6-exact-state-miss-002"
 }
