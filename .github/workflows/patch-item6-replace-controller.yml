@@ -1,0 +1,354 @@
+name: Patch Item6 Replace Controller
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/patch-item6-replace-controller.txt']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Add exact-output replacement transaction controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/studio-api/worker.js')
+          s=p.read_text()
+          begin='// ITEM6_REPLACE_TRANSACTION_V1_BEGIN'
+          end='// ITEM6_REPLACE_TRANSACTION_V1_END'
+          if begin in s or end in s:
+              raise SystemExit('Item 6 replacement controller marker already present')
+          anchor='async function repairControlAction(env, input) {'
+          if s.count(anchor)!=1:
+              raise SystemExit(f'Expected one repairControlAction anchor, found {s.count(anchor)}')
+          block=r'''
+// ITEM6_REPLACE_TRANSACTION_V1_BEGIN
+const ITEM6_REPLACE_ACTIVE_STATES = new Set(["Prepared", "Publishing", "Verified", "Cleanup Pending", "Manual Cleanup Required"]);
+const ITEM6_REPLACE_COMMON_FIELDS = Object.freeze([
+  "Publish_Status", "Published_At", "Platform_Post_URL", "Publish_Error_Message",
+  "Publish_Attempt_Count", "Last_Publish_Attempt_At", "Publish_Locked_At", "Publish_Locked_By",
+  "Publish_Started_At", "Platform_Post_ID", "Platform_Media_ID", "Platform_Publish_Response_JSON",
+  "Platform_Publish_Status_URL", "Publish_Retry_Eligible", "Publish_Next_Retry_At", "Manual_Fallback_Required"
+]);
+const ITEM6_REPLACE_PLATFORM_FIELDS = Object.freeze({
+  Instagram: Object.freeze([
+    "IG_Story_Status", "IG_Story_Published_At", "IG_Story_Post_ID", "IG_Story_Container_ID",
+    "IG_Story_Error_Message", "IG_Story_Attempt_Count", "IG_Story_Last_Attempt_At", "IG_Story_Locked_At",
+    "IG_Story_Locked_By", "IG_Story_Response_JSON",
+    "IG_Carousel_Status", "IG_Carousel_Child_Count", "IG_Carousel_Children_Ready_Count", "IG_Carousel_Children_JSON",
+    "IG_Carousel_Parent_Container_ID", "IG_Carousel_Parent_Status", "IG_Carousel_Parent_Created_At",
+    "IG_Carousel_Parent_Last_Checked_At", "IG_Carousel_Published_Media_ID", "IG_Carousel_Published_At",
+    "IG_Carousel_Error_Stage", "IG_Carousel_Error_Message", "IG_Carousel_Retry_Count", "IG_Carousel_Next_Retry_At",
+    "IG_Carousel_Last_Completed_Stage", "IG_Carousel_Parent_Poll_Attempt_Count", "IG_Carousel_Parent_Response_JSON",
+    "IG_Carousel_Publish_Attempt_Count", "IG_Carousel_Publish_Response_JSON", "IG_Carousel_Reconcile_Attempt_Count",
+    "IG_Carousel_Reconcile_Response_JSON", "IG_Carousel_Finalize_Attempt_Count", "IG_Carousel_Finalize_Response_JSON"
+  ]),
+  Facebook: Object.freeze([
+    "FB_Photo_IDs_JSON", "FB_Photo_Count", "FB_Last_Checked_At", "FB_Publish_Status", "FB_Post_Fingerprint",
+    "FB_Reconcile_Attempt_Count", "FB_Reconcile_Response_JSON", "FB_Slideshow_Status", "FB_Slideshow_Render_Job_ID",
+    "FB_Slideshow_Render_Status_URL", "FB_Slideshow_Render_URL", "FB_Slideshow_Public_URL", "FB_Slideshow_Drive_File_ID",
+    "FB_Slideshow_Drive_File_Name", "FB_Slideshow_Meta_Video_ID", "FB_Slideshow_Meta_Upload_URL",
+    "FB_Slideshow_Response_JSON", "FB_Slideshow_Attempt_Count", "FB_Slideshow_Last_Checked_At", "FB_Slideshow_Error_Message"
+  ]),
+  TikTok: Object.freeze([
+    "TikTok_Private_Posted_At", "TikTok_Privacy_Status", "Recommended_Publication_At", "TikTok_Public_Confirmation_At",
+    "TikTok_Review_Token", "TikTok_Review_URL", "TikTok_Review_Status", "TikTok_Review_Expires_At", "TikTok_Review_Submitted_At",
+    "Manual_Completion_Status", "Manual_Completion_At", "Manual_Published_URL", "TikTok_Draft_Status", "TikTok_Draft_Publish_ID",
+    "TikTok_Draft_Delivered_At", "TikTok_Draft_Last_Checked_At", "TikTok_Draft_Email_Sent_At", "TikTok_Manual_Posted_At",
+    "TikTok_Draft_Poll_Attempt_Count", "TikTok_Draft_Response_JSON", "TikTok_Draft_Public_Post_IDs_JSON",
+    "TikTok_Manual_Completion_Token", "TikTok_Manual_Completion_URL"
+  ]),
+  YouTube: Object.freeze([
+    "YouTube_Package_Status", "YouTube_Package_Email_Sent_At", "YouTube_Video_ID", "YouTube_Upload_Status",
+    "YouTube_Processing_Status", "YouTube_Last_Checked_At", "YouTube_Stage", "YouTube_Upload_Job_ID",
+    "YouTube_Upload_Started_At", "YouTube_Upload_Completed_At", "YouTube_Upload_Progress_Percent",
+    "YouTube_Processing_Progress_Percent", "YouTube_Thumbnail_Status", "YouTube_Processing_Failure_Reason",
+    "YouTube_Rejection_Reason", "YouTube_Error_Message", "YouTube_Response_JSON", "YouTube_Idempotency_Key", "YouTube_Published_At"
+  ])
+});
+
+function item6Choice(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value.name || value.id || null;
+  return value ?? null;
+}
+
+function item6Platform(fields) {
+  return String(item6Choice(fields?.Platform) || "").trim();
+}
+
+function item6SnapshotFieldNames(fields) {
+  const platform = item6Platform(fields);
+  return [...ITEM6_REPLACE_COMMON_FIELDS, ...(ITEM6_REPLACE_PLATFORM_FIELDS[platform] || [])];
+}
+
+function item6PublicationSnapshot(record) {
+  const fields = record?.fields || {};
+  const names = item6SnapshotFieldNames(fields);
+  const values = {};
+  for (const name of names) values[name] = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : null;
+  return {
+    schema: "ITEM6_LAST_GOOD_V1",
+    record_id: record.id,
+    platform: item6Platform(fields),
+    captured_at: new Date().toISOString(),
+    fields: values,
+  };
+}
+
+function item6ParseSnapshot(value, recordId) {
+  let snapshot;
+  try { snapshot = typeof value === "string" ? JSON.parse(value) : value; } catch { snapshot = null; }
+  if (!snapshot || snapshot.schema !== "ITEM6_LAST_GOOD_V1" || snapshot.record_id !== recordId || !snapshot.fields || typeof snapshot.fields !== "object") {
+    throw new HttpError(409, `Platform Output ${recordId} does not have a valid Item 6 last-good snapshot`);
+  }
+  return snapshot;
+}
+
+function item6Identity(fields) {
+  const platform = item6Platform(fields);
+  const first = (...values) => values.map(v => String(v || "").trim()).find(Boolean) || null;
+  if (platform === "Instagram") return first(fields.Platform_Post_ID, fields.IG_Carousel_Published_Media_ID, fields.IG_Story_Post_ID, fields.Platform_Post_URL);
+  if (platform === "Facebook") return first(fields.Platform_Post_ID, fields.FB_Slideshow_Meta_Video_ID, fields.Platform_Post_URL);
+  if (platform === "TikTok") return first(fields.Platform_Post_ID, fields.Manual_Published_URL, fields.TikTok_Draft_Public_Post_IDs_JSON, fields.Platform_Post_URL);
+  if (platform === "YouTube") return first(fields.YouTube_Video_ID, fields.Platform_Post_ID, fields.Platform_Post_URL);
+  return first(fields.Platform_Post_ID, fields.Platform_Post_URL);
+}
+
+function item6IdentityFromSnapshot(snapshot) {
+  return item6Identity({ Platform: snapshot.platform, ...(snapshot.fields || {}) });
+}
+
+function item6SafeJson(value, fallback = null) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "object") return value;
+  try { return JSON.parse(String(value)); } catch { return fallback; }
+}
+
+async function item6LoadAllowedOutput(env, lease, input) {
+  const recordId = repairString(input.platform_output_record_id, "platform_output_record_id", 32);
+  if (!lease.contract.allowed_platform_output_record_ids.includes(recordId)) {
+    throw new HttpError(403, `Platform Output ${recordId} is outside this test_run_id allowlist`);
+  }
+  await repairVerifyOutputRecord(env, recordId, lease.contract.allow_public_publish === true, lease.contract.test_run_id);
+  const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
+  if (!record?.id) throw new HttpError(404, `Platform Output ${recordId} not found`);
+  return record;
+}
+
+async function item6PatchOutput(env, recordId, fields) {
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
+function item6PrepareResetPatch(record, transactionId, fingerprint) {
+  const fields = record.fields || {};
+  const platform = item6Platform(fields);
+  const patch = {};
+  for (const name of ITEM6_REPLACE_COMMON_FIELDS) patch[name] = null;
+  patch.Publish_Status = "Ready";
+  patch.Publish_Attempt_Count = 0;
+  patch.Publish_Retry_Eligible = false;
+  patch.Manual_Fallback_Required = false;
+  for (const name of ITEM6_REPLACE_PLATFORM_FIELDS[platform] || []) patch[name] = null;
+  if (platform === "YouTube") {
+    patch.YouTube_Idempotency_Key = `item6:${record.id}:${transactionId}:${fingerprint}`.slice(0, 250);
+  }
+  return patch;
+}
+
+function item6ObsoleteInventory(snapshot) {
+  const fields = snapshot.fields || {};
+  return {
+    schema: "ITEM6_OBSOLETE_V1",
+    platform: snapshot.platform,
+    captured_at: snapshot.captured_at,
+    canonical_identity: item6IdentityFromSnapshot(snapshot),
+    platform_post_id: fields.Platform_Post_ID || null,
+    platform_media_id: fields.Platform_Media_ID || null,
+    platform_post_url: fields.Platform_Post_URL || null,
+    instagram_story_post_id: fields.IG_Story_Post_ID || null,
+    instagram_carousel_media_id: fields.IG_Carousel_Published_Media_ID || null,
+    facebook_slideshow_video_id: fields.FB_Slideshow_Meta_Video_ID || null,
+    tiktok_public_post_ids: item6SafeJson(fields.TikTok_Draft_Public_Post_IDs_JSON, fields.TikTok_Draft_Public_Post_IDs_JSON || null),
+    youtube_video_id: fields.YouTube_Video_ID || null,
+  };
+}
+
+async function item6ReplaceControlAction(env, action, lease, input) {
+  const record = await item6LoadAllowedOutput(env, lease, input);
+  const fields = record.fields || {};
+  const transactionId = repairString(input.replace_transaction_id, "replace_transaction_id", 120);
+  const fingerprint = repairString(input.replace_fingerprint, "replace_fingerprint", 250);
+  const currentTxn = String(fields.Replace_Transaction_ID || "").trim();
+  const currentFingerprint = String(fields.Replace_Fingerprint || "").trim();
+  const state = String(fields.Replace_State || "").trim();
+  const now = new Date().toISOString();
+
+  if (currentTxn && currentTxn !== transactionId && ITEM6_REPLACE_ACTIVE_STATES.has(state)) {
+    throw new HttpError(409, `Platform Output ${record.id} already has active replacement transaction ${currentTxn}`);
+  }
+  if (currentTxn === transactionId && currentFingerprint && currentFingerprint !== fingerprint) {
+    throw new HttpError(409, `Replacement transaction ${transactionId} fingerprint mismatch`);
+  }
+
+  if (action === "replace_transaction_state") {
+    return {
+      action,
+      output: { id: record.id, output_id: fields.Output_ID ?? null, platform: item6Platform(fields), test_run_id: fields.Test_Run_ID || null },
+      replace: {
+        transaction_id: currentTxn || null,
+        fingerprint: currentFingerprint || null,
+        state: state || null,
+        cleanup_state: fields.Replace_Cleanup_State || null,
+        started_at: fields.Replace_Started_At || null,
+        updated_at: fields.Replace_Updated_At || null,
+        has_last_good_snapshot: Boolean(String(fields.Replace_Last_Good_JSON || "").trim()),
+      },
+    };
+  }
+
+  await repairReserveBudget(env, lease, { operationCost: 1, action });
+
+  if (action === "prepare_replace_transaction") {
+    if (currentTxn === transactionId && currentFingerprint === fingerprint && ITEM6_REPLACE_ACTIVE_STATES.has(state)) {
+      return { action, idempotent: true, output: { id: record.id, output_id: fields.Output_ID ?? null }, replace: { transaction_id: transactionId, fingerprint, state } };
+    }
+    if (state === "Complete" && currentTxn === transactionId && currentFingerprint === fingerprint) {
+      return { action, idempotent: true, complete: true, output: { id: record.id, output_id: fields.Output_ID ?? null }, replace: { transaction_id: transactionId, fingerprint, state } };
+    }
+    const snapshot = item6PublicationSnapshot(record);
+    const oldIdentity = item6IdentityFromSnapshot(snapshot);
+    if (!oldIdentity) throw new HttpError(409, `Platform Output ${record.id} has no durable published identity to replace`);
+    const updated = await item6PatchOutput(env, record.id, {
+      Replace_Transaction_ID: transactionId,
+      Replace_State: "Prepared",
+      Replace_Fingerprint: fingerprint,
+      Replace_Last_Good_JSON: JSON.stringify(snapshot),
+      Replace_Obsolete_JSON: null,
+      Replace_Cleanup_State: null,
+      Replace_Cleanup_Attempt_Count: 0,
+      Replace_Error: null,
+      Replace_Started_At: now,
+      Replace_Updated_At: now,
+    });
+    return { action, idempotent: false, output: { id: record.id, output_id: fields.Output_ID ?? null, platform: snapshot.platform }, replace: { transaction_id: transactionId, fingerprint, state: "Prepared", last_good_identity: oldIdentity }, record: { id: updated.id } };
+  }
+
+  if (currentTxn !== transactionId || currentFingerprint !== fingerprint) {
+    throw new HttpError(409, `Replacement transaction ${transactionId} is not the current transaction for Platform Output ${record.id}`);
+  }
+  const snapshot = item6ParseSnapshot(fields.Replace_Last_Good_JSON, record.id);
+  const oldIdentity = item6IdentityFromSnapshot(snapshot);
+
+  if (action === "begin_replace_transaction") {
+    if (lease.contract.allow_public_publish !== true) throw new HttpError(403, "Replacement publishing requires a lease with allow_public_publish=true");
+    if (fields.Do_Not_Publish === true) throw new HttpError(409, `Platform Output ${record.id} is still Do_Not_Publish`);
+    const explicitPlatform = String(lease.contract.explicit_publish_platform || "").trim();
+    if (!explicitPlatform || explicitPlatform !== item6Platform(fields)) throw new HttpError(409, "Replacement platform does not match the lease explicit_publish_platform");
+    if (state === "Publishing") return { action, idempotent: true, output: { id: record.id }, replace: { transaction_id: transactionId, fingerprint, state } };
+    if (state !== "Prepared") throw new HttpError(409, `Replacement begin requires Prepared state, found ${state || "blank"}`);
+    const reset = item6PrepareResetPatch(record, transactionId, fingerprint);
+    const updated = await item6PatchOutput(env, record.id, {
+      ...reset,
+      Replace_State: "Publishing",
+      Replace_Cleanup_State: null,
+      Replace_Error: null,
+      Replace_Updated_At: now,
+    });
+    return { action, idempotent: false, output: { id: record.id, output_id: fields.Output_ID ?? null, platform: item6Platform(fields) }, replace: { transaction_id: transactionId, fingerprint, state: "Publishing", last_good_identity: oldIdentity }, record: { id: updated.id } };
+  }
+
+  if (action === "verify_replace_transaction") {
+    if (!["Publishing", "Verified", "Cleanup Pending", "Manual Cleanup Required", "Complete"].includes(state)) throw new HttpError(409, `Replacement verification requires Publishing or later state, found ${state || "blank"}`);
+    const newIdentity = item6Identity(fields);
+    const expectedIdentity = String(input.expected_new_platform_identity || "").trim();
+    if (!newIdentity) throw new HttpError(409, `Platform Output ${record.id} has no replacement publication identity yet`);
+    if (oldIdentity && newIdentity === oldIdentity) throw new HttpError(409, "Replacement identity is still the last-good publication identity");
+    if (expectedIdentity && expectedIdentity !== newIdentity) throw new HttpError(409, "Observed replacement identity does not match expected_new_platform_identity");
+    if (["Verified", "Cleanup Pending", "Manual Cleanup Required", "Complete"].includes(state)) {
+      return { action, idempotent: true, output: { id: record.id }, replace: { transaction_id: transactionId, fingerprint, state, old_identity: oldIdentity, new_identity: newIdentity, cleanup_state: fields.Replace_Cleanup_State || null } };
+    }
+    const obsolete = item6ObsoleteInventory(snapshot);
+    const updated = await item6PatchOutput(env, record.id, {
+      Replace_State: "Manual Cleanup Required",
+      Replace_Obsolete_JSON: JSON.stringify(obsolete),
+      Replace_Cleanup_State: "Manual Cleanup Required",
+      Replace_Error: null,
+      Replace_Updated_At: now,
+    });
+    return { action, idempotent: false, output: { id: record.id, output_id: fields.Output_ID ?? null, platform: item6Platform(fields) }, replace: { transaction_id: transactionId, fingerprint, state: "Manual Cleanup Required", old_identity: oldIdentity, new_identity: newIdentity, cleanup_state: "Manual Cleanup Required" }, record: { id: updated.id } };
+  }
+
+  if (action === "rollback_replace_transaction") {
+    if (state === "Rolled Back") return { action, idempotent: true, output: { id: record.id }, replace: { transaction_id: transactionId, fingerprint, state } };
+    if (!["Prepared", "Publishing", "Failed"].includes(state)) throw new HttpError(409, `Replacement rollback is not allowed from ${state || "blank"}`);
+    const observedIdentity = item6Identity(fields);
+    if (state === "Publishing" && observedIdentity && observedIdentity !== oldIdentity) {
+      await item6PatchOutput(env, record.id, {
+        Replace_State: "Manual Cleanup Required",
+        Replace_Cleanup_State: "Manual Cleanup Required",
+        Replace_Error: "Rollback refused because a new external publication identity is already present; clean up the new object before restoring last-good state.",
+        Replace_Updated_At: now,
+      });
+      throw new HttpError(409, "Rollback refused because replacement publication already exists; cleanup is required before last-good restoration");
+    }
+    const restore = { ...(snapshot.fields || {}) };
+    const updated = await item6PatchOutput(env, record.id, {
+      ...restore,
+      Replace_State: "Rolled Back",
+      Replace_Cleanup_State: null,
+      Replace_Error: String(input.rollback_reason || "").trim() || null,
+      Replace_Updated_At: now,
+    });
+    return { action, idempotent: false, output: { id: record.id, output_id: fields.Output_ID ?? null, platform: snapshot.platform }, replace: { transaction_id: transactionId, fingerprint, state: "Rolled Back", restored_identity: oldIdentity }, record: { id: updated.id } };
+  }
+
+  if (action === "complete_replace_cleanup") {
+    if (!["Manual Cleanup Required", "Cleanup Pending", "Verified"].includes(state)) throw new HttpError(409, `Cleanup completion is not allowed from ${state || "blank"}`);
+    const evidence = input.cleanup_evidence;
+    if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) throw new HttpError(400, "cleanup_evidence object is required");
+    const verified = evidence.verified === true;
+    if (!verified) throw new HttpError(409, "cleanup_evidence.verified must be true before completing replacement cleanup");
+    const updated = await item6PatchOutput(env, record.id, {
+      Replace_State: "Complete",
+      Replace_Cleanup_State: "Complete",
+      Replace_Cleanup_Attempt_Count: Number(fields.Replace_Cleanup_Attempt_Count || 0) + 1,
+      Replace_Error: null,
+      Replace_Updated_At: now,
+    });
+    return { action, idempotent: false, output: { id: record.id, output_id: fields.Output_ID ?? null, platform: item6Platform(fields) }, replace: { transaction_id: transactionId, fingerprint, state: "Complete", cleanup_state: "Complete", cleanup_evidence: evidence }, record: { id: updated.id } };
+  }
+
+  throw new HttpError(400, `Unsupported Item 6 replacement action ${action}`);
+}
+// ITEM6_REPLACE_TRANSACTION_V1_END
+
+'''
+          s=s.replace(anchor,block+anchor,1)
+          action_anchor='''  const lease = await repairFindLease(env, input);\n\n  if (action === "assert_output_allowed") {'''
+          if s.count(action_anchor)!=1:
+              raise SystemExit(f'Expected one repair action dispatch anchor, found {s.count(action_anchor)}')
+          action_repl='''  const lease = await repairFindLease(env, input);\n\n  if (["replace_transaction_state", "prepare_replace_transaction", "begin_replace_transaction", "verify_replace_transaction", "rollback_replace_transaction", "complete_replace_cleanup"].includes(action)) {\n    return item6ReplaceControlAction(env, action, lease, input);\n  }\n\n  if (action === "assert_output_allowed") {'''
+          s=s.replace(action_anchor,action_repl,1)
+          p.write_text(s)
+          PY
+          node --check apps/studio-api/worker.js
+          git diff --check
+          grep -q 'ITEM6_REPLACE_TRANSACTION_V1_BEGIN' apps/studio-api/worker.js
+          grep -q 'prepare_replace_transaction' apps/studio-api/worker.js
+          grep -q 'Rollback refused because replacement publication already exists' apps/studio-api/worker.js
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'item6: add exact-output replace transaction controller'
+          git push origin HEAD:main
