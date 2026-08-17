@@ -1,0 +1,57 @@
+name: Patch Studio SMV1 Exact Test Pulse V2
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/patch-studio-smv1-exact-test-pulse-v2.txt']
+permissions: {contents: write}
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch exact SMV1 Test Mode selector pulse in variant drain only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/studio-api/worker.js'); s=p.read_text()
+          def once(text,old,new,label):
+              c=text.count(old)
+              if c!=1: raise SystemExit(f'{label}: expected 1 match, found {c}')
+              return text.replace(old,new,1)
+          # Global constants.
+          s=once(s,
+          'const ITEM4_SMV1_SCENARIO_ID = 5894885;\nconst ITEM4_P3_SCENARIO_ID = 5531703;',
+          '''const ITEM4_SMV1_SCENARIO_ID = 5894885;\nconst ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';\nconst ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;\nconst ITEM4_P3_SCENARIO_ID = 5531703;''','constants')
+          helper='''\nfunction item4Smv1FormulaQuoted(value) {\n  return String(value || "").replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\\\"');\n}\nfunction item4Smv1ExactTestFormula(recordId, testRunId) {\n  return `AND({Production_Request_Record_ID}="${item4Smv1FormulaQuoted(recordId)}",{Test_Run_ID}="${item4Smv1FormulaQuoted(testRunId)}",${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;\n}\nasync function item4SetSmv1SelectorFormula(env, formula) {\n  const { makeApiBase, headers } = await phase6MakeApiConfig(env);\n  const read = async () => {\n    const r=await fetch(`${makeApiBase}/scenarios/${ITEM4_SMV1_SCENARIO_ID}/blueprint?draft=false`,{method:"GET",headers});\n    const raw=await r.text(); if(!r.ok) throw new HttpError(r.status,`SMV1 selector read failed (${r.status}): ${raw.slice(0,240)}`);\n    const b=raw?JSON.parse(raw):{}; const w=b?.blueprint??b?.response?.blueprint??b; return typeof w==="string"?JSON.parse(w):w;\n  };\n  const find=(flow,id)=>{for(const n of flow||[]){if(Number(n?.id)===Number(id))return n;for(const route of n?.routes||[]){const x=find(route?.flow||[],id);if(x)return x;}}return null;};\n  const bp=await read(); const m=find(bp?.flow||[],1);\n  if(!m||m.module!=="airtable:ActionSearchRecords"||String(m?.mapper?.maxRecords||"")!=="1") throw new HttpError(409,"SMV1 Module 1 selector contract drifted");\n  if(String(m?.mapper?.formula||"")===formula)return false; m.mapper.formula=formula;\n  const patch=await fetch(`${makeApiBase}/scenarios/${ITEM4_SMV1_SCENARIO_ID}?confirmed=true`,{method:"PATCH",headers,body:JSON.stringify({blueprint:JSON.stringify(bp)})});\n  const pr=await patch.text();if(!patch.ok)throw new HttpError(patch.status,`SMV1 selector patch failed (${patch.status}): ${pr.slice(0,240)}`);\n  const vb=await read();const vm=find(vb?.flow||[],1);if(String(vm?.mapper?.formula||"")!==formula||String(vm?.mapper?.maxRecords||"")!=="1")throw new HttpError(502,"SMV1 selector verification failed");return true;\n}\n'''
+          s=once(s,'async function item4DrainVariantWorker(env, recordId, maxRuns) {',helper+'\nasync function item4DrainVariantWorker(env, recordId, maxRuns) {','helper')
+          # Scope all following replacements to this one function.
+          start=s.index('async function item4DrainVariantWorker(env, recordId, maxRuns) {')
+          end=s.index('\nasync function ',start+20)
+          seg=s[start:end]
+          seg=once(seg,
+          '  const originalState = await phase6ScenarioState(env, ITEM4_SMV1_SCENARIO_ID);\n  const executionIds = [];',
+          '''  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);\n  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();\n  const originalState = await phase6ScenarioState(env, ITEM4_SMV1_SCENARIO_ID);\n  if (testRunId && originalState.isActive) throw new HttpError(409, "Test Mode refuses to seize an already-active SMV1 scenario");\n  const executionIds = [];''','owner identity')
+          seg=once(seg,
+          '      const failed = current.filter((row) => item4QueueStatus(row) === "Failed");\n      if (!outstanding.length || failed.length) break;',
+          '''      const failed = current.filter((row) => item4QueueStatus(row) === "Failed");\n      if (!outstanding.length || failed.length) break;\n      if (testRunId) {\n        const crossBoundary=current.filter((row)=>String(f(row,"Test_Run_ID")||"").trim()!==testRunId);\n        if(crossBoundary.length) throw new HttpError(409,"SMV1 Test Mode queue contains a blank or mismatched Test_Run_ID");\n      }''','queue guard')
+          seg=once(seg,
+          '        await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, true);\n        await new Promise((resolve) => setTimeout(resolve, 2500));\n        try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}',
+          '''        let exactTestSelectorInstalled=false;\n        try {\n          if(testRunId){await item4SetSmv1SelectorFormula(env,item4Smv1ExactTestFormula(recordId,testRunId));exactTestSelectorInstalled=true;}\n          await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, true);\n          await new Promise((resolve) => setTimeout(resolve, 2500));\n        } finally {\n          try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}\n          if(exactTestSelectorInstalled) await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);\n        }''','exact pulse')
+          seg=once(seg,
+          '    if (!originalState.isActive) {\n      try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}\n    }',
+          '''    if (!originalState.isActive) {\n      try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}\n    }\n    if(testRunId){try{await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);}catch{}}''','guaranteed restore')
+          s=s[:start]+seg+s[end:]
+          s=once(s,'          studio_smv1_queue_test_identity_v1: true,','          studio_smv1_queue_test_identity_v1: true,\n          studio_smv1_exact_test_pulse_v1: true,','health')
+          p.write_text(s)
+          PY
+          node --check apps/studio-api/worker.js
+          git diff --check
+          grep -q 'studio_smv1_exact_test_pulse_v1: true' apps/studio-api/worker.js
+          grep -q 'Test Mode refuses to seize an already-active SMV1 scenario' apps/studio-api/worker.js
+          git config user.name 'SM Pipeline Repair Bot'; git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'repair: exact Test Mode selector pulse for SMV1'
+          git push
