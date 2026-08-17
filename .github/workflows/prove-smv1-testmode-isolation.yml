@@ -1,0 +1,153 @@
+name: Prove SMV1 Test Mode Isolation
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/prove-smv1-testmode-isolation.txt']
+
+permissions: {contents: read}
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run bounded exact-selector behavioral matrix
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          export PAT
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error,time,copy,sys
+          PAT=os.environ['PAT']; BASE_ID='appe33zkZn35yirTL'; TABLE='tblBZLXPd1p2NRWRK'; SID=5894885
+          settings=json.load(open('/tmp/settings')); vals={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in settings['records']}
+          MAKE_BASE=str(vals['MAKE_API_BASE_URL']).strip().rstrip('/'); MAKE_TOKEN=str(vals['MAKE_API_TOKEN']).strip()
+          BASE_ELIG='OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))'
+          PROD='AND({Test_Run_ID}=BLANK(),'+BASE_ELIG+')'
+          TEST_A='TR-SMV1-ITEM5-A-20260816'; TEST_B='TR-SMV1-ITEM5-B-20260816'
+          PR_A='PR-SMV1-ITEM5-A-20260816'; PR_B='PR-SMV1-ITEM5-B-20260816'; PR_P='PR-SMV1-ITEM5-PROD-20260816'
+          fixture_ids=[]; before_bp=None; meta0=None; started=False; selector_patched=False
+          evidence={'passed':False,'scenario_id':SID,'test_run_id':TEST_A,'fixtures':{},'contracts':{}}
+          def request(url,method='GET',body=None,auth=None):
+            data=None if body is None else json.dumps(body,separators=(',',':')).encode()
+            h={'Content-Type':'application/json','User-Agent':'SM-Pipeline-V2-TestMode-Proof/1.0'}
+            if auth: h['Authorization']=auth
+            q=urllib.request.Request(url,data=data,method=method,headers=h)
+            with urllib.request.urlopen(q,timeout=30) as r:
+              raw=r.read().decode(); return json.loads(raw) if raw else {}
+          def make(path,method='GET',body=None): return request(MAKE_BASE+path,method,body,'Token '+MAKE_TOKEN)
+          def air(path='',method='GET',body=None): return request(f'https://api.airtable.com/v0/{BASE_ID}/{TABLE}'+('/'+path if path else ''),method,body,'Bearer '+PAT)
+          def sc(x): return x.get('scenario') or x.get('response') or x
+          def bp(x):
+            b=x.get('blueprint') or (x.get('response') or {}).get('blueprint') or x
+            return json.loads(b) if isinstance(b,str) else b
+          def find(flow,id):
+            for n in flow or []:
+              if int(n.get('id'))==id:return n
+              for route in n.get('routes') or []:
+                f=find(route.get('flow') or [],id)
+                if f:return f
+            return None
+          def readrow(rid): return air(rid)
+          def slim(r):
+            f=r.get('fields') or {}
+            return {k:f.get(k) for k in ('Transfer_ID','Production_Request_Record_ID','Asset_Kind','Transfer_Status','Attempt_Count','Last_Attempt_At','Drive_File_ID','Media_Asset_Record_ID','Test_Run_ID','Error_Message')}
+          def unchanged_denial(pre,post):
+            keys=('Transfer_ID','Production_Request_Record_ID','Asset_Kind','Transfer_Status','Attempt_Count','Last_Attempt_At','Drive_File_ID','Media_Asset_Record_ID','Test_Run_ID')
+            return all(pre.get(k)==post.get(k) for k in keys)
+          failure=None
+          try:
+            meta0=sc(make(f'/scenarios/{SID}')); before_bp=bp(make(f'/scenarios/{SID}/blueprint?draft=false'))
+            m1=find(before_bp.get('flow') or [],1)
+            if meta0.get('isActive') is not False: raise RuntimeError('SMV1 must be OFF before proof')
+            if meta0.get('hookId') is not None: raise RuntimeError('SMV1 unexpected hook')
+            if not m1 or m1.get('module')!='airtable:ActionSearchRecords' or str((m1.get('mapper') or {}).get('maxRecords'))!='1': raise RuntimeError('SMV1 Module 1 shape/maxRecords drift')
+            if str((m1.get('mapper') or {}).get('formula') or '')!=PROD: raise RuntimeError('SMV1 production selector not at canonical formula')
+            # Three deliberately incomplete Master Original rows: target may lock, but cannot create a Drive asset because source/bridge data is intentionally absent.
+            body={'records':[
+              {'fields':{'Transfer_ID':'SMV1-ITEM5-TARGET-A','Production_Request_Record_ID':PR_A,'Asset_Kind':'Master Original','Source_Asset_ID':'TEST-A','Source_Name':'SMV1 isolation target','Transfer_Status':'Pending','Test_Run_ID':TEST_A}},
+              {'fields':{'Transfer_ID':'SMV1-ITEM5-DENY-B','Production_Request_Record_ID':PR_B,'Asset_Kind':'Master Original','Source_Asset_ID':'TEST-B','Source_Name':'SMV1 other-test denial','Transfer_Status':'Pending','Test_Run_ID':TEST_B}},
+              {'fields':{'Transfer_ID':'SMV1-ITEM5-DENY-PROD','Production_Request_Record_ID':PR_P,'Asset_Kind':'Master Original','Source_Asset_ID':'TEST-P','Source_Name':'SMV1 production denial','Transfer_Status':'Pending'}}
+            ],'typecast':True}
+            created=air('', 'POST', body); recs=created.get('records') or []
+            if len(recs)!=3: raise RuntimeError('failed to create all three fixtures')
+            fixture_ids=[r['id'] for r in recs]; target,other,prod=fixture_ids
+            pre={rid:slim(readrow(rid)) for rid in fixture_ids}
+            evidence['fixtures']={'target':target,'other_test':other,'blank_production':prod}
+            exact=f'AND({{Production_Request_Record_ID}}="{PR_A}",{{Test_Run_ID}}="{TEST_A}",{BASE_ELIG})'
+            patched=copy.deepcopy(before_bp); pm=find(patched.get('flow') or [],1); pm['mapper']['formula']=exact
+            make(f'/scenarios/{SID}?confirmed=true','PATCH',{'blueprint':json.dumps(patched,separators=(',',':'))}); selector_patched=True
+            live=bp(make(f'/scenarios/{SID}/blueprint?draft=false')); lm=find(live.get('flow') or [],1)
+            if str((lm.get('mapper') or {}).get('formula') or '')!=exact or str((lm.get('mapper') or {}).get('maxRecords'))!='1': raise RuntimeError('exact selector failed verification')
+            make(f'/scenarios/{SID}/start','POST'); started=True
+            time.sleep(4.0)
+            try: make(f'/scenarios/{SID}/stop','POST')
+            finally: started=False
+            time.sleep(2.0)
+            post={rid:slim(readrow(rid)) for rid in fixture_ids}
+            targ=post[target]; tpre=pre[target]
+            target_touched=(targ.get('Transfer_Status')!=tpre.get('Transfer_Status') or (targ.get('Attempt_Count') or 0)>(tpre.get('Attempt_Count') or 0) or bool(targ.get('Last_Attempt_At')))
+            evidence['before']=pre; evidence['after']=post
+            evidence['contracts']['matching_target_only_touched']=target_touched
+            evidence['contracts']['other_test_unchanged']=unchanged_denial(pre[other],post[other])
+            evidence['contracts']['blank_production_unchanged']=unchanged_denial(pre[prod],post[prod])
+            if not target_touched: raise RuntimeError('exact target was not behaviorally consumed/touched')
+            if not evidence['contracts']['other_test_unchanged']: raise RuntimeError('other-test fixture was touched')
+            if not evidence['contracts']['blank_production_unchanged']: raise RuntimeError('blank production fixture was touched')
+          except Exception as e:
+            failure=str(e)
+          finally:
+            # Stop first, then restore canonical production selector, then verify OFF, then delete every disposable fixture.
+            try:
+              if started: make(f'/scenarios/{SID}/stop','POST')
+            except Exception as e: failure=(failure+'; ' if failure else '')+'stop cleanup failed: '+str(e)
+            try:
+              if before_bp is not None:
+                restore=copy.deepcopy(before_bp); rm=find(restore.get('flow') or [],1); rm['mapper']['formula']=PROD
+                make(f'/scenarios/{SID}?confirmed=true','PATCH',{'blueprint':json.dumps(restore,separators=(',',':'))})
+            except Exception as e: failure=(failure+'; ' if failure else '')+'selector restore failed: '+str(e)
+            try:
+              sm=sc(make(f'/scenarios/{SID}')); rb=bp(make(f'/scenarios/{SID}/blueprint?draft=false')); rm=find(rb.get('flow') or [],1)
+              evidence['contracts']['scenario_off_after']=sm.get('isActive') is False
+              evidence['contracts']['production_selector_restored']=str((rm.get('mapper') or {}).get('formula') or '')==PROD and str((rm.get('mapper') or {}).get('maxRecords'))=='1'
+              if not evidence['contracts']['scenario_off_after']: failure=(failure+'; ' if failure else '')+'SMV1 not OFF after proof'
+              if not evidence['contracts']['production_selector_restored']: failure=(failure+'; ' if failure else '')+'production selector not restored'
+            except Exception as e: failure=(failure+'; ' if failure else '')+'post-restore verification failed: '+str(e)
+            if fixture_ids:
+              try:
+                air('', 'DELETE', None) if False else None
+                # Airtable batch delete query.
+                import urllib.parse
+                qs=urllib.parse.urlencode([('records[]',x) for x in fixture_ids])
+                request(f'https://api.airtable.com/v0/{BASE_ID}/{TABLE}?{qs}','DELETE',None,'Bearer '+PAT)
+                evidence['contracts']['fixtures_deleted']=True
+              except Exception as e:
+                evidence['contracts']['fixtures_deleted']=False; failure=(failure+'; ' if failure else '')+'fixture cleanup failed: '+str(e)
+          evidence['passed']=failure is None and all(evidence['contracts'].get(k) is True for k in ('matching_target_only_touched','other_test_unchanged','blank_production_unchanged','scenario_off_after','production_selector_restored','fixtures_deleted'))
+          evidence['failure']=failure
+          open('/tmp/evidence.json','w').write(json.dumps(evidence,indent=2,default=str)); print(json.dumps({'passed':evidence['passed'],'failure':failure,'contracts':evidence['contracts']}))
+          if not evidence['passed']: sys.exit(1)
+          PY
+      - name: Save sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smv1-testmode-isolation-${{ github.run_id }}
+          path: /tmp/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings /tmp/evidence.json
