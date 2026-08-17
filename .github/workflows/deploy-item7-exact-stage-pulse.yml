@@ -1,4 +1,4 @@
-name: Item7 R2 Selector Diagnostic
+name: Item7 Isolated R2 Retry
 
 on:
   push:
@@ -14,12 +14,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  inspect:
+  r2:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TEST_RUN_ID: ITEM7_9X16_REGRESSION_RUN32060507474
+      CONTENT_RECORD_ID: recA0WClSp6SR6vvl
+      OUTPUT_RECORD_ID: recByMge4QPlCOsD2
+      SCENARIO_ID: '5569495'
+      LEASE_ID: ITEM7-R2-RUN32060507474-L2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,7 +37,7 @@ jobs:
           set -euo pipefail
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r2-diagnostic"
+          BRIDGE="chicagoshining-item7-r2-retry"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
           export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});}};
@@ -50,7 +55,7 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Capture raw redacted R2 inspection and ledger checkpoint
+      - name: Verify R2 OFF, acquire exact lease, pulse once
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -59,30 +64,56 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
-          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary '{"action":"inspect_make_scenario","confirm":"INSPECT-MAKE-MODULES-V1","scenario_id":5569495,"module_ids":[1]}' -o /tmp/preflight.json
-          jq -e '.ok==true and .inspected.scenario_active==false and (.inspected.modules|length)==1' /tmp/preflight.json >/dev/null
+          inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
+          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" -o /tmp/preflight.json
+          jq -e '.ok==true and .inspected.scenario_active==false' /tmp/preflight.json >/dev/null
+          EXPIRES=$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')
+          acquire=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg exp "$EXPIRES" --arg out "$OUTPUT_RECORD_ID" --arg ci "$CONTENT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"acquire",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,max_runs:1,max_operations:30,expires_at:$exp,allowed_platform_output_record_ids:[$out],allowed_content_item_record_ids:[$ci],deny_fixture_record_ids:[],allow_public_publish:false}')
+          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" -o /tmp/acquire.json
+          jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .lease.test_run_id==$tr and (.lease.contract.allowed_platform_output_record_ids|index($out))!=null' /tmp/acquire.json >/dev/null
+          pulse=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"pulse_item7_exact_stage",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out,max_cycles:1}')
+          code=$(curl -sS -o /tmp/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse")
+          cat /tmp/pulse.json | jq .
+          test "$code" = 200
+          jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .stage=="R2" and .platform_output_record_id==$out and .test_run_id==$tr and .checkpoint.asset_selection_status=="Selected" and .checkpoint.selected_assets_present==true and (.checkpoint.selected_clip_count>0) and .scenario_stopped==true and .selector_restored==true and .schedule_preserved==true and .do_not_publish_preserved==true' /tmp/pulse.json >/dev/null
+
+      - name: Record R2 PASS in permanent ledger
+        shell: bash
+        run: |
+          set -euo pipefail
           git pull --rebase origin main
-          mkdir -p repair/evidence
-          cp /tmp/preflight.json repair/evidence/item7-r2-selector-preflight-20260817.json
-          python - <<'PY'
+          CLIPS=$(jq -r '.checkpoint.selected_clip_count' /tmp/pulse.json)
+          python - "$CLIPS" <<'PY'
           from pathlib import Path
-          import re
+          import re,sys
+          clips=sys.argv[1]
           p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
           s=p.read_text()
-          row='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — controller proven; R2 prerequisite diagnosis active** | Controller deploy run `32060507474` PASS. Fresh CI 75 / Output 168 exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. First bounded R2 run `32061240553` made no target progress; R2 PASS was not recorded. Live Module 1 inspection is preserved in `repair/evidence/item7-r2-selector-preflight-20260817.json`. | Resolve only the exact R2 selector prerequisite mismatch, then retry R2 under a new one-output lease. R3 remains blocked. |'
+          row=f'| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — controller + R2 proven** | Controller deploy run `32060507474` PASS. Fresh CI 75 / Output 168 exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. Initial R2 prerequisite mismatch was diagnosed without broadening selectors. R2 `5569495` retry PASS: Asset Selection `Selected`, selected assets present, selected clip count {clips}; scenario OFF and production selector/schedule restored. | Pulse R3 `5557966` under a fresh exact lease; proceed only after complete Ready-for-Render package and restoration proof. |'
           s,n=re.subn(r'^\| 7 \| Fresh edge-to-edge 9:16 normal-path regression \|.*$',row,s,count=1,flags=re.M)
           if n != 1: raise SystemExit('Item 7 row not found')
-          marker='- R2 pending; no later Item 7 stage or publishing action has run.'
-          repl='- First R2 exact pulse run `32061240553` made no target progress; no R2 PASS was recorded. R3 remained blocked.\n- Live R2 Module 1 inspection is stored at `repair/evidence/item7-r2-selector-preflight-20260817.json` for narrow fixture diagnosis.'
-          if marker in s: s=s.replace(marker,repl)
-          elif 'First R2 exact pulse run `32061240553`' not in s: s += '\n'+repl+'\n'
+          marker='- Live R2 Module 1 inspection is stored at `repair/evidence/item7-r2-selector-preflight-20260817.json` for narrow fixture diagnosis.'
+          addition=f'\n- R2 `5569495` retry PASS after correcting only fixture prerequisites: Asset Selection `Selected`, selected assets present, selected clip count {clips}; exact selector restored, schedule preserved, scenario OFF, `Do_Not_Publish` preserved.\n- R3 pending; no R4/R5/RR1 or publishing action has run.'
+          if marker in s and 'R2 `5569495` retry PASS' not in s: s=s.replace(marker,marker+addition)
           p.write_text(s)
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add repair/evidence/item7-r2-selector-preflight-20260817.json repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          git commit -m 'evidence(item7): persist R2 selector diagnosis'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'docs(item7): record isolated R2 pass'
           git push origin HEAD:main
+
+      - name: Save R2 retry evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-r2-retry-${{ github.run_id }}
+          path: |
+            /tmp/preflight.json
+            /tmp/acquire.json
+            /tmp/pulse.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Remove temporary bridge
         if: always()
