@@ -1,0 +1,135 @@
+{
+  "repair_item": 6,
+  "checkpoint": "republish-replace-inventory",
+  "timestamp_ct": "2026-08-17T08:03:00-05:00",
+  "status": "IN_PROGRESS",
+  "scope": "Read-only inventory of current publishing contracts and Platform Outputs schema before any Item 6 production mutation.",
+  "safety": {
+    "scheduled_publish_orchestrators_left_off": true,
+    "make_scenario_activations": 0,
+    "make_scenario_runs": 0,
+    "airtable_record_writes": 0,
+    "public_platform_operations": 0,
+    "output_151_excluded": true,
+    "item_7_blocked": true
+  },
+  "github_action_evidence": {
+    "publishing_orchestrator_contracts": {
+      "run_id": 32032438800,
+      "artifact_id": 9289400121,
+      "artifact_sha256": "d0bbe6ecef18608359387d9346b3018a6d2b06389b653efc3feb15c755e5c76d"
+    },
+    "publisher_active_states": {
+      "run_id": 32032449024
+    },
+    "publisher_stage_contracts": {
+      "run_id": 32032864742,
+      "artifact_id": 9289566594,
+      "artifact_sha256": "b03af277ee4b7e2dae28a275b3773aed1de0070a5b78bc8ff5e53b2743d10db3"
+    }
+  },
+  "scheduled_orchestrator_state": [
+    {"scenario_id": 5864632, "name": "IG-PUB-ORCH", "active": false},
+    {"scenario_id": 5791537, "name": "AP-CAR-ORCH", "active": false},
+    {"scenario_id": 5813561, "name": "FB-ORCH", "active": false},
+    {"scenario_id": 5806668, "name": "TTD-ORCH", "active": false},
+    {"scenario_id": 5823581, "name": "YT-ORCH", "active": false}
+  ],
+  "current_stage_contract_findings": {
+    "instagram_reel": {
+      "scenario_id": 5862882,
+      "scenario_name": "AP1-IG - Automated Instagram Reel Publisher v2.4 - Generated Cover URL + Offset Fallback",
+      "exact_output_webhook": true,
+      "test_run_id_guard_in_stage": false,
+      "do_not_publish_guard": true,
+      "existing_post_id_guard": true,
+      "ambiguity_reconciliation": false,
+      "finding": "A create failure schedules retry, but the stage has no transaction/reconciliation identity proving that an ambiguous create did not already publish a Reel before retry."
+    },
+    "instagram_story": {
+      "scenario_ids": [5612664, 5845193],
+      "scenario_names": ["AP1-IGS - Instagram Story Container Creator v5.2 - Exact Output Webhook", "AP1-IGS-POLL - Instagram Story Container Poll + Publish v1.3 - Exact Output Webhook"],
+      "exact_output_webhook": true,
+      "test_run_id_guard_in_stage": false,
+      "do_not_publish_guard": true,
+      "finding": "Container creation and media_publish are exact-output addressed, but there is no cross-attempt replacement transaction identity or last-good snapshot."
+    },
+    "instagram_carousel": {
+      "scenario_ids": [5791356, 5791396, 5791424],
+      "scenario_names": ["AP4C - Publish Instagram Carousel Parent v1.0", "AP4R - Reconcile Ambiguous Instagram Carousel Publish v1.0.1", "AP5C - Finalize Instagram Carousel Publish v1.0.1"],
+      "exact_output_webhook": true,
+      "test_run_id_guard_in_stage": false,
+      "ambiguity_reconciliation": true,
+      "finding": "Carousel already has a useful ambiguity-reconciliation primitive, but it commits directly into the primary published fields and does not preserve a previous last-good publication during replacement."
+    },
+    "facebook": {
+      "scenario_ids": [5813463, 5813487, 5813511, 5813534],
+      "scenario_names": ["FB1 - Create Facebook Unpublished Photo Objects v1.5 - Temporary Media + View-Decoupled Search", "FB2 - Publish Facebook 4x5 Image Post v1.5 - Binary Response Field Mapping Fix", "FB2R - Reconcile Ambiguous Facebook Page Publish v1.1 - Orchestrator-Owned Handoff", "FB3 - Finalize Facebook Page Post v1.0.2 - Use Graph Permalink URL"],
+      "exact_output_webhook": true,
+      "test_run_id_guard_in_stage": false,
+      "package_revision_primitive": true,
+      "post_fingerprint_primitive": true,
+      "ambiguity_reconciliation": true,
+      "finding": "Facebook has the strongest existing single-attempt duplicate defense: package revision, pre-publish fingerprint, and ambiguous-post reconciliation. It still lacks a cross-revision last-good/pending replacement transaction and obsolete-object cleanup state."
+    },
+    "tiktok": {
+      "scenario_ids": [5806644, 5806597, 5806518],
+      "scenario_names": ["TTD1 - Initialize TikTok Draft Delivery v1.0.2 - Valid Photo JSON", "TTD2 - Poll TikTok Draft Processing v1.0.1", "TTD4 - TikTok Manual Completion Handler v1.0.1 - TikTok URL Guard"],
+      "exact_output_addressing": true,
+      "test_run_id_guard_in_stage": false,
+      "draft_publish_id_guard": true,
+      "multiple_public_post_ids_supported": true,
+      "finding": "TTD1 refuses reinitialization once TikTok_Draft_Publish_ID exists and TTD2 stores TikTok_Draft_Public_Post_IDs_JSON. Manual completion can finalize a URL, but there is no transactional old-vs-new publication model or deterministic cleanup contract."
+    },
+    "youtube": {
+      "scenario_ids": [5823572, 5830810, 5830609, 5830616, 5830623],
+      "scenario_names": ["YT0 - Validate and Prepare YouTube Package v1.4 - YTP1 Handoff", "YTP1 - Start YouTube Upload v1.4 - Public Publish Asset First", "YTS1 - Poll YouTube Upload Job v1.2 - Retryable Poll Errors + Terminal Job Failure", "YTS2 - Poll YouTube Processing and Optional Thumbnail v1.4 - Auto JPEG Under 2MB", "YTS3 - Finalize YouTube Publish v1.1 - Existing Setting Alignment"],
+      "exact_output_webhook": true,
+      "test_run_id_guard_in_stage": false,
+      "upload_idempotency_key_primitive": true,
+      "finding": "The original upload chain is idempotency-keyed, but replacement needs revision/transaction-scoped idempotency so a new master can intentionally create one new upload without replaying or colliding with the prior publication."
+    }
+  },
+  "airtable_schema_inventory": {
+    "base_id": "appe33zkZn35yirTL",
+    "platform_outputs_table_id": "tblrlPeboBthkplH0",
+    "existing_primitives": [
+      "Published_At",
+      "Platform_Post_ID",
+      "Platform_Media_ID",
+      "Platform_Post_URL",
+      "Platform_Publish_Response_JSON",
+      "Publish_Status",
+      "Publish_Attempt_Count",
+      "Publish_Locked_At",
+      "Publish_Locked_By",
+      "Publish_Retry_Eligible",
+      "Publish_Next_Retry_At",
+      "Do_Not_Publish",
+      "Test_Run_ID",
+      "FB_Package_Revision",
+      "FB_Post_Fingerprint",
+      "FB_Reconcile_Attempt_Count",
+      "IG_Carousel_Published_Media_ID",
+      "IG_Carousel_Reconcile_Attempt_Count",
+      "TikTok_Draft_Publish_ID",
+      "TikTok_Draft_Public_Post_IDs_JSON",
+      "YouTube_Idempotency_Key",
+      "YouTube_Video_ID"
+    ],
+    "missing_transaction_primitives": [
+      "replacement transaction identity/state",
+      "durable last-good publication snapshot",
+      "pending replacement publication identity",
+      "replacement fingerprint/revision",
+      "obsolete object inventory",
+      "cleanup state/attempt/error",
+      "rollback/commit state"
+    ]
+  },
+  "fixture_inventory": {
+    "existing_test_run_platform_outputs": 0,
+    "decision": "Create a new isolated Item 6 fixture. Do not reuse Outputs 135-137 or Output 151."
+  },
+  "next_gate": "Define and implement a minimal transaction contract that preserves the old publication until the replacement is verified, is idempotent by transaction/revision, separates commit from cleanup, blocks cross-record/test identity drift, and routes unsupported cleanup to an explicit manual-cleanup state instead of guessing."
+}
