@@ -31,7 +31,7 @@ jobs:
           OUTPUTS='tblrlPeboBthkplH0'
           SETTINGS='tblpHPWeEkyJaF7ql'
           REC='recXaaWhSZmQ9oOsw'
-          EXPECTED_KEY='YT-151-recXaaWhSZmQ9oOsw-oauthretry-2'
+          EXPECTED_KEY='YT-151-recXaaWhSZmQ9oOsw-oauthretry-3'
           pat=open('/tmp/pat.txt').read().strip()
           headers={'Authorization':f'Bearer {pat}','Content-Type':'application/json'}
 
