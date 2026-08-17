@@ -1,0 +1,52 @@
+name: Read P4 Webhook Schema
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-p4-webhook-schema.txt']
+
+permissions: {contents: read}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read P4 Module 900 learned webhook interface
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json,urllib.request
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          token=str(v['MAKE_API_TOKEN']).strip(); base=str(v['MAKE_API_BASE_URL']).strip().rstrip('/')
+          def get(path):
+            q=urllib.request.Request(base+path,headers={'Authorization':'Token '+token,'User-Agent':'SM-Pipeline-Audit/1.0'})
+            with urllib.request.urlopen(q,timeout=30) as h:return json.loads(h.read().decode())
+          raw=get('/scenarios/5533802/blueprint?draft=false')
+          b=raw.get('blueprint') or (raw.get('response') or {}).get('blueprint') or raw
+          if isinstance(b,str): b=json.loads(b)
+          def walk(flow):
+            for n in flow or []:
+              yield n
+              for r in n.get('routes') or []: yield from walk(r.get('flow') or [])
+          n=next(x for x in walk(b.get('flow') or []) if int(x.get('id'))==900)
+          md=n.get('metadata') or {}
+          # print only module/interface shape; webhook URL/token values are not in blueprint metadata
+          print(json.dumps({'id':n.get('id'),'module':n.get('module'),'parameters':n.get('parameters'),'mapper':n.get('mapper'),'interface':n.get('interface'),'metadata':md},default=str,separators=(',',':')))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings
