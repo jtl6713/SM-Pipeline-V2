@@ -43,7 +43,7 @@ jobs:
           {"main_module":"bridge.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
           EOF
           node --check /tmp/bridge.js
-      - name: Upload bridge and inspect stage scenarios
+      - name: Upload bridge and inspect R3 R5 RR1
         shell: bash
         run: |
           set -euo pipefail
@@ -56,7 +56,7 @@ jobs:
           for i in $(seq 1 20); do code=$(curl -sS -o /tmp/ready.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$T/ready" || true); [[ "$code" == 200 ]] && break; sleep 1; done; test "$code" = 200
           call_inspect(){
             local label="$1" sid="$2"; local body out code attempt
-            body=$(jq -cn --argjson sid "$sid" '{action:"inspect_make_scenario",scenario_id:$sid,module_ids:[],confirm:"INSPECT-MAKE-MODULES-V1"}')
+            body=$(jq -cn --argjson sid "$sid" '{action:"inspect_make_scenario",scenario_id:$sid,confirm:"INSPECT-MAKE-MODULES-V1"}')
             out="/tmp/${label}.json"
             for attempt in 1 2 3; do
               code=$(curl -sS --max-time 120 -o "$out" -w '%{http_code}' -X POST "$ENDPOINT" -H 'Content-Type: application/json' --data "$body" || true)
@@ -66,7 +66,6 @@ jobs:
             echo "$label http=$code"; test "$code" = 200; jq -e '.ok==true' "$out" >/dev/null
             jq -c '{scenario:.inspected.scenario_name,active:.inspected.scenario_active,module_count:.inspected.module_count_returned,airtable_modules:[.inspected.modules[]|select(.module.module|startswith("airtable:"))|{id:.module.id,type:.module.module,name:.module.metadata.designer.name,formula:.module.mapper.formula,maxRecords:.module.mapper.maxRecords,table:.module.mapper.table,id_expr:.module.mapper.id,record:.module.mapper.record}]}' "$out"
           }
-          call_inspect r2 5569495
           call_inspect r3 5557966
           call_inspect r5 5565333
           call_inspect rr1 5576363
@@ -85,7 +84,6 @@ jobs:
         with:
           name: item7-render-stage-inspection-${{ github.run_id }}
           path: |
-            /tmp/r2.json
             /tmp/r3.json
             /tmp/r5.json
             /tmp/rr1.json
