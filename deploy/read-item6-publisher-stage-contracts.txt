@@ -1,0 +1,1 @@
+Read-only Item 6 audit of exact publishing stage workers across Instagram, Facebook, TikTok, and YouTube. No Make state changes, Airtable mutations, or public publishing. Trigger 2026-08-17 08:00 CT.
