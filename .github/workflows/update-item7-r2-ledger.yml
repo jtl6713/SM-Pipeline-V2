@@ -1,0 +1,51 @@
+name: Update Item7 R2 Ledger Checkpoint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/update-item7-r2-ledger.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-ledger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch permanent Item 7 ledger entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+          s=p.read_text()
+          old='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — R2 retry pending after subrequest-budget repair** | Output 168 / Content 75 remains exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. L8 run `32067297719` passed exact preflight and lease acquisition, executed only Output 168, and captured exact Make execution `a76e05c9fcd5469c9adefc8193443717`; Output 168 entered `Selecting` for Exact 6 clips but emitted no selected package or terminal R2 diagnostics within the 90-second checkpoint window. The decisive failure was controller-side Cloudflare subrequest exhaustion: both the exact-execution force-stop and scenario-stop fallback returned `Too many subrequests by single Worker invocation`. Independent safety inspect `32067706933` confirmed R2 was still active with the exact stranded selector immediately after the failed pulse. Fresh watchdog run `32067711473` then terminalized L8 `budget-exhausted` with `scenario_stopped=true`; Output 168 partial `Selecting` residue was reset exactly to its pre-L8 blank selection state while Test_Run_ID/DNP and all downstream fields remained preserved. | Repair Item 7 pulse to reserve subrequest capacity for exact execution/scenario stop and selector restoration, then run a fresh R2 lease. R3 remains blocked until R2 reaches Selected with package + clip count and postflight restoration proof. |'
+          new='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — R2 accepted; R3 is next** | Output 168 / Content 75 remains exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. R2 Module 9 **Update Selected Assets + Music URL + Diagnostic State (R4 Owns Audio Volume)** was repaired in run `32071982668` by changing only the `Selected_Review_Images_HTML` `map()` key from unquoted `google_drive_url` to the quoted serialization proven in live production blueprints; R2 remained OFF and schedule/hook/topology were preserved. L10 run `32072146088` failed during lease-acquire transport before any lease or R2 run and left Output 168 unchanged. Fresh L11 run `32072311195` acquired exact lease `ITEM7-R2-RUN32060507474-L11`, executed only Output 168, and R2 reached `Asset_Selection_Status=Selected`, `Selected_Clip_Count=6`, non-empty `Selected_Assets_JSON`, `Asset_Selection_Last_Result=Selected`, and non-empty review HTML while preserving exact Test_Run_ID and `Do_Not_Publish=true`. The controller response itself hit Cloudflare subrequest ceiling after the business state completed; the lease was then terminalized `budget-exhausted` with `runs_used=1`, `operations_used=25`, `scenario_stopped=true`. Independent read-only postflight `32072648938` proves R2 is OFF, Module 1 `maxRecords=1`, and the canonical production selector is restored with `{Test_Run_ID}=BLANK()` plus `NOT({Do_Not_Publish})`. | Run R3 `5557966` under a fresh exact lease. Require `Ready for Render` plus `Composition_ID`, `Output_Filename`, non-empty `Render_Clip_List_JSON`, `Render_Total_Frames>0`, exact Test_Run_ID/DNP preservation, R3 OFF, and selector/schedule restoration before R4. The malformed/concatenated review-HTML presentation observed in the R2 field is deferred to Item 10 and does not invalidate R2 selection acceptance. |'
+          if new in s:
+              raise SystemExit('Item 7 ledger already updated')
+          if old not in s:
+              raise SystemExit('Expected prior Item 7 ledger row not found; refusing broad edit')
+          s=s.replace(old,new,1)
+          delta='''\n\n## 2026-08-17 Item 7 R2 acceptance delta\n\n- Fixture remains Platform Output 168 (`recByMge4QPlCOsD2`) / Content Item 75 (`recA0WClSp6SR6vvl`) with exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, and `Do_Not_Publish=true`.\n- L9 execution tracing identified the real runtime defect at R2 **Module 9 — Update Selected Assets + Music URL + Diagnostic State (R4 Owns Audio Volume)**: field `Selected_Review_Images_HTML` (`fldEzxfia9EtHbg2F`) failed because its `map()` key serialized as unquoted `google_drive_url`. Read-only blueprint history showed this mapping first appeared in R2 v45; live production blueprint comparison showed equivalent Make `map()` keys are quoted.\n- Repair run `32071982668` changed only `map(8.selected_clips; google_drive_url)` to `map(8.selected_clips; "google_drive_url")`. Postflight proved R2 stayed OFF, schedule/hook/name were preserved, and no other flow content changed.\n- L10 run `32072146088` failed at the temporary Cloudflare bridge with HTTP 500 before lease creation; no L10 lease record exists and Output 168 did not mutate.\n- L11 run `32072311195` acquired one exact lease and executed R2 once. Output 168 reached `Selected` with six clips, non-empty `Selected_Assets_JSON`, 900 total selected frames in the package, `Asset_Selection_Last_Result=Selected`, and exact Test_Run_ID/DNP preservation.\n- The L11 controller response hit `Too many subrequests by single Worker invocation` after R2 business completion. Its terminal sweep closed L11 `budget-exhausted` with `runs_used=1`, `operations_used=25`, and `scenario_stopped=true`. A cleanup-only call was then correctly refused because the lease was already terminal.\n- Independent read-only postflight run `32072648938` proves scenario 5569495 is OFF and Module 1 is restored to the canonical production selector with `maxRecords=1`, `{Test_Run_ID}=BLANK()`, and `NOT({Do_Not_Publish})`. This supplies the restoration proof missing from the failed controller response.\n- R2 is therefore accepted for Item 7. R3 is now authorized; R4/R5/RR1 remain blocked until their preceding stage passes.\n- Item 10 note: `Selected_Review_Images_HTML` is now non-empty but its rendered concatenation contains formatting artifacts. That presentation issue is evidence for Item 10 and is not counted as R2 business-state failure.\n'''
+          marker='## 2026-08-17 Item 7 R2 acceptance delta'
+          if marker not in s:
+              s=s.rstrip()+delta+'\n'
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- repair/SM_PIPELINE_21_ITEM_LEDGER.md
+      - name: Commit ledger checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git diff --cached --quiet && exit 0
+          git commit -m 'ledger(item7): record R2 acceptance and authorize R3'
+          git push origin HEAD:main
