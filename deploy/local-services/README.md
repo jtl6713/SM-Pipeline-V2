@@ -1,15 +1,18 @@
 # Controlled Local Service Deployment
 
-This framework promotes approved service source from GitHub `main` into the
-Windows production runtime without running production directly from the Git
-working copy.
+This framework promotes approved service source from GitHub `main` into the Windows production runtime without running production directly from the Git working copy.
+
+**Current proven framework version:** `1.0.1-ps51-collections`
+
+For the complete operator and AI-handoff procedure, read:
+
+`Documentation/GITHUB_SOURCE_CONTROL_AND_LOCAL_SERVICE_DEPLOYMENT_RUNBOOK.md`
 
 ## Authority model
 
 - GitHub `jtl6713/SM-Pipeline-V2` `main`: approved source authority.
-- `D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2`:
-  local Git checkout only.
-- `D:\Content Creation\ChicagoShining Pipeline\Services\...`: live runtime only.
+- `D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2`: local Git checkout only.
+- `D:\Content Creation\ChicagoShining Pipeline\Services\...`: live production runtime.
 
 ## Supported services
 
@@ -35,19 +38,42 @@ A normal deployment:
 6. Verifies current local and public service health before mutation.
 7. Creates a timestamped local backup.
 8. Stops only the selected service.
-9. Copies source-controlled files only.
-10. Preserves `.env`, OAuth/token files, runtime job data, generated media,
-    `node_modules`, Python virtual environments, caches and logs.
+9. Copies source-controlled/deployable files only.
+10. Preserves `.env`, OAuth/token files, runtime job data, generated media, `node_modules`, Python virtual environments, caches and logs.
 11. Reinstalls dependencies only when required or missing.
 12. Restarts only the selected service with the existing numbered tab title.
 13. Requires local `/health` and permanent public `/health` to pass.
 14. Writes `.smv2-deployment.json` to the live service containing the exact Git SHA.
-15. Automatically restores the previous source/dependencies and restarts the
-    previous service if deployment fails.
+15. Automatically restores the previous source/dependencies and restarts the previous service if deployment fails.
 
-## First proof
+## Proven acceptance
 
-Use Watermark first.
+On 2026-08-17:
+
+- PLAN was proven read-only.
+- Watermark was deployed from an exact approved commit.
+- Watermark local/public health passed.
+- Manual rollback passed and health was re-verified.
+- Watermark was redeployed into the Git-managed state.
+- The other four services were PLAN-validated and brought into the managed deployment model.
+- Final production verification confirmed all five local services and all five permanent Cloudflare routes reachable.
+
+Framework commits:
+
+- `13a731737708192c50c75ac65d1f47ef09ef5c4a` — initial framework
+- `051b6251bad51f797f39765096b68008de08fce1` — Windows PowerShell 5.1 collection compatibility
+
+## Friendly launchers
+
+Installed under `Production Start-Stop-Verify Services`:
+
+- `PLAN Local Service Deployment.bat`
+- `DEPLOY Local Service.bat`
+- `ROLLBACK Local Service.bat`
+
+They display a numbered 1-5 service menu.
+
+## Direct PowerShell usage
 
 Plan only:
 
@@ -55,29 +81,16 @@ Plan only:
 powershell -ExecutionPolicy Bypass -File ".\deploy\local-services\Deploy-SMService.ps1" -Service watermark -PlanOnly
 ```
 
-The plan must complete without changing production.
-
-Then perform the same-commit deployment:
+Deploy:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File ".\deploy\local-services\Deploy-SMService.ps1" -Service watermark
 ```
 
-Type `DEPLOY` only after reviewing the displayed plan.
-
-## Install friendly launchers
-
-From the repository root:
+Rollback latest:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".\deploy\local-services\Install-Deployment-Shortcuts.ps1"
+powershell -ExecutionPolicy Bypass -File ".\deploy\local-services\Deploy-SMService.ps1" -Service watermark -RollbackLatest
 ```
 
-This adds three BAT launchers to `Production Start-Stop-Verify Services`:
-
-- `PLAN Local Service Deployment.bat`
-- `DEPLOY Local Service.bat`
-- `ROLLBACK Local Service.bat`
-
-They display a numbered 1-5 service menu, so ordinary operation does not require
-remembering Git commands.
+Prefer the friendly launchers for normal operator use.
