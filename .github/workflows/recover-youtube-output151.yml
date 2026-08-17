@@ -3,7 +3,9 @@ name: Recover YouTube Output 151
 on:
   push:
     branches: [main]
-    paths: ['deploy/recover-youtube-output151.txt']
+    paths:
+      - 'deploy/recover-youtube-output151.txt'
+      - '.github/workflows/recover-youtube-output151.yml'
 
 permissions:
   contents: read
