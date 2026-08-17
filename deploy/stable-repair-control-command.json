@@ -7,6 +7,6 @@
   "replace_transaction_id": "ITEM6_TXN_20260817_0836_DENY",
   "replace_fingerprint": "sha256:item6-deny-fixture-v1",
   "allow_public_publish": false,
-  "expected_upstream_status": 403,
-  "note": "Item 6 negative control: explicit deny fixture must be rejected before mutation"
+  "expected_exception_substring": "outside this test_run_id allowlist",
+  "note": "Item 6 negative control: stable bridge surfaces controller denial as guarded exception"
 }
