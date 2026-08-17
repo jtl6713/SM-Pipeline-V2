@@ -1,4 +1,4 @@
-name: Inspect Item7 R4 Baseline
+name: Inspect Item7 R4 Baseline V2
 
 on:
   push:
@@ -73,13 +73,17 @@ jobs:
           s=scen(json.load(open('/tmp/scenario.json'))); b=bp(json.load(open('/tmp/bp-wrap.json'))); m=find(b.get('flow'),1); out=json.load(open('/tmp/output.json')); f=out.get('fields',{}); iface=json.load(open('/tmp/interface.json')); iw=iface.get('response',iface); iw=iw.get('interface',iw) if isinstance(iw,dict) else {}; inputs=iw.get('input',[]) if isinstance(iw,dict) else []
           try: health=json.load(open('/tmp/renderer-health.json'))
           except: health={'raw':open('/tmp/renderer-health.json').read()[:500] if os.path.exists('/tmp/renderer-health.json') else ''}
-          ev={'scenario_id':int(os.environ['SCENARIO_ID']),'scenario_name':s.get('name'),'scenario_active':s.get('isActive',s.get('active')),'schedule':s.get('scheduling',s.get('schedule')),'hook_id':s.get('hookId',s.get('hook_id')),'module_1_type':m.get('module') if m else None,'module_1_name':((m.get('metadata') or {}).get('designer') or {}).get('name') if m else None,'module_1_record_id':(m.get('mapper') or {}).get('recordId') if m else None,'interface_inputs':[{'name':x.get('name'),'required':x.get('required')} for x in inputs if isinstance(x,dict)],'output_id':f.get('Output_ID'),'test_run_id':f.get('Test_Run_ID'),'do_not_publish':f.get('Do_Not_Publish'),'render_status':f.get('Render_Status'),'composition_id':f.get('Composition_ID'),'output_filename':f.get('Output_Filename'),'render_total_frames':f.get('Render_Total_Frames'),'render_clip_list_present':bool(str(f.get('Render_Clip_List_JSON') or '').strip()),'remotion_job_id':f.get('Remotion_Job_ID'),'remotion_status_url':f.get('Remotion_Status_URL'),'renderer_health_http':open('/tmp/renderer-health-code.txt').read().strip(),'renderer_health':health}
+          mapper=(m.get('mapper') or {}) if m else {}
+          ev={'scenario_id':int(os.environ['SCENARIO_ID']),'scenario_name':s.get('name'),'scenario_active':s.get('isActive',s.get('active')),'schedule':s.get('scheduling',s.get('schedule')),'hook_id':s.get('hookId',s.get('hook_id')),'module_1_type':m.get('module') if m else None,'module_1_name':((m.get('metadata') or {}).get('designer') or {}).get('name') if m else None,'module_1_formula':mapper.get('formula'),'module_1_maxRecords':mapper.get('maxRecords'),'interface_inputs':[{'name':x.get('name'),'required':x.get('required')} for x in inputs if isinstance(x,dict)],'output_id':f.get('Output_ID'),'test_run_id':f.get('Test_Run_ID'),'do_not_publish':f.get('Do_Not_Publish'),'render_status':f.get('Render_Status'),'composition_id':f.get('Composition_ID'),'output_filename':f.get('Output_Filename'),'render_total_frames':f.get('Render_Total_Frames'),'render_clip_list_present':bool(str(f.get('Render_Clip_List_JSON') or '').strip()),'remotion_job_id':f.get('Remotion_Job_ID'),'remotion_status_url':f.get('Remotion_Status_URL'),'renderer_health_http':open('/tmp/renderer-health-code.txt').read().strip(),'renderer_health':health}
           print(json.dumps(ev,indent=2,sort_keys=True)); open('evidence/r4-baseline.json','w').write(json.dumps(ev,indent=2,sort_keys=True))
           if ev['scenario_active'] is not False: raise SystemExit('R4 is not OFF')
           if ev['schedule'] != {'type':'indefinitely','interval':900}: raise SystemExit(f'R4 schedule drift: {ev["schedule"]}')
           if ev['hook_id'] is not None: raise SystemExit('R4 unexpectedly has hook identity')
-          if ev['module_1_type']!='airtable:ActionGetRecord': raise SystemExit('R4 Module 1 is not exact GetRecord')
-          if ev['renderer_health_http']!='200': raise SystemExit('Renderer health did not return 200')
+          if ev['module_1_type']!='airtable:ActionSearchRecords': raise SystemExit('R4 Module 1 unexpected type')
+          if str(ev['module_1_maxRecords'])!='1': raise SystemExit('R4 Module 1 must address one record')
+          expected={'test_run_id','output_record_id','platform_output_id','intended_stage','attempt_number','idempotency_key'}
+          if {x['name'] for x in ev['interface_inputs']} != expected: raise SystemExit('R4 interface input contract drifted')
+          if ev['renderer_health_http']!='200' or ev['renderer_health'].get('ok') is not True: raise SystemExit('Renderer health failed')
           PY
       - name: Destroy transient credentials
         if: always()
@@ -90,7 +94,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r4-baseline-${{ github.run_id }}
+          name: item7-r4-baseline-v2-${{ github.run_id }}
           path: evidence/
           if-no-files-found: warn
           retention-days: 30
