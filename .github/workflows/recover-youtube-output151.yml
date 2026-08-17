@@ -31,7 +31,7 @@ jobs:
           OUTPUTS='tblrlPeboBthkplH0'
           SETTINGS='tblpHPWeEkyJaF7ql'
           REC='recXaaWhSZmQ9oOsw'
-          EXPECTED_KEY='YT-151-recXaaWhSZmQ9oOsw-oauthretry-3'
+          EXPECTED_KEY='YT-151-recXaaWhSZmQ9oOsw-oauthretry-4'
           pat=open('/tmp/pat.txt').read().strip()
           headers={'Authorization':f'Bearer {pat}','Content-Type':'application/json'}
 
@@ -54,7 +54,7 @@ jobs:
 
           def get_settings():
               names=['YTP1_WEBHOOK_URL','YTS1_WEBHOOK_URL','YTS2_WEBHOOK_URL','YTS3_WEBHOOK_URL']
-              ors=','.join('{Setting_Name}="'+n+'"' for n in names)
+              ors=','.join('{Setting_Name}=\"'+n+'\"' for n in names)
               formula='AND({Active}=1,OR('+ors+'))'
               q=urllib.parse.urlencode({'filterByFormula':formula,'pageSize':20})
               _, d=req(f'https://api.airtable.com/v0/{BASE}/{SETTINGS}?{q}')
@@ -145,4 +145,4 @@ jobs:
         if: always()
         shell: bash
         run: |
-          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt; do [[ ! -e \"$f\" ]] || shred -u \"$f\" 2>/dev/null || rm -f \"$f\"; done
