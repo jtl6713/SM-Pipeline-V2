@@ -3,10 +3,10 @@
   "lease_id": "ITEM6_REPLACE_LEASE_20260817_0836",
   "scenario_id": 5813561,
   "test_run_id": "ITEM6_REPLACE_20260817T0836CT",
-  "platform_output_record_id": "recfiTvMN0nsw0MNF",
-  "replace_transaction_id": "ITEM6_TXN_20260817_0836",
-  "replace_fingerprint": "sha256:item6-fixture-v1",
+  "platform_output_record_id": "rec3djtxIMcDy89Az",
+  "replace_transaction_id": "ITEM6_TXN_20260817_0836_DENY",
+  "replace_fingerprint": "sha256:item6-deny-fixture-v1",
   "allow_public_publish": false,
-  "expected_upstream_status": 200,
-  "note": "Item 6 idempotent replay of identical prepare transaction"
+  "expected_upstream_status": 403,
+  "note": "Item 6 negative control: explicit deny fixture must be rejected before mutation"
 }
