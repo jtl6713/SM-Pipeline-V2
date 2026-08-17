@@ -136,6 +136,7 @@ export default {
           repair_item7_standalone_selector_recovery_v6: true,
           repair_item7_selector_recovery_v6_1: true,
           repair_item7_r3_canonical_maxrecords_v7: true,
+          repair_item7_r5_canonical_maxrecords_v8: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
@@ -9903,6 +9904,13 @@ async function repairPulseP1TestSelector(env, lease, input, action) {
 }
 
 
+function repairItem7CanonicalMaxRecords(scenarioId) {
+  const sid = Number(scenarioId);
+  if (sid === 5557966) return "10";
+  if (sid === 5565333) return "5";
+  return "1";
+}
+
 // ITEM7_EXACT_STAGE_TEST_MODE_V1_BEGIN
 const ITEM7_EXACT_STAGE_CONFIG = Object.freeze({
   5569495: Object.freeze({ stage: "R2", max_cycles: 1, wait_ms_per_cycle: 90000 }),
@@ -10015,20 +10023,21 @@ async function repairPulseItem7ExactStage(env, lease, input, action) {
     const recoveredBlueprint = JSON.parse(JSON.stringify(originalBlueprint));
     const recoveredRoot = repairScenarioModuleById(recoveredBlueprint?.flow || [], 1);
     recoveredRoot.mapper.formula = recoveredFormula;
-    recoveredRoot.mapper.maxRecords = scenarioId === 5557966 ? "10" : "1";
+    recoveredRoot.mapper.maxRecords = repairItem7CanonicalMaxRecords(scenarioId);
     await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, { method: "PATCH", body: JSON.stringify({ blueprint: JSON.stringify(recoveredBlueprint) }) });
     read = await repairReadMakeBlueprint(env, scenarioId);
     originalBlueprint = read.blueprint;
     root = repairScenarioModuleById(originalBlueprint?.flow || [], 1);
     originalFormula = String(root?.mapper?.formula || "");
-    if (originalFormula !== recoveredFormula || String(root?.mapper?.maxRecords || "") !== (scenarioId === 5557966 ? "10" : "1")) throw new HttpError(502, `${config.stage} stranded selector recovery did not verify live`);
+    if (originalFormula !== recoveredFormula || String(root?.mapper?.maxRecords || "") !== (repairItem7CanonicalMaxRecords(scenarioId))) throw new HttpError(502, `${config.stage} stranded selector recovery did not verify live`);
     strandedSelectorRecovered = true;
   }
 
   // ITEM7_R3_CANONICAL_MAXRECORDS_V7: R3 production intentionally batches up to 10;
+  // ITEM7_R5_CANONICAL_MAXRECORDS_V8: R5 production intentionally batches up to 5;
   // the temporary exact Item 7 selector uses maxRecords=1 and must restore the
   // canonical production value after every success, failure, retry, or cleanup.
-  const canonicalMaxRecords = scenarioId === 5557966 ? "10" : "1";
+  const canonicalMaxRecords = repairItem7CanonicalMaxRecords(scenarioId);
   const originalSerialized = JSON.stringify(originalBlueprint);
   const originalIds = repairScenarioModuleIds(originalBlueprint?.flow || []).sort((a, b) => a - b);
   if (String(root?.mapper?.maxRecords || "") !== canonicalMaxRecords) throw new HttpError(409, `${config.stage} canonical maxRecords drifted; expected ${canonicalMaxRecords}`);
@@ -10130,7 +10139,7 @@ async function repairCleanupItem7ExactStage(env, lease, input) {
   let selectorRestored = false;
   let alreadyCanonical = false;
 
-  const canonicalMaxRecords = scenarioId === 5557966 ? "10" : "1";
+  const canonicalMaxRecords = repairItem7CanonicalMaxRecords(scenarioId);
   if (formula.includes('{Test_Run_ID}=BLANK()')) {
     if (scenarioId === 5569495 && !formula.includes('NOT({Do_Not_Publish})')) throw new HttpError(409, "R2 canonical cleanup selector is missing Do_Not_Publish exclusion");
     if (String(root?.mapper?.maxRecords || "") !== canonicalMaxRecords) throw new HttpError(409, `${config.stage} canonical cleanup maxRecords drifted; expected ${canonicalMaxRecords}`);
@@ -10456,7 +10465,7 @@ async function repairRecoverItem7ExactSelector(env, input) {
   const root = repairScenarioModuleById(blueprint?.flow || [], 1);
   if (!root || root.module !== "airtable:ActionSearchRecords") throw new HttpError(409, `${config.stage} Module 1 is not the expected Airtable Search Records selector`);
   const formula = String(root?.mapper?.formula || "");
-  const canonicalMaxRecords = scenarioId === 5557966 ? "10" : "1";
+  const canonicalMaxRecords = repairItem7CanonicalMaxRecords(scenarioId);
 
   if (formula.includes('{Test_Run_ID}=BLANK()')) {
     if (String(root?.mapper?.maxRecords || "") !== canonicalMaxRecords) throw new HttpError(409, `${config.stage} canonical selector maxRecords drifted; expected ${canonicalMaxRecords}`);
