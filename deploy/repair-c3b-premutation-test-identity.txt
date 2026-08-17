@@ -1,0 +1,1 @@
+Trigger rollback-safe C3B pre-mutation identity guards.
