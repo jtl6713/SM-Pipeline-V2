@@ -65,10 +65,10 @@ jobs:
           PY
 
           git diff --check
-          grep -q 'Item 2 closure:' repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          grep -q '31993357970' repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          grep -q '| 2 | Record-resolution discipline | **Complete' repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          grep -q '| 5 | Genuine hard test mode | **Complete' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -Fq 'Item 2 closure:' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -Fq '31993357970' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -Fq '| 2 | Record-resolution discipline | **Complete' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -Fq '| 5 | Genuine hard test mode | **Complete' repair/SM_PIPELINE_21_ITEM_LEDGER.md
 
           if git diff --quiet -- repair/SM_PIPELINE_21_ITEM_LEDGER.md; then
             echo 'Ledger already current.'
