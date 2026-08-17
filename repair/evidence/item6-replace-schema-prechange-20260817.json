@@ -1,0 +1,33 @@
+{
+  "repair_item": 6,
+  "checkpoint": "replace-schema-prechange",
+  "timestamp_ct": "2026-08-17T08:07:00-05:00",
+  "base_id": "appe33zkZn35yirTL",
+  "table_id": "tblrlPeboBthkplH0",
+  "existing_core_schema": [
+    {"field_id":"fldxQ7Ep88cpC1g2y","name":"Output_ID","type":"autoNumber"},
+    {"field_id":"fldse0PC0P0WewJnH","name":"Platform","type":"singleSelect"},
+    {"field_id":"fldViUkfcG57W6Es4","name":"Publish_Status","type":"singleSelect"},
+    {"field_id":"fldQPpzUuPMzvqrtj","name":"Published_At","type":"dateTime"},
+    {"field_id":"fldJyxt3BuhWji93F","name":"Platform_Post_ID","type":"singleLineText"},
+    {"field_id":"fld3348mDIgQ1kwcN","name":"Platform_Post_URL","type":"url"},
+    {"field_id":"fldSaF56wryp4N2et","name":"Do_Not_Publish","type":"checkbox"},
+    {"field_id":"fld5Ew2FySt51Jl2Q","name":"Test_Run_ID","type":"singleLineText"}
+  ],
+  "planned_additive_fields": [
+    "Replace_Transaction_ID",
+    "Replace_State",
+    "Replace_Fingerprint",
+    "Replace_Last_Good_JSON",
+    "Replace_Obsolete_JSON",
+    "Replace_Cleanup_State",
+    "Replace_Cleanup_Attempt_Count",
+    "Replace_Error",
+    "Replace_Started_At",
+    "Replace_Updated_At"
+  ],
+  "design_rule": "Existing publication fields remain the normal-path contract. Replace_* fields are transaction metadata only. A replacement transaction snapshots last-good state before current publish fields may be reset; commit happens only after the new platform object is verified. Cleanup is a separate post-commit phase.",
+  "rollback": "All planned schema changes are additive. If implementation validation fails, normal selectors remain unaffected because they do not reference Replace_* fields. Created field IDs will be recorded in the postchange evidence; fields can remain inert until a later verified removal path exists. No existing field type/options/value is changed by this schema step.",
+  "record_mutations_before_schema_step": 0,
+  "public_platform_operations_before_schema_step": 0
+}
