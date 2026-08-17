@@ -134,6 +134,7 @@ export default {
           repair_item7_fresh_invocation_cleanup_v5: true,
           repair_item7_standalone_selector_recovery_v6: true,
           repair_item7_selector_recovery_v6_1: true,
+          repair_item7_r3_canonical_maxrecords_v7: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
@@ -10013,17 +10014,23 @@ async function repairPulseItem7ExactStage(env, lease, input, action) {
     const recoveredBlueprint = JSON.parse(JSON.stringify(originalBlueprint));
     const recoveredRoot = repairScenarioModuleById(recoveredBlueprint?.flow || [], 1);
     recoveredRoot.mapper.formula = recoveredFormula;
+    recoveredRoot.mapper.maxRecords = scenarioId === 5557966 ? "10" : "1";
     await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, { method: "PATCH", body: JSON.stringify({ blueprint: JSON.stringify(recoveredBlueprint) }) });
     read = await repairReadMakeBlueprint(env, scenarioId);
     originalBlueprint = read.blueprint;
     root = repairScenarioModuleById(originalBlueprint?.flow || [], 1);
     originalFormula = String(root?.mapper?.formula || "");
-    if (originalFormula !== recoveredFormula) throw new HttpError(502, `${config.stage} stranded selector recovery did not verify live`);
+    if (originalFormula !== recoveredFormula || String(root?.mapper?.maxRecords || "") !== (scenarioId === 5557966 ? "10" : "1")) throw new HttpError(502, `${config.stage} stranded selector recovery did not verify live`);
     strandedSelectorRecovered = true;
   }
 
+  // ITEM7_R3_CANONICAL_MAXRECORDS_V7: R3 production intentionally batches up to 10;
+  // the temporary exact Item 7 selector uses maxRecords=1 and must restore the
+  // canonical production value after every success, failure, retry, or cleanup.
+  const canonicalMaxRecords = scenarioId === 5557966 ? "10" : "1";
   const originalSerialized = JSON.stringify(originalBlueprint);
   const originalIds = repairScenarioModuleIds(originalBlueprint?.flow || []).sort((a, b) => a - b);
+  if (String(root?.mapper?.maxRecords || "") !== canonicalMaxRecords) throw new HttpError(409, `${config.stage} canonical maxRecords drifted; expected ${canonicalMaxRecords}`);
   if (!originalFormula.includes('{Test_Run_ID}=BLANK()')) throw new HttpError(409, `${config.stage} production selector no longer contains the verified Test_Run_ID exclusion`);
   if (scenarioId === 5569495 && !originalFormula.includes('NOT({Do_Not_Publish})')) throw new HttpError(409, "R2 production selector no longer contains the verified Do_Not_Publish exclusion");
 
@@ -10122,8 +10129,10 @@ async function repairCleanupItem7ExactStage(env, lease, input) {
   let selectorRestored = false;
   let alreadyCanonical = false;
 
+  const canonicalMaxRecords = scenarioId === 5557966 ? "10" : "1";
   if (formula.includes('{Test_Run_ID}=BLANK()')) {
     if (scenarioId === 5569495 && !formula.includes('NOT({Do_Not_Publish})')) throw new HttpError(409, "R2 canonical cleanup selector is missing Do_Not_Publish exclusion");
+    if (String(root?.mapper?.maxRecords || "") !== canonicalMaxRecords) throw new HttpError(409, `${config.stage} canonical cleanup maxRecords drifted; expected ${canonicalMaxRecords}`);
     selectorRestored = true;
     alreadyCanonical = true;
   } else {
@@ -10140,13 +10149,13 @@ async function repairCleanupItem7ExactStage(env, lease, input) {
     const recoveredBlueprint = JSON.parse(JSON.stringify(blueprint));
     const recoveredRoot = repairScenarioModuleById(recoveredBlueprint?.flow || [], 1);
     recoveredRoot.mapper.formula = recoveredFormula;
-    recoveredRoot.mapper.maxRecords = "1";
+    recoveredRoot.mapper.maxRecords = canonicalMaxRecords;
     await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, { method: "PATCH", body: JSON.stringify({ blueprint: JSON.stringify(recoveredBlueprint) }) });
 
     const verify = await repairReadMakeBlueprint(env, scenarioId);
     const verifyRoot = repairScenarioModuleById(verify.blueprint?.flow || [], 1);
     const verifyState = await phase6ScenarioState(env, scenarioId);
-    selectorRestored = String(verifyRoot?.mapper?.formula || "") === recoveredFormula && String(verifyRoot?.mapper?.maxRecords || "") === "1" && verifyState.isActive === false;
+    selectorRestored = String(verifyRoot?.mapper?.formula || "") === recoveredFormula && String(verifyRoot?.mapper?.maxRecords || "") === canonicalMaxRecords && verifyState.isActive === false;
     if (!selectorRestored) throw new HttpError(502, `${config.stage} cleanup selector restoration did not verify live`);
     if (JSON.stringify(verifyState?.scenario?.scheduling || {}) !== originalScheduling) throw new HttpError(502, `${config.stage} cleanup changed scenario scheduling`);
   }
@@ -10446,12 +10455,15 @@ async function repairRecoverItem7ExactSelector(env, input) {
   const root = repairScenarioModuleById(blueprint?.flow || [], 1);
   if (!root || root.module !== "airtable:ActionSearchRecords") throw new HttpError(409, `${config.stage} Module 1 is not the expected Airtable Search Records selector`);
   const formula = String(root?.mapper?.formula || "");
-  if (String(root?.mapper?.maxRecords || "") !== "1") throw new HttpError(409, `${config.stage} selector maxRecords is not 1`);
+  const canonicalMaxRecords = scenarioId === 5557966 ? "10" : "1";
 
   if (formula.includes('{Test_Run_ID}=BLANK()')) {
+    if (String(root?.mapper?.maxRecords || "") !== canonicalMaxRecords) throw new HttpError(409, `${config.stage} canonical selector maxRecords drifted; expected ${canonicalMaxRecords}`);
     if (scenarioId === 5569495 && !formula.includes('NOT({Do_Not_Publish})')) throw new HttpError(409, "R2 canonical selector is missing Do_Not_Publish exclusion");
     return { stage: config.stage, scenario_id: scenarioId, platform_output_record_id: recordId, test_run_id: testRunId, scenario_stopped: true, selector_restored: true, already_canonical: true, schedule_preserved: true };
   }
+
+  if (String(root?.mapper?.maxRecords || "") !== "1") throw new HttpError(409, `${config.stage} stranded exact selector maxRecords is not 1`);
 
   const exactWrapper = `AND(RECORD_ID()=${JSON.stringify(recordId)},`;
   const exactRunToken = `{Test_Run_ID}=${JSON.stringify(testRunId)}`;
@@ -10468,14 +10480,14 @@ async function repairRecoverItem7ExactSelector(env, input) {
   const patched = JSON.parse(JSON.stringify(blueprint));
   const patchedRoot = repairScenarioModuleById(patched?.flow || [], 1);
   patchedRoot.mapper.formula = canonical;
-  patchedRoot.mapper.maxRecords = "1";
+  patchedRoot.mapper.maxRecords = canonicalMaxRecords;
   await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, { method: "PATCH", body: JSON.stringify({ blueprint: JSON.stringify(patched) }) });
 
   const verifyRead = await repairReadMakeBlueprint(env, scenarioId);
   const verifyRoot = repairScenarioModuleById(verifyRead.blueprint?.flow || [], 1);
   const afterState = await phase6ScenarioState(env, scenarioId);
   const schedulePreserved = JSON.stringify(afterState?.scenario?.scheduling || {}) === schedulingBefore;
-  const selectorRestored = afterState.isActive === false && String(verifyRoot?.mapper?.formula || "") === canonical && String(verifyRoot?.mapper?.maxRecords || "") === "1";
+  const selectorRestored = afterState.isActive === false && String(verifyRoot?.mapper?.formula || "") === canonical && String(verifyRoot?.mapper?.maxRecords || "") === canonicalMaxRecords;
   if (!selectorRestored) throw new HttpError(502, `${config.stage} standalone selector recovery did not verify live`);
   if (!schedulePreserved) throw new HttpError(502, `${config.stage} standalone selector recovery changed scenario scheduling`);
 
