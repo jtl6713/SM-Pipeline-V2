@@ -123,6 +123,7 @@ export default {
           repair_make_scenario_inventory_v1: true,
           repair_make_start_scenario_probe_v1: true,
           repair_r4_exact_output_entry_v1: true,
+          repair_item7_r4_exact_entry_drift_v8: true,
           repair_r4_token_exact_entry_v1: true,
           repair_r4_direct_input_pulse_v1: true,
           repair_r4_scheduled_selector_pulse_v1: true,
@@ -11352,12 +11353,21 @@ async function repairR4ExactOutputEntry(env) {
     existing1?.mapper?.table === outputTableId &&
     String(existing1?.metadata?.designer?.name || '') === '1 - Get Exact Platform Output';
   if (!migratingLegacyNullInput) {
+    // ITEM7_R4_EXACT_ENTRY_DRIFT_V8: a later Test Mode hardening pass reintroduced
+    // SearchRecords while retaining the exact-entry module label. Accept only that
+    // known one-record drift (or the original approved broad selector) so the
+    // existing exact-entry migration can restore GetRecord without touching Modules 2+.
     if (existing1?.module !== 'airtable:ActionSearchRecords') throw new HttpError(409, `R4 module 1 type changed unexpectedly: ${existing1?.module}`);
-    if (String(existing1?.metadata?.designer?.name || '') !== 'Find One Platform Output Ready for Render - Rerender Safe - Cache Concurrency Guard') {
-      throw new HttpError(409, 'R4 module 1 name changed unexpectedly');
-    }
-    if (String(existing1?.mapper?.formula || '') !== expectedFormula || String(existing1?.mapper?.maxRecords || '') !== '1') {
-      throw new HttpError(409, 'R4 module 1 broad selector no longer matches the approved repair baseline');
+    const liveName = String(existing1?.metadata?.designer?.name || '');
+    const approvedNames = new Set([
+      'Find One Platform Output Ready for Render - Rerender Safe - Cache Concurrency Guard',
+      '1 - Get Exact Platform Output',
+    ]);
+    if (!approvedNames.has(liveName)) throw new HttpError(409, `R4 module 1 name changed unexpectedly: ${liveName}`);
+    const testModeGuardedFormula = `AND({Test_Run_ID}=BLANK(),${expectedFormula})`;
+    const liveFormula = String(existing1?.mapper?.formula || '');
+    if (![expectedFormula, testModeGuardedFormula].includes(liveFormula) || String(existing1?.mapper?.maxRecords || '') !== '1') {
+      throw new HttpError(409, 'R4 module 1 selector no longer matches an approved exact-entry migration baseline');
     }
   }
   const module2 = existingMap.get(2);
