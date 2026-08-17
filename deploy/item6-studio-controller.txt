@@ -1,1 +1,1 @@
-Deploy Item 6 replacement controller with no-bundle exact-source verification, binding identity verification, functional authenticated-session check, and automatic rollback on failure. Trigger 2026-08-17 08:24 CT.
+Deploy Item 6 replacement controller with no-bundle exact-source verification, binding identity verification, functional authenticated-session check, automatic rollback on failure, and retained Wrangler diagnostics. Retrigger 2026-08-17 08:27 CT.
