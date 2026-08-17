@@ -1,0 +1,87 @@
+name: Item7 R2 L9 Post-Failure Inspect
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-item7-r2-l9-postflight.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: item7-isolated-regression
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TEST_RUN_ID: ITEM7_9X16_REGRESSION_RUN32060507474
+      OUTPUT_RECORD_ID: recByMge4QPlCOsD2
+      SCENARIO_ID: '5569495'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create temporary authenticated service bridge
+        id: bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          BRIDGE="chicagoshining-item7-r2-l9-inspect"
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          cat >/tmp/bridge.js <<EOF
+          export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});}};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
+          EOF
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE" -H "$AUTH" >/dev/null 2>&1 || true
+          curl -fsS -X PUT "$ROOT/workers/scripts/$BRIDGE/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'worker.js=@/tmp/bridge.js;type=application/javascript+module;filename=worker.js' -o /tmp/upload.json
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/subdomain.json >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          echo "bridge=$BRIDGE" >> "$GITHUB_OUTPUT"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
+      - name: Inspect R2 OFF and selector state
+        shell: bash
+        env:
+          BRIDGE: ${{ steps.bridge.outputs.bridge }}
+          TOKEN: ${{ steps.bridge.outputs.token }}
+          SUB: ${{ steps.bridge.outputs.sub }}
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
+          inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -sS --max-time 60 -o evidence/inspect.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' evidence/inspect.json >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          echo "inspect_http=$code"
+          cat evidence/inspect.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
+          test "$code" = 200
+          jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1"' evidence/inspect.json >/dev/null
+      - name: Save inspect evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-r2-l9-postfailure-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Remove temporary bridge
+        if: always()
+        shell: bash
+        env:
+          BRIDGE: ${{ steps.bridge.outputs.bridge }}
+        run: |
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null 2>&1 || true
