@@ -1,0 +1,1 @@
+Read current C3B topology before identity-guard mutation.
