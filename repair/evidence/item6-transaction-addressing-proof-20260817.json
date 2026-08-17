@@ -1,0 +1,21 @@
+{
+  "repair_item": 6,
+  "checkpoint": "transaction-addressed-stage-handoff",
+  "result": "PASS",
+  "workflow_run_id": 32050199756,
+  "artifact_id": 9294513351,
+  "artifact_digest": "sha256:c8528991f5b219e4481f65aaf03415edb15596838668364038c0e0e9bc2d95b7",
+  "head_sha": "3fa6d4cb16dd609cb61d810055a5e55b4e98b641",
+  "scenario_runs": 0,
+  "scenario_activation_changes": 0,
+  "nonterminal_replacement_transactions_at_start": 0,
+  "scheduled_orchestrators_verified_off": [5864632,5813561,5806668,5823581],
+  "stage_scenarios_verified_active_unchanged": [5862882,5612664,5845193,5791356,5791396,5791424,5813463,5813487,5813511,5813534,5806644,5806597,5823572,5830810,5830609,5830616,5830623],
+  "contract": {
+    "normal_calls": "Missing/empty transaction fields require the exact Airtable replacement fields to also be empty.",
+    "replacement_calls": "replace_transaction_id and replace_fingerprint must equal the exact Airtable Platform Output before the first mutating/create/finalize stage step.",
+    "handoffs": "Orchestrator and internal exact-output webhook bodies carry Replace_Transaction_ID and Replace_Fingerprint.",
+    "youtube": "YT0 YouTube_Idempotency_Key is replacement-transaction scoped."
+  },
+  "rate_limit_recovery": "A prior partial rollout stopped on Make HTTP 429. The successful convergence used paced requests, 429 backoff, and final read-back of all 21 target blueprints."
+}
