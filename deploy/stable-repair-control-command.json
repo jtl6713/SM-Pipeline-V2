@@ -8,5 +8,5 @@
   "replace_fingerprint": "sha256:item6-fixture-v1",
   "allow_public_publish": false,
   "expected_upstream_status": 200,
-  "note": "Item 6 prepare must snapshot last-good state without resetting publication fields"
+  "note": "Item 6 idempotent replay of identical prepare transaction"
 }
