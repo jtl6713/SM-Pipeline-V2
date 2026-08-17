@@ -1,0 +1,1 @@
+Read-only P4/P5 Airtable write and reminder-side-effect contract audit for Test Mode. No Make mutation, activation, Airtable write, email, render, draft, or publishing. 2026-08-16.
