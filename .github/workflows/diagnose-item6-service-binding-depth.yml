@@ -1,0 +1,122 @@
+name: Diagnose Item6 Service Binding Depth
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/diagnose-item6-service-binding-depth.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-item6-depth-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build exact-version diagnostic bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/before.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json)
+          PCT=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.percentage' /tmp/before.json)
+          test "$PCT" = '100'
+          printf '%s' "$ACTIVE" >/tmp/active.txt
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          printf '%s' "$TOKEN" >/tmp/token.txt
+          cat >/tmp/bridge.js <<EOF
+          async function callTarget(env, method, path, body, active) {
+            const headers = {
+              "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
+              "Origin": "https://studio.chicagoshining.com",
+              "Accept": "application/json",
+              "Cloudflare-Workers-Version-Overrides": "$TARGET_WORKER=\"$ACTIVE\""
+            };
+            if (body !== null) headers["Content-Type"] = "application/json";
+            const r = await env.STUDIO_API.fetch(new Request("https://studio-api.internal" + path, {
+              method,
+              headers,
+              body: body === null ? undefined : JSON.stringify(body)
+            }));
+            return {status:r.status, contentType:r.headers.get("Content-Type"), text:await r.text()};
+          }
+          export default {async fetch(request, env) {
+            const u = new URL(request.url);
+            if (u.pathname === "/$TOKEN/ready") return Response.json({ok:true});
+            if (u.pathname !== "/$TOKEN/execute") return new Response("Not found", {status:404});
+            const out = {};
+            try { out.health = await callTarget(env, "GET", "/health", null, "$ACTIVE"); }
+            catch (e) { out.health = {threw:true, name:e?.name, message:e?.message, stack:e?.stack}; }
+            try { out.output167 = await callTarget(env, "GET", "/api/outputs/recdCzUqxwQMYcK6g", null, "$ACTIVE"); }
+            catch (e) { out.output167 = {threw:true, name:e?.name, message:e?.message, stack:e?.stack}; }
+            try { out.repairState = await callTarget(env, "POST", "/api/admin/repair/control", {action:"state",test_run_id:"ITEM6_CLEANUP_20260817_1217A",lease_id:"ITEM6_DIAG_NONEXISTENT_LEASE",scenario_id:5813561}, "$ACTIVE"); }
+            catch (e) { out.repairState = {threw:true, name:e?.name, message:e?.message, stack:e?.stack}; }
+            return Response.json({ok:true, activeVersion:"$ACTIVE", probes:out}, {headers:{"Cache-Control":"no-store"}});
+          }};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"bridge.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/bridge.js
+
+      - name: Upload bridge and execute probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT "$ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'bridge.js=@/tmp/bridge.js;type=application/javascript+module;filename=bridge.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/subdomain-enable.json
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          T=$(cat /tmp/token.txt)
+          ready=false
+          for i in $(seq 1 20); do
+            rc=$(curl -sS --max-time 15 -o /tmp/ready.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$T/ready" || true)
+            if [[ "$rc" == '200' ]] && jq -e '.ok==true' /tmp/ready.json >/dev/null 2>&1; then ready=true; break; fi
+            sleep 2
+          done
+          test "$ready" = true
+          rc=$(curl -sS --max-time 60 -o /tmp/probes.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$T/execute" || true)
+          echo "bridge_http=$rc"
+          cat /tmp/probes.json
+          test "$rc" = '200'
+          jq -e '.ok==true' /tmp/probes.json >/dev/null
+          echo '--- probe summary ---'
+          jq -c '.probes | with_entries(.value |= {status,threw,name,message,contentType,text})' /tmp/probes.json
+
+      - name: Delete bridge and verify target unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/after.json
+          test "$(cat /tmp/active.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)"
+
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item6-service-binding-depth-${{ github.run_id }}
+          path: |
+            /tmp/probes.json
+            /tmp/before.json
+            /tmp/after.json
+          if-no-files-found: ignore
+          retention-days: 30
