@@ -1,0 +1,66 @@
+name: Read TestMode Final Gap Contracts
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-testmode-final-gap-contracts.txt']
+
+permissions: {contents: read}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env: {CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}'}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read C3 C3B PUB3 SMV1 exact contracts
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q
+          import urllib.parse
+          f="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q)" -H "Authorization: Bearer $PAT" -o /tmp/settings
+          python - <<'PY'
+          import json,urllib.request
+          d=json.load(open('/tmp/settings')); v={r['fields']['Setting_Name']:r['fields']['Setting_Value'] for r in d['records']}
+          token=str(v['MAKE_API_TOKEN']).strip(); base=str(v['MAKE_API_BASE_URL']).strip().rstrip('/')
+          T=[(5587853,'C3'),(5592384,'C3B'),(5580354,'PUB3'),(5894885,'SMV1')]
+          def get(path):
+            q=urllib.request.Request(base+path,headers={'Authorization':'Token '+token,'User-Agent':'SM-Pipeline-Audit/1.0'})
+            with urllib.request.urlopen(q,timeout=30) as h:return json.loads(h.read().decode())
+          def unwrap(x): return x.get('scenario') or x.get('response') or x
+          def bp(x):
+            b=x.get('blueprint') or (x.get('response') or {}).get('blueprint') or x
+            return json.loads(b) if isinstance(b,str) else b
+          def walk(flow):
+            for n in flow or []:
+              yield n
+              for r in n.get('routes') or []: yield from walk(r.get('flow') or [])
+          for sid,label in T:
+            meta=unwrap(get(f'/scenarios/{sid}')); b=bp(get(f'/scenarios/{sid}/blueprint?draft=false'))
+            print('\n===',label,sid,meta.get('name'),'active=',meta.get('isActive'),'hook=',meta.get('hookId'),'schedule=',meta.get('scheduling'),'===')
+            print('TEST_RUN_ID_PRESENT', 'Test_Run_ID' in json.dumps(b,default=str))
+            for n in walk(b.get('flow') or []):
+              mod=str(n.get('module') or ''); nm=str(((n.get('metadata') or {}).get('designer') or {}).get('name') or '')
+              if not any(x in mod for x in ('gateway:CustomWebHook','airtable:','google-email:','gmail:','http:','webhooks:')): continue
+              params=n.get('parameters') or {}; mapper=n.get('mapper') or {}
+              safe={}
+              for k,val in {**params,**mapper}.items():
+                kl=str(k).lower()
+                if any(x in kl for x in ('token','secret','authorization','connection')): safe[k]='<redacted>'
+                elif 'url' in kl: safe[k]='<url-redacted>'
+                elif any(x in kl for x in ('to','cc','bcc','email')) and isinstance(val,str) and '@' in val: safe[k]='<email-redacted>'
+                else: safe[k]=val
+              print(json.dumps({'id':n.get('id'),'module':mod,'name':nm,'config':safe,'filter':n.get('filter')},default=str,separators=(',',':')))
+          PY
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/q /tmp/settings
