@@ -32,29 +32,44 @@ def add_handoff_fields(n):
     raw=mapper.get('jsonStringBodyContent')
     if not isinstance(raw,str) or 'output_record_id' not in raw:
         return False
+    # Make permits templated JSON strings whose inner formatDate quotes are not
+    # valid standalone JSON. Prefer structural JSON parsing, but fall back to a
+    # narrow textual insertion anchored to the exact output_record_id token.
+    source=None
     try:
         body=json.loads(raw)
+        out=body.get('output_record_id')
+        if isinstance(out,str):
+            m=re.search(r'\{\{\s*(\d+)\.id\s*\}\}',out)
+            if m: source=m.group(1)
+        if source:
+            wanted_tx=f'{{{{{source}.Replace_Transaction_ID}}}}'
+            wanted_fp=f'{{{{{source}.Replace_Fingerprint}}}}'
+            changed=False
+            if body.get('replace_transaction_id') != wanted_tx:
+                body['replace_transaction_id']=wanted_tx; changed=True
+            if body.get('replace_fingerprint') != wanted_fp:
+                body['replace_fingerprint']=wanted_fp; changed=True
+            if changed:
+                mapper['jsonStringBodyContent']=json.dumps(body,separators=(',',':'))
+                n['mapper']=mapper
+                changes.append({'module_id':n.get('id'),'name':((n.get('metadata') or {}).get('designer') or {}).get('name'),'change':'transaction_handoff_payload'})
+            return changed
     except Exception:
+        pass
+
+    if 'replace_transaction_id' in raw and 'replace_fingerprint' in raw:
         return False
-    out=body.get('output_record_id')
-    if not isinstance(out,str):
-        return False
-    m=re.search(r'\{\{\s*(\d+)\.id\s*\}\}',out)
+    m=re.search(r'("output_record_id"\s*:\s*"\{\{\s*(\d+)\.id\s*\}\}")',raw)
     if not m:
         return False
-    source=m.group(1)
-    wanted_tx=f'{{{{{source}.Replace_Transaction_ID}}}}'
-    wanted_fp=f'{{{{{source}.Replace_Fingerprint}}}}'
-    changed=False
-    if body.get('replace_transaction_id') != wanted_tx:
-        body['replace_transaction_id']=wanted_tx; changed=True
-    if body.get('replace_fingerprint') != wanted_fp:
-        body['replace_fingerprint']=wanted_fp; changed=True
-    if changed:
-        mapper['jsonStringBodyContent']=json.dumps(body,separators=(',',':'))
-        n['mapper']=mapper
-        changes.append({'module_id':n.get('id'),'name':((n.get('metadata') or {}).get('designer') or {}).get('name'),'change':'transaction_handoff_payload'})
-    return changed
+    source=m.group(2)
+    insertion=(m.group(1)+f',"replace_transaction_id":"{{{{{source}.Replace_Transaction_ID}}}}",'
+               f'"replace_fingerprint":"{{{{{source}.Replace_Fingerprint}}}}"')
+    mapper['jsonStringBodyContent']=raw[:m.start(1)]+insertion+raw[m.end(1):]
+    n['mapper']=mapper
+    changes.append({'module_id':n.get('id'),'name':((n.get('metadata') or {}).get('designer') or {}).get('name'),'change':'transaction_handoff_payload_templated_json'})
+    return True
 
 # Patch every exact-output HTTP handoff in both orchestrators and stage scenarios.
 for n in nodes:
