@@ -9555,9 +9555,32 @@ async function repairAcquireLease(env, input, authorization) {
     }
   }
 
-  await repairSweepExpiredLeases(env, scenarioId);
-  const overlaps = (await repairLeaseRecords(env, scenarioId)).map(repairLeaseState).filter((l) => l.lease_id !== leaseId);
-  if (overlaps.length) throw new HttpError(409, `Scenario ${scenarioId} already has an active repair lease`);
+  const existingLeases = (await repairLeaseRecords(env, scenarioId)).map(repairLeaseState).filter((l) => l.lease_id !== leaseId);
+  const nowMs = Date.now();
+  const staleLeases = existingLeases.filter((l) => {
+    const expiry = repairIsoMs(l.expires_at);
+    const exhausted = l.operations_used >= Number(l.contract.max_operations || 0) || l.runs_used >= Number(l.contract.max_runs || 0);
+    return (Number.isFinite(expiry) && expiry <= nowMs) || exhausted;
+  });
+  const activeOverlaps = existingLeases.filter((l) => !staleLeases.includes(l));
+  if (activeOverlaps.length) throw new HttpError(409, `Scenario ${scenarioId} already has an active repair lease`);
+  if (staleLeases.length) {
+    const staleWithRuns = staleLeases.filter((l) => l.runs_used > 0);
+    let stopped = null;
+    if (staleWithRuns.length) {
+      try { stopped = await phase6StopScenarioVerified(env, scenarioId, 2); }
+      catch (e) { throw new HttpError(502, `Could not verify scenario ${scenarioId} inactive before replacing stale repair lease: ${e instanceof Error ? e.message : String(e)}`); }
+      if (stopped?.inactive !== true) throw new HttpError(502, `Could not verify scenario ${scenarioId} inactive before replacing stale repair lease`);
+    }
+    for (const stale of staleLeases) {
+      await repairCloseLease(env, stale, "expired", {
+        reason: stale.runs_used > 0 ? "lease-expired-before-reacquire-scenario-stopped" : "lease-expired-before-reacquire-no-runs",
+        scenario_stopped: stale.runs_used > 0 ? stopped?.inactive === true : null,
+        replacement_lease_id: leaseId,
+        replacement_test_run_id: testRunId,
+      });
+    }
+  }
 
   const outputs = [];
   for (const id of allowedOutputs) outputs.push(await repairVerifyOutputRecord(env, id, allowPublicPublish, testRunId));
