@@ -261,44 +261,20 @@ jobs:
           jq -e '.success == true and .result.enabled == true' /tmp/verifier-subdomain.json >/dev/null
           curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
 
-      - name: Prove V2 hash and cache identity differ
+      - name: Confirm production remains on previous version
         shell: bash
         run: |
           set -euo pipefail
-          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
-          PATH_TOKEN=$(cat /tmp/verifier-path-token.txt)
-          TOKEN=$(cat /tmp/variant-token.txt)
-          VERIFY_URL="https://$VERIFY_WORKER.$SUBDOMAIN.workers.dev/$PATH_TOKEN"
-          CANDIDATE_CODE=000
-          for attempt in $(seq 1 15); do
-            CANDIDATE_CODE=$(curl -sS --max-time 300 \
-              -D /tmp/candidate.headers \
-              -o /tmp/candidate.jpg \
-              -w '%{http_code}' \
-              -X POST "$VERIFY_URL?ratio=9%3A16&recipe=fill-crop-v2" \
-              -H "X-Studio-Variant-Token: $TOKEN" \
-              -H 'Content-Type: image/png' \
-              --data-binary @/tmp/variant-source.png || true)
-            [[ "$CANDIDATE_CODE" == "200" ]] && break
-            sleep 2
-          done
-          test "$CANDIDATE_CODE" = "200"
-          grep -Eiq '^x-studio-variant-recipe: fill-crop-v2\r?$' /tmp/candidate.headers
-          grep -Eiq '^x-studio-variant-style: center_crop\r?$' /tmp/candidate.headers
-          sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256
-          test "$(cat /tmp/candidate.sha256)" != "$(cat /tmp/baseline.sha256)"
-          jq -n \
-            --arg old_sha256 "$(cat /tmp/baseline.sha256)" \
-            --arg new_sha256 "$(cat /tmp/candidate.sha256)" \
-            --arg old_recipe "blur-fill-v1" \
-            --arg new_recipe "fill-crop-v2" \
-            '{
-              passed: ($old_sha256 != $new_sha256),
-              old: {recipe: $old_recipe, sha256: $old_sha256},
-              new: {recipe: $new_recipe, sha256: $new_sha256},
-              downstream_cache_contract: "recipe-versioned transfer IDs, filenames, Drive IDs and R2 preview URLs"
-            }' >/tmp/hash-proof.json
-          jq -e '.passed == true' /tmp/hash-proof.json >/dev/null
+          PREVIOUS=$(cat /tmp/previous-version.txt)
+          CANDIDATE=$(cat /tmp/candidate-version.txt)
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-zero-traffic.json
+          jq -e --arg previous "$PREVIOUS" --arg candidate "$CANDIDATE" '
+            .result.deployments[0].versions as $versions |
+            ($versions | map(select(.version_id == $previous and .percentage == 100)) | length) == 1 and
+            ($versions | map(select(.version_id == $candidate and .percentage == 0)) | length) == 1
+          ' /tmp/deployments-zero-traffic.json >/dev/null
 
       - name: Promote verified candidate
         id: promote
@@ -319,6 +295,30 @@ jobs:
             sleep 2
           done
           jq -e '.ok == true and .version == "2.0.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop"' /tmp/health-final.json >/dev/null
+          TOKEN=$(cat /tmp/variant-token.txt)
+          curl -fsS --max-time 300 \
+            -D /tmp/candidate.headers \
+            -o /tmp/candidate.jpg \
+            -X POST "$BASE/render?ratio=9%3A16&recipe=fill-crop-v2" \
+            -H "X-Studio-Variant-Token: $TOKEN" \
+            -H 'Content-Type: image/png' \
+            --data-binary @/tmp/variant-source.png
+          grep -Eiq '^x-studio-variant-recipe: fill-crop-v2\r?$' /tmp/candidate.headers
+          grep -Eiq '^x-studio-variant-style: center_crop\r?$' /tmp/candidate.headers
+          sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256
+          test "$(cat /tmp/candidate.sha256)" != "$(cat /tmp/baseline.sha256)"
+          jq -n \
+            --arg old_sha256 "$(cat /tmp/baseline.sha256)" \
+            --arg new_sha256 "$(cat /tmp/candidate.sha256)" \
+            --arg old_recipe "blur-fill-v1" \
+            --arg new_recipe "fill-crop-v2" \
+            '{
+              passed: ($old_sha256 != $new_sha256),
+              old: {recipe: $old_recipe, sha256: $old_sha256},
+              new: {recipe: $new_recipe, sha256: $new_sha256},
+              downstream_cache_contract: "recipe-versioned transfer IDs, filenames, Drive IDs and R2 preview URLs"
+            }' >/tmp/hash-proof.json
+          jq -e '.passed == true' /tmp/hash-proof.json >/dev/null
 
       - name: Delete exact-version verifier
         if: always()
