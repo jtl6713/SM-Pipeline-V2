@@ -1,0 +1,14 @@
+# Runtime upload/job state
+/data/youtube-jobs.json
+
+# Local credentials and tokens
+.env
+.env.*
+!.env.example
+*credentials*.json
+*token*.json
+
+# Runtime dependencies / output
+node_modules/
+logs/
+*.log
