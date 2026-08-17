@@ -20,9 +20,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       SCENARIO_ID: '5569495'
-      EXECUTION_ID: 'dc20ddd227a64573aa14be6d1d95ce9a'
-      WINDOW_START: '2026-08-17T20:51:50Z'
-      WINDOW_END: '2026-08-17T20:53:40Z'
+      FIELD_ID: 'fldEzxfia9EtHbg2F'
     steps:
       - uses: actions/checkout@v6
       - name: Resolve Make API credentials without logging values
@@ -47,94 +45,73 @@ jobs:
           if not t or not b: raise SystemExit('Missing active Make API settings')
           open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
           PY
-      - name: Read R2 scenario, module logs and exact L9 error detail
+      - name: Read recent R2 Module 9 blueprint mappings
         shell: bash
         run: |
           set -euo pipefail
-          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID="$SCENARIO_ID"; EID="$EXECUTION_ID"
-          mkdir -p /tmp/r2logs
-          curl -fsS "$BASE/scenarios/$SID/logs?pg%5Blimit%5D=50&pg%5BsortDir%5D=desc" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/r2logs/scenario.json
-          for MID in 1 2 3 5 6 10 11 4 7 8 9 20 14 21; do
-            code=$(curl -sS -o "/tmp/r2logs/module-$MID.json" -w '%{http_code}' "$BASE/scenarios/$SID/modules/$MID/logs?pg%5Blimit%5D=50&pg%5BsortDir%5D=desc" -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
-            echo "module_${MID}_http=$code"
-            if [[ "$code" != 200 ]]; then echo '{"moduleLogs":[]}' > "/tmp/r2logs/module-$MID.json"; fi
-          done
-          dcode=$(curl -sS -o /tmp/r2logs/execution-detail.json -w '%{http_code}' "$BASE/scenarios/$SID/executions/$EID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
-          echo "execution_detail_http=$dcode"
-          if [[ "$dcode" != 200 ]]; then echo '{}' > /tmp/r2logs/execution-detail.json; fi
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID="$SCENARIO_ID"
+          curl -fsS "$BASE/scenarios/$SID/blueprints" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/versions.json
+          python - <<'PY' >/tmp/ids.txt
+          import json
+          d=json.load(open('/tmp/versions.json'))
+          raw=(d.get('response',{}).get('scenariosBlueprints') if isinstance(d.get('response'),dict) else None) or d.get('scenariosBlueprints') or (d.get('response',{}).get('blueprints') if isinstance(d.get('response'),dict) else None) or d.get('blueprints') or d.get('response') or d
+          if isinstance(raw,dict): raw=[raw]
+          for v in (raw if isinstance(raw,list) else [])[:30]:
+              x=v.get('id',v.get('blueprintId',v.get('blueprint_id',v.get('version')))) if isinstance(v,dict) else None
+              if x is not None: print(x)
+          PY
+          mkdir -p /tmp/bps
+          while read -r BID; do
+            [[ -n "$BID" ]] || continue
+            code=$(curl -sS -o "/tmp/bps/$BID.json" -w '%{http_code}' "$BASE/scenarios/$SID/blueprint?blueprintId=$BID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json')
+            echo "blueprint_${BID}_http=$code"
+          done </tmp/ids.txt
           python - <<'PY'
-          import json, os, re
-          from datetime import datetime
-          start=datetime.fromisoformat(os.environ['WINDOW_START'].replace('Z','+00:00'))
-          end=datetime.fromisoformat(os.environ['WINDOW_END'].replace('Z','+00:00'))
-          eid=os.environ['EXECUTION_ID']
-          def dt(v):
-              if not v: return None
-              try: return datetime.fromisoformat(str(v).replace('Z','+00:00'))
-              except Exception: return None
-          s=json.load(open('/tmp/r2logs/scenario.json'))
-          scenario=[]
-          for r in s.get('scenarioLogs',[])[:50]:
-              t=dt(r.get('timestamp') or r.get('startedAt'))
-              row={k:r.get(k) for k in ('id','timestamp','status','duration','operations','type','instant') if k in r}
-              row['in_l9_window']=bool(t and start <= t <= end)
-              scenario.append(row)
-          modules=[]
-          target9=None
-          for mid in [1,2,3,5,6,10,11,4,7,8,9,20,14,21]:
-              try: d=json.load(open(f'/tmp/r2logs/module-{mid}.json'))
-              except Exception: d={}
-              rows=[]
-              for r in d.get('moduleLogs',[])[:50]:
-                  t=dt(r.get('timestamp'))
-                  row={k:r.get(k) for k in ('executionId','timestamp','status','bundles') if k in r}
-                  row['in_l9_window']=bool(t and start <= t <= end)
-                  rows.append(row)
-                  if mid==9 and str(r.get('executionId'))==eid: target9=r
-              modules.append({'module_id':mid,'logs':rows})
-          def errorish(obj, path=''):
-              out={}
-              if isinstance(obj,dict):
-                  for k,v in obj.items():
-                      lk=str(k).lower(); p=f'{path}.{k}' if path else str(k)
-                      if any(x in lk for x in ('error','message','reason','detail','code','status')):
-                          if isinstance(v,(str,int,float,bool)) or v is None: out[p]=v
-                          elif isinstance(v,(dict,list)): out.update(errorish(v,p))
-                      elif isinstance(v,(dict,list)) and not any(x in lk for x in ('input','output','request','response','header','body','data','bundle')):
-                          out.update(errorish(v,p))
-              elif isinstance(obj,list):
-                  for i,v in enumerate(obj[:10]): out.update(errorish(v,f'{path}[{i}]'))
-              return out
-          detail=json.load(open('/tmp/r2logs/execution-detail.json'))
-          exact_scenario=next((r for r in scenario if str(r.get('id'))==eid),None)
-          exact_modules=[]
-          for m in modules:
-              rr=[r for r in m['logs'] if str(r.get('executionId'))==eid]
-              if rr: exact_modules.append({'module_id':m['module_id'],'logs':rr})
-          module9_diag={
-              'entry_keys': sorted(target9.keys()) if isinstance(target9,dict) else [],
-              'error_fields': errorish(target9 or {}),
-          }
-          detail_obj=detail.get('execution') or detail.get('response') or detail
-          execution_diag={
-              'top_level_keys': sorted(detail_obj.keys()) if isinstance(detail_obj,dict) else [],
-              'error_fields': errorish(detail_obj if isinstance(detail_obj,dict) else {}),
-          }
-          out={'scenario_id':int(os.environ['SCENARIO_ID']),'execution_id':eid,'scenario_log':exact_scenario,'exact_module_path':exact_modules,'module_9_diagnostic':module9_diag,'execution_diagnostic':execution_diag}
-          open('/tmp/item7-r2-l9-execution-detail.json','w').write(json.dumps(out,indent=2,sort_keys=True))
-          print(json.dumps(out,indent=2,sort_keys=True))
+          import json, os, glob
+          fid=os.environ['FIELD_ID']
+          versions_meta=json.load(open('/tmp/versions.json'))
+          raw=(versions_meta.get('response',{}).get('scenariosBlueprints') if isinstance(versions_meta.get('response'),dict) else None) or versions_meta.get('scenariosBlueprints') or (versions_meta.get('response',{}).get('blueprints') if isinstance(versions_meta.get('response'),dict) else None) or versions_meta.get('blueprints') or versions_meta.get('response') or versions_meta
+          if isinstance(raw,dict): raw=[raw]
+          meta={}
+          for v in (raw if isinstance(raw,list) else []):
+              if not isinstance(v,dict): continue
+              bid=v.get('id',v.get('blueprintId',v.get('blueprint_id',v.get('version'))))
+              if bid is not None: meta[str(bid)]={k:v.get(k) for k in ('id','blueprintId','blueprint_id','version','createdAt','created_at','created','timestamp','draft','isDraft','is_draft') if k in v}
+          def find(flow,mid):
+              for n in flow if isinstance(flow,list) else []:
+                  if str(n.get('id'))==str(mid): return n
+                  for r in n.get('routes',[]) if isinstance(n.get('routes'),list) else []:
+                      z=find(r.get('flow'),mid)
+                      if z: return z
+              return None
+          out=[]
+          for p in glob.glob('/tmp/bps/*.json'):
+              bid=os.path.basename(p)[:-5]
+              try: d=json.load(open(p))
+              except Exception: continue
+              bp=(d.get('response',{}).get('blueprint') if isinstance(d.get('response'),dict) else None) or d.get('blueprint')
+              if not isinstance(bp,dict): continue
+              m=find(bp.get('flow'),9)
+              mapper=(m or {}).get('mapper') or {}
+              out.append({'blueprint_id':bid,'meta':meta.get(bid,{}),'module9_name':((m or {}).get('metadata',{}).get('designer',{}).get('name')),'review_html_mapping':mapper.get(fid),'module9_field_count':len(mapper) if isinstance(mapper,dict) else None})
+          def sortkey(x):
+              try:return int(x['blueprint_id'])
+              except:return -1
+          out.sort(key=sortkey,reverse=True)
+          open('/tmp/item7-r2-module9-history.json','w').write(json.dumps({'scenario_id':int(os.environ['SCENARIO_ID']),'field_id':fid,'versions':out},indent=2,sort_keys=True))
+          print(json.dumps({'version_count':len(out),'mappings':[{'blueprint_id':x['blueprint_id'],'meta':x['meta'],'review_html_mapping':x['review_html_mapping']} for x in out]},indent=2,sort_keys=True))
           PY
       - name: Destroy transient credentials
         if: always()
         shell: bash
         run: |
-          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/q.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
-          rm -rf /tmp/r2logs
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/q.txt /tmp/versions.json /tmp/ids.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+          rm -rf /tmp/bps
       - name: Upload sanitized evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r2-l9-execution-detail-${{ github.run_id }}
-          path: /tmp/item7-r2-l9-execution-detail.json
+          name: item7-r2-module9-history-${{ github.run_id }}
+          path: /tmp/item7-r2-module9-history.json
           if-no-files-found: warn
           retention-days: 30
