@@ -1,0 +1,79 @@
+{
+  "repair_item": 6,
+  "checkpoint": "safe-republish-replace-closure",
+  "timestamp_utc": "2026-08-17T18:44:30Z",
+  "status": "PASS_SYNTHETIC_TRANSACTION_CLOSURE",
+  "scope": "Exact-output, nonpublic Output 167 proof of replacement transaction semantics and duplicate-cleanup state handling. No Make publisher run and no public platform operation occurred.",
+  "fixture": {
+    "record_id": "recdCzUqxwQMYcK6g",
+    "output_id": 167,
+    "platform": "YouTube",
+    "test_run_id": "ITEM6_CLEANUP_20260817_1217A",
+    "do_not_publish": true,
+    "old_identity": "item6-old-20260817-1217",
+    "synthetic_new_identity": "ITEM6_SIM_NEW_20260817_1343D"
+  },
+  "repair_control": {
+    "exact_address_lookup_deploy_run_id": 32055036474,
+    "async_error_boundary_fix_deploy_run_id": 32055380702,
+    "wrong_lease_denial_run_id": 32055477235,
+    "wrong_test_run_denial_run_id": 32055993483,
+    "final_lease_acquire_run_id": 32056249027,
+    "lease_id": "ITEM6_CLEANUP_LEASE_20260817_1343D",
+    "lease_record_id": "rec3BpTLLskGGjbzq",
+    "scenario_id": 5813561,
+    "max_runs": 1,
+    "max_operations": 40,
+    "allow_public_publish": false,
+    "allowed_platform_output_record_ids": [
+      "recdCzUqxwQMYcK6g"
+    ],
+    "runs_used": 0,
+    "closed_as_zero_run_metadata": true
+  },
+  "stage_contract_evidence": {
+    "transaction_addressing_file": "repair/evidence/item6-transaction-addressing-proof-20260817.json",
+    "transaction_addressing_run_id": 32050199756,
+    "ambiguous_retry_guard_file": "repair/evidence/item6-ambiguous-retry-guards-proof-20260817.json",
+    "ambiguous_retry_guard_run_id": 32036387558,
+    "stage_scenario_runs_for_structural_proofs": 0
+  },
+  "closure_proof": {
+    "workflow_run_id": 32056383357,
+    "artifact_id": 9296527685,
+    "artifact_digest": "sha256:e793e13ad92972a625493c9e3f5ed2edb41fd74f6cbb428a5ff8026de52907a3",
+    "active_worker_version": "d46b9f8f-0fa4-4ad5-bb79-f634e9400c94",
+    "replace_transaction_id": "ITEM6_TXN_20260817_1343D",
+    "replace_fingerprint": "sha256:item6-output167-cleanup-1343D",
+    "checks": {
+      "exact_state": "PASS",
+      "prepare": "PASS",
+      "prepare_replay_idempotent": "PASS",
+      "public_begin_denied_without_public_lease": "PASS",
+      "verify_new_identity_and_obsolete_snapshot": "PASS",
+      "mismatched_cleanup_evidence_denied": "PASS",
+      "matching_cleanup_evidence_accepted": "PASS",
+      "cleanup_replay_idempotent": "PASS",
+      "final_state_complete": "PASS",
+      "fixture_restored_exactly": "PASS",
+      "production_worker_version_unchanged": "PASS"
+    }
+  },
+  "platform_cleanup_boundary": {
+    "actual_external_platform_deletion_performed": false,
+    "actual_external_platform_cleanup_proven": false,
+    "controller_supports_verified_cleanup_evidence": true,
+    "controller_supports_manual_cleanup_required_state": true,
+    "note": "Synthetic cleanup evidence proves transaction and reconciliation semantics only. Platform-specific real deletion/reconciliation remains subject to each platform's later acceptance item and API capability; Item 6 does not authorize blind retry or claim a real YouTube deletion."
+  },
+  "safety": {
+    "public_platform_operations": 0,
+    "make_publisher_runs": 0,
+    "fixture_restored": true,
+    "do_not_publish_restored_true": true,
+    "disposable_bridge_deleted": true,
+    "production_worker_unchanged": true
+  },
+  "closure_status": "CLOSED",
+  "item7_unblocked": true
+}
