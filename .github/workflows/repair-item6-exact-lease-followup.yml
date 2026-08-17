@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Surgically patch exact lease lookup
+      - name: Scope acquire sweep and preserve exact follow-ups
         shell: bash
         run: |
           set -euo pipefail
@@ -33,24 +33,45 @@ jobs:
           from pathlib import Path
           p=Path('apps/studio-api/worker.js')
           s=p.read_text()
-          start=s.index('async function repairFindLease(env, input) {')
-          end=s.index('\nasync function repairReserveBudget', start)
-          block=s[start:end]
-          needle='  await repairSweepExpiredLeases(env);\n'
-          if block.count(needle) != 1:
-              raise SystemExit(f'Expected exactly one global sweep in repairFindLease, found {block.count(needle)}')
-          block=block.replace(needle,'',1)
-          s2=s[:start]+block+s[end:]
-          astart=s2.index('async function repairAcquireLease(env, input, authorization) {')
-          aend=s2.index('\nasync function repairFindLease', astart)
-          acquire=s2[astart:aend]
-          if 'await repairSweepExpiredLeases(env);' not in acquire:
-              raise SystemExit('Acquire path no longer contains required global expiry sweep')
-          if 'await repairSweepExpiredLeases(env);' in block:
-              raise SystemExit('Exact repairFindLease still contains global sweep')
-          p.write_text(s2)
-          print('exact_followup_sweep_removed=PASS')
-          print('acquire_sweep_preserved=PASS')
+
+          old_sig='async function repairSweepExpiredLeases(env) {'
+          new_sig='async function repairSweepExpiredLeases(env, scenarioId = null) {'
+          if s.count(old_sig) != 1:
+              raise SystemExit(f'Expected one sweep signature, found {s.count(old_sig)}')
+          s=s.replace(old_sig,new_sig,1)
+
+          sstart=s.index(new_sig)
+          send=s.index('\nasync function repairAcquireLease',sstart)
+          sweep=s[sstart:send]
+          old_records='  const records = await repairLeaseRecords(env);\n'
+          if sweep.count(old_records) != 1:
+              raise SystemExit('Expected one global lease-record read in sweep function')
+          sweep=sweep.replace(old_records,'  const records = await repairLeaseRecords(env, scenarioId);\n',1)
+          s=s[:sstart]+sweep+s[send:]
+
+          astart=s.index('async function repairAcquireLease(env, input, authorization) {')
+          aend=s.index('\nasync function repairFindLease',astart)
+          acquire=s[astart:aend]
+          old_call='  await repairSweepExpiredLeases(env);\n'
+          if acquire.count(old_call) != 1:
+              raise SystemExit(f'Expected one acquire sweep call, found {acquire.count(old_call)}')
+          acquire=acquire.replace(old_call,'  await repairSweepExpiredLeases(env, scenarioId);\n',1)
+          s=s[:astart]+acquire+s[aend:]
+
+          fstart=s.index('async function repairFindLease(env, input) {')
+          fend=s.index('\nasync function repairReserveBudget',fstart)
+          follow=s[fstart:fend]
+          if 'repairSweepExpiredLeases' in follow:
+              raise SystemExit('Exact follow-up lookup must not sweep')
+          if 'await repairSweepExpiredLeases(env, scenarioId);' not in acquire:
+              raise SystemExit('Acquire path is not scenario-scoped')
+          if 'return respond(request, env, { ok: true, action, swept: await repairSweepExpiredLeases(env) });' not in s:
+              raise SystemExit('Explicit maintenance sweep is no longer global')
+
+          p.write_text(s)
+          print('acquire_scenario_scoped_sweep=PASS')
+          print('exact_followup_no_sweep=PASS')
+          print('explicit_global_maintenance_sweep=PASS')
           PY
           node --check apps/studio-api/worker.js
           git diff --check
@@ -64,12 +85,11 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add apps/studio-api/worker.js
-          git commit -m 'fix(item6): make exact lease follow-ups exact'
+          git commit -m 'fix(item6): scope acquire lease sweep to scenario'
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git push origin HEAD:main
 
       - name: Deploy exact committed source with rollback
-        id: deploy
         shell: bash
         run: |
           set -euo pipefail
