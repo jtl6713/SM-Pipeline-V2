@@ -1,0 +1,281 @@
+name: Prove Item6 Output167 Cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/prove-item6-output167-cleanup.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: item6-output167-cleanup-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-item6-proof-${{ github.run_id }}
+      OUTPUT_RECORD_ID: recdCzUqxwQMYcK6g
+      OUTPUT_TABLE_ID: tblrlPeboBthkplH0
+      BASE_ID: appe33zkZn35yirTL
+      LEASE_TABLE_ID: tbltuSt9UibYzxpah
+      LEASE_RECORD_ID: rec0kkPALSDs1R6q8
+      TEST_RUN_ID: ITEM6_CLEANUP_20260817_1217A
+      LEASE_ID: ITEM6_CLEANUP_LEASE_20260817_1334B
+      SCENARIO_ID: '5813561'
+      TXN_ID: ITEM6_TXN_20260817_1335B
+      FINGERPRINT: ITEM6_FP_20260817_1335B
+      NEW_IDENTITY: ITEM6_SIM_NEW_20260817_1335B
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Decrypt verified Airtable credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+
+      - name: Capture fixture baseline and active Worker version
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $(cat /tmp/pat.txt)"
+          AIR="https://api.airtable.com/v0/$BASE_ID/$OUTPUT_TABLE_ID/$OUTPUT_RECORD_ID"
+          curl -fsS "$AIR" -H "$AUTH" -o /tmp/output-before.json
+          jq -e --arg tr "$TEST_RUN_ID" '.id==env.OUTPUT_RECORD_ID and .fields.Do_Not_Publish==true and .fields.Test_Run_ID==$tr and (.fields.Platform|tostring)=="YouTube"' /tmp/output-before.json >/dev/null
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/deployments-before.json
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|select(.percentage==100)|.version_id' /tmp/deployments-before.json)
+          printf '%s' "$ACTIVE" >/tmp/active-version.txt
+          echo "active_version=$ACTIVE"
+
+      - name: Build and upload exact-version multi-command bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE=$(cat /tmp/active-version.txt)
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          printf '%s' "$TOKEN" >/tmp/bridge-token.txt
+          cat >/tmp/bridge.js <<EOF
+          export default {async fetch(request,env){
+            const u=new URL(request.url);
+            if(u.pathname==="/$TOKEN/ready") return Response.json({ok:true},{headers:{"Cache-Control":"no-store"}});
+            if(u.pathname!=="/$TOKEN/execute" || request.method!=="POST") return new Response("Not found",{status:404});
+            const body=await request.text();
+            const r=await env.STUDIO_API.fetch(new Request("https://studio-api.internal/api/admin/repair/control",{
+              method:"POST",
+              headers:{
+                "Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com",
+                "Origin":"https://studio.chicagoshining.com",
+                "Content-Type":"application/json",
+                "Accept":"application/json",
+                "Cloudflare-Workers-Version-Overrides":"$TARGET_WORKER=\"$ACTIVE\""
+              },
+              body
+            }));
+            return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});
+          }};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"bridge.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/bridge.js
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -X PUT "$ROOT/workers/scripts/$BRIDGE_WORKER/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'bridge.js=@/tmp/bridge.js;type=application/javascript+module;filename=bridge.js' -o /tmp/upload.json
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE_WORKER/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' >/tmp/bridge-subdomain-enable.json
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          for i in $(seq 1 20); do
+            code=$(curl -sS --max-time 15 -o /tmp/ready.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$TOKEN/ready" || true)
+            [[ "$code" == '200' ]] && jq -e '.ok==true' /tmp/ready.json >/dev/null 2>&1 && break
+            sleep 1
+          done
+          test "$code" = '200'
+
+      - name: Execute complete synthetic replacement cleanup contract proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          TOKEN=$(cat /tmp/bridge-token.txt)
+          ENDPOINT="https://$BRIDGE_WORKER.$SUB.workers.dev/$TOKEN/execute"
+          AUTH="Authorization: Bearer $(cat /tmp/pat.txt)"
+          AIR="https://api.airtable.com/v0/$BASE_ID/$OUTPUT_TABLE_ID/$OUTPUT_RECORD_ID"
+
+          call_control() {
+            local name="$1" expected="$2" body="$3"
+            local out="/tmp/${name}.json"
+            local code
+            code=$(curl -sS --max-time 45 -o "$out" -w '%{http_code}' -X POST "$ENDPOINT" -H 'Content-Type: application/json' --data "$body" || true)
+            echo "$name http=$code expected=$expected"
+            jq -c '{ok,action,error:(.error//null),idempotent:(.idempotent//null),lease:(.lease//null),output:(.output//null),replace:(.replace//null)}' "$out" || cat "$out"
+            test "$code" = "$expected"
+            if [[ "$expected" -ge 200 && "$expected" -lt 300 ]]; then jq -e '.ok==true' "$out" >/dev/null; else jq -e '.ok==false' "$out" >/dev/null; fi
+          }
+
+          base=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --argjson sid "$SCENARIO_ID" '{test_run_id:$tr,lease_id:$lease,scenario_id:$sid}')
+
+          call_control state_positive 200 "$(jq -c '. + {action:"state"}' <<<"$base")"
+          call_control wrong_lease_denial 409 "$(jq -c '. + {action:"state",lease_id:"ITEM6_WRONG_LEASE_FOR_DENIAL"}' <<<"$base")"
+          call_control wrong_test_run_denial 409 "$(jq -c '. + {action:"state",test_run_id:"ITEM6_WRONG_TEST_RUN_FOR_DENIAL"}' <<<"$base")"
+
+          common=$(jq -c --arg rid "$OUTPUT_RECORD_ID" --arg tx "$TXN_ID" --arg fp "$FINGERPRINT" '. + {platform_output_record_id:$rid,replace_transaction_id:$tx,replace_fingerprint:$fp}' <<<"$base")
+          call_control prepare 200 "$(jq -c '. + {action:"prepare_replace_transaction"}' <<<"$common")"
+          jq -e '.idempotent==false and .replace.state=="Prepared"' /tmp/prepare.json >/dev/null
+          OLD_IDENTITY=$(jq -er '.replace.last_good_identity' /tmp/prepare.json)
+          printf '%s' "$OLD_IDENTITY" >/tmp/old-identity.txt
+
+          call_control prepare_replay 200 "$(jq -c '. + {action:"prepare_replace_transaction"}' <<<"$common")"
+          jq -e '.idempotent==true' /tmp/prepare_replay.json >/dev/null
+
+          # A non-public lease must reject the real publish transition.
+          call_control public_begin_denial 403 "$(jq -c '. + {action:"begin_replace_transaction"}' <<<"$common")"
+
+          # Synthetic publisher outcome: mutate Airtable only. No YouTube/Make publish call is made.
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          PATCH=$(jq -cn --arg nid "$NEW_IDENTITY" --arg now "$NOW" '{fields:{YouTube_Video_ID:$nid,Replace_State:"Publishing",Replace_Updated_At:$now,Do_Not_Publish:true}}')
+          curl -fsS -X PATCH "$AIR" -H "$AUTH" -H 'Content-Type: application/json' --data "$PATCH" -o /tmp/simulated-new-identity.json
+          jq -e --arg nid "$NEW_IDENTITY" '.fields.YouTube_Video_ID==$nid and .fields.Do_Not_Publish==true and .fields.Replace_State=="Publishing"' /tmp/simulated-new-identity.json >/dev/null
+
+          call_control verify 200 "$(jq -c --arg nid "$NEW_IDENTITY" '. + {action:"verify_replace_transaction",expected_new_platform_identity:$nid}' <<<"$common")"
+          jq -e --arg old "$OLD_IDENTITY" --arg nid "$NEW_IDENTITY" '.idempotent==false and .replace.state=="Manual Cleanup Required" and .replace.old_identity==$old and .replace.new_identity==$nid' /tmp/verify.json >/dev/null
+
+          curl -fsS "$AIR" -H "$AUTH" -o /tmp/after-verify-record.json
+          jq -e --arg old "$OLD_IDENTITY" '(.fields.Replace_Obsolete_JSON|fromjson|.schema)=="ITEM6_OBSOLETE_V1" and (.fields.Replace_Obsolete_JSON|fromjson|.canonical_identity)==$old' /tmp/after-verify-record.json >/dev/null
+
+          BAD_EVIDENCE=$(jq -cn --arg fp "$FINGERPRINT" --arg old "$OLD_IDENTITY" --arg nid "$NEW_IDENTITY" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{verified:true,synthetic_fixture:true,note:"Airtable-only synthetic contract proof; no YouTube API call.",transaction_id:"ITEM6_BAD_TXN_DENIAL",replace_fingerprint:$fp,platform:"YouTube",obsolete_identity:$old,current_identity:$nid,verification:{obsolete_absent:true,replacement_present:true},verification_method:"platform_reconciliation",verified_at:$now}')
+          call_control bad_cleanup_denial 409 "$(jq -c --argjson ev "$BAD_EVIDENCE" '. + {action:"complete_replace_cleanup",cleanup_evidence:$ev}' <<<"$common")"
+          jq -e '.error|contains("transaction_id")' /tmp/bad_cleanup_denial.json >/dev/null
+
+          GOOD_EVIDENCE=$(jq -cn --arg tx "$TXN_ID" --arg fp "$FINGERPRINT" --arg old "$OLD_IDENTITY" --arg nid "$NEW_IDENTITY" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{verified:true,synthetic_fixture:true,note:"Airtable-only synthetic contract proof; no YouTube API call. This proves transaction semantics only, not external platform deletion.",transaction_id:$tx,replace_fingerprint:$fp,platform:"YouTube",obsolete_identity:$old,current_identity:$nid,verification:{obsolete_absent:true,replacement_present:true},verification_method:"platform_reconciliation",verified_at:$now}')
+          call_control cleanup_accept 200 "$(jq -c --argjson ev "$GOOD_EVIDENCE" '. + {action:"complete_replace_cleanup",cleanup_evidence:$ev}' <<<"$common")"
+          jq -e '.idempotent==false and .replace.state=="Complete" and .replace.cleanup_state=="Complete"' /tmp/cleanup_accept.json >/dev/null
+
+          call_control cleanup_replay 200 "$(jq -c --argjson ev "$GOOD_EVIDENCE" '. + {action:"complete_replace_cleanup",cleanup_evidence:$ev}' <<<"$common")"
+          jq -e '.idempotent==true and .replace.state=="Complete"' /tmp/cleanup_replay.json >/dev/null
+
+          call_control final_state 200 "$(jq -c '. + {action:"replace_transaction_state"}' <<<"$common")"
+          jq -e '.replace.state=="Complete" and .replace.cleanup_state=="Complete"' /tmp/final_state.json >/dev/null
+
+          jq -n \
+            --arg schema ITEM6_SYNTHETIC_CLEANUP_PROOF_V1 \
+            --arg output "$OUTPUT_RECORD_ID" \
+            --arg test_run "$TEST_RUN_ID" \
+            --arg lease "$LEASE_ID" \
+            --arg tx "$TXN_ID" \
+            --arg fp "$FINGERPRINT" \
+            --arg old "$OLD_IDENTITY" \
+            --arg new "$NEW_IDENTITY" \
+            --arg active "$(cat /tmp/active-version.txt)" \
+            --arg proved_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --slurpfile state /tmp/state_positive.json \
+            --slurpfile wrong_lease /tmp/wrong_lease_denial.json \
+            --slurpfile wrong_run /tmp/wrong_test_run_denial.json \
+            --slurpfile prepare /tmp/prepare.json \
+            --slurpfile prepare_replay /tmp/prepare_replay.json \
+            --slurpfile public_denial /tmp/public_begin_denial.json \
+            --slurpfile verify /tmp/verify.json \
+            --slurpfile bad_cleanup /tmp/bad_cleanup_denial.json \
+            --slurpfile cleanup /tmp/cleanup_accept.json \
+            --slurpfile cleanup_replay /tmp/cleanup_replay.json \
+            --slurpfile final_state /tmp/final_state.json \
+            '{schema:$schema,synthetic_only:true,actual_platform_cleanup_proven:false,no_public_publish_performed:true,output_record_id:$output,test_run_id:$test_run,lease_id:$lease,replace_transaction_id:$tx,replace_fingerprint:$fp,old_identity:$old,synthetic_new_identity:$new,active_worker_version:$active,proved_at:$proved_at,checks:{state_positive:$state[0],wrong_lease_denial:$wrong_lease[0],wrong_test_run_denial:$wrong_run[0],prepare:$prepare[0],prepare_replay:$prepare_replay[0],public_begin_denial:$public_denial[0],verify:$verify[0],bad_cleanup_denial:$bad_cleanup[0],cleanup_accept:$cleanup[0],cleanup_replay:$cleanup_replay[0],final_state:$final_state[0]}}' > /tmp/item6-proof.json
+          jq -e '.synthetic_only==true and .actual_platform_cleanup_proven==false and .no_public_publish_performed==true' /tmp/item6-proof.json >/dev/null
+
+      - name: Restore Output 167 exactly and close proof lease without touching Make
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $(cat /tmp/pat.txt)"
+          AIR="https://api.airtable.com/v0/$BASE_ID/$OUTPUT_TABLE_ID/$OUTPUT_RECORD_ID"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path('/tmp/output-before.json').read_text())
+          f=before.get('fields',{})
+          names=['YouTube_Video_ID','Replace_Transaction_ID','Replace_State','Replace_Fingerprint','Replace_Last_Good_JSON','Replace_Obsolete_JSON','Replace_Cleanup_State','Replace_Cleanup_Attempt_Count','Replace_Error','Replace_Started_At','Replace_Updated_At']
+          restore={name:f.get(name,None) for name in names}
+          restore['Do_Not_Publish']=f.get('Do_Not_Publish',True)
+          restore['Test_Run_ID']=f.get('Test_Run_ID')
+          Path('/tmp/restore-body.json').write_text(json.dumps({'fields':restore},separators=(',',':')))
+          PY
+          curl -fsS -X PATCH "$AIR" -H "$AUTH" -H 'Content-Type: application/json' --data-binary @/tmp/restore-body.json -o /tmp/restored.json
+          curl -fsS "$AIR" -H "$AUTH" -o /tmp/output-after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          b=json.loads(Path('/tmp/output-before.json').read_text()).get('fields',{})
+          a=json.loads(Path('/tmp/output-after.json').read_text()).get('fields',{})
+          names=['YouTube_Video_ID','Replace_Transaction_ID','Replace_State','Replace_Fingerprint','Replace_Last_Good_JSON','Replace_Obsolete_JSON','Replace_Cleanup_State','Replace_Cleanup_Attempt_Count','Replace_Error','Replace_Started_At','Replace_Updated_At','Do_Not_Publish','Test_Run_ID','Platform_Post_ID','Platform_Post_URL','Platform']
+          mismatches={n:{'before':b.get(n), 'after':a.get(n)} for n in names if b.get(n)!=a.get(n)}
+          if mismatches:
+              raise SystemExit('Fixture restore mismatch: '+json.dumps(mismatches,sort_keys=True))
+          if a.get('Do_Not_Publish') is not True:
+              raise SystemExit('Do_Not_Publish was not restored true')
+          print('fixture_restore=PASS')
+          PY
+
+          # Close the zero-run proof lease as harness metadata only; this avoids activating/deactivating Make.
+          LEASE_URL="https://api.airtable.com/v0/$BASE_ID/$LEASE_TABLE_ID/$LEASE_RECORD_ID"
+          CLOSED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LEASE_PATCH=$(jq -cn --arg at "$CLOSED_AT" '{fields:{Status:"Succeeded",Completed_At:$at,Result_JSON:({kind:"REPAIR_LEASE_V1",state:"released",reason:"item6-output167-synthetic-proof-complete",scenario_stopped:null,runs_used:0,closed_at:$at}|tojson),Error_Message:null}}')
+          curl -fsS -X PATCH "$LEASE_URL" -H "$AUTH" -H 'Content-Type: application/json' --data "$LEASE_PATCH" -o /tmp/lease-closed.json
+          jq -e '.fields.Status=="Succeeded"' /tmp/lease-closed.json >/dev/null
+
+      - name: Delete disposable bridge and verify production Worker unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE_WORKER" -H "$AUTH" >/dev/null || true
+          curl -fsS "$ROOT/workers/scripts/$TARGET_WORKER/deployments" -H "$AUTH" -o /tmp/deployments-after.json
+          test "$(cat /tmp/active-version.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-after.json)"
+
+      - name: Destroy credential material
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+
+      - name: Save proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item6-output167-cleanup-proof-${{ github.run_id }}
+          path: |
+            /tmp/item6-proof.json
+            /tmp/output-before.json
+            /tmp/after-verify-record.json
+            /tmp/output-after.json
+            /tmp/lease-closed.json
+            /tmp/deployments-before.json
+            /tmp/deployments-after.json
+            /tmp/state_positive.json
+            /tmp/wrong_lease_denial.json
+            /tmp/wrong_test_run_denial.json
+            /tmp/prepare.json
+            /tmp/prepare_replay.json
+            /tmp/public_begin_denial.json
+            /tmp/verify.json
+            /tmp/bad_cleanup_denial.json
+            /tmp/cleanup_accept.json
+            /tmp/cleanup_replay.json
+            /tmp/final_state.json
+          if-no-files-found: ignore
+          retention-days: 30
