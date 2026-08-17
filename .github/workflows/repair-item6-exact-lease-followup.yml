@@ -1,13 +1,19 @@
 name: Repair Item6 Exact Lease Follow-up
+
 on:
   push:
-    branches: [main]
-    paths: ['.github/workflows/repair-item6-exact-lease-followup.yml']
+    branches:
+      - main
+    paths:
+      - '.github/workflows/repair-item6-exact-lease-followup.yml'
+
 permissions:
   contents: write
+
 concurrency:
   group: item6-exact-lease-followup-repair
   cancel-in-progress: false
+
 jobs:
   repair:
     runs-on: ubuntu-latest
@@ -19,52 +25,55 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
       - name: Replace scenario-list lookup with exact lease address
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          p=Path('apps/studio-api/worker.js')
-          s=p.read_text()
-          a=s.index('async function repairFindLease(env, input) {')
-          b=s.index('\nasync function repairReserveBudget',a)
-          old=s[a:b]
+          p = Path('apps/studio-api/worker.js')
+          s = p.read_text()
+          a = s.index('async function repairFindLease(env, input) {')
+          b = s.index('\nasync function repairReserveBudget', a)
+          old = s[a:b]
           if 'repairLeaseRecords(env, scenarioId)' not in old:
               raise SystemExit('Expected scenario-list repairFindLease implementation not found')
-          new='''async function repairFindLease(env, input) {
-  const scenarioId = Number(input.scenario_id);
-  const leaseId = repairString(input.lease_id, "lease_id");
-  const testRunId = repairString(input.test_run_id, "test_run_id");
-  if (!Number.isInteger(scenarioId) || !REPAIR_CONTROL_SCENARIOS.has(scenarioId)) throw new HttpError(403, `Scenario ${scenarioId} is not repair-control allowlisted`);
-  const exactMarker = `${REPAIR_LEASE_NOTE_PREFIX} ${leaseId};`;
-  const formula = `AND({Status}="Processing",{Scenario_ID}=${scenarioId},{Correlation_ID}=${JSON.stringify(testRunId)},FIND(${JSON.stringify(exactMarker)}, {Notes}&"")>0)`;
-  const params = new URLSearchParams();
-  params.set("pageSize", "2");
-  params.set("maxRecords", "2");
-  params.set("filterByFormula", formula);
-  params.set("sort[0][field]", "Requested_At");
-  params.set("sort[0][direction]", "desc");
-  const body = await airtableFetch(env, REPAIR_LEASE_TABLE_ID, `?${params.toString()}`);
-  const candidates = (Array.isArray(body?.records) ? body.records : []).map(repairLeaseState);
-  const lease = candidates.find((l) => l.lease_id === leaseId && l.test_run_id === testRunId && l.scenario_id === scenarioId);
-  if (!lease) throw new HttpError(409, "Active repair lease not found or does not match test_run_id");
-  if (repairIsoMs(lease.expires_at) <= Date.now()) throw new HttpError(409, "Repair lease has expired");
-  return lease;
-}
-'''
-          s=s[:a]+new+s[b:]
+          lines = [
+              'async function repairFindLease(env, input) {',
+              '  const scenarioId = Number(input.scenario_id);',
+              '  const leaseId = repairString(input.lease_id, "lease_id");',
+              '  const testRunId = repairString(input.test_run_id, "test_run_id");',
+              '  if (!Number.isInteger(scenarioId) || !REPAIR_CONTROL_SCENARIOS.has(scenarioId)) throw new HttpError(403, `Scenario ${scenarioId} is not repair-control allowlisted`);',
+              '  const exactMarker = `${REPAIR_LEASE_NOTE_PREFIX} ${leaseId};`;',
+              '  const formula = `AND({Status}="Processing",{Scenario_ID}=${scenarioId},{Correlation_ID}=${JSON.stringify(testRunId)},FIND(${JSON.stringify(exactMarker)}, {Notes}&"")>0)`;',
+              '  const params = new URLSearchParams();',
+              '  params.set("pageSize", "2");',
+              '  params.set("maxRecords", "2");',
+              '  params.set("filterByFormula", formula);',
+              '  params.set("sort[0][field]", "Requested_At");',
+              '  params.set("sort[0][direction]", "desc");',
+              '  const body = await airtableFetch(env, REPAIR_LEASE_TABLE_ID, `?${params.toString()}`);',
+              '  const candidates = (Array.isArray(body?.records) ? body.records : []).map(repairLeaseState);',
+              '  const lease = candidates.find((l) => l.lease_id === leaseId && l.test_run_id === testRunId && l.scenario_id === scenarioId);',
+              '  if (!lease) throw new HttpError(409, "Active repair lease not found or does not match test_run_id");',
+              '  if (repairIsoMs(lease.expires_at) <= Date.now()) throw new HttpError(409, "Repair lease has expired");',
+              '  return lease;',
+              '}',
+          ]
+          new = '\n'.join(lines) + '\n'
+          s = s[:a] + new + s[b:]
           p.write_text(s)
+          check = s[a:s.index('\nasync function repairReserveBudget', a)]
+          if 'repairLeaseRecords(env, scenarioId)' in check:
+              raise SystemExit('Scenario-list lookup still present')
+          if 'const exactMarker' not in check or 'Correlation_ID' not in check:
+              raise SystemExit('Exact lookup contract missing')
           print('exact_scenario_lease_test_run_query=PASS')
           PY
           node --check apps/studio-api/worker.js
           git diff --check
-          grep -F 'const exactMarker = `${REPAIR_LEASE_NOTE_PREFIX} ${leaseId};`;' apps/studio-api/worker.js
-          ! python - <<'PY'
-          from pathlib import Path
-          s=Path('apps/studio-api/worker.js').read_text();a=s.index('async function repairFindLease(env, input) {');b=s.index('\nasync function repairReserveBudget',a)
-          raise SystemExit(0 if 'repairLeaseRecords(env, scenarioId)' in s[a:b] else 1)
-          PY
+
       - name: Commit authoritative source
         id: commit
         shell: bash
@@ -76,6 +85,7 @@ jobs:
           git commit -m 'fix(item6): exact-address repair lease followups'
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           git push origin HEAD:main
+
       - name: Deploy exact committed source with rollback
         shell: bash
         run: |
@@ -86,6 +96,7 @@ jobs:
             exit 1
           fi
           test "$(git rev-parse HEAD)" = "${{ steps.commit.outputs.sha }}"
+
       - name: Save deployment evidence
         if: always()
         uses: actions/upload-artifact@v4
