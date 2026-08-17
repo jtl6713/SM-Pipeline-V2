@@ -1,0 +1,1 @@
+Patch Item 6 Studio deploy script so Wrangler installs outside the clean Worker source directory; keep no-bundle exact-source verification. Trigger 2026-08-17 08:31 CT.
