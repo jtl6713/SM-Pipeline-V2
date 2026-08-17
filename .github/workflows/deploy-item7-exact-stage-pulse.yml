@@ -1,4 +1,4 @@
-name: Item7 R2 L9 Subrequest-Reserve Regression
+name: Item7 R2 L10 Module9 Quoted Map-Key Regression
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
       CONTENT_RECORD_ID: recA0WClSp6SR6vvl
       OUTPUT_RECORD_ID: recByMge4QPlCOsD2
       SCENARIO_ID: '5569495'
-      LEASE_ID: ITEM7-R2-RUN32060507474-L9
+      LEASE_ID: ITEM7-R2-RUN32060507474-L10
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +36,7 @@ jobs:
           mkdir -p evidence
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r2-l9"
+          BRIDGE="chicagoshining-item7-r2-l10"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
           export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});}};
@@ -83,7 +83,7 @@ jobs:
             )
           ' evidence/preflight.json >/dev/null
 
-      - name: Acquire L9 and pulse R2 once
+      - name: Acquire L10 and pulse R2 once
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -123,11 +123,11 @@ jobs:
           test "$code" = 200
           jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()") and contains("NOT({Do_Not_Publish})"))' evidence/postflight.json >/dev/null
 
-      - name: Save L9 evidence
+      - name: Save L10 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r2-l9-${{ github.run_id }}
+          name: item7-r2-l10-${{ github.run_id }}
           path: evidence/
           if-no-files-found: ignore
           retention-days: 30
