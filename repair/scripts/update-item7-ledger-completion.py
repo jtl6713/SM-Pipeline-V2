@@ -11,6 +11,6 @@ if n != 1:
     raise SystemExit(f'Item 7 row replacement count={n}')
 append = '''\n\n## 2026-08-17 Item 7 completion delta\n\n- **R5:** run `32077730040` / lease L16. Exact one-cycle pulse finalized Output 168 to `Rendered` with Drive final file `1ZR49jPVZglsnGRda4m7A2-dnC9L6XPiR`, Studio preview URL, and `Do_Not_Publish=true` preserved. Controller patch v8 (`32077649270`) preserves R5 production `maxRecords=5` across exact-stage recovery.\n- **RR1:** failed L18 `32078181389` exposed two gates: production RR1 requires `Review_Status=BLANK()` (fixture had `Pending`), and controller canonical `maxRecords=10` had to be preserved like R3/R5. After clearing the fixture review status, deploying RR1 maxRecords v9 (`32078078572`), and rerunning L19 `32078647065`, Output 168 reached `Review Sent` with review email timestamp `2026-08-17T23:02:03.289Z`; RR1 returned OFF with canonical selector restored.\n- **Item 7 is complete** for the bounded exact-output 9:16 regression on Output 168. Publishing was not attempted and must remain blocked by `Do_Not_Publish=true`.\n'''
 if '## 2026-08-17 Item 7 completion delta' not in s2:
-    s2 = s2.rstrip() + append + '\n'
-p.write_text(s2)
+    s2 = s2.rstrip() + append
+p.write_text(s2 if s2.endswith('\n') else s2 + '\n')
 print('updated Item 7 ledger to completion')
