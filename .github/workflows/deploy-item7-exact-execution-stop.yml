@@ -1,0 +1,75 @@
+name: Deploy Item7 Exact Execution Stop
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'repair/scripts/patch-item7-exact-execution-stop.py'
+      - '.github/workflows/deploy-item7-exact-execution-stop.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: item7-controller-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact execution-aware shutdown patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/scripts/patch-item7-exact-execution-stop.py apps/studio-api/worker.js
+          node --check apps/studio-api/worker.js
+          grep -q 'ITEM7_EXACT_EXECUTION_STOP_V3' apps/studio-api/worker.js
+          grep -q 'repair_item7_exact_execution_stop_v3: true' apps/studio-api/worker.js
+          grep -q 'executions/${executionId}/stop' apps/studio-api/worker.js
+          git diff --check
+          git diff -- apps/studio-api/worker.js > /tmp/item7-exact-execution-stop.diff
+          test -s /tmp/item7-exact-execution-stop.diff
+
+      - name: Deploy patched Studio API worker with rollback guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash repair/scripts/deploy-item6-studio-controller-v2.sh
+
+      - name: Persist deployed source in GitHub
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'fix(item7): stop only the exact leased Make execution'
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Save deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-exact-execution-stop-${{ github.run_id }}
+          path: |
+            /tmp/item7-exact-execution-stop.diff
+            /tmp/item6v2-active-before.txt
+            /tmp/item6v2-active-after.txt
+            /tmp/item6v2-source-sha256.txt
+            /tmp/item6v2-bindings-before.json
+            /tmp/item6v2-bindings-after.json
+            /tmp/item6v2-dry-run.log
+            /tmp/item6v2-deploy.log
+            /tmp/item6v2-session.json
+          if-no-files-found: ignore
+          retention-days: 30
