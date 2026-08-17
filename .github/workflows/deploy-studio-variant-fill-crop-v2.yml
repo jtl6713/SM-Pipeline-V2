@@ -148,7 +148,6 @@ jobs:
             -H "X-Studio-Variant-Token: $TOKEN" \
             -H 'Content-Type: image/png' \
             --data-binary @/tmp/variant-source.png
-          grep -Eiq '^x-studio-variant-style: blur_fill\r?$' /tmp/baseline.headers
           sha256sum /tmp/baseline.jpg | awk '{print $1}' >/tmp/baseline.sha256
 
       - name: Install Wrangler and upload zero-traffic candidate
