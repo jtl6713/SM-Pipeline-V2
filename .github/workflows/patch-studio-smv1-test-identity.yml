@@ -1,0 +1,62 @@
+name: Patch Studio SMV1 Test Identity
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/patch-studio-smv1-test-identity.txt']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch durable Test_Run_ID into SMV1 queue upserts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/studio-api/worker.js')
+          s=p.read_text()
+          def once(old,new,label):
+              global s
+              c=s.count(old)
+              if c!=1: raise SystemExit(f'{label}: expected 1 match, found {c}')
+              s=s.replace(old,new,1)
+              print('patched',label)
+
+          once(
+          '''async function item4UpsertMasterQueue(env, recordId, assets) {\n  const driveFolderId = await item4PipelineSetting(env, "STUDIO_MASTER_DRIVE_FOLDER_ID");''',
+          '''async function item4UpsertMasterQueue(env, recordId, assets) {\n  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);\n  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();\n  const driveFolderId = await item4PipelineSetting(env, "STUDIO_MASTER_DRIVE_FOLDER_ID");''',
+          'master queue owner identity')
+
+          once(
+          '''      Transfer_ID: transferId,\n      Production_Request_Record_ID: recordId,\n      Asset_Kind: "Master Original",''',
+          '''      Transfer_ID: transferId,\n      Production_Request_Record_ID: recordId,\n      Test_Run_ID: testRunId || null,\n      Asset_Kind: "Master Original",''',
+          'master queue Test_Run_ID field')
+
+          once(
+          '''async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan) {\n  const driveFolderId = await item4PipelineSetting(env, "STUDIO_VARIANT_DRIVE_FOLDER_ID");''',
+          '''async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan) {\n  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);\n  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();\n  const driveFolderId = await item4PipelineSetting(env, "STUDIO_VARIANT_DRIVE_FOLDER_ID");''',
+          'variant queue owner identity')
+
+          once(
+          '''        Transfer_ID: transferId,\n        Production_Request_Record_ID: recordId,\n        Asset_Kind: "Platform Variant",''',
+          '''        Transfer_ID: transferId,\n        Production_Request_Record_ID: recordId,\n        Test_Run_ID: testRunId || null,\n        Asset_Kind: "Platform Variant",''',
+          'variant queue Test_Run_ID field')
+
+          health='          repair_durable_test_run_identity_v1: true,'
+          if health not in s: raise SystemExit('health capability anchor missing')
+          s=s.replace(health,health+'\n          studio_smv1_queue_test_identity_v1: true,',1)
+          p.write_text(s)
+          PY
+          node --check apps/studio-api/worker.js
+          git diff --check
+          test "$(grep -c 'Test_Run_ID: testRunId || null' apps/studio-api/worker.js)" = 2
+          grep -q 'studio_smv1_queue_test_identity_v1: true' apps/studio-api/worker.js
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'repair: propagate test identity to SMV1 queue'
+          git push
