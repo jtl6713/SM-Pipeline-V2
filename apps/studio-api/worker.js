@@ -129,6 +129,7 @@ export default {
           repair_p1_test_selector_pulse_v1: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
+          studio_smv1_queue_test_identity_v1: true,
           repair_run_disabled_until_stage_addressing_verified: true,
           local_airtable_pat_required_for_admin_deploys: false,
           make_admin_blueprint_string_patch: true,
@@ -1922,6 +1923,8 @@ async function item4MasterQueueRows(env, recordId) {
 }
 
 async function item4UpsertMasterQueue(env, recordId, assets) {
+  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const driveFolderId = await item4PipelineSetting(env, "STUDIO_MASTER_DRIVE_FOLDER_ID");
   if (!driveFolderId) throw new HttpError(500, "STUDIO_MASTER_DRIVE_FOLDER_ID is not configured");
 
@@ -1944,6 +1947,7 @@ async function item4UpsertMasterQueue(env, recordId, assets) {
     const fields = {
       Transfer_ID: transferId,
       Production_Request_Record_ID: recordId,
+      Test_Run_ID: testRunId || null,
       Asset_Kind: "Master Original",
       Source_Asset_ID: String(asset.id),
       Source_Name: String(asset.name || "photo"),
@@ -2813,6 +2817,8 @@ async function item4PipelineSetting(env, name) {
 }
 
 async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan) {
+  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const driveFolderId = await item4PipelineSetting(env, "STUDIO_VARIANT_DRIVE_FOLDER_ID");
   if (!driveFolderId) throw new HttpError(500, "STUDIO_VARIANT_DRIVE_FOLDER_ID is not configured");
 
@@ -2848,6 +2854,7 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
       const fields = {
         Transfer_ID: transferId,
         Production_Request_Record_ID: recordId,
+        Test_Run_ID: testRunId || null,
         Asset_Kind: "Platform Variant",
         Source_Asset_ID: String(asset.id),
         Source_Name: String(asset.name || "photo"),
