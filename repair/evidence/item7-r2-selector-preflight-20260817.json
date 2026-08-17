@@ -1,0 +1,792 @@
+{
+  "ok": true,
+  "action": "inspect_make_scenario",
+  "inspected": {
+    "scenario_id": 5569495,
+    "scenario_name": "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility",
+    "scenario_active": false,
+    "module_count_returned": 1,
+    "modules": [
+      {
+        "route_path": [],
+        "module": {
+          "id": 1,
+          "module": "airtable:ActionSearchRecords",
+          "version": 3,
+          "parameters": {
+            "__IMTCONN__": 9293192
+          },
+          "mapper": {
+            "base": "appe33zkZn35yirTL",
+            "table": "tblrlPeboBthkplH0",
+            "fields": [
+              "Output_ID",
+              "Content_Item",
+              "Content_Profile",
+              "Market_Name",
+              "Platform",
+              "Format",
+              "Platform_Output_Type",
+              "Aspect_Ratio",
+              "Output_Status",
+              "Output_Title",
+              "Output_Caption",
+              "Output_Hashtags",
+              "Output_URL",
+              "Thumbnail_URL",
+              "Voiceover_URL",
+              "Scheduled_Post_Date",
+              "Published_At",
+              "Platform_Post_URL",
+              "Do_Not_Publish",
+              "Output_Notes",
+              "Asset Requests",
+              "Asset Request Shots",
+              "Asset_Need_Status",
+              "Asset_Validation_Mode",
+              "Target_Final_Length",
+              "Recommended_Raw_Capture_Length",
+              "Missing_Asset_Summary",
+              "Render_Status",
+              "Render_Server_URL",
+              "Final_File_URL",
+              "Final_File_ID",
+              "Final_File_Name",
+              "Final_File_Storage_Status",
+              "Final_File_Error_Message",
+              "Remotion_Job_ID",
+              "Remotion_Status_URL",
+              "Remotion_Props_JSON",
+              "Remotion_Error_Message",
+              "Composition_ID",
+              "Output_Filename",
+              "Clip_1_URL",
+              "Clip_1_Duration_Frames",
+              "Clip_2_URL",
+              "Clip_2_Duration_Frames",
+              "Clip_3_URL",
+              "Clip_3_Duration_Frames",
+              "Music_URL",
+              "Music_Volume",
+              "Title_Text",
+              "Brand_Text",
+              "Selected_Clip_1_URL",
+              "Selected_Clip_2_URL",
+              "Selected_Clip_3_URL",
+              "Selected_Music_URL",
+              "Selected_Asset_Notes",
+              "Asset_Selection_Status",
+              "Asset_Selection_Notes",
+              "Selected_Clip_1_Media_Asset_ID",
+              "Selected_Clip_2_Media_Asset_ID",
+              "Selected_Clip_3_Media_Asset_ID",
+              "Selected_Music_Media_Asset_ID",
+              "Selected_Asset_Summary",
+              "Selected_Assets_JSON",
+              "Selected_Clip_Count",
+              "Render_Clip_List_JSON",
+              "Render_Total_Frames",
+              "Review_Status",
+              "Review_Decision_At",
+              "Review_Notes",
+              "Review_Email_Sent_At",
+              "Review_Decision_Token",
+              "Publish_Status",
+              "Publish_Error_Message",
+              "Asset_Selection_Attempt_Count",
+              "Last_Asset_Selection_Attempt_At",
+              "Asset_Selection_Next_Retry_At",
+              "Asset_Selection_Retry_Eligible",
+              "Asset_Selection_Last_Result",
+              "Asset_Selection_Failure_Reason",
+              "Asset_Selection_Minimum_Assets_Needed",
+              "Asset_Selection_Assets_Found_Count",
+              "Carousel Slides",
+              "Auto_Publish_Enabled",
+              "Publish_Method",
+              "Publish_Attempt_Count",
+              "Last_Publish_Attempt_At",
+              "Publish_Locked_At",
+              "Publish_Locked_By",
+              "Publish_Started_At",
+              "Platform_Post_ID",
+              "Platform_Media_ID",
+              "Platform_Publish_Response_JSON",
+              "Platform_Publish_Status_URL",
+              "Publish_Retry_Eligible",
+              "Publish_Next_Retry_At",
+              "Manual_Fallback_Required",
+              "Lemon8_Manual_Publish_Required",
+              "Publish_Asset_URL",
+              "Publish_Asset_Host",
+              "Publish_Asset_Ready_At"
+            ],
+            "formula": "AND(RECORD_ID()=\"recByMge4QPlCOsD2\",AND({Test_Run_ID}=\"ITEM7_9X16_REGRESSION_RUN32060507474\",AND(\n  {Do_Not_Publish}=1,\n  {Content_Item} != BLANK(),\n  {Output_Status} = \"Ready for Review\",\n  OR({Asset_Need_Status} = \"Not Needed\", {Asset_Need_Status} = \"Fulfilled\"),\n  {Asset_Selection_Status} = BLANK(),\n  {Render_Status} = BLANK(),\n  {Remotion_Job_ID} = BLANK(),\n  {Remotion_Props_JSON} = BLANK(),\n  {Final_File_URL} = BLANK(),\n  {Final_File_ID} = BLANK(),\n  {Output_URL} = BLANK(),\n  {Published_At} = BLANK(),\n  {Platform_Post_URL} = BLANK(),\n  OR(\n    AND(\n      {Selected_Assets_JSON} = BLANK(),\n      {Selected_Clip_Count} = BLANK(),\n      {Render_Clip_List_JSON} = BLANK()\n    ),\n    AND(\n      FIND(\"Studio exact source authority\", {Asset_Selection_Notes} & \"\") > 0,\n      {Selected_Assets_JSON} != BLANK(),\n      {Selected_Clip_Count} > 0,\n      {Render_Clip_List_JSON} != BLANK()\n    )\n  )\n)))",
+            "maxRecords": "1",
+            "useColumnId": false
+          },
+          "metadata": {
+            "notes": "STUDIO_OR_LEGACY_R2_ELIGIBILITY_V1: module 1 no longer depends on the legacy R2 - Needs Asset Selection view. Explicit Airtable eligibility preserves publication/render safety stops and accepts either legacy unselected outputs or Studio exact-source preloaded packages.",
+            "expect": [
+              {
+                "name": "base",
+                "type": "select",
+                "label": "Base",
+                "required": true
+              },
+              {
+                "name": "useColumnId",
+                "type": "boolean",
+                "label": "Use Column ID",
+                "required": true
+              },
+              {
+                "name": "table",
+                "type": "select",
+                "label": "Table",
+                "required": true
+              },
+              {
+                "name": "formula",
+                "type": "text",
+                "label": "Formula"
+              },
+              {
+                "name": "maxRecords",
+                "type": "integer",
+                "label": "Limit"
+              },
+              {
+                "name": "sort",
+                "spec": [
+                  {
+                    "name": "field",
+                    "type": "select",
+                    "label": "Field",
+                    "dynamic": true,
+                    "options": []
+                  },
+                  {
+                    "name": "direction",
+                    "type": "select",
+                    "label": "Direction",
+                    "options": [
+                      {
+                        "label": "Descending",
+                        "value": "desc"
+                      },
+                      {
+                        "label": "Ascending",
+                        "value": "asc"
+                      }
+                    ]
+                  }
+                ],
+                "type": "array",
+                "label": "Sort"
+              },
+              {
+                "name": "view",
+                "type": "select",
+                "label": "View"
+              },
+              {
+                "name": "fields",
+                "type": "select",
+                "label": "Output Fields",
+                "multiple": true
+              }
+            ],
+            "restore": {
+              "expect": {
+                "base": {
+                  "mode": "chose",
+                  "label": "ChicagoShining AI Content Creator"
+                },
+                "sort": {
+                  "mode": "chose"
+                },
+                "view": {
+                  "mode": "chose",
+                  "label": "R2 - Needs Asset Selection"
+                },
+                "table": {
+                  "mode": "chose",
+                  "label": "Platform Outputs"
+                },
+                "fields": {
+                  "mode": "chose"
+                },
+                "useColumnId": {
+                  "mode": "chose"
+                }
+              },
+              "parameters": {
+                "__IMTCONN__": {
+                  "data": {
+                    "scoped": "true",
+                    "connection": "airtable3"
+                  },
+                  "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                }
+              }
+            },
+            "designer": {
+              "x": 0,
+              "y": 0,
+              "name": "Find One Platform Output Needing Asset Selection - Advanced Directive Aware"
+            },
+            "interface": [
+              {
+                "name": "__IMTLENGTH__",
+                "type": "uinteger",
+                "label": "Total number of bundles"
+              },
+              {
+                "name": "__IMTINDEX__",
+                "type": "uinteger",
+                "label": "Bundle order position"
+              },
+              {
+                "name": "id",
+                "type": "text",
+                "label": "ID"
+              },
+              {
+                "name": "createdTime",
+                "type": "date",
+                "label": "Created Time"
+              },
+              {
+                "name": "Output_ID",
+                "type": "number",
+                "label": "Output_ID"
+              },
+              {
+                "name": "Content_Item",
+                "spec": {
+                  "label": "Record ID"
+                },
+                "type": "array",
+                "label": "Content_Item"
+              },
+              {
+                "name": "Content_Profile",
+                "type": "array",
+                "label": "Content_Profile"
+              },
+              {
+                "name": "Market_Name",
+                "type": "array",
+                "label": "Market_Name"
+              },
+              {
+                "name": "Platform",
+                "type": "text",
+                "label": "Platform"
+              },
+              {
+                "name": "Format",
+                "type": "text",
+                "label": "Format"
+              },
+              {
+                "name": "Platform_Output_Type",
+                "type": "text",
+                "label": "Platform_Output_Type"
+              },
+              {
+                "name": "Aspect_Ratio",
+                "type": "text",
+                "label": "Aspect_Ratio"
+              },
+              {
+                "name": "Output_Status",
+                "type": "text",
+                "label": "Output_Status"
+              },
+              {
+                "name": "Output_Title",
+                "type": "text",
+                "label": "Output_Title"
+              },
+              {
+                "name": "Output_Caption",
+                "type": "text",
+                "label": "Output_Caption",
+                "multiline": true
+              },
+              {
+                "name": "Output_Hashtags",
+                "type": "text",
+                "label": "Output_Hashtags",
+                "multiline": true
+              },
+              {
+                "name": "Output_URL",
+                "type": "text",
+                "label": "Output_URL"
+              },
+              {
+                "name": "Thumbnail_URL",
+                "type": "text",
+                "label": "Thumbnail_URL"
+              },
+              {
+                "name": "Voiceover_URL",
+                "type": "text",
+                "label": "Voiceover_URL"
+              },
+              {
+                "name": "Scheduled_Post_Date",
+                "time": true,
+                "type": "date",
+                "label": "Scheduled_Post_Date"
+              },
+              {
+                "name": "Published_At",
+                "time": true,
+                "type": "date",
+                "label": "Published_At"
+              },
+              {
+                "name": "Platform_Post_URL",
+                "type": "text",
+                "label": "Platform_Post_URL"
+              },
+              {
+                "name": "Do_Not_Publish",
+                "type": "boolean",
+                "label": "Do_Not_Publish"
+              },
+              {
+                "name": "Output_Notes",
+                "type": "text",
+                "label": "Output_Notes",
+                "multiline": true
+              },
+              {
+                "name": "Asset Requests",
+                "spec": {
+                  "label": "Record ID"
+                },
+                "type": "array",
+                "label": "Asset Requests"
+              },
+              {
+                "name": "Asset Request Shots",
+                "spec": {
+                  "label": "Record ID"
+                },
+                "type": "array",
+                "label": "Asset Request Shots"
+              },
+              {
+                "name": "Asset_Need_Status",
+                "type": "text",
+                "label": "Asset_Need_Status"
+              },
+              {
+                "name": "Asset_Validation_Mode",
+                "type": "text",
+                "label": "Asset_Validation_Mode"
+              },
+              {
+                "name": "Target_Final_Length",
+                "type": "number",
+                "label": "Target_Final_Length"
+              },
+              {
+                "name": "Recommended_Raw_Capture_Length",
+                "type": "number",
+                "label": "Recommended_Raw_Capture_Length"
+              },
+              {
+                "name": "Missing_Asset_Summary",
+                "type": "text",
+                "label": "Missing_Asset_Summary",
+                "multiline": true
+              },
+              {
+                "name": "Render_Status",
+                "type": "text",
+                "label": "Render_Status"
+              },
+              {
+                "name": "Render_Server_URL",
+                "type": "text",
+                "label": "Render_Server_URL"
+              },
+              {
+                "name": "Final_File_URL",
+                "type": "text",
+                "label": "Final_File_URL"
+              },
+              {
+                "name": "Final_File_ID",
+                "type": "text",
+                "label": "Final_File_ID"
+              },
+              {
+                "name": "Final_File_Name",
+                "type": "text",
+                "label": "Final_File_Name"
+              },
+              {
+                "name": "Final_File_Storage_Status",
+                "type": "text",
+                "label": "Final_File_Storage_Status"
+              },
+              {
+                "name": "Final_File_Error_Message",
+                "type": "text",
+                "label": "Final_File_Error_Message",
+                "multiline": true
+              },
+              {
+                "name": "Remotion_Job_ID",
+                "type": "text",
+                "label": "Remotion_Job_ID"
+              },
+              {
+                "name": "Remotion_Status_URL",
+                "type": "text",
+                "label": "Remotion_Status_URL"
+              },
+              {
+                "name": "Remotion_Props_JSON",
+                "type": "text",
+                "label": "Remotion_Props_JSON",
+                "multiline": true
+              },
+              {
+                "name": "Remotion_Error_Message",
+                "type": "text",
+                "label": "Remotion_Error_Message",
+                "multiline": true
+              },
+              {
+                "name": "Composition_ID",
+                "type": "text",
+                "label": "Composition_ID"
+              },
+              {
+                "name": "Output_Filename",
+                "type": "text",
+                "label": "Output_Filename"
+              },
+              {
+                "name": "Clip_1_URL",
+                "type": "text",
+                "label": "Clip_1_URL"
+              },
+              {
+                "name": "Clip_1_Duration_Frames",
+                "type": "number",
+                "label": "Clip_1_Duration_Frames"
+              },
+              {
+                "name": "Clip_2_URL",
+                "type": "text",
+                "label": "Clip_2_URL"
+              },
+              {
+                "name": "Clip_2_Duration_Frames",
+                "type": "number",
+                "label": "Clip_2_Duration_Frames"
+              },
+              {
+                "name": "Clip_3_URL",
+                "type": "text",
+                "label": "Clip_3_URL"
+              },
+              {
+                "name": "Clip_3_Duration_Frames",
+                "type": "number",
+                "label": "Clip_3_Duration_Frames"
+              },
+              {
+                "name": "Music_URL",
+                "type": "text",
+                "label": "Music_URL"
+              },
+              {
+                "name": "Music_Volume",
+                "type": "number",
+                "label": "Music_Volume"
+              },
+              {
+                "name": "Title_Text",
+                "type": "text",
+                "label": "Title_Text"
+              },
+              {
+                "name": "Brand_Text",
+                "type": "text",
+                "label": "Brand_Text"
+              },
+              {
+                "name": "Selected_Clip_1_URL",
+                "type": "text",
+                "label": "Selected_Clip_1_URL"
+              },
+              {
+                "name": "Selected_Clip_2_URL",
+                "type": "text",
+                "label": "Selected_Clip_2_URL"
+              },
+              {
+                "name": "Selected_Clip_3_URL",
+                "type": "text",
+                "label": "Selected_Clip_3_URL"
+              },
+              {
+                "name": "Selected_Music_URL",
+                "type": "text",
+                "label": "Selected_Music_URL"
+              },
+              {
+                "name": "Selected_Asset_Notes",
+                "type": "text",
+                "label": "Selected_Asset_Notes",
+                "multiline": true
+              },
+              {
+                "name": "Asset_Selection_Status",
+                "type": "text",
+                "label": "Asset_Selection_Status"
+              },
+              {
+                "name": "Asset_Selection_Notes",
+                "type": "text",
+                "label": "Asset_Selection_Notes",
+                "multiline": true
+              },
+              {
+                "name": "Selected_Clip_1_Media_Asset_ID",
+                "type": "text",
+                "label": "Selected_Clip_1_Media_Asset_ID"
+              },
+              {
+                "name": "Selected_Clip_2_Media_Asset_ID",
+                "type": "text",
+                "label": "Selected_Clip_2_Media_Asset_ID"
+              },
+              {
+                "name": "Selected_Clip_3_Media_Asset_ID",
+                "type": "text",
+                "label": "Selected_Clip_3_Media_Asset_ID"
+              },
+              {
+                "name": "Selected_Music_Media_Asset_ID",
+                "type": "text",
+                "label": "Selected_Music_Media_Asset_ID"
+              },
+              {
+                "name": "Selected_Asset_Summary",
+                "type": "text",
+                "label": "Selected_Asset_Summary",
+                "multiline": true
+              },
+              {
+                "name": "Selected_Assets_JSON",
+                "type": "text",
+                "label": "Selected_Assets_JSON",
+                "multiline": true
+              },
+              {
+                "name": "Selected_Clip_Count",
+                "type": "number",
+                "label": "Selected_Clip_Count"
+              },
+              {
+                "name": "Render_Clip_List_JSON",
+                "type": "text",
+                "label": "Render_Clip_List_JSON",
+                "multiline": true
+              },
+              {
+                "name": "Render_Total_Frames",
+                "type": "number",
+                "label": "Render_Total_Frames"
+              },
+              {
+                "name": "Review_Status",
+                "type": "text",
+                "label": "Review_Status"
+              },
+              {
+                "name": "Review_Decision_At",
+                "time": true,
+                "type": "date",
+                "label": "Review_Decision_At"
+              },
+              {
+                "name": "Review_Notes",
+                "type": "text",
+                "label": "Review_Notes",
+                "multiline": true
+              },
+              {
+                "name": "Review_Email_Sent_At",
+                "time": true,
+                "type": "date",
+                "label": "Review_Email_Sent_At"
+              },
+              {
+                "name": "Review_Decision_Token",
+                "type": "text",
+                "label": "Review_Decision_Token"
+              },
+              {
+                "name": "Publish_Status",
+                "type": "text",
+                "label": "Publish_Status"
+              },
+              {
+                "name": "Publish_Error_Message",
+                "type": "text",
+                "label": "Publish_Error_Message",
+                "multiline": true
+              },
+              {
+                "name": "Asset_Selection_Attempt_Count",
+                "type": "number",
+                "label": "Asset_Selection_Attempt_Count"
+              },
+              {
+                "name": "Last_Asset_Selection_Attempt_At",
+                "time": true,
+                "type": "date",
+                "label": "Last_Asset_Selection_Attempt_At"
+              },
+              {
+                "name": "Asset_Selection_Next_Retry_At",
+                "time": true,
+                "type": "date",
+                "label": "Asset_Selection_Next_Retry_At"
+              },
+              {
+                "name": "Asset_Selection_Retry_Eligible",
+                "type": "boolean",
+                "label": "Asset_Selection_Retry_Eligible"
+              },
+              {
+                "name": "Asset_Selection_Last_Result",
+                "type": "text",
+                "label": "Asset_Selection_Last_Result"
+              },
+              {
+                "name": "Asset_Selection_Failure_Reason",
+                "type": "text",
+                "label": "Asset_Selection_Failure_Reason",
+                "multiline": true
+              },
+              {
+                "name": "Asset_Selection_Minimum_Assets_Needed",
+                "type": "number",
+                "label": "Asset_Selection_Minimum_Assets_Needed"
+              },
+              {
+                "name": "Asset_Selection_Assets_Found_Count",
+                "type": "number",
+                "label": "Asset_Selection_Assets_Found_Count"
+              },
+              {
+                "name": "Carousel Slides",
+                "spec": {
+                  "label": "Record ID"
+                },
+                "type": "array",
+                "label": "Carousel Slides"
+              },
+              {
+                "name": "Auto_Publish_Enabled",
+                "type": "boolean",
+                "label": "Auto_Publish_Enabled"
+              },
+              {
+                "name": "Publish_Method",
+                "type": "text",
+                "label": "Publish_Method"
+              },
+              {
+                "name": "Publish_Attempt_Count",
+                "type": "number",
+                "label": "Publish_Attempt_Count"
+              },
+              {
+                "name": "Last_Publish_Attempt_At",
+                "time": true,
+                "type": "date",
+                "label": "Last_Publish_Attempt_At"
+              },
+              {
+                "name": "Publish_Locked_At",
+                "time": true,
+                "type": "date",
+                "label": "Publish_Locked_At"
+              },
+              {
+                "name": "Publish_Locked_By",
+                "type": "text",
+                "label": "Publish_Locked_By"
+              },
+              {
+                "name": "Publish_Started_At",
+                "time": true,
+                "type": "date",
+                "label": "Publish_Started_At"
+              },
+              {
+                "name": "Platform_Post_ID",
+                "type": "text",
+                "label": "Platform_Post_ID"
+              },
+              {
+                "name": "Platform_Media_ID",
+                "type": "text",
+                "label": "Platform_Media_ID"
+              },
+              {
+                "name": "Platform_Publish_Response_JSON",
+                "type": "text",
+                "label": "Platform_Publish_Response_JSON",
+                "multiline": true
+              },
+              {
+                "name": "Platform_Publish_Status_URL",
+                "type": "text",
+                "label": "Platform_Publish_Status_URL"
+              },
+              {
+                "name": "Publish_Retry_Eligible",
+                "type": "boolean",
+                "label": "Publish_Retry_Eligible"
+              },
+              {
+                "name": "Publish_Next_Retry_At",
+                "time": true,
+                "type": "date",
+                "label": "Publish_Next_Retry_At"
+              },
+              {
+                "name": "Manual_Fallback_Required",
+                "type": "boolean",
+                "label": "Manual_Fallback_Required"
+              }
+            ],
+            "parameters": [
+              {
+                "name": "__IMTCONN__",
+                "type": "account:airtable3,airtable2",
+                "label": "Connection",
+                "required": true
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
