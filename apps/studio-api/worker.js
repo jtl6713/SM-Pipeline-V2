@@ -130,6 +130,7 @@ export default {
           repair_item7_exact_stage_pulse_v1: true,
           repair_item7_explicit_run_stop_recovery_v2: true,
           repair_item7_exact_execution_stop_v3: true,
+          repair_item7_subrequest_reserve_v4: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
@@ -9950,12 +9951,19 @@ async function repairReadItem7Output(env, recordId, testRunId) {
 async function repairWaitItem7Checkpoint(env, scenarioId, recordId, testRunId, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
+  // ITEM7_SUBREQUEST_RESERVE_V4: keep the long R2/R3/RR1 wait window, but cap
+  // checkpoint reads so the same Worker invocation always has capacity left for
+  // exact execution stop, scenario deactivation, selector rollback, verification,
+  // and lease close. Six 15s reads cover the 90s window instead of ~15 6s reads.
+  const pollMs = 15000;
   while (Date.now() < deadline) {
     const record = await repairReadItem7Output(env, recordId, testRunId);
     const checkpoint = repairItem7StageCheckpoint(scenarioId, record.fields || {});
     last = { record, checkpoint };
     if (checkpoint.complete || checkpoint.failed) return last;
-    await new Promise((resolve) => setTimeout(resolve, 6000));
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, remaining)));
   }
   return last;
 }
@@ -10046,11 +10054,13 @@ async function repairPulseItem7ExactStage(env, lease, input, action) {
       const exactRun = await phase6RunScenario(env, scenarioId, null);
       const exactExecutionId = exactRun.executionId;
       observed = await repairWaitItem7Checkpoint(env, scenarioId, recordId, lease.test_run_id, config.wait_ms_per_cycle);
-      stop = await phase6StopScenarioVerified(env, scenarioId, 3);
+      // Reserve stop/rollback subrequests: one normal stop attempt first, then
+      // exact execution force-stop and up to three verification attempts.
+      stop = await phase6StopScenarioVerified(env, scenarioId, 1);
       let exactExecutionStop = null;
       if (stop?.inactive !== true) {
         exactExecutionStop = await phase6StopExactScenarioExecution(env, scenarioId, exactExecutionId);
-        stop = await phase6StopScenarioVerified(env, scenarioId, 6);
+        stop = await phase6StopScenarioVerified(env, scenarioId, 3);
       }
       if (stop?.inactive !== true) {
         throw new HttpError(502, `${config.stage} did not verify inactive after exact cycle ${cycle}; execution_id=${exactExecutionId}; exact_execution_stop=${JSON.stringify(exactExecutionStop)}; scenario_stop=${JSON.stringify(stop)}`);
