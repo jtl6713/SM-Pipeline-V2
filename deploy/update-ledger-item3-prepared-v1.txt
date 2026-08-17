@@ -1,1 +1,1 @@
-Record Item 3 authoritative renderer source verification and native-overlap repair bundle preparation. Runtime renderer acceptance remains pending; this is a ledger-only checkpoint. Retrigger after YAML validation fix.
+Record Item 3 authoritative renderer source verification and native-overlap repair bundle preparation. Runtime renderer acceptance remains pending; this is a ledger-only checkpoint. Retrigger after final bundle fingerprint and first-scene intro preservation update.
