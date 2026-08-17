@@ -1,0 +1,348 @@
+name: Deploy Studio Variant Fill Crop V2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/studio-variant-service/**'
+      - '.github/workflows/deploy-studio-variant-fill-crop-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-variant-fill-crop-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-variant-service
+      VERIFY_WORKER: chicagoshining-variant-v2-verify
+      WRANGLER_VERSION: 4.123.0
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate source and unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -s apps/studio-variant-service/worker.mjs
+          test -s apps/studio-variant-service/wrangler.jsonc
+          test -s deploy/credential-envelope/private.pem.enc
+          test -s deploy/credential-envelope/airtable_pat.ciphertext.b64
+          node --check apps/studio-variant-service/worker.mjs
+          node --test apps/studio-variant-service/worker.test.mjs
+          grep -q 'fill-crop-v2' apps/studio-variant-service/worker.mjs
+          if grep -Eq 'blur_fill|blur:|\.draw\(' apps/studio-variant-service/worker.mjs; then
+            echo 'Legacy blur-fill composition remains in the V2 worker source.'
+            exit 1
+          fi
+
+      - name: Recover live variant endpoint and token in runner temp
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/airtable-envelope-private.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/airtable-envelope-private.pem \
+            -in /tmp/airtable-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/airtable-pat.txt
+          PAT=$(tr -d '\r\n' </tmp/airtable-pat.txt)
+          test "${PAT#pat}" != "$PAT"
+          curl -fsS \
+            'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?maxRecords=100' \
+            -H "Authorization: Bearer $PAT" \
+            -o /tmp/pipeline-settings.json
+          jq -er '
+            [.records[].fields | select(.Active == true and .Setting_Name == "STUDIO_VARIANT_SERVICE_BASE_URL") | .Setting_Value][0]
+          ' /tmp/pipeline-settings.json >/tmp/variant-base-url.txt
+          jq -er '
+            [.records[].fields | select(.Active == true and .Setting_Name == "STUDIO_VARIANT_SERVICE_TOKEN") | .Setting_Value][0]
+          ' /tmp/pipeline-settings.json >/tmp/variant-token.txt
+          test -n "$(cat /tmp/variant-base-url.txt)"
+          test -n "$(cat /tmp/variant-token.txt)"
+          rm -f /tmp/pipeline-settings.json
+
+      - name: Generate deterministic wide PNG fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import struct, zlib
+          from pathlib import Path
+
+          width, height = 320, 180
+          rows = []
+          for y in range(height):
+              row = bytearray([0])
+              for x in range(width):
+                  row.extend(((x * 255) // (width - 1), (y * 255) // (height - 1), (x + y) % 256))
+              rows.append(bytes(row))
+
+          def chunk(kind, data):
+              return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+
+          png = (
+              b"\x89PNG\r\n\x1a\n"
+              + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+              + chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+              + chunk(b"IEND", b"")
+          )
+          Path("/tmp/variant-source.png").write_bytes(png)
+          PY
+          test -s /tmp/variant-source.png
+
+      - name: Capture active version and blur-fill baseline
+        id: capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
+          PREVIOUS=$(jq -er '.result.deployments[0].versions | select(length == 1) | .[0] | select(.percentage == 100) | .version_id' /tmp/deployments-before.json)
+          printf '%s' "$PREVIOUS" >/tmp/previous-version.txt
+          curl -fsS "$API/versions/$PREVIOUS" -H "$AUTH" -o /tmp/version-before.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path("/tmp/version-before.json").read_text())["result"]
+          bindings = (result.get("resources") or {}).get("bindings") or []
+          by_name = {str(row.get("name")): str(row.get("type")) for row in bindings}
+          if "IMAGES" not in by_name or by_name.get("STUDIO_VARIANT_SERVICE_TOKEN") != "secret_text":
+              raise SystemExit(f"Live variant binding contract drifted: {by_name}")
+          Path("/tmp/bindings-before-sanitized.json").write_text(json.dumps({
+              "version_id": result.get("id"),
+              "bindings": sorted({"name": key, "type": value} for key, value in by_name.items()),
+          }, indent=2, sort_keys=True))
+          PY
+          BASE=$(cat /tmp/variant-base-url.txt)
+          TOKEN=$(cat /tmp/variant-token.txt)
+          curl -fsS --max-time 300 \
+            -D /tmp/baseline.headers \
+            -o /tmp/baseline.jpg \
+            -X POST "$BASE/render?ratio=9%3A16" \
+            -H "X-Studio-Variant-Token: $TOKEN" \
+            -H 'Content-Type: image/png' \
+            --data-binary @/tmp/variant-source.png
+          grep -Eiq '^x-studio-variant-style: blur_fill\r?$' /tmp/baseline.headers
+          sha256sum /tmp/baseline.jpg | awk '{print $1}' >/tmp/baseline.sha256
+
+      - name: Install Wrangler and upload zero-traffic candidate
+        id: upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/variant-v2
+          cp apps/studio-variant-service/worker.mjs /tmp/variant-v2/worker.mjs
+          cp apps/studio-variant-service/wrangler.jsonc /tmp/variant-v2/wrangler.jsonc
+          cd /tmp/variant-v2
+          npm init -y >/dev/null 2>&1
+          npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --dry-run >/tmp/variant-dry-run.log 2>&1
+          ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-before-upload.json
+          ./node_modules/.bin/wrangler versions upload --config wrangler.jsonc --keep-vars \
+            --message "Item 8 fill-crop-v2 candidate ${GITHUB_SHA}" >/tmp/variant-upload.log 2>&1
+          ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-after-upload.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before = json.loads(Path("/tmp/versions-before-upload.json").read_text())
+          after = json.loads(Path("/tmp/versions-after-upload.json").read_text())
+          def version_id(row):
+              return str(row.get("id") or row.get("version_id") or row.get("versionId") or "")
+          old = {version_id(row) for row in before if version_id(row)}
+          new = [version_id(row) for row in after if version_id(row) and version_id(row) not in old]
+          if len(new) != 1:
+              raise SystemExit(f"Expected one candidate version, found {new}")
+          Path("/tmp/candidate-version.txt").write_text(new[0])
+          PY
+          echo "version_id=$(cat /tmp/candidate-version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify candidate bindings and attach at zero percent
+        id: split
+        shell: bash
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CANDIDATE=$(cat /tmp/candidate-version.txt)
+          PREVIOUS=$(cat /tmp/previous-version.txt)
+          curl -fsS "$API/versions/$CANDIDATE" -H "$AUTH" -o /tmp/version-candidate.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before = json.loads(Path("/tmp/version-before.json").read_text())["result"]
+          after = json.loads(Path("/tmp/version-candidate.json").read_text())["result"]
+          def contract(result):
+              return {str(row.get("name")): str(row.get("type")) for row in ((result.get("resources") or {}).get("bindings") or [])}
+          old, new = contract(before), contract(after)
+          if old != new:
+              raise SystemExit(f"Candidate binding contract changed: before={old}, after={new}")
+          Path("/tmp/bindings-candidate-sanitized.json").write_text(json.dumps({
+              "version_id": after.get("id"),
+              "bindings": sorted({"name": key, "type": value} for key, value in new.items()),
+          }, indent=2, sort_keys=True))
+          PY
+          cd /tmp/variant-v2
+          ./node_modules/.bin/wrangler versions deploy "$PREVIOUS@100%" "$CANDIDATE@0%" \
+            --name "$TARGET_WORKER" --message 'Item 8 exact-version verification' -y >/tmp/variant-split.log 2>&1
+          echo 'created=true' >> "$GITHUB_OUTPUT"
+
+      - name: Build exact-version verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE=$(cat /tmp/candidate-version.txt)
+          PATH_TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(32))
+          PY
+          )
+          printf '%s' "$PATH_TOKEN" >/tmp/verifier-path-token.txt
+          cat >/tmp/verifier-worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              if (url.pathname !== "/$PATH_TOKEN") return new Response("Not found", {status: 404});
+              const headers = new Headers();
+              headers.set("X-Studio-Variant-Token", request.headers.get("X-Studio-Variant-Token") || "");
+              headers.set("Content-Type", request.headers.get("Content-Type") || "application/octet-stream");
+              headers.set("Cloudflare-Workers-Version-Overrides", '$TARGET_WORKER="$CANDIDATE"');
+              return env.VARIANT.fetch(new Request("https://variant.internal/render" + url.search, {
+                method: request.method,
+                headers,
+                body: request.method === "GET" ? null : request.body,
+              }));
+            }
+          };
+          EOF
+          cat >/tmp/verifier-metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-17","bindings":[{"type":"service","name":"VARIANT","service":"$TARGET_WORKER"}]}
+          EOF
+          node --check /tmp/verifier-worker.js
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -sS -X DELETE "$ROOT/workers/scripts/$VERIFY_WORKER" -H "$AUTH" >/dev/null || true
+          code=$(curl -sS -o /tmp/verifier-upload.json -w '%{http_code}' \
+            -X PUT "$ROOT/workers/scripts/$VERIFY_WORKER/content" -H "$AUTH" \
+            -F 'metadata=@/tmp/verifier-metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/verifier-worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success == true' /tmp/verifier-upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$VERIFY_WORKER/subdomain" \
+            -H "$AUTH" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' >/tmp/verifier-subdomain.json
+          jq -e '.success == true and .result.enabled == true' /tmp/verifier-subdomain.json >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+
+      - name: Prove V2 hash and cache identity differ
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/account-subdomain.json)
+          PATH_TOKEN=$(cat /tmp/verifier-path-token.txt)
+          TOKEN=$(cat /tmp/variant-token.txt)
+          VERIFY_URL="https://$VERIFY_WORKER.$SUBDOMAIN.workers.dev/$PATH_TOKEN"
+          curl -fsS --max-time 300 \
+            -D /tmp/candidate.headers \
+            -o /tmp/candidate.jpg \
+            -X POST "$VERIFY_URL?ratio=9%3A16&recipe=fill-crop-v2" \
+            -H "X-Studio-Variant-Token: $TOKEN" \
+            -H 'Content-Type: image/png' \
+            --data-binary @/tmp/variant-source.png
+          grep -Eiq '^x-studio-variant-recipe: fill-crop-v2\r?$' /tmp/candidate.headers
+          grep -Eiq '^x-studio-variant-style: center_crop\r?$' /tmp/candidate.headers
+          sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256
+          test "$(cat /tmp/candidate.sha256)" != "$(cat /tmp/baseline.sha256)"
+          jq -n \
+            --arg old_sha256 "$(cat /tmp/baseline.sha256)" \
+            --arg new_sha256 "$(cat /tmp/candidate.sha256)" \
+            --arg old_recipe "blur-fill-v1" \
+            --arg new_recipe "fill-crop-v2" \
+            '{
+              passed: ($old_sha256 != $new_sha256),
+              old: {recipe: $old_recipe, sha256: $old_sha256},
+              new: {recipe: $new_recipe, sha256: $new_sha256},
+              downstream_cache_contract: "recipe-versioned transfer IDs, filenames, Drive IDs and R2 preview URLs"
+            }' >/tmp/hash-proof.json
+          jq -e '.passed == true' /tmp/hash-proof.json >/dev/null
+
+      - name: Promote verified candidate
+        id: promote
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE=$(cat /tmp/candidate-version.txt)
+          cd /tmp/variant-v2
+          ./node_modules/.bin/wrangler versions deploy "$CANDIDATE@100%" \
+            --name "$TARGET_WORKER" --message 'Promote Item 8 fill-crop-v2' -y >/tmp/variant-promote.log 2>&1
+          echo 'promoted=true' >> "$GITHUB_OUTPUT"
+          BASE=$(cat /tmp/variant-base-url.txt)
+          for attempt in $(seq 1 10); do
+            if curl -fsS "$BASE/health" -o /tmp/health-final.json &&
+              jq -e '.ok == true and .version == "2.0.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop"' /tmp/health-final.json >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          jq -e '.ok == true and .version == "2.0.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop"' /tmp/health-final.json >/dev/null
+
+      - name: Delete exact-version verifier
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          code=$(curl -sS -o /tmp/verifier-delete.json -w '%{http_code}' \
+            -X DELETE "$ROOT/workers/scripts/$VERIFY_WORKER" -H "$AUTH")
+          if [[ "$code" != "404" && ( "$code" -lt 200 || "$code" -ge 300 ) ]]; then exit 1; fi
+
+      - name: Roll back on post-split failure
+        if: failure() && steps.split.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREVIOUS=$(cat /tmp/previous-version.txt)
+          cd /tmp/variant-v2
+          ./node_modules/.bin/wrangler versions deploy "$PREVIOUS@100%" \
+            --name "$TARGET_WORKER" --message 'Automatic rollback after Item 8 verification failure' -y >/tmp/variant-rollback.log 2>&1
+
+      - name: Destroy transient credentials
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in /tmp/variant-token.txt /tmp/airtable-pat.txt /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc; do
+            if [[ -e "$file" ]]; then shred -u "$file" 2>/dev/null || rm -f "$file"; fi
+          done
+
+      - name: Upload sanitized Item 8 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item8-variant-fill-crop-v2-${{ github.run_id }}
+          path: |
+            /tmp/bindings-before-sanitized.json
+            /tmp/bindings-candidate-sanitized.json
+            /tmp/hash-proof.json
+            /tmp/health-final.json
+          if-no-files-found: ignore
+          retention-days: 30

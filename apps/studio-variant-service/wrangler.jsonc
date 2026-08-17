@@ -1,0 +1,15 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "chicagoshining-studio-variant-service",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-08-17",
+  "workers_dev": false,
+  "keep_vars": true,
+  "images": {
+    "binding": "IMAGES"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
