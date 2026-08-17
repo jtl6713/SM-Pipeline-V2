@@ -60,7 +60,12 @@ jobs:
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           body=$(jq -cn --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"recover_item7_exact_selector",confirm:"RECOVER-ITEM7-EXACT-SELECTOR-V1",test_run_id:$tr,scenario_id:$sid,platform_output_record_id:$out}')
-          code=$(curl -sS --max-time 120 -o evidence/recover.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$body" || true)
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -sS --max-time 120 -o evidence/recover.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$body" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true and .stage=="R2" and .scenario_stopped==true and .selector_restored==true and .schedule_preserved==true' evidence/recover.json >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
           echo "recover_http=$code"
           cat evidence/recover.json | jq . || cat evidence/recover.json
           test "$code" = 200
