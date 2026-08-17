@@ -1,0 +1,49 @@
+name: Read Item6 Stage Route Structure
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/read-item6-stage-route-structure.txt']
+
+permissions: {contents: read}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read target route structure only
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python -c 'import urllib.parse; f="OR({Setting_Name}=\"MAKE_API_TOKEN\",{Setting_Name}=\"MAKE_API_BASE_URL\")"; print(urllib.parse.urlencode([("filterByFormula",f),("fields[]","Setting_Name"),("fields[]","Setting_Value"),("fields[]","Active")]))' >/tmp/q.txt
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python -c 'import json; d=json.load(open("/tmp/settings.json")); v={r["fields"].get("Setting_Name"):r["fields"].get("Setting_Value") for r in d.get("records",[]) if r.get("fields",{}).get("Active")}; open("/tmp/make-token.txt","w").write(str(v["MAKE_API_TOKEN"]).strip()); open("/tmp/make-base.txt","w").write(str(v["MAKE_API_BASE_URL"]).strip().rstrip("/"))'
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
+          echo '[' >/tmp/item6-route-structure.json
+          first=1
+          for sid in 5862882 5612664 5845193 5791356 5791396 5806644; do
+            curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" | python repair/scripts/read-item6-stage-route-structure.py "$sid" >/tmp/one.json
+            [[ $first -eq 1 ]] || echo ',' >>/tmp/item6-route-structure.json
+            cat /tmp/one.json >>/tmp/item6-route-structure.json
+            first=0
+          done
+          echo ']' >>/tmp/item6-route-structure.json
+          cat /tmp/item6-route-structure.json
+      - name: Destroy credentials
+        if: always()
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/q.txt /tmp/one.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: item6-stage-route-structure-${{ github.run_id }}
+          path: /tmp/item6-route-structure.json
+          retention-days: 30
