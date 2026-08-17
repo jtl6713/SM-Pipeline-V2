@@ -1,4 +1,4 @@
-name: Item7 R2 L6 Explicit-Run Regression
+name: Item7 R2 L7 Clean-Lease Regression
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
       CONTENT_RECORD_ID: recA0WClSp6SR6vvl
       OUTPUT_RECORD_ID: recByMge4QPlCOsD2
       SCENARIO_ID: '5569495'
-      LEASE_ID: ITEM7-R2-RUN32060507474-L6
+      LEASE_ID: ITEM7-R2-RUN32060507474-L7
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,12 +35,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p evidence
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r2-l6"
+          BRIDGE="chicagoshining-item7-r2-l7"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
-          export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});}};
+          export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});}};
           EOF
           cat >/tmp/metadata.json <<EOF
           {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
@@ -63,7 +64,6 @@ jobs:
           SUB: ${{ steps.bridge.outputs.sub }}
         run: |
           set -euo pipefail
-          mkdir -p evidence
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
           code=000
@@ -72,8 +72,8 @@ jobs:
             if [[ "$code" == 200 ]] && jq -e '.ok==true and .inspected.scenario_active==false' evidence/preflight.json >/dev/null 2>&1; then break; fi
             sleep 2
           done
+          echo "preflight_http=$code"
           test "$code" = 200
-          cat evidence/preflight.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
           jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '
             .ok==true and .inspected.scenario_active==false and
             .inspected.modules[0].module.module=="airtable:ActionSearchRecords" and
@@ -84,7 +84,7 @@ jobs:
             )
           ' evidence/preflight.json >/dev/null
 
-      - name: Acquire fresh L6 lease and pulse R2 once
+      - name: Acquire fresh L7 lease and pulse R2 once
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -97,14 +97,14 @@ jobs:
           acquire=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg exp "$EXPIRES" --arg out "$OUTPUT_RECORD_ID" --arg ci "$CONTENT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"acquire",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,max_runs:1,max_operations:30,expires_at:$exp,allowed_platform_output_record_ids:[$out],allowed_content_item_record_ids:[$ci],deny_fixture_record_ids:[],allow_public_publish:false}')
           acode=$(curl -sS --max-time 90 -o evidence/acquire.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" || true)
           echo "acquire_http=$acode"
-          cat evidence/acquire.json | jq .
+          cat evidence/acquire.json || true
           test "$acode" = 200
           jq -e --arg lease "$LEASE_ID" --arg tr "$TEST_RUN_ID" '.ok==true and .lease.lease_id==$lease and .lease.test_run_id==$tr and .lease.scenario_id==5569495' evidence/acquire.json >/dev/null
 
           pulse=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"pulse_item7_exact_stage",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out,max_cycles:1}')
           pcode=$(curl -sS --max-time 190 -o evidence/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse" || true)
           echo "pulse_http=$pcode"
-          cat evidence/pulse.json | jq .
+          cat evidence/pulse.json || true
           test "$pcode" = 200
           jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .stage=="R2" and .platform_output_record_id==$out and .test_run_id==$tr and .checkpoint.asset_selection_status=="Selected" and .checkpoint.selected_assets_present==true and (.checkpoint.selected_clip_count>0) and .scenario_stopped==true and .selector_restored==true and .schedule_preserved==true and .do_not_publish_preserved==true' evidence/pulse.json >/dev/null
 
@@ -120,11 +120,11 @@ jobs:
           inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
           code=$(curl -sS --max-time 60 -o evidence/postflight.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
           echo "postflight_http=$code"
-          cat evidence/postflight.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
+          cat evidence/postflight.json || true
           test "$code" = 200
           jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()") and contains("NOT({Do_Not_Publish})"))' evidence/postflight.json >/dev/null
 
-      - name: Record R2 PASS in permanent ledger
+      - name: Record R2 L7 PASS in permanent ledger
         shell: bash
         run: |
           set -euo pipefail
@@ -136,24 +136,24 @@ jobs:
           clips,recovered=sys.argv[1:3]
           p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
           s=p.read_text()
-          row=f'| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — R2 PASS; R3 next** | Output 168 / Content 75 remains exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. L5 failed before mutation because the controller activated R2 but did not explicitly run it; R2 was independently re-proven OFF after L5 expiry. Controller repair deployed in run `32065602564` adds one explicit Make `/run` per exact leased cycle plus state-verified delayed-stop recovery. Fresh L6 R2 PASS selected {clips} clip(s); stranded exact selector recovered={recovered}; scenario stopped; canonical production selector and schedule restored; DNP preserved. | Pulse R3 `5557966` under a fresh exact lease and require the complete Ready-for-Render package plus OFF/selector/schedule restoration proof. |'
+          row=f'| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — R2 PASS; R3 next** | Output 168 / Content 75 remains exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. Controller explicit-run + robust-stop repair deployed in run `32065602564`. Safety run `32065906190` independently proved R2 OFF; L6 `32066062184` then failed during stale-lease replacement before an L6 lease/output mutation, after which L5 was manually reconciled terminal and zero Processing leases were confirmed. Fresh L7 R2 PASS selected {clips} clip(s); stranded exact selector recovered={recovered}; R2 stopped; canonical production selector and schedule restored; DNP/Test_Run_ID preserved. | Pulse R3 `5557966` under a fresh exact lease and require the complete Ready-for-Render package plus OFF/selector/schedule restoration proof. |'
           s,n=re.subn(r'^\| 7 \| Fresh edge-to-edge 9:16 normal-path regression \|.*$',row,s,count=1,flags=re.M)
           if n != 1: raise SystemExit('Item 7 row not found')
-          s += f'\n- 2026-08-17 Item 7 R2 L6 PASS: controller explicit-run/stop recovery deploy `32065602564`; Output 168 exact Test_Run_ID isolation; selected clip count {clips}; stranded selector recovered={recovered}; R2 postflight OFF with canonical production selector restored; schedule and Do_Not_Publish preserved. R3 next.\n'
+          s += f'\n- 2026-08-17 Item 7 R2 L7 PASS: Output 168 exact Test_Run_ID isolation; selected clip count {clips}; stranded selector recovered={recovered}; R2 postflight OFF with canonical production selector restored; schedule, Do_Not_Publish and identity preserved. R3 next.\n'
           p.write_text(s)
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
-          git commit -m 'docs(item7): record fresh R2 L6 pass'
+          git commit -m 'docs(item7): record R2 L7 pass'
           git pull --rebase origin main
           git push origin HEAD:main
 
-      - name: Save R2 L6 evidence
+      - name: Save R2 L7 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r2-l6-${{ github.run_id }}
+          name: item7-r2-l7-${{ github.run_id }}
           path: evidence/
           if-no-files-found: ignore
           retention-days: 30
