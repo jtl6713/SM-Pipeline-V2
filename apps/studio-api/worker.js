@@ -130,6 +130,7 @@ export default {
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
+          studio_smv1_exact_test_pulse_v1: true,
           repair_run_disabled_until_stage_addressing_verified: true,
           local_airtable_pat_required_for_admin_deploys: false,
           make_admin_blueprint_string_patch: true,
@@ -2733,6 +2734,8 @@ async function getItem4OutputPlan(request, env, url, authorization) {
 
 const ITEM4_VARIANT_QUEUE_TABLE = "tblBZLXPd1p2NRWRK";
 const ITEM4_SMV1_SCENARIO_ID = 5894885;
+const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
+const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
@@ -2911,6 +2914,29 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
   return expected;
 }
 
+
+function item4Smv1FormulaQuoted(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+function item4Smv1ExactTestFormula(recordId, testRunId) {
+  return `AND({Production_Request_Record_ID}="${item4Smv1FormulaQuoted(recordId)}",{Test_Run_ID}="${item4Smv1FormulaQuoted(testRunId)}",${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
+}
+async function item4SetSmv1SelectorFormula(env, formula) {
+  const { makeApiBase, headers } = await phase6MakeApiConfig(env);
+  const read = async () => {
+    const r=await fetch(`${makeApiBase}/scenarios/${ITEM4_SMV1_SCENARIO_ID}/blueprint?draft=false`,{method:"GET",headers});
+    const raw=await r.text(); if(!r.ok) throw new HttpError(r.status,`SMV1 selector read failed (${r.status}): ${raw.slice(0,240)}`);
+    const b=raw?JSON.parse(raw):{}; const w=b?.blueprint??b?.response?.blueprint??b; return typeof w==="string"?JSON.parse(w):w;
+  };
+  const find=(flow,id)=>{for(const n of flow||[]){if(Number(n?.id)===Number(id))return n;for(const route of n?.routes||[]){const x=find(route?.flow||[],id);if(x)return x;}}return null;};
+  const bp=await read(); const m=find(bp?.flow||[],1);
+  if(!m||m.module!=="airtable:ActionSearchRecords"||String(m?.mapper?.maxRecords||"")!=="1") throw new HttpError(409,"SMV1 Module 1 selector contract drifted");
+  if(String(m?.mapper?.formula||"")===formula)return false; m.mapper.formula=formula;
+  const patch=await fetch(`${makeApiBase}/scenarios/${ITEM4_SMV1_SCENARIO_ID}?confirmed=true`,{method:"PATCH",headers,body:JSON.stringify({blueprint:JSON.stringify(bp)})});
+  const pr=await patch.text();if(!patch.ok)throw new HttpError(patch.status,`SMV1 selector patch failed (${patch.status}): ${pr.slice(0,240)}`);
+  const vb=await read();const vm=find(vb?.flow||[],1);if(String(vm?.mapper?.formula||"")!==formula||String(vm?.mapper?.maxRecords||"")!=="1")throw new HttpError(502,"SMV1 selector verification failed");return true;
+}
+
 async function item4DrainVariantWorker(env, recordId, maxRuns) {
   // Hard guarantee: before any pending platform variant is allowed to run,
   // verify the live SMV1 blueprint has filename-only Drive reuse disabled.
@@ -2918,7 +2944,10 @@ async function item4DrainVariantWorker(env, recordId, maxRuns) {
   // (for example images 1.jpg) are reused across different Production Requests.
   await item4EnsureSmv1PreviewCacheWorker(env);
 
+  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const originalState = await phase6ScenarioState(env, ITEM4_SMV1_SCENARIO_ID);
+  if (testRunId && originalState.isActive) throw new HttpError(409, "Test Mode refuses to seize an already-active SMV1 scenario");
   const executionIds = [];
 
   try {
@@ -2929,6 +2958,10 @@ async function item4DrainVariantWorker(env, recordId, maxRuns) {
       );
       const failed = current.filter((row) => item4QueueStatus(row) === "Failed");
       if (!outstanding.length || failed.length) break;
+      if (testRunId) {
+        const crossBoundary=current.filter((row)=>String(f(row,"Test_Run_ID")||"").trim()!==testRunId);
+        if(crossBoundary.length) throw new HttpError(409,"SMV1 Test Mode queue contains a blank or mismatched Test_Run_ID");
+      }
 
       if (!originalState.isActive) {
         // SMV1 Module 1 intentionally reads maxRecords=1. In the production
@@ -2936,9 +2969,15 @@ async function item4DrainVariantWorker(env, recordId, maxRuns) {
         // execute one queue cycle reliably. Pulse ON -> one cycle -> OFF for
         // each outstanding row instead of depending on repeated /run calls
         // against a temporarily active interval scenario.
-        await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, true);
-        await new Promise((resolve) => setTimeout(resolve, 2500));
-        try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
+        let exactTestSelectorInstalled=false;
+        try {
+          if(testRunId){await item4SetSmv1SelectorFormula(env,item4Smv1ExactTestFormula(recordId,testRunId));exactTestSelectorInstalled=true;}
+          await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, true);
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+        } finally {
+          try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
+          if(exactTestSelectorInstalled) await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);
+        }
 
         // Give Make/Airtable a short reconciliation window before deciding
         // whether another pulse is needed.
@@ -2973,6 +3012,7 @@ async function item4DrainVariantWorker(env, recordId, maxRuns) {
     if (!originalState.isActive) {
       try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
     }
+    if(testRunId){try{await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);}catch{}}
   }
 
   return executionIds;
