@@ -1,4 +1,4 @@
-name: Item7 R2 L9 Post-Failure Inspect
+name: Item7 R2 L9 Fresh Cleanup
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  inspect:
+  cleanup:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -23,6 +23,7 @@ jobs:
       TEST_RUN_ID: ITEM7_9X16_REGRESSION_RUN32060507474
       OUTPUT_RECORD_ID: recByMge4QPlCOsD2
       SCENARIO_ID: '5569495'
+      LEASE_ID: ITEM7-R2-RUN32060507474-L9
     steps:
       - uses: actions/checkout@v4
       - name: Create temporary authenticated service bridge
@@ -33,7 +34,7 @@ jobs:
           mkdir -p evidence
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r2-l9-inspect"
+          BRIDGE="chicagoshining-item7-r2-l9-cleanup"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
           export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});}};
@@ -50,7 +51,8 @@ jobs:
           echo "bridge=$BRIDGE" >> "$GITHUB_OUTPUT"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
-      - name: Inspect R2 OFF and selector state
+
+      - name: Fresh cleanup L9 and restore canonical R2 selector
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -59,22 +61,31 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
-          inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
+          cleanup=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"cleanup_item7_exact_stage",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out}')
           code=000
           for i in 1 2 3 4 5 6 7 8 9 10; do
-            code=$(curl -sS --max-time 60 -o evidence/inspect.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
-            if [[ "$code" == 200 ]] && jq -e '.ok==true' evidence/inspect.json >/dev/null 2>&1; then break; fi
+            code=$(curl -sS --max-time 120 -o evidence/cleanup.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$cleanup" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' evidence/cleanup.json >/dev/null 2>&1; then break; fi
+            if [[ "$code" != 404 ]]; then break; fi
             sleep 2
           done
-          echo "inspect_http=$code"
-          cat evidence/inspect.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
+          echo "cleanup_http=$code"
+          cat evidence/cleanup.json | jq .
           test "$code" = 200
-          jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1"' evidence/inspect.json >/dev/null
-      - name: Save inspect evidence
+          jq -e '.ok==true and .stage=="R2" and .scenario_stopped==true and .selector_restored==true and .lease_terminalized==true' evidence/cleanup.json >/dev/null
+
+          inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
+          icode=$(curl -sS --max-time 60 -o evidence/postinspect.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
+          echo "inspect_http=$icode"
+          cat evidence/postinspect.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
+          test "$icode" = 200
+          jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="1" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()") and contains("NOT({Do_Not_Publish})"))' evidence/postinspect.json >/dev/null
+
+      - name: Save cleanup evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r2-l9-postfailure-${{ github.run_id }}
+          name: item7-r2-l9-cleanup-${{ github.run_id }}
           path: evidence/
           if-no-files-found: ignore
           retention-days: 30
