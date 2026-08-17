@@ -1,0 +1,105 @@
+name: Item7 R4 L15 Exact Handoff
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-item7-r4-l15.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: item7-isolated-regression
+  cancel-in-progress: false
+
+jobs:
+  r4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TEST_RUN_ID: ITEM7_9X16_REGRESSION_RUN32060507474
+      CONTENT_RECORD_ID: recA0WClSp6SR6vvl
+      OUTPUT_RECORD_ID: recByMge4QPlCOsD2
+      SCENARIO_ID: '5556716'
+      LEASE_ID: ITEM7-R4-RUN32060507474-L15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create temporary authenticated service bridge
+        id: bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          BRIDGE="chicagoshining-item7-r4-l15"
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          cat >/tmp/bridge.js <<EOF
+          export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio-api.internal/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});}};
+          EOF
+          cat >/tmp/metadata.json <<EOF
+          {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
+          EOF
+          curl -sS -X DELETE "$ROOT/workers/scripts/$BRIDGE" -H "$AUTH" >/dev/null 2>&1 || true
+          curl -fsS -X PUT "$ROOT/workers/scripts/$BRIDGE/content" -H "$AUTH" -F 'metadata=@/tmp/metadata.json;type=application/json' -F 'worker.js=@/tmp/bridge.js;type=application/javascript+module;filename=worker.js' -o /tmp/upload.json
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "$ROOT/workers/scripts/$BRIDGE/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/subdomain.json
+          jq -e '.success==true and .result.enabled==true' /tmp/subdomain.json >/dev/null
+          curl -fsS "$ROOT/workers/subdomain" -H "$AUTH" -o /tmp/account-subdomain.json
+          echo "bridge=$BRIDGE" >> "$GITHUB_OUTPUT"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
+      - name: Acquire L15 and pulse exact R4 once
+        shell: bash
+        env:
+          BRIDGE: ${{ steps.bridge.outputs.bridge }}
+          TOKEN: ${{ steps.bridge.outputs.token }}
+          SUB: ${{ steps.bridge.outputs.sub }}
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
+          EXPIRES=$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')
+          acquire=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg exp "$EXPIRES" --arg out "$OUTPUT_RECORD_ID" --arg ci "$CONTENT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"acquire",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,max_runs:1,max_operations:20,expires_at:$exp,allowed_platform_output_record_ids:[$out],allowed_content_item_record_ids:[$ci],deny_fixture_record_ids:[],allow_public_publish:false}')
+          acode=000
+          for i in 1 2 3 4 5; do
+            acode=$(curl -sS --max-time 90 -D evidence/acquire.headers -o evidence/acquire.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" || true)
+            if [[ "$acode" == 200 ]]; then break; fi
+            if [[ "$acode" != 404 ]] || ! grep -q '1042' evidence/acquire.json 2>/dev/null; then break; fi
+            sleep 2
+          done
+          echo "acquire_http=$acode"
+          cat evidence/acquire.json | jq . || cat evidence/acquire.json
+          test "$acode" = 200
+          jq -e --arg lease "$LEASE_ID" --arg tr "$TEST_RUN_ID" '.ok==true and .lease.lease_id==$lease and .lease.test_run_id==$tr and .lease.scenario_id==5556716' evidence/acquire.json >/dev/null
+          sleep 2
+          pulse=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"pulse_r4_exact_output",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out,attempt_number:1,intended_stage:"R4",idempotency_key:($tr+":R4:"+$out+":1")}')
+          pcode=000
+          for i in 1 2 3 4 5; do
+            pcode=$(curl -sS --max-time 150 -D evidence/pulse.headers -o evidence/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse" || true)
+            if [[ "$pcode" == 200 ]]; then break; fi
+            # Only retry Cloudflare propagation 1042. Any application/Make failure is not replayed.
+            if [[ "$pcode" != 404 ]] || ! grep -q '1042' evidence/pulse.json 2>/dev/null; then break; fi
+            sleep 2
+          done
+          echo "pulse_http=$pcode"
+          cat evidence/pulse.json | jq . || cat evidence/pulse.json
+          test "$pcode" = 200
+          jq -e --arg out "$OUTPUT_RECORD_ID" '.ok==true and .action=="pulse_r4_exact_output" and .platform_output_record_id==$out and .intended_stage=="R4" and .attempt_number==1 and .exact_input_dispatched==true and .exact_target_consumed==true' evidence/pulse.json >/dev/null
+      - name: Save L15 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-r4-l15-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Remove temporary bridge
+        if: always()
+        shell: bash
+        env:
+          BRIDGE: ${{ steps.bridge.outputs.bridge }}
+        run: |
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null 2>&1 || true
