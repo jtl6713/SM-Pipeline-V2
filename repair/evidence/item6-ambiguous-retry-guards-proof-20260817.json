@@ -1,0 +1,32 @@
+{
+  "repair_item": 6,
+  "checkpoint": "ambiguous-retry-guards",
+  "result": "PASS",
+  "workflow_run_id": 32036387558,
+  "artifact_id": 9290832672,
+  "artifact_digest": "sha256:1818785ec6e63dbf299b9226ac7ae2a0745008d4e74dbf835019e2838a5e0a49",
+  "scenario_runs": 0,
+  "scenario_activation_changes": 0,
+  "contract": {
+    "normal_path": "Original failure route now additionally requires Replace_Transaction_ID notexist.",
+    "replacement_path": "Sibling failure route requires Replace_Transaction_ID exist and fails closed.",
+    "replacement_effect": [
+      "Publish_Status=Failed",
+      "Publish_Retry_Eligible=false",
+      "Publish_Next_Retry_At cleared",
+      "Manual_Fallback_Required=true",
+      "Replace_State=Manual Cleanup Required",
+      "Replace_Cleanup_State=Manual Cleanup Required",
+      "Replace_Error populated",
+      "Replace_Updated_At updated"
+    ]
+  },
+  "scenarios": [
+    {"scenario_id":5862882,"module_id":6,"replacement_guard_module_id":901,"before":"c741a63a177f0a7f2b8826a5b6c02c957b27399c897fc90904bb164646021afa","after":"fcb5c028d0df46339dfb78731dbcf93d0418c6fcc41781f8c2524b59373b4d65"},
+    {"scenario_id":5612664,"module_id":9,"replacement_guard_module_id":901,"before":"1fac3ec4b17c41cb74f1f782c494ec91c053690945a7b4c2e48fd03ab6fff8e4","after":"6e7629ce8eff2090bb208381f1cedad5c6e8807f21e8df8cf92154f3c52258fc"},
+    {"scenario_id":5845193,"module_id":27,"replacement_guard_module_id":901,"before":"4927c99c1c627a7311ea40878a075966f7f9b7e5229bbb493b0f99aa359e1c08","after":"f3908a77c5a1e7ca1db0fdfc5f5ded6c0f369caca1c4cbeb32ea0dc8c2869267"},
+    {"scenario_id":5791356,"module_id":7,"replacement_guard_module_id":901,"before":"c4f24d2c3edcea3fd8d785153ba548548db667a5263ab8be0678db9c8376c5cb","after":"dd20f44cd33f5a013760ef9fda7846380cd42d836a9d6de8798a6b425eaf4a83"},
+    {"scenario_id":5791396,"module_id":10,"replacement_guard_module_id":901,"before":"ea79cc7b5fa09fcfbbcbce32900d22cdd68cf74e772997890254d491106d56d8","after":"6f1a5161e1f6bb73005e6a4a1ca3a269f79b5a960c596dd6ed14db958a9d6870"},
+    {"scenario_id":5806644,"module_ids":[24,34],"replacement_guard_module_ids":[901,902],"before":"b9cf93d20bcdd368f06a848307a5b8cba6f710c68566875d899ba662966b3d4b","after":"cd8a15bd38a76bf7eeea6fac0a4e6cc31956aee0f5c7ff10ab244fd71227baff"}
+  ]
+}
