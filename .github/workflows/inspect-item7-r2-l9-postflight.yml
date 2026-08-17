@@ -80,7 +80,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r2-l9-selector-recovery-v6-${{ github.run_id }}
+          name: item7-r2-l9-selector-recovery-v6-1-${{ github.run_id }}
           path: evidence/
           if-no-files-found: ignore
           retention-days: 30
@@ -91,3 +91,5 @@ jobs:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
         run: |
           curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null 2>&1 || true
+
+# v6.1 retry: DNP is enforced by repairVerifyOutputRecord before recovery.
