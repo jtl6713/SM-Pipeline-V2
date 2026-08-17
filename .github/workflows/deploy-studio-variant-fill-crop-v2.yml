@@ -66,18 +66,22 @@ jobs:
           PAT=$(tr -d '\r\n' </tmp/airtable-pat.txt)
           test "${PAT#pat}" != "$PAT"
           curl -fsS \
-            'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?maxRecords=100' \
+            'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql/recMROc2eVH1xlthP' \
             -H "Authorization: Bearer $PAT" \
-            -o /tmp/pipeline-settings.json
+            -o /tmp/variant-base-setting.json
+          curl -fsS \
+            'https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql/recn0Kjduge0Dv2ac' \
+            -H "Authorization: Bearer $PAT" \
+            -o /tmp/variant-token-setting.json
           jq -er '
-            [.records[].fields | select(.Active == true and .Setting_Name == "STUDIO_VARIANT_SERVICE_BASE_URL") | .Setting_Value][0]
-          ' /tmp/pipeline-settings.json >/tmp/variant-base-url.txt
+            select(.fields.Active == true and .fields.Setting_Name == "STUDIO_VARIANT_SERVICE_BASE_URL") | .fields.Setting_Value
+          ' /tmp/variant-base-setting.json >/tmp/variant-base-url.txt
           jq -er '
-            [.records[].fields | select(.Active == true and .Setting_Name == "STUDIO_VARIANT_SERVICE_TOKEN") | .Setting_Value][0]
-          ' /tmp/pipeline-settings.json >/tmp/variant-token.txt
+            select(.fields.Active == true and .fields.Setting_Name == "STUDIO_VARIANT_SERVICE_TOKEN") | .fields.Setting_Value
+          ' /tmp/variant-token-setting.json >/tmp/variant-token.txt
           test -n "$(cat /tmp/variant-base-url.txt)"
           test -n "$(cat /tmp/variant-token.txt)"
-          rm -f /tmp/pipeline-settings.json
+          rm -f /tmp/variant-base-setting.json /tmp/variant-token-setting.json
 
       - name: Generate deterministic wide PNG fixture
         shell: bash
