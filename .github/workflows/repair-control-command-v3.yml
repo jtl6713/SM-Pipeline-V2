@@ -30,7 +30,7 @@ jobs:
           set -euo pipefail
           test -s deploy/repair-control-command-v3.json
           ACTION=$(jq -er '.action' deploy/repair-control-command-v3.json)
-          case "$ACTION" in acquire|assert_output_allowed|state|release|sweep) ;; *) exit 1 ;; esac
+          case "$ACTION" in acquire|assert_output_allowed|state|release|sweep|replace_transaction_state|prepare_replace_transaction|begin_replace_transaction|verify_replace_transaction|rollback_replace_transaction|complete_replace_cleanup) ;; *) exit 1 ;; esac
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           curl -fsS "$API/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
           ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json)
@@ -93,7 +93,7 @@ jobs:
           SUB=$(jq -er '.result.subdomain' /tmp/account-subdomain.json); T=$(cat /tmp/token.txt); EXPECTED=$(jq -r '.expected_http_status // 200' deploy/repair-control-command-v3.json)
           code=$(curl -sS --max-time 150 -o /tmp/result.json -w '%{http_code}' "https://$BRIDGE_WORKER.$SUB.workers.dev/$T/execute" || true)
           echo "repair_v3_http=$code expected=$EXPECTED"
-          jq -c '{ok,action,error:(.error//null),lease:(.lease//null),output:(.output//null),swept:(.swept//null)}' /tmp/result.json || true
+          jq -c '{ok,action,error:(.error//null),lease:(.lease//null),output:(.output//null),replace:(.replace//null),idempotent:(.idempotent//null),swept:(.swept//null)}' /tmp/result.json || true
           test "$code" = "$EXPECTED"
           if [[ "$EXPECTED" -ge 200 && "$EXPECTED" -lt 300 ]]; then jq -e '.ok==true' /tmp/result.json >/dev/null; else jq -e '.ok==false' /tmp/result.json >/dev/null; fi
       - name: Delete bridge and verify production unchanged
