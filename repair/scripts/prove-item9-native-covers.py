@@ -32,7 +32,7 @@ FB_RECORD = "rec5TIGeAHkc7fzyG"
 IG_RECORD = "recccXkpGTx6O3Sa2"
 FALLBACK_PUBLIC_THUMB = "https://media.chicagoshining.com/publish/thumbnail-output-147.jpg"
 DRIVE_FILE_ID = "1ZtX9_7lbPj6gJvIlV3cg48JiUfqfV7Ad"
-R2_KEY = "publish/thumbnail-item9-native-cover-proof.jpg"
+R2_KEY = "publish/thumbnail-item9-native-cover-proof-v2.jpg"
 ORCHESTRATORS = {
     "5864632": "IG-PUB-ORCH",
     "5813561": "FB-ORCH",
@@ -489,8 +489,17 @@ def main():
         }
         evidence["youtube"] = prove_youtube(settings, youtube_output, hosted["public_url"])
         if evidence["youtube"]["attached"]:
-            airtable_patch(pat, OUTPUTS_TABLE, YT_RECORD, {"YouTube_Thumbnail_Status": "Uploaded"})
+            airtable_patch(
+                pat,
+                OUTPUTS_TABLE,
+                YT_RECORD,
+                {
+                    "YouTube_Thumbnail_Status": "Uploaded",
+                    "Thumbnail_URL": hosted["public_url"],
+                },
+            )
             evidence["youtube"]["airtable_status"] = "Uploaded"
+            evidence["youtube"]["thumbnail_url"] = hosted["public_url"]
         evidence["facebook"] = prove_facebook(settings, facebook_output, hosted["public_url"])
         evidence["instagram"] = prove_instagram(settings, instagram_output, ig_contract)
         evidence["orchestrators_after"] = assert_orchestrators_off(make_base, settings["MAKE_API_TOKEN"])
