@@ -21,22 +21,22 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v6
-      - name: Exact-source binding-preserving deploy with rollback
+      - name: Exact-source clean-directory deploy with rollback
         shell: bash
-        run: bash repair/scripts/deploy-item6-studio-controller.sh
+        run: bash repair/scripts/deploy-item6-studio-controller-v2.sh
       - name: Upload sanitized evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: item6-studio-controller-${{ github.run_id }}
           path: |
-            /tmp/item6-bindings-before.json
-            /tmp/item6-bindings-after.json
-            /tmp/item6-session.json
-            /tmp/item6-source-sha256.txt
-            /tmp/item6-active-before.txt
-            /tmp/item6-active-after.txt
-            /tmp/item6-wrangler-dry-run.log
-            /tmp/item6-wrangler-deploy.log
+            /tmp/item6v2-bindings-before.json
+            /tmp/item6v2-bindings-after.json
+            /tmp/item6v2-session.json
+            /tmp/item6v2-source-sha256.txt
+            /tmp/item6v2-active-before.txt
+            /tmp/item6v2-active-after.txt
+            /tmp/item6v2-dry-run.log
+            /tmp/item6v2-deploy.log
           if-no-files-found: ignore
           retention-days: 30
