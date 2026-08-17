@@ -1,0 +1,14 @@
+{
+  "name": "sm-pipeline-youtube-uploader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SM Pipeline V2 YouTube resumable uploader",
+  "main": "youtube-upload-service.js",
+  "scripts": {
+    "start": "node youtube-upload-service.js",
+    "oauth": "node youtube-oauth-setup.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
