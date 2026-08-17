@@ -1,0 +1,182 @@
+name: Repair Item7 R2 Module9 Review HTML Map Key
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-item7-r2-module9-review-html.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repair-item7-r2-module9-review-html
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SCENARIO_ID: '5569495'
+      TARGET_FIELD_ID: 'fldEzxfia9EtHbg2F'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Resolve Make API credentials without logging values
+        shell: bash
+        run: |
+          set -euo pipefail; umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          PAT=$(cat /tmp/pat.txt)
+          python - <<'PY' >/tmp/q.txt
+          import urllib.parse
+          f="OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL')"
+          print(urllib.parse.urlencode([('filterByFormula',f),('fields[]','Setting_Name'),('fields[]','Setting_Value'),('fields[]','Active')]))
+          PY
+          curl -fsS "https://api.airtable.com/v0/appe33zkZn35yirTL/tblpHPWeEkyJaF7ql?$(cat /tmp/q.txt)" -H "Authorization: Bearer $PAT" -o /tmp/settings.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/settings.json'))
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value') for r in d.get('records',[]) if r.get('fields',{}).get('Active')}
+          t=str(vals.get('MAKE_API_TOKEN') or '').strip(); b=str(vals.get('MAKE_API_BASE_URL') or '').strip().rstrip('/')
+          if not t or not b: raise SystemExit('Missing active Make API settings')
+          open('/tmp/make-token.txt','w').write(t); open('/tmp/make-base.txt','w').write(b)
+          PY
+      - name: Preflight exact R2 state and build one-field patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID="$SCENARIO_ID"
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/scenario-before.json
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/blueprint-before-wrapper.json
+          python - <<'PY'
+          import copy, hashlib, json, os
+          sid=int(os.environ['SCENARIO_ID']); fid=os.environ['TARGET_FIELD_ID']
+          def unwrap_scenario(d):
+              x=d.get('response',d) if isinstance(d,dict) else {}
+              if isinstance(x,dict) and isinstance(x.get('scenario'),dict): x=x['scenario']
+              return x if isinstance(x,dict) else {}
+          def unwrap_bp(d):
+              x=d.get('response',d) if isinstance(d,dict) else d
+              if isinstance(x,dict) and 'blueprint' in x: x=x['blueprint']
+              if isinstance(x,str): x=json.loads(x)
+              if not isinstance(x,dict): raise SystemExit('Could not unwrap current R2 blueprint')
+              return x
+          def find(flow,mid):
+              for n in flow if isinstance(flow,list) else []:
+                  if str(n.get('id'))==str(mid): return n
+                  for r in n.get('routes',[]) if isinstance(n.get('routes'),list) else []:
+                      z=find(r.get('flow'),mid)
+                      if z:return z
+              return None
+          s=unwrap_scenario(json.load(open('/tmp/scenario-before.json')))
+          active=s.get('isActive',s.get('active'))
+          if active is not False: raise SystemExit(f'R2 must be OFF before repair; observed active={active!r}')
+          bp=unwrap_bp(json.load(open('/tmp/blueprint-before-wrapper.json')))
+          m=find(bp.get('flow'),9)
+          if not m: raise SystemExit('R2 Module 9 not found')
+          rec=(m.get('mapper') or {}).get('record')
+          if not isinstance(rec,dict): raise SystemExit('R2 Module 9 Airtable record mapper not found')
+          before=rec.get(fid)
+          needle='map(8.selected_clips; google_drive_url)'
+          fixed='map(8.selected_clips; "google_drive_url")'
+          if not isinstance(before,str): raise SystemExit('Target review HTML mapping missing')
+          if fixed in before and needle not in before:
+              raise SystemExit('Target mapping already repaired; refusing duplicate mutation')
+          if before.count(needle)!=1: raise SystemExit(f'Expected exactly one unquoted key token, found {before.count(needle)}')
+          patched=copy.deepcopy(bp)
+          pm=find(patched.get('flow'),9)
+          pm['mapper']['record'][fid]=before.replace(needle,fixed,1)
+          # Make PATCH contract accepts the blueprint string without idSequence.
+          patched.pop('idSequence',None)
+          body={'blueprint':json.dumps(patched,separators=(',',':'))}
+          open('/tmp/patch-body.json','w').write(json.dumps(body,separators=(',',':')))
+          rollback=copy.deepcopy(bp); rollback.pop('idSequence',None)
+          open('/tmp/rollback-body.json','w').write(json.dumps({'blueprint':json.dumps(rollback,separators=(',',':'))},separators=(',',':')))
+          def h(x):return hashlib.sha256(json.dumps(x,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+          evidence={
+            'scenario_id':sid,'scenario_active_before':active,
+            'scenario_name':s.get('name'),'schedule_before':s.get('scheduling',s.get('schedule')),
+            'hook_id_before':s.get('hookId',s.get('hook_id')),
+            'module_id':9,'module_name':((m.get('metadata') or {}).get('designer') or {}).get('name'),
+            'field_id':fid,'mapping_before':before,'mapping_after_expected':pm['mapper']['record'][fid],
+            'flow_sha256_before':h(bp.get('flow'))
+          }
+          open('/tmp/item7-r2-module9-repair-evidence.json','w').write(json.dumps(evidence,indent=2,sort_keys=True))
+          print(json.dumps(evidence,indent=2,sort_keys=True))
+          PY
+      - name: Patch exact Module 9 mapping and verify complete rollback invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt); SID="$SCENARIO_ID"
+          code=$(curl -sS -o /tmp/patch-response.json -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID?confirmed=true" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data-binary @/tmp/patch-body.json)
+          echo "patch_http=$code"
+          [[ "$code" =~ ^2 ]] || { cat /tmp/patch-response.json; exit 1; }
+          curl -fsS "$BASE/scenarios/$SID/blueprint" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/blueprint-after-wrapper.json
+          curl -fsS "$BASE/scenarios/$SID" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -o /tmp/scenario-after.json
+          if ! python - <<'PY'
+          import copy, hashlib, json, os, sys
+          fid=os.environ['TARGET_FIELD_ID']
+          def unwrap_scenario(d):
+              x=d.get('response',d) if isinstance(d,dict) else {}
+              if isinstance(x,dict) and isinstance(x.get('scenario'),dict):x=x['scenario']
+              return x if isinstance(x,dict) else {}
+          def unwrap_bp(d):
+              x=d.get('response',d) if isinstance(d,dict) else d
+              if isinstance(x,dict) and 'blueprint' in x:x=x['blueprint']
+              if isinstance(x,str):x=json.loads(x)
+              return x
+          def find(flow,mid):
+              for n in flow if isinstance(flow,list) else []:
+                  if str(n.get('id'))==str(mid):return n
+                  for r in n.get('routes',[]) if isinstance(n.get('routes'),list) else []:
+                      z=find(r.get('flow'),mid)
+                      if z:return z
+              return None
+          sb=unwrap_scenario(json.load(open('/tmp/scenario-before.json'))); sa=unwrap_scenario(json.load(open('/tmp/scenario-after.json')))
+          bb=unwrap_bp(json.load(open('/tmp/blueprint-before-wrapper.json'))); ba=unwrap_bp(json.load(open('/tmp/blueprint-after-wrapper.json')))
+          bm=find(bb.get('flow'),9); am=find(ba.get('flow'),9)
+          before=bm['mapper']['record'][fid]; after=am['mapper']['record'][fid]
+          expected=before.replace('map(8.selected_clips; google_drive_url)','map(8.selected_clips; "google_drive_url")',1)
+          checks={
+            'mapping_exact':after==expected,
+            'scenario_still_off':sa.get('isActive',sa.get('active')) is False,
+            'schedule_preserved':sa.get('scheduling',sa.get('schedule'))==sb.get('scheduling',sb.get('schedule')),
+            'hook_preserved':sa.get('hookId',sa.get('hook_id'))==sb.get('hookId',sb.get('hook_id')),
+            'name_preserved':ba.get('name')==bb.get('name')
+          }
+          # Compare full flow after normalizing the single intended field back to its prior value.
+          norm=copy.deepcopy(ba); nm=find(norm.get('flow'),9); nm['mapper']['record'][fid]=before
+          checks['only_intended_flow_change']=norm.get('flow')==bb.get('flow')
+          ev=json.load(open('/tmp/item7-r2-module9-repair-evidence.json'))
+          ev.update({'mapping_after_live':after,'scenario_active_after':sa.get('isActive',sa.get('active')),'schedule_after':sa.get('scheduling',sa.get('schedule')),'hook_id_after':sa.get('hookId',sa.get('hook_id')),'checks':checks})
+          open('/tmp/item7-r2-module9-repair-evidence.json','w').write(json.dumps(ev,indent=2,sort_keys=True))
+          print(json.dumps({'checks':checks,'mapping_after_live':after},indent=2,sort_keys=True))
+          if not all(checks.values()): sys.exit(2)
+          PY
+          then
+            echo 'Postflight invariant failed; rolling back exact prior blueprint'
+            rcode=$(curl -sS -o /tmp/rollback-response.json -w '%{http_code}' -X PATCH "$BASE/scenarios/$SID?confirmed=true" -H "Authorization: Token $TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' --data-binary @/tmp/rollback-body.json)
+            echo "rollback_http=$rcode"
+            exit 1
+          fi
+      - name: Destroy transient credentials and mutation payloads
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/make-token.txt /tmp/make-base.txt /tmp/settings.json /tmp/q.txt /tmp/patch-body.json /tmp/rollback-body.json /tmp/blueprint-before-wrapper.json /tmp/blueprint-after-wrapper.json /tmp/patch-response.json /tmp/rollback-response.json; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
+      - name: Upload repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item7-r2-module9-review-html-repair-${{ github.run_id }}
+          path: |
+            /tmp/item7-r2-module9-repair-evidence.json
+            /tmp/scenario-before.json
+            /tmp/scenario-after.json
+          if-no-files-found: ignore
+          retention-days: 30
