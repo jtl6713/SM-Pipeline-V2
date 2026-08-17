@@ -1,0 +1,32 @@
+name: Apply Item6 Transaction Addressing
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/apply-item6-transaction-addressing.txt']
+
+permissions: {contents: read}
+
+concurrency:
+  group: item6-transaction-addressing
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Patch exact publisher transaction addressing with rollback
+        shell: bash
+        run: bash repair/scripts/apply-item6-transaction-addressing.sh
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item6-transaction-addressing-${{ github.run_id }}
+          path: /tmp/item6-transaction-addressing-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
