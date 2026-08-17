@@ -1,0 +1,5 @@
+Item 9 native cover attach trigger: 2026-08-17
+
+Patch AP1-IG, YT0, YTS2, and FBS4 so generated Thumbnail_URL is sent to
+native platform cover/thumbnail APIs. Preserve hooks, scheduling, and
+activation. Do not publish or start orchestrators.
