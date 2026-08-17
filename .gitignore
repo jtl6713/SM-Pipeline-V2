@@ -2,6 +2,10 @@
 node_modules/
 .pnpm-store/
 .yarn/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
 
 # Environment / secrets
 .env
@@ -19,6 +23,7 @@ logs/
 tmp/
 temp/
 .cache/
+work/
 
 # Builds / generated
 build/
@@ -30,6 +35,7 @@ coverage/
 # Remotion / media outputs
 out/
 render-assets/
+render-props/
 public/render-assets/
 public/renders/
 renders/
@@ -39,6 +45,9 @@ renders/
 *.mkv
 *.wav
 *.mp3
+
+# Frame Extractor working output
+public/frames/
 
 # Image/media working files
 *.heic
@@ -61,3 +70,5 @@ Thumbs.db
 *.rar
 *.bak
 *.backup
+*backup-*
+*_backups/
