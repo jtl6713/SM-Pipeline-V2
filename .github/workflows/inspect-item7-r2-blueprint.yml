@@ -83,4 +83,4 @@ jobs:
         run: |
           curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null 2>&1 || true
 
-# Trigger touch after workflow creation; read-only inspection only.
+# Trigger touch after L11 exhaustion; read-only inspection only.
