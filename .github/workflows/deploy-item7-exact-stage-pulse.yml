@@ -1,4 +1,4 @@
-name: Item7 R3 L13 Exact Regression
+name: Item7 R3 L14 Exact Regression
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
       CONTENT_RECORD_ID: recA0WClSp6SR6vvl
       OUTPUT_RECORD_ID: recByMge4QPlCOsD2
       SCENARIO_ID: '5557966'
-      LEASE_ID: ITEM7-R3-RUN32060507474-L13
+      LEASE_ID: ITEM7-R3-RUN32060507474-L14
     steps:
       - uses: actions/checkout@v4
       - name: Create temporary authenticated service bridge
@@ -35,7 +35,7 @@ jobs:
           mkdir -p evidence
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r3-l13"
+          BRIDGE="chicagoshining-item7-r3-l14"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
           export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio-api.internal/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":r.headers.get("Content-Type")||"application/json","Cache-Control":"no-store"}});}};
@@ -71,8 +71,8 @@ jobs:
           echo "preflight_http=$code"
           cat evidence/preflight.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
           test "$code" = 200
-          jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.module=="airtable:ActionSearchRecords" and ((.inspected.modules[0].module.mapper.maxRecords=="10" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()") and contains("{Asset_Selection_Status}=\"Selected\"") and contains("{Render_Status}=BLANK()"))) or (.inspected.modules[0].module.mapper.maxRecords=="1" and (.inspected.modules[0].module.mapper.formula|startswith("AND(RECORD_ID()=\""+$out+"\",") and contains("{Test_Run_ID}=\""+$tr+"\"") and contains("{Do_Not_Publish}=1"))))' evidence/preflight.json >/dev/null
-      - name: Acquire L13 and pulse R3 once
+          jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.module=="airtable:ActionSearchRecords" and ((.inspected.modules[0].module.mapper.maxRecords=="10" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()") and contains("{Asset_Selection_Status}=\"Selected\"") and contains("{Render_Status}=BLANK()"))) or (.inspected.modules[0].module.mapper.maxRecords=="1" and (.inspected.modules[0].module.mapper.formula|startswith("AND(RECORD_ID()=\""+$out+"\",") and contains("{Test_Run_ID}=\""+$tr+"\""))))' evidence/preflight.json >/dev/null
+      - name: Acquire L14 and pulse R3 once
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -83,12 +83,28 @@ jobs:
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           EXPIRES=$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')
           acquire=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg exp "$EXPIRES" --arg out "$OUTPUT_RECORD_ID" --arg ci "$CONTENT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"acquire",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,max_runs:1,max_operations:30,expires_at:$exp,allowed_platform_output_record_ids:[$out],allowed_content_item_record_ids:[$ci],deny_fixture_record_ids:[],allow_public_publish:false}')
-          acode=$(curl -sS --max-time 90 -D evidence/acquire.headers -o evidence/acquire.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" || true)
+          acode=000
+          for i in 1 2 3 4 5; do
+            acode=$(curl -sS --max-time 90 -D evidence/acquire.headers -o evidence/acquire.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" || true)
+            if [[ "$acode" == 200 ]]; then break; fi
+            if [[ "$acode" != 404 ]] || ! grep -q '1042' evidence/acquire.json 2>/dev/null; then break; fi
+            sleep 2
+          done
           echo "acquire_http=$acode"
           test "$acode" = 200
           jq -e --arg lease "$LEASE_ID" --arg tr "$TEST_RUN_ID" '.ok==true and .lease.lease_id==$lease and .lease.test_run_id==$tr and .lease.scenario_id==5557966' evidence/acquire.json >/dev/null
+          # Give the temporary bridge route a brief propagation margin after the successful acquire.
+          sleep 3
           pulse=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"pulse_item7_exact_stage",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out,max_cycles:1}')
-          pcode=$(curl -sS --max-time 210 -D evidence/pulse.headers -o evidence/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse" || true)
+          pcode=000
+          for i in 1 2 3 4 5; do
+            pcode=$(curl -sS --max-time 210 -D evidence/pulse.headers -o evidence/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse" || true)
+            if [[ "$pcode" == 200 ]]; then break; fi
+            # Retry only an unmistakable Cloudflare bridge-propagation 1042/404 response.
+            # Never replay an ambiguous application/Make error.
+            if [[ "$pcode" != 404 ]] || ! grep -q '1042' evidence/pulse.json 2>/dev/null; then break; fi
+            sleep 2
+          done
           echo "pulse_http=$pcode"
           cat evidence/pulse.json | jq . || cat evidence/pulse.json
           test "$pcode" = 200
@@ -104,16 +120,22 @@ jobs:
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
-          code=$(curl -sS --max-time 60 -o evidence/postflight.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
+          code=000
+          for i in 1 2 3 4 5; do
+            code=$(curl -sS --max-time 60 -o evidence/postflight.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
+            if [[ "$code" == 200 ]]; then break; fi
+            if [[ "$code" != 404 ]] || ! grep -q '1042' evidence/postflight.json 2>/dev/null; then break; fi
+            sleep 2
+          done
           echo "postflight_http=$code"
           cat evidence/postflight.json | jq '{ok,scenario_active:.inspected.scenario_active,formula:.inspected.modules[0].module.mapper.formula,maxRecords:.inspected.modules[0].module.mapper.maxRecords}'
           test "$code" = 200
           jq -e '.ok==true and .inspected.scenario_active==false and .inspected.modules[0].module.mapper.maxRecords=="10" and (.inspected.modules[0].module.mapper.formula|contains("{Test_Run_ID}=BLANK()") and contains("{Asset_Selection_Status}=\"Selected\"") and contains("{Render_Status}=BLANK()"))' evidence/postflight.json >/dev/null
-      - name: Save L13 evidence
+      - name: Save L14 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r3-l13-${{ github.run_id }}
+          name: item7-r3-l14-${{ github.run_id }}
           path: evidence/
           if-no-files-found: ignore
           retention-days: 30
