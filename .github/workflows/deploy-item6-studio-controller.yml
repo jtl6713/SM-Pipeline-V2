@@ -1,0 +1,40 @@
+name: Deploy Item6 Studio Controller
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/item6-studio-controller.txt']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-item6-studio-controller
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Exact-source binding-preserving deploy with rollback
+        shell: bash
+        run: bash repair/scripts/deploy-item6-studio-controller.sh
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item6-studio-controller-${{ github.run_id }}
+          path: |
+            /tmp/item6-bindings-before.json
+            /tmp/item6-bindings-after.json
+            /tmp/item6-session.json
+            /tmp/item6-source-sha256.txt
+            /tmp/item6-active-before.txt
+            /tmp/item6-active-after.txt
+          if-no-files-found: ignore
+          retention-days: 30
