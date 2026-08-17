@@ -133,7 +133,10 @@ jobs:
               raise SystemExit(f"Live variant binding contract drifted: {by_name}")
           Path("/tmp/bindings-before-sanitized.json").write_text(json.dumps({
               "version_id": result.get("id"),
-              "bindings": sorted({"name": key, "type": value} for key, value in by_name.items()),
+              "bindings": sorted(
+                  ({"name": key, "type": value} for key, value in by_name.items()),
+                  key=lambda row: row["name"],
+              ),
           }, indent=2, sort_keys=True))
           PY
           BASE=$(cat /tmp/variant-base-url.txt)
@@ -201,7 +204,10 @@ jobs:
               raise SystemExit(f"Candidate binding contract changed: before={old}, after={new}")
           Path("/tmp/bindings-candidate-sanitized.json").write_text(json.dumps({
               "version_id": after.get("id"),
-              "bindings": sorted({"name": key, "type": value} for key, value in new.items()),
+              "bindings": sorted(
+                  ({"name": key, "type": value} for key, value in new.items()),
+                  key=lambda row: row["name"],
+              ),
           }, indent=2, sort_keys=True))
           PY
           cd /tmp/variant-v2
