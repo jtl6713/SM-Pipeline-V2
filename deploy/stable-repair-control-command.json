@@ -1,12 +1,12 @@
 {
-  "action": "begin_replace_transaction",
+  "action": "rollback_replace_transaction",
   "lease_id": "ITEM6_REPLACE_LEASE_20260817_0836",
   "scenario_id": 5813561,
   "test_run_id": "ITEM6_REPLACE_20260817T0836CT",
   "platform_output_record_id": "recfiTvMN0nsw0MNF",
   "replace_transaction_id": "ITEM6_TXN_20260817_0836",
   "replace_fingerprint": "sha256:item6-fixture-v1",
-  "allow_public_publish": false,
-  "expected_exception_substring": "requires a lease with allow_public_publish=true",
-  "note": "Item 6 safety proof: prepared replacement cannot reset/publish under nonpublic lease"
+  "rollback_reason": "Item 6 isolated controller proof complete; restore synthetic last-good state",
+  "expected_upstream_status": 200,
+  "note": "Item 6 rollback proof from Prepared state; no external publication exists"
 }
