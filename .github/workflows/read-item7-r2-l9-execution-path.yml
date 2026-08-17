@@ -84,16 +84,23 @@ jobs:
                       z=find(r.get('flow'),mid)
                       if z: return z
               return None
+          def as_obj(v):
+              if isinstance(v,dict): return v
+              if isinstance(v,str):
+                  try: return json.loads(v)
+                  except Exception: return None
+              return None
           out=[]
           for p in glob.glob('/tmp/bps/*.json'):
               bid=os.path.basename(p)[:-5]
               try: d=json.load(open(p))
               except Exception: continue
-              bp=(d.get('response',{}).get('blueprint') if isinstance(d.get('response'),dict) else None) or d.get('blueprint')
+              candidate=(d.get('response',{}).get('blueprint') if isinstance(d.get('response'),dict) else None) or d.get('blueprint') or d.get('response')
+              bp=as_obj(candidate)
               if not isinstance(bp,dict): continue
               m=find(bp.get('flow'),9)
               mapper=(m or {}).get('mapper') or {}
-              out.append({'blueprint_id':bid,'meta':meta.get(bid,{}),'module9_name':((m or {}).get('metadata',{}).get('designer',{}).get('name')),'review_html_mapping':mapper.get(fid),'module9_field_count':len(mapper) if isinstance(mapper,dict) else None})
+              out.append({'blueprint_id':bid,'meta':meta.get(bid,{}),'module9_name':((m or {}).get('metadata',{}).get('designer',{}).get('name')),'review_html_mapping':(mapper.get('record') or {}).get(fid) if isinstance(mapper.get('record'),dict) else mapper.get(fid),'module9_field_count':len((mapper.get('record') or {})) if isinstance(mapper.get('record'),dict) else len(mapper) if isinstance(mapper,dict) else None})
           def sortkey(x):
               try:return int(x['blueprint_id'])
               except:return -1
