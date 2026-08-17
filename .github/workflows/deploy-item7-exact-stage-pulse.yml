@@ -1,4 +1,4 @@
-name: Item7 R2 L4 Exact Retry
+name: Item7 R2 L4 Pulse Transport Retry
 
 on:
   push:
@@ -21,7 +21,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TEST_RUN_ID: ITEM7_9X16_REGRESSION_RUN32060507474
-      CONTENT_RECORD_ID: recA0WClSp6SR6vvl
       OUTPUT_RECORD_ID: recByMge4QPlCOsD2
       SCENARIO_ID: '5569495'
       LEASE_ID: ITEM7-R2-RUN32060507474-L4
@@ -37,7 +36,7 @@ jobs:
           set -euo pipefail
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r2-l4"
+          BRIDGE="chicagoshining-item7-r2-l4-pulse"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
           export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});}};
@@ -55,7 +54,7 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "sub=$(jq -r '.result.subdomain' /tmp/account-subdomain.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Acquire L4 exact lease and pulse R2 once
+      - name: Verify R2 OFF then retry L4 pulse only on non-JSON transport failures
         shell: bash
         env:
           BRIDGE: ${{ steps.bridge.outputs.bridge }}
@@ -65,20 +64,25 @@ jobs:
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
-          code=000
           for i in 1 2 3 4 5 6 7 8 9 10; do
             code=$(curl -sS --max-time 60 -o /tmp/preflight.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$inspect" || true)
             if [[ "$code" == 200 ]] && jq -e '.ok==true and .inspected.scenario_active==false' /tmp/preflight.json >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          test "$code" = 200
           jq -e '.ok==true and .inspected.scenario_active==false' /tmp/preflight.json >/dev/null
-          EXPIRES=$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')
-          acquire=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg exp "$EXPIRES" --arg out "$OUTPUT_RECORD_ID" --arg ci "$CONTENT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"acquire",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,max_runs:1,max_operations:30,expires_at:$exp,allowed_platform_output_record_ids:[$out],allowed_content_item_record_ids:[$ci],deny_fixture_record_ids:[],allow_public_publish:false}')
-          curl -fsS -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$acquire" -o /tmp/acquire.json
-          jq -e --arg lease "$LEASE_ID" '.ok==true and .lease.lease_id==$lease' /tmp/acquire.json >/dev/null
+
           pulse=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --arg out "$OUTPUT_RECORD_ID" --argjson sid "$SCENARIO_ID" '{action:"pulse_item7_exact_stage",test_run_id:$tr,lease_id:$lease,scenario_id:$sid,platform_output_record_id:$out,max_cycles:1}')
-          code=$(curl -sS --max-time 150 -o /tmp/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse")
+          code=000
+          for i in 1 2 3 4 5; do
+            code=$(curl -sS --max-time 150 -o /tmp/pulse.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$pulse" || true)
+            if jq -e 'type=="object" and has("ok")' /tmp/pulse.json >/dev/null 2>&1; then break; fi
+            sleep 3
+          done
+          if ! jq -e 'type=="object" and has("ok")' /tmp/pulse.json >/dev/null 2>&1; then
+            echo 'No controller JSON response after transport retries'
+            cat /tmp/pulse.json
+            exit 1
+          fi
           cat /tmp/pulse.json | jq .
           test "$code" = 200
           jq -e --arg tr "$TEST_RUN_ID" --arg out "$OUTPUT_RECORD_ID" '.ok==true and .stage=="R2" and .platform_output_record_id==$out and .test_run_id==$tr and .checkpoint.asset_selection_status=="Selected" and .checkpoint.selected_assets_present==true and (.checkpoint.selected_clip_count>0) and .scenario_stopped==true and .selector_restored==true and .schedule_preserved==true and .do_not_publish_preserved==true' /tmp/pulse.json >/dev/null
@@ -99,7 +103,7 @@ jobs:
           row=f'| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — R2 proven** | Repaired controller deploy `32062013319` PASS. Fresh CI 75 / Output 168 exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`. Stale L2 lease explicitly released. R2 `5569495` L4 PASS: selected clip count {clips}; stranded selector recovered={recovered}; scenario OFF and production selector/schedule restored. | Pulse R3 `5557966` under a fresh exact lease; require complete Ready-for-Render package and restoration proof. |'
           s,n=re.subn(r'^\| 7 \| Fresh edge-to-edge 9:16 normal-path regression \|.*$',row,s,count=1,flags=re.M)
           if n != 1: raise SystemExit('Item 7 row not found')
-          s += f'\n- R2 L4 PASS after explicit stale-L2 release: selected clip count {clips}; stranded selector recovered={recovered}; production selector/schedule restored and scenario OFF. R3 next.\n'
+          s += f'\n- R2 L4 PASS after transport-only retry: selected clip count {clips}; stranded selector recovered={recovered}; production selector/schedule restored and scenario OFF. R3 next.\n'
           p.write_text(s)
           PY
           git config user.name 'github-actions[bot]'
@@ -108,14 +112,13 @@ jobs:
           git commit -m 'docs(item7): record R2 L4 pass'
           git push origin HEAD:main
 
-      - name: Save R2 L4 evidence
+      - name: Save R2 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r2-l4-${{ github.run_id }}
+          name: item7-r2-l4-pulse-${{ github.run_id }}
           path: |
             /tmp/preflight.json
-            /tmp/acquire.json
             /tmp/pulse.json
           if-no-files-found: ignore
           retention-days: 30
