@@ -1,0 +1,99 @@
+name: Repair Item6 Acquire Sweep Scope
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repair-item6-acquire-sweep-scope.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: item6-acquire-sweep-scope-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Patch acquisition to scenario-scoped expiry sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/studio-api/worker.js')
+          s=p.read_text()
+          old_sig='async function repairSweepExpiredLeases(env) {'
+          new_sig='async function repairSweepExpiredLeases(env, scenarioId = null) {'
+          if s.count(old_sig) != 1: raise SystemExit(f'Expected one old sweep signature, found {s.count(old_sig)}')
+          s=s.replace(old_sig,new_sig,1)
+          ss=s.index(new_sig); se=s.index('\nasync function repairAcquireLease',ss)
+          sweep=s[ss:se]
+          old_records='  const records = await repairLeaseRecords(env);\n'
+          if sweep.count(old_records) != 1: raise SystemExit('Expected one global lease read inside sweep')
+          sweep=sweep.replace(old_records,'  const records = await repairLeaseRecords(env, scenarioId);\n',1)
+          s=s[:ss]+sweep+s[se:]
+          a=s.index('async function repairAcquireLease(env, input, authorization) {'); ae=s.index('\nasync function repairFindLease',a)
+          acquire=s[a:ae]
+          old_call='  await repairSweepExpiredLeases(env);\n'
+          if acquire.count(old_call) != 1: raise SystemExit(f'Expected one acquire global sweep call, found {acquire.count(old_call)}')
+          acquire=acquire.replace(old_call,'  await repairSweepExpiredLeases(env, scenarioId);\n',1)
+          s=s[:a]+acquire+s[ae:]
+          f=s.index('async function repairFindLease(env, input) {'); fe=s.index('\nasync function repairReserveBudget',f)
+          follow=s[f:fe]
+          if 'repairSweepExpiredLeases' in follow: raise SystemExit('Exact follow-up lookup still sweeps')
+          if 'await repairSweepExpiredLeases(env, scenarioId);' not in acquire: raise SystemExit('Acquire is not scenario scoped')
+          if 'return respond(request, env, { ok: true, action, swept: await repairSweepExpiredLeases(env) });' not in s: raise SystemExit('Explicit global sweep was altered')
+          p.write_text(s)
+          print('acquire_scenario_scoped_sweep=PASS')
+          print('exact_followup_no_sweep=PASS')
+          print('explicit_global_sweep=PASS')
+          PY
+          node --check apps/studio-api/worker.js
+          git diff --check
+      - name: Commit authoritative source
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js
+          git commit -m 'fix(item6): scope acquire lease sweep to scenario'
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git push origin HEAD:main
+      - name: Deploy exact source with rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! bash repair/scripts/deploy-item6-studio-controller-v2.sh; then
+            git revert --no-edit "${{ steps.commit.outputs.sha }}"
+            git push origin HEAD:main
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "${{ steps.commit.outputs.sha }}"
+      - name: Save deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item6-acquire-sweep-scope-${{ github.run_id }}
+          path: |
+            /tmp/item6v2-bindings-before.json
+            /tmp/item6v2-bindings-after.json
+            /tmp/item6v2-session.json
+            /tmp/item6v2-source-sha256.txt
+            /tmp/item6v2-active-before.txt
+            /tmp/item6v2-active-after.txt
+            /tmp/item6v2-dry-run.log
+            /tmp/item6v2-deploy.log
+          if-no-files-found: ignore
+          retention-days: 30
