@@ -1,2 +1,2 @@
 Read-only full team Make scenario inventory for remaining Item 2 stage/exact-addressing audit. Include all current scenario IDs/names/states/schedules. No Make mutation, activation/run, Airtable write, render, email, draft, or publishing.
-Triggered 2026-08-16 after Item 1 completion, full-list pass.
+Recheck R2/R2B/R3 identifiers after YouTube recovery — 2026-08-16.
