@@ -1,0 +1,1 @@
+Close Item 3 after successful authoritative native-overlap runtime acceptance. Uploaded evidence ZIP SHA-256 c485fed3eae8d9e13d19b8f5e7e45df7a594378aa12a36ad66426d7999124ad8. This trigger is ledger-only; no Make, Airtable, Cloudflare, renderer, email, upload, draft, or publishing mutation.
