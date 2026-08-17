@@ -1,0 +1,82 @@
+name: Update Ledger Items 2 and 5 Closure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/update-ledger-items2-5-closure.txt
+
+permissions:
+  contents: write
+
+jobs:
+  update-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Close Items 2 and 5 in authoritative ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+          s = p.read_text()
+          lines = s.splitlines()
+
+          item2 = "| 2 | Record-resolution discipline | **Complete — structural exact-addressing and production isolation verified** | Exact immutable record targeting is proven through the controlled orchestrator and publishing mutation paths: I4, P1→P2→P3, C7→C8→C9, P4/P5, R2/R3/R4/R5/RR paths, AP0/AP1/AP1C, TTD/AP-CAR and publisher/post-publish stages. Production batch owners exclude tagged tests where they touch production outputs; C3/C3B/PUB3/SMV1 final Test Mode seams are also exact-identity guarded. | Closed for structural exact-addressing. Reopen only on new cross-record evidence; normal-path runtime acceptance remains Item 7 and platform-specific acceptance remains later items. |"
+          item5 = "| 5 | Genuine hard test mode | **Complete — final SMV1 target-only isolation matrix passed** | Durable `Test_Run_ID` identity propagates through Studio/controller, Content Items, Production Requests, Platform Outputs, carousel review, P4/P5 asset-request, C3/C3B, PUB3 and SMV1 queue/work-item paths. Production selectors exclude tagged tests and test side effects require exact matching identity plus explicit acknowledgement where applicable. Final SMV1 proof run `31993357970` advanced only the matching test row while a different test row and blank-production row remained unchanged; the canonical production selector was restored, SMV1 returned OFF, and fixtures were deterministically cleaned up. | Keep exact `record_id` + `Test_Run_ID` isolation as a standing regression invariant; reopen only on evidence that a test-tagged run can mutate unrelated or blank-production state. |"
+
+          found2 = found5 = False
+          for i, line in enumerate(lines):
+              if line.startswith('| 2 |'):
+                  lines[i] = item2
+                  found2 = True
+              elif line.startswith('| 5 |'):
+                  lines[i] = item5
+                  found5 = True
+          if not (found2 and found5):
+              raise SystemExit('authoritative ledger row precondition failed')
+
+          out = '\n'.join(lines)
+          marker = '## 2026-08-17 Items 2 and 5 closure delta'
+          if marker not in out:
+              delta_lines = [
+                  '',
+                  '',
+                  marker,
+                  '',
+                  '- **Item 2 closure:** the prior structural completion inventory found no additional active cross-record orchestrator blocker in Item 2 scope after exact-addressing repairs to I4, P1→P2→P3, C7/C8, P4/P5, render/review handoffs, AP0/AP1/AP1C, TTD/AP-CAR, and publishing chains. The remaining C3/C3B/PUB3/SMV1 surfaces were subsequently handled as the final Test Mode seam tranche, so they no longer remain an Item 2 gap.',
+                  '- **C3 `5587853`, Module 4 — Send One Review Email Per Content Item:** production review email now requires blank parent `Test_Run_ID`; corrected repair run `31990171575` succeeded. The earlier run `31990016152` stopped before any Make write.',
+                  '- **C3B `5592384`, hook `2545695`:** exact slide pre-read identity guards precede approve/regenerate/delete/manual mutation, with parent/linked-slide identity checks on global updates. Repair run `31990328432` succeeded after topology audit `31990224163`.',
+                  '- **PUB3 `5580354`, Module 5 — Mark Published in Airtable:** production confirmation requires blank test context; test-tagged confirmation requires exact incoming/output `Test_Run_ID` equality plus explicit `allow_test_publish=true`, retaining existing publication guards. Repair run `31990171575` succeeded.',
+                  '- **SMV1 queue authority:** Studio Media Transfer Queue `tblBZLXPd1p2NRWRK` has durable `Test_Run_ID` field `fldrUASIRo91tMnmZ`; Studio derives owning Production Request identity for master and variant queue writes. Source patch `31990631302` and guarded rollout/promotion `31990685644` succeeded.',
+                  '- **SMV1 `5894885`, Module 1:** ordinary scheduled production selection requires `{Test_Run_ID}=BLANK()` around existing eligibility. Repair run `31990739903` succeeded with the scenario kept OFF/no-hook.',
+                  '- **Controlled SMV1 test pulse:** Studio refuses to seize an already-active SMV1, requires every queue row for the request to match the same test identity, installs an exact request + `Test_Run_ID` selector for a single max-one pulse, then deactivates SMV1 and restores the production selector in cleanup paths. Scoped source patch `31991001553` and guarded rollout/promotion `31991048868` succeeded; the earlier `31990922155` attempt failed safely before commit on a non-unique source anchor.',
+                  '- **Final behavioral acceptance:** `Prove SMV1 TestMode Isolation` run `31993357970` succeeded. The exact target test row advanced `Pending` → `Ready for Cleanup` with `S3a Ready for Audit`; the other-test row stayed `Pending`; the blank-production row stayed `Pending`; the canonical selector `AND({Request_Type}=\'Master Original\',{Status}=\'Pending\',{Test_Run_ID}=BLANK())` was restored; SMV1 was OFF afterward; fixtures were deleted deterministically.',
+                  '- No broad E2E, renderer, review-email delivery, platform draft/upload, or public publishing operation was used to close Items 2 or 5.',
+                  ''
+              ]
+              out += '\n'.join(delta_lines)
+
+          p.write_text(out.rstrip() + '\n')
+          PY
+
+          git diff --check
+          grep -q 'Item 2 closure:' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -q '31993357970' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -q '| 2 | Record-resolution discipline | **Complete' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -q '| 5 | Genuine hard test mode | **Complete' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+
+          if git diff --quiet -- repair/SM_PIPELINE_21_ITEM_LEDGER.md; then
+            echo 'Ledger already current.'
+            exit 0
+          fi
+
+          git config user.name 'SM Pipeline Repair Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'ledger: close Items 2 and 5 after final isolation proof'
+          git push
