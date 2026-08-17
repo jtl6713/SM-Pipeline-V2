@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - deploy/update-ledger-items2-5-closure.txt
+      - 'deploy/update-ledger-items2-5-closure*.txt'
 
 permissions:
   contents: write
