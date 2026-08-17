@@ -1,11 +1,9 @@
 {
-  "action": "prepare_replace_transaction",
+  "action": "assert_output_allowed",
   "test_run_id": "ITEM6_CLEANUP_20260817_1217A",
   "lease_id": "ITEM6_CLEANUP_LEASE_20260817_1217A",
   "scenario_id": 5813561,
   "platform_output_record_id": "recdCzUqxwQMYcK6g",
-  "replace_transaction_id": "ITEM6_CLEANUP_TXN_20260817_1217A",
-  "replace_fingerprint": "sha256:item6-cleanup-proof-20260817-1217A",
   "expected_http_status": 200,
-  "proof_nonce": "item6-cleanup-003"
+  "proof_nonce": "item6-cleanup-diag-004"
 }
