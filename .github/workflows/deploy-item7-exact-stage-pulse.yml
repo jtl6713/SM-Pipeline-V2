@@ -1,4 +1,4 @@
-name: Item7 R2 L5 Safety Release
+name: Item7 R2 L5 Safety Release Internal Binding
 
 on:
   push:
@@ -32,10 +32,10 @@ jobs:
           set -euo pipefail
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          BRIDGE="chicagoshining-item7-r2-l5-release"
+          BRIDGE="chicagoshining-item7-r2-l5-release2"
           TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
           cat >/tmp/bridge.js <<EOF
-          export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});}};
+          export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!=="/$TOKEN")return new Response("Not found",{status:404});const body=await request.text();const r=await env.STUDIO_API.fetch(new Request("https://service.binding.internal/api/admin/repair/control",{method:"POST",headers:{"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Origin":"https://studio.chicagoshining.com","Content-Type":"application/json","Accept":"application/json"},body}));return new Response(await r.text(),{status:r.status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});}};
           EOF
           cat >/tmp/metadata.json <<EOF
           {"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}
@@ -59,8 +59,9 @@ jobs:
           set -euo pipefail
           URL="https://$BRIDGE.$SUB.workers.dev/$TOKEN"
           release=$(jq -cn --arg tr "$TEST_RUN_ID" --arg lease "$LEASE_ID" --argjson sid "$SCENARIO_ID" '{action:"release",test_run_id:$tr,lease_id:$lease,scenario_id:$sid}')
-          code=$(curl -sS --max-time 60 -o /tmp/release.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$release")
-          cat /tmp/release.json | jq .
+          code=$(curl -sS --max-time 60 -o /tmp/release.json -w '%{http_code}' -X POST "$URL" -H 'Content-Type: application/json' --data-binary "$release" || true)
+          cat /tmp/release.json || true
+          echo "http=$code"
           test "$code" = 200
           jq -e '.ok==true and .scenario.isActive==false' /tmp/release.json >/dev/null
           inspect=$(jq -cn --argjson sid "$SCENARIO_ID" '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:$sid,module_ids:[1]}')
@@ -70,7 +71,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item7-r2-l5-release-${{ github.run_id }}
+          name: item7-r2-l5-release2-${{ github.run_id }}
           path: |
             /tmp/release.json
             /tmp/postrelease.json
