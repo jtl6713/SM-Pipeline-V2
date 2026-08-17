@@ -1,1 +1,1 @@
-Read-only publishing contract audit including YTP1/YTS1 for Output 151 OAuth recovery. No Make state changes or publishing. 2026-08-16.
+Read-only publishing contract audit for Item 6 safe republish/replace transaction inventory. No Make state changes, Airtable mutations, or publishing. Trigger 2026-08-17 07:56 CT.
