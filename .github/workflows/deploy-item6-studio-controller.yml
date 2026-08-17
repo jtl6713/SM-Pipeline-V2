@@ -36,5 +36,7 @@ jobs:
             /tmp/item6-source-sha256.txt
             /tmp/item6-active-before.txt
             /tmp/item6-active-after.txt
+            /tmp/item6-wrangler-dry-run.log
+            /tmp/item6-wrangler-deploy.log
           if-no-files-found: ignore
           retention-days: 30
