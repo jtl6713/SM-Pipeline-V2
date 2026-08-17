@@ -1,0 +1,149 @@
+{
+  "repair_item": 6,
+  "checkpoint": "isolated-replacement-controller-proof",
+  "timestamp_ct": "2026-08-17T08:32:00-05:00",
+  "status": "PASS_CONTROLLER_LAYER_ONLY",
+  "scope": "Exact-output, nonpublic proof of prepare/idempotency/deny/begin-gate/rollback for the Item 6 replacement transaction controller. No Make publisher run and no public platform operation occurred.",
+  "production_controller": {
+    "source_commit": "807bb73b1b1de1ed608239fe5ab9b5a989b95f37",
+    "source_sha256": "e403436353d9696648a0a0a4f1beed8e71ae7d2912224e0c53a9e2255d5d26a6",
+    "cloudflare_deploy_run_id": 32035052723,
+    "cloudflare_deploy_artifact_id": 9290338615,
+    "cloudflare_deploy_artifact_sha256": "d0575e2f61fd175c602fdbbd3134e192872818d18f8d3f1f879febc47ef9171c",
+    "worker_version_before": "44f3b871-821a-4234-a0e2-ac6a6c38f82c",
+    "worker_version_after": "f18b18c0-c43b-4ee3-acbe-93690248aae0",
+    "gates": [
+      "predeploy exact binding contract PASS",
+      "clean no-bundle deploy PASS",
+      "postdeploy binding identity PASS",
+      "active source byte match PASS",
+      "authenticated Studio session PASS"
+    ]
+  },
+  "fixture": {
+    "test_run_id": "ITEM6_REPLACE_20260817T0836CT",
+    "lease_id": "ITEM6_REPLACE_LEASE_20260817_0836",
+    "scenario_scope_id": 5813561,
+    "allow_public_publish": false,
+    "explicit_publish_platform": null,
+    "primary": {
+      "record_id": "recfiTvMN0nsw0MNF",
+      "output_id": 165,
+      "platform": "YouTube",
+      "do_not_publish": true,
+      "auto_publish_enabled": false,
+      "synthetic_last_good_id": "ITEM6_OLD_PRIMARY_20260817_0836",
+      "synthetic_last_good_url": "https://example.com/item6/old-primary-20260817-0836"
+    },
+    "deny": {
+      "record_id": "rec3djtxIMcDy89Az",
+      "output_id": 166,
+      "platform": "YouTube",
+      "do_not_publish": true,
+      "auto_publish_enabled": false,
+      "synthetic_last_good_id": "ITEM6_OLD_DENY_20260817_0836",
+      "synthetic_last_good_url": "https://example.com/item6/old-deny-20260817-0836"
+    }
+  },
+  "lease_acquire": {
+    "run_id": 32035297835,
+    "artifact_id": 9290420318,
+    "artifact_sha256": "b8842050bda5a9cbfd170bd64f445005abaa27eee6c1e16df2224ddd91a73b31",
+    "result": "PASS",
+    "contract": {
+      "allowed_platform_output_record_ids": ["recfiTvMN0nsw0MNF"],
+      "deny_fixture_record_ids": ["rec3djtxIMcDy89Az"],
+      "max_runs": 1,
+      "max_operations": 8,
+      "allow_public_publish": false
+    }
+  },
+  "proofs": [
+    {
+      "name": "prepare snapshots last-good without reset",
+      "run_id": 32035347480,
+      "artifact_id": 9290436981,
+      "artifact_sha256": "7650c10796be41fd27d3e0393f9f839a67d62590d8e300b15fb9f6047726e60b",
+      "result": "PASS",
+      "observed": {
+        "Replace_State": "Prepared",
+        "Replace_Transaction_ID": "ITEM6_TXN_20260817_0836",
+        "Replace_Fingerprint": "sha256:item6-fixture-v1",
+        "Publish_Status": "Published",
+        "Platform_Post_ID": "ITEM6_OLD_PRIMARY_20260817_0836",
+        "Platform_Post_URL": "https://example.com/item6/old-primary-20260817-0836",
+        "Do_Not_Publish": true,
+        "last_good_snapshot_present": true
+      }
+    },
+    {
+      "name": "identical prepare replay is idempotent",
+      "run_id": 32035396902,
+      "artifact_id": 9290458259,
+      "artifact_sha256": "acab09b974808588f7d6c524ad74d4ce6ed72be8f255f6f36051e7ee09d3d16b",
+      "result": "PASS",
+      "observed_controller_result": {
+        "ok": true,
+        "action": "prepare_replace_transaction",
+        "idempotent": true,
+        "output_id": 165,
+        "state": "Prepared"
+      }
+    },
+    {
+      "name": "deny fixture cannot be mutated",
+      "diagnostic_wrapper_run_id_excluded": 32035446137,
+      "run_id": 32035498475,
+      "artifact_id": 9290494195,
+      "artifact_sha256": "2d8ff801946eff0f9464e932b6b0d0d22a61b44a9997c532c12c0e5b37837826",
+      "result": "PASS",
+      "expected_exception": "outside this test_run_id allowlist",
+      "observed_record": "Output 166 retained its original publication fields and had no Replace_* transaction state"
+    },
+    {
+      "name": "nonpublic lease cannot begin replacement publishing",
+      "run_id": 32035539539,
+      "artifact_id": 9290510057,
+      "artifact_sha256": "9fbbef420fbf89dcaa1006b7f82b53a4ea1c99eed99b8fbe6fc84274e8fd8422",
+      "result": "PASS",
+      "expected_exception": "requires a lease with allow_public_publish=true",
+      "observed_after_denial": {
+        "Replace_State": "Prepared",
+        "Publish_Status": "Published",
+        "Platform_Post_ID": "ITEM6_OLD_PRIMARY_20260817_0836",
+        "Platform_Post_URL": "https://example.com/item6/old-primary-20260817-0836",
+        "Do_Not_Publish": true
+      }
+    },
+    {
+      "name": "prepared transaction rolls back deterministically",
+      "run_id": 32035589510,
+      "artifact_id": 9290532003,
+      "artifact_sha256": "e23bf30e5cd5283be2ec5822a7e5d5a828007a45865df9d231994946d41a990b",
+      "result": "PASS",
+      "observed_after_rollback": {
+        "Replace_State": "Rolled Back",
+        "Publish_Status": "Published",
+        "Platform_Post_ID": "ITEM6_OLD_PRIMARY_20260817_0836",
+        "Platform_Post_URL": "https://example.com/item6/old-primary-20260817-0836",
+        "Do_Not_Publish": true
+      }
+    }
+  ],
+  "cross_record_result": {
+    "primary_only_was_transaction_mutated": true,
+    "deny_fixture_unchanged": true,
+    "make_scenario_runs": 0,
+    "scheduled_publisher_orchestrators_activated": 0,
+    "public_platform_operations": 0
+  },
+  "closure_status": "NOT CLOSED",
+  "remaining_item6_work": [
+    "Implement transaction-aware handoff into actual stage workers with exact transaction/revision identity.",
+    "Harden ambiguous create/publish paths, especially Instagram Reel/Story and TikTok, against blind duplicate retry.",
+    "Implement deterministic obsolete-object cleanup where platform APIs safely support deletion, and explicit Manual Cleanup Required semantics where they do not.",
+    "Prove verify/commit and cleanup/duplicate reconciliation without using Output 151 or ordinary production records.",
+    "Repeat positive + denial controls through the stage-worker boundary before marking Item 6 complete."
+  ],
+  "item7_blocked": true
+}
