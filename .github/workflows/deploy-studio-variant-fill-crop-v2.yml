@@ -269,13 +269,20 @@ jobs:
           PATH_TOKEN=$(cat /tmp/verifier-path-token.txt)
           TOKEN=$(cat /tmp/variant-token.txt)
           VERIFY_URL="https://$VERIFY_WORKER.$SUBDOMAIN.workers.dev/$PATH_TOKEN"
-          curl -fsS --max-time 300 \
-            -D /tmp/candidate.headers \
-            -o /tmp/candidate.jpg \
-            -X POST "$VERIFY_URL?ratio=9%3A16&recipe=fill-crop-v2" \
-            -H "X-Studio-Variant-Token: $TOKEN" \
-            -H 'Content-Type: image/png' \
-            --data-binary @/tmp/variant-source.png
+          CANDIDATE_CODE=000
+          for attempt in $(seq 1 15); do
+            CANDIDATE_CODE=$(curl -sS --max-time 300 \
+              -D /tmp/candidate.headers \
+              -o /tmp/candidate.jpg \
+              -w '%{http_code}' \
+              -X POST "$VERIFY_URL?ratio=9%3A16&recipe=fill-crop-v2" \
+              -H "X-Studio-Variant-Token: $TOKEN" \
+              -H 'Content-Type: image/png' \
+              --data-binary @/tmp/variant-source.png || true)
+            [[ "$CANDIDATE_CODE" == "200" ]] && break
+            sleep 2
+          done
+          test "$CANDIDATE_CODE" = "200"
           grep -Eiq '^x-studio-variant-recipe: fill-crop-v2\r?$' /tmp/candidate.headers
           grep -Eiq '^x-studio-variant-style: center_crop\r?$' /tmp/candidate.headers
           sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256
