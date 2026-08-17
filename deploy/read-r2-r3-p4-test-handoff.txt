@@ -1,0 +1,1 @@
+Read-only R2/R2B/R3/P4 test identity handoff audit. No Make mutation, activation, Airtable write, render, email, or publish. 2026-08-16.
