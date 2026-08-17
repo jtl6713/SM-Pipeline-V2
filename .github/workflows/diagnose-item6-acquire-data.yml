@@ -37,13 +37,33 @@ jobs:
             --data-urlencode 'maxRecords=100' \
             --data-urlencode 'sort[0][field]=Requested_At' \
             --data-urlencode 'sort[0][direction]=desc' \
-            --data-urlencode 'filterByFormula=AND(FIND("REPAIR_LEASE_V1", {Notes}&"")>0,FIND("5813561", {Notes}&"")>0)' \
+            --data-urlencode 'filterByFormula=AND({Status}="Processing",FIND("REPAIR_LEASE_V1", {Notes}&"")>0,{Scenario_ID}=5813561)' \
             -o /tmp/leases.json
           echo 'OUTPUT_167='
-          jq -c '{id,fields:{Platform_Output_ID:.fields.Platform_Output_ID,Platform:.fields.Platform,Do_Not_Publish:.fields.Do_Not_Publish,Test_Run_ID:.fields.Test_Run_ID,Output_Status:.fields.Output_Status,Remote_Post_ID:.fields.Remote_Post_ID,Published_URL:.fields.Published_URL,Replace_Transaction_ID:.fields.Replace_Transaction_ID,Replace_State:.fields.Replace_State,Replace_Old_Remote_ID:.fields.Replace_Old_Remote_ID,Replace_New_Remote_ID:.fields.Replace_New_Remote_ID,Replace_Cleanup_Verified_At:.fields.Replace_Cleanup_Verified_At}}' /tmp/output.json
+          jq -c '{id,fields:{Platform:.fields.Platform,Do_Not_Publish:.fields.Do_Not_Publish,Test_Run_ID:.fields.Test_Run_ID,Output_ID:.fields.Output_ID,Replace_Transaction_ID:.fields.Replace_Transaction_ID,Replace_State:.fields.Replace_State}}' /tmp/output.json
           echo 'LEASE_ROWS='
-          jq -c '[.records[]|{id,Status:.fields.Status,Requested_At:.fields.Requested_At,Completed_At:.fields.Completed_At,Error_Message:.fields.Error_Message,Notes:.fields.Notes}]' /tmp/leases.json
+          jq -c '[.records[]|{id,Status:.fields.Status,Scenario_ID:.fields.Scenario_ID,Correlation_ID:.fields.Correlation_ID,Requested_At:.fields.Requested_At,Request_JSON:.fields.Request_JSON,Result_JSON:.fields.Result_JSON,Notes:.fields.Notes}]' /tmp/leases.json
           echo "lease_row_count=$(jq '.records|length' /tmp/leases.json)"
+      - name: Replay exact Worker lease-row create then delete it
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $(cat /tmp/pat.txt)"
+          URL='https://api.airtable.com/v0/appe33zkZn35yirTL/tbltuSt9UibYzxpah'
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EXP=$(date -u -d '+10 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          CONTRACT=$(jq -cn --arg exp "$EXP" '{kind:"REPAIR_LEASE_V1",lease_id:"ITEM6_DIAG_SCHEMA_20260817",test_run_id:"ITEM6_CLEANUP_20260817_1217A",scenario_id:5813561,expires_at:$exp,max_runs:1,max_operations:20,allowed_platform_output_record_ids:["recdCzUqxwQMYcK6g"],allowed_content_item_record_ids:[],deny_fixture_record_ids:[],allow_public_publish:false,explicit_publish_platform:null}')
+          BODY=$(jq -cn --arg now "$NOW" --arg contract "$CONTRACT" '{records:[{fields:{Command_ID:"REPAIR-LEASE-DIAG-5813561",Action:"GET_SCENARIO",Scenario_ID:5813561,Scenario_Name:"Repair activation lease 5813561",Request_JSON:$contract,Write_Approved:false,Activation_Approved:false,Status:"Processing",Result_JSON:"{\"kind\":\"REPAIR_LEASE_V1\",\"state\":\"active\",\"operations_used\":0,\"runs_used\":0}",Requested_At:$now,Started_At:$now,Requested_By:"studio-admin",Correlation_ID:"ITEM6_CLEANUP_20260817_1217A",Notes:"REPAIR_LEASE_V1 ITEM6_DIAG_SCHEMA_20260817; exact resource allowlist enforced; standalone RUN disabled; only stage-specific guarded pulses permitted."}}],typecast:true}')
+          code=$(curl -sS -o /tmp/create.json -w '%{http_code}' -X POST "$URL" -H "$AUTH" -H 'Content-Type: application/json' --data "$BODY")
+          echo "lease_create_http=$code"
+          jq -c '{records:[.records[]? | {id,fields:{Status:.fields.Status,Scenario_ID:.fields.Scenario_ID,Correlation_ID:.fields.Correlation_ID}}],error:(.error//null)}' /tmp/create.json || cat /tmp/create.json
+          if [[ "$code" -ge 200 && "$code" -lt 300 ]]; then
+            RID=$(jq -er '.records[0].id' /tmp/create.json)
+            delcode=$(curl -sS -o /tmp/delete.json -w '%{http_code}' -X DELETE "$URL/$RID" -H "$AUTH")
+            echo "lease_delete_http=$delcode record_id=$RID"
+            test "$delcode" = '200'
+          fi
+          test "$code" -ge 200 -a "$code" -lt 300
       - name: Destroy credential material
         if: always()
         shell: bash
