@@ -1,2 +1,3 @@
 Trigger guarded Item 6 transaction-addressing rollout.
 Retry after templated Make JSON support.
+Retry with paced Make API calls and 429 backoff.
