@@ -1,1 +1,2 @@
 Read-only publishing selector/handoff inventory for Item 2 and Item 5. No Make state changes or publishing.
+Recheck after YouTube Output 151 recovery — 2026-08-16.
