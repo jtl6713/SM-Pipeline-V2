@@ -1,4 +1,4 @@
-One-shot binding-preserving Studio API deployment for repair-control lease table-ID hardening.
-Source must contain REPAIR_LEASE_TABLE_ID=tbltuSt9UibYzxpah.
-Preserve exact current production bindings, verify deployed source bytes and authenticated session, rollback on failure.
-Triggered 2026-08-16 continuation checkpoint.
+Binding-preserving Studio API deployment for Item 6 replace transaction controller.
+Source commit authority: 807bb73b1b1de1ed608239fe5ab9b5a989b95f37.
+Preserve exact current production bindings, verify deployed source bytes and authenticated session, rollback automatically on failure.
+Triggered 2026-08-17 08:20 CT.
