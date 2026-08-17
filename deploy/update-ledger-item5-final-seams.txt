@@ -1,0 +1,1 @@
+Record completed C3/C3B/PUB3/SMV1 Test Mode hardening and remaining behavioral proof gate.
