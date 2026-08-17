@@ -33,7 +33,7 @@ jobs:
           found3 = found6 = found7 = False
           for i, line in enumerate(lines):
               if line.startswith('Updated:'):
-                  lines[i] = 'Updated: 2026-08-17 UTC  '
+                  lines[i] = 'Updated: 2026-08-17 UTC'
               elif line.startswith('The top-five repair program remains in progress.'):
                   lines[i] = 'Items 1–5 are now **complete and verified**. The top-five gate is cleared and **Item 6 is authorized as the next repair**. Broad end-to-end acceptance remains deferred: Item 7 may begin only after Item 6 is closed. Every future test must remain exact-record/exact-output addressed, bounded by the repair controls, and leave cost-driving scenarios OFF.'
               elif line.startswith('| 3 |'):
