@@ -296,14 +296,25 @@ jobs:
           done
           jq -e '.ok == true and .version == "2.0.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop"' /tmp/health-final.json >/dev/null
           TOKEN=$(cat /tmp/variant-token.txt)
-          curl -fsS --max-time 300 \
-            -D /tmp/candidate.headers \
-            -o /tmp/candidate.jpg \
-            -X POST "$BASE/render?ratio=9%3A16&recipe=fill-crop-v2" \
-            -H "X-Studio-Variant-Token: $TOKEN" \
-            -H 'Content-Type: image/png' \
-            --data-binary @/tmp/variant-source.png
-          tr -d '\r' </tmp/candidate.headers >/tmp/candidate.normalized.headers
+          for attempt in $(seq 1 15); do
+            curl -fsS --max-time 300 \
+              -D /tmp/candidate.headers \
+              -o /tmp/candidate.jpg \
+              -X POST "$BASE/render?ratio=9%3A16&recipe=fill-crop-v2" \
+              -H "X-Studio-Variant-Token: $TOKEN" \
+              -H 'Content-Type: image/png' \
+              --data-binary @/tmp/variant-source.png
+            tr -d '\r' </tmp/candidate.headers >/tmp/candidate.normalized.headers
+            if grep -Eiq '^x-studio-variant-version: 2\.0\.0$' /tmp/candidate.normalized.headers &&
+              grep -Eiq '^x-studio-variant-recipe: fill-crop-v2$' /tmp/candidate.normalized.headers &&
+              grep -Eiq '^x-studio-variant-style: center_crop$' /tmp/candidate.normalized.headers; then
+              break
+            fi
+            sleep 2
+          done
+          grep -Eiq '^x-studio-variant-version: 2\.0\.0$' /tmp/candidate.normalized.headers
+          grep -Eiq '^x-studio-variant-recipe: fill-crop-v2$' /tmp/candidate.normalized.headers
+          grep -Eiq '^x-studio-variant-style: center_crop$' /tmp/candidate.normalized.headers
           sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256
           test "$(cat /tmp/candidate.sha256)" != "$(cat /tmp/baseline.sha256)"
           jq -n \
