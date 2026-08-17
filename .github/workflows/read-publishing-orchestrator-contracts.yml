@@ -15,7 +15,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v6
-      - name: Read four live orchestrator contracts
+      - name: Read publishing orchestrator and YouTube worker contracts
         shell: bash
         run: |
           set -euo pipefail; umask 077
@@ -36,7 +36,7 @@ jobs:
           PY
           TOKEN=$(cat /tmp/make-token.txt); BASE=$(cat /tmp/make-base.txt)
           : >/tmp/audit.ndjson
-          for sid in 5864632 5813561 5806668 5823581; do
+          for sid in 5864632 5813561 5806668 5823581 5830810 5830609; do
             curl -fsS "$BASE/scenarios/$sid" -H "Authorization: Token $TOKEN" -o /tmp/scenario.json
             sleep 1
             curl -fsS "$BASE/scenarios/$sid/blueprint" -H "Authorization: Token $TOKEN" -o /tmp/blueprint.json
@@ -58,13 +58,13 @@ jobs:
               name=((n.get('metadata') or {}).get('designer') or {}).get('name')
               mapper=n.get('mapper') or {}; params=n.get('parameters') or {}; filt=n.get('filter')
               blob=json.dumps([mapper,params,filt,name,n.get('module')],default=str)
-              keep=depth==0 or any(k.lower() in blob.lower() for k in ['airtable','webhook','output','publish','lock','status','due','ready','platform','do_not_publish','test_run','idempot'])
+              keep=depth==0 or any(k.lower() in blob.lower() for k in ['airtable','webhook','output','publish','lock','status','due','ready','platform','do_not_publish','test_run','idempot','youtube','upload','job'])
               if keep:
                 mods.append({'id':n.get('id'),'module':n.get('module'),'name':name,'depth':depth,'mapper':clean(mapper),'parameters':clean(params),'filter':clean(filt)})
               for r in n.get('routes') or []: walk(r.get('flow') or [],depth+1)
           walk(bp.get('flow') or [])
           text=json.dumps(bp,default=str).lower()
-          terms={k:(k.lower() in text) for k in ['test_run_id','Do_Not_Publish','Publish_Lock','Publishing_Lock','idempotency','Published','Ready to Publish','Publish_Status']}
+          terms={k:(k.lower() in text) for k in ['test_run_id','Do_Not_Publish','Publish_Lock','Publishing_Lock','idempotency','YouTube_Upload_Job_ID','YouTube_Video_ID','YouTube_Stage','YouTube_Upload_Status','Terminal Error','Published','Ready to Publish','Publish_Status']}
           out={'scenario_id':sid,'name':scenario.get('name'),'isActive':scenario.get('isActive'),'hookId':scenario.get('hookId'),'scheduling':scenario.get('scheduling'),'module_count':len(mods),'terms':terms,'modules':mods}
           print(json.dumps(out,separators=(',',':')))
           PY
