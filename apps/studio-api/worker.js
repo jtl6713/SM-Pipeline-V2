@@ -242,9 +242,9 @@ export default {
 
       if (isAdminRepairControlRoute) {
         requirePermission(authorization, "tenant_admin");
-        if (request.method === "GET") return adminRepairControlStatus(request, env);
+        if (request.method === "GET") return await adminRepairControlStatus(request, env);
         assertWriteRequest(request, env);
-        return adminRepairControl(request, env, authorization);
+        return await adminRepairControl(request, env, authorization);
       }
 
       if (isVoiceCatalogRoute) {
