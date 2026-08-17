@@ -127,6 +127,7 @@ export default {
           repair_r4_direct_input_pulse_v1: true,
           repair_r4_scheduled_selector_pulse_v1: true,
           repair_p1_test_selector_pulse_v1: true,
+          repair_item7_exact_stage_pulse_v1: true,
           repair_exact_output_test_mode_v1: true,
           repair_durable_test_run_identity_v1: true,
           studio_smv1_queue_test_identity_v1: true,
@@ -9369,6 +9370,10 @@ const REPAIR_CONTROL_SCENARIOS = new Set([
   5864632, // IG-PUB-ORCH
   5556716, // R4 renderer handoff
   5528742, // P1 content package scheduled root (Test Mode exact selector pulse only)
+  5569495, // R2 exact Test Mode selector pulse only
+  5557966, // R3 exact Test Mode selector pulse only
+  5565333, // R5 exact Test Mode selector pulse only
+  5576363, // RR1 exact Test Mode selector pulse only
   5612096, // AP0 public asset preparation
 ]);
 const REPAIR_LEASE_MAX_MS = 30 * 60 * 1000;
@@ -9849,6 +9854,155 @@ async function repairPulseP1TestSelector(env, lease, input, action) {
   };
 }
 
+
+// ITEM7_EXACT_STAGE_TEST_MODE_V1_BEGIN
+const ITEM7_EXACT_STAGE_CONFIG = Object.freeze({
+  5569495: Object.freeze({ stage: "R2", max_cycles: 1, wait_ms_per_cycle: 90000 }),
+  5557966: Object.freeze({ stage: "R3", max_cycles: 1, wait_ms_per_cycle: 90000 }),
+  5565333: Object.freeze({ stage: "R5", max_cycles: 12, wait_ms_per_cycle: 18000 }),
+  5576363: Object.freeze({ stage: "RR1", max_cycles: 1, wait_ms_per_cycle: 90000 }),
+});
+
+function repairItem7StageCheckpoint(scenarioId, fields = {}) {
+  if (scenarioId === 5569495) {
+    return {
+      complete: String(fields.Asset_Selection_Status || "") === "Selected" && Boolean(String(fields.Selected_Assets_JSON || "").trim()) && Number(fields.Selected_Clip_Count || 0) > 0,
+      failed: String(fields.Asset_Selection_Status || "") === "Failed",
+      summary: { asset_selection_status: fields.Asset_Selection_Status || null, selected_clip_count: Number(fields.Selected_Clip_Count || 0), selected_assets_present: Boolean(String(fields.Selected_Assets_JSON || "").trim()) },
+    };
+  }
+  if (scenarioId === 5557966) {
+    return {
+      complete: String(fields.Render_Status || "") === "Ready for Render" && Boolean(String(fields.Composition_ID || "").trim()) && Boolean(String(fields.Output_Filename || "").trim()) && Boolean(String(fields.Render_Clip_List_JSON || "").trim()) && Number(fields.Render_Total_Frames || 0) > 0,
+      failed: String(fields.Render_Status || "") === "Failed",
+      summary: { render_status: fields.Render_Status || null, composition_id: fields.Composition_ID || null, output_filename: fields.Output_Filename || null, render_total_frames: Number(fields.Render_Total_Frames || 0), render_clip_list_present: Boolean(String(fields.Render_Clip_List_JSON || "").trim()) },
+    };
+  }
+  if (scenarioId === 5565333) {
+    return {
+      complete: String(fields.Render_Status || "") === "Rendered" && Boolean(String(fields.Final_File_URL || "").trim()) && Boolean(String(fields.Final_File_ID || "").trim()),
+      // R5 deliberately pre-marks Failed while Drive upload is in progress, so timeout/cycle exhaustion is the terminal failure signal.
+      failed: false,
+      summary: { render_status: fields.Render_Status || null, final_file_url: fields.Final_File_URL || null, final_file_id: fields.Final_File_ID || null, studio_preview_url: fields.Studio_Preview_URL || null, studio_preview_r2_key: fields.Studio_Preview_R2_Key || null },
+    };
+  }
+  if (scenarioId === 5576363) {
+    return {
+      complete: String(fields.Review_Status || "") === "Review Sent" && Boolean(String(fields.Review_Email_Sent_At || "").trim()),
+      failed: false,
+      summary: { review_status: fields.Review_Status || null, review_email_sent_at: fields.Review_Email_Sent_At || null },
+    };
+  }
+  throw new HttpError(403, `Scenario ${scenarioId} is not an Item 7 exact-stage scenario`);
+}
+
+async function repairReadItem7Output(env, recordId, testRunId) {
+  const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
+  if (!record?.id) throw new HttpError(404, `Platform Output ${recordId} not found`);
+  const fields = record.fields || {};
+  if (String(fields.Test_Run_ID || "").trim() !== testRunId) throw new HttpError(409, `Platform Output ${recordId} escaped Item 7 Test_Run_ID isolation`);
+  if (fields.Do_Not_Publish !== true) throw new HttpError(409, `Platform Output ${recordId} must remain Do_Not_Publish=true during Item 7`);
+  return record;
+}
+
+async function repairWaitItem7Checkpoint(env, scenarioId, recordId, testRunId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    const record = await repairReadItem7Output(env, recordId, testRunId);
+    const checkpoint = repairItem7StageCheckpoint(scenarioId, record.fields || {});
+    last = { record, checkpoint };
+    if (checkpoint.complete || checkpoint.failed) return last;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  return last;
+}
+
+async function repairPulseItem7ExactStage(env, lease, input, action) {
+  const scenarioId = Number(input.scenario_id);
+  const config = ITEM7_EXACT_STAGE_CONFIG[scenarioId];
+  if (!config || lease.scenario_id !== scenarioId) throw new HttpError(403, `pulse_item7_exact_stage is not authorized for scenario ${scenarioId}`);
+  const recordId = repairString(input.platform_output_record_id, "platform_output_record_id", 32);
+  const allowlist = Array.isArray(lease.contract.allowed_platform_output_record_ids) ? lease.contract.allowed_platform_output_record_ids : [];
+  if (!allowlist.includes(recordId)) throw new HttpError(403, `Platform Output ${recordId} is outside this Item 7 lease allowlist`);
+  if ((lease.contract.deny_fixture_record_ids || []).includes(recordId)) throw new HttpError(403, `Platform Output ${recordId} is an explicit denial fixture`);
+  await repairVerifyOutputRecord(env, recordId, false, lease.test_run_id);
+
+  const requestedCycles = Math.max(1, Number(input.max_cycles || 1));
+  const maxCycles = Math.min(config.max_cycles, requestedCycles);
+  if (!Number.isInteger(maxCycles) || maxCycles < 1) throw new HttpError(400, "max_cycles must be a positive integer");
+
+  const beforeState = await phase6ScenarioState(env, scenarioId);
+  if (beforeState.isActive) throw new HttpError(409, `${config.stage} must be OFF before Item 7 exact-stage pulse`);
+  if (beforeState?.scenario?.hookId != null) throw new HttpError(409, `${config.stage} unexpectedly has a webhook identity; refusing scheduled-stage seizure`);
+  const originalScheduling = JSON.stringify(beforeState?.scenario?.scheduling || {});
+
+  const read = await repairReadMakeBlueprint(env, scenarioId);
+  const originalBlueprint = read.blueprint;
+  const originalSerialized = JSON.stringify(originalBlueprint);
+  const originalIds = repairScenarioModuleIds(originalBlueprint?.flow || []).sort((a, b) => a - b);
+  const root = repairScenarioModuleById(originalBlueprint?.flow || [], 1);
+  if (!root || root.module !== "airtable:ActionSearchRecords") throw new HttpError(409, `${config.stage} Module 1 is not the expected Airtable Search Records selector`);
+  const originalFormula = String(root?.mapper?.formula || "");
+  if (!originalFormula.includes('{Test_Run_ID}=BLANK()')) throw new HttpError(409, `${config.stage} production selector no longer contains the verified Test_Run_ID exclusion`);
+  if (scenarioId === 5569495 && !originalFormula.includes('NOT({Do_Not_Publish})')) throw new HttpError(409, "R2 production selector no longer contains the verified Do_Not_Publish exclusion");
+
+  let exactFormula = originalFormula.replaceAll('{Test_Run_ID}=BLANK()', `{Test_Run_ID}=${JSON.stringify(lease.test_run_id)}`);
+  if (scenarioId === 5569495) exactFormula = exactFormula.replace('NOT({Do_Not_Publish})', '{Do_Not_Publish}=1');
+  exactFormula = `AND(RECORD_ID()=${JSON.stringify(recordId)},${exactFormula})`;
+
+  const patched = JSON.parse(JSON.stringify(originalBlueprint));
+  const patchedRoot = repairScenarioModuleById(patched?.flow || [], 1);
+  patchedRoot.mapper.formula = exactFormula;
+  patchedRoot.mapper.maxRecords = "1";
+
+  await repairReserveBudget(env, lease, { operationCost: Math.min(90, 20 + (maxCycles * 5)), runCost: maxCycles, action });
+
+  let patchedLive = false, restored = false, failure = null, stop = null, observed = null, cyclesRun = 0;
+  try {
+    await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, { method: "PATCH", body: JSON.stringify({ blueprint: JSON.stringify(patched) }) });
+    patchedLive = true;
+    const verifyPatched = await repairReadMakeBlueprint(env, scenarioId);
+    const verifyRoot = repairScenarioModuleById(verifyPatched.blueprint?.flow || [], 1);
+    const verifyIds = repairScenarioModuleIds(verifyPatched.blueprint?.flow || []).sort((a, b) => a - b);
+    if (String(verifyRoot?.mapper?.formula || "") !== exactFormula || String(verifyRoot?.mapper?.maxRecords || "") !== "1") throw new HttpError(502, `${config.stage} exact Item 7 selector did not verify live`);
+    if (JSON.stringify(verifyIds) !== JSON.stringify(originalIds)) throw new HttpError(502, `${config.stage} module topology changed while installing exact selector`);
+
+    for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
+      cyclesRun = cycle;
+      await phase6SetScenarioActive(env, scenarioId, true);
+      observed = await repairWaitItem7Checkpoint(env, scenarioId, recordId, lease.test_run_id, config.wait_ms_per_cycle);
+      stop = await phase6StopScenarioVerified(env, scenarioId, 4);
+      if (stop?.inactive !== true) throw new HttpError(502, `${config.stage} did not verify inactive after exact cycle ${cycle}`);
+      if (observed?.checkpoint?.failed) throw new HttpError(502, `${config.stage} reported a failed checkpoint: ${JSON.stringify(observed.checkpoint.summary)}`);
+      if (observed?.checkpoint?.complete) break;
+      if (cycle < maxCycles) await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    if (!observed?.checkpoint?.complete) throw new HttpError(502, `${config.stage} did not reach its exact Item 7 checkpoint after ${cyclesRun} cycle(s)`);
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+  } finally {
+    try { stop = await phase6StopScenarioVerified(env, scenarioId, 4); } catch (error) { if (!failure) failure = error instanceof Error ? error.message : String(error); }
+    if (patchedLive) {
+      try {
+        await phase6MakeApiJson(env, `/scenarios/${scenarioId}?confirmed=true`, { method: "PATCH", body: JSON.stringify({ blueprint: read.original_payload }) });
+        const verifyRestore = await repairReadMakeBlueprint(env, scenarioId);
+        const restoredState = await phase6ScenarioState(env, scenarioId);
+        restored = JSON.stringify(verifyRestore.blueprint) === originalSerialized && restoredState.isActive === false && JSON.stringify(restoredState?.scenario?.scheduling || {}) === originalScheduling;
+        if (!restored && !failure) failure = `${config.stage} exact selector rollback did not verify byte-for-byte`;
+      } catch (error) { if (!failure) failure = error instanceof Error ? error.message : String(error); }
+    }
+    if (failure || !restored) {
+      try { await repairCloseLease(env, lease, "failed", { reason: "item7-exact-stage-pulse-failed", stage: config.stage, scenario_stopped: stop?.inactive === true, selector_restored: restored, cycles_run: cyclesRun, error: failure || "restore verification failed" }); } catch {}
+    } else {
+      try { await repairCloseLease(env, lease, "released", { reason: "item7-exact-stage-pulse-complete", stage: config.stage, scenario_stopped: true, selector_restored: true, exact_platform_output_record_id: recordId, cycles_run: cyclesRun, checkpoint: observed?.checkpoint?.summary || null }); } catch {}
+    }
+  }
+  if (failure || !restored) throw new HttpError(502, failure || `${config.stage} Item 7 exact-stage restoration failed`);
+  return { stage: config.stage, scenario_id: scenarioId, platform_output_record_id: recordId, test_run_id: lease.test_run_id, cycles_run: cyclesRun, checkpoint: observed?.checkpoint?.summary || null, scenario_started: true, scenario_stopped: stop?.inactive === true, selector_restored: true, schedule_preserved: true, do_not_publish_preserved: true };
+}
+// ITEM7_EXACT_STAGE_TEST_MODE_V1_END
+
 // ITEM6_REPLACE_TRANSACTION_V1_BEGIN
 const ITEM6_REPLACE_ACTIVE_STATES = new Set(["Prepared", "Publishing", "Verified", "Cleanup Pending", "Manual Cleanup Required"]);
 const ITEM6_REPLACE_COMMON_FIELDS = Object.freeze([
@@ -10119,6 +10273,10 @@ async function repairControlAction(env, input) {
 
   if (action === "pulse_p1_test_selector") {
     return await repairPulseP1TestSelector(env, lease, input, action);
+  }
+
+  if (action === "pulse_item7_exact_stage") {
+    return await repairPulseItem7ExactStage(env, lease, input, action);
   }
 
   if (action === "pulse_r4_scheduled_selector") {
