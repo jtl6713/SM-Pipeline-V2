@@ -9608,7 +9608,6 @@ async function repairFindLease(env, input) {
   const leaseId = repairString(input.lease_id, "lease_id");
   const testRunId = repairString(input.test_run_id, "test_run_id");
   if (!Number.isInteger(scenarioId) || !REPAIR_CONTROL_SCENARIOS.has(scenarioId)) throw new HttpError(403, `Scenario ${scenarioId} is not repair-control allowlisted`);
-  await repairSweepExpiredLeases(env);
   const candidates = (await repairLeaseRecords(env, scenarioId)).map(repairLeaseState);
   const lease = candidates.find((l) => l.lease_id === leaseId && l.test_run_id === testRunId);
   if (!lease) throw new HttpError(409, "Active repair lease not found or does not match test_run_id");
