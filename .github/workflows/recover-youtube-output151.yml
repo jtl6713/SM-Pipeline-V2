@@ -1,0 +1,150 @@
+name: Recover YouTube Output 151
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/recover-youtube-output151.txt']
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Recover exact YouTube output through exact worker webhooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          python - <<'PY'
+          import json, os, time, urllib.request, urllib.parse, urllib.error
+
+          BASE='appe33zkZn35yirTL'
+          OUTPUTS='tblrlPeboBthkplH0'
+          SETTINGS='tblpHPWeEkyJaF7ql'
+          REC='recXaaWhSZmQ9oOsw'
+          EXPECTED_KEY='YT-151-recXaaWhSZmQ9oOsw-oauthretry-1'
+          pat=open('/tmp/pat.txt').read().strip()
+          headers={'Authorization':f'Bearer {pat}','Content-Type':'application/json'}
+
+          def req(url, method='GET', body=None, headers_extra=None, timeout=90):
+              h=dict(headers)
+              if headers_extra: h.update(headers_extra)
+              data=None if body is None else json.dumps(body).encode()
+              r=urllib.request.Request(url,data=data,headers=h,method=method)
+              try:
+                  with urllib.request.urlopen(r,timeout=timeout) as x:
+                      raw=x.read().decode()
+                      return x.status, (json.loads(raw) if raw else {})
+              except urllib.error.HTTPError as e:
+                  raw=e.read().decode(errors='replace')
+                  raise RuntimeError(f'HTTP {e.code}: {raw[:500]}')
+
+          def get_output():
+              _, d=req(f'https://api.airtable.com/v0/{BASE}/{OUTPUTS}/{REC}')
+              return d.get('fields',{})
+
+          def get_settings():
+              names=['YTP1_WEBHOOK_URL','YTS1_WEBHOOK_URL','YTS2_WEBHOOK_URL','YTS3_WEBHOOK_URL']
+              ors=','.join('{Setting_Name}="'+n+'"' for n in names)
+              formula='AND({Active}=1,OR('+ors+'))'
+              q=urllib.parse.urlencode({'filterByFormula':formula,'pageSize':20})
+              _, d=req(f'https://api.airtable.com/v0/{BASE}/{SETTINGS}?{q}')
+              vals={r.get('fields',{}).get('Setting_Name'):str(r.get('fields',{}).get('Setting_Value','')).strip() for r in d.get('records',[])}
+              missing=[n for n in names if not vals.get(n)]
+              if missing: raise RuntimeError('Missing active webhook settings: '+','.join(missing))
+              return vals
+
+          def hook(url, target):
+              payload={'output_record_id':REC,'source':'YT151-OAUTH-RECOVERY','target':target,'requested_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+              data=json.dumps(payload).encode()
+              r=urllib.request.Request(url,data=data,headers={'Content-Type':'application/json'},method='POST')
+              try:
+                  with urllib.request.urlopen(r,timeout=90) as x:
+                      x.read()
+                      print(f'{target}: webhook accepted HTTP {x.status}')
+              except urllib.error.HTTPError as e:
+                  raw=e.read().decode(errors='replace')
+                  raise RuntimeError(f'{target} webhook HTTP {e.code}: {raw[:300]}')
+
+          def state_line(f):
+              return {k:f.get(k) for k in ['Output_ID','Platform','YouTube_Stage','YouTube_Upload_Status','YouTube_Upload_Job_ID','YouTube_Video_ID','YouTube_Processing_Status','Publish_Status','YouTube_Error_Message']}
+
+          f=get_output()
+          if str(f.get('Output_ID'))!='151' or str(f.get('Platform','')).lower()!='youtube':
+              raise RuntimeError('Exact record identity mismatch')
+          if f.get('Test_Run_ID') not in (None,''):
+              raise RuntimeError('Refusing test-tagged output in production recovery')
+          if bool(f.get('Do_Not_Publish')):
+              raise RuntimeError('Refusing Do_Not_Publish output')
+          if f.get('YouTube_Video_ID'):
+              raise RuntimeError('Video ID already exists; refusing duplicate upload start')
+          if str(f.get('YouTube_Idempotency_Key','')) != EXPECTED_KEY:
+              raise RuntimeError('Unexpected retry idempotency key')
+          if str(f.get('YouTube_Stage',''))!='YT1' or f.get('YouTube_Upload_Job_ID'):
+              raise RuntimeError('Output is not at the exact safe YT1 retry seam')
+          print('Preflight:', json.dumps(state_line(f)))
+          s=get_settings()
+
+          hook(s['YTP1_WEBHOOK_URL'],'YTP1')
+          time.sleep(8)
+          f=get_output()
+          print('After YTP1:', json.dumps(state_line(f)))
+          if str(f.get('YouTube_Stage',''))=='Terminal Error':
+              raise RuntimeError('YTP1 terminal error: '+str(f.get('YouTube_Error_Message','')))
+          if str(f.get('YouTube_Stage',''))!='YT2' or not f.get('YouTube_Upload_Job_ID'):
+              raise RuntimeError('YTP1 did not create a fresh upload job')
+
+          # Poll exact YTS1 until upload completes with a video ID.
+          for i in range(30):
+              f=get_output()
+              if f.get('YouTube_Video_ID'):
+                  print('Upload completed with video ID.')
+                  break
+              if str(f.get('YouTube_Stage',''))=='Terminal Error':
+                  raise RuntimeError('YTS1 terminal error: '+str(f.get('YouTube_Error_Message','')))
+              hook(s['YTS1_WEBHOOK_URL'],'YTS1')
+              time.sleep(20)
+          else:
+              raise RuntimeError('Timed out waiting for YouTube upload completion')
+
+          # Poll exact YTS2 until YouTube processing reaches YT4/Succeeded.
+          for i in range(24):
+              f=get_output()
+              if str(f.get('YouTube_Stage',''))=='YT4' and str(f.get('YouTube_Processing_Status','')).lower()=='succeeded':
+                  print('YouTube processing succeeded.')
+                  break
+              if str(f.get('YouTube_Stage',''))=='Terminal Error':
+                  raise RuntimeError('YTS2 terminal error: '+str(f.get('YouTube_Error_Message','')))
+              hook(s['YTS2_WEBHOOK_URL'],'YTS2')
+              time.sleep(20)
+          else:
+              raise RuntimeError('Timed out waiting for YouTube processing')
+
+          hook(s['YTS3_WEBHOOK_URL'],'YTS3')
+          time.sleep(8)
+          f=get_output()
+          print('Final:', json.dumps(state_line(f)))
+          if not f.get('YouTube_Video_ID'):
+              raise RuntimeError('Finalization missing YouTube Video ID')
+          if str(f.get('YouTube_Stage','')).lower()!='complete':
+              raise RuntimeError('Final YouTube stage is not Complete')
+          if str(f.get('YouTube_Upload_Status','')).lower()!='uploaded':
+              raise RuntimeError('Final upload status is not Uploaded')
+          if str(f.get('Publish_Status','')).lower() not in ('published privately','published'):
+              raise RuntimeError('Final Publish_Status is not terminal success')
+          print('SUCCESS: Output 151 completed exact YouTube recovery.')
+          PY
+      - name: Destroy credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/key.pem /tmp/pat.enc /tmp/pat.txt; do [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"; done
