@@ -1,0 +1,141 @@
+name: Close Item6 Ledger 20260817
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/close-item6-ledger-20260817.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Persist Item 6 closure evidence and update ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          evidence = {
+            "repair_item": 6,
+            "checkpoint": "safe-republish-replace-closure",
+            "timestamp_utc": "2026-08-17T18:44:30Z",
+            "status": "PASS_SYNTHETIC_TRANSACTION_CLOSURE",
+            "scope": "Exact-output, nonpublic Output 167 proof of replacement transaction semantics and duplicate-cleanup state handling. No Make publisher run and no public platform operation occurred.",
+            "fixture": {
+              "record_id": "recdCzUqxwQMYcK6g",
+              "output_id": 167,
+              "platform": "YouTube",
+              "test_run_id": "ITEM6_CLEANUP_20260817_1217A",
+              "do_not_publish": True,
+              "old_identity": "item6-old-20260817-1217",
+              "synthetic_new_identity": "ITEM6_SIM_NEW_20260817_1343D"
+            },
+            "repair_control": {
+              "exact_address_lookup_deploy_run_id": 32055036474,
+              "async_error_boundary_fix_deploy_run_id": 32055380702,
+              "wrong_lease_denial_run_id": 32055477235,
+              "wrong_test_run_denial_run_id": 32055993483,
+              "final_lease_acquire_run_id": 32056249027,
+              "lease_id": "ITEM6_CLEANUP_LEASE_20260817_1343D",
+              "lease_record_id": "rec3BpTLLskGGjbzq",
+              "scenario_id": 5813561,
+              "max_runs": 1,
+              "max_operations": 40,
+              "allow_public_publish": False,
+              "allowed_platform_output_record_ids": ["recdCzUqxwQMYcK6g"],
+              "runs_used": 0,
+              "closed_as_zero_run_metadata": True
+            },
+            "stage_contract_evidence": {
+              "transaction_addressing_file": "repair/evidence/item6-transaction-addressing-proof-20260817.json",
+              "transaction_addressing_run_id": 32050199756,
+              "ambiguous_retry_guard_file": "repair/evidence/item6-ambiguous-retry-guards-proof-20260817.json",
+              "ambiguous_retry_guard_run_id": 32036387558,
+              "stage_scenario_runs_for_structural_proofs": 0
+            },
+            "closure_proof": {
+              "workflow_run_id": 32056383357,
+              "artifact_id": 9296527685,
+              "artifact_digest": "sha256:e793e13ad92972a625493c9e3f5ed2edb41fd74f6cbb428a5ff8026de52907a3",
+              "active_worker_version": "d46b9f8f-0fa4-4ad5-bb79-f634e9400c94",
+              "replace_transaction_id": "ITEM6_TXN_20260817_1343D",
+              "replace_fingerprint": "sha256:item6-output167-cleanup-1343D",
+              "checks": {
+                "exact_state": "PASS",
+                "prepare": "PASS",
+                "prepare_replay_idempotent": "PASS",
+                "public_begin_denied_without_public_lease": "PASS",
+                "verify_new_identity_and_obsolete_snapshot": "PASS",
+                "mismatched_cleanup_evidence_denied": "PASS",
+                "matching_cleanup_evidence_accepted": "PASS",
+                "cleanup_replay_idempotent": "PASS",
+                "final_state_complete": "PASS",
+                "fixture_restored_exactly": "PASS",
+                "production_worker_version_unchanged": "PASS"
+              }
+            },
+            "platform_cleanup_boundary": {
+              "actual_external_platform_deletion_performed": False,
+              "actual_external_platform_cleanup_proven": False,
+              "controller_supports_verified_cleanup_evidence": True,
+              "controller_supports_manual_cleanup_required_state": True,
+              "note": "Synthetic cleanup evidence proves transaction and reconciliation semantics only. Platform-specific real deletion/reconciliation remains subject to each platform's later acceptance item and API capability; Item 6 does not authorize blind retry or claim a real YouTube deletion."
+            },
+            "safety": {
+              "public_platform_operations": 0,
+              "make_publisher_runs": 0,
+              "fixture_restored": True,
+              "do_not_publish_restored_true": True,
+              "disposable_bridge_deleted": True,
+              "production_worker_unchanged": True
+            },
+            "closure_status": "CLOSED",
+            "item7_unblocked": True
+          }
+          Path('repair/evidence/item6-safe-republish-replace-closure-20260817.json').write_text(json.dumps(evidence, indent=2) + '\n')
+
+          path = Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+          text = path.read_text()
+
+          lines = text.splitlines()
+          for i, line in enumerate(lines):
+            if line.startswith('Items 1–5 are now **complete and verified**.'):
+              lines[i] = 'Items 1–6 are now **complete and verified**. The safe republish/replace gate is cleared and **Item 7 is authorized as the next repair/acceptance step**. Every future test must remain exact-record/exact-output addressed, bounded by the repair controls, and leave cost-driving scenarios OFF unless a specific bounded pulse is required.'
+            elif line.startswith('| 6 | Safe republish/replace transaction and duplicate cleanup |'):
+              lines[i] = '| 6 | Safe republish/replace transaction and duplicate cleanup | **Complete — exact transaction and synthetic cleanup semantics proven** | Transaction/revision identity is enforced across the relevant stage handoffs; ambiguous replacement failures fail closed instead of blind retry; the repair controller uses exact Scenario_ID + lease_id + Test_Run_ID addressing and catches async route failures as JSON instead of Cloudflare 1101. Final isolated Output 167 proof (`32056383357`) passed prepare, idempotent replay, nonpublic begin denial, synthetic new-identity verification, obsolete-object snapshot, mismatched cleanup-evidence denial, matching cleanup completion, cleanup replay, and final Complete state. Output 167 was restored exactly, `Do_Not_Publish=true` was preserved, the lease closed with zero Make runs, and the production Worker version remained unchanged. Durable closure evidence: `repair/evidence/item6-safe-republish-replace-closure-20260817.json`. | Closed for cross-revision transaction safety and duplicate-cleanup state semantics. A real external YouTube deletion was deliberately not performed or claimed; platform-specific native cleanup/reconciliation remains part of later platform acceptance where supported, with `Manual Cleanup Required` as the safe fallback. |'
+            elif line.startswith('| 7 | Fresh edge-to-edge 9:16 normal-path regression |'):
+              lines[i] = '| 7 | Fresh edge-to-edge 9:16 normal-path regression | **Authorized — Item 6 gate cleared** | Renderer transition acceptance and safe replacement transaction controls are complete. Broad normal-path E2E may now proceed only as one fresh isolated 9:16 exact-output run, with the repair-control and Test Mode invariants preserved. | Run one isolated fresh 9:16 normal-path regression through the approved production path with checkpoint evidence and deterministic cleanup; do not reuse prior Output 151/167 fixtures. |'
+
+          text = '\n'.join(lines) + '\n'
+          delta = '''\n## 2026-08-17 Item 6 closure delta\n\n- Durable transaction-addressed stage handoff proof already covered all relevant publishing stages and kept scheduled orchestrators OFF (`repair/evidence/item6-transaction-addressing-proof-20260817.json`, run `32050199756`).\n- Ambiguous create/publish failure paths were already hardened so replacement transactions fail closed with retry disabled and `Manual Cleanup Required` rather than blind duplicate creation (`repair/evidence/item6-ambiguous-retry-guards-proof-20260817.json`, run `32036387558`).\n- Repair-control follow-up addressing was hardened to exact Scenario_ID + lease ID + Test_Run_ID. The actual Cloudflare 1101 root cause was an un-awaited async repair route handler; GET/POST repair handlers now `await` inside the outer error boundary. Wrong lease and wrong Test_Run_ID controls now return deterministic JSON 409 responses (`32055477235`, `32055993483`).\n- Final nonpublic Output 167 closure proof ran under lease `ITEM6_CLEANUP_LEASE_20260817_1343D`, `allow_public_publish=false`, exact output allowlist only, and zero Make runs. Run `32056383357` proved prepare, idempotent prepare replay, public-begin denial, synthetic replacement verification, obsolete snapshot, bad-cleanup-evidence denial, cleanup acceptance, idempotent cleanup replay, and final Complete state.\n- The proof was intentionally synthetic at the platform boundary: it did **not** call YouTube or delete a real external object. That is not counted as a platform deletion proof. The Item 6 safety contract is that verified cleanup may complete the transaction where platform reconciliation exists, otherwise `Manual Cleanup Required` is the explicit fail-safe state.\n- Teardown restored Output 167 exactly, retained `Do_Not_Publish=true`, closed the zero-run lease as metadata, deleted the disposable bridge, and verified the production Worker version was unchanged. Artifact `9296527685`, digest `sha256:e793e13ad92972a625493c9e3f5ed2edb41fd74f6cbb428a5ff8026de52907a3`.\n- **Item 6 is closed. Item 7 is now unblocked and authorized.**\n'''
+          if '## 2026-08-17 Item 6 closure delta' not in text:
+              text += delta
+          path.write_text(text)
+          PY
+
+          python -m json.tool repair/evidence/item6-safe-republish-replace-closure-20260817.json >/dev/null
+          grep -F '| 6 | Safe republish/replace transaction and duplicate cleanup | **Complete' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -F '| 7 | Fresh edge-to-edge 9:16 normal-path regression | **Authorized' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          grep -F '**Item 6 is closed. Item 7 is now unblocked and authorized.**' repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git diff --check
+
+      - name: Commit closure evidence and ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/item6-safe-republish-replace-closure-20260817.json repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'ledger(item6): close safe republish replace transaction'
+          git push origin HEAD:main
