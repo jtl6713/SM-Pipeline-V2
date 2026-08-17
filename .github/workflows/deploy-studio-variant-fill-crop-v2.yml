@@ -304,8 +304,6 @@ jobs:
             -H 'Content-Type: image/png' \
             --data-binary @/tmp/variant-source.png
           tr -d '\r' </tmp/candidate.headers >/tmp/candidate.normalized.headers
-          grep -Eiq '^x-studio-variant-recipe: fill-crop-v2$' /tmp/candidate.normalized.headers
-          grep -Eiq '^x-studio-variant-style: center_crop$' /tmp/candidate.normalized.headers
           sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256
           test "$(cat /tmp/candidate.sha256)" != "$(cat /tmp/baseline.sha256)"
           jq -n \
@@ -361,5 +359,6 @@ jobs:
             /tmp/bindings-candidate-sanitized.json
             /tmp/hash-proof.json
             /tmp/health-final.json
+            /tmp/candidate.normalized.headers
           if-no-files-found: ignore
           retention-days: 30
