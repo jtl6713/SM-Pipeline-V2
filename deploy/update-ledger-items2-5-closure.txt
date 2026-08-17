@@ -1,1 +1,2 @@
 Close authoritative ledger Items 2 and 5 after structural exact-addressing completion and successful final SMV1 Test Mode isolation proof run 31993357970. Ledger-only action; no Make, Airtable, Cloudflare, rendering, email, upload, draft, or publishing mutation.
+Retry after changing Markdown status assertions to fixed-string matching.
