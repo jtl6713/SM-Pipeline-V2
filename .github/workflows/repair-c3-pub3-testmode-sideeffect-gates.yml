@@ -69,7 +69,7 @@ jobs:
           old_pub=copy.deepcopy(np[5].get('filter') or {'name':'','conditions':[[]]})
           corep=(old_pub.get('conditions') or [[]])[0]
           prod=copy.deepcopy(corep)+[{'a':'{{2.Test_Run_ID}}','o':'notexist'},{'a':'{{1.test_run_id}}','o':'notexist'}]
-          test=copy.deepcopy(corep)+[{'a':'{{2.Test_Run_ID}}','o':'exist'},{'a':'{{1.test_run_id}}','b':'{{2.Test_Run_ID}}','o':'text:equal'},{'a':'{{1.allow_test_publish}}','b':true,'o':'boolean:equal'}]
+          test=copy.deepcopy(corep)+[{'a':'{{2.Test_Run_ID}}','o':'exist'},{'a':'{{1.test_run_id}}','b':'{{2.Test_Run_ID}}','o':'text:equal'},{'a':'{{1.allow_test_publish}}','b':True,'o':'boolean:equal'}]
           np[5]['filter']={'name':'Valid publish confirmation + explicit Test Mode authorization','conditions':[prod,test]}
           written=[]
           try:
