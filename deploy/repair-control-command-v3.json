@@ -9,5 +9,6 @@
   "allowed_platform_output_record_ids": ["recdCzUqxwQMYcK6g"],
   "deny_fixture_record_ids": [],
   "allow_public_publish": false,
-  "expected_http_status": 200
+  "expected_http_status": 200,
+  "proof_nonce": "item6-cleanup-001"
 }
