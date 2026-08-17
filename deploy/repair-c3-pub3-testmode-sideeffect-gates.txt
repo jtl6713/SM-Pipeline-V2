@@ -1,1 +1,1 @@
-Trigger rollback-safe C3/PUB3 Test Mode side-effect hardening.
+Trigger rollback-safe C3/PUB3 Test Mode side-effect hardening. Corrected retry 2026-08-16 CT.
