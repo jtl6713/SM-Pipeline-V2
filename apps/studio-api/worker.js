@@ -9487,8 +9487,8 @@ async function repairVerifyOutputRecord(env, recordId, allowPublicPublish = fals
   };
 }
 
-async function repairSweepExpiredLeases(env) {
-  const records = await repairLeaseRecords(env);
+async function repairSweepExpiredLeases(env, scenarioId = null) {
+  const records = await repairLeaseRecords(env, scenarioId);
   const results = [];
   const now = Date.now();
   for (const record of records) {
@@ -9555,7 +9555,7 @@ async function repairAcquireLease(env, input, authorization) {
     }
   }
 
-  await repairSweepExpiredLeases(env);
+  await repairSweepExpiredLeases(env, scenarioId);
   const overlaps = (await repairLeaseRecords(env, scenarioId)).map(repairLeaseState).filter((l) => l.lease_id !== leaseId);
   if (overlaps.length) throw new HttpError(409, `Scenario ${scenarioId} already has an active repair lease`);
 
