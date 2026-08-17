@@ -1,0 +1,1 @@
+Apply bounded rollback-safe Test Mode identity hardening to R2 5569495, P4 5533802, and P5 5536624 only. Preserve P4 hook 2567873, all connections/layout/topology/state. Propagate Test_Run_ID to Asset Requests and Asset Request Shots, suppress P4 test email, exclude test shots from P5 reminders. 2026-08-16.
