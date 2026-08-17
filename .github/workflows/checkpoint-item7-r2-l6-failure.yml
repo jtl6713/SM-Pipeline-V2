@@ -1,0 +1,45 @@
+name: Checkpoint Item7 R2 L6 Failure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/checkpoint-item7-r2-l6-failure.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: item7-ledger-checkpoint
+  cancel-in-progress: false
+
+jobs:
+  checkpoint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Update permanent Item 7 ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('repair/SM_PIPELINE_21_ITEM_LEDGER.md')
+          s=p.read_text()
+          row='| 7 | Fresh edge-to-edge 9:16 normal-path regression | **In progress — R2 retry pending after lease-control cleanup** | Output 168 / Content 75 remains exact `Test_Run_ID=ITEM7_9X16_REGRESSION_RUN32060507474`, 9:16, `Do_Not_Publish=true`, with no selection/render/final mutation. Controller explicit-run + robust-stop repair deployed successfully in run `32065602564`. Independent safety run `32065906190` proved R2 `5569495` OFF with `maxRecords=1` and the stranded exact selector still isolated to Output 168/Test_Run_ID. L6 run `32066062184` failed before creating a lease or pulsing R2: stale-L5 replacement during `acquire` returned a Cloudflare runtime `error code: 1104`. L5 was then manually reconciled terminal **Failed** only after the independent OFF proof, and the obsolete pending Make Admin deactivation command was removed; zero Processing repair leases remain. | Retry R2 with a fresh lease now that stale lease/control records are terminal; require selected assets + clip count, R2 OFF, canonical production selector/schedule restoration, and DNP/Test_Run_ID preservation before R3. |'
+          s,n=re.subn(r'^\| 7 \| Fresh edge-to-edge 9:16 normal-path regression \|.*$',row,s,count=1,flags=re.M)
+          if n != 1: raise SystemExit('Item 7 row not found')
+          marker='- 2026-08-17 Item 7 L6 control-plane checkpoint:'
+          if marker not in s:
+              s += '\n'+marker+' controller repair deploy `32065602564` PASS; safety run `32065906190` proved R2 OFF and exact selector isolation; L6 `32066062184` failed during lease acquire with Cloudflare runtime 1104 before any L6 lease/output mutation; expired L5 manually reconciled Failed from independent OFF evidence; obsolete pending deactivation command removed; zero Processing repair leases remain. R2 retry remains the gate; R3 blocked.\n'
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/SM_PIPELINE_21_ITEM_LEDGER.md
+          git commit -m 'docs(item7): checkpoint R2 L6 acquire failure'
+          git pull --rebase origin main
+          git push origin HEAD:main
