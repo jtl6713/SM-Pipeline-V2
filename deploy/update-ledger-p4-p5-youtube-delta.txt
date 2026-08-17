@@ -1,0 +1,1 @@
+Update the permanent 21-item ledger with successful YouTube Output 151 recovery and rollback-safe R2/P4/P5 Test Mode identity hardening. 2026-08-16.
