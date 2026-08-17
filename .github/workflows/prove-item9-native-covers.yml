@@ -24,6 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          python -m pip install --quiet pillow
           python -m py_compile repair/scripts/prove-item9-native-covers.py
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
             -pass env:CLOUDFLARE_API_TOKEN \

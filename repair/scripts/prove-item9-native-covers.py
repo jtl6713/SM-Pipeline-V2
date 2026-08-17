@@ -18,7 +18,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 
 
 BASE_ID = "appe33zkZn35yirTL"
@@ -250,6 +253,30 @@ def download_image(urls):
     raise SystemExit("could not download a generated thumbnail image")
 
 
+def compress_for_platforms(image, max_bytes=1800000):
+    original = Image.open(BytesIO(image["body"])).convert("RGB")
+    frame = original.copy()
+    frame.thumbnail((1080, 1920))
+    for quality in (85, 75, 65, 55, 45):
+        buffer = BytesIO()
+        frame.save(buffer, format="JPEG", quality=quality, optimize=True)
+        body = buffer.getvalue()
+        if len(body) <= max_bytes:
+            return {
+                "source_url": image["source_url"],
+                "content_type": "image/jpeg",
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "bytes": len(body),
+                "body": body,
+                "original_bytes": image["bytes"],
+                "original_content_type": image["content_type"],
+                "jpeg_quality": quality,
+                "width": frame.width,
+                "height": frame.height,
+            }
+    raise SystemExit("could not compress generated thumbnail under 2 MB")
+
+
 def host_public_thumbnail(settings, image):
     worker = settings["R2_UPLOAD_WORKER_URL"].rstrip("/")
     status, _, payload = json_http(
@@ -441,8 +468,10 @@ def main():
         youtube_output = load_output(pat, YT_RECORD)
         facebook_output = load_output(pat, FB_RECORD)
         instagram_output = load_output(pat, IG_RECORD)
-        image = download_image(
-            [youtube_output.get("Thumbnail_URL"), facebook_output.get("Thumbnail_URL"), *download_candidates()]
+        image = compress_for_platforms(
+            download_image(
+                [youtube_output.get("Thumbnail_URL"), facebook_output.get("Thumbnail_URL"), *download_candidates()]
+            )
         )
         hosted = host_public_thumbnail(settings, image)
         evidence["source_image"] = {
@@ -450,6 +479,11 @@ def main():
             "content_type": image["content_type"],
             "sha256": image["sha256"],
             "bytes": image["bytes"],
+            "original_bytes": image.get("original_bytes"),
+            "original_content_type": image.get("original_content_type"),
+            "jpeg_quality": image.get("jpeg_quality"),
+            "width": image.get("width"),
+            "height": image.get("height"),
             "public_url": hosted["public_url"],
             "r2_key": hosted["key"],
         }

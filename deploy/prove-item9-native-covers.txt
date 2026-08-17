@@ -1,2 +1,2 @@
 item9-native-cover-platform-proof
-retry-make-user-agent
+retry-compress-under-2mb
