@@ -15,3 +15,5 @@ Item 18 Pages deploy: 2026-08-18 — upload-preview self-heal: bounded image ret
 EZ path Pages deploy: 2026-08-18 — Phase 1 New content door on Production (single/multiple photos), caption Manual/None/AI, current form under Advanced. Photo-count /plan overrides work before studio-api deploy. Source commit db27daf.
 
 EZ path Pages deploy: 2026-08-18 — Auto-build platform plan after photos; per-photo Manual captions on each still. Source commit 78d7213.
+
+EZ path Pages deploy: 2026-08-18 — Drop the leftover one-caption composer box; Manual captions live under each still. Source commit b6a1c62.
