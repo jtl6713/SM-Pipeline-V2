@@ -21,3 +21,5 @@ EZ path Pages deploy: 2026-08-18 — Drop the leftover one-caption composer box;
 EZ path Pages deploy: 2026-08-18 — Drag-to-reframe platform crops in section 3. Source commit b7a5dc5. Baked JPEG gravity waits on the next studio-api deploy.
 
 EZ path Pages deploy: 2026-08-18 — Two-axis crop pan with zoom. Source commit bf6dca8.
+
+EZ path Pages deploy: 2026-08-18 — Caption box on each platform-ready still. Source commit dd0944f.
