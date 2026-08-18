@@ -2997,6 +2997,7 @@
         enabled: slide.overlay?.enabled !== false,
         text: slide.overlay?.text || "",
         caption: slide.overlay?.caption || slide.overlay?.subtitle || "",
+        subtitle: slide.overlay?.caption || slide.overlay?.subtitle || "",
         style_preset: slide.overlay?.style_preset || "Chicago Editorial",
         role: slide.overlay?.role || "overlay",
         position: slide.overlay?.position || phase6DefaultOverlayPosition(),

@@ -1,0 +1,18 @@
+{
+  "repair_item": 17,
+  "checkpoint": "studio-per-photo-title-edit-lock-render-input",
+  "proof_run": 32093128689,
+  "source_validation_run": 32093128678,
+  "source_commit": "f819e38",
+  "make_scenario_runs": 0,
+  "tiktok_drafts_created": 0,
+  "ttd_orch_pulsed": false,
+  "schema": "studio-title-edit-v1",
+  "keeps_item15_recipe": "tiktok-title-overlay-v1",
+  "passed": true,
+  "live": {
+    "studio_api_deployed": false,
+    "studio_pages_deployed": false,
+    "ttd_orch_must_stay_off": true
+  }
+}
