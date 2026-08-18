@@ -1,0 +1,23 @@
+{
+  "repair_item": 15,
+  "checkpoint": "tiktok-per-photo-title-overlay-contract",
+  "proof_run": 32092237071,
+  "make_scenario_runs": 0,
+  "tiktok_drafts_created": 0,
+  "ttd_orch_pulsed": false,
+  "recipe": "tiktok-title-overlay-v1",
+  "safe_area": {"top": 285, "right": 78, "bottom": 285, "left": 78},
+  "critical_4x5": {"width": 1080, "height": 1350},
+  "defaults": {
+    "position": "lower-third",
+    "start_fraction": 0,
+    "end_fraction": 1,
+    "duration_seconds": 4
+  },
+  "live": {
+    "studio_api_deployed": false,
+    "remotion_acceptance_render": false,
+    "ttd0_still_sends_raw_9x16_urls": true
+  },
+  "passed": true
+}
