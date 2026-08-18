@@ -261,7 +261,7 @@ def main():
         "passed": False,
     }
     permalink = str(graph.get("permalink") or airtable_permalink).lower()
-    native_feed_url = "/instagram.com/p/" in permalink and "/reel/" not in permalink
+    native_feed_url = "instagram.com/p/" in permalink and "/reel/" not in permalink
     graph_ok = (
         graph_status == 200
         and graph.get("media_type") == "CAROUSEL_ALBUM"
