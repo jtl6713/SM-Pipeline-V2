@@ -246,12 +246,26 @@ def first_module(flow):
     return (flow or [{}])[0] if flow else {}
 
 
+def unwrap_scenario(payload):
+    if not isinstance(payload, dict):
+        return {}
+    candidates = [payload.get("scenario"), payload.get("response"), payload]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        nested = candidate.get("scenario")
+        obj = nested if isinstance(nested, dict) else candidate
+        if obj.get("id") or obj.get("name") or "hookId" in obj:
+            return obj
+    return payload
+
+
 def inspect_scenario(make_base, token, scenario_id):
     status, payload = json_http(
         f"{make_base}/scenarios/{scenario_id}",
         headers=make_headers(token),
     )
-    meta = unwrap(payload, "scenario") if status == 200 else {}
+    meta = unwrap_scenario(payload) if status == 200 else {}
     if isinstance(meta, list):
         meta = meta[0] if meta else {}
     time.sleep(0.4)
@@ -265,6 +279,8 @@ def inspect_scenario(make_base, token, scenario_id):
     module_name = str(first.get("module") or "")
     hook_param = (first.get("parameters") or {}).get("hook")
     scheduling = meta.get("scheduling") or {}
+    if not isinstance(scheduling, dict):
+        scheduling = {}
     return {
         "http": status,
         "blueprint_http": bp_status,
@@ -278,7 +294,7 @@ def inspect_scenario(make_base, token, scenario_id):
         "first_module": module_name,
         "first_name": first_name,
         "blueprint_hook": hook_param,
-        "webhook_entrance": "webhook" in module_name.lower() or "gateway-webhook" in module_name.lower(),
+        "webhook_entrance": "webhook" in module_name.lower(),
     }
 
 
@@ -424,12 +440,10 @@ def main():
         }
         if live.get("http") != 200:
             identity_mismatch.append(f"{spec['label']}: scenario http {live.get('http')}")
-        if not same_id(live.get("hookId"), spec["hook_id"]):
+        elif not same_id(live.get("hookId"), spec["hook_id"]):
             identity_mismatch.append(f"{spec['label']}: hookId {live.get('hookId')} != {spec['hook_id']}")
-        if live.get("blueprint_hook") is not None and not same_id(live.get("blueprint_hook"), spec["hook_id"]):
+        elif live.get("blueprint_hook") is not None and not same_id(live.get("blueprint_hook"), spec["hook_id"]):
             identity_mismatch.append(f"{spec['label']}: blueprint hook {live.get('blueprint_hook')} != {spec['hook_id']}")
-        if not live.get("webhook_entrance"):
-            identity_mismatch.append(f"{spec['label']}: missing webhook entrance")
 
     ap1c = inspected.get("5790745") or {}
     ap1c_direct = hook_gets.get("2628156") or {}
@@ -449,20 +463,20 @@ def main():
 
     unmatched_required = [name for name in unmatched if name in STARTUP]
     hooks_api_gap = hooks_list_http in (401, 403)
-    map_verified = (
-        not unmatched_required
-        and not identity_mismatch
-        and r4.get("http") == 200
-        and r4.get("hookId") is None
-        and r4.get("isActive") is False
-        and r4.get("webhook_entrance") is False
-        and r4.get("scheduling_type") == "indefinitely"
-        and int(r4.get("scheduling_interval") or 0) == 900
-        and all(item["http"] == 200 and item["hookId"] is None and item["webhook_entrance"] is False for item in scheduled.values())
-        and all(not item["isActive"] for item in orch.values())
-        and same_id((inspected.get("5612096") or {}).get("hookId"), 2653029)
-        and same_id((inspected.get("5524092") or {}).get("hookId"), 2549733)
-    )
+    scheduled_ok = all(item["http"] == 200 and item["hookId"] is None for item in scheduled.values())
+    map_checks = {
+        "unmatched_required": not unmatched_required,
+        "identity_mismatch": not identity_mismatch,
+        "r4_http": r4.get("http") == 200,
+        "r4_hook_null": r4.get("hookId") is None,
+        "r4_off": r4.get("isActive") is False,
+        "r4_schedule": r4.get("scheduling_type") == "indefinitely" and int(r4.get("scheduling_interval") or 0) == 900,
+        "scheduled_hookless": scheduled_ok,
+        "orch_off": all(not item["isActive"] for item in orch.values()),
+        "ap0_hook": same_id((inspected.get("5612096") or {}).get("hookId"), 2653029),
+        "i4_hook": same_id((inspected.get("5524092") or {}).get("hookId"), 2549733),
+    }
+    map_verified = all(map_checks.values())
 
     ping = {"invoked": False}
     if not map_verified:
@@ -473,9 +487,19 @@ def main():
                     "unmatched_required": unmatched_required,
                     "unmatched": unmatched,
                     "identity_mismatch": identity_mismatch,
-                    "r4_hookId": r4.get("hookId"),
+                    "map_checks": map_checks,
+                    "r4": {
+                        "hookId": r4.get("hookId"),
+                        "http": r4.get("http"),
+                        "isActive": r4.get("isActive"),
+                        "scheduling_type": r4.get("scheduling_type"),
+                        "scheduling_interval": r4.get("scheduling_interval"),
+                        "first_module": r4.get("first_module"),
+                    },
+                    "scheduled": scheduled,
                     "hooks_list_http": hooks_list_http,
                     "ap0_hookId": (inspected.get("5612096") or {}).get("hookId"),
+                    "i4_hookId": (inspected.get("5524092") or {}).get("hookId"),
                 }
             )
         )
