@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.38-ez-idea-edit";
+  const BUILD_ID = "item4-0.6.39-idea-autosave";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -419,6 +419,42 @@
     }
   }
 
+  function managedIdeaDraft() {
+    return {
+      title: String($("editIdeaTitle")?.value || "").trim(),
+      summary: String($("editIdeaSummary")?.value || "").trim(),
+    };
+  }
+
+  function managedIdeaDraftDirty(idea = activeIdea) {
+    if (!idea) return false;
+    const draft = managedIdeaDraft();
+    return draft.title !== String(idea.title || "").trim()
+      || draft.summary !== String(idea.summary || "").trim();
+  }
+
+  async function saveManagedIdeaIdentity({ quiet = false, reloadList = true } = {}) {
+    const idea = activeIdea;
+    if (!idea?.id || !ideaCanModify(idea)) return idea || null;
+    if (!managedIdeaDraftDirty(idea)) return idea;
+    const draft = managedIdeaDraft();
+    if (!draft.title) {
+      const error = new Error("Idea title is required.");
+      if (!quiet) setManageMessage(error.message, "error-text");
+      throw error;
+    }
+    const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(draft),
+    });
+    if (result.record) {
+      activeIdea = result.record;
+      if (reloadList) await Promise.all([loadIdeas(), loadDashboard()]);
+      return result.record;
+    }
+    return idea;
+  }
+
   function openIdeaDrawer(idea) {
     updateIdeaDrawer(idea);
     $("ideaDrawerBackdrop").hidden = false;
@@ -428,17 +464,26 @@
     setTimeout(() => $("editIdeaTitle").focus(), 80);
   }
 
-  function closeIdeaDrawer() {
+  async function closeIdeaDrawer({ save = true } = {}) {
+    if (save && activeIdea?.id && ideaCanModify(activeIdea) && managedIdeaDraftDirty()) {
+      try {
+        await saveManagedIdeaIdentity({ quiet: true, reloadList: true });
+      } catch (error) {
+        setManageMessage(error.message || "Could not save the idea.", "error-text");
+        return false;
+      }
+    }
     $("ideaManageDrawer").classList.remove("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "true");
     $("ideaDrawerBackdrop").hidden = true;
     document.body.classList.remove("drawer-open");
     activeIdea = null;
     setManageMessage();
+    return true;
   }
 
-  $("closeIdeaDrawer").addEventListener("click", closeIdeaDrawer);
-  $("ideaDrawerBackdrop").addEventListener("click", closeIdeaDrawer);
+  $("closeIdeaDrawer").addEventListener("click", () => { closeIdeaDrawer(); });
+  $("ideaDrawerBackdrop").addEventListener("click", () => { closeIdeaDrawer(); });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && $("ideaManageDrawer").classList.contains("open")) closeIdeaDrawer();
   });
@@ -460,15 +505,8 @@
     setManageMessage();
 
     try {
-      const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          title: $("editIdeaTitle").value.trim(),
-          summary: $("editIdeaSummary").value.trim(),
-        }),
-      });
-      updateIdeaDrawer(result.record);
-      await Promise.all([loadIdeas(), loadDashboard()]);
+      const record = await saveManagedIdeaIdentity({ quiet: false, reloadList: true });
+      if (record) updateIdeaDrawer(record);
       setManageMessage("Changes saved.", "success");
     } catch (e) {
       setManageMessage(e.message, "error-text");
@@ -625,7 +663,7 @@
         method: "DELETE",
         body: JSON.stringify({}),
       });
-      closeIdeaDrawer();
+      await closeIdeaDrawer({ save: false });
       await Promise.all([loadIdeas(), loadDashboard()]);
     } catch (e) {
       setManageMessage(e.message, "error-text");
@@ -3139,7 +3177,7 @@
         method: "POST",
         body: JSON.stringify({}),
       });
-      closeIdeaDrawer();
+      await closeIdeaDrawer({ save: false });
       activeIdea = idea;
       ezEntryPath = "configure";
       switchToPage("content");
@@ -3181,8 +3219,19 @@
   }
   bindEzIntake();
 
-  $("configureProductionButton")?.addEventListener("click", () => {
-    if (activeIdea) openProductionRequestForIdea(activeIdea);
+  $("configureProductionButton")?.addEventListener("click", async () => {
+    if (!activeIdea) return;
+    const button = $("configureProductionButton");
+    try {
+      const idea = await saveManagedIdeaIdentity({ quiet: true, reloadList: true });
+      openProductionRequestForIdea(idea || activeIdea);
+    } catch (error) {
+      setManageMessage(error.message || "Could not save the idea before opening production.", "error-text");
+      if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
+        button.disabled = false;
+        button.textContent = "Configure Production";
+      }
+    }
   });
 
   $("closeProductionRequest")?.addEventListener("click", () => {
