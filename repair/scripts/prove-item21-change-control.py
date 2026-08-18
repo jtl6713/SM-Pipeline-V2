@@ -194,7 +194,7 @@ def main():
         raise SystemExit("MAKE_API_BASE_URL or MAKE_API_TOKEN missing from Pipeline Settings")
     orch = inspect_off(make_base, make_token, ORCHESTRATORS)
     scheduled = inspect_off(make_base, make_token, SCHEDULED_OFF)
-    youtube_untouched = YOUTUBE_151 in ledger_text and "Do not republish" in ledger_text
+    youtube_untouched = YOUTUBE_151 in ledger_text and "4HAhk2Lg7GE" in ledger_text and "Do not republish" in ledger_text
     evidence = {
         "repair_item": 21,
         "checkpoint": "evidence-backed-change-control-close",
