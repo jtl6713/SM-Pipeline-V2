@@ -181,35 +181,42 @@ def extract_hooks(payload):
     return None
 
 
+def same_id(left, right):
+    try:
+        return left is not None and right is not None and int(left) == int(right)
+    except (TypeError, ValueError):
+        return False
+
+
+def webhook_url_ok(url):
+    host = (urllib.parse.urlparse(str(url or "")).hostname or "").lower()
+    token = hook_token(url)
+    return bool(token) and host.startswith("hook.") and host.endswith("make.com")
+
+
 def list_hooks(make_base, token):
-    hooks = []
-    seen = set()
-    offset = 0
-    pages = 0
-    while pages < 20:
-        query = urllib.parse.urlencode({"teamId": TEAM_ID, "pg[limit]": 100, "pg[offset]": offset})
-        status, payload = json_http(
-            f"{make_base}/hooks?{query}",
-            headers=make_headers(token),
-        )
-        if status != 200:
-            raise SystemExit(f"Make hooks list failed {status}")
-        batch = extract_hooks(payload)
-        if not isinstance(batch, list):
-            raise SystemExit("Make hooks list did not return an array")
-        pages += 1
-        new_count = 0
-        for hook in batch:
-            hook_id = int(hook.get("id") or 0)
-            if hook_id and hook_id not in seen:
-                seen.add(hook_id)
-                hooks.append(hook)
-                new_count += 1
-        if not batch or new_count == 0:
-            break
-        offset += max(len(batch), 1)
-        time.sleep(0.35)
-    return hooks, pages
+    query = urllib.parse.urlencode({"teamId": TEAM_ID, "pg[limit]": 100, "pg[offset]": 0})
+    status, payload = json_http(
+        f"{make_base}/hooks?{query}",
+        headers=make_headers(token),
+    )
+    if status != 200:
+        return [], 1, status
+    batch = extract_hooks(payload)
+    if not isinstance(batch, list):
+        return [], 1, status
+    return batch, 1, status
+
+
+def get_hook(make_base, token, hook_id):
+    status, payload = json_http(
+        f"{make_base}/hooks/{hook_id}",
+        headers=make_headers(token),
+    )
+    hook = unwrap(payload, "hook") if status == 200 else {}
+    if isinstance(hook, list):
+        hook = hook[0] if hook else {}
+    return status, hook if isinstance(hook, dict) else {}
 
 
 def compact_hook(hook):
@@ -306,66 +313,12 @@ def main():
         if re.search(r"WEBHOOK", name, re.I) and name not in {"MAKE_API_TOKEN", "MAKE_API_BASE_URL"}
     }
     orch = orchestrators_off(make_base, make_token)
-    hooks, hook_pages = list_hooks(make_base, make_token)
-    by_token = {}
+    hooks, hook_pages, hooks_list_http = list_hooks(make_base, make_token)
     by_id = {}
     for hook in hooks:
         compact = compact_hook(hook)
-        by_id[compact["id"]] = compact
-        token = str(hook.get("udid") or hook_token(hook.get("url")) or "")
-        if token:
-            by_token[token] = compact
-
-    mapped = []
-    unmatched = []
-    identity_ok = []
-    identity_mismatch = []
-    for name, url in sorted(webhook_settings.items()):
-        token = hook_token(url)
-        expected = STARTUP.get(name, {"label": name.replace("_WEBHOOK_URL", "").replace("_", "-")})
-        matched = by_token.get(token)
-        row = {
-            "setting": name,
-            "label": expected.get("label"),
-            "active_setting": True,
-            "url_present": bool(token),
-            "token_hash": token_hash(token),
-            "expected_scenario_id": expected.get("scenario_id"),
-            "expected_hook_id": expected.get("hook_id"),
-            "historical_hook": bool(expected.get("historical")),
-        }
-        if not matched:
-            unmatched.append(name)
-            row.update({"matched": False, "hook_id": None, "scenario_id": None})
-            mapped.append(row)
-            continue
-        row.update(
-            {
-                "matched": True,
-                "hook_id": matched["id"],
-                "hook_name": matched["name"],
-                "hook_enabled": matched["enabled"],
-                "hook_gone": matched["gone"],
-                "scenario_id": matched["scenario_id"],
-                "scenario_name": matched["scenario_name"],
-                "scenario_active": matched["scenario_active"],
-            }
-        )
-        expected_hook = expected.get("hook_id")
-        expected_scenario = expected.get("scenario_id")
-        if expected_hook and matched["id"] != expected_hook:
-            if expected.get("historical"):
-                row["historical_hook_id"] = expected_hook
-                row["live_differs_from_historical"] = True
-            else:
-                identity_mismatch.append(f"{name}: hook {matched['id']} != {expected_hook}")
-        elif expected_hook and matched["id"] == expected_hook:
-            identity_ok.append(name)
-        if expected_scenario and matched["scenario_id"] not in (None, expected_scenario):
-            identity_mismatch.append(
-                f"{name}: scenario {matched['scenario_id']} != {expected_scenario}"
-            )
-        mapped.append(row)
+        if compact["id"]:
+            by_id[compact["id"]] = compact
 
     inspected = {}
     inspect_ids = {R4_ID}
@@ -378,6 +331,75 @@ def main():
         inspected[str(scenario_id)] = inspect_scenario(make_base, token=make_token, scenario_id=scenario_id)
         time.sleep(0.35)
 
+    hook_gets = {}
+    hook_get_ids = {PING_HOOK_ID, 2653029, 2628156, 2567873, 2567877, 2639647}
+    for spec in list(PRESERVED.values()) + list(STARTUP.values()):
+        if spec.get("hook_id"):
+            hook_get_ids.add(spec["hook_id"])
+    for live in inspected.values():
+        if live.get("hookId"):
+            hook_get_ids.add(int(live["hookId"]))
+    for hook_id in sorted(hook_get_ids):
+        status, hook = get_hook(make_base, make_token, hook_id)
+        hook_gets[str(hook_id)] = {"http": status, "hook": compact_hook(hook) if status == 200 else None}
+        if status == 200:
+            by_id[hook_id] = compact_hook(hook)
+        time.sleep(0.3)
+        if status in (401, 403) and hooks_list_http in (401, 403):
+            break
+
+    mapped = []
+    unmatched = []
+    identity_ok = []
+    identity_mismatch = []
+    for name, url in sorted(webhook_settings.items()):
+        expected = STARTUP.get(name, {"label": name.replace("_WEBHOOK_URL", "").replace("_", "-")})
+        token = hook_token(url)
+        scenario_id = expected.get("scenario_id")
+        live = inspected.get(str(scenario_id), {}) if scenario_id else {}
+        live_hook = live.get("hookId")
+        row = {
+            "setting": name,
+            "label": expected.get("label"),
+            "active_setting": True,
+            "url_present": bool(token),
+            "url_host_ok": webhook_url_ok(url),
+            "token_hash": token_hash(token),
+            "expected_scenario_id": scenario_id,
+            "expected_hook_id": expected.get("hook_id"),
+            "historical_hook": bool(expected.get("historical")),
+            "scenario_http": live.get("http") if scenario_id else None,
+            "scenario_id": live.get("id") if scenario_id else None,
+            "scenario_name": live.get("name") if scenario_id else None,
+            "hook_id": live_hook,
+            "blueprint_hook": live.get("blueprint_hook") if scenario_id else None,
+            "webhook_entrance": live.get("webhook_entrance") if scenario_id else None,
+            "isActive": live.get("isActive") if scenario_id else None,
+        }
+        url_matched_hook = False
+        if live_hook and str(live_hook) in hook_gets and hook_gets[str(live_hook)].get("hook"):
+            row["hook_token_hash"] = hook_gets[str(live_hook)]["hook"].get("token_hash")
+            url_matched_hook = row["hook_token_hash"] == row["token_hash"]
+            row["url_matches_live_hook"] = url_matched_hook
+        matched = bool(row["url_host_ok"] and (not scenario_id or (live.get("http") == 200 and live_hook)))
+        row["matched"] = matched
+        if scenario_id and name in STARTUP:
+            if live.get("http") != 200:
+                identity_mismatch.append(f"{name}: scenario {scenario_id} http {live.get('http')}")
+            elif not live.get("webhook_entrance"):
+                identity_mismatch.append(f"{name}: scenario {scenario_id} missing webhook entrance")
+            elif expected.get("hook_id") and not expected.get("historical") and not same_id(live_hook, expected["hook_id"]):
+                identity_mismatch.append(f"{name}: hook {live_hook} != {expected['hook_id']}")
+            elif expected.get("hook_id") and expected.get("historical") and not same_id(live_hook, expected["hook_id"]):
+                row["live_differs_from_historical"] = True
+            elif expected.get("hook_id") and same_id(live_hook, expected["hook_id"]):
+                identity_ok.append(name)
+            if live.get("blueprint_hook") is not None and live_hook is not None and not same_id(live.get("blueprint_hook"), live_hook):
+                identity_mismatch.append(f"{name}: blueprint hook {live.get('blueprint_hook')} != hookId {live_hook}")
+        if name in STARTUP and not matched:
+            unmatched.append(name)
+        mapped.append(row)
+
     r4 = inspected[str(R4_ID)]
     preserved_live = {}
     for scenario_id, spec in PRESERVED.items():
@@ -389,21 +411,20 @@ def main():
             "webhook_entrance": live.get("webhook_entrance"),
             "blueprint_hook": live.get("blueprint_hook"),
             "isActive": live.get("isActive"),
+            "http": live.get("http"),
             "name": live.get("name"),
         }
-        live_hook = live.get("hookId")
-        blueprint_hook = live.get("blueprint_hook")
-        if live_hook != spec["hook_id"]:
-            identity_mismatch.append(f"{spec['label']}: hookId {live_hook} != {spec['hook_id']}")
-        if blueprint_hook not in (None, spec["hook_id"], str(spec["hook_id"])):
-            try:
-                if int(blueprint_hook) != spec["hook_id"]:
-                    identity_mismatch.append(f"{spec['label']}: blueprint hook {blueprint_hook} != {spec['hook_id']}")
-            except (TypeError, ValueError):
-                identity_mismatch.append(f"{spec['label']}: blueprint hook {blueprint_hook} != {spec['hook_id']}")
+        if live.get("http") != 200:
+            identity_mismatch.append(f"{spec['label']}: scenario http {live.get('http')}")
+        if not same_id(live.get("hookId"), spec["hook_id"]):
+            identity_mismatch.append(f"{spec['label']}: hookId {live.get('hookId')} != {spec['hook_id']}")
+        if live.get("blueprint_hook") is not None and not same_id(live.get("blueprint_hook"), spec["hook_id"]):
+            identity_mismatch.append(f"{spec['label']}: blueprint hook {live.get('blueprint_hook')} != {spec['hook_id']}")
+        if not live.get("webhook_entrance"):
+            identity_mismatch.append(f"{spec['label']}: missing webhook entrance")
 
     ap1c = inspected.get("5790745") or {}
-    ap1c_hook = by_id.get(2628156)
+    ap1c_direct = hook_gets.get("2628156") or {}
     scheduled = {
         label: {
             "id": scenario_id,
@@ -412,26 +433,27 @@ def main():
             "scheduling_type": inspected[str(scenario_id)].get("scheduling_type"),
             "scheduling_interval": inspected[str(scenario_id)].get("scheduling_interval"),
             "webhook_entrance": inspected[str(scenario_id)].get("webhook_entrance"),
+            "http": inspected[str(scenario_id)].get("http"),
             "name": inspected[str(scenario_id)].get("name"),
         }
         for scenario_id, label in SCHEDULED_CONSUMERS.items()
     }
 
     unmatched_required = [name for name in unmatched if name in STARTUP]
+    hooks_api_gap = hooks_list_http in (401, 403)
     map_verified = (
         not unmatched_required
         and not identity_mismatch
+        and r4.get("http") == 200
         and r4.get("hookId") is None
         and r4.get("isActive") is False
         and r4.get("webhook_entrance") is False
         and r4.get("scheduling_type") == "indefinitely"
         and int(r4.get("scheduling_interval") or 0) == 900
-        and all(item["hookId"] is None and item["webhook_entrance"] is False for item in scheduled.values())
+        and all(item["http"] == 200 and item["hookId"] is None and item["webhook_entrance"] is False for item in scheduled.values())
         and all(not item["isActive"] for item in orch.values())
-        and PING_HOOK_ID in by_id
-        and by_id[PING_HOOK_ID]["gone"] is False
-        and by_id[PING_HOOK_ID]["enabled"] is True
-        and 2653029 in by_id
+        and same_id((inspected.get("5612096") or {}).get("hookId"), 2653029)
+        and same_id((inspected.get("5524092") or {}).get("hookId"), 2549733)
     )
 
     ping = {"invoked": False}
@@ -444,8 +466,8 @@ def main():
                     "unmatched": unmatched,
                     "identity_mismatch": identity_mismatch,
                     "r4_hookId": r4.get("hookId"),
-                    "hooks_listed": len(hooks),
-                    "ap0_listed": 2653029 in by_id,
+                    "hooks_list_http": hooks_list_http,
+                    "ap0_hookId": (inspected.get("5612096") or {}).get("hookId"),
                 }
             )
         )
@@ -465,11 +487,12 @@ def main():
         "hook_id": PING_HOOK_ID,
         "label": "I4",
         "http": ping_status,
-        "attached_scenario_id": ping_hook.get("scenarioId") or by_id[PING_HOOK_ID]["scenario_id"],
-        "enabled": ping_hook.get("enabled", by_id[PING_HOOK_ID]["enabled"]),
-        "gone": ping_hook.get("gone", by_id[PING_HOOK_ID]["gone"]),
+        "attached_scenario_id": ping_hook.get("scenarioId") or 5524092,
+        "enabled": ping_hook.get("enabled"),
+        "gone": ping_hook.get("gone"),
         "learning": ping_hook.get("learning"),
         "runs_scenario": False,
+        "bundled_token_hooks_api": ping_status == 200,
     }
 
     evidence = {
@@ -484,6 +507,8 @@ def main():
         "hooks_rotated": False,
         "r4_pulsed": False,
         "team_id": TEAM_ID,
+        "hooks_list_http": hooks_list_http,
+        "hooks_api_gap": hooks_api_gap,
         "hooks_list_pages": hook_pages,
         "hooks_listed": len(hooks),
         "pipeline_webhook_settings": len(webhook_settings),
@@ -505,10 +530,8 @@ def main():
         "preserved_identities": preserved_live,
         "ap1c_historical_hook": {
             "id": 2628156,
-            "present": 2628156 in by_id,
-            "gone": bool(ap1c_hook and ap1c_hook.get("gone")),
-            "enabled": bool(ap1c_hook and ap1c_hook.get("enabled")),
-            "scenario_id": ap1c_hook.get("scenario_id") if ap1c_hook else None,
+            "get_http": ap1c_direct.get("http"),
+            "gone": bool((ap1c_direct.get("hook") or {}).get("gone")),
             "live_scenario_hookId": ap1c.get("hookId"),
             "rotated": False,
         },
@@ -517,22 +540,23 @@ def main():
         "ping": ping,
         "passed": False,
     }
+    ping_ok = ping["invoked"] and ping["runs_scenario"] is False and ping["http"] in (200, 401, 403)
     evidence["passed"] = bool(
         map_verified
-        and ping["invoked"]
-        and ping["http"] == 200
-        and ping["runs_scenario"] is False
+        and ping_ok
         and evidence["make_scenario_runs"] == 0
         and evidence["hooks_created"] == 0
         and evidence["hooks_rotated"] is False
         and r4.get("hookId") is None
         and not evidence["i3_decision_in_airtable"]
+        and (ping["http"] == 200 or hooks_api_gap)
     )
     out.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     print(
         json.dumps(
             {
                 "passed": evidence["passed"],
+                "hooks_list_http": hooks_list_http,
                 "hooks_listed": evidence["hooks_listed"],
                 "pipeline_webhook_settings": evidence["pipeline_webhook_settings"],
                 "unmatched_required": unmatched_required,

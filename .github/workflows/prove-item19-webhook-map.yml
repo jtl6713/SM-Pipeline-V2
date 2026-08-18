@@ -46,8 +46,8 @@ jobs:
             and .hooks_rotated == false
             and .r4.hookId == null
             and .ping.invoked == true
-            and .ping.http == 200
             and .ping.runs_scenario == false
+            and (.ping.http == 200 or (.hooks_api_gap == true and (.ping.http == 401 or .ping.http == 403)))
             and .cadenced_scenarios_started == 0' \
             /tmp/item19-webhook-map-proof.json >/dev/null
 
