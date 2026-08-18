@@ -12,7 +12,8 @@
   "passed": true,
   "live": {
     "studio_api_deployed": false,
-    "studio_pages_deployed": false,
+    "studio_pages_deployed": true,
+    "studio_pages_run": 32093199968,
     "ttd_orch_must_stay_off": true
   }
 }
