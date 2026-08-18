@@ -31,3 +31,5 @@ EZ voice catalog deploy retry: 2026-08-18 — report Worker source mismatch deta
 EZ voice catalog deploy retry: 2026-08-18 — upload Worker source with Wrangler `--no-bundle` so live bytes match `apps/studio-api/worker.js`. Source commit 65a6f63.
 
 EZ voice catalog deploy retry: 2026-08-18 — accept Wrangler’s bundled Worker when the uploaded module still contains the expected Studio API source markers. Source commit 65a6f63.
+
+EZ voice catalog deploy: 2026-08-18 — list ElevenLabs voices from v2 without the query params that returned 400. Source commit 349ae93.
