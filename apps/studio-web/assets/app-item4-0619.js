@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.42-home";
+  const BUILD_ID = "item4-0.6.43-home";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
