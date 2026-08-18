@@ -1,0 +1,37 @@
+name: Prove Item 13 Facebook Native Multi-Photo Contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-item13-facebook-contract.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Assert Facebook photo-set default is native Multi-Image Post
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile repair/scripts/prove-item13-facebook-contract.py
+          export ITEM13_EVIDENCE="/tmp/item13-facebook-contract-proof.json"
+          python repair/scripts/prove-item13-facebook-contract.py
+          jq -e '.passed == true and .make_scenario_runs == 0 and .decision == "native_multi_photo_default"' \
+            /tmp/item13-facebook-contract-proof.json >/dev/null
+
+      - name: Upload Item 13 contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item13-facebook-contract-${{ github.run_id }}
+          path: /tmp/item13-facebook-contract-proof.json
+          if-no-files-found: ignore
+          retention-days: 30

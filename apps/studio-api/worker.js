@@ -207,7 +207,9 @@ export default {
           item4_output_plan: true,
           item4_audio_capability_routing: true,
           item4_instagram_default_output: "Reel",
-          item4_facebook_default_output: "Slideshow Reel",
+          item4_facebook_default_output: "Multi-Image Post",
+          item4_facebook_photo_object: "native_multi_photo",
+          item4_facebook_slideshow_reel_opt_in: true,
           item4_facebook_slideshow_voiceover_hardening: true,
           item4_ratio_authority: "platform-output-mappings",
           item4_publish_locked_until_bridge_validation: false,
@@ -1843,11 +1845,11 @@ const ITEM4_PLAN_SPECS = Object.freeze({
     }),
   }),
   Facebook: Object.freeze({
-    default_output_type: "Slideshow Reel",
+    default_output_type: "Multi-Image Post",
     options: Object.freeze({
-      "Multi-Image Post": { mapping_type: "Facebook Photo Set", format: "Photo Set", rationale: "Preserves the full photo set in an easy-to-browse Facebook post." },
-      "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Turns the same photos into a 9:16 motion/slideshow Reel." },
-      "Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Creates a 9:16 Facebook Reel from the source set." },
+      "Multi-Image Post": { mapping_type: "Facebook Photo Set", format: "Photo Set", rationale: "Default. Publishes a native Facebook multi-photo so people can swipe and inspect each still. Not a Reel." },
+      "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Optional. Renders the same photos as a 9:16 Facebook Reel for Reels distribution." },
+      "Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Creates a 9:16 Facebook Reel from shot video, not from a photo set." },
       "Single Image": { mapping_type: "Facebook Post", format: "Feed Post", rationale: "Use one hero photo as a Facebook post." },
     }),
   }),
@@ -4574,6 +4576,7 @@ const STUDIO_OUTPUT_ROUTE_SPECS = Object.freeze({
     pipeline_family: "Video",
     content_type: "Vertical Short Video",
     proven_mapping: "Facebook Reel",
+    facebook_object: "reel",
   },
   "Facebook::Story": {
     pipeline_family: "Story",
@@ -4589,11 +4592,13 @@ const STUDIO_OUTPUT_ROUTE_SPECS = Object.freeze({
     pipeline_family: "Carousel / Photo Set",
     content_type: "Photo Set",
     proven_mapping: "Facebook Photo Set",
+    facebook_object: "native_multi_photo",
   },
   "Facebook::Slideshow Reel": {
     pipeline_family: "Slideshow Video",
     content_type: "Vertical Short Video",
     proven_mapping: "Facebook Reel",
+    facebook_object: "reel",
   },
 
   "TikTok::Video Draft": {
