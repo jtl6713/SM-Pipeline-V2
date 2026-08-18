@@ -1,0 +1,69 @@
+{
+  "repair_item": 9,
+  "checkpoint": "native-cover-platform-proof",
+  "timestamp_utc": "2026-08-18T00:01:43Z",
+  "status": "PASS_PLATFORM_COVER_ATTACH",
+  "github_run_id": 32082841725,
+  "github_run_url": "https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32082841725",
+  "head_sha": "c1cfae3eef686921c0020374f0fb657b18610e44",
+  "make_scenario_runs": 0,
+  "cadenced_scenarios_started": 0,
+  "public_posts_created": 0,
+  "orchestrators_left_off": [
+    "5864632",
+    "5813561",
+    "5823581",
+    "5791537",
+    "5806668"
+  ],
+  "source_image": {
+    "public_url": "https://media.chicagoshining.com/publish/thumbnail-item9-native-cover-proof-v2.jpg",
+    "r2_key": "publish/thumbnail-item9-native-cover-proof-v2.jpg",
+    "content_type": "image/jpeg",
+    "bytes": 367074,
+    "width": 1080,
+    "height": 1920,
+    "sha256": "2d4d77f05df6de62176cfa9b18f03fdd8502753de4e918232b2629266b4c33c3",
+    "note": "Drive PNG was 4.1 MB and exceeds YouTube's 2 MB thumbnails.set limit; the hosted JPEG is the attachable cover."
+  },
+  "youtube": {
+    "output_id": 151,
+    "record_id": "recXaaWhSZmQ9oOsw",
+    "video_id": "4HAhk2Lg7GE",
+    "privacy": "private",
+    "attached": true,
+    "set_kind": "youtube#thumbnailSetResponse",
+    "airtable_status": "Uploaded",
+    "custom_thumbnail_host": "i9.ytimg.com"
+  },
+  "facebook": {
+    "output_id": 149,
+    "record_id": "rec5TIGeAHkc7fzyG",
+    "video_id": "1579989503541819",
+    "attached": true,
+    "attach_method": "multipart-source-file",
+    "preferred_before_id": "1696730381388886",
+    "preferred_after_id": "1581545820052854",
+    "preferred_changed": true,
+    "url_query_rejected": "Graph (#100) The parameter source is required",
+    "form_source_url_rejected": true
+  },
+  "instagram": {
+    "output_id": 148,
+    "record_id": "recccXkpGTx6O3Sa2",
+    "media_id": "18623426680004630",
+    "permalink": "https://www.instagram.com/reel/DcFmRZkkTZl/",
+    "new_reel_created": false,
+    "reattach_unsupported": true,
+    "live_create_contract": {
+      "scenario_id": 5862882,
+      "cover_url": "{{1.Thumbnail_URL}}",
+      "thumb_offset": "{{if(1.Thumbnail_URL; emptystring; 1)}}"
+    }
+  },
+  "not_claimed": [
+    "No new Instagram Reel was published; Instagram covers are create-time only",
+    "FBS4 Make module 70 still cannot attach by URL query; Graph accepted only a multipart source file",
+    "YouTube OAuth durability remains Item 11"
+  ]
+}
