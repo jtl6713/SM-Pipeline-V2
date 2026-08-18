@@ -48,7 +48,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.23-ez-autoplan-captions";
+  const BUILD_ID = "item4-0.6.24-ez-caption-on-photo";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -777,10 +777,7 @@
   async function saveEzCaptionsToRequest() {
     if (!activeProductionRequest?.id || !ezManualCaptionsEnabled()) return;
     const captions = collectEzManualCaptions();
-    const text = captions.map((value) => String(value || "").trim()).filter(Boolean).join("\n\n");
-    const captionBox = $("ezCaption");
-    const single = String(captionBox?.value || "").trim();
-    const requested = ezPhotoSetActive() ? text : single;
+    const requested = captions.map((value) => String(value || "").trim()).filter(Boolean).join("\n\n");
     if ($("prRequestedCaption")) $("prRequestedCaption").value = requested;
     if ($("prCaptionMode")) $("prCaptionMode").value = "Force exact";
     const notes = $("prProductionNotes");
@@ -797,13 +794,9 @@
 
   function renderEzCaptionUi() {
     const mode = ezCaptionMode();
-    const single = !ezPhotoSetActive();
-    const field = $("ezCaptionField");
-    if (field) field.hidden = mode !== "manual" || !single;
     const hint = $("ezCaptionHint");
     if (hint) {
-      if (mode === "manual" && !single) hint.textContent = "Write a caption under each photo. Studio saves as you type.";
-      else if (mode === "manual") hint.textContent = "Write one caption for this photo.";
+      if (mode === "manual") hint.textContent = "Write a caption under each photo. Studio saves as you type.";
       else if (mode === "none") hint.textContent = "No AI text and no overlay titles.";
       else hint.textContent = "Studio writes captions. Switch to Manual to caption each photo yourself.";
     }
@@ -893,7 +886,6 @@
     ezStagedFiles = files;
     const captionMode = ezCaptionMode();
     const captions = collectEzManualCaptions();
-    const captionText = String($("ezCaption")?.value || "").trim();
     if (ezStarting) return;
     ezStarting = true;
     const continueBtn = $("ezContinue");
@@ -903,7 +895,7 @@
       item4PlanOverrides = {};
       const planned = applyEzPlanOverrides(files.length, ezSelectedPlatforms());
       syncItem4PlatformsFromEz();
-      let captionFields = apiHelpers.ezCaptionFields(captionMode, { caption: captionText, captions });
+      let captionFields = apiHelpers.ezCaptionFields(captionMode, { captions });
       if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
         captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
       }
