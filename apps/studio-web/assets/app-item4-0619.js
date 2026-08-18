@@ -55,7 +55,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.30-ez-card-caption";
+  const BUILD_ID = "item4-0.6.31-ez-caption-save";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -113,8 +113,12 @@
         ...(fetchOptions.headers || {}),
       },
     });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || body.ok === false) throw new Error(body.error || `Request failed (${response.status})`);
+    const text = await response.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
+    if (!response.ok || body.ok === false) {
+      throw new Error(body.error || body.message || `Request failed (${response.status})`);
+    }
     return body;
   }
 
@@ -899,6 +903,7 @@
           box.hidden = mode !== "manual";
           if (mode === "manual" && !ezCaptionsLocked()) box.focus();
         }
+        if (mode === "manual") return;
         queueEzCaptionSave();
       });
     });
@@ -982,28 +987,104 @@
   function queueEzCaptionSave() {
     clearTimeout(ezCaptionSaveTimer);
     ezCaptionSaveTimer = setTimeout(() => {
-      saveEzCaptionsToRequest().catch((error) => setEzMessage(error.message, "error-text"));
+      saveEzCaptionsToRequest().catch((error) => {
+        const message = String(error?.message || "Could not save the caption.");
+        if (/enter a caption/i.test(message)) return;
+        setEzMessage(
+          /request failed \(5\d\d\)/i.test(message)
+            ? "Couldn't save that caption yet. Your photos are still here — try typing again in a moment."
+            : message,
+          "error-text"
+        );
+      });
     }, 700);
   }
 
+  function ezControlValue(id, fallback = "") {
+    const value = $(id)?.value;
+    if (value === null || value === undefined || String(value).trim() === "") return fallback;
+    return value;
+  }
+
+  function ezCaptionSavePayload(captionFields) {
+    const record = activeProductionRequest || {};
+    const requestedPlatforms = selectedRequestPlatforms();
+    const recordPlatforms = Array.isArray(record.platforms) ? record.platforms : [];
+    const payload = {
+      content_type: ezControlValue("prContentType", record.content_type || "Photo Set"),
+      platforms: requestedPlatforms.length ? requestedPlatforms : (recordPlatforms.length ? recordPlatforms : item4SelectedPlatforms()),
+      voiceover_mode: ezControlValue("prVoiceover", record.voiceover_mode || "No"),
+      background_music_mode: ezControlValue("prMusicMode", record.background_music_mode || "No"),
+      thumbnail_mode: ezControlValue("prThumbnail", record.thumbnail_mode || "Use Profile Default"),
+      video_duration_seconds: ezControlValue("prVideoDuration", record.video_duration_seconds ?? 30),
+      video_clip_count_mode: ezControlValue("prVideoClipMode", record.video_clip_count_mode || "AI decides"),
+      video_clip_count_exact: ezControlValue("prVideoClipExact", record.video_clip_count_exact ?? ""),
+      video_clip_count_min: ezControlValue("prVideoClipMin", record.video_clip_count_min ?? ""),
+      video_clip_count_max: ezControlValue("prVideoClipMax", record.video_clip_count_max ?? ""),
+      carousel_slide_count_mode: ezControlValue("prCarouselSlideMode", record.carousel_slide_count_mode || "Exact"),
+      carousel_slide_count_exact: ezControlValue("prCarouselSlideExact", record.carousel_slide_count_exact ?? ""),
+      carousel_slide_count_min: ezControlValue("prCarouselSlideMin", record.carousel_slide_count_min ?? ""),
+      carousel_slide_count_max: ezControlValue("prCarouselSlideMax", record.carousel_slide_count_max ?? ""),
+      carousel_image_mode: ezControlValue("prCarouselImageMode", record.carousel_image_mode || "Manual Upload"),
+      voiceover_tail_seconds: ezControlValue("prVoiceoverTail", record.voiceover_tail_seconds ?? 2),
+      selected_music_asset_id: ezControlValue(
+        "prMusicAsset",
+        Array.isArray(record.selected_music_asset_links) ? (record.selected_music_asset_links[0] || "") : ""
+      ),
+      title_mode: captionFields.title_mode || "AI decides",
+      requested_title: captionFields.requested_title || "",
+      caption_mode: captionFields.caption_mode || "AI decides",
+      requested_caption: captionFields.requested_caption || "",
+      script_mode: captionFields.script_mode || record.script_mode || "AI decides",
+      requested_script: captionFields.requested_script || record.requested_script || "",
+      production_notes: captionFields.production_notes || record.production_notes || "",
+    };
+    if (payload.video_clip_count_mode === "Exact" && String(payload.video_clip_count_exact).trim() === "") {
+      payload.video_clip_count_mode = "AI decides";
+      payload.video_clip_count_exact = "";
+    }
+    if (payload.carousel_slide_count_mode === "Exact" && String(payload.carousel_slide_count_exact).trim() === "") {
+      payload.carousel_slide_count_exact = item4Workspace?.assets?.length || ezStagedFiles.length || 2;
+    }
+    if (payload.caption_mode === "Leave blank" || captionFields.mode === "none") {
+      Object.assign(payload, captionFields.live_fallback || {
+        title_mode: "Force exact",
+        requested_title: " ",
+        caption_mode: "Force exact",
+        requested_caption: " ",
+        script_mode: "AI decides",
+        requested_script: "",
+      });
+      payload.production_notes = captionFields.production_notes || payload.production_notes;
+    }
+    return payload;
+  }
+
   async function saveEzCaptionsToRequest() {
-    if (!activeProductionRequest?.id) return;
+    if (!activeProductionRequest?.id || ezStarting) return;
     const mode = ezCaptionMode();
     const captions = collectEzManualCaptions();
+    if (mode === "manual" && !captions.some((value) => String(value || "").trim())) return;
     const fields = ezPlanApi()?.ezCaptionFields(mode, { captions }) || {};
-    if ($("prRequestedCaption")) $("prRequestedCaption").value = fields.requested_caption || "";
-    if ($("prCaptionMode")) $("prCaptionMode").value = fields.caption_mode || "AI decides";
-    if ($("prTitleMode") && fields.title_mode) $("prTitleMode").value = fields.title_mode;
-    if ($("prRequestedTitle") && fields.requested_title !== undefined) $("prRequestedTitle").value = fields.requested_title || "";
-    const notes = $("prProductionNotes");
-    if (notes && ezPlanApi()) {
-      const parsed = ezPlanApi().parseEzOriginNotes(notes.value) || {};
-      notes.value = ezPlanApi().ezOriginNotes({
-        inputKind: parsed.inputKind || ezIntakeKind || "multiple-photos",
-        captionMode: mode,
-      });
+    const productionNotes = ezPlanApi()?.ezOriginNotes({
+      inputKind: ezIntakeKind || "multiple-photos",
+      captionMode: mode,
+    }) || "";
+    const payload = ezCaptionSavePayload({ ...fields, production_notes: productionNotes });
+    if ($("prRequestedCaption")) $("prRequestedCaption").value = payload.requested_caption || "";
+    if ($("prCaptionMode") && Array.from($("prCaptionMode").options).some((option) => option.value === payload.caption_mode)) {
+      $("prCaptionMode").value = payload.caption_mode;
     }
-    await saveActiveProductionRequest({ quiet: true });
+    if ($("prTitleMode") && Array.from($("prTitleMode").options).some((option) => option.value === payload.title_mode)) {
+      $("prTitleMode").value = payload.title_mode;
+    }
+    if ($("prRequestedTitle")) $("prRequestedTitle").value = payload.requested_title || "";
+    if ($("prProductionNotes")) $("prProductionNotes").value = productionNotes;
+    const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+    if (result.record) activeProductionRequest = result.record;
   }
 
   function renderEzCaptionUi() {
@@ -1159,7 +1240,11 @@
       await uploadItem4Files(files);
       renderEzPhotoStrip();
     } catch (error) {
-      setEzMessage(error.message, "error-text");
+      const saved = Boolean(activeProductionRequest?.id);
+      const message = saved
+        ? `Your photos are still here, but Studio could not finish saving (${error.message}). You can keep editing captions.`
+        : error.message;
+      setEzMessage(message, "error-text");
       setRequestMessage(error.message, "error-text");
     } finally {
       ezStarting = false;
@@ -2791,6 +2876,20 @@
       requested_script: $("prRequestedScript").value.trim(),
       production_notes: $("prProductionNotes").value.trim(),
     };
+    if (payload.video_clip_count_mode === "Exact" && !String(payload.video_clip_count_exact || "").trim()) {
+      payload.video_clip_count_mode = activeProductionRequest?.video_clip_count_mode || "AI decides";
+      payload.video_clip_count_exact = activeProductionRequest?.video_clip_count_exact ?? "";
+    }
+    if (payload.carousel_slide_count_mode === "Exact" && !String(payload.carousel_slide_count_exact || "").trim()) {
+      payload.carousel_slide_count_exact = activeProductionRequest?.carousel_slide_count_exact
+        || item4Workspace?.assets?.length
+        || ezStagedFiles.length
+        || "";
+    }
+    if (!payload.content_type) payload.content_type = activeProductionRequest?.content_type || "";
+    if (!payload.platforms.length && Array.isArray(activeProductionRequest?.platforms)) {
+      payload.platforms = activeProductionRequest.platforms;
+    }
     const parsed = ezPlanApi()?.parseEzOriginNotes(payload.production_notes);
     if (parsed?.captionMode === "none") {
       const none = ezPlanApi().ezCaptionFields("none");
