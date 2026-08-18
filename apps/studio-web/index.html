@@ -5,7 +5,7 @@
  <meta name="viewport" content="width=device-width,initial-scale=1">
  <meta name="robots" content="noindex,nofollow,noarchive">
  <title>ChicagoShining Studio</title>
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.21-item18-upload-preview">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.22-ez-path">
 </head>
 <body>
  <header class="topbar">
@@ -29,7 +29,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.21</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.22</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -64,9 +64,70 @@
 
  <section id="page-content" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Create once · publish everywhere</span><h1>Production workspace</h1><p>Upload your master media once, choose the platforms, and let Studio prepare the right format and ratio for each destination.</p></div>
+ <div><span class="eyebrow">Create once · publish everywhere</span><h1>Production workspace</h1><p>Start from photos you already have, or keep using Ideas when the asset still needs to be shot. Studio writes the same production records either way.</p></div>
  <button class="secondary-button" data-refresh="content">Refresh</button>
  </div>
+
+ <section class="panel ez-intake" id="ezIntake">
+ <div class="panel-heading">
+ <div>
+ <span class="eyebrow">New content</span>
+ <h2>Start from assets</h2>
+ <p>Pick the kind of media you already have. Ideas remain the demand-first door when you still need assets shot or added.</p>
+ </div>
+ </div>
+ <div class="ez-card-grid" id="ezCardGrid">
+ <button type="button" class="ez-card" data-ez-input="single-photo">
+ <strong>Single photo</strong>
+ <span>One still. Instagram 4:5 feed, Facebook image, TikTok photo draft. YouTube stays off.</span>
+ </button>
+ <button type="button" class="ez-card" data-ez-input="multiple-photos">
+ <strong>Multiple photos</strong>
+ <span>Native Instagram carousel, Facebook album, TikTok photo draft, YouTube Short.</span>
+ </button>
+ <button type="button" class="ez-card" data-ez-input="video-clips" disabled>
+ <strong>Video clips</strong>
+ <span>Coming later. Clip assembly and render are not part of this photo door.</span>
+ <em>Coming later</em>
+ </button>
+ <button type="button" class="ez-card" data-ez-input="finished-video" disabled>
+ <strong>Finished video</strong>
+ <span>Coming later. Pass-through publishing is the next video step after photos.</span>
+ <em>Coming later</em>
+ </button>
+ </div>
+ <div class="ez-composer" id="ezComposer" hidden>
+ <div class="ez-composer-grid">
+ <label class="form-field"><span>Title <em>optional</em></span><input id="ezTitle" maxlength="160" placeholder="Defaults from the first filename"></label>
+ <fieldset class="ez-caption-fieldset">
+ <legend>Caption</legend>
+ <label><input type="radio" name="ezCaptionMode" value="manual"> Manual</label>
+ <label><input type="radio" name="ezCaptionMode" value="none"> None</label>
+ <label><input type="radio" name="ezCaptionMode" value="ai" checked> AI</label>
+ </fieldset>
+ <fieldset class="ez-platform-fieldset">
+ <legend>Platforms</legend>
+ <label><input type="checkbox" data-ez-platform value="Instagram" checked> Instagram</label>
+ <label><input type="checkbox" data-ez-platform value="Facebook" checked> Facebook</label>
+ <label><input type="checkbox" data-ez-platform value="TikTok" checked> TikTok</label>
+ <label id="ezYouTubeLabel"><input type="checkbox" data-ez-platform value="YouTube" id="ezYouTube"> YouTube</label>
+ </fieldset>
+ </label class="form-field" id="ezCaptionField" hidden>
+ <span id="ezCaptionLabel">Caption</span>
+ <textarea id="ezCaption" rows="3" maxlength="10000" placeholder="One caption for this photo"></textarea>
+ </label>
+ <div class="ez-per-photo-captions" id="ezPerPhotoCaptions" hidden></div>
+ </div>
+ <div class="item4-upload-zone ez-upload-zone" id="ezUploadZone" tabindex="0" role="button" aria-label="Upload photos for New content">
+ <input id="ezMediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" hidden>
+ <div class="item4-upload-icon">＋</div>
+ <div><strong id="ezUploadTitle">Drop photos here or choose files</strong><span id="ezUploadHint">Studio creates the Idea Candidate and Production Request underneath. No email until final pre-publish.</span></div>
+ <button type="button" class="secondary-button" id="ezChooseMedia">Choose photos</button>
+ </div>
+ <button type="button" class="primary-button" id="ezContinue" hidden>Continue with these photos</button>
+ <div class="form-message" id="ezMessage" aria-live="polite"></div>
+ </div>
+ </section>
 
  <section class="panel production-request-shell" id="productionRequestWorkspace" hidden>
  <div class="panel-heading production-request-heading">
@@ -124,6 +185,10 @@
  <div class="item4-variant-error error-text" id="item4VariantError" hidden></div>
  <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty">Prepared 4:5, 9:16, 1:1, or 16:9 versions will appear here only when required by the selected outputs.</div></div>
  </div>
+
+ <details class="ez-advanced" id="ezAdvancedOptions">
+ <summary>Advanced options</summary>
+ <p class="ez-advanced-note">The current Production Request form stays here. EZ only sets defaults. Facebook Slideshow Reel is opt-in in this matrix, not an EZ default.</p>
 
  <div class="request-section">
  <div class="request-section-heading"><h3>4. Master creative defaults</h3><p>Configure shared defaults once. Requested platform outputs inherit these values unless overridden.</p></div>
@@ -426,6 +491,7 @@
  <div class="request-section-heading"><h3>9. Production notes</h3><p>Any additional direction for assets, pacing, style, or execution.</p></div>
  <label class="form-field"><textarea id="prProductionNotes" rows="5" maxlength="10000"></textarea></label>
  </div>
+ </details>
 
  <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
  <div class="form-message" id="productionPromotionCompatibility">
@@ -701,6 +767,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.21-item18-upload-preview"></script>
+ <script src="/assets/ez-plan.js?v=0.6.22-ez-path"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.22-ez-path"></script>
 </body>
 </html>

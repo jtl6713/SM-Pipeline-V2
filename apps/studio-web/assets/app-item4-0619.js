@@ -11,6 +11,10 @@
   let item4Workspace = null;
   let item4BridgePreflight = null;
   let item4PlanOverrides = {};
+  let ezIntakeKind = null;
+  let ezStagedFiles = [];
+  let ezStarting = false;
+  let ezAutoPlanAfterUpload = false;
   let item4Uploading = false;
   let item4PreparingVariants = false;
   let item4VariantPollTimer = null;
@@ -41,7 +45,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.21-upload-preview-self-heal";
+  const BUILD_ID = "item4-0.6.22-ez-path";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -620,6 +624,278 @@
     loadPage(page);
   }
 
+  function ezPlanApi() {
+    return window.ChicagoShiningEzPlan || null;
+  }
+
+  function setEzMessage(text = "", type = "") {
+    const target = $("ezMessage");
+    if (!target) return;
+    target.textContent = text;
+    target.className = `form-message${type ? ` ${type}` : ""}`;
+  }
+
+  function ezCaptionMode() {
+    return document.querySelector('input[name="ezCaptionMode"]:checked')?.value || "ai";
+  }
+
+  function usingEzPlatforms() {
+    if (!ezIntakeKind) return false;
+    if (ezStarting) return true;
+    return ezIsOriginRecord();
+  }
+
+  function ezSelectedPlatforms() {
+    if (!usingEzPlatforms()) return item4SelectedPlatforms();
+    const boxes = Array.from(document.querySelectorAll("[data-ez-platform]"));
+    if (!boxes.length) return item4SelectedPlatforms();
+    return boxes.filter((input) => input.checked && !input.disabled).map((input) => input.value);
+  }
+
+  function syncItem4PlatformsFromEz() {
+    if (!usingEzPlatforms()) return;
+    const selected = new Set(ezSelectedPlatforms());
+    document.querySelectorAll("[data-item4-platform]").forEach((input) => {
+      input.checked = selected.has(input.value);
+    });
+  }
+
+  function applyEzPlanOverrides(photoCount, platforms) {
+    const planned = ezPlanApi()?.ezPlanFromPhotoCount({ photoCount, platforms }) || { overrides: {}, platforms: platforms || [] };
+    item4PlanOverrides = { ...planned.overrides, ...item4PlanOverrides };
+    return planned;
+  }
+
+  function ezIsOriginRecord(record = activeProductionRequest) {
+    return Boolean(ezPlanApi()?.parseEzOriginNotes(record?.production_notes));
+  }
+
+  function setEzAdvancedOpen(open) {
+    const details = $("ezAdvancedOptions");
+    if (details) details.open = Boolean(open);
+  }
+
+  function renderEzPerPhotoCaptions() {
+    const host = $("ezPerPhotoCaptions");
+    if (!host) return;
+    const show = ezIntakeKind === "multiple-photos" && ezCaptionMode() === "manual" && ezStagedFiles.length > 0;
+    host.hidden = !show;
+    if (!show) {
+      host.innerHTML = "";
+      return;
+    }
+    host.innerHTML = ezStagedFiles.map((file, index) => `
+      <label class="form-field">
+        <span>Caption for ${escapeHtml(file.name || `Photo ${index + 1}`)}</span>
+        <textarea data-ez-photo-caption="${index}" rows="2" maxlength="2000" placeholder="Caption for this image"></textarea>
+      </label>
+    `).join("");
+  }
+
+  function collectEzManualCaptions() {
+    if (ezIntakeKind === "multiple-photos") {
+      return Array.from(document.querySelectorAll("[data-ez-photo-caption]")).map((input) => input.value);
+    }
+    return [];
+  }
+
+  function renderEzCaptionUi() {
+    const mode = ezCaptionMode();
+    const single = ezIntakeKind !== "multiple-photos";
+    const field = $("ezCaptionField");
+    if (field) field.hidden = mode !== "manual" || !single;
+    renderEzPerPhotoCaptions();
+    const continueBtn = $("ezContinue");
+    if (continueBtn) {
+      const needsContinue = mode === "manual" && ezStagedFiles.length > 0;
+      continueBtn.hidden = !needsContinue;
+    }
+  }
+
+  function syncEzYouTubeAvailability(resetChecked = true) {
+    const youtube = $("ezYouTube");
+    const single = ezIntakeKind !== "multiple-photos";
+    if (!youtube) return;
+    youtube.disabled = single;
+    if (single) youtube.checked = false;
+    else if (resetChecked) youtube.checked = true;
+  }
+
+  function selectEzInput(kind, { resetPlatforms = true } = {}) {
+    if (kind === "video-clips" || kind === "finished-video") return;
+    ezIntakeKind = kind === "multiple-photos" ? "multiple-photos" : "single-photo";
+    if (resetPlatforms) ezStagedFiles = [];
+    document.querySelectorAll("[data-ez-input]").forEach((button) => {
+      button.classList.toggle("selected", button.dataset.ezInput === ezIntakeKind);
+    });
+    const composer = $("ezComposer");
+    if (composer) composer.hidden = false;
+    const input = $("ezMediaInput");
+    if (input) input.multiple = ezIntakeKind === "multiple-photos";
+    const title = $("ezUploadTitle");
+    const hint = $("ezUploadHint");
+    if (title) title.textContent = ezIntakeKind === "multiple-photos" ? "Drop several photos here" : "Drop one photo here";
+    if (hint) hint.textContent = ezIntakeKind === "multiple-photos"
+      ? "Native carousel / album / TikTok draft, then a YouTube Short. No email until final pre-publish."
+      : "Instagram 4:5, Facebook image, TikTok photo draft. YouTube stays off. No email until final pre-publish.";
+    syncEzYouTubeAvailability(resetPlatforms);
+    if (resetPlatforms) syncItem4PlatformsFromEz();
+    renderEzCaptionUi();
+    if (resetPlatforms) setEzMessage();
+  }
+
+  function titleFromFiles(files) {
+    const typed = String($("ezTitle")?.value || "").trim();
+    if (typed) return typed.slice(0, 160);
+    const name = String(files[0]?.name || "New photo").replace(/\.[^.]+$/, "").trim();
+    return (name || "New photo").slice(0, 160);
+  }
+
+  async function createEzProductionRequest(ideaId, payload) {
+    try {
+      return await api("/api/production-requests", { method: "POST", body: JSON.stringify({ idea_record_id: ideaId, ...payload }) });
+    } catch (error) {
+      if (payload.caption_mode !== "Leave blank") throw error;
+      const fallback = ezPlanApi()?.ezCaptionFields("none")?.live_fallback || {
+        title_mode: "Force exact",
+        requested_title: " ",
+        caption_mode: "Force exact",
+        requested_caption: " ",
+      };
+      return await api("/api/production-requests", {
+        method: "POST",
+        body: JSON.stringify({ idea_record_id: ideaId, ...payload, ...fallback }),
+      });
+    }
+  }
+
+  async function startEzFromFiles(fileList) {
+    const apiHelpers = ezPlanApi();
+    if (!apiHelpers) throw new Error("EZ plan helper did not load");
+    const supported = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
+    if (!supported.length) {
+      setEzMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
+      return;
+    }
+    if (ezIntakeKind === "single-photo" && supported.length > 1) {
+      setEzMessage("Single photo uses the first image. Choose Multiple photos for a set.", "");
+    }
+    const files = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
+    if (ezIntakeKind === "multiple-photos" && files.length < 2) {
+      setEzMessage("Drop at least two photos, or choose Single photo.", "error-text");
+      return;
+    }
+    ezStagedFiles = files;
+    const captionMode = ezCaptionMode();
+    const captions = collectEzManualCaptions();
+    const captionText = String($("ezCaption")?.value || "").trim();
+    if (captionMode === "manual") {
+      const ready = ezIntakeKind === "single-photo" ? Boolean(captionText) : captions.some((value) => String(value || "").trim());
+      if (!ready) {
+        renderEzCaptionUi();
+        setEzMessage(ezIntakeKind === "single-photo"
+          ? "Enter a caption, then continue."
+          : "Enter a caption for at least one photo, then continue.", "error-text");
+        return;
+      }
+    }
+    if (ezStarting) return;
+    ezStarting = true;
+    const continueBtn = $("ezContinue");
+    if (continueBtn) continueBtn.disabled = true;
+    setEzMessage("Creating the Idea Candidate and Production Request…");
+    try {
+      item4PlanOverrides = {};
+      const planned = applyEzPlanOverrides(files.length, ezSelectedPlatforms());
+      syncItem4PlatformsFromEz();
+      const captionFields = apiHelpers.ezCaptionFields(captionMode, { caption: captionText, captions });
+      const idea = await api("/api/ideas", {
+        method: "POST",
+        body: JSON.stringify({
+          title: titleFromFiles(files),
+          summary: apiHelpers.ezIdeaSummary({ inputKind: ezIntakeKind }),
+        }),
+      });
+      activeIdea = idea.record;
+      const requestPayload = {
+        content_type: planned.master_content_type,
+        platforms: planned.platforms,
+        voiceover_mode: "No",
+        background_music_mode: "No",
+        thumbnail_mode: "Use Profile Default",
+        title_mode: captionFields.title_mode,
+        requested_title: captionFields.requested_title || "",
+        caption_mode: captionFields.caption_mode,
+        requested_caption: captionFields.requested_caption || "",
+        script_mode: captionFields.script_mode || "AI decides",
+        requested_script: captionFields.requested_script || "",
+        carousel_image_mode: "Manual Upload",
+        carousel_slide_count_mode: "Exact",
+        carousel_slide_count_exact: files.length,
+        production_notes: apiHelpers.ezOriginNotes({ inputKind: ezIntakeKind, captionMode }),
+      };
+      await ensureProductionRequestMusic();
+      const created = await createEzProductionRequest(activeIdea.id, requestPayload);
+      setEzAdvancedOpen(false);
+      populateProductionRequestForm(created.record);
+      await loadProductionRequestOutputs(created.record);
+      await loadItem4Workspace(created.record);
+      await loadProductionRequests();
+      ezAutoPlanAfterUpload = true;
+      setEzMessage("Uploading originals…");
+      await uploadItem4Files(files);
+    } catch (error) {
+      setEzMessage(error.message, "error-text");
+      setRequestMessage(error.message, "error-text");
+    } finally {
+      ezStarting = false;
+      if (continueBtn) continueBtn.disabled = false;
+    }
+  }
+
+  function bindEzIntake() {
+    document.querySelectorAll("[data-ez-input]").forEach((button) => {
+      button.addEventListener("click", () => selectEzInput(button.dataset.ezInput));
+    });
+    document.querySelectorAll('input[name="ezCaptionMode"]').forEach((input) => {
+      input.addEventListener("change", renderEzCaptionUi);
+    });
+    document.querySelectorAll("[data-ez-platform]").forEach((input) => {
+      input.addEventListener("change", syncItem4PlatformsFromEz);
+    });
+    $("ezChooseMedia")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      $("ezMediaInput")?.click();
+    });
+    $("ezMediaInput")?.addEventListener("change", (event) => {
+      startEzFromFiles(event.target.files);
+      event.target.value = "";
+    });
+    $("ezContinue")?.addEventListener("click", () => startEzFromFiles(ezStagedFiles));
+    const drop = $("ezUploadZone");
+    if (!drop) return;
+    drop.addEventListener("click", (event) => {
+      if (event.target.closest("button, input")) return;
+      $("ezMediaInput")?.click();
+    });
+    ["dragenter", "dragover"].forEach((type) => drop.addEventListener(type, (event) => {
+      event.preventDefault();
+      drop.classList.add("dragging");
+    }));
+    ["dragleave", "drop"].forEach((type) => drop.addEventListener(type, (event) => {
+      event.preventDefault();
+      drop.classList.remove("dragging");
+    }));
+    drop.addEventListener("drop", (event) => startEzFromFiles(event.dataTransfer?.files));
+    drop.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        $("ezMediaInput")?.click();
+      }
+    });
+  }
+
   function item4SelectedPlatforms() {
     return Array.from(document.querySelectorAll("[data-item4-platform]:checked")).map(el => el.value);
   }
@@ -1184,7 +1460,14 @@
         setRequestMessage("Master photos uploaded. Studio is saving them to Google Drive and preparing previews; this page updates automatically.", "success");
         startItem4MasterPolling();
       }
+      if (ezAutoPlanAfterUpload && item4Workspace?.assets?.length) {
+        ezAutoPlanAfterUpload = false;
+        setEzMessage("Building the photo-count platform plan…");
+        await buildItem4Plan();
+        setEzMessage("Platform plan ready. Review below, or open Advanced options.", "success");
+      }
     } catch (error) {
+      ezAutoPlanAfterUpload = false;
       if (progress) progress.textContent = `Upload failed: ${error.message}`;
       setRequestMessage(error.message, "error-text");
     } finally {
@@ -1205,7 +1488,11 @@
 
   async function buildItem4Plan() {
     if (!activeProductionRequest?.id) return;
-    const platforms = item4SelectedPlatforms();
+    syncItem4PlatformsFromEz();
+    const selected = ezSelectedPlatforms().length ? ezSelectedPlatforms() : item4SelectedPlatforms();
+    const count = item4Workspace?.assets?.length || 0;
+    const planned = applyEzPlanOverrides(count, selected);
+    const platforms = planned.platforms.length ? planned.platforms : selected;
     if (!platforms.length) { setRequestMessage("Choose at least one platform.", "error-text"); return; }
     const button = $("item4BuildPlan");
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
@@ -1541,6 +1828,14 @@
   }
 
   function recommendedOutputFor(platform) {
+    const count = item4Workspace?.assets?.length || (usingEzPlatforms() ? ezStagedFiles.length : 0);
+    if (count > 0 || usingEzPlatforms()) {
+      const planned = ezPlanApi()?.ezPlanFromPhotoCount({
+        photoCount: count,
+        platforms: [platform],
+      });
+      if (planned?.overrides?.[platform]) return planned.overrides[platform];
+    }
     const contentType = $("prContentType")?.value || "";
     return OUTPUT_DEFAULTS_BY_CONTENT_TYPE[contentType]?.[platform] || "";
   }
@@ -1728,6 +2023,20 @@
     syncAllStructureControls();
     setProductionRequestControlState(record);
     setRequestMessage();
+    const parsed = ezPlanApi()?.parseEzOriginNotes(record.production_notes);
+    if (parsed?.inputKind === "multiple-photos" || parsed?.inputKind === "single-photo") {
+      selectEzInput(parsed.inputKind, { resetPlatforms: false });
+      document.querySelectorAll("[data-ez-platform]").forEach((input) => {
+        input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
+      });
+      syncEzYouTubeAvailability(false);
+      if (parsed.captionMode) {
+        const radio = document.querySelector(`input[name="ezCaptionMode"][value="${parsed.captionMode}"]`);
+        if (radio) radio.checked = true;
+        renderEzCaptionUi();
+      }
+    }
+    setEzAdvancedOpen(!parsed);
   }
 
   async function openProductionRequestForIdea(idea) {
@@ -1752,6 +2061,7 @@
       await loadProductionRequestOutputs(result.record);
       await loadItem4Workspace(result.record);
       await loadProductionRequests();
+      setEzAdvancedOpen(true);
       setRequestMessage(result.created ? "Production Request draft created." : "Existing Production Request draft opened.", "success");
     } catch (e) {
       setManageMessage(e.message, "error-text");
@@ -1782,6 +2092,7 @@
     item4Drop.addEventListener("drop", event => uploadItem4Files(event.dataTransfer?.files));
     item4Drop.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); $("item4MediaInput")?.click(); } });
   }
+  bindEzIntake();
 
   $("configureProductionButton")?.addEventListener("click", () => {
     if (activeIdea) openProductionRequestForIdea(activeIdea);
@@ -1806,7 +2117,7 @@
   function productionRequestPayload() {
     const requestedPlatforms = selectedRequestPlatforms();
     const planPlatforms = item4SelectedPlatforms();
-    return {
+    const payload = {
       content_type: $("prContentType").value,
       platforms: requestedPlatforms.length ? requestedPlatforms : planPlatforms,
       voiceover_mode: $("prVoiceover").value,
@@ -1832,6 +2143,18 @@
       requested_script: $("prRequestedScript").value.trim(),
       production_notes: $("prProductionNotes").value.trim(),
     };
+    const parsed = ezPlanApi()?.parseEzOriginNotes(payload.production_notes);
+    if (parsed?.captionMode === "none") {
+      const none = ezPlanApi().ezCaptionFields("none");
+      Object.assign(payload, none.live_fallback || {
+        title_mode: "Force exact",
+        requested_title: " ",
+        caption_mode: "Force exact",
+        requested_caption: " ",
+      });
+      payload.production_notes = $("prProductionNotes").value.trim();
+    }
+    return payload;
   }
 
   async function saveActiveProductionRequest({ quiet = false } = {}) {
@@ -2023,7 +2346,7 @@
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Open an Idea Candidate and choose Configure Production.</span></div>';
+        target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Start from New content above, or open an Idea Candidate and choose Configure Production.</span></div>';
         return;
       }
       target.innerHTML = `<table class="data-table"><thead><tr><th>Request</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th></th></tr></thead><tbody>${records.map(r => {

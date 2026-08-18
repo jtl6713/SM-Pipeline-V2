@@ -1445,7 +1445,7 @@ const PRO_OUTPUT_TYPES_BY_PLATFORM = Object.freeze({
 const PRO_OUTPUT_OVERRIDE_TRISTATE = new Set(["Inherit", "Use Profile Default", "Yes", "No"]);
 const PRO_OUTPUT_COUNT_MODES = new Set(["Inherit", "AI decides", "Exact", "Target range"]);
 const PRO_OUTPUT_CAROUSEL_IMAGE_MODES = new Set(["Inherit", "Make AI Generated", "Manual Upload"]);
-const PRO_OUTPUT_TEXT_MODES = new Set(["Inherit", "AI decides", "Force exact", "AI improve"]);
+const PRO_OUTPUT_TEXT_MODES = new Set(["Inherit", "AI decides", "Force exact", "AI improve", "Leave blank"]);
 const PRO_OUTPUT_PUBLISH_MODES = new Set(["Inherit", "Auto Publish", "Manual Review", "Do Not Publish"]);
 
 function productionRequestIdFromOutputsPath(url) {
@@ -1845,7 +1845,7 @@ const ITEM4_RATIO_SPECS = Object.freeze({
 
 const ITEM4_PLAN_SPECS = Object.freeze({
   Instagram: Object.freeze({
-    default_output_type: "Reel",
+    default_output_type: "Carousel",
     options: Object.freeze({
       "Carousel": { mapping_type: "Instagram Carousel", format: "Carousel", rationale: "Five photos are strongest as a swipeable 4:5 Instagram carousel." },
       "Reel": { mapping_type: "Instagram Reel", format: "Vertical Short Video", rationale: "Turns the photo set into a vertical motion sequence." },
@@ -2651,10 +2651,23 @@ async function item4MappingIndex(env) {
   return index;
 }
 
-function item4PlanChoice(platform, requestedOutputType) {
+function item4PhotoCountKind(count) {
+  return Math.max(0, Number(count) || 0) <= 1 ? "single-photo" : "multiple-photos";
+}
+
+function item4DefaultOutputType(platform, photoCount) {
+  const n = Math.max(0, Number(photoCount) || 0);
+  const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Multi-Photo" });
+  const multiple = Object.freeze({ Instagram: "Carousel", Facebook: "Multi-Image Post", TikTok: "Multi-Photo", YouTube: "Short" });
+  const map = n <= 1 ? single : multiple;
+  return map[platform] || null;
+}
+
+function item4PlanChoice(platform, requestedOutputType, photoCount) {
   const spec = ITEM4_PLAN_SPECS[platform];
   if (!spec) throw new HttpError(400, `Item 4 does not support ${platform}`);
-  const outputType = String(requestedOutputType || spec.default_output_type).trim();
+  const fallback = item4DefaultOutputType(platform, photoCount) || spec.default_output_type;
+  const outputType = String(requestedOutputType || fallback).trim();
   const selected = spec.options[outputType];
   if (!selected) throw new HttpError(400, `${platform} output type ${outputType} is not supported by the Item 4 planner`);
   return { output_type: outputType, ...selected, available_output_types: Object.keys(spec.options) };
@@ -2712,7 +2725,10 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const items=[];
   let needsReview=false;
   for (const platform of platforms) {
-    const chosen=item4PlanChoice(platform, overrides[platform]);
+    const requested=overrides[platform];
+    const fallback=item4DefaultOutputType(platform, assets.length);
+    if (!requested && !fallback) continue;
+    const chosen=item4PlanChoice(platform, requested, assets.length);
     const mapping=mappingIndex.get(`${platform}::${chosen.mapping_type}`) || null;
     const aspectRatio=mapping?String(f(mapping,"Aspect_Ratio")||"").trim():null;
     if (!aspectRatio) needsReview=true;
@@ -2723,7 +2739,7 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
       source_asset_count:assets.length, requires_variant_review:!aspectRatio,
     });
   }
-  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:assets.length,items};
+  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:assets.length,photo_count_kind:item4PhotoCountKind(assets.length),items};
 
   if (items.some(item =>
     item.platform === "Facebook" &&
@@ -2735,7 +2751,7 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   await item4SyncPlanOutputs(env,record,items);
   const maxCount=Math.min(15,Math.max(1,assets.length));
   record=await item4UpdateRequestState(env,recordId,{
-    Master_Content_Type:"Photo Set", Target_Platforms:platforms,
+    Master_Content_Type:assets.length<=1?"Feed Post":"Photo Set", Target_Platforms:items.map(item=>item.platform),
     Carousel_Image_Mode:"Manual Upload", Carousel_Slide_Count_Mode:"Exact", Carousel_Slide_Count_Exact:assets.length,
     Carousel_Slide_Count_Min:null, Carousel_Slide_Count_Max:null,
     Video_Clip_Count_Mode:"Exact", Video_Clip_Count_Exact:maxCount, Video_Clip_Count_Min:null, Video_Clip_Count_Max:null,
@@ -3567,7 +3583,7 @@ const PR_CONTENT_TYPES = new Set([
 const PR_PLATFORMS = new Set(["Instagram","Facebook","TikTok","YouTube","Threads","X","Lemon8"]);
 const PR_TRISTATE = new Set(["Use Profile Default","Yes","No"]);
 const PR_COUNT_MODES = new Set(["AI decides","Exact","Target range"]);
-const PR_TEXT_MODES = new Set(["AI decides","Force exact","AI improve"]);
+const PR_TEXT_MODES = new Set(["AI decides","Force exact","AI improve","Leave blank"]);
 const PR_CAROUSEL_IMAGE_MODES = new Set(["Make AI Generated","Manual Upload"]);
 
 function mapProductionRequest(record) {
@@ -3749,9 +3765,9 @@ async function cleanProductionRequestPayload(payload, env) {
   const captionMode = normalizeChoice(payload?.caption_mode, PR_TEXT_MODES, "AI decides", "Caption mode");
   const scriptMode = normalizeChoice(payload?.script_mode, PR_TEXT_MODES, "AI decides", "Script mode");
 
-  const requestedTitle = String(payload?.requested_title || "").trim();
-  const requestedCaption = String(payload?.requested_caption || "").trim();
-  const requestedScript = String(payload?.requested_script || "").trim();
+  let requestedTitle = String(payload?.requested_title || "").trim();
+  let requestedCaption = String(payload?.requested_caption || "").trim();
+  let requestedScript = String(payload?.requested_script || "").trim();
   const productionNotes = String(payload?.production_notes || "").trim();
 
   if (requestedTitle.length > 500) throw new HttpError(400, "Requested title must be 500 characters or fewer");
@@ -3762,6 +3778,9 @@ async function cleanProductionRequestPayload(payload, env) {
   if (titleMode === "Force exact" && !requestedTitle) throw new HttpError(400, "Enter a title when Title mode is Force exact");
   if (captionMode === "Force exact" && !requestedCaption) throw new HttpError(400, "Enter a caption when Caption mode is Force exact");
   if (scriptMode === "Force exact" && !requestedScript) throw new HttpError(400, "Enter a script when Script mode is Force exact");
+  if (titleMode === "Leave blank") requestedTitle = "";
+  if (captionMode === "Leave blank") requestedCaption = "";
+  if (scriptMode === "Leave blank") requestedScript = "";
 
   const selectedMusicAssetId = String(payload?.selected_music_asset_id || "").trim() || null;
   if (selectedMusicAssetId) await validateMusicAsset(env, selectedMusicAssetId);
@@ -4360,8 +4379,8 @@ function productionRequestCompatibilityIssues(record) {
     ["Caption", captionMode],
     ["Script", scriptMode],
   ]) {
-    if (!["AI decides", "Force exact", "AI improve"].includes(mode)) {
-      issues.push(`${label} control must be AI decides, Force exact, or AI improve.`);
+    if (!["AI decides", "Force exact", "AI improve", "Leave blank"].includes(mode)) {
+      issues.push(`${label} control must be AI decides, Force exact, AI improve, or Leave blank.`);
     }
   }
 
