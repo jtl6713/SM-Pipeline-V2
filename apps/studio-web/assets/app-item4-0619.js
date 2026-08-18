@@ -25,6 +25,7 @@
   let ezCaptionSaveTimer = null;
   let ezPinnedExtraOutputs = [];
   let ezConfigSaveTimer = null;
+  let ezIdeaIdentitySaveTimer = null;
   let item4Uploading = false;
   let item4PreparingVariants = false;
   let item4VariantPollTimer = null;
@@ -57,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.36-ez-configure";
+  const BUILD_ID = "item4-0.6.37-ez-idea-title";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -758,6 +759,7 @@
     if (composer) composer.hidden = false;
     syncEzStructureCounts();
     loadEzAudioOptions().catch(() => {});
+    setTimeout(() => $("ezIdeaTitle")?.focus(), 0);
   }
 
   function enterEzIdeaPath() {
@@ -1345,8 +1347,46 @@
     if (resetPlatforms) setEzMessage();
   }
 
+  function ezIdeaTitleValue() {
+    return String($("ezIdeaTitle")?.value || $("ezTitle")?.value || "").trim();
+  }
+
+  function ezIdeaSummaryValue(inputKind = ezIntakeKind) {
+    const user = String($("ezIdeaSummary")?.value || "").trim();
+    const origin = ezPlanApi()?.ezIdeaSummary({ inputKind }) || "";
+    return user ? `${user}\n\n${origin}` : origin;
+  }
+
+  function syncEzIdeaIdentityFields() {
+    const title = ezIdeaTitleValue();
+    if ($("ezTitle")) $("ezTitle").value = title.slice(0, 160);
+  }
+
+  async function saveEzIdeaIdentity() {
+    if (!activeIdea?.id) return;
+    syncEzIdeaIdentityFields();
+    const title = ezIdeaTitleValue() || activeIdea.title || "New photo";
+    const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: title.slice(0, 160),
+        summary: ezIdeaSummaryValue(),
+      }),
+    });
+    if (result.record) activeIdea = result.record;
+  }
+
+  function queueEzIdeaIdentitySave() {
+    syncEzIdeaIdentityFields();
+    if (!activeIdea?.id) return;
+    clearTimeout(ezIdeaIdentitySaveTimer);
+    ezIdeaIdentitySaveTimer = setTimeout(() => {
+      saveEzIdeaIdentity().catch(() => {});
+    }, 500);
+  }
+
   function titleFromFiles(files) {
-    const typed = String($("ezTitle")?.value || "").trim();
+    const typed = ezIdeaTitleValue();
     if (typed) return typed.slice(0, 160);
     const name = String(files[0]?.name || "New photo").replace(/\.[^.]+$/, "").trim();
     return (name || "New photo").slice(0, 160);
@@ -1414,10 +1454,13 @@
         method: "POST",
         body: JSON.stringify({
           title: titleFromFiles(files),
-          summary: apiHelpers.ezIdeaSummary({ inputKind: ezIntakeKind }),
+          summary: ezIdeaSummaryValue(ezIntakeKind),
         }),
       });
       activeIdea = idea.record;
+      if ($("ezIdeaTitle") && !String($("ezIdeaTitle").value || "").trim()) {
+        $("ezIdeaTitle").value = activeIdea.title || "";
+      }
       const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
       const requestPayload = {
         content_type: planned.master_content_type,
@@ -1481,10 +1524,19 @@
       ezCaptionDefault = "ai";
       ezCaptionModes.clear();
       ezCaptionDrafts.clear();
+      if ($("ezIdeaTitle")) $("ezIdeaTitle").value = "";
+      if ($("ezIdeaSummary")) $("ezIdeaSummary").value = "";
+      if ($("ezTitle")) $("ezTitle").value = "";
       document.querySelectorAll("[data-ez-input]").forEach((button) => button.classList.remove("selected"));
       renderEzPhotoStrip();
       setEzMessage();
       showEzFork();
+    });
+    ["ezIdeaTitle", "ezIdeaSummary"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener("input", queueEzIdeaIdentitySave);
+      el.addEventListener("change", queueEzIdeaIdentitySave);
     });
     ["ezAudioVoiceover", "ezAudioMusic", "ezAudioTrack", "ezAudioVoice"].forEach((id) => {
       $(id)?.addEventListener("change", () => {

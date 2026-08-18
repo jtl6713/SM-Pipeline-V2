@@ -5,7 +5,7 @@
  <meta name="viewport" content="width=device-width,initial-scale=1">
  <meta name="robots" content="noindex,nofollow,noarchive">
  <title>ChicagoShining Studio</title>
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.36-ez-configure">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.37-ez-idea-title">
 </head>
 <body>
  <header class="topbar">
@@ -29,7 +29,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.36</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.37</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -88,8 +88,16 @@
  <div>
  <button type="button" class="text-button" id="ezStartOver">← Start over</button>
  <h2>Start with content</h2>
- <p>Pick the media you have, then drop it in.</p>
+ <p>Name it, pick the media you have, then drop it in.</p>
  </div>
+ </div>
+ <div class="ez-idea-fields">
+ <label class="form-field"><span>Title</span>
+ <input id="ezIdeaTitle" maxlength="160" placeholder="e.g. Chicago Theatre marquee at dusk">
+ </label>
+ <label class="form-field"><span>Idea description <em>optional</em></span>
+ <textarea id="ezIdeaSummary" maxlength="5000" rows="3" placeholder="What should this content be about?"></textarea>
+ </label>
  </div>
  <div class="ez-card-grid" id="ezCardGrid">
  <button type="button" class="ez-card" data-ez-input="single-photo">
@@ -153,15 +161,15 @@
  </div>
  </details>
  <details class="ez-option-group" id="ezTitleGroup">
- <summary>Title</summary>
+ <summary>Post title</summary>
  <div class="ez-option-group-body">
  <label class="form-field"><span>Title control</span>
  <select id="ezTitleMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select>
  </label>
- <label class="form-field"><span>Title</span>
+ <label class="form-field"><span>Post title</span>
  <input id="ezRequestedTitle" maxlength="500" placeholder="Optional unless forcing exact wording">
  </label>
- <em class="ez-option-hint">Without a title, Studio uses the first photo filename.</em>
+ <em class="ez-option-hint">This is the on-post title. The idea name at the top is what shows in Ideas.</em>
  </div>
  </details>
  <details class="ez-option-group" id="ezScriptGroup">
@@ -899,7 +907,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.36-ez-configure"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.36-ez-configure"></script>
+ <script src="/assets/ez-plan.js?v=0.6.37-ez-idea-title"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.37-ez-idea-title"></script>
 </body>
 </html>
