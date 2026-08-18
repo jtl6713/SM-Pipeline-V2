@@ -23,3 +23,5 @@ EZ path Pages deploy: 2026-08-18 — Drag-to-reframe platform crops in section 3
 EZ path Pages deploy: 2026-08-18 — Two-axis crop pan with zoom. Source commit bf6dca8.
 
 EZ path Pages deploy: 2026-08-18 — Caption box on each platform-ready still. Source commit dd0944f.
+
+EZ path Pages deploy: 2026-08-18 — Keep platform-ready captions editable on drafts. Source commit ca5bb96.
