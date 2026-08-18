@@ -1,0 +1,9 @@
+Item 21 repair scope and change-control proof trigger.
+
+Verify ledger items 1-20 are Complete or Deferred with evidence.
+Do not start, stop, or run Make scenarios.
+Do not pulse IG-PUB-ORCH, FB-ORCH, YT-ORCH, AP-CAR-ORCH, TTD-ORCH, R4, or R5.
+Do not republish YouTube Output 151.
+Do not rotate webhooks. Do not switch studio-api source traffic.
+
+Initialized: 2026-08-18

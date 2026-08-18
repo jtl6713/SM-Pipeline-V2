@@ -5,7 +5,7 @@ Checkpoint commit before this update: `d685045`
 
 ## Operating gate
 
-Items 1–6 are now **complete and verified**. The safe republish/replace gate is cleared and **Item 7 is authorized as the next repair/acceptance step**. Every future test must remain exact-record/exact-output addressed, bounded by the repair controls, and leave cost-driving scenarios OFF unless a specific bounded pulse is required.
+The 21-item repair program is **closed**. Items 1–9 and 11–20 are complete with deterministic evidence. Item 10 is explicitly deferred (dashboard reviews replace in-pipeline email except final publish approval). Cadenced Make orchestrators remain **OFF** until an operator explicitly starts them. Exact `record_id` + `Test_Run_ID` isolation, preserved webhook identities, and the Studio API 10-core + optional ELEVENLABS binding contract are standing invariants. Do not republish YouTube Output 151.
 
 ## Full 21-item checklist
 

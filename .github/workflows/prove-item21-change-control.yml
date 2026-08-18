@@ -1,0 +1,69 @@
+name: Prove Item 21 Change Control
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-item21-change-control.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Prove Items 1-20 are terminal and cadenced Make stays OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python -m py_compile repair/scripts/prove-item21-change-control.py
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/key.pem \
+            -in /tmp/pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/pat.txt
+          export AIRTABLE_PAT="$(tr -d '\r\n' </tmp/pat.txt)"
+          export ITEM21_EVIDENCE="/tmp/item21-change-control-proof.json"
+          python repair/scripts/prove-item21-change-control.py
+          jq -e '.passed == true
+            and .make_scenario_runs == 0
+            and .cadenced_scenarios_started == 0
+            and .youtube_151_republished == false
+            and .hooks_rotated == false
+            and .item_10_deferred == true
+            and (.open_items_1_20 | length) == 0
+            and .orchestrators["IG-PUB-ORCH"].isActive == false
+            and .orchestrators["FB-ORCH"].isActive == false
+            and .orchestrators["YT-ORCH"].isActive == false
+            and .orchestrators["AP-CAR-ORCH"].isActive == false
+            and .orchestrators["TTD-ORCH"].isActive == false
+            and .scheduled_consumers.R4.isActive == false' \
+            /tmp/item21-change-control-proof.json >/dev/null
+
+      - name: Upload sanitized Item 21 change-control evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item21-change-control-${{ github.run_id }}
+          path: /tmp/item21-change-control-proof.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Destroy transient credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/item21-change-control-proof.json
