@@ -632,8 +632,10 @@ input, select, textarea, button {
 .text-button{border:0;background:transparent;color:var(--teal-dark);font:inherit;font-weight:800;padding:0;cursor:pointer;width:fit-content}
 .text-button:hover{text-decoration:underline}
 .ez-intake-heading{align-items:flex-start}
-.ez-idea-fields{display:grid;gap:12px;padding:0 20px 14px}
+.ez-idea-fields{display:grid;gap:12px;padding:12px 20px 14px;position:sticky;top:72px;z-index:6;background:#fff;border-bottom:1px solid var(--line)}
 .ez-idea-fields textarea{min-height:72px;resize:vertical}
+.ez-idea-fields input,.ez-idea-fields textarea{pointer-events:auto;cursor:text;background:#fff}
+.ez-option-hint.error-text{color:var(--red)}
 .ez-photo-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
 .ez-photo-card{border:1px solid #d9e6e3;border-radius:12px;background:#fff;overflow:hidden;display:grid}
 .ez-photo-card img,.ez-photo-card .item4-heic-placeholder{width:100%;aspect-ratio:4/5;object-fit:cover;background:#eef3f2;display:block}

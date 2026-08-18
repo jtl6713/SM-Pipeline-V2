@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.37-ez-idea-title";
+  const BUILD_ID = "item4-0.6.38-ez-idea-edit";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -758,6 +758,7 @@
     if (intake) intake.hidden = false;
     if (composer) composer.hidden = false;
     syncEzStructureCounts();
+    syncEzIdeaIdentityFields();
     loadEzAudioOptions().catch(() => {});
     setTimeout(() => $("ezIdeaTitle")?.focus(), 0);
   }
@@ -1351,6 +1352,15 @@
     return String($("ezIdeaTitle")?.value || $("ezTitle")?.value || "").trim();
   }
 
+  function userIdeaSummaryFromStored(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return "";
+    const origin = ezPlanApi()?.ezIdeaSummary({ inputKind: ezIntakeKind }) || "";
+    if (origin && text === origin) return "";
+    if (origin && text.endsWith(origin)) return text.slice(0, -origin.length).replace(/\s+$/, "");
+    return text.replace(/\n*Created from New content[^\n]*\.?/g, "").trim();
+  }
+
   function ezIdeaSummaryValue(inputKind = ezIntakeKind) {
     const user = String($("ezIdeaSummary")?.value || "").trim();
     const origin = ezPlanApi()?.ezIdeaSummary({ inputKind }) || "";
@@ -1360,12 +1370,28 @@
   function syncEzIdeaIdentityFields() {
     const title = ezIdeaTitleValue();
     if ($("ezTitle")) $("ezTitle").value = title.slice(0, 160);
+    const heading = $("productionRequestTitle");
+    if (heading && title) heading.textContent = title;
+    ["ezIdeaTitle", "ezIdeaSummary"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.readOnly = false;
+      el.disabled = false;
+    });
+  }
+
+  function setEzIdeaIdentityHint(text = "You can edit these anytime. Photos do not lock the name.", type = "") {
+    const hint = $("ezIdeaIdentityHint");
+    if (!hint) return;
+    hint.textContent = text;
+    hint.className = `ez-option-hint${type ? ` ${type}` : ""}`;
   }
 
   async function saveEzIdeaIdentity() {
-    if (!activeIdea?.id) return;
     syncEzIdeaIdentityFields();
+    if (!activeIdea?.id) return;
     const title = ezIdeaTitleValue() || activeIdea.title || "New photo";
+    setEzIdeaIdentityHint("Saving…");
     const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -1374,15 +1400,22 @@
       }),
     });
     if (result.record) activeIdea = result.record;
+    setEzIdeaIdentityHint("Saved. You can keep editing.");
   }
 
   function queueEzIdeaIdentitySave() {
     syncEzIdeaIdentityFields();
-    if (!activeIdea?.id) return;
+    if (!activeIdea?.id) {
+      setEzIdeaIdentityHint("This name is saved when the photos land.");
+      return;
+    }
     clearTimeout(ezIdeaIdentitySaveTimer);
+    setEzIdeaIdentityHint("Saving…");
     ezIdeaIdentitySaveTimer = setTimeout(() => {
-      saveEzIdeaIdentity().catch(() => {});
-    }, 500);
+      saveEzIdeaIdentity().catch((error) => {
+        setEzIdeaIdentityHint(error?.message || "Could not save the title yet.", "error-text");
+      });
+    }, 400);
   }
 
   function titleFromFiles(files) {
@@ -1461,6 +1494,11 @@
       if ($("ezIdeaTitle") && !String($("ezIdeaTitle").value || "").trim()) {
         $("ezIdeaTitle").value = activeIdea.title || "";
       }
+      if ($("ezIdeaSummary") && !String($("ezIdeaSummary").value || "").trim()) {
+        $("ezIdeaSummary").value = userIdeaSummaryFromStored(activeIdea.summary);
+      }
+      syncEzIdeaIdentityFields();
+      setEzIdeaIdentityHint("Saved. You can keep editing.");
       const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
       const requestPayload = {
         content_type: planned.master_content_type,
@@ -1527,6 +1565,7 @@
       if ($("ezIdeaTitle")) $("ezIdeaTitle").value = "";
       if ($("ezIdeaSummary")) $("ezIdeaSummary").value = "";
       if ($("ezTitle")) $("ezTitle").value = "";
+      setEzIdeaIdentityHint("You can edit these anytime. Photos do not lock the name.");
       document.querySelectorAll("[data-ez-input]").forEach((button) => button.classList.remove("selected"));
       renderEzPhotoStrip();
       setEzMessage();
@@ -2953,10 +2992,11 @@
 
     if (form) {
       form.querySelectorAll("input, select, textarea").forEach((control) => {
-        if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode]")) return;
+        if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode], #ezIdeaTitle, #ezIdeaSummary")) return;
         control.disabled = !editable;
       });
     }
+    syncEzIdeaIdentityFields();
     syncEzCaptionLock();
 
     const save = $("saveProductionRequest");
