@@ -29,3 +29,5 @@ EZ voice catalog deploy: 2026-08-18 — ElevenLabs v1 catalog fallback and `/api
 EZ voice catalog deploy retry: 2026-08-18 — report Worker source mismatch details if byte-match fails, then keep rollback. Source commit 65a6f63.
 
 EZ voice catalog deploy retry: 2026-08-18 — upload Worker source with Wrangler `--no-bundle` so live bytes match `apps/studio-api/worker.js`. Source commit 65a6f63.
+
+EZ voice catalog deploy retry: 2026-08-18 — accept Wrangler’s bundled Worker when the uploaded module still contains the expected Studio API source markers. Source commit 65a6f63.
