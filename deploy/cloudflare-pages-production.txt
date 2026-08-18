@@ -51,3 +51,5 @@ EZ path Pages deploy: 2026-08-18 — Ideas Manage saves title and summary on clo
 EZ path Pages deploy: 2026-08-18 — Home tab for Idea vs Content; Production keeps in-progress work. UI 0.6.40. Source commit 1b2c619.
 
 EZ path Pages deploy: 2026-08-18 — Home dusk hero with Chicago photos, teal/gold glass, 3D start tiles. UI 0.6.41. Source commit e7f43a3.
+
+EZ path Pages deploy: 2026-08-18 — Home wordmark Chicago Shining plus QA publishing hook. UI 0.6.42. Source commit 0e8511e.
