@@ -55,7 +55,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.33-ez-audio";
+  const BUILD_ID = "item4-0.6.34-ez-audio";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {

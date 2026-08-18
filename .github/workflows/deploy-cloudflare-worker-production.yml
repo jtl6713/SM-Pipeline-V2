@@ -176,7 +176,7 @@ jobs:
           else:
               markers = [
                   b'phase6_voice_preview_proxy',
-                  b'0.10.9-elevenlabs-voice-preview',
+                  b'0.10.10-elevenlabs-v2-catalog',
                   b'phase6VoicePreview',
                   b'chicagoshining-studio-api',
                   b'repair_item7_rr1_canonical_maxrecords_v9',

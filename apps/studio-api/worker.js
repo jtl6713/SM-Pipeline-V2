@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.9-elevenlabs-voice-preview",
+          version: "0.10.10-elevenlabs-v2-catalog",
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
@@ -7801,6 +7801,19 @@ function mapElevenLabsVoice(voice) {
   };
 }
 
+function phase6ElevenLabsErrorDetail(status, body) {
+  const detail = body?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail.trim().slice(0, 240);
+  if (Array.isArray(detail) && detail[0]?.msg) return String(detail[0].msg).trim().slice(0, 240);
+  if (detail && typeof detail === "object") {
+    const message = detail.message || detail.msg || detail.status;
+    if (message) return String(message).trim().slice(0, 240);
+  }
+  const message = body?.message || body?.error;
+  if (typeof message === "string" && message.trim()) return message.trim().slice(0, 240);
+  return `ElevenLabs request failed (${status})`;
+}
+
 async function phase6FetchElevenLabsJson(env, path) {
   const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
   if (!apiKey) return { configured: false, ok: false, status: 0, body: null, error: null };
@@ -7816,7 +7829,7 @@ async function phase6FetchElevenLabsJson(env, path) {
     ok: response.ok,
     status: response.status,
     body,
-    error: response.ok ? null : `ElevenLabs request failed (${response.status})`,
+    error: response.ok ? null : phase6ElevenLabsErrorDetail(response.status, body),
   };
 }
 
@@ -7828,37 +7841,43 @@ async function phase6LiveElevenLabsVoices(env) {
   const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
   if (!apiKey) return { configured: false, voices: [], error: null, source: null };
   try {
-    const v1Legacy = await phase6FetchElevenLabsJson(env, "/v1/voices?show_legacy=true");
-    let v1Voices = v1Legacy.ok ? phase6CollectElevenLabsVoices(v1Legacy.body) : [];
-    let lastError = v1Legacy.error;
-    if (!v1Voices.length) {
-      const v1 = await phase6FetchElevenLabsJson(env, "/v1/voices");
-      v1Voices = v1.ok ? phase6CollectElevenLabsVoices(v1.body) : [];
-      lastError = v1.error || lastError;
-    }
-    if (v1Voices.length) {
-      return { configured: true, voices: v1Voices, error: null, source: "elevenlabs-v1" };
-    }
-
     const voices = [];
     let nextPageToken = null;
     let pages = 0;
-    lastError = lastError || "ElevenLabs v1 returned no voices";
+    let lastError = null;
     do {
-      const query = new URLSearchParams({ page_size: "100", include_total_count: "false" });
+      const query = new URLSearchParams();
+      if (pages === 0 && !nextPageToken && lastError) {
+        // Retry with ElevenLabs defaults if page_size was rejected.
+      } else {
+        query.set("page_size", "100");
+      }
       if (nextPageToken) query.set("next_page_token", nextPageToken);
-      const page = await phase6FetchElevenLabsJson(env, `/v2/voices?${query.toString()}`);
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+      const page = await phase6FetchElevenLabsJson(env, `/v2/voices${suffix}`);
       if (!page.ok) {
-        lastError = page.error || lastError;
+        lastError = page.error;
+        if (pages === 0 && !nextPageToken && query.has("page_size")) continue;
         break;
       }
+      lastError = null;
       voices.push(...phase6CollectElevenLabsVoices(page.body));
       nextPageToken = page.body?.has_more ? phase6Text(page.body?.next_page_token, 500) : null;
       pages += 1;
-    } while (nextPageToken && pages < 5 && voices.length < 500);
+    } while ((nextPageToken && pages < 8 && voices.length < 800) || (pages === 0 && lastError && voices.length === 0));
 
-    if (voices.length) return { configured: true, voices, error: lastError, source: "elevenlabs-v2" };
-    return { configured: true, voices: [], error: lastError || "ElevenLabs returned no voices", source: null };
+    if (voices.length) return { configured: true, voices, error: null, source: "elevenlabs-v2" };
+
+    const v1 = await phase6FetchElevenLabsJson(env, "/v1/voices");
+    const v1Voices = v1.ok ? phase6CollectElevenLabsVoices(v1.body) : [];
+    if (v1Voices.length) return { configured: true, voices: v1Voices, error: null, source: "elevenlabs-v1" };
+
+    return {
+      configured: true,
+      voices: [],
+      error: lastError || v1.error || "ElevenLabs returned no voices",
+      source: null,
+    };
   } catch (error) {
     console.warn("ElevenLabs live voice catalog unavailable", error);
     return { configured: true, voices: [], error: error instanceof Error ? error.message : "ElevenLabs voice catalog unavailable", source: null };
