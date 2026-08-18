@@ -39,3 +39,5 @@ EZ path Pages deploy: 2026-08-18 — Voice Preview uses the ElevenLabs sample pr
 EZ path Pages deploy: 2026-08-18 — Voice and Music track sit side by side under Voiceover/Music; UI 0.6.34. Source commit 349ae93.
 
 EZ path Pages deploy: 2026-08-18 — Collapsed Title, Script, Cover, Structure, Notes, and Outputs on New content; UI 0.6.35. Source commit 2ebb267.
+
+EZ path Pages deploy: 2026-08-18 — Ideas > Configure Production opens the existing request, not the start fork. UI 0.6.36. Source commit 438f1a9.
