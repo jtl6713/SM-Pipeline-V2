@@ -14,6 +14,7 @@ export default {
       }
 
       const isMusicPreviewRoute = /^\/api\/music\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
+      const isVoicePreviewRoute = /^\/api\/voices\/[A-Za-z0-9_-]+\/preview$/.test(url.pathname);
       const isMediaAssetPreviewRoute = /^\/api\/media-assets\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
       const isIdeaRecordRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
@@ -63,7 +64,7 @@ export default {
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
-        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute)) ||
+        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isIdeaCreateRoute ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
@@ -95,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.8-item20-source-identity",
+          version: "0.10.9-elevenlabs-voice-preview",
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
@@ -152,6 +153,8 @@ export default {
           phase6_native_r2_preview: true,
           phase6_voiceover_volume: true,
           phase6_dynamic_voice_catalog: true,
+          phase6_voice_catalog_v1_fallback: true,
+          phase6_voice_preview_proxy: true,
           phase6_voice_id_authority: true,
           phase6_make_voice_migration: "predeployed-verified-no-save-dependency",
           phase6_save_voiceprep_rerender_handoff: true,
@@ -266,6 +269,10 @@ export default {
         if (request.method === "GET") return await adminRepairControlStatus(request, env);
         assertWriteRequest(request, env);
         return await adminRepairControl(request, env, authorization);
+      }
+
+      if (isVoicePreviewRoute) {
+        return phase6VoicePreview(request, env, url);
       }
 
       if (isVoiceCatalogRoute) {
@@ -7774,50 +7781,87 @@ async function phase6CachedVoiceCatalog(env) {
   return voices;
 }
 
+function mapElevenLabsVoice(voice) {
+  const labels = voice?.labels && typeof voice.labels === "object" ? voice.labels : {};
+  const id = phase6Text(voice?.voice_id, 120);
+  const name = phase6Text(voice?.name, 120);
+  if (!id || !name) return null;
+  return {
+    id,
+    name,
+    preview_url: phase6Text(voice?.preview_url, 2000) || null,
+    category: phase6Text(voice?.category, 120) || null,
+    accent: phase6Text(labels?.accent, 120) || null,
+    gender: phase6Text(labels?.gender, 120) || null,
+    age: phase6Text(labels?.age, 120) || null,
+    use_case: phase6Text(labels?.use_case, 200) || null,
+    description: phase6Text(voice?.description || labels?.description, 1000) || null,
+    is_default: id === PHASE6_DEFAULT_VOICE_ID,
+    source: "elevenlabs-live",
+  };
+}
+
+async function phase6FetchElevenLabsJson(env, path) {
+  const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
+  if (!apiKey) return { configured: false, ok: false, status: 0, body: null, error: null };
+  const response = await fetch(`https://api.elevenlabs.io${path}`, {
+    method: "GET",
+    headers: { "xi-api-key": apiKey, Accept: "application/json" },
+  });
+  const text = await response.text();
+  let body;
+  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+  return {
+    configured: true,
+    ok: response.ok,
+    status: response.status,
+    body,
+    error: response.ok ? null : `ElevenLabs request failed (${response.status})`,
+  };
+}
+
+function phase6CollectElevenLabsVoices(body) {
+  return (Array.isArray(body?.voices) ? body.voices : []).map(mapElevenLabsVoice).filter(Boolean);
+}
+
 async function phase6LiveElevenLabsVoices(env) {
   const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
-  if (!apiKey) return { configured: false, voices: [], error: null };
-  const voices = [];
-  let nextPageToken = null;
-  let pages = 0;
+  if (!apiKey) return { configured: false, voices: [], error: null, source: null };
   try {
+    const v1Legacy = await phase6FetchElevenLabsJson(env, "/v1/voices?show_legacy=true");
+    let v1Voices = v1Legacy.ok ? phase6CollectElevenLabsVoices(v1Legacy.body) : [];
+    let lastError = v1Legacy.error;
+    if (!v1Voices.length) {
+      const v1 = await phase6FetchElevenLabsJson(env, "/v1/voices");
+      v1Voices = v1.ok ? phase6CollectElevenLabsVoices(v1.body) : [];
+      lastError = v1.error || lastError;
+    }
+    if (v1Voices.length) {
+      return { configured: true, voices: v1Voices, error: null, source: "elevenlabs-v1" };
+    }
+
+    const voices = [];
+    let nextPageToken = null;
+    let pages = 0;
+    lastError = lastError || "ElevenLabs v1 returned no voices";
     do {
-      const query = new URLSearchParams({ page_size: "100", include_total_count: "false", sort: "name", sort_direction: "asc" });
+      const query = new URLSearchParams({ page_size: "100", include_total_count: "false" });
       if (nextPageToken) query.set("next_page_token", nextPageToken);
-      const response = await fetch(`https://api.elevenlabs.io/v2/voices?${query.toString()}`, {
-        method: "GET",
-        headers: { "xi-api-key": apiKey, Accept: "application/json" },
-      });
-      const text = await response.text();
-      let body;
-      try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
-      if (!response.ok) throw new Error(`ElevenLabs voice catalog request failed (${response.status})`);
-      for (const voice of Array.isArray(body?.voices) ? body.voices : []) {
-        const labels = voice?.labels && typeof voice.labels === "object" ? voice.labels : {};
-        const id = phase6Text(voice?.voice_id, 120);
-        const name = phase6Text(voice?.name, 120);
-        if (!id || !name) continue;
-        voices.push({
-          id,
-          name,
-          preview_url: phase6Text(voice?.preview_url, 2000) || null,
-          category: phase6Text(voice?.category, 120) || null,
-          accent: phase6Text(labels?.accent, 120) || null,
-          gender: phase6Text(labels?.gender, 120) || null,
-          age: phase6Text(labels?.age, 120) || null,
-          use_case: phase6Text(labels?.use_case, 200) || null,
-          description: phase6Text(voice?.description || labels?.description, 1000) || null,
-          is_default: id === PHASE6_DEFAULT_VOICE_ID,
-          source: "elevenlabs-live",
-        });
+      const page = await phase6FetchElevenLabsJson(env, `/v2/voices?${query.toString()}`);
+      if (!page.ok) {
+        lastError = page.error || lastError;
+        break;
       }
-      nextPageToken = body?.has_more ? phase6Text(body?.next_page_token, 500) : null;
+      voices.push(...phase6CollectElevenLabsVoices(page.body));
+      nextPageToken = page.body?.has_more ? phase6Text(page.body?.next_page_token, 500) : null;
       pages += 1;
     } while (nextPageToken && pages < 5 && voices.length < 500);
-    return { configured: true, voices, error: null };
+
+    if (voices.length) return { configured: true, voices, error: lastError, source: "elevenlabs-v2" };
+    return { configured: true, voices: [], error: lastError || "ElevenLabs returned no voices", source: null };
   } catch (error) {
     console.warn("ElevenLabs live voice catalog unavailable", error);
-    return { configured: true, voices: [], error: error instanceof Error ? error.message : "ElevenLabs voice catalog unavailable" };
+    return { configured: true, voices: [], error: error instanceof Error ? error.message : "ElevenLabs voice catalog unavailable", source: null };
   }
 }
 
@@ -7828,7 +7872,11 @@ async function phase6VoiceCatalog(env) {
   const byId = new Map();
   for (const voice of source) byId.set(voice.id, voice);
   // Always preserve the proven legacy voices as fallbacks even if the live account list changes.
-  for (const voice of cached) if (!byId.has(voice.id)) byId.set(voice.id, voice);
+  for (const voice of cached) {
+    const existing = byId.get(voice.id);
+    if (!existing) byId.set(voice.id, voice);
+    else if (!existing.preview_url && voice.preview_url) byId.set(voice.id, { ...existing, preview_url: voice.preview_url });
+  }
   const voices = Array.from(byId.values()).sort((a, b) => {
     if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
     return String(a.name).localeCompare(String(b.name));
@@ -7838,6 +7886,7 @@ async function phase6VoiceCatalog(env) {
     live_connected: Boolean(live.configured && live.voices.length),
     live_configured: Boolean(live.configured),
     live_error: live.error,
+    live_source: live.source || null,
     default_voice_id: PHASE6_DEFAULT_VOICE_ID,
   };
 }
@@ -7851,6 +7900,55 @@ async function listPhase6Voices(request, env, authorization) {
     current_default_preserved: true,
     make_mapping: "finalized-server-side-on-creative-save",
   });
+}
+
+async function phase6VoicePreviewUrl(env, voiceId) {
+  const apiKey = String(env.ELEVENLABS_API_KEY || "").trim();
+  if (apiKey) {
+    const detail = await phase6FetchElevenLabsJson(env, `/v1/voices/${encodeURIComponent(voiceId)}`);
+    const liveUrl = phase6Text(detail.body?.preview_url, 2000) || null;
+    if (liveUrl) return liveUrl;
+  }
+  const catalog = await phase6VoiceCatalog(env);
+  return catalog.voices.find((voice) => voice.id === voiceId)?.preview_url || null;
+}
+
+async function phase6VoicePreview(request, env, url) {
+  const identity = accessIdentity(request);
+  if (!identity.email && !identity.jwt_present) {
+    throw new HttpError(401, "Authenticated Studio session required");
+  }
+
+  const match = url.pathname.match(/^\/api\/voices\/([A-Za-z0-9_-]+)\/preview$/);
+  if (!match) throw new HttpError(400, "Invalid voice preview route");
+  const voiceId = match[1];
+  const previewUrl = await phase6VoicePreviewUrl(env, voiceId);
+  if (!previewUrl) throw new HttpError(404, `No ElevenLabs preview is available for ${voiceId}`);
+
+  const upstream = await fetch(previewUrl, {
+    method: "GET",
+    headers: { Accept: "audio/mpeg,audio/*;q=0.9,*/*;q=0.8" },
+    redirect: "follow",
+  });
+  if (!upstream.ok) {
+    try { await upstream.body?.cancel(); } catch {}
+    throw new HttpError(upstream.status === 404 ? 404 : 502, `ElevenLabs preview fetch failed (${upstream.status})`);
+  }
+
+  const headers = new Headers();
+  headers.set("Content-Type", upstream.headers.get("Content-Type") || "audio/mpeg");
+  const length = upstream.headers.get("Content-Length");
+  if (length) headers.set("Content-Length", length);
+  headers.set("Cache-Control", "private, max-age=3600");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Studio-Preview-Source", "elevenlabs");
+  for (const [key, value] of Object.entries(corsHeaders(request, env))) headers.set(key, value);
+
+  if (request.method === "HEAD") {
+    try { await upstream.body?.cancel(); } catch {}
+    return new Response(null, { status: 200, headers });
+  }
+  return new Response(upstream.body, { status: 200, headers });
 }
 
 function phase6FindModule(flow, moduleId) {

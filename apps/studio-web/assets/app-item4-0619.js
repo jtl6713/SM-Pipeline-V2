@@ -55,7 +55,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.32-ez-audio";
+  const BUILD_ID = "item4-0.6.33-ez-audio";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -828,12 +828,15 @@
     const voiceJob = (async () => {
       if (!voiceSelect) return;
       if (hint) hint.textContent = "Loading ElevenLabs voices…";
-      const result = await api("/api/voices");
+      const result = await api("/api/voices", { timeoutMs: 45000 });
       const voices = phase6NormalizeVoices(result.voices || result.records || result.items || []);
       const current = ezSelectedVoiceId || voiceSelect.value;
       voiceSelect.innerHTML = `<option value="">Profile default</option>${phase6VoiceOptionList(voices, current)}`;
       if (hint) {
-        if (voices.length) hint.textContent = `${voices.length} ElevenLabs voices`;
+        if (voices.length && result.live_connected) hint.textContent = `${voices.length} ElevenLabs voices`;
+        else if (voices.length) hint.textContent = result.live_error
+          ? `${voices.length} cached voices · ${result.live_error}`
+          : `${voices.length} cached voices`;
         else if (result.live_error) hint.textContent = result.live_error;
         else hint.textContent = result.live_configured === false
           ? "Add the ElevenLabs API key to load the full voice catalog."
@@ -1277,23 +1280,25 @@
     });
     ["ezAudioVoiceover", "ezAudioMusic", "ezAudioTrack", "ezAudioVoice"].forEach((id) => {
       $(id)?.addEventListener("change", () => {
+        stopStudioAudioPreview();
         syncEzAudioFields();
         if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
       });
     });
     $("ezAudioVoicePreview")?.addEventListener("click", () => {
-      const select = $("ezAudioVoice");
-      const voice = phase6SelectedVoice(select);
-      if (!voice.id) {
-        setEzMessage("Pick an ElevenLabs voice to preview.", "error-text");
+      phase6PreviewSelectedVoice($("ezAudioVoice"), $("ezAudioVoicePreview"), setEzMessage);
+    });
+    $("ezAudioTrackPreview")?.addEventListener("click", () => {
+      const select = $("ezAudioTrack");
+      const id = String(select?.value || "").trim();
+      if (!id) {
+        setEzMessage("Pick a music track to preview.", "error-text");
         return;
       }
-      if (!voice.preview_url) {
-        setEzMessage(`No ElevenLabs preview is available for ${voice.name || "this voice"}.`, "error-text");
-        return;
-      }
+      const option = select?.selectedOptions?.[0];
+      const preview = String(option?.dataset?.preview || "").trim() || `${apiBase}/api/music/${encodeURIComponent(id)}/preview`;
       setEzMessage();
-      phase6PreviewSelectedVoice(select, $("ezAudioVoicePreview"));
+      playStudioAudioPreview(preview, $("ezAudioTrackPreview"), setEzMessage, option?.textContent?.trim() || "track");
     });
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.addEventListener("click", () => selectEzInput(button.dataset.ezInput));
@@ -2289,9 +2294,10 @@
     const { records = [] } = await api("/api/music?limit=100");
     productionRequestMusic = records.filter(record => !record.do_not_use);
     const select = $("prMusicAsset");
-    select.innerHTML = '<option value="">AI / profile chooses track</option>' + productionRequestMusic.map(record =>
-      `<option value="${escapeHtml(record.id)}">${escapeHtml(record.display_name || record.name || record.id)}</option>`
-    ).join("");
+    select.innerHTML = '<option value="">AI / profile chooses track</option>' + productionRequestMusic.map(record => {
+      const preview = record.preview_url || (record.preview_available ? `/api/music/${record.id}/preview` : "");
+      return `<option value="${escapeHtml(record.id)}" data-preview="${escapeHtml(preview)}">${escapeHtml(record.display_name || record.name || record.id)}</option>`;
+    }).join("");
     return productionRequestMusic;
   }
 
@@ -3264,8 +3270,53 @@
   }
 
 
-  let phase6VoicePreviewAudio = null;
-  let phase6VoicePreviewButton = null;
+  let studioPreviewAudio = null;
+  let studioPreviewButton = null;
+
+  function stopStudioAudioPreview() {
+    if (!studioPreviewAudio) return;
+    studioPreviewAudio.pause();
+    try { studioPreviewAudio.currentTime = 0; } catch (_) {}
+    if (studioPreviewButton) studioPreviewButton.textContent = "▶ Preview";
+    studioPreviewAudio = null;
+    studioPreviewButton = null;
+  }
+
+  function playStudioAudioPreview(url, button = null, messageFn = phase6Message, label = "preview") {
+    if (!url) {
+      messageFn(`No preview is available for ${label}.`, "error-text");
+      return;
+    }
+    try {
+      if (studioPreviewAudio) {
+        const clickedActiveButton = !!button && button === studioPreviewButton;
+        stopStudioAudioPreview();
+        if (clickedActiveButton) return;
+      }
+
+      const audio = new Audio(url);
+      studioPreviewAudio = audio;
+      studioPreviewButton = button || null;
+      audio.preload = "auto";
+      if (button) button.textContent = "■ Stop";
+
+      const restore = () => {
+        if (studioPreviewAudio !== audio) return;
+        stopStudioAudioPreview();
+      };
+      audio.addEventListener("ended", restore, { once: true });
+      audio.addEventListener("error", () => {
+        restore();
+        messageFn(`That ${label} could not be played.`, "error-text");
+      }, { once: true });
+      audio.play().catch(() => {
+        restore();
+        messageFn("Browser playback was blocked. Click Preview again.", "error-text");
+      });
+    } catch (e) {
+      messageFn(e.message || "Preview failed.", "error-text");
+    }
+  }
 
   function phase6NormalizeVoices(values) {
     return (Array.isArray(values) ? values : []).map((voice) => {
@@ -3315,44 +3366,14 @@
     };
   }
 
-  function phase6PreviewSelectedVoice(select, button = null) {
+  function phase6PreviewSelectedVoice(select, button = null, messageFn = phase6Message) {
     const voice = phase6SelectedVoice(select);
-    if (!voice.preview_url) {
-      phase6Message(`No ElevenLabs preview is available for ${voice.name || "this voice"}.`, "error-text");
+    if (!voice.id) {
+      messageFn("Pick an ElevenLabs voice to preview.", "error-text");
       return;
     }
-    try {
-      // A second click on the currently playing preview is a true Stop.
-      // Clicking a different Preview button stops the old sample first, then starts the new one.
-      if (phase6VoicePreviewAudio) {
-        const clickedActiveButton = !!button && button === phase6VoicePreviewButton;
-        const oldAudio = phase6VoicePreviewAudio;
-        oldAudio.pause();
-        try { oldAudio.currentTime = 0; } catch (_) {}
-        if (phase6VoicePreviewButton) phase6VoicePreviewButton.textContent = "▶ Preview";
-        phase6VoicePreviewAudio = null;
-        phase6VoicePreviewButton = null;
-        if (clickedActiveButton) return;
-      }
-
-      const audio = new Audio(voice.preview_url);
-      phase6VoicePreviewAudio = audio;
-      phase6VoicePreviewButton = button || null;
-      audio.preload = "auto";
-      if (button) button.textContent = "■ Stop";
-
-      const restore = () => {
-        if (phase6VoicePreviewAudio !== audio) return;
-        if (phase6VoicePreviewButton) phase6VoicePreviewButton.textContent = "▶ Preview";
-        phase6VoicePreviewAudio = null;
-        phase6VoicePreviewButton = null;
-      };
-      audio.addEventListener("ended", restore, { once: true });
-      audio.addEventListener("error", () => { restore(); phase6Message("That ElevenLabs voice preview could not be played.", "error-text"); }, { once: true });
-      audio.play().catch(() => { restore(); phase6Message("Browser playback was blocked. Click Preview again.", "error-text"); });
-    } catch (e) {
-      phase6Message(e.message || "Voice preview failed.", "error-text");
-    }
+    const previewUrl = voice.preview_url || `${apiBase}/api/voices/${encodeURIComponent(voice.id)}/preview`;
+    playStudioAudioPreview(previewUrl, button, messageFn, voice.name || "voice");
   }
 
   function phase6Message(message = "", type = "") {
