@@ -1,0 +1,111 @@
+{
+  "repair_item": 20,
+  "checkpoint": "cloudflare-github-diagnostics-binding-contract",
+  "schema": "item20-diagnostics-v1",
+  "make_scenario_runs": 0,
+  "cadenced_scenarios_started": 0,
+  "production_worker_traffic_switched": false,
+  "contract": "studio-api-10-core-elevenlabs-optional",
+  "core_binding_count": 10,
+  "required_secrets": [
+    "AIRTABLE_PAT"
+  ],
+  "elevenlabs_required": false,
+  "authoritative_services": [
+    {
+      "name": "chicagoshining-studio-api",
+      "kind": "worker",
+      "role": "Studio API / repair controller"
+    },
+    {
+      "name": "chicagoshining-studio-web",
+      "kind": "pages",
+      "role": "Studio UI"
+    },
+    {
+      "name": "chicagoshining-studio-variant-service",
+      "kind": "worker",
+      "role": "fill-crop-v2 variants"
+    },
+    {
+      "name": "chicagoshining-r2-upload",
+      "kind": "worker",
+      "role": "publish asset upload / lifecycle"
+    },
+    {
+      "name": "chicagoshining-tiktok-auth",
+      "kind": "worker",
+      "role": "TikTok OAuth helper"
+    },
+    {
+      "name": "chicagoshining-studio-media-bridge",
+      "kind": "worker",
+      "role": "media preview bridge"
+    }
+  ],
+  "remaining_stale_v86_pins": [
+    "cloudflare-beta-version-audit.yml",
+    "cloudflare-production-rollback-v86.yml",
+    "cloudflare-production-stage-safety.yml",
+    "cloudflare-promote-safety-with-envelope.yml",
+    "cloudflare-prune-bad-studio-versions.yml",
+    "cloudflare-secret-recovery-readonly.yml"
+  ],
+  "repo": {
+    "studio_api_source_version": "0.10.8-item20-source-identity",
+    "studio_api_source_sha256": "10772cadc2580c0b625f4db6f5659a03a1f098b058b5918d02806bc79cd83452",
+    "studio_ui_build": "0.6.21"
+  },
+  "source_checks": {
+    "worker_source_version": true,
+    "worker_contract_id": true,
+    "worker_elevenlabs_not_required": true,
+    "ui_build": true,
+    "deploy_imports_contract": true,
+    "deploy_does_not_require_elevenlabs": true,
+    "rollout_imports_contract": true,
+    "rollout_not_pinned_to_v86": true,
+    "audit_imports_contract": true,
+    "audit_not_requiring_11": true,
+    "fixed_gates_unpinned": true
+  },
+  "live_worker": {
+    "name": "chicagoshining-studio-api",
+    "active_version_id": "3093cf73-33e9-4866-9e1d-d879bb82ff6c",
+    "version_number": 146,
+    "percentage": 100,
+    "pinned_to_stale_v86": false,
+    "binding_count": 10,
+    "core_ok": true,
+    "elevenlabs_present": false,
+    "contract_ok": true,
+    "worker_names": [
+      "chicagoshining-r2-upload",
+      "chicagoshining-repair-control-bridge",
+      "chicagoshining-studio-api",
+      "chicagoshining-studio-media-bridge",
+      "chicagoshining-studio-variant-service",
+      "chicagoshining-tiktok-auth",
+      "shiny-glitter-6de8"
+    ],
+    "leftover_workers": [
+      "chicagoshining-repair-control-bridge",
+      "shiny-glitter-6de8"
+    ]
+  },
+  "live_pages": {
+    "http": 200,
+    "access_protected": true,
+    "ui_build_0621": false,
+    "item18_cache_bust": false
+  },
+  "live_health": {
+    "http": 200,
+    "access_protected": true,
+    "version": null,
+    "binding_contract": null,
+    "source_identity": null,
+    "drift_from_repo_version": null
+  },
+  "passed": true
+}
