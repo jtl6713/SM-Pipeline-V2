@@ -17,3 +17,5 @@ EZ path Pages deploy: 2026-08-18 — Phase 1 New content door on Production (sin
 EZ path Pages deploy: 2026-08-18 — Auto-build platform plan after photos; per-photo Manual captions on each still. Source commit 78d7213.
 
 EZ path Pages deploy: 2026-08-18 — Drop the leftover one-caption composer box; Manual captions live under each still. Source commit b6a1c62.
+
+EZ path Pages deploy: 2026-08-18 — Drag-to-reframe platform crops in section 3. Source commit b7a5dc5. Baked JPEG gravity waits on the next studio-api deploy.
