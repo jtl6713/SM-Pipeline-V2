@@ -6,10 +6,13 @@ const path = require("path");
 const crypto = require("crypto");
 const { URL } = require("url");
 
+const SERVICE_VERSION = "2026-08-18-oauth-status";
+const MIN_REFRESH_TOKEN_LENGTH = 40;
+const ENV_PATH = path.join(process.cwd(), ".env");
+
 function loadDotEnv() {
-  const p = path.join(process.cwd(), ".env");
-  if (!fs.existsSync(p)) return;
-  for (const raw of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
+  if (!fs.existsSync(ENV_PATH)) return;
+  for (const raw of fs.readFileSync(ENV_PATH, "utf8").split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const i = line.indexOf("=");
@@ -20,6 +23,7 @@ function loadDotEnv() {
   }
 }
 loadDotEnv();
+
 const cfg = {
   port: Number(process.env.PORT || 3340),
   secret: process.env.YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET || "",
@@ -29,76 +33,407 @@ const cfg = {
   chunkBytes: Number(process.env.YOUTUBE_UPLOAD_CHUNK_BYTES || 8388608),
   tempDir: path.resolve(process.env.YOUTUBE_TEMP_DIR || "./tmp"),
   jobStore: path.resolve(process.env.YOUTUBE_JOB_STORE || "./data/youtube-jobs.json"),
-  retentionHours: Number(process.env.YOUTUBE_JOB_RETENTION_HOURS || 168)
+  retentionHours: Number(process.env.YOUTUBE_JOB_RETENTION_HOURS || 168),
 };
-if (cfg.chunkBytes < 262144 || cfg.chunkBytes % 262144 !== 0) throw new Error("YOUTUBE_UPLOAD_CHUNK_BYTES must be a multiple of 256 KiB.");
+if (cfg.chunkBytes < 262144 || cfg.chunkBytes % 262144 !== 0) {
+  throw new Error("YOUTUBE_UPLOAD_CHUNK_BYTES must be a multiple of 256 KiB.");
+}
+
 const jobs = new Map();
 let saveChain = Promise.resolve();
+let cachedAccess = { token: "", expiresAt: 0 };
+
+function now() {
+  return new Date().toISOString();
+}
+
+function refreshTokenLooksTruncated(token) {
+  const value = String(token || "").trim();
+  return !value || value.length < MIN_REFRESH_TOKEN_LENGTH;
+}
+
+async function persistEnvValue(key, value) {
+  const current = fs.existsSync(ENV_PATH) ? await fsp.readFile(ENV_PATH, "utf8") : "";
+  const lines = current.split(/\r?\n/);
+  let found = false;
+  const next = lines.map((line) => {
+    if (!line.startsWith(key + "=")) return line;
+    found = true;
+    return key + "=" + value;
+  });
+  if (!found) next.push(key + "=" + value);
+  const text = next.join("\n").replace(/\n*$/, "\n");
+  const tmp = ENV_PATH + ".tmp";
+  await fsp.writeFile(tmp, text, { encoding: "utf8", mode: 0o600 });
+  await fsp.rename(tmp, ENV_PATH);
+}
+
 async function init() {
   await fsp.mkdir(cfg.tempDir, { recursive: true });
   await fsp.mkdir(path.dirname(cfg.jobStore), { recursive: true });
-  try { const rows = JSON.parse(await fsp.readFile(cfg.jobStore, "utf8")); for (const j of rows) jobs.set(j.id, j); } catch (e) { if (e.code !== "ENOENT") console.error("Job store load warning:", e.message); }
+  try {
+    const rows = JSON.parse(await fsp.readFile(cfg.jobStore, "utf8"));
+    for (const job of rows) jobs.set(job.id, job);
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("Job store load warning:", error.message);
+  }
   cleanupOldJobs();
 }
-function persist() { saveChain = saveChain.then(() => fsp.writeFile(cfg.jobStore, JSON.stringify([...jobs.values()], null, 2))); return saveChain; }
-function cleanupOldJobs() { const cutoff = Date.now() - cfg.retentionHours * 3600000; for (const [id,j] of jobs) if (Date.parse(j.updatedAt || j.createdAt) < cutoff && ["completed","failed"].includes(j.status)) jobs.delete(id); persist().catch(console.error); }
-function now() { return new Date().toISOString(); }
-function json(res, code, body) { const data=Buffer.from(JSON.stringify(body)); res.writeHead(code,{"Content-Type":"application/json","Content-Length":data.length}); res.end(data); }
-async function readJson(req, max=1024*1024) { const chunks=[]; let n=0; for await (const c of req) { n+=c.length; if(n>max) throw new Error("Request body too large"); chunks.push(c); } const body=Buffer.allocUnsafe(n); let offset=0; for(const chunk of chunks){chunk.copy(body,offset);offset+=chunk.length;} return JSON.parse(body.toString("utf8")||"{}"); }
-function authorized(req) { if (!cfg.secret) return true; const v=req.headers["x-sm-pipeline-key"]||""; const a=Buffer.from(String(v)); const b=Buffer.from(cfg.secret); return a.length===b.length && crypto.timingSafeEqual(a,b); }
-async function accessToken() {
-  if (!cfg.clientId || !cfg.clientSecret || !cfg.refreshToken) throw new Error("Google OAuth environment variables are incomplete.");
-  const body=new URLSearchParams({client_id:cfg.clientId,client_secret:cfg.clientSecret,refresh_token:cfg.refreshToken,grant_type:"refresh_token"});
-  const r=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
-  const data=await r.json(); if(!r.ok) throw new Error(`OAuth refresh failed ${r.status}: ${JSON.stringify(data)}`); return data.access_token;
+
+function persist() {
+  saveChain = saveChain.then(() => fsp.writeFile(cfg.jobStore, JSON.stringify([...jobs.values()], null, 2)));
+  return saveChain;
 }
-async function downloadToFile(url, file) {
-  const r=await fetch(url,{redirect:"follow"}); if(!r.ok) throw new Error(`Source download failed ${r.status}`);
-  const type=(r.headers.get("content-type")||"video/mp4").split(";")[0];
-  const out=fs.createWriteStream(file); for await (const chunk of r.body) if(!out.write(chunk)) await new Promise(x=>out.once("drain",x));
-  await new Promise((resolve,reject)=>out.end(e=>e?reject(e):resolve())); return type;
-}
-function metadataFrom(p) {
-  const privacy=String(p.privacyStatus||"private").toLowerCase(); if(!["private","unlisted","public"].includes(privacy)) throw new Error("privacyStatus must be private, unlisted, or public");
-  const status={privacyStatus:privacy,selfDeclaredMadeForKids:Boolean(p.madeForKids),containsSyntheticMedia:Boolean(p.containsSyntheticMedia)};
-  if(p.publishAt){ if(privacy!=="private") throw new Error("Scheduled publish requires privacyStatus=private"); status.publishAt=p.publishAt; }
-  return {snippet:{title:String(p.title||"").slice(0,100),description:String(p.description||"").slice(0,5000),tags:Array.isArray(p.tags)?p.tags.slice(0,500):[],categoryId:String(p.categoryId||"22")},status};
-}
-async function initiateSession(token, metadata, size, mime) {
-  const u="https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
-  const r=await fetch(u,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json; charset=UTF-8","X-Upload-Content-Length":String(size),"X-Upload-Content-Type":mime},body:JSON.stringify(metadata)});
-  const text=await r.text(); if(!r.ok) throw new Error(`Session initialization failed ${r.status}: ${text}`); const loc=r.headers.get("location"); if(!loc) throw new Error("YouTube did not return a resumable Location header."); return loc;
-}
-async function uploadChunks(job, file, mime, token, sessionUrl) {
-  const size=(await fsp.stat(file)).size; let start=Number(job.bytesUploaded||0); const fd=await fsp.open(file,"r");
-  try {
-    while(start<size){ const len=Math.min(cfg.chunkBytes,size-start); const buf=Buffer.allocUnsafe(len); const {bytesRead}=await fd.read(buf,0,len,start); const end=start+bytesRead-1;
-      const r=await fetch(sessionUrl,{method:"PUT",headers:{Authorization:`Bearer ${token}`,"Content-Type":mime,"Content-Length":String(bytesRead),"Content-Range":`bytes ${start}-${end}/${size}`},body:buf.subarray(0,bytesRead)});
-      if(r.status===308){ const range=r.headers.get("range"); start=range?Number(range.split("-").pop())+1:end+1; }
-      else { const text=await r.text(); if(!r.ok) throw new Error(`Upload failed ${r.status}: ${text}`); const video=JSON.parse(text); job.videoId=video.id; job.youtubeResponse=video; start=size; }
-      job.bytesUploaded=start; job.progressPercent=Math.floor(start*100/size); job.updatedAt=now(); await persist();
+
+function cleanupOldJobs() {
+  const cutoff = Date.now() - cfg.retentionHours * 3600000;
+  for (const [id, job] of jobs) {
+    if (Date.parse(job.updatedAt || job.createdAt) < cutoff && ["completed", "failed"].includes(job.status)) {
+      jobs.delete(id);
     }
-  } finally { await fd.close(); }
+  }
+  persist().catch(console.error);
 }
-async function processUpload(jobId,p) {
-  const job=jobs.get(jobId); const file=path.join(cfg.tempDir,`${jobId}.mp4`);
-  try { job.status="downloading"; job.updatedAt=now(); await persist(); const mime=await downloadToFile(p.sourceUrl,file); const size=(await fsp.stat(file)).size; job.fileSize=size; job.mimeType=mime; job.status="initializing"; await persist();
-    const token=await accessToken(); const metadata=metadataFrom(p); const session=await initiateSession(token,metadata,size,mime); job.sessionCreated=true; job.status="uploading"; await persist(); await uploadChunks(job,file,mime,token,session);
-    job.status="completed"; job.completedAt=now(); job.updatedAt=now(); await persist();
-  } catch(e) { job.status="failed"; job.error=e.message; job.updatedAt=now(); await persist(); }
-  finally { fsp.unlink(file).catch(()=>{}); }
+
+function json(res, code, body) {
+  const data = Buffer.from(JSON.stringify(body));
+  res.writeHead(code, { "Content-Type": "application/json", "Content-Length": data.length });
+  res.end(data);
 }
-async function videoStatus(videoId) { const token=await accessToken(); const u=new URL("https://www.googleapis.com/youtube/v3/videos"); u.searchParams.set("part","status,processingDetails,snippet"); u.searchParams.set("id",videoId); const r=await fetch(u,{headers:{Authorization:`Bearer ${token}`}}); const data=await r.json(); if(!r.ok) throw new Error(`videos.list failed ${r.status}: ${JSON.stringify(data)}`); return data; }
-async function setThumbnail(videoId, sourceUrl) { const token=await accessToken(); const r0=await fetch(sourceUrl); if(!r0.ok) throw new Error(`Thumbnail download failed ${r0.status}`); const b=Buffer.from(await r0.arrayBuffer()); if(b.length>2097152) throw new Error("Thumbnail exceeds 2 MB"); const mime=(r0.headers.get("content-type")||"image/jpeg").split(";")[0]; const u=`https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`; const r=await fetch(u,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":mime,"Content-Length":String(b.length)},body:b}); const text=await r.text(); if(!r.ok) throw new Error(`thumbnails.set failed ${r.status}: ${text}`); return JSON.parse(text); }
-async function handler(req,res){
-  try { const u=new URL(req.url,`http://${req.headers.host||"localhost"}`); if(u.pathname==="/health") return json(res,200,{ok:true,service:"sm-pipeline-youtube-uploader",time:now(),oauthConfigured:Boolean(cfg.clientId&&cfg.clientSecret&&cfg.refreshToken)});
-    if(!authorized(req)) return json(res,401,{error:"Unauthorized"});
-    if(req.method==="POST"&&u.pathname==="/youtube/upload"){ const p=await readJson(req); if(!p.sourceUrl||!p.title) return json(res,400,{error:"sourceUrl and title are required"}); const idem=String(p.idempotencyKey||""); if(idem){ const existing=[...jobs.values()].find(j=>j.idempotencyKey===idem&&!(["failed"].includes(j.status))); if(existing) return json(res,200,existing); }
-      const id=crypto.randomUUID(); const job={id,idempotencyKey:idem,status:"queued",progressPercent:0,bytesUploaded:0,createdAt:now(),updatedAt:now(),videoId:null,error:null}; jobs.set(id,job); await persist(); setImmediate(()=>processUpload(id,p)); return json(res,202,job); }
-    const jm=u.pathname.match(/^\/youtube\/jobs\/([^/]+)$/); if(req.method==="GET"&&jm){ const j=jobs.get(jm[1]); return j?json(res,200,j):json(res,404,{error:"Job not found"}); }
-    const vm=u.pathname.match(/^\/youtube\/videos\/([^/]+)$/); if(req.method==="GET"&&vm) return json(res,200,await videoStatus(vm[1]));
-    if(req.method==="POST"&&u.pathname==="/youtube/thumbnail"){ const p=await readJson(req); if(!p.videoId||!p.sourceUrl) return json(res,400,{error:"videoId and sourceUrl are required"}); return json(res,200,await setThumbnail(p.videoId,p.sourceUrl)); }
-    return json(res,404,{error:"Not found"});
-  } catch(e){ console.error(e); return json(res,500,{error:e.message}); }
+
+async function readJson(req, max = 1024 * 1024) {
+  const chunks = [];
+  let n = 0;
+  for await (const chunk of req) {
+    n += chunk.length;
+    if (n > max) throw new Error("Request body too large");
+    chunks.push(chunk);
+  }
+  const body = Buffer.allocUnsafe(n);
+  let offset = 0;
+  for (const chunk of chunks) {
+    chunk.copy(body, offset);
+    offset += chunk.length;
+  }
+  return JSON.parse(body.toString("utf8") || "{}");
 }
-init().then(()=>http.createServer(handler).listen(cfg.port,"0.0.0.0",()=>console.log(`YouTube uploader listening on ${cfg.port}`))).catch(e=>{console.error(e);process.exit(1)});
+
+function authorized(req) {
+  if (!cfg.secret) return true;
+  const supplied = Buffer.from(String(req.headers["x-sm-pipeline-key"] || ""));
+  const expected = Buffer.from(cfg.secret);
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
+
+async function refreshAccessToken() {
+  if (!cfg.clientId || !cfg.clientSecret || !cfg.refreshToken) {
+    throw new Error("Google OAuth environment variables are incomplete.");
+  }
+  if (refreshTokenLooksTruncated(cfg.refreshToken)) {
+    throw new Error("GOOGLE_REFRESH_TOKEN looks truncated. Re-authorize and write the full token to .env.");
+  }
+  const body = new URLSearchParams({
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+    refresh_token: cfg.refreshToken,
+    grant_type: "refresh_token",
+  });
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    const code = data && data.error ? String(data.error) : "oauth_refresh_failed";
+    throw new Error(`OAuth refresh failed ${response.status}: ${code}`);
+  }
+  if (!data.access_token) throw new Error("OAuth refresh returned no access_token.");
+  if (data.refresh_token && data.refresh_token !== cfg.refreshToken) {
+    if (refreshTokenLooksTruncated(data.refresh_token)) {
+      throw new Error("Google returned a truncated refresh token; refusing to persist it.");
+    }
+    cfg.refreshToken = data.refresh_token;
+    process.env.GOOGLE_REFRESH_TOKEN = data.refresh_token;
+    await persistEnvValue("GOOGLE_REFRESH_TOKEN", data.refresh_token);
+  }
+  const expiresIn = Number(data.expires_in || 3600);
+  cachedAccess = {
+    token: data.access_token,
+    expiresAt: Date.now() + Math.max(30, expiresIn - 60) * 1000,
+    expiresIn,
+  };
+  return cachedAccess;
+}
+
+async function accessToken() {
+  if (cachedAccess.token && Date.now() < cachedAccess.expiresAt) return cachedAccess.token;
+  const refreshed = await refreshAccessToken();
+  return refreshed.token;
+}
+
+async function oauthStatus() {
+  const result = {
+    ok: false,
+    service: "sm-pipeline-youtube-uploader",
+    version: SERVICE_VERSION,
+    oauthConfigured: Boolean(cfg.clientId && cfg.clientSecret && cfg.refreshToken),
+    refresh_token_length: String(cfg.refreshToken || "").length,
+    truncated: refreshTokenLooksTruncated(cfg.refreshToken),
+    refresh_ok: false,
+    access_token_expires_in: null,
+    error: null,
+    checked_at: now(),
+    google_consent_publishing: "not_visible_from_token_api",
+    durable_requirement:
+      "Google OAuth consent screen must be In production. Testing-mode refresh tokens expire after 7 days.",
+  };
+  try {
+    const refreshed = await refreshAccessToken();
+    result.refresh_ok = true;
+    result.ok = true;
+    result.access_token_expires_in = refreshed.expiresIn;
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error);
+  }
+  return result;
+}
+
+async function downloadToFile(url, file) {
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok) throw new Error(`Source download failed ${response.status}`);
+  const type = (response.headers.get("content-type") || "video/mp4").split(";")[0];
+  const out = fs.createWriteStream(file);
+  for await (const chunk of response.body) {
+    if (!out.write(chunk)) await new Promise((resolve) => out.once("drain", resolve));
+  }
+  await new Promise((resolve, reject) => out.end((error) => (error ? reject(error) : resolve())));
+  return type;
+}
+
+function metadataFrom(payload) {
+  const privacy = String(payload.privacyStatus || "private").toLowerCase();
+  if (!["private", "unlisted", "public"].includes(privacy)) {
+    throw new Error("privacyStatus must be private, unlisted, or public");
+  }
+  const status = {
+    privacyStatus: privacy,
+    selfDeclaredMadeForKids: Boolean(payload.madeForKids),
+    containsSyntheticMedia: Boolean(payload.containsSyntheticMedia),
+  };
+  if (payload.publishAt) {
+    if (privacy !== "private") throw new Error("Scheduled publish requires privacyStatus=private");
+    status.publishAt = payload.publishAt;
+  }
+  return {
+    snippet: {
+      title: String(payload.title || "").slice(0, 100),
+      description: String(payload.description || "").slice(0, 5000),
+      tags: Array.isArray(payload.tags) ? payload.tags.slice(0, 500) : [],
+      categoryId: String(payload.categoryId || "22"),
+    },
+    status,
+  };
+}
+
+async function initiateSession(token, metadata, size, mime) {
+  const url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Length": String(size),
+      "X-Upload-Content-Type": mime,
+    },
+    body: JSON.stringify(metadata),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Session initialization failed ${response.status}: ${text}`);
+  const location = response.headers.get("location");
+  if (!location) throw new Error("YouTube did not return a resumable Location header.");
+  return location;
+}
+
+async function uploadChunks(job, file, mime, token, sessionUrl) {
+  const size = (await fsp.stat(file)).size;
+  let start = Number(job.bytesUploaded || 0);
+  const fd = await fsp.open(file, "r");
+  try {
+    while (start < size) {
+      const len = Math.min(cfg.chunkBytes, size - start);
+      const buf = Buffer.allocUnsafe(len);
+      const { bytesRead } = await fd.read(buf, 0, len, start);
+      const end = start + bytesRead - 1;
+      const response = await fetch(sessionUrl, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": mime,
+          "Content-Length": String(bytesRead),
+          "Content-Range": `bytes ${start}-${end}/${size}`,
+        },
+        body: buf.subarray(0, bytesRead),
+      });
+      if (response.status === 308) {
+        const range = response.headers.get("range");
+        start = range ? Number(range.split("-").pop()) + 1 : end + 1;
+      } else {
+        const text = await response.text();
+        if (!response.ok) throw new Error(`Upload failed ${response.status}: ${text}`);
+        const video = JSON.parse(text);
+        job.videoId = video.id;
+        job.youtubeResponse = video;
+        start = size;
+      }
+      job.bytesUploaded = start;
+      job.progressPercent = Math.floor((start * 100) / size);
+      job.updatedAt = now();
+      await persist();
+    }
+  } finally {
+    await fd.close();
+  }
+}
+
+async function processUpload(jobId, payload) {
+  const job = jobs.get(jobId);
+  const file = path.join(cfg.tempDir, `${jobId}.mp4`);
+  try {
+    job.status = "downloading";
+    job.updatedAt = now();
+    await persist();
+    const mime = await downloadToFile(payload.sourceUrl, file);
+    const size = (await fsp.stat(file)).size;
+    job.fileSize = size;
+    job.mimeType = mime;
+    job.status = "initializing";
+    await persist();
+    const token = await accessToken();
+    const metadata = metadataFrom(payload);
+    const session = await initiateSession(token, metadata, size, mime);
+    job.sessionCreated = true;
+    job.status = "uploading";
+    await persist();
+    await uploadChunks(job, file, mime, token, session);
+    job.status = "completed";
+    job.completedAt = now();
+    job.updatedAt = now();
+    await persist();
+  } catch (error) {
+    job.status = "failed";
+    job.error = error instanceof Error ? error.message : String(error);
+    job.updatedAt = now();
+    await persist();
+  } finally {
+    fsp.unlink(file).catch(() => {});
+  }
+}
+
+async function videoStatus(videoId) {
+  const token = await accessToken();
+  const url = new URL("https://www.googleapis.com/youtube/v3/videos");
+  url.searchParams.set("part", "status,processingDetails,snippet");
+  url.searchParams.set("id", videoId);
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`videos.list failed ${response.status}`);
+  return data;
+}
+
+async function setThumbnail(videoId, sourceUrl) {
+  const token = await accessToken();
+  const downloaded = await fetch(sourceUrl);
+  if (!downloaded.ok) throw new Error(`Thumbnail download failed ${downloaded.status}`);
+  const body = Buffer.from(await downloaded.arrayBuffer());
+  if (body.length > 2097152) throw new Error("Thumbnail exceeds 2 MB");
+  const mime = (downloaded.headers.get("content-type") || "image/jpeg").split(";")[0];
+  const url = `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": mime,
+      "Content-Length": String(body.length),
+    },
+    body,
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`thumbnails.set failed ${response.status}: ${text}`);
+  return JSON.parse(text);
+}
+
+async function handler(req, res) {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    if (url.pathname === "/health") {
+      return json(res, 200, {
+        ok: true,
+        service: "sm-pipeline-youtube-uploader",
+        version: SERVICE_VERSION,
+        time: now(),
+        oauthConfigured: Boolean(cfg.clientId && cfg.clientSecret && cfg.refreshToken),
+      });
+    }
+    if (!authorized(req)) return json(res, 401, { error: "Unauthorized" });
+    if (req.method === "GET" && url.pathname === "/youtube/oauth/status") {
+      return json(res, 200, await oauthStatus());
+    }
+    if (req.method === "POST" && url.pathname === "/youtube/upload") {
+      const payload = await readJson(req);
+      if (!payload.sourceUrl || !payload.title) {
+        return json(res, 400, { error: "sourceUrl and title are required" });
+      }
+      const idem = String(payload.idempotencyKey || "");
+      if (idem) {
+        const existing = [...jobs.values()].find((job) => job.idempotencyKey === idem && job.status !== "failed");
+        if (existing) return json(res, 200, existing);
+      }
+      const id = crypto.randomUUID();
+      const job = {
+        id,
+        idempotencyKey: idem,
+        status: "queued",
+        progressPercent: 0,
+        bytesUploaded: 0,
+        createdAt: now(),
+        updatedAt: now(),
+        videoId: null,
+        error: null,
+      };
+      jobs.set(id, job);
+      await persist();
+      setImmediate(() => processUpload(id, payload));
+      return json(res, 202, job);
+    }
+    const jobMatch = url.pathname.match(/^\/youtube\/jobs\/([^/]+)$/);
+    if (req.method === "GET" && jobMatch) {
+      const job = jobs.get(jobMatch[1]);
+      return job ? json(res, 200, job) : json(res, 404, { error: "Job not found" });
+    }
+    const videoMatch = url.pathname.match(/^\/youtube\/videos\/([^/]+)$/);
+    if (req.method === "GET" && videoMatch) return json(res, 200, await videoStatus(videoMatch[1]));
+    if (req.method === "POST" && url.pathname === "/youtube/thumbnail") {
+      const payload = await readJson(req);
+      if (!payload.videoId || !payload.sourceUrl) {
+        return json(res, 400, { error: "videoId and sourceUrl are required" });
+      }
+      return json(res, 200, await setThumbnail(payload.videoId, payload.sourceUrl));
+    }
+    return json(res, 404, { error: "Not found" });
+  } catch (error) {
+    console.error(error);
+    return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+init()
+  .then(() =>
+    http.createServer(handler).listen(cfg.port, "0.0.0.0", () => {
+      console.log(`YouTube uploader listening on ${cfg.port}`);
+    })
+  )
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

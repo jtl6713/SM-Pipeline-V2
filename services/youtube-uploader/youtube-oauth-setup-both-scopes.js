@@ -93,12 +93,29 @@ const server = http.createServer(async (req, res) => {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.end("Authorization successful. Return to PowerShell.");
 
+    const redacted = { ...tokenJson };
+    if (redacted.refresh_token) redacted.refresh_token = `[stored in .env, length ${redacted.refresh_token.length}]`;
+    if (redacted.access_token) redacted.access_token = "[redacted]";
     console.log("\nOAuth response:");
-    console.log(JSON.stringify(tokenJson, null, 2));
+    console.log(JSON.stringify(redacted, null, 2));
 
     if (tokenJson.refresh_token) {
-      console.log("\nAdd/replace this line in .env:");
-      console.log(`GOOGLE_REFRESH_TOKEN=${tokenJson.refresh_token}`);
+      if (String(tokenJson.refresh_token).length < 40) {
+        throw new Error("Google returned a truncated refresh token; refusing to write .env.");
+      }
+      const envPath = ".env";
+      const current = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf8") : "";
+      const lines = current.split(/\r?\n/);
+      let found = false;
+      const next = lines.map((line) => {
+        if (!line.startsWith("GOOGLE_REFRESH_TOKEN=")) return line;
+        found = true;
+        return "GOOGLE_REFRESH_TOKEN=" + tokenJson.refresh_token;
+      });
+      if (!found) next.push("GOOGLE_REFRESH_TOKEN=" + tokenJson.refresh_token);
+      fs.writeFileSync(envPath, next.join("\n").replace(/\n*$/, "\n"));
+      console.log("\nWrote the full GOOGLE_REFRESH_TOKEN to .env automatically.");
+      console.log(`Stored refresh token length: ${tokenJson.refresh_token.length}`);
     } else {
       console.log(
         "\nWARNING: Google did not return a refresh_token. Remove this app from Google Account permissions, then rerun."
