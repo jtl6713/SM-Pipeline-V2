@@ -1,0 +1,21 @@
+{
+  "repair_item": 13,
+  "checkpoint": "facebook-native-multi-photo-default",
+  "decision": "native_multi_photo_default",
+  "opt_in": "Slideshow Reel",
+  "shot_video_default": "Reel",
+  "make_scenario_runs": 0,
+  "fb_orch_started": false,
+  "source_proof_run": 32090107409,
+  "pages_deploy_run": 32090192762,
+  "pages_deploy": "success",
+  "worker_deploy_run": 32090192773,
+  "worker_deploy": "blocked_predeploy_binding_contract",
+  "worker_deploy_blocker": "Deploy workflow expected ELEVENLABS_API_KEY; live chicagoshining-studio-api has 10 bindings and no ELEVENLABS_API_KEY. No production Worker traffic was switched.",
+  "live": {
+    "studio_pages_labels": "Multi-Image Post is labeled native album; Slideshow Reel is labeled optional 9:16 from photos",
+    "studio_pages_photo_set_default": "Multi-Image Post",
+    "studio_api_planner_default": "still Slideshow Reel until the next successful Worker deploy"
+  },
+  "passed": true
+}
