@@ -1,0 +1,28 @@
+{
+  "repair_item": 11,
+  "checkpoint": "oauth-consent-in-production",
+  "timestamp_utc": "2026-08-18T01:20:59Z",
+  "status": "PASS_PRODUCTION_CONSENT_AND_TOKEN_REFRESH",
+  "github_run_id": 32087890325,
+  "github_run_url": "https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32087890325",
+  "google_oauth": {
+    "project": "ChicagoShining YT Publisher",
+    "publishing_status": "In production",
+    "user_type": "External",
+    "operator_confirmed": true
+  },
+  "yt_orch_active": false,
+  "make_scenario_runs": 0,
+  "upload_attempted": false,
+  "oauth": {
+    "refresh_ok": true,
+    "truncated": false,
+    "refresh_token_length": 103,
+    "access_token_expires_in": 3599,
+    "uploader_version": "2026-08-18-oauth-status"
+  },
+  "video": {
+    "id": "4HAhk2Lg7GE",
+    "privacyStatus": "private"
+  }
+}
