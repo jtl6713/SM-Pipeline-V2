@@ -103,4 +103,27 @@ test("ratio aliases resolve to the canonical recipe", () => {
   const spec = resolveRecipe(new URL("https://variant.example/render?ratio=9x16"));
   assert.equal(spec.ratio, "9:16");
   assert.equal(spec.recipe, "fill-crop-v2");
+  assert.equal(spec.gravity, "center");
+});
+
+test("optional gravity keeps the fill-crop-v2 recipe and defaults to center", async () => {
+  const spec = resolveRecipe(new URL("https://variant.example/render?ratio=4:5&recipe=fill-crop-v2&g=0.20x0.80"));
+  assert.equal(spec.recipe, "fill-crop-v2");
+  assert.equal(spec.style, "focal_crop");
+  assert.deepEqual(spec.gravity, { x: 0.2, y: 0.8 });
+
+  const trace = [];
+  const response = await worker.fetch(
+    renderRequest("ratio=4%3A5&recipe=fill-crop-v2&g=0.20x0.80"),
+    environment(trace),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-studio-variant-recipe"), "fill-crop-v2");
+  assert.equal(response.headers.get("x-studio-variant-gravity"), "0.20x0.80");
+  assert.deepEqual(trace[1], ["transform", {
+    width: 1080,
+    height: 1350,
+    fit: "cover",
+    gravity: { x: 0.2, y: 0.8 },
+  }]);
 });

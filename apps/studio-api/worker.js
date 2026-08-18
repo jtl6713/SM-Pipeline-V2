@@ -2802,11 +2802,54 @@ function item4VariantRatioKey(ratio) {
 function item4VariantTargetFileName(asset, ratio) {
   const original = String(asset?.name || "photo").trim() || "photo";
   const base = original.replace(/\.[^.]+$/, "") || "photo";
-  return `${item4SafeFileName(base)}__${item4VariantRatioKey(ratio)}__${ITEM4_VARIANT_RECIPE_VERSION}.jpg`;
+  const filename = `${item4SafeFileName(base)}__${item4VariantRatioKey(ratio)}__${ITEM4_VARIANT_RECIPE_VERSION}.jpg`;
+  const suffix = item4CropTransferSuffix(asset, ratio);
+  return suffix ? filename.replace(/\.jpg$/i, `${suffix}.jpg`) : filename;
 }
 
-function item4QueueTransferId(recordId, assetId, ratio) {
-  return `ITEM4-VARIANT-${ITEM4_VARIANT_RECIPE_VERSION}-${recordId}-${assetId}-${item4VariantRatioKey(ratio)}`;
+function item4NormalizedCrop(asset, ratio) {
+  const raw = asset?.crops?.[ratio] || asset?.crops?.[String(ratio)] || null;
+  const x = Number(raw?.x);
+  const y = Number(raw?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return { x: 0.5, y: 0.5 };
+  return {
+    x: Math.min(1, Math.max(0, x)),
+    y: Math.min(1, Math.max(0, y)),
+  };
+}
+
+function item4CropStyleToken(asset, ratio) {
+  const crop = item4NormalizedCrop(asset, ratio);
+  if (Math.abs(crop.x - 0.5) < 0.005 && Math.abs(crop.y - 0.5) < 0.005) return "center";
+  return `${crop.x.toFixed(2)}x${crop.y.toFixed(2)}`;
+}
+
+function item4CropTransferSuffix(asset, ratio) {
+  const token = item4CropStyleToken(asset, ratio);
+  return token === "center" ? "" : `-g${token}`;
+}
+
+function item4MergeAssetCrops(assets, cropsPayload) {
+  if (!cropsPayload || typeof cropsPayload !== "object") return assets;
+  return (Array.isArray(assets) ? assets : []).map((asset) => {
+    const incoming = cropsPayload[asset.id] || cropsPayload[String(asset.id)];
+    if (!incoming || typeof incoming !== "object") return asset;
+    const crops = { ...(asset.crops || {}) };
+    for (const [ratio, point] of Object.entries(incoming)) {
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      crops[String(ratio)] = {
+        x: Math.min(1, Math.max(0, x)),
+        y: Math.min(1, Math.max(0, y)),
+      };
+    }
+    return { ...asset, crops };
+  });
+}
+
+function item4QueueTransferId(recordId, assetId, ratio, asset = null) {
+  return `ITEM4-VARIANT-${ITEM4_VARIANT_RECIPE_VERSION}-${recordId}-${assetId}-${item4VariantRatioKey(ratio)}${item4CropTransferSuffix(asset, ratio)}`;
 }
 
 function item4QueueStatus(row) {
@@ -2884,7 +2927,7 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
       const spec = ITEM4_RATIO_SPECS[ratio];
       if (!spec) throw new HttpError(400, `Unsupported platform ratio ${ratio}`);
 
-      const transferId = item4QueueTransferId(recordId, asset.id, ratio);
+      const transferId = item4QueueTransferId(recordId, asset.id, ratio, asset);
       const targetOutputs = item4OutputIdsForRatio(outputRows, plan, ratio);
       const targetFileName = item4VariantTargetFileName(asset, ratio);
       const current = byTransferId.get(transferId) || null;
@@ -2911,7 +2954,7 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
         Source_Drive_File_ID: sourceDriveId,
         Source_Media_Asset: [sourceMediaAssetId],
         Target_Production_Request_Outputs: targetOutputs,
-        Variant_Style: "Center Crop",
+        Variant_Style: item4CropStyleToken(asset, ratio),
       };
 
       if (!preserveStatus) {
@@ -3090,7 +3133,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
     };
 
     for (const ratio of ratios) {
-      const transferId = item4QueueTransferId(recordId, asset.id, ratio);
+      const transferId = item4QueueTransferId(recordId, asset.id, ratio, asset);
       const q = queueById.get(transferId);
       if (!q || item4QueueStatus(q) !== "Ready") continue;
 
@@ -3115,7 +3158,10 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
         preview_url: previewUrl,
         preview_status: previewStatus || null,
         file_name: String(f(q, "Target_File_Name") || item4VariantTargetFileName(asset, ratio)),
-        presentation: ratio === "9:16" ? "edge-to-edge center crop" : "center crop",
+        presentation: item4CropStyleToken(asset, ratio) === "center"
+          ? (ratio === "9:16" ? "edge-to-edge center crop" : "center crop")
+          : `focal crop ${item4CropStyleToken(asset, ratio)}`,
+        crop: item4NormalizedCrop(asset, ratio),
         authoritative_storage: "google_drive",
         persistent_cloudflare_storage: false,
       };
@@ -3135,7 +3181,7 @@ async function item4ReconcileVariants(env, recordId, record = null) {
   const ratios = item4RequiredRatios(plan || {});
   const queueRows = await item4VariantQueueRows(env, recordId);
   const expectedIds = new Set(
-    assets.flatMap((asset) => ratios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio)))
+    assets.flatMap((asset) => ratios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio, asset)))
   );
   const scoped = queueRows.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
 
@@ -3194,14 +3240,24 @@ async function item4ReconcileVariants(env, recordId, record = null) {
 }
 
 async function prepareItem4Variants(request, env, url, authorization) {
-  try { await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
 
   const recordId = item4RequestIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   assertEditableProductionRequest(record);
 
-  const assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const cropsPayload = payload?.crops && typeof payload.crops === "object" ? payload.crops : {};
+  let assets = item4MergeAssetCrops(item4AssetManifest(record), cropsPayload)
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   if (!assets.length) throw new HttpError(409, "Upload master photos before preparing platform media");
+
+  if (Object.keys(cropsPayload).length) {
+    record = await item4UpdateRequestState(env, recordId, {
+      Studio_Master_Assets_JSON: JSON.stringify(assets),
+    });
+    assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  }
 
   const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   if (f(record, "Studio_Output_Plan_Status") !== "Ready" || !plan?.items?.length) {
@@ -3235,6 +3291,8 @@ async function prepareItem4Variants(request, env, url, authorization) {
       `${stillMissing.length} master photo${stillMissing.length === 1 ? " has" : "s have"} not reached complete Google Drive + Media Asset authority yet`
     );
   }
+
+  authoritativeAssets = item4MergeAssetCrops(authoritativeAssets, cropsPayload);
 
   const outputRows = await outputRowsForProductionRequest(env, recordId);
   await item4UpdateRequestState(env, recordId, {
@@ -3380,7 +3438,7 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   // explicit state-transition correction.
   const queueRows = await item4VariantQueueRows(env, recordId);
   const expectedIds = new Set(
-    assets.flatMap((asset) => ratios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio)))
+    assets.flatMap((asset) => ratios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio, asset)))
   );
   const scoped = queueRows.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
   if (!scoped.length) {
@@ -6943,12 +7001,15 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
   const safeVariantReuse = module21Query.includes("__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__");
   const liveVariantRecipe = String(module33?.mapper?.qs?.find?.((row) => row?.name === "recipe")?.value || "");
   const variantRecipeReady = liveVariantRecipe === ITEM4_VARIANT_RECIPE_VERSION;
+  const liveGravity = String(module33?.mapper?.qs?.find?.((row) => row?.name === "g")?.value || "");
+  const gravityReady = liveGravity.includes("{{1.Variant_Style}}");
 
   const alreadyReady =
     previewReady &&
     selectorSafe &&
     safeVariantReuse &&
     variantRecipeReady &&
+    gravityReady &&
     !legacyLinkMappingsPresent;
 
   if (alreadyReady) {
@@ -6984,6 +7045,9 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
   const recipeRow = patchedModule33.mapper.qs.find((row) => row?.name === "recipe");
   if (recipeRow) recipeRow.value = ITEM4_VARIANT_RECIPE_VERSION;
   else patchedModule33.mapper.qs.push({ name: "recipe", value: ITEM4_VARIANT_RECIPE_VERSION });
+  const gravityRow = patchedModule33.mapper.qs.find((row) => row?.name === "g");
+  if (gravityRow) gravityRow.value = "{{1.Variant_Style}}";
+  else patchedModule33.mapper.qs.push({ name: "g", value: "{{1.Variant_Style}}" });
   if (patchedModule33?.metadata?.designer) {
     patchedModule33.metadata.designer.name = "33 - Render Versioned Fill-Crop Platform Variant";
   }
@@ -7092,6 +7156,7 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
     const verifiedModule21Query = String(verifiedModule21?.mapper?.qs?.find?.((row) => row?.key === "q")?.value || "");
     const verifiedModule33 = phase6FindModule(verified?.flow, 33);
     const verifiedVariantRecipe = String(verifiedModule33?.mapper?.qs?.find?.((row) => row?.name === "recipe")?.value || "");
+    const verifiedGravity = String(verifiedModule33?.mapper?.qs?.find?.((row) => row?.name === "g")?.value || "");
     if (!verifiedSearch ||
         !verifiedFormula.includes("Preview_Status") ||
         !verifiedFormula.includes('AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending")') ||
@@ -7099,7 +7164,8 @@ async function item4EnsureSmv1PreviewCacheWorker(env) {
         !phase6FindModule(verified?.flow, 60) ||
         !phase6FindModule(verified?.flow, 70) ||
         !verifiedModule21Query.includes("__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__") ||
-        verifiedVariantRecipe !== ITEM4_VARIANT_RECIPE_VERSION) {
+        verifiedVariantRecipe !== ITEM4_VARIANT_RECIPE_VERSION ||
+        !verifiedGravity.includes("{{1.Variant_Style}}")) {
       throw new HttpError(502, "SMV1 post-deploy verification did not match the safe authority/preview selector contract");
     }
 

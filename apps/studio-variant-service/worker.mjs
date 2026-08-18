@@ -50,6 +50,28 @@ function normalizeRatio(value) {
   return null;
 }
 
+export function parseGravity(value) {
+  const text = String(value || "").trim().toLowerCase().replace(",", "x");
+  if (!text || text === "center" || text === "center_crop" || text === "center crop") {
+    return { gravity: "center", token: "center" };
+  }
+  const parts = text.split(/[x;:_]/);
+  if (parts.length !== 2) return { gravity: "center", token: "center" };
+  let x = Number(parts[0]);
+  let y = Number(parts[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return { gravity: "center", token: "center" };
+  if (x > 1 || y > 1) {
+    x = x / 100;
+    y = y / 100;
+  }
+  x = Math.min(1, Math.max(0, x));
+  y = Math.min(1, Math.max(0, y));
+  if (Math.abs(x - 0.5) < 0.005 && Math.abs(y - 0.5) < 0.005) {
+    return { gravity: "center", token: "center" };
+  }
+  return { gravity: { x, y }, token: `${x.toFixed(2)}x${y.toFixed(2)}` };
+}
+
 export function resolveRecipe(url) {
   const ratio = normalizeRatio(url.searchParams.get("ratio"));
   if (!ratio) return { error: "ratio must be 4:5 or 9:16", status: 400 };
@@ -63,10 +85,14 @@ export function resolveRecipe(url) {
     };
   }
 
+  const { gravity, token } = parseGravity(url.searchParams.get("g") || url.searchParams.get("gravity"));
   return {
     ratio,
     recipe: RECIPE.version,
     ...RECIPE.ratios[ratio],
+    gravity,
+    gravity_token: token,
+    style: token === "center" ? RECIPE.ratios[ratio].style : "focal_crop",
   };
 }
 
@@ -77,7 +103,7 @@ async function renderFillCrop(request, env, spec) {
       width: spec.width,
       height: spec.height,
       fit: "cover",
-      gravity: "center",
+      gravity: spec.gravity || "center",
     })
     .output({
       format: RECIPE.outputFormat,
@@ -132,6 +158,7 @@ export default {
       headers.set("x-studio-variant-width", String(spec.width));
       headers.set("x-studio-variant-height", String(spec.height));
       headers.set("x-studio-variant-style", spec.style);
+      headers.set("x-studio-variant-gravity", spec.gravity_token || "center");
 
       return new Response(result.body, { status: 200, headers });
     } catch (error) {
