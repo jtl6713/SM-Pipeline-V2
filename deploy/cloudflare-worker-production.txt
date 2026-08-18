@@ -23,3 +23,5 @@ Lease-store hardening deployment: 2026-08-16 — repair-control lease CRUD now u
 Item 8 recipe-versioning deployment: 2026-08-17 — `fill-crop-v2` scopes variant transfer IDs, Google Drive filenames, manifest metadata, and SMV1 render queries so targeted rebuilds create distinct downstream cache identities.
 
 Item 13 Worker deploy: 2026-08-18 — Facebook photo-set planner default is native Multi-Image Post; Slideshow Reel remains opt-in. Source commit fc5bb05.
+
+EZ voice catalog deploy: 2026-08-18 — ElevenLabs v1 catalog fallback and `/api/voices/:id/preview` sample proxy so Studio can list and play the full voice library. Source commit 65a6f63.

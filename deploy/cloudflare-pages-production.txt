@@ -33,3 +33,5 @@ EZ path Pages deploy: 2026-08-18 — Per-photo caption dropdown; Manual opens th
 EZ path Pages deploy: 2026-08-18 — Caption autosave uses the saved Production Request instead of the hidden Advanced form, so Manual captions no longer 500.
 
 EZ path Pages deploy: 2026-08-18 — ElevenLabs voice catalog on Content audio; Voice and Music track only appear after Yes.
+
+EZ path Pages deploy: 2026-08-18 — Voice Preview uses the ElevenLabs sample proxy, Music track has Preview, UI 0.6.33. Source commit 65a6f63.
