@@ -1,0 +1,42 @@
+name: Prove Item 17 Studio Per-Photo Title Editing
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-item17-studio-title-edit.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Assert title edit, preview, version, approval lock, and render input
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-title-edit/contract.test.mjs apps/tiktok-overlay/contract.test.mjs
+          python -m py_compile repair/scripts/prove-item17-title-edit.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          cp apps/studio-web/assets/app-item4-0619.js /tmp/studio-web.mjs
+          node --check /tmp/studio-web.mjs
+          export ITEM17_EVIDENCE="/tmp/item17-title-edit-proof.json"
+          python repair/scripts/prove-item17-title-edit.py
+          jq -e '.passed == true and .make_scenario_runs == 0 and .tiktok_drafts_created == 0 and .ttd_orch_pulsed == false and .schema == "studio-title-edit-v1"' \
+            /tmp/item17-title-edit-proof.json >/dev/null
+
+      - name: Upload Item 17 title-edit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item17-title-edit-${{ github.run_id }}
+          path: /tmp/item17-title-edit-proof.json
+          if-no-files-found: ignore
+          retention-days: 30

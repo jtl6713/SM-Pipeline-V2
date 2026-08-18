@@ -165,6 +165,9 @@ export default {
           phase6_p0202_generic_voice_prep: true,
           phase6_studio_request_scoped_voice_prep: true,
           phase6_auto_voice_duration_probe: true,
+          phase6_title_edit_v1: true,
+          phase6_title_approval_lock: true,
+          phase6_title_render_input: true,
           elevenlabs_voice_catalog_configured: Boolean(env.ELEVENLABS_API_KEY),
           item4_master_media_upload: true,
           item4_heic_heif_upload: true,
@@ -7542,7 +7545,7 @@ function phase6SlidePreviewUrl(slide, ratio) {
     f(slide, "Current Image URL") || f(slide, "AI Image URL") || null;
 }
 
-function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolume = 1) {
+function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolume = 1, platform = "") {
   const directives = phase6ParseJson(f(slide, "Creative_Directives_JSON"), {}) || {};
   const overlay = directives.overlay && typeof directives.overlay === "object" ? directives.overlay : {};
   const voiceover = directives.voiceover && typeof directives.voiceover === "object" ? directives.voiceover : {};
@@ -7554,6 +7557,7 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
     "1:1": phase6VariantForRatio(slide, "1:1"),
     "16:9": null,
   };
+  const tiktok916 = String(platform || "") === "TikTok" && String(targetRatio || "") === "9:16";
   return {
     id: slide.id,
     name: f(slide, "Slide Name"),
@@ -7571,10 +7575,12 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
       text: phase6Text(overlay.text, 1000),
       style_preset: phase6Text(overlay.stylePreset || "Chicago Editorial", 80),
       role: phase6Text(overlay.role || "overlay", 60),
-      position: phase6Text(overlay.position || "center", 60),
+      position: phase6Text(overlay.position || (tiktok916 ? "lower-third" : "center"), 60),
       size: phase6Number(overlay.size, 64),
+      version: Math.max(1, Math.round(phase6Number(overlay.version, 1))),
       eyebrow: phase6Text(overlay.eyebrow, 250),
-      subtitle: phase6Text(overlay.subtitle, 500),
+      subtitle: phase6Text(overlay.subtitle || overlay.caption, 500),
+      caption: phase6Text(overlay.caption || overlay.subtitle, 500),
       accent_text: phase6Text(overlay.accentText, 500),
       brand: phase6Text(overlay.brand, 250),
       background_opacity: phase6Number(overlay.backgroundOpacity, null),
@@ -7614,8 +7620,9 @@ async function phase6SlidesForOutput(env, outputRecord) {
   const ids = Array.isArray(f(outputRecord, "Carousel Slides")) ? f(outputRecord, "Carousel Slides") : [];
   const records = await Promise.all(ids.map(id => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
   const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
+  const platform = String(f(outputRecord, "Platform") || "").trim();
   const defaultVoiceoverVolume = phase6Clamp(f(outputRecord, "Voiceover_Volume"), 0, 1.25, 1);
-  return records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume))
+  return records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume, platform))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 }
 
@@ -7898,11 +7905,13 @@ async function getOutputCreative(request, env, url, authorization) {
     phase6VoiceCatalog(env),
   ]);
   const handoff = phase6CreativeHandoffStatus(record, slides);
+  const titleLock = phase6TitleLockView(record, slides);
   return respond(request, env, {
     ok: true,
     output,
-    slides,
+    slides: phase6SlidesWithTitleRenderInput(record, slides),
     handoff,
+    title_lock: titleLock,
     options: {
       style_presets: PHASE6_STYLE_PRESETS,
       text_roles: PHASE6_TEXT_ROLES,
@@ -7922,6 +7931,7 @@ async function getOutputCreative(request, env, url, authorization) {
       review_only: true,
       do_not_publish: output.do_not_publish,
       publishing_changed_by_this_api: false,
+      title_lock: titleLock,
     },
   });
 }
@@ -7955,29 +7965,38 @@ function phase6SlideDirectiveFromPayload(input, existing) {
       : phase6Clamp(requestedVoiceVolumeOverride, 0, 1.25, phase6Number(oldVoice.volumeOverride, 1)))
     : phase6Number(oldVoice.volumeOverride, null);
 
+  const durationSeconds = phase6Clamp(input?.duration_seconds ?? input?.durationSeconds, 0.5, 60, phase6Number(old.durationSeconds, 4));
+  const startFraction = phase6Clamp(overlayInput.start_fraction ?? overlayInput.startFraction ?? oldOverlay.startFraction, 0, 1, 0);
+  const endFraction = phase6Clamp(overlayInput.end_fraction ?? overlayInput.endFraction ?? oldOverlay.endFraction, 0, 1, 1);
+  const overlay = {
+    ...oldOverlay,
+    enabled: overlayEnabled,
+    text: phase6Text(overlayInput.text ?? oldOverlay.text, 1000),
+    stylePreset,
+    role: phase6Select(overlayInput.role ?? oldOverlay.role, PHASE6_TEXT_ROLES, "overlay"),
+    position: phase6Select(overlayInput.position ?? oldOverlay.position, PHASE6_POSITIONS, "center"),
+    size: Math.round(phase6Clamp(overlayInput.size ?? oldOverlay.size, 20, 140, 64)),
+    eyebrow: phase6Text(overlayInput.eyebrow ?? oldOverlay.eyebrow, 250),
+    subtitle: phase6Text(overlayInput.caption ?? overlayInput.subtitle ?? oldOverlay.caption ?? oldOverlay.subtitle, 500),
+    caption: phase6Text(overlayInput.caption ?? overlayInput.subtitle ?? oldOverlay.caption ?? oldOverlay.subtitle, 500),
+    accentText: phase6Text(overlayInput.accent_text ?? overlayInput.accentText ?? oldOverlay.accentText, 500),
+    brand: phase6Text(overlayInput.brand ?? oldOverlay.brand, 250),
+    backgroundOpacity: phase6Clamp(overlayInput.background_opacity ?? overlayInput.backgroundOpacity ?? oldOverlay.backgroundOpacity, 0, 1, 0.4),
+    animation: phase6Text(overlayInput.animation ?? oldOverlay.animation ?? "fade", 60),
+    startFraction: Math.min(startFraction, endFraction),
+    endFraction: Math.max(startFraction, endFraction),
+  };
+  overlay.version = phase6NextTitleVersion(oldOverlay, overlay, durationSeconds);
+
   return {
     ...old,
     schemaVersion: "p020.slide.4-ui-phase6",
     include: phase6Bool(input?.include, old.include !== false),
-    durationSeconds: phase6Clamp(input?.duration_seconds ?? input?.durationSeconds, 0.5, 60, phase6Number(old.durationSeconds, 4)),
+    durationSeconds,
     focalPoint: phase6Select(input?.focal_point ?? input?.focalPoint ?? old.focalPoint, PHASE6_FOCAL_POINTS, "center"),
     fitMode: phase6Select(input?.fit_mode ?? input?.fitMode ?? old.fitMode, PHASE6_FIT_MODES, "fill_crop"),
     safeAreaAware: phase6Bool(input?.safe_area_aware ?? input?.safeAreaAware, old.safeAreaAware !== false),
-    overlay: {
-      ...oldOverlay,
-      enabled: overlayEnabled,
-      text: phase6Text(overlayInput.text ?? oldOverlay.text, 1000),
-      stylePreset,
-      role: phase6Select(overlayInput.role ?? oldOverlay.role, PHASE6_TEXT_ROLES, "overlay"),
-      position: phase6Select(overlayInput.position ?? oldOverlay.position, PHASE6_POSITIONS, "center"),
-      size: Math.round(phase6Clamp(overlayInput.size ?? oldOverlay.size, 20, 140, 64)),
-      eyebrow: phase6Text(overlayInput.eyebrow ?? oldOverlay.eyebrow, 250),
-      subtitle: phase6Text(overlayInput.subtitle ?? oldOverlay.subtitle, 500),
-      accentText: phase6Text(overlayInput.accent_text ?? overlayInput.accentText ?? oldOverlay.accentText, 500),
-      brand: phase6Text(overlayInput.brand ?? oldOverlay.brand, 250),
-      backgroundOpacity: phase6Clamp(overlayInput.background_opacity ?? overlayInput.backgroundOpacity ?? oldOverlay.backgroundOpacity, 0, 1, 0.4),
-      animation: phase6Text(overlayInput.animation ?? oldOverlay.animation ?? "fade", 60),
-    },
+    overlay,
     voiceover: {
       ...oldVoice,
       enabled: voiceEnabled,
@@ -8024,11 +8043,15 @@ async function updateOutputCreative(request, env, url, authorization) {
 
   const creativeSettings = payload?.creative_settings && typeof payload.creative_settings === "object"
     ? payload.creative_settings : current.creative_settings || {};
+  const { title_lock: _clientTitleLock, ...safeCreativeSettings } = creativeSettings;
+  const existingTitleLock = current.creative_settings?.title_lock && typeof current.creative_settings.title_lock === "object"
+    ? current.creative_settings.title_lock : {};
   const settingsSnapshot = {
-    ...creativeSettings,
+    ...safeCreativeSettings,
     schemaVersion: "p020.phase6.ui.2",
     savedAt: new Date().toISOString(),
     savedBy: authorization?.email || null,
+    title_lock: existingTitleLock,
   };
 
   const outputFields = {
@@ -8049,6 +8072,7 @@ async function updateOutputCreative(request, env, url, authorization) {
   const linkedIds = new Set(Array.isArray(f(existingOutput, "Carousel Slides")) ? f(existingOutput, "Carousel Slides") : []);
   const slideInputs = Array.isArray(payload?.slides) ? payload.slides.slice(0, 40) : [];
   const existingSlides = new Map();
+  const tiktok916 = String(f(existingOutput, "Platform") || "") === "TikTok" && String(f(existingOutput, "Aspect_Ratio") || "") === "9:16";
   for (const slideInput of slideInputs) {
     const slideId = String(slideInput?.id || "").trim();
     if (!linkedIds.has(slideId)) throw new HttpError(400, `Slide ${slideId || "(blank)"} is not linked to this output`);
@@ -8072,11 +8096,27 @@ async function updateOutputCreative(request, env, url, authorization) {
 
   // All input is validated before writes begin.
   const slideWrites = [];
+  let overlayChanged = false;
   for (let index = 0; index < slideInputs.length; index += 1) {
     const input = slideInputs[index];
     const slideId = String(input.id).trim();
     const existing = existingSlides.get(slideId);
     const directive = phase6SlideDirectiveFromPayload(input, existing);
+    const previousDirective = phase6ParseJson(f(existing, "Creative_Directives_JSON"), {}) || {};
+    const previousOverlay = previousDirective.overlay && typeof previousDirective.overlay === "object" ? previousDirective.overlay : {};
+    const oldOverlayForIdentity = {
+      ...previousOverlay,
+      position: previousOverlay.position || (tiktok916 ? "lower-third" : "center"),
+      caption: previousOverlay.caption || previousOverlay.subtitle,
+      subtitle: previousOverlay.subtitle || previousOverlay.caption,
+    };
+    const newOverlayForIdentity = {
+      ...directive.overlay,
+      position: directive.overlay?.position || (tiktok916 ? "lower-third" : "center"),
+    };
+    if (phase6TitleEditIdentity(oldOverlayForIdentity, previousDirective.durationSeconds) !== phase6TitleEditIdentity(newOverlayForIdentity, directive.durationSeconds)) {
+      overlayChanged = true;
+    }
     const voiceText = directive.voiceover.enabled ? phase6Text(directive.voiceover.text, 5000) : "";
     const voiceId = directive.voiceover.enabled ? phase6Text(directive.voiceover.voiceId, 120) : (f(existing, "Slide_Voice_ID") || PHASE6_DEFAULT_VOICE_ID);
     const voice = directive.voiceover.enabled ? phase6Text(directive.voiceover.voice, 120) : (f(existing, "Slide_Voice_Name") || f(existing, "Slide_Voice") || "Kate");
@@ -8104,6 +8144,34 @@ async function updateOutputCreative(request, env, url, authorization) {
     slideWrites.push({ slideId, fields });
   }
 
+  const unlockRequested = payload?.unlock_titles === true;
+  const titleLockDecision = phase6TitleLockState({
+    reviewStatus: f(existingOutput, "Review_Status"),
+    lock: existingTitleLock,
+    overlayChanged,
+    unlockRequested,
+  });
+  if (!titleLockDecision.allow) {
+    throw new HttpError(409, "Per-photo titles are locked after preview approval. Unlock titles to start a new version.");
+  }
+  if (unlockRequested) {
+    settingsSnapshot.title_lock = {
+      schema: "studio-title-edit-v1",
+      locked: false,
+      version: Math.max(1, Math.round(phase6Number(existingTitleLock.version, 1))),
+      overlay_identity: existingTitleLock.overlay_identity || null,
+      approved_at: existingTitleLock.approved_at || null,
+      unlocked_at: new Date().toISOString(),
+    };
+  } else if (!titleLockDecision.locked && existingTitleLock && Object.keys(existingTitleLock).length) {
+    settingsSnapshot.title_lock = {
+      ...existingTitleLock,
+      schema: "studio-title-edit-v1",
+      locked: false,
+    };
+  }
+  outputFields.Studio_Creative_Settings_JSON = JSON.stringify(settingsSnapshot);
+
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
     method: "PATCH",
     body: JSON.stringify({ fields: outputFields, typecast: false }),
@@ -8117,13 +8185,17 @@ async function updateOutputCreative(request, env, url, authorization) {
 
   const refreshedOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
   const slides = await phase6SlidesForOutput(env, refreshedOutput);
+  const titleLock = phase6TitleLockView(refreshedOutput, slides);
   return respond(request, env, {
     ok: true,
     saved: true,
     record: mapPhase6CreativeOutput(refreshedOutput),
-    slides,
+    slides: phase6SlidesWithTitleRenderInput(refreshedOutput, slides),
+    title_lock: titleLock,
     make_voice_mapping: makeVoiceMigration,
-    message: "Phase 6 creative settings saved. Publishing state was not changed.",
+    message: unlockRequested
+      ? "Per-photo titles are unlocked. Save a new preview and approve again before publishing review is complete."
+      : "Phase 6 creative settings saved. Publishing state was not changed.",
   });
 }
 
@@ -8138,6 +8210,102 @@ function phase6DimensionsForRatio(ratio) {
 function phase6AssetSourceForSlide(slide, ratio) {
   if (slide?.variants?.[ratio]) return `prepared_${String(ratio).replace(":", "x")}`;
   return "fallback_source";
+}
+
+function phase6TitleEditIdentity(overlay, _durationSeconds = 4) {
+  const o = overlay && typeof overlay === "object" ? overlay : {};
+  const start = phase6Clamp(o.start_fraction ?? o.startFraction, 0, 1, 0);
+  const end = phase6Clamp(o.end_fraction ?? o.endFraction, 0, 1, 1);
+  return [
+    "studio-title-edit-v1",
+    o.enabled === false ? "0" : "1",
+    phase6Text(o.text, 1000),
+    phase6Text(o.caption ?? o.subtitle, 500),
+    phase6Text(o.position || "center", 60),
+    Math.round(phase6Clamp(o.size, 20, 140, 64)),
+    phase6Text(o.style_preset || o.stylePreset || "Chicago Editorial", 80),
+    Math.min(start, end),
+    Math.max(start, end),
+  ].join("|");
+}
+
+function phase6NextTitleVersion(oldOverlay, newOverlay, durationSeconds = 4) {
+  const previous = oldOverlay && typeof oldOverlay === "object" ? oldOverlay : {};
+  const next = newOverlay && typeof newOverlay === "object" ? newOverlay : {};
+  const hadVersion = Number.isFinite(Number(previous.version)) && Number(previous.version) >= 1;
+  const prevVersion = hadVersion ? Math.round(Number(previous.version)) : 1;
+  if (phase6TitleEditIdentity(previous, durationSeconds) === phase6TitleEditIdentity(next, durationSeconds)) {
+    return hadVersion ? prevVersion : 1;
+  }
+  return hadVersion ? prevVersion + 1 : 1;
+}
+
+function phase6TitleLockState({ reviewStatus = "", lock = null, overlayChanged = false, unlockRequested = false } = {}) {
+  const stored = lock && typeof lock === "object" ? lock : {};
+  const reviewApproved = String(reviewStatus || "") === "Approved";
+  const locked = stored.locked === true || (reviewApproved && stored.locked !== false);
+  if (locked && overlayChanged && !unlockRequested) {
+    return { schema: "studio-title-edit-v1", locked: true, allow: false, code: "title-lock-conflict" };
+  }
+  if (unlockRequested) {
+    return { schema: "studio-title-edit-v1", locked: false, allow: true, code: "unlocked" };
+  }
+  return { schema: "studio-title-edit-v1", locked, allow: true, code: locked ? "locked-unchanged" : "unlocked" };
+}
+
+function phase6TitleLockView(record, slides = []) {
+  const settings = phase6ParseJson(f(record, "Studio_Creative_Settings_JSON"), {}) || {};
+  const lock = settings.title_lock && typeof settings.title_lock === "object" ? settings.title_lock : {};
+  const reviewApproved = String(f(record, "Review_Status") || "") === "Approved";
+  const locked = lock.locked === true || (reviewApproved && lock.locked !== false);
+  const currentIdentity = (Array.isArray(slides) ? slides : []).map((slide) => `${slide.id}:${phase6TitleEditIdentity(slide.overlay, slide.duration_seconds)}`).join("||");
+  const approvedIdentity = phase6Text(lock.overlay_identity, 20000);
+  const versions = (Array.isArray(slides) ? slides : []).map((slide) => Math.max(1, Math.round(phase6Number(slide?.overlay?.version, 1))));
+  return {
+    schema: "studio-title-edit-v1",
+    locked,
+    version: versions.length ? Math.max(...versions) : Math.max(1, Math.round(phase6Number(lock.version, 1))),
+    overlay_identity: currentIdentity,
+    approved_overlay_identity: approvedIdentity || null,
+    stale_approval: Boolean(!locked && reviewApproved && approvedIdentity && approvedIdentity !== currentIdentity),
+    approved_at: lock.approved_at || (reviewApproved ? f(record, "Review_Decision_At") : null) || null,
+    unlocked_at: lock.unlocked_at || null,
+  };
+}
+
+function phase6TitleRenderInput(slide, options = {}) {
+  const overlay = phase6RenderOverlayFromSlide(slide, options);
+  const source = slide?.overlay && typeof slide.overlay === "object" ? slide.overlay : {};
+  const storedVersion = Number(source.version);
+  overlay.schema = "studio-title-edit-v1";
+  overlay.version = Number.isFinite(storedVersion) && storedVersion >= 1 ? Math.round(storedVersion) : 1;
+  overlay.caption = phase6Text(source.caption || source.subtitle || overlay.subtitle, 500);
+  overlay.titleEditKey = [
+    "studio-title-edit-v1",
+    overlay.version,
+    overlay.enabled ? "1" : "0",
+    overlay.text,
+    overlay.caption,
+    overlay.position,
+    overlay.size,
+    overlay.stylePreset,
+    overlay.startFraction,
+    overlay.endFraction,
+  ].join("|");
+  return overlay;
+}
+
+function phase6SlidesWithTitleRenderInput(outputRecord, slides = []) {
+  const platform = String(f(outputRecord, "Platform") || "").trim();
+  const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim();
+  return (Array.isArray(slides) ? slides : []).map((slide) => ({
+    ...slide,
+    title_render_input: phase6TitleRenderInput(slide, {
+      platform,
+      ratio,
+      durationSeconds: slide.duration_seconds,
+    }),
+  }));
 }
 
 function phase6RenderOverlayFromSlide(slide, options = {}) {
@@ -8244,7 +8412,7 @@ async function phase6BuildPreviewRenderPackage(env, outputRecord) {
         volume: phase6Clamp(slide.voiceover.volume_override, 0, 1.25, globalVoiceoverVolume),
         measuredDurationSeconds: phase6Number(slide.voiceover.duration_seconds, null),
       } : { enabled: false },
-      overlay: phase6RenderOverlayFromSlide(slide, {
+      overlay: phase6TitleRenderInput(slide, {
         platform: f(outputRecord, "Platform"),
         ratio,
         durationSeconds: requestedSeconds,
@@ -8284,6 +8452,7 @@ async function phase6BuildPreviewRenderPackage(env, outputRecord) {
   const manifest = {
     ...priorManifest,
     schemaVersion: "p020.6-phase6-preview",
+    titleEditSchema: "studio-title-edit-v1",
     sequenceType: "photo_sequence",
     outputRecordId: outputRecord.id,
     outputId,
@@ -9265,11 +9434,22 @@ async function reviewOutputCreative(request, env, url, authorization) {
   let renderPackage = null;
   let voiceAutomation = null;
   if (action === "approve" || action === "approved") {
+    const slidesForLock = await phase6SlidesForOutput(env, existing);
+    const settings = phase6ParseJson(f(existing, "Studio_Creative_Settings_JSON"), {}) || {};
+    const lockView = phase6TitleLockView(existing, slidesForLock);
+    settings.title_lock = {
+      schema: "studio-title-edit-v1",
+      locked: true,
+      version: lockView.version,
+      overlay_identity: lockView.overlay_identity,
+      approved_at: stamp,
+    };
     fields = {
       Review_Status: "Approved",
       Review_Decision_At: stamp,
       Review_Notes: [existingNotes, note, `Studio Phase 6 preview approved (review-only) at ${stamp}.`].filter(Boolean).join("\n\n"),
       Do_Not_Publish: true,
+      Studio_Creative_Settings_JSON: JSON.stringify(settings),
     };
   } else if (["changes", "changes_requested", "revise", "revision"].includes(action)) {
     // Persist the handoff boundary BEFORE any long-running voice work. This is the durable

@@ -28,6 +28,7 @@
   let creativeOptions = {};
   let creativeHandoffPollToken = 0;
   let creativeHandoffStatus = null;
+  let creativeTitleLock = null;
   let creativeEditorDirty = false;
   let creativeSavedFingerprint = "";
   let creativeDirtyTimer = null;
@@ -2305,7 +2306,7 @@
   }
 
   function setCreativeBusy(busy) {
-    ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "reloadCreativeEditor"].forEach((id) => {
+    ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "reloadCreativeEditor", "creativeUnlockTitles"].forEach((id) => {
       const button = $(id);
       if (button) {
         button.disabled = Boolean(busy);
@@ -2368,7 +2369,8 @@
     reloadCreativeEditor: "Discard unsaved edits and reload the latest saved values from Studio.",
     creativeRequestChanges: "Save the current controls and create a new rendered preview. Publishing stays locked.",
     saveCreativeEditor: "Save these edits as a draft without creating a new rendered preview.",
-    creativeApprovePreview: "Approve the current preview. This records review approval only and does not publish the output.",
+    creativeApprovePreview: "Approve the current preview. This records review approval, locks per-photo titles, and does not publish the output.",
+    creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
   };
 
@@ -2382,8 +2384,11 @@
     overlay_style: "Selects the visual text preset, such as Chicago Editorial, Glass Card, or Black Gold Arched.",
     overlay_role: "Describes the purpose of the text treatment, such as title card, callout, or end card, so the renderer can apply the appropriate treatment.",
     overlay_position: "Controls where the text treatment is positioned within the safe area.",
-    overlay_text: "The main on-screen text for this slide. This is separate from the spoken narration script.",
+    overlay_text: "The on-photo title for this slide. This is separate from the spoken narration script.",
+    overlay_caption: "Optional second line under the title. Kept inside the same safe area as the title.",
     overlay_size: "Text size used for the primary overlay treatment on this slide.",
+    overlay_start: "When the title appears during this slide, as a fraction of the slide duration.",
+    overlay_end: "When the title disappears during this slide, as a fraction of the slide duration.",
     voiceover_enabled: "Turn narration for this slide on or off.",
     voiceover_voice: "ElevenLabs voice to use when this slide narration is generated or regenerated. Studio saves the underlying voice ID, so names can change without breaking generation.",
     voiceover_voice_preview: "Plays the ElevenLabs sample for this slide selected voice without changing the saved narration.",
@@ -2535,6 +2540,51 @@
     phase6DecorateTooltips(target);
   }
 
+  function phase6DefaultOverlayPosition() {
+    return String(activeCreativeOutput?.platform || "") === "TikTok" && String(activeCreativeOutput?.aspect_ratio || "") === "9:16"
+      ? "lower-third"
+      : "center";
+  }
+
+  function phase6OverlayPreviewHtml(overlay = {}) {
+    const title = String(overlay.text || "").trim();
+    const caption = String(overlay.caption || overlay.subtitle || "").trim();
+    const enabled = overlay.enabled !== false && Boolean(title);
+    const position = String(overlay.position || phase6DefaultOverlayPosition()).replace(/[^a-z0-9-]/gi, "") || "center";
+    const size = Math.max(10, Math.round((Number(overlay.size || 64) / 64) * 13));
+    if (!enabled) return `<div class="slide-title-preview pos-${escapeHtml(position)} off" aria-hidden="true"></div>`;
+    return `<div class="slide-title-preview pos-${escapeHtml(position)}" style="font-size:${size}px">
+      <div class="slide-title-preview-title">${escapeHtml(title)}</div>
+      ${caption ? `<div class="slide-title-preview-caption">${escapeHtml(caption)}</div>` : ""}
+    </div>`;
+  }
+
+  function phase6BindOverlayPreview(card) {
+    const canvas = card.querySelector(".slide-preview-canvas");
+    if (!canvas) return;
+    const update = () => {
+      const style = card.querySelector('[data-field="overlay_style"]')?.value;
+      const overlay = {
+        enabled: Boolean(card.querySelector('[data-field="overlay_enabled"]')?.checked) && style !== "No Text",
+        text: card.querySelector('[data-field="overlay_text"]')?.value || "",
+        caption: card.querySelector('[data-field="overlay_caption"]')?.value || "",
+        position: card.querySelector('[data-field="overlay_position"]')?.value || phase6DefaultOverlayPosition(),
+        size: Number(card.querySelector('[data-field="overlay_size"]')?.value || 64),
+      };
+      const nextWrap = document.createElement("div");
+      nextWrap.innerHTML = phase6OverlayPreviewHtml(overlay);
+      const next = nextWrap.firstElementChild;
+      const existing = canvas.querySelector(".slide-title-preview");
+      if (existing) existing.replaceWith(next);
+      else canvas.appendChild(next);
+    };
+    ["overlay_enabled", "overlay_text", "overlay_caption", "overlay_position", "overlay_size", "overlay_style"].forEach((field) => {
+      const node = card.querySelector(`[data-field="${field}"]`);
+      node?.addEventListener("input", update);
+      node?.addEventListener("change", update);
+    });
+  }
+
   function renderCreativeSlides() {
     const target = $("creativeSlidesList");
     $("creativeSlideCount").textContent = `${creativeSlides.length} slide${creativeSlides.length === 1 ? "" : "s"}`;
@@ -2545,6 +2595,9 @@
     }
 
     const targetRatio = String(activeCreativeOutput?.aspect_ratio || "4:5");
+    const tiktok916 = String(activeCreativeOutput?.platform || "") === "TikTok" && targetRatio === "9:16";
+    const titleLocked = Boolean(creativeTitleLock?.locked);
+    const titleLockAttr = titleLocked ? "disabled" : "";
     const styles = creativeOptions.style_presets || [];
     const roles = creativeOptions.text_roles || [];
     const positions = creativeOptions.positions || [];
@@ -2556,6 +2609,9 @@
 
     target.innerHTML = creativeSlides.map((slide, index) => {
       const overlay = slide.overlay || {};
+      const overlayPosition = overlay.position || (tiktok916 ? "lower-third" : "center");
+      const overlayCaption = overlay.caption || overlay.subtitle || "";
+      const overlayVersion = Number(overlay.version || slide.title_render_input?.version || 1);
       const voiceover = slide.voiceover || {};
       const variants = slide.variants || {};
       const preview = slide.preview_url;
@@ -2568,19 +2624,26 @@
       const previewHtml = preview
         ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(slide.name || `Slide ${index + 1}`)}">`
         : '<div class="slide-preview-placeholder">No preview image available</div>';
+      const titlePreviewHtml = phase6OverlayPreviewHtml({
+        enabled: overlay.enabled,
+        text: overlay.text,
+        caption: overlayCaption,
+        position: overlayPosition,
+        size: overlay.size,
+      });
       const tiktokProof = targetRatio === "9:16" && slide.tiktok_safe_zone_status
         ? `<div class="subtle">TikTok safe zone: ${escapeHtml(slide.tiktok_safe_zone_status)}</div>` : "";
 
       const collapsed = creativeSlideCollapsed.has(slide.id);
-      const slideSummary = `${Number(slide.duration_seconds ?? 4).toFixed(1)}s · ${overlay.style_preset || "No style"} · ${voiceover.enabled === false ? "No voiceover" : (voiceover.voice || "Voiceover")}`;
-      return `<article class="creative-slide-card ${slide.include === false ? "excluded" : ""} ${collapsed ? "collapsed" : ""}" draggable="true" data-slide-id="${escapeHtml(slide.id)}">
+      const slideSummary = `v${overlayVersion} · ${Number(slide.duration_seconds ?? 4).toFixed(1)}s · ${overlay.style_preset || "No style"} · ${voiceover.enabled === false ? "No voiceover" : (voiceover.voice || "Voiceover")}${titleLocked ? " · titles locked" : ""}`;
+      return `<article class="creative-slide-card ${slide.include === false ? "excluded" : ""} ${collapsed ? "collapsed" : ""} ${titleLocked ? "title-locked" : ""}" draggable="true" data-slide-id="${escapeHtml(slide.id)}">
         <div class="creative-slide-header">
           <div class="creative-slide-title-wrap"><span class="slide-drag-handle" title="Drag to reorder">⋮⋮</span><div><div class="creative-slide-title">${escapeHtml(slide.name || `Slide ${index + 1}`)}</div><div class="creative-slide-subtitle">Order ${index + 1}${slide.is_cover ? " · Cover" : ""}${slide.review_status ? ` · ${escapeHtml(slide.review_status)}` : ""} · ${escapeHtml(slideSummary)}</div></div></div>
           <div class="creative-slide-header-actions"><button type="button" class="slide-collapse-button" aria-expanded="${collapsed ? "false" : "true"}">${collapsed ? "Expand" : "Collapse"}</button><label class="slide-include-control"><input type="checkbox" data-field="include" ${slide.include !== false ? "checked" : ""}> Include</label></div>
         </div>
         <div class="creative-slide-body">
           <div class="creative-slide-visual">
-            <div class="slide-preview-canvas ${phase6RatioClass(targetRatio)}">${previewHtml}<div class="safe-zone-overlay ${slide.safe_area_aware !== false ? "on" : ""}"></div></div>
+            <div class="slide-preview-canvas ${phase6RatioClass(targetRatio)}">${previewHtml}${titlePreviewHtml}<div class="safe-zone-overlay ${slide.safe_area_aware !== false ? "on" : ""}"></div></div>
             <div class="variant-chips">${variantChips}</div>${tiktokProof}
           </div>
           <div class="creative-slide-controls">
@@ -2594,16 +2657,21 @@
               </div>
             </div>
             <div class="slide-control-section">
-              <div class="slide-control-section-title">Text overlay</div>
+              <div class="slide-control-section-title">On-photo title ${titleLocked ? "· locked" : `· v${overlayVersion}`}</div>
               <div class="slide-control-row">
-                <label class="toggle-control"><input data-field="overlay_enabled" type="checkbox" ${overlay.enabled !== false ? "checked" : ""}><span>Text on this slide</span></label>
-                <label class="form-field"><span>Style</span><select data-field="overlay_style">${phase6OptionList(styles, overlay.style_preset || "Chicago Editorial")}</select></label>
-                <label class="form-field"><span>Role</span><select data-field="overlay_role">${phase6OptionList(roles, overlay.role || "overlay")}</select></label>
-                <label class="form-field"><span>Placement</span><select data-field="overlay_position">${phase6OptionList(positions, overlay.position || "center")}</select></label>
+                <label class="toggle-control"><input data-field="overlay_enabled" type="checkbox" ${overlay.enabled !== false ? "checked" : ""} ${titleLockAttr}><span>Text on this slide</span></label>
+                <label class="form-field"><span>Style</span><select data-field="overlay_style" ${titleLockAttr}>${phase6OptionList(styles, overlay.style_preset || "Chicago Editorial")}</select></label>
+                <label class="form-field"><span>Role</span><select data-field="overlay_role" ${titleLockAttr}>${phase6OptionList(roles, overlay.role || "overlay")}</select></label>
+                <label class="form-field"><span>Placement</span><select data-field="overlay_position" ${titleLockAttr}>${phase6OptionList(positions, overlayPosition)}</select></label>
               </div>
               <div class="slide-control-row two">
-                <label class="form-field"><span>Overlay text</span><textarea class="slide-overlay-text" data-field="overlay_text">${escapeHtml(overlay.text || "")}</textarea></label>
-                <label class="form-field"><span>Text size</span><input data-field="overlay_size" type="number" min="20" max="140" step="1" value="${escapeHtml(overlay.size ?? 64)}"></label>
+                <label class="form-field"><span>On-photo title</span><textarea class="slide-overlay-text" data-field="overlay_text" ${titleLockAttr}>${escapeHtml(overlay.text || "")}</textarea></label>
+                <label class="form-field"><span>On-photo caption</span><textarea class="slide-overlay-text" data-field="overlay_caption" ${titleLockAttr}>${escapeHtml(overlayCaption)}</textarea></label>
+              </div>
+              <div class="slide-control-row three">
+                <label class="form-field"><span>Text size</span><input data-field="overlay_size" type="number" min="20" max="140" step="1" value="${escapeHtml(overlay.size ?? 64)}" ${titleLockAttr}></label>
+                <label class="form-field"><span>Start (0–1)</span><input data-field="overlay_start" type="number" min="0" max="1" step="0.05" value="${escapeHtml(overlay.start_fraction ?? 0)}" ${titleLockAttr}></label>
+                <label class="form-field"><span>End (0–1)</span><input data-field="overlay_end" type="number" min="0" max="1" step="0.05" value="${escapeHtml(overlay.end_fraction ?? 1)}" ${titleLockAttr}></label>
               </div>
             </div>
             <div class="slide-control-section">
@@ -2681,6 +2749,7 @@
       card.querySelector('[data-field="overlay_style"]')?.addEventListener("change", (event) => {
         if (event.target.value === "No Text") card.querySelector('[data-field="overlay_enabled"]').checked = false;
       });
+      phase6BindOverlayPreview(card);
     });
     renderCreativeRatioPanel();
   }
@@ -2705,10 +2774,14 @@
           ...(base.overlay || {}),
           enabled: Boolean(get("overlay_enabled")?.checked),
           text: get("overlay_text")?.value || "",
+          caption: get("overlay_caption")?.value || "",
+          subtitle: get("overlay_caption")?.value || "",
           style_preset: get("overlay_style")?.value || "Chicago Editorial",
           role: get("overlay_role")?.value || "overlay",
-          position: get("overlay_position")?.value || "center",
+          position: get("overlay_position")?.value || phase6DefaultOverlayPosition(),
           size: Number(get("overlay_size")?.value || 64),
+          start_fraction: Number(get("overlay_start")?.value ?? 0),
+          end_fraction: Number(get("overlay_end")?.value ?? 1),
         },
         voiceover: {
           ...(base.voiceover || {}),
@@ -2849,14 +2922,20 @@
     activeCreativeOutput = data.output || null;
     creativeSlides = Array.isArray(data.slides) ? data.slides : [];
     creativeOptions = data.options || {};
+    creativeTitleLock = data.title_lock || data.output?.creative_settings?.title_lock || null;
     const output = activeCreativeOutput || {};
+    const titleLocked = Boolean(creativeTitleLock?.locked);
     $("creativeEditorTitle").textContent = `Output ${output.output_id ?? ""} · ${output.platform || "Creative review"}`;
     $("creativeEditorSubtitle").textContent = `${output.platform_output_type || output.format || "Photo sequence"}${output.aspect_ratio ? ` · ${output.aspect_ratio}` : ""} · creative review`;
-    $("creativeSafetyBadge").textContent = output.do_not_publish ? "Publishing locked" : "Editing locked";
+    $("creativeSafetyBadge").textContent = output.do_not_publish
+      ? (titleLocked ? "Titles locked" : "Publishing locked")
+      : "Editing locked";
     $("creativeSafetyBadge").className = `badge ${output.do_not_publish ? "ready-for-review" : "failed"}`;
-    $("creativeSafetyBanner").innerHTML = output.do_not_publish
-      ? '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Publishing stays locked until the later publishing step.'
-      : '<strong>Creative editing locked.</strong> This output is not currently in a safe review-only state.';
+    $("creativeSafetyBanner").innerHTML = !output.do_not_publish
+      ? '<strong>Creative editing locked.</strong> This output is not currently in a safe review-only state.'
+      : titleLocked
+        ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
+        : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
 
     showCreativeRenderedPreview(output);
     renderCreativeOutputMeta(output);
@@ -2865,11 +2944,16 @@
     renderCreativeChangeProgress(data.handoff || creativeHandoffStatus);
     if (!data.handoff && !creativeHandoffStatus) phase6Message("");
     $("creativeEditorPanel").hidden = false;
+    $("creativeEditorPanel").classList.toggle("title-edit-locked", titleLocked);
     $("creativeEditorPanel").scrollIntoView({ behavior: "smooth", block: "start" });
     setCreativeBusy(false);
     $("saveCreativeEditor").disabled = !output.do_not_publish;
     $("creativeRequestChanges").disabled = !output.do_not_publish;
     $("creativeApprovePreview").disabled = !output.do_not_publish;
+    if ($("creativeUnlockTitles")) {
+      $("creativeUnlockTitles").hidden = !titleLocked;
+      $("creativeUnlockTitles").disabled = !output.do_not_publish || !titleLocked;
+    }
     requestAnimationFrame(() => phase6MarkSaved());
   }
 
@@ -2912,10 +2996,13 @@
       overlay: {
         enabled: slide.overlay?.enabled !== false,
         text: slide.overlay?.text || "",
+        caption: slide.overlay?.caption || slide.overlay?.subtitle || "",
         style_preset: slide.overlay?.style_preset || "Chicago Editorial",
         role: slide.overlay?.role || "overlay",
-        position: slide.overlay?.position || "center",
+        position: slide.overlay?.position || phase6DefaultOverlayPosition(),
         size: Number(slide.overlay?.size || 64),
+        start_fraction: Number(slide.overlay?.start_fraction ?? 0),
+        end_fraction: Number(slide.overlay?.end_fraction ?? 1),
       },
       voiceover: {
         enabled: slide.voiceover?.enabled !== false,
@@ -2971,6 +3058,7 @@
       });
       activeCreativeOutput = result.record || activeCreativeOutput;
       creativeSlides = Array.isArray(result.slides) ? result.slides : creativeSlides;
+      if (result.title_lock) creativeTitleLock = result.title_lock;
       if (!quiet) {
         populateCreativeEditor({ output: activeCreativeOutput, slides: creativeSlides, options: creativeOptions, handoff: creativeHandoffStatus });
         phase6Message("Draft saved. The rendered preview is unchanged until you choose Save & rerender preview.", "success");
@@ -3052,6 +3140,27 @@
       const h = await refreshCreativeChangeProgress().catch(() => null);
       if (h?.overall_status === "error") phase6Message(h?.message || "The creative handoff needs attention.", "error-text");
       else phase6Message("");
+      setCreativeBusy(false);
+    }
+  }
+
+  async function unlockCreativeTitles() {
+    if (!activeCreativeOutputId) return;
+    if (!window.confirm("Unlock per-photo titles? Approval will no longer cover these titles until you save a new preview and approve again. Publishing stays locked.")) return;
+    setCreativeBusy(true);
+    phase6Message("Unlocking per-photo titles…");
+    try {
+      const payload = collectCreativePayload();
+      payload.unlock_titles = true;
+      const result = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      const refreshed = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`);
+      populateCreativeEditor(refreshed);
+      phase6Message(result.message || "Titles unlocked. Save a new preview before approving again.", "success");
+    } catch (e) {
+      phase6Message(e.message, "error-text");
       setCreativeBusy(false);
     }
   }
@@ -3166,9 +3275,10 @@
     openCreativeEditor(activeCreativeOutputId);
   });
   $("saveCreativeEditor")?.addEventListener("click", () => saveActiveCreative().catch(() => {}));
+  $("creativeUnlockTitles")?.addEventListener("click", () => unlockCreativeTitles().catch(() => {}));
   $("creativeRequestChanges")?.addEventListener("click", () => reviewActiveCreative("changes_requested"));
   $("creativeApprovePreview")?.addEventListener("click", () => {
-    if (window.confirm("Approve this preview? This records review approval only; it will not publish the output.")) reviewActiveCreative("approve");
+    if (window.confirm("Approve this preview? This records review approval and locks per-photo titles; it will not publish the output.")) reviewActiveCreative("approve");
   });
   $("creativeDefaultVoicePreview")?.addEventListener("click", () => phase6PreviewSelectedVoice($("creativeDefaultVoice"), $("creativeDefaultVoicePreview")));
   $("creativeVoiceoverVolumeRange")?.addEventListener("input", () => syncCreativeAudioPair("creativeVoiceoverVolumeRange", "creativeVoiceoverVolume"));

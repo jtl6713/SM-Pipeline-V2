@@ -602,3 +602,21 @@ input, select, textarea, button {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Item 17 — live per-photo title/caption preview and approval lock */
+.slide-title-preview{position:absolute;left:8%;right:8%;z-index:2;display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;color:#fff;text-shadow:0 1px 8px rgba(0,0,0,.65);pointer-events:none;padding:4px 6px}
+.slide-title-preview.off{display:none}
+.slide-title-preview.pos-top{top:8%}
+.slide-title-preview.pos-upper-third{top:18%}
+.slide-title-preview.pos-center{top:50%;transform:translateY(-50%)}
+.slide-title-preview.pos-lower-third{bottom:18%}
+.slide-title-preview.pos-bottom{bottom:8%}
+.slide-title-preview.pos-left,.slide-title-preview.pos-right{top:50%;transform:translateY(-50%);width:42%}
+.slide-title-preview.pos-left{left:8%;right:auto;align-items:flex-start;text-align:left}
+.slide-title-preview.pos-right{right:8%;left:auto;align-items:flex-end;text-align:right}
+.slide-preview-canvas.ratio-9x16 .slide-title-preview.pos-lower-third{bottom:18%}
+.slide-title-preview-title{font-weight:850;line-height:1.15;max-width:100%}
+.slide-title-preview-caption{font-weight:650;font-size:.82em;opacity:.92;line-height:1.2;max-width:100%}
+.creative-slide-card.title-locked .slide-control-section-title{color:#8a6d1b}
+.creative-editor-shell.title-edit-locked #creativeUnlockTitles{display:inline-flex}
+
