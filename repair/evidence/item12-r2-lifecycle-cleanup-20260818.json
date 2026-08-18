@@ -1,0 +1,111 @@
+{
+  "repair_item": 12,
+  "checkpoint": "report-first-allowlisted-cleanup",
+  "github_run": 32088747779,
+  "worker_version": "1.1.0-lifecycle",
+  "ttl_policy": "Publish objects are retained until explicit allowlisted cleanup. Incomplete multipart uploads abort after 7 days by R2 default. studio/previews are TTL candidates and are not auto-deleted by this worker.",
+  "make_scenario_runs": 0,
+  "orchestrators": {
+    "IG-PUB-ORCH": {
+      "id": "5864632",
+      "http": 200,
+      "isActive": false
+    },
+    "FB-ORCH": {
+      "id": "5813561",
+      "http": 200,
+      "isActive": false
+    },
+    "YT-ORCH": {
+      "id": "5823581",
+      "http": 200,
+      "isActive": false
+    },
+    "AP-CAR-ORCH": {
+      "id": "5791537",
+      "http": 200,
+      "isActive": false
+    },
+    "TTD-ORCH": {
+      "id": "5806668",
+      "http": 200,
+      "isActive": false
+    }
+  },
+  "airtable_output_157_count": 0,
+  "airtable_output_151_count": 1,
+  "health_status": 200,
+  "orphan_prefix": "publish/platform-output-157/",
+  "before_157": {
+    "http": 200,
+    "count": 2,
+    "keys": [
+      "publish/platform-output-157/11HDxHa8sGxwaQptMsrFLlaWFVBzXclc9.mp4",
+      "publish/platform-output-157/1ovadWZG1QByiFYJ7kndyIUtT3nnCmPd3.mp4"
+    ]
+  },
+  "marker_put": {
+    "http": 200,
+    "ok": true,
+    "key": "publish/item12-lifecycle-proof/marker.txt"
+  },
+  "marker_head": {
+    "http": 200,
+    "retain_class": "proof",
+    "output_id": "157",
+    "custom_metadata": {
+      "uploadedBy": "chicagoshining-r2-upload",
+      "uploadedAt": "2026-08-18T01:35:17.949Z",
+      "outputId": "157",
+      "finalFileId": "item12-marker",
+      "retainClass": "proof"
+    }
+  },
+  "deny_production_delete": {
+    "http": 403,
+    "error": "Key not in cleanup allowlist",
+    "denied": [
+      "publish/platform-output-151.mp4"
+    ]
+  },
+  "production_before": {
+    "http": 200,
+    "ok": true,
+    "key": "publish/platform-output-151.mp4",
+    "size": 13208077
+  },
+  "dry_run": {
+    "http": 200,
+    "ok": true,
+    "would_delete": [
+      "publish/platform-output-157/11HDxHa8sGxwaQptMsrFLlaWFVBzXclc9.mp4",
+      "publish/platform-output-157/1ovadWZG1QByiFYJ7kndyIUtT3nnCmPd3.mp4",
+      "publish/item12-lifecycle-proof/marker.txt"
+    ]
+  },
+  "cleanup": {
+    "http": 200,
+    "ok": true,
+    "deleted": [
+      "publish/platform-output-157/11HDxHa8sGxwaQptMsrFLlaWFVBzXclc9.mp4",
+      "publish/platform-output-157/1ovadWZG1QByiFYJ7kndyIUtT3nnCmPd3.mp4",
+      "publish/item12-lifecycle-proof/marker.txt"
+    ]
+  },
+  "after_157": {
+    "http": 200,
+    "count": 0,
+    "keys": []
+  },
+  "after_proof_prefix": {
+    "http": 200,
+    "count": 0
+  },
+  "production_after": {
+    "http": 200,
+    "ok": true,
+    "key": "publish/platform-output-151.mp4",
+    "size": 13208077
+  },
+  "passed": true
+}
