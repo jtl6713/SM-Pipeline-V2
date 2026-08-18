@@ -1,0 +1,220 @@
+{
+  "repair_item": 21,
+  "checkpoint": "evidence-backed-change-control-close",
+  "schema": "item21-change-control-v1",
+  "team_id": 2410882,
+  "make_scenario_runs": 0,
+  "cadenced_scenarios_started": 0,
+  "youtube_151_republished": false,
+  "hooks_rotated": false,
+  "ledger_items": {
+    "1": {
+      "item": "Activation leases and operation limits",
+      "status": "Complete \u2014 controller acceptance proven",
+      "class": "complete"
+    },
+    "2": {
+      "item": "Record-resolution discipline",
+      "status": "Complete \u2014 structural exact-addressing and production isolation verified",
+      "class": "complete"
+    },
+    "3": {
+      "item": "Renderer native overlap transitions",
+      "status": "Complete \u2014 native overlap and A/V acceptance proven",
+      "class": "complete"
+    },
+    "4": {
+      "item": "AP0 versioned re-stage",
+      "status": "Complete \u2014 live proven",
+      "class": "complete"
+    },
+    "5": {
+      "item": "Genuine hard test mode",
+      "status": "Complete \u2014 final SMV1 target-only isolation matrix passed",
+      "class": "complete"
+    },
+    "6": {
+      "item": "Safe republish/replace transaction and duplicate cleanup",
+      "status": "Complete \u2014 exact transaction and synthetic cleanup semantics proven",
+      "class": "complete"
+    },
+    "7": {
+      "item": "Fresh edge-to-edge 9:16 normal-path regression",
+      "status": "Complete - R2/R3/R4/R5/RR1 accepted on Output 168",
+      "class": "complete"
+    },
+    "8": {
+      "item": "Regenerate/invalidate queued blur-fill variants and caches",
+      "status": "Complete \u2014 `fill-crop-v2` live, queued audit clean, forward cache identities versioned",
+      "class": "complete"
+    },
+    "9": {
+      "item": "Genuine platform covers/thumbnails",
+      "status": "Complete \u2014 YouTube and Facebook native covers proven; Instagram create-time contract live",
+      "class": "complete"
+    },
+    "10": {
+      "item": "RR1/RR2 review evidence and all-image enumeration",
+      "status": "Deferred \u2014 dashboard reviews replace in-pipeline email except final publish approval",
+      "class": "deferred"
+    },
+    "11": {
+      "item": "YouTube OAuth and upload/thumbnail chain",
+      "status": "Complete \u2014 upload/thumbnail proven; OAuth consent In production; live refresh re-proven",
+      "class": "complete"
+    },
+    "12": {
+      "item": "R2 lifecycle/version/TTL/cleanup",
+      "status": "Complete \u2014 report-first allowlisted cleanup proven",
+      "class": "complete"
+    },
+    "13": {
+      "item": "Facebook multi-photo product contract",
+      "status": "Complete \u2014 native multi-photo is the default; Slideshow Reel is opt-in",
+      "class": "complete"
+    },
+    "14": {
+      "item": "Native Instagram carousel validation",
+      "status": "Complete \u2014 native `/p/` carousel plus AP0C\u2013AP5C contracts proven",
+      "class": "complete"
+    },
+    "15": {
+      "item": "TikTok per-photo title/overlay preparation",
+      "status": "Complete \u2014 overlay contract, timing, safe area, and identity proven in source",
+      "class": "complete"
+    },
+    "16": {
+      "item": "TikTok draft idempotency/email/manual completion",
+      "status": "Complete \u2014 one-key/one-draft contracts proven; 139/150 email uncertainty reconciled",
+      "class": "complete"
+    },
+    "17": {
+      "item": "Studio per-photo caption/title editing",
+      "status": "Complete \u2014 edit/preview/version/approval lock and render-input proven in source",
+      "class": "complete"
+    },
+    "18": {
+      "item": "Upload-preview self-heal",
+      "status": "Complete \u2014 observable state, bounded retry, and no hard-refresh proven in source",
+      "class": "complete"
+    },
+    "19": {
+      "item": "Make webhook administration/API gaps",
+      "status": "Complete \u2014 read-only map proven; bundled token still cannot list hooks",
+      "class": "complete"
+    },
+    "20": {
+      "item": "Cloudflare/GitHub diagnostics and source drift",
+      "status": "Complete \u2014 10-core binding contract proven; production gates unpinned",
+      "class": "complete"
+    },
+    "21": {
+      "item": "Repair scope/change-control and evidence-backed completion",
+      "status": "Partial \u2014 ledger active and current",
+      "class": "closeout"
+    }
+  },
+  "complete_items": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20
+  ],
+  "deferred_items": [
+    10
+  ],
+  "open_items_1_20": [],
+  "item_10_deferred": true,
+  "required_evidence_ok": true,
+  "run_cited_items_ok": true,
+  "missing_evidence": [],
+  "missing_run_citations": [],
+  "orchestrators": {
+    "IG-PUB-ORCH": {
+      "id": 5864632,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    },
+    "FB-ORCH": {
+      "id": 5813561,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    },
+    "YT-ORCH": {
+      "id": 5823581,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    },
+    "AP-CAR-ORCH": {
+      "id": 5791537,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    },
+    "TTD-ORCH": {
+      "id": 5806668,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    }
+  },
+  "scheduled_consumers": {
+    "R4": {
+      "id": 5556716,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    },
+    "R3": {
+      "id": 5557966,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    },
+    "R5": {
+      "id": 5565333,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    },
+    "RR1": {
+      "id": 5576363,
+      "http": 200,
+      "isActive": false,
+      "hookId": null
+    }
+  },
+  "follow_ons_out_of_21_item_scope": [
+    "Next studio-api Worker deploy for Items 13/17/18 source and 0.10.8 identity",
+    "Item 10 dashboard review email remains deferred",
+    "FBS4 cannot post a multipart Facebook cover from Make",
+    "TTD3 send/stamp race documented, not patched",
+    "TTD0 still sends raw 9:16 URLs",
+    "Path-filtered/emergency workflows still mention v86",
+    "Leftover Workers chicagoshining-repair-control-bridge and shiny-glitter-6de8",
+    "Bundled Make token still lacks hooks:read",
+    "Frame Extractor/Remotion working-file cleanup remains deferred",
+    "Cadenced orchestrators stay OFF until an operator explicitly starts them",
+    "Do not republish YouTube Output 151"
+  ],
+  "youtube_151_do_not_republish": true,
+  "passed": true
+}
