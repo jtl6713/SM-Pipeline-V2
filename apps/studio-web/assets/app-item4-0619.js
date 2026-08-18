@@ -23,6 +23,8 @@
   const ezCaptionModes = new Map();
   let ezCaptionDefault = "ai";
   let ezCaptionSaveTimer = null;
+  let ezPinnedExtraOutputs = [];
+  let ezConfigSaveTimer = null;
   let item4Uploading = false;
   let item4PreparingVariants = false;
   let item4VariantPollTimer = null;
@@ -55,7 +57,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.34-ez-audio";
+  const BUILD_ID = "item4-0.6.35-ez-config";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -736,6 +738,7 @@
     if (fork) fork.hidden = true;
     if (intake) intake.hidden = false;
     if (composer) composer.hidden = false;
+    syncEzStructureCounts();
     loadEzAudioOptions().catch(() => {});
   }
 
@@ -815,6 +818,169 @@
     if ($("prMusicMode")) $("prMusicMode").value = $("ezAudioMusic")?.value || "No";
     if ($("prMusicAsset")) $("prMusicAsset").value = musicOn ? ($("ezAudioTrack")?.value || "") : "";
     ezSelectedVoiceId = voiceoverOn ? ($("ezAudioVoice")?.value || "") : "";
+  }
+
+  function copySelectValue(fromId, toId) {
+    const from = $(fromId);
+    const to = $(toId);
+    if (!from || !to) return;
+    if (Array.from(to.options).some((option) => option.value === from.value)) to.value = from.value;
+  }
+
+  function syncEzStructureCounts() {
+    const carouselMode = $("ezCarouselSlideMode")?.value;
+    $("ezCarouselStructure")?.querySelectorAll(".exact-count").forEach((el) => { el.hidden = carouselMode !== "Exact"; });
+    $("ezCarouselStructure")?.querySelectorAll(".range-count").forEach((el) => { el.hidden = carouselMode !== "Target range"; });
+    const videoMode = $("ezVideoClipMode")?.value;
+    $("ezVideoStructure")?.querySelectorAll(".exact-count").forEach((el) => { el.hidden = videoMode !== "Exact"; });
+    $("ezVideoStructure")?.querySelectorAll(".range-count").forEach((el) => { el.hidden = videoMode !== "Target range"; });
+  }
+
+  function userNotesFromProductionNotes(raw) {
+    const text = String(raw || "");
+    const parsed = ezPlanApi()?.parseEzOriginNotes(text);
+    if (!parsed) return text;
+    const origin = ezPlanApi()?.ezOriginNotes({
+      inputKind: parsed.inputKind,
+      captionMode: parsed.captionMode,
+    }) || "";
+    if (origin && text.startsWith(origin)) return text.slice(origin.length).replace(/^\s+/, "");
+    const lines = text.split(/\n/);
+    if (lines[0]?.includes("origin=")) return lines.slice(1).join("\n").replace(/^\s+/, "");
+    return text;
+  }
+
+  function mergeEzProductionNotes() {
+    const origin = ezPlanApi()?.ezOriginNotes({
+      inputKind: ezIntakeKind || "single-photo",
+      captionMode: ezCaptionMode(),
+    }) || "";
+    const user = String($("ezProductionNotes")?.value || "").trim();
+    const combined = user ? `${origin}\n\n${user}` : origin;
+    if ($("prProductionNotes")) $("prProductionNotes").value = combined;
+    return combined;
+  }
+
+  function ezTitleIsCustomized() {
+    const mode = $("ezTitleMode")?.value || "AI decides";
+    const text = String($("ezRequestedTitle")?.value || "").trim();
+    return mode !== "AI decides" || Boolean(text);
+  }
+
+  function ezScriptIsCustomized() {
+    const mode = $("ezScriptMode")?.value || "AI decides";
+    const text = String($("ezRequestedScript")?.value || "").trim();
+    return mode !== "AI decides" || Boolean(text);
+  }
+
+  function syncEzConfigFields() {
+    copySelectValue("ezTitleMode", "prTitleMode");
+    if ($("prRequestedTitle")) $("prRequestedTitle").value = $("ezRequestedTitle")?.value || "";
+    if ($("ezTitle")) $("ezTitle").value = String($("ezRequestedTitle")?.value || "").trim().slice(0, 160);
+    copySelectValue("ezScriptMode", "prScriptMode");
+    if ($("prRequestedScript")) $("prRequestedScript").value = $("ezRequestedScript")?.value || "";
+    copySelectValue("ezThumbnail", "prThumbnail");
+    if ($("prVoiceoverTail")) $("prVoiceoverTail").value = $("ezVoiceoverTail")?.value || "2";
+    if ($("prVideoDuration")) $("prVideoDuration").value = $("ezVideoDuration")?.value || "30";
+    copySelectValue("ezVideoClipMode", "prVideoClipMode");
+    if ($("prVideoClipExact")) $("prVideoClipExact").value = $("ezVideoClipExact")?.value || "";
+    if ($("prVideoClipMin")) $("prVideoClipMin").value = $("ezVideoClipMin")?.value || "";
+    if ($("prVideoClipMax")) $("prVideoClipMax").value = $("ezVideoClipMax")?.value || "";
+    copySelectValue("ezCarouselSlideMode", "prCarouselSlideMode");
+    if ($("prCarouselSlideExact")) $("prCarouselSlideExact").value = $("ezCarouselSlideExact")?.value || "";
+    if ($("prCarouselSlideMin")) $("prCarouselSlideMin").value = $("ezCarouselSlideMin")?.value || "";
+    if ($("prCarouselSlideMax")) $("prCarouselSlideMax").value = $("ezCarouselSlideMax")?.value || "";
+    copySelectValue("ezCarouselImageMode", "prCarouselImageMode");
+    mergeEzProductionNotes();
+    syncEzStructureCounts();
+    if ($("prVideoClipMode") && $("prCarouselSlideMode")) syncAllStructureControls();
+  }
+
+  function hydrateEzOutputsFromMatrix() {
+    document.querySelectorAll("[data-ez-output]").forEach((input) => {
+      const match = outputMatrixInputs().find((row) => row.dataset.platform === input.dataset.platform && row.value === input.value);
+      if (match) input.checked = match.checked;
+    });
+  }
+
+  function ezExtraOutputSnapshot() {
+    const recommended = new Set(
+      ezSelectedPlatforms().map((platform) => `${platform}::${recommendedOutputFor(platform)}`)
+    );
+    const checked = Array.from(document.querySelectorAll("[data-ez-output]:checked"))
+      .map((input) => `${input.dataset.platform}::${input.value}`)
+      .filter((key) => !recommended.has(key));
+    ezPinnedExtraOutputs = checked;
+    return checked;
+  }
+
+  function applyEzExtraOutputs(keys = ezPinnedExtraOutputs) {
+    (Array.isArray(keys) ? keys : []).forEach((key) => {
+      const [platform, ...rest] = String(key).split("::");
+      const outputType = rest.join("::");
+      const match = outputMatrixInputs().find((row) => row.dataset.platform === platform && row.value === outputType);
+      if (match) match.checked = true;
+    });
+    hydrateEzOutputsFromMatrix();
+    if ($("prOutputMatrixSummary")) updateOutputMatrixSummary();
+  }
+
+  function hydrateEzConfigFromRequest(record = activeProductionRequest) {
+    if (!record) {
+      syncEzStructureCounts();
+      return;
+    }
+    if ($("ezAudioVoiceover")) {
+      $("ezAudioVoiceover").value = record.voiceover_mode === "Yes" ? "Yes" : "No";
+    }
+    if ($("ezAudioMusic")) {
+      $("ezAudioMusic").value = record.background_music_mode === "Yes" ? "Yes" : "No";
+    }
+    const musicId = Array.isArray(record.selected_music_asset_links) ? record.selected_music_asset_links[0] : "";
+    if ($("ezAudioTrack") && musicId) $("ezAudioTrack").value = musicId;
+    syncEzAudioFields();
+    if ($("ezTitleMode")) {
+      const titleText = String(record.requested_title || "").trim();
+      const titleMode = !titleText && (record.title_mode === "Force exact" || record.title_mode === "Leave blank")
+        ? "AI decides"
+        : record.title_mode;
+      setSelectValue("ezTitleMode", titleMode, "AI decides");
+    }
+    if ($("ezRequestedTitle")) $("ezRequestedTitle").value = String(record.requested_title || "").trim();
+    if ($("ezTitle")) $("ezTitle").value = String(record.requested_title || "").trim().slice(0, 160);
+    if ($("ezScriptMode")) {
+      const scriptText = String(record.requested_script || "").trim();
+      const scriptMode = !scriptText && (record.script_mode === "Force exact" || record.script_mode === "Leave blank")
+        ? "AI decides"
+        : record.script_mode;
+      setSelectValue("ezScriptMode", scriptMode, "AI decides");
+    }
+    if ($("ezRequestedScript")) $("ezRequestedScript").value = record.requested_script || "";
+    if ($("ezThumbnail")) setSelectValue("ezThumbnail", record.thumbnail_mode, "Use Profile Default");
+    if ($("ezVoiceoverTail")) $("ezVoiceoverTail").value = record.voiceover_tail_seconds ?? 2;
+    if ($("ezVideoDuration")) $("ezVideoDuration").value = record.video_duration_seconds ?? 30;
+    if ($("ezVideoClipMode")) setSelectValue("ezVideoClipMode", record.video_clip_count_mode, "AI decides");
+    if ($("ezVideoClipExact")) $("ezVideoClipExact").value = record.video_clip_count_exact ?? "";
+    if ($("ezVideoClipMin")) $("ezVideoClipMin").value = record.video_clip_count_min ?? "";
+    if ($("ezVideoClipMax")) $("ezVideoClipMax").value = record.video_clip_count_max ?? "";
+    if ($("ezCarouselSlideMode")) setSelectValue("ezCarouselSlideMode", record.carousel_slide_count_mode, "AI decides");
+    if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = record.carousel_slide_count_exact ?? "";
+    if ($("ezCarouselSlideMin")) $("ezCarouselSlideMin").value = record.carousel_slide_count_min ?? "";
+    if ($("ezCarouselSlideMax")) $("ezCarouselSlideMax").value = record.carousel_slide_count_max ?? "";
+    if ($("ezCarouselImageMode")) setSelectValue("ezCarouselImageMode", record.carousel_image_mode, "Manual Upload");
+    if ($("ezProductionNotes")) $("ezProductionNotes").value = userNotesFromProductionNotes(record.production_notes);
+    syncEzStructureCounts();
+    hydrateEzOutputsFromMatrix();
+  }
+
+  function queueEzConfigSave() {
+    syncEzAudioFields();
+    syncEzConfigFields();
+    if (!activeProductionRequest?.id) return;
+    clearTimeout(ezConfigSaveTimer);
+    ezConfigSaveTimer = setTimeout(() => {
+      saveActiveProductionRequest({ quiet: true }).catch(() => {});
+    }, 400);
   }
 
   async function loadEzAudioOptions() {
@@ -969,9 +1135,12 @@
     if (ezPlanInFlight) return;
     ezPlanInFlight = true;
     ezAutoPlanAfterUpload = false;
+    const extras = ezExtraOutputSnapshot();
     try {
       setEzMessage("Building the platform plan…");
       await buildItem4Plan();
+      applyEzExtraOutputs(extras);
+      if (extras.length) await saveProductionRequestOutputs(activeProductionRequest);
       setEzMessage("Platform plan ready.", "success");
     } catch (error) {
       setEzMessage(error.message || "Could not build the platform plan.", "error-text");
@@ -1018,6 +1187,8 @@
   }
 
   function ezCaptionSavePayload(captionFields) {
+    syncEzAudioFields();
+    syncEzConfigFields();
     const record = activeProductionRequest || {};
     const requestedPlatforms = selectedRequestPlatforms();
     const recordPlatforms = Array.isArray(record.platforms) ? record.platforms : [];
@@ -1042,13 +1213,13 @@
         "prMusicAsset",
         Array.isArray(record.selected_music_asset_links) ? (record.selected_music_asset_links[0] || "") : ""
       ),
-      title_mode: captionFields.title_mode || "AI decides",
-      requested_title: captionFields.requested_title || "",
+      title_mode: ezControlValue("prTitleMode", captionFields.title_mode || "AI decides"),
+      requested_title: String($("prRequestedTitle")?.value || captionFields.requested_title || "").trim(),
       caption_mode: captionFields.caption_mode || "AI decides",
       requested_caption: captionFields.requested_caption || "",
-      script_mode: captionFields.script_mode || record.script_mode || "AI decides",
-      requested_script: captionFields.requested_script || record.requested_script || "",
-      production_notes: captionFields.production_notes || record.production_notes || "",
+      script_mode: ezControlValue("prScriptMode", captionFields.script_mode || record.script_mode || "AI decides"),
+      requested_script: String($("prRequestedScript")?.value || captionFields.requested_script || record.requested_script || ""),
+      production_notes: mergeEzProductionNotes() || captionFields.production_notes || record.production_notes || "",
     };
     if (payload.video_clip_count_mode === "Exact" && String(payload.video_clip_count_exact).trim() === "") {
       payload.video_clip_count_mode = "AI decides";
@@ -1058,15 +1229,25 @@
       payload.carousel_slide_count_exact = item4Workspace?.assets?.length || ezStagedFiles.length || 2;
     }
     if (payload.caption_mode === "Leave blank" || captionFields.mode === "none") {
-      Object.assign(payload, captionFields.live_fallback || {
+      const none = captionFields.live_fallback || {
         title_mode: "Force exact",
         requested_title: " ",
         caption_mode: "Force exact",
         requested_caption: " ",
         script_mode: "AI decides",
         requested_script: "",
-      });
-      payload.production_notes = captionFields.production_notes || payload.production_notes;
+      };
+      payload.caption_mode = none.caption_mode;
+      payload.requested_caption = none.requested_caption;
+      if (!ezTitleIsCustomized()) {
+        payload.title_mode = none.title_mode;
+        payload.requested_title = none.requested_title;
+      }
+      if (!ezScriptIsCustomized()) {
+        payload.script_mode = none.script_mode;
+        payload.requested_script = none.requested_script;
+      }
+      payload.production_notes = mergeEzProductionNotes();
     }
     return payload;
   }
@@ -1077,11 +1258,7 @@
     const captions = collectEzManualCaptions();
     if (mode === "manual" && !captions.some((value) => String(value || "").trim())) return;
     const fields = ezPlanApi()?.ezCaptionFields(mode, { captions }) || {};
-    const productionNotes = ezPlanApi()?.ezOriginNotes({
-      inputKind: ezIntakeKind || "multiple-photos",
-      captionMode: mode,
-    }) || "";
-    const payload = ezCaptionSavePayload({ ...fields, production_notes: productionNotes });
+    const payload = ezCaptionSavePayload(fields);
     if ($("prRequestedCaption")) $("prRequestedCaption").value = payload.requested_caption || "";
     if ($("prCaptionMode") && Array.from($("prCaptionMode").options).some((option) => option.value === payload.caption_mode)) {
       $("prCaptionMode").value = payload.caption_mode;
@@ -1090,7 +1267,7 @@
       $("prTitleMode").value = payload.title_mode;
     }
     if ($("prRequestedTitle")) $("prRequestedTitle").value = payload.requested_title || "";
-    if ($("prProductionNotes")) $("prProductionNotes").value = productionNotes;
+    if ($("prProductionNotes")) $("prProductionNotes").value = payload.production_notes || "";
     const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
@@ -1209,6 +1386,8 @@
       const planned = applyEzPlanOverrides(files.length, ezSelectedPlatforms());
       syncItem4PlatformsFromEz();
       syncEzAudioFields();
+      syncEzConfigFields();
+      const extras = ezExtraOutputSnapshot();
       let captionFields = apiHelpers.ezCaptionFields(captionMode, { captions });
       if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
         captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
@@ -1221,29 +1400,40 @@
         }),
       });
       activeIdea = idea.record;
+      const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
       const requestPayload = {
         content_type: planned.master_content_type,
         platforms: planned.platforms,
         voiceover_mode: $("ezAudioVoiceover")?.value || "No",
         background_music_mode: $("ezAudioMusic")?.value || "No",
-        thumbnail_mode: "Use Profile Default",
-        title_mode: captionFields.title_mode,
-        requested_title: captionFields.requested_title || "",
+        thumbnail_mode: $("ezThumbnail")?.value || "Use Profile Default",
+        video_duration_seconds: $("ezVideoDuration")?.value || 30,
+        video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
+        video_clip_count_exact: $("ezVideoClipExact")?.value || "",
+        video_clip_count_min: $("ezVideoClipMin")?.value || "",
+        video_clip_count_max: $("ezVideoClipMax")?.value || "",
+        voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 2,
+        title_mode: ezTitleIsCustomized() ? ($("ezTitleMode")?.value || "AI decides") : (captionFields.title_mode || "AI decides"),
+        requested_title: ezTitleIsCustomized() ? String($("ezRequestedTitle")?.value || "").trim() : (captionFields.requested_title || ""),
         caption_mode: captionFields.caption_mode,
         requested_caption: captionFields.requested_caption || "",
-        script_mode: captionFields.script_mode || "AI decides",
-        requested_script: captionFields.requested_script || "",
-        carousel_image_mode: "Manual Upload",
-        carousel_slide_count_mode: "Exact",
-        carousel_slide_count_exact: files.length,
+        script_mode: ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides"),
+        requested_script: ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || ""),
+        carousel_image_mode: $("ezCarouselImageMode")?.value || "Manual Upload",
+        carousel_slide_count_mode: slideMode,
+        carousel_slide_count_exact: $("ezCarouselSlideExact")?.value || (slideMode === "Exact" ? files.length : ""),
+        carousel_slide_count_min: $("ezCarouselSlideMin")?.value || "",
+        carousel_slide_count_max: $("ezCarouselSlideMax")?.value || "",
         selected_music_asset_id: $("ezAudioTrack")?.value || "",
-        production_notes: apiHelpers.ezOriginNotes({ inputKind: ezIntakeKind, captionMode }),
+        production_notes: mergeEzProductionNotes(),
       };
       await ensureProductionRequestMusic();
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
       setEzAdvancedOpen(false);
       populateProductionRequestForm(created.record, { reveal: false });
       await loadProductionRequestOutputs(created.record);
+      applyEzExtraOutputs(extras);
+      if (extras.length) await saveProductionRequestOutputs(created.record);
       await loadItem4Workspace(created.record);
       await loadProductionRequests();
       ezAutoPlanAfterUpload = true;
@@ -1283,6 +1473,29 @@
         stopStudioAudioPreview();
         syncEzAudioFields();
         if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
+      });
+    });
+    [
+      "ezTitleMode", "ezRequestedTitle", "ezScriptMode", "ezRequestedScript",
+      "ezThumbnail", "ezVoiceoverTail", "ezVideoDuration", "ezVideoClipMode",
+      "ezVideoClipExact", "ezVideoClipMin", "ezVideoClipMax", "ezCarouselSlideMode",
+      "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax",
+      "ezCarouselImageMode", "ezProductionNotes",
+    ].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener("change", queueEzConfigSave);
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") el.addEventListener("input", queueEzConfigSave);
+    });
+    document.querySelectorAll("[data-ez-output]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const match = outputMatrixInputs().find((row) => row.dataset.platform === input.dataset.platform && row.value === input.value);
+        if (match) match.checked = input.checked;
+        ezExtraOutputSnapshot();
+        updateOutputMatrixSummary();
+        if (activeProductionRequest?.id && productionOutputMatrixLoaded) {
+          saveProductionRequestOutputs().catch(() => {});
+        }
       });
     });
     $("ezAudioVoicePreview")?.addEventListener("click", () => {
@@ -2329,6 +2542,7 @@
     target.textContent = outputs.length
       ? `${outputs.length} requested output${outputs.length === 1 ? "" : "s"}: ${outputs.map(o => `${o.platform} ${o.output_type}`).join(" · ")}`
       : "No custom outputs selected. Studio will use the recommended output for each selected platform.";
+    hydrateEzOutputsFromMatrix();
   }
 
   function outputRecordKey(row) {
@@ -2797,6 +3011,7 @@
         renderEzCaptionUi();
       }
     }
+    hydrateEzConfigFromRequest(record);
     setEzAdvancedOpen(!parsed);
   }
 
@@ -2876,6 +3091,10 @@
   });
 
   function productionRequestPayload() {
+    if (usingEzPlatforms() || ezEntryPath === "content") {
+      syncEzAudioFields();
+      syncEzConfigFields();
+    }
     const requestedPlatforms = selectedRequestPlatforms();
     const planPlatforms = item4SelectedPlatforms();
     const payload = {

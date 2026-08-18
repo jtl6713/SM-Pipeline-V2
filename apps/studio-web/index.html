@@ -5,7 +5,7 @@
  <meta name="viewport" content="width=device-width,initial-scale=1">
  <meta name="robots" content="noindex,nofollow,noarchive">
  <title>ChicagoShining Studio</title>
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.34-ez-audio">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.35-ez-config">
 </head>
 <body>
  <header class="topbar">
@@ -29,7 +29,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.34</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.35</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -149,6 +149,109 @@
  <button type="button" class="voice-preview-button" id="ezAudioTrackPreview">▶ Preview</button>
  </div>
  </div>
+ </div>
+ </div>
+ </details>
+ <details class="ez-option-group" id="ezTitleGroup">
+ <summary>Title</summary>
+ <div class="ez-option-group-body">
+ <label class="form-field"><span>Title control</span>
+ <select id="ezTitleMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select>
+ </label>
+ <label class="form-field"><span>Title</span>
+ <input id="ezRequestedTitle" maxlength="500" placeholder="Optional unless forcing exact wording">
+ </label>
+ <em class="ez-option-hint">Without a title, Studio uses the first photo filename.</em>
+ </div>
+ </details>
+ <details class="ez-option-group" id="ezScriptGroup">
+ <summary>Script</summary>
+ <div class="ez-option-group-body">
+ <label class="form-field"><span>Script control</span>
+ <select id="ezScriptMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select>
+ </label>
+ <label class="form-field"><span>Script / voiceover direction</span>
+ <textarea id="ezRequestedScript" rows="5" maxlength="25000" placeholder="Optional unless forcing exact wording"></textarea>
+ </label>
+ </div>
+ </details>
+ <details class="ez-option-group" id="ezCoverGroup">
+ <summary>Cover</summary>
+ <div class="ez-option-group-body">
+ <div class="ez-audio-toggles">
+ <label class="form-field"><span>Thumbnail / cover</span>
+ <select id="ezThumbnail"><option>Use Profile Default</option><option>Yes</option><option>No</option></select>
+ </label>
+ <label class="form-field"><span>Video after voiceover</span>
+ <input id="ezVoiceoverTail" type="number" min="0" max="10" step=".5" value="2">
+ </label>
+ </div>
+ </div>
+ </details>
+ <details class="ez-option-group" id="ezStructureGroup">
+ <summary>Structure</summary>
+ <div class="ez-option-group-body">
+ <div class="ez-structure-grid">
+ <div class="ez-structure-card" id="ezVideoStructure">
+ <strong>Video</strong>
+ <label class="form-field"><span>Duration (seconds)</span><input type="number" id="ezVideoDuration" min="5" max="600" value="30"></label>
+ <label class="form-field"><span>Clip count</span><select id="ezVideoClipMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
+ <div class="count-inputs">
+ <label class="form-field exact-count" hidden><span>Exact</span><input type="number" id="ezVideoClipExact" min="1" max="30"></label>
+ <label class="form-field range-count" hidden><span>Min</span><input type="number" id="ezVideoClipMin" min="1" max="30"></label>
+ <label class="form-field range-count" hidden><span>Max</span><input type="number" id="ezVideoClipMax" min="1" max="30"></label>
+ </div>
+ </div>
+ <div class="ez-structure-card" id="ezCarouselStructure">
+ <strong>Carousel / photo sequence</strong>
+ <label class="form-field"><span>Slide count</span><select id="ezCarouselSlideMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
+ <div class="count-inputs">
+ <label class="form-field exact-count" hidden><span>Exact</span><input type="number" id="ezCarouselSlideExact" min="1" max="20"></label>
+ <label class="form-field range-count" hidden><span>Min</span><input type="number" id="ezCarouselSlideMin" min="1" max="20"></label>
+ <label class="form-field range-count" hidden><span>Max</span><input type="number" id="ezCarouselSlideMax" min="1" max="20"></label>
+ </div>
+ <label class="form-field"><span>Image mode</span><select id="ezCarouselImageMode"><option>Manual Upload</option><option>Make AI Generated</option></select></label>
+ </div>
+ </div>
+ </div>
+ </details>
+ <details class="ez-option-group" id="ezNotesGroup">
+ <summary>Notes</summary>
+ <div class="ez-option-group-body">
+ <label class="form-field"><span>Production notes</span>
+ <textarea id="ezProductionNotes" rows="4" maxlength="10000" placeholder="Anything extra for pacing, style, or execution"></textarea>
+ </label>
+ </div>
+ </details>
+ <details class="ez-option-group" id="ezOutputsGroup">
+ <summary>Outputs</summary>
+ <div class="ez-option-group-body">
+ <em class="ez-option-hint">Defaults follow your platforms and photos. Add extras here. Facebook Slideshow Reel stays opt-in.</em>
+ <div class="ez-output-matrix" id="ezOutputMatrix">
+ <fieldset><legend>Instagram</legend>
+ <label><input type="checkbox" data-ez-output data-platform="Instagram" value="Reel"> Reel</label>
+ <label><input type="checkbox" data-ez-output data-platform="Instagram" value="Story"> Story</label>
+ <label><input type="checkbox" data-ez-output data-platform="Instagram" value="Single Image"> Single Image</label>
+ <label><input type="checkbox" data-ez-output data-platform="Instagram" value="Carousel"> Carousel</label>
+ </fieldset>
+ <fieldset><legend>Facebook</legend>
+ <label><input type="checkbox" data-ez-output data-platform="Facebook" value="Reel"> Reel</label>
+ <label><input type="checkbox" data-ez-output data-platform="Facebook" value="Story"> Story</label>
+ <label><input type="checkbox" data-ez-output data-platform="Facebook" value="Single Image"> Single Image</label>
+ <label><input type="checkbox" data-ez-output data-platform="Facebook" value="Multi-Image Post"> Multi-Image Post</label>
+ <label><input type="checkbox" data-ez-output data-platform="Facebook" value="Slideshow Reel"> Slideshow Reel</label>
+ </fieldset>
+ <fieldset><legend>TikTok</legend>
+ <label><input type="checkbox" data-ez-output data-platform="TikTok" value="Video Draft"> Video Draft</label>
+ <label><input type="checkbox" data-ez-output data-platform="TikTok" value="Story"> Story</label>
+ <label><input type="checkbox" data-ez-output data-platform="TikTok" value="Single Photo"> Single Photo</label>
+ <label><input type="checkbox" data-ez-output data-platform="TikTok" value="Multi-Photo"> Multi-Photo</label>
+ </fieldset>
+ <fieldset><legend>YouTube</legend>
+ <label><input type="checkbox" data-ez-output data-platform="YouTube" value="Short"> Short</label>
+ <label><input type="checkbox" data-ez-output data-platform="YouTube" value="Standard Video"> Standard Video</label>
+ <label><input type="checkbox" data-ez-output data-platform="YouTube" value="Slideshow Video"> Slideshow Video</label>
+ </fieldset>
  </div>
  </div>
  </details>
@@ -796,7 +899,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.34-ez-audio"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.34-ez-audio"></script>
+ <script src="/assets/ez-plan.js?v=0.6.35-ez-config"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.35-ez-config"></script>
 </body>
 </html>

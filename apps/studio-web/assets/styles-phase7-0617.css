@@ -644,13 +644,23 @@ input, select, textarea, button {
 .ez-option-group{border:1px solid var(--line);border-radius:14px;background:#fff;padding:2px 14px}
 .ez-option-group>summary{cursor:pointer;font-weight:800;padding:10px 0;list-style:revert}
 .ez-option-group-body{display:grid;gap:10px;padding:0 0 12px}
-.ez-option-group-body select{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);padding:8px 10px;font:inherit}
+.ez-option-group-body select,.ez-option-group-body input[type="text"],.ez-option-group-body input[type="number"],.ez-option-group-body textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);padding:8px 10px;font:inherit}
+.ez-option-group-body textarea{min-height:88px;resize:vertical}
+.ez-option-hint{font-style:normal;font-size:.72rem;font-weight:600;color:var(--muted);line-height:1.35}
+.ez-structure-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ez-structure-card{display:grid;gap:8px;align-content:start}
+.ez-structure-card>strong{font-size:.82rem}
+.ez-output-matrix{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ez-output-matrix fieldset{border:1px solid var(--line);border-radius:10px;margin:0;padding:8px 10px 10px;display:grid;gap:6px}
+.ez-output-matrix legend{font-weight:800;font-size:.78rem}
+.ez-output-matrix label{display:flex;gap:8px;align-items:flex-start;font-size:.82rem;font-weight:600}
 .ez-audio-toggles{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
 .ez-audio-extra{display:grid;gap:4px}
 .ez-audio-hint{font-style:normal;font-size:.72rem;font-weight:600;color:var(--muted)}
 .page-content-simple .ez-busy-panel{display:none}
 @media(max-width:760px){
   .ez-path-fork-grid{grid-template-columns:1fr}
+  .ez-structure-grid,.ez-output-matrix{grid-template-columns:1fr}
 }
 .ez-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 20px 12px}
 .ez-card{border:1px solid var(--line);border-radius:14px;background:#fff;padding:14px;text-align:left;display:flex;flex-direction:column;gap:6px;cursor:pointer;font:inherit;color:var(--ink);min-height:0}
