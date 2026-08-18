@@ -31,3 +31,5 @@ EZ path Pages deploy: 2026-08-18 — Two-button Idea vs Content start; immediate
 EZ path Pages deploy: 2026-08-18 — Per-photo caption dropdown; Manual opens the text box. Source commit 71f4999.
 
 EZ path Pages deploy: 2026-08-18 — Caption autosave uses the saved Production Request instead of the hidden Advanced form, so Manual captions no longer 500.
+
+EZ path Pages deploy: 2026-08-18 — ElevenLabs voice catalog on Content audio; Voice and Music track only appear after Yes.
