@@ -79,24 +79,32 @@ STARTUP = {
 }
 
 
-def json_http(url, method="GET", headers=None, body=None, timeout=60):
+def json_http(url, method="GET", headers=None, body=None, timeout=60, retries=5):
     data = None if body is None else json.dumps(body).encode()
     request_headers = {"User-Agent": "SM-Pipeline-V2-Item19/1.0"}
     request_headers.update(headers or {})
     if data is not None:
         request_headers.setdefault("Content-Type", "application/json")
-    req = urllib.request.Request(url, data=data, method=method, headers=request_headers)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            raw = response.read().decode("utf-8", "replace")
-            return response.status, json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as error:
-        raw = error.read().decode("utf-8", "replace")
+    delay = 1.5
+    last_status, last_payload = None, {}
+    for attempt in range(max(1, retries)):
+        req = urllib.request.Request(url, data=data, method=method, headers=request_headers)
         try:
-            payload = json.loads(raw) if raw else {}
-        except json.JSONDecodeError:
-            payload = {"raw": raw[:500]}
-        return error.code, payload
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                raw = response.read().decode("utf-8", "replace")
+                return response.status, json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as error:
+            raw = error.read().decode("utf-8", "replace")
+            try:
+                payload = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                payload = {"raw": raw[:500]}
+            last_status, last_payload = error.code, payload
+            if error.code not in (429, 502, 503) or attempt == retries - 1:
+                return error.code, payload
+            time.sleep(delay)
+            delay = min(delay * 2, 16)
+    return last_status, last_payload
 
 
 def unwrap(payload, key):
@@ -329,7 +337,7 @@ def main():
             inspect_ids.add(spec["scenario_id"])
     for scenario_id in sorted(inspect_ids):
         inspected[str(scenario_id)] = inspect_scenario(make_base, token=make_token, scenario_id=scenario_id)
-        time.sleep(0.35)
+        time.sleep(0.8)
 
     hook_gets = {}
     hook_get_ids = {PING_HOOK_ID, 2653029, 2628156, 2567873, 2567877, 2639647}
@@ -386,8 +394,8 @@ def main():
         if scenario_id and name in STARTUP:
             if live.get("http") != 200:
                 identity_mismatch.append(f"{name}: scenario {scenario_id} http {live.get('http')}")
-            elif not live.get("webhook_entrance"):
-                identity_mismatch.append(f"{name}: scenario {scenario_id} missing webhook entrance")
+            elif live.get("hookId") is None:
+                identity_mismatch.append(f"{name}: scenario {scenario_id} has no hookId")
             elif expected.get("hook_id") and not expected.get("historical") and not same_id(live_hook, expected["hook_id"]):
                 identity_mismatch.append(f"{name}: hook {live_hook} != {expected['hook_id']}")
             elif expected.get("hook_id") and expected.get("historical") and not same_id(live_hook, expected["hook_id"]):

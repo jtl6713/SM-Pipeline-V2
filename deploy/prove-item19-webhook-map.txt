@@ -7,3 +7,4 @@ After the map is verified, issue exactly one GET /hooks/{id}/ping. Do not POST p
 
 Initialized: 2026-08-18
 Retried: 2026-08-18 after bundled-token hooks:read 401
+Retried: 2026-08-18 after Make 429 during blueprint reads
