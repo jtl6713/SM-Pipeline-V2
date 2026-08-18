@@ -144,6 +144,7 @@ jobs:
           from email.parser import BytesParser
           from email.policy import default
           from pathlib import Path
+          import hashlib
           import re
           headers=Path('/tmp/worker-after-headers.txt').read_bytes(); body=Path('/tmp/worker-after-body.bin').read_bytes()
           text=headers.decode('latin-1',errors='replace')
@@ -156,15 +157,30 @@ jobs:
               for part in msg.walk():
                   if part.is_multipart(): continue
                   ctype=part.get_content_type().lower(); filename=part.get_filename() or ''; payload=part.get_payload(decode=True) or b''
-                  if 'javascript' in ctype or filename.lower().endswith(('.js','.mjs')): candidates.append((filename,payload))
+                  if 'javascript' in ctype or filename.lower().endswith(('.js','.mjs')): candidates.append((filename,payload,ctype,len(payload)))
               if not candidates: raise SystemExit('No JavaScript module found in active Worker content')
+              print('live_js_candidates=' + ','.join(f'{name or "unnamed"}:{length}' for name, _payload, _ctype, length in candidates))
               preferred=next((x for x in candidates if x[0] in ('worker.js','index.js','src/index.js')),candidates[0])
               out.write_bytes(preferred[1])
           else:
+              print(f'live_content_type={content_type or "missing"} live_body_bytes={len(body)}')
               out.write_bytes(body)
+          def norm(value):
+              if value.startswith(b'\xef\xbb\xbf'):
+                  value = value[3:]
+              return value.replace(b'\r\n', b'\n')
+          repo = Path('apps/studio-api/worker.js').read_bytes()
+          live = out.read_bytes()
+          if norm(repo) == norm(live):
+              print('active_source_byte_match=PASS')
+          else:
+              print(f'repo_bytes={len(repo)} live_bytes={len(live)}')
+              print(f'repo_sha256={hashlib.sha256(norm(repo)).hexdigest()}')
+              print(f'live_sha256={hashlib.sha256(norm(live)).hexdigest()}')
+              print(f'live_has_voice_preview_proxy={b"phase6_voice_preview_proxy" in live}')
+              print(f'live_head={live[:160]!r}')
+              raise SystemExit('active Worker source does not match apps/studio-api/worker.js')
           PY
-          cmp --silent apps/studio-api/worker.js /tmp/worker-after.js
-          echo "active_source_byte_match=PASS"
 
       - name: Build and upload one-time functional verification bridge
         shell: bash
