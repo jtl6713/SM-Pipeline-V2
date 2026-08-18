@@ -15,6 +15,9 @@
   let ezStagedFiles = [];
   let ezStarting = false;
   let ezAutoPlanAfterUpload = false;
+  let ezPlanInFlight = false;
+  const ezCaptionDrafts = new Map();
+  let ezCaptionSaveTimer = null;
   let item4Uploading = false;
   let item4PreparingVariants = false;
   let item4VariantPollTimer = null;
@@ -45,7 +48,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.22-ez-path";
+  const BUILD_ID = "item4-0.6.23-ez-autoplan-captions";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -675,41 +678,139 @@
     if (details) details.open = Boolean(open);
   }
 
+  function ezPhotoSetActive() {
+    const count = item4Workspace?.assets?.length || ezStagedFiles.length || 0;
+    if (ezIntakeKind === "multiple-photos" || count > 1) return true;
+    const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
+    return parsed?.inputKind === "multiple-photos";
+  }
+
+  function ezManualCaptionsEnabled() {
+    return ezCaptionMode() === "manual";
+  }
+
+  function syncEzPlanChrome() {
+    const button = $("item4BuildPlan");
+    const hint = $("item4PlanHint");
+    const ez = ezIsOriginRecord() || ezStarting || ezAutoPlanAfterUpload;
+    if (!button) return;
+    if (ez) {
+      button.hidden = true;
+      if (hint) {
+        if (item4Workspace?.plan_status === "Ready" && item4Workspace?.plan?.items?.length) {
+          hint.textContent = "Platform plan built automatically. Change a format below if you need a different output.";
+        } else if (item4Workspace?.assets?.length) {
+          hint.textContent = "Studio is building the platform plan from these photos.";
+        } else {
+          hint.textContent = "Drop photos and Studio will build the platform plan.";
+        }
+      }
+    } else {
+      button.hidden = false;
+    }
+  }
+
+  async function maybeAutoEzPlan(force = false) {
+    if (!activeProductionRequest?.id) return;
+    if (!ezIsOriginRecord() && !ezAutoPlanAfterUpload && !ezStarting) return;
+    if (!item4Workspace?.assets?.length) return;
+    if (!force && item4Workspace?.plan_status === "Ready" && item4Workspace?.plan?.items?.length) {
+      ezAutoPlanAfterUpload = false;
+      syncEzPlanChrome();
+      return;
+    }
+    if (ezPlanInFlight) return;
+    ezPlanInFlight = true;
+    ezAutoPlanAfterUpload = false;
+    try {
+      setEzMessage("Building the platform plan…");
+      await buildItem4Plan();
+      setEzMessage("Platform plan ready.", "success");
+    } catch (error) {
+      setEzMessage(error.message || "Could not build the platform plan.", "error-text");
+    } finally {
+      ezPlanInFlight = false;
+      syncEzPlanChrome();
+    }
+  }
+
   function renderEzPerPhotoCaptions() {
     const host = $("ezPerPhotoCaptions");
     if (!host) return;
-    const show = ezIntakeKind === "multiple-photos" && ezCaptionMode() === "manual" && ezStagedFiles.length > 0;
-    host.hidden = !show;
-    if (!show) {
+    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const showStaged = ezPhotoSetActive() && ezManualCaptionsEnabled() && ezStagedFiles.length > 0 && !assets.length;
+    host.hidden = !showStaged;
+    if (!showStaged) {
       host.innerHTML = "";
       return;
     }
-    host.innerHTML = ezStagedFiles.map((file, index) => `
-      <label class="form-field">
+    host.innerHTML = ezStagedFiles.map((file, index) => {
+      const stored = ezCaptionDrafts.get(`staged:${index}`) || "";
+      return `<label class="form-field">
         <span>Caption for ${escapeHtml(file.name || `Photo ${index + 1}`)}</span>
-        <textarea data-ez-photo-caption="${index}" rows="2" maxlength="2000" placeholder="Caption for this image"></textarea>
-      </label>
-    `).join("");
+        <textarea data-ez-photo-caption="${index}" rows="2" maxlength="2000" placeholder="Caption for this image">${escapeHtml(stored)}</textarea>
+      </label>`;
+    }).join("");
+    host.querySelectorAll("[data-ez-photo-caption]").forEach((input) => {
+      input.addEventListener("input", () => {
+        ezCaptionDrafts.set(`staged:${input.dataset.ezPhotoCaption}`, input.value);
+      });
+    });
   }
 
   function collectEzManualCaptions() {
-    if (ezIntakeKind === "multiple-photos") {
+    const fromAssets = Array.from(document.querySelectorAll("[data-ez-asset-caption]")).map((input) => input.value);
+    if (fromAssets.length) return fromAssets;
+    if (ezPhotoSetActive()) {
       return Array.from(document.querySelectorAll("[data-ez-photo-caption]")).map((input) => input.value);
     }
     return [];
   }
 
+  function queueEzCaptionSave() {
+    clearTimeout(ezCaptionSaveTimer);
+    ezCaptionSaveTimer = setTimeout(() => {
+      saveEzCaptionsToRequest().catch((error) => setEzMessage(error.message, "error-text"));
+    }, 700);
+  }
+
+  async function saveEzCaptionsToRequest() {
+    if (!activeProductionRequest?.id || !ezManualCaptionsEnabled()) return;
+    const captions = collectEzManualCaptions();
+    const text = captions.map((value) => String(value || "").trim()).filter(Boolean).join("\n\n");
+    const captionBox = $("ezCaption");
+    const single = String(captionBox?.value || "").trim();
+    const requested = ezPhotoSetActive() ? text : single;
+    if ($("prRequestedCaption")) $("prRequestedCaption").value = requested;
+    if ($("prCaptionMode")) $("prCaptionMode").value = "Force exact";
+    const notes = $("prProductionNotes");
+    if (notes && ezPlanApi()) {
+      const parsed = ezPlanApi().parseEzOriginNotes(notes.value) || {};
+      notes.value = ezPlanApi().ezOriginNotes({
+        inputKind: parsed.inputKind || ezIntakeKind || "multiple-photos",
+        captionMode: "manual",
+      });
+    }
+    if (!requested) return;
+    await saveActiveProductionRequest({ quiet: true });
+  }
+
   function renderEzCaptionUi() {
     const mode = ezCaptionMode();
-    const single = ezIntakeKind !== "multiple-photos";
+    const single = !ezPhotoSetActive();
     const field = $("ezCaptionField");
     if (field) field.hidden = mode !== "manual" || !single;
+    const hint = $("ezCaptionHint");
+    if (hint) {
+      if (mode === "manual" && !single) hint.textContent = "Write a caption under each photo. Studio saves as you type.";
+      else if (mode === "manual") hint.textContent = "Write one caption for this photo.";
+      else if (mode === "none") hint.textContent = "No AI text and no overlay titles.";
+      else hint.textContent = "Studio writes captions. Switch to Manual to caption each photo yourself.";
+    }
     renderEzPerPhotoCaptions();
     const continueBtn = $("ezContinue");
-    if (continueBtn) {
-      const needsContinue = mode === "manual" && ezStagedFiles.length > 0;
-      continueBtn.hidden = !needsContinue;
-    }
+    if (continueBtn) continueBtn.hidden = true;
+    if (item4Workspace?.assets?.length) renderItem4Assets(item4Workspace);
   }
 
   function syncEzYouTubeAvailability(resetChecked = true) {
@@ -739,6 +840,10 @@
       ? "Native carousel / album / TikTok draft, then a YouTube Short. No email until final pre-publish."
       : "Instagram 4:5, Facebook image, TikTok photo draft. YouTube stays off. No email until final pre-publish.";
     syncEzYouTubeAvailability(resetPlatforms);
+    if (resetPlatforms && ezIntakeKind === "multiple-photos") {
+      const manual = document.querySelector('input[name="ezCaptionMode"][value="manual"]');
+      if (manual) manual.checked = true;
+    }
     if (resetPlatforms) syncItem4PlatformsFromEz();
     renderEzCaptionUi();
     if (resetPlatforms) setEzMessage();
@@ -789,16 +894,6 @@
     const captionMode = ezCaptionMode();
     const captions = collectEzManualCaptions();
     const captionText = String($("ezCaption")?.value || "").trim();
-    if (captionMode === "manual") {
-      const ready = ezIntakeKind === "single-photo" ? Boolean(captionText) : captions.some((value) => String(value || "").trim());
-      if (!ready) {
-        renderEzCaptionUi();
-        setEzMessage(ezIntakeKind === "single-photo"
-          ? "Enter a caption, then continue."
-          : "Enter a caption for at least one photo, then continue.", "error-text");
-        return;
-      }
-    }
     if (ezStarting) return;
     ezStarting = true;
     const continueBtn = $("ezContinue");
@@ -808,7 +903,10 @@
       item4PlanOverrides = {};
       const planned = applyEzPlanOverrides(files.length, ezSelectedPlatforms());
       syncItem4PlatformsFromEz();
-      const captionFields = apiHelpers.ezCaptionFields(captionMode, { caption: captionText, captions });
+      let captionFields = apiHelpers.ezCaptionFields(captionMode, { caption: captionText, captions });
+      if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
+        captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
+      }
       const idea = await api("/api/ideas", {
         method: "POST",
         body: JSON.stringify({
@@ -861,7 +959,12 @@
       input.addEventListener("change", renderEzCaptionUi);
     });
     document.querySelectorAll("[data-ez-platform]").forEach((input) => {
-      input.addEventListener("change", syncItem4PlatformsFromEz);
+      input.addEventListener("change", () => {
+        syncItem4PlatformsFromEz();
+        if ((ezIsOriginRecord() || ezStarting) && item4Workspace?.assets?.length) {
+          maybeAutoEzPlan(true);
+        }
+      });
     });
     $("ezChooseMedia")?.addEventListener("click", (event) => {
       event.preventDefault();
@@ -1009,9 +1112,15 @@
       : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
-    return `<article class="item4-asset-card" data-item4-asset="${escapeHtml(asset.id)}">
+    const showCaption = ezManualCaptionsEnabled() && (ezPhotoSetActive() || ezIntakeKind === "single-photo");
+    const captionValue = ezCaptionDrafts.get(String(asset.id || "")) || "";
+    const captionField = showCaption
+      ? `<label class="item4-asset-caption-field"><span>Caption</span><textarea data-ez-asset-caption="${escapeHtml(asset.id)}" rows="2" maxlength="2000" placeholder="Caption for this photo">${escapeHtml(captionValue)}</textarea></label>`
+      : "";
+    return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}" data-item4-asset="${escapeHtml(asset.id)}">
       <div class="item4-thumb">${visual}</div>
       <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || "Photo")}</strong><span>Photo ${escapeHtml(asset.order || "")} · ${escapeHtml(dims)}${formatNote}</span></div>
+      ${captionField}
       <button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="Remove this master photo">×</button>
     </article>`;
   }
@@ -1031,6 +1140,13 @@
             : `${assets.length} photo${assets.length === 1 ? "" : "s"} processing`;
     }
     if (!host) return;
+    if (ezManualCaptionsEnabled() && assets.length) {
+      const parts = String(activeProductionRequest?.requested_caption || "").split(/\n\n+/);
+      assets.forEach((asset, index) => {
+        const id = String(asset?.id || "");
+        if (id && !ezCaptionDrafts.has(id) && parts[index]) ezCaptionDrafts.set(id, parts[index]);
+      });
+    }
     host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">No master photos uploaded yet.</div>';
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => item4BindPreviewImage(img, {
       placeholder: () => {
@@ -1040,6 +1156,12 @@
       },
     }));
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
+    host.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
+      input.addEventListener("input", () => {
+        ezCaptionDrafts.set(String(input.dataset.ezAssetCaption || ""), input.value);
+        queueEzCaptionSave();
+      });
+    });
   }
 
   function item4PlanCard(item) {
@@ -1072,6 +1194,10 @@
     host.querySelectorAll("[data-item4-format]").forEach(select => {
       select.addEventListener("change", () => {
         item4PlanOverrides[select.dataset.item4Format] = select.value;
+        if (ezIsOriginRecord()) {
+          maybeAutoEzPlan(true);
+          return;
+        }
         const button = $("item4BuildPlan");
         if (button) button.textContent = "Update platform plan";
       });
@@ -1225,6 +1351,7 @@
       if (state === "Ready") {
         stopItem4MasterPolling();
         setRequestMessage("Master photos are saved to Google Drive and previews are ready. No refresh was required.", "success");
+        await maybeAutoEzPlan();
         return;
       }
       if (state === "Error") {
@@ -1350,6 +1477,7 @@
     });
     setProductionRequestControlState(activeProductionRequest);
     updateItem4MasterProgress(status || {});
+    syncEzPlanChrome();
     if (status?.assets?.length && status?.assets_status === "Uploading" && !item4MasterPollTimer) startItem4MasterPolling();
     if (status?.assets_status === "Ready" || status?.assets_status === "Error") stopItem4MasterPolling();
     if (status?.variant_status === "Preparing" && !item4VariantPollTimer) startItem4VariantPolling();
@@ -1460,12 +1588,8 @@
         setRequestMessage("Master photos uploaded. Studio is saving them to Google Drive and preparing previews; this page updates automatically.", "success");
         startItem4MasterPolling();
       }
-      if (ezAutoPlanAfterUpload && item4Workspace?.assets?.length) {
-        ezAutoPlanAfterUpload = false;
-        setEzMessage("Building the photo-count platform plan…");
-        await buildItem4Plan();
-        setEzMessage("Platform plan ready. Review below, or open Advanced options.", "success");
-      }
+      await maybeAutoEzPlan();
+      renderEzCaptionUi();
     } catch (error) {
       ezAutoPlanAfterUpload = false;
       if (progress) progress.textContent = `Upload failed: ${error.message}`;
@@ -1483,6 +1607,7 @@
       await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(assetId)}`, {method:"DELETE", body:JSON.stringify({})});
       await loadItem4Workspace(activeProductionRequest);
       setRequestMessage("Master photo removed. Rebuild the platform plan before production.", "success");
+      if (ezIsOriginRecord()) await maybeAutoEzPlan(true);
     } catch (error) { setRequestMessage(error.message, "error-text"); }
   }
 
@@ -1507,7 +1632,13 @@
       await loadProductionRequestOutputs(activeProductionRequest);
       setRequestMessage(result.message || "Platform plan ready.", "success");
     } catch (error) { setRequestMessage(error.message, "error-text"); }
-    finally { if (button) { button.textContent = item4Workspace?.plan?.items?.length ? "Update platform plan" : "Recommend platform plan"; button.disabled = !(item4Workspace?.assets?.length); } }
+    finally {
+      if (button) {
+        button.textContent = item4Workspace?.plan?.items?.length ? "Update platform plan" : "Recommend platform plan";
+        button.disabled = !(item4Workspace?.assets?.length);
+      }
+      syncEzPlanChrome();
+    }
   }
 
   function selectedRequestPlatforms() {
@@ -2177,12 +2308,13 @@
         body: JSON.stringify(productionRequestPayload()),
       });
       activeProductionRequest = result.record;
+      if (quiet) return activeProductionRequest;
       await saveProductionRequestOutputs(result.record);
       populateProductionRequestForm(activeProductionRequest);
       await loadProductionRequestOutputs(activeProductionRequest);
       await loadItem4Workspace(activeProductionRequest);
       await loadProductionRequests();
-      if (!quiet) setRequestMessage("Production Request draft and requested platform outputs saved.", "success");
+      setRequestMessage("Production Request draft and requested platform outputs saved.", "success");
       return activeProductionRequest;
     } finally {
       if (button) {
