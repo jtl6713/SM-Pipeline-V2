@@ -1,0 +1,34 @@
+{
+  "repair_item": 16,
+  "checkpoint": "tiktok-one-key-one-draft-contracts",
+  "proof_run": 32091671074,
+  "make_scenario_runs": 0,
+  "tiktok_drafts_created": 0,
+  "ttd_orch_pulsed": false,
+  "one_key_one_draft": true,
+  "unique_publish_id_count": 6,
+  "gmail": {
+    "142": {"threads": 1, "ids": ["1a0060159a67a8b7"]},
+    "139": {"threads": 2, "ids": ["1a0007f96acd6d02", "1a0008d1e7e00605"]},
+    "137": {"threads": 1, "ids": ["19ffec296cbf6af0"]},
+    "129": {"threads": 1, "ids": ["19ff6ed1e190467b"]},
+    "150": {"threads": 0, "ids": []}
+  },
+  "prior_uncertainty": {
+    "output_139": "Two Gmail handoffs for one publish_id; Airtable stamp matches the second send.",
+    "output_150": "Airtable TTD3 stamp exists; no matching sent Gmail in joseph.t.logan@gmail.com.",
+    "root_cause": "TTD3 stamps Email_Sent_At after Gmail, and the stamp filter only requires the source record to exist.",
+    "reconciled": true,
+    "blind_retry_now": false
+  },
+  "native_contract_terms": {
+    "ttd1_refuses_existing_publish_id": true,
+    "ttd1_blocks_ambiguous_reinit": true,
+    "ttd3_email_sent_fence": true,
+    "ttd3_operational_email_key": true,
+    "ttd3_gmail": true,
+    "ttd4_url_guard": true,
+    "ttd4_already_published": true
+  },
+  "passed": true
+}
