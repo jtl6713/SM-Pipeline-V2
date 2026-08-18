@@ -45,3 +45,5 @@ EZ path Pages deploy: 2026-08-18 — Ideas > Configure Production opens the exis
 EZ path Pages deploy: 2026-08-18 — Start with Content title and optional idea description at the top. UI 0.6.37. Source commit b6a7182.
 
 EZ path Pages deploy: 2026-08-18 — Title and idea description stay editable after photos save. UI 0.6.38. Source commit fc3e0ae.
+
+EZ path Pages deploy: 2026-08-18 — Ideas Manage saves title and summary on close or Configure Production. UI 0.6.39. Source commit 011cb94.
