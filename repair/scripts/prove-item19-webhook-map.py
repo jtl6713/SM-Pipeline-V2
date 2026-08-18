@@ -40,7 +40,6 @@ SCHEDULED_CONSUMERS = {
     5557966: "R3",
     5565333: "R5",
     5576363: "RR1",
-    5536624: "P5",
 }
 PRESERVED = {
     5524092: {"label": "I4", "hook_id": 2549733},
