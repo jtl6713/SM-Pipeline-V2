@@ -37,3 +37,5 @@ EZ path Pages deploy: 2026-08-18 — ElevenLabs voice catalog on Content audio; 
 EZ path Pages deploy: 2026-08-18 — Voice Preview uses the ElevenLabs sample proxy, Music track has Preview, UI 0.6.33. Source commit 65a6f63.
 
 EZ path Pages deploy: 2026-08-18 — Voice and Music track sit side by side under Voiceover/Music; UI 0.6.34. Source commit 349ae93.
+
+EZ path Pages deploy: 2026-08-18 — Collapsed Title, Script, Cover, Structure, Notes, and Outputs on New content; UI 0.6.35. Source commit 2ebb267.
