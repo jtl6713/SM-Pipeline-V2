@@ -7579,6 +7579,8 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
       brand: phase6Text(overlay.brand, 250),
       background_opacity: phase6Number(overlay.backgroundOpacity, null),
       animation: phase6Text(overlay.animation || "fade", 60),
+      start_fraction: phase6Clamp(overlay.startFraction ?? overlay.start_fraction, 0, 1, 0),
+      end_fraction: phase6Clamp(overlay.endFraction ?? overlay.end_fraction, 0, 1, 1),
     },
     voice_prep_request_id: f(slide, "Studio_Voice_Prep_Request_ID") || null,
     voiceover: {
@@ -8138,12 +8140,17 @@ function phase6AssetSourceForSlide(slide, ratio) {
   return "fallback_source";
 }
 
-function phase6RenderOverlayFromSlide(slide) {
+function phase6RenderOverlayFromSlide(slide, options = {}) {
   const o = slide?.overlay || {};
-  return {
-    enabled: o.enabled !== false,
-    text: phase6Text(o.text, 1000),
-    position: phase6Text(o.position || "center", 60),
+  const tiktok = String(options.platform || "") === "TikTok" && String(options.ratio || "") === "9:16";
+  const startFraction = phase6Clamp(o.start_fraction ?? o.startFraction, 0, 1, 0);
+  const endFraction = phase6Clamp(o.end_fraction ?? o.endFraction, 0, 1, 1);
+  const text = phase6Text(o.text || (tiktok ? slide?.name : ""), 1000);
+  const enabled = o.enabled !== false && Boolean(text);
+  const overlay = {
+    enabled,
+    text,
+    position: phase6Text(o.position || (tiktok ? "lower-third" : "center"), 60),
     size: Math.round(phase6Clamp(o.size, 20, 140, 64)),
     stylePreset: phase6Text(o.style_preset || "Chicago Editorial", 80),
     animation: phase6Text(o.animation || "fade", 60),
@@ -8153,9 +8160,28 @@ function phase6RenderOverlayFromSlide(slide) {
     accentText: phase6Text(o.accent_text, 500),
     brand: phase6Text(o.brand, 250),
     backgroundOpacity: phase6Clamp(o.background_opacity, 0, 1, 0.4),
-    startFraction: 0,
-    endFraction: 1,
+    startFraction: Math.min(startFraction, endFraction),
+    endFraction: Math.max(startFraction, endFraction),
   };
+  if (tiktok) {
+    overlay.recipe = "tiktok-title-overlay-v1";
+    overlay.safeArea = "tiktok-9x16";
+    overlay.safeAreaInsets = { top: 285, right: 78, bottom: 285, left: 78 };
+    overlay.durationSeconds = phase6Clamp(options.durationSeconds, 0.5, 60, 4);
+    overlay.idempotencyKey = [
+      "tiktok-title-overlay-v1",
+      overlay.enabled ? "1" : "0",
+      overlay.text,
+      overlay.position,
+      overlay.size,
+      overlay.stylePreset,
+      overlay.startFraction,
+      overlay.endFraction,
+      overlay.durationSeconds,
+      "285,78,285,78",
+    ].join("|");
+  }
+  return overlay;
 }
 
 async function phase6BuildPreviewRenderPackage(env, outputRecord) {
@@ -8218,7 +8244,11 @@ async function phase6BuildPreviewRenderPackage(env, outputRecord) {
         volume: phase6Clamp(slide.voiceover.volume_override, 0, 1.25, globalVoiceoverVolume),
         measuredDurationSeconds: phase6Number(slide.voiceover.duration_seconds, null),
       } : { enabled: false },
-      overlay: phase6RenderOverlayFromSlide(slide),
+      overlay: phase6RenderOverlayFromSlide(slide, {
+        platform: f(outputRecord, "Platform"),
+        ratio,
+        durationSeconds: requestedSeconds,
+      }),
       transition: {
         type: phase6Text(slide?.transition?.type || "fade", 60),
         durationFrames: Math.round(phase6Clamp(slide?.transition?.duration_frames, 0, 90, 12)),

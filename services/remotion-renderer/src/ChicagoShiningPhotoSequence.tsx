@@ -156,6 +156,7 @@ export type ChicagoShiningPhotoClip = {
     backgroundOpacity?: number;
     startFraction?: number;
     endFraction?: number;
+    safeArea?: "default" | "tiktok-9x16";
   };
 };
 
@@ -306,7 +307,11 @@ const resolveClipSource = (
 
 const safeAreaPadding = (
   ratio: PhotoSequenceAspectRatio,
+  mode?: "default" | "tiktok-9x16",
 ): {top: number; right: number; bottom: number; left: number} => {
+  if (mode === "tiktok-9x16") {
+    return {top: 285, right: 78, bottom: 285, left: 78};
+  }
   switch (ratio) {
     case "16:9":
       return {top: 70, right: 120, bottom: 80, left: 120};
@@ -323,8 +328,9 @@ const safeAreaPadding = (
 const positionStyle = (
   position: PhotoSequenceTextPosition,
   ratio: PhotoSequenceAspectRatio,
+  mode?: "default" | "tiktok-9x16",
 ): React.CSSProperties => {
-  const safe = safeAreaPadding(ratio);
+  const safe = safeAreaPadding(ratio, mode);
   const base: React.CSSProperties = {
     position: "absolute",
     display: "flex",
@@ -479,6 +485,7 @@ const AnimatedText: React.FC<{
   backgroundOpacity?: number;
   durationInFrames: number;
   targetAspectRatio: PhotoSequenceAspectRatio;
+  safeArea?: "default" | "tiktok-9x16";
 }> = ({
   text,
   preset,
@@ -493,6 +500,7 @@ const AnimatedText: React.FC<{
   backgroundOpacity,
   durationInFrames,
   targetAspectRatio,
+  safeArea,
 }) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
@@ -553,7 +561,7 @@ const AnimatedText: React.FC<{
   return (
     <AbsoluteFill
       style={{
-        ...positionStyle(position, targetAspectRatio),
+        ...positionStyle(position, targetAspectRatio, safeArea),
         pointerEvents: "none",
         opacity,
       }}
@@ -875,6 +883,7 @@ const ImageSegment: React.FC<{
             backgroundOpacity={overlay?.backgroundOpacity}
             durationInFrames={overlayDuration}
             targetAspectRatio={targetAspectRatio}
+            safeArea={overlay?.safeArea}
           />
         </Sequence>
       ) : null}
