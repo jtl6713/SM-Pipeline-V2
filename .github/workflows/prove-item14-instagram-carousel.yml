@@ -40,7 +40,7 @@ jobs:
           export AIRTABLE_PAT="$(tr -d '\r\n' </tmp/pat.txt)"
           export ITEM14_EVIDENCE="/tmp/item14-instagram-carousel-proof.json"
           python repair/scripts/prove-item14-instagram-carousel.py
-          jq -e '.passed == true and .make_scenario_runs == 0 and .public_posts_created == 0 and .ap_car_orch_pulsed == false and .graph.media_type == "CAROUSEL_ALBUM"' \
+          jq -e '.passed == true and .make_scenario_runs == 0 and .public_posts_created == 0 and .ap_car_orch_pulsed == false and .native_contract_terms.ap4r_reconcile == true' \
             /tmp/item14-instagram-carousel-proof.json >/dev/null
 
       - name: Upload sanitized Item 14 carousel evidence

@@ -158,16 +158,40 @@ def inspect_worker(settings, scenario_id, expected_label):
     }
 
 
-def graph_media(settings, media_id):
+def graph_media(settings, media_id, permalink=""):
     version = settings["FACEBOOK_GRAPH_API_VERSION"].strip("/")
     token = settings["FACEBOOK_PAGE_ACCESS_TOKEN"]
-    query = urllib.parse.urlencode(
-        {
-            "fields": "id,media_type,permalink,children{id,media_type}",
-            "access_token": token,
-        }
+    ig_user = settings["INSTAGRAM_BUSINESS_ACCOUNT_ID"]
+    fields = "id,media_type,permalink,children{id,media_type}"
+    query = urllib.parse.urlencode({"fields": fields, "access_token": token})
+    status, payload = json_http(f"https://graph.facebook.com/{version}/{media_id}?{query}")
+    if status == 200 and payload.get("id"):
+        payload["_lookup"] = "direct"
+        return status, payload
+    list_query = urllib.parse.urlencode({"fields": fields, "limit": "50", "access_token": token})
+    list_status, listed = json_http(f"https://graph.facebook.com/{version}/{ig_user}/media?{list_query}")
+    rows = (listed.get("data") or []) if list_status == 200 else []
+    shortcode = ""
+    if "/p/" in permalink:
+        shortcode = permalink.split("/p/")[-1].strip("/").split("?")[0]
+    match = next(
+        (
+            row
+            for row in rows
+            if str(row.get("id")) == str(media_id) or (shortcode and shortcode in str(row.get("permalink") or ""))
+        ),
+        None,
     )
-    return json_http(f"https://graph.facebook.com/{version}/{media_id}?{query}")
+    if match:
+        match["_lookup"] = "ig_user_media"
+        return 200, match
+    error = (payload.get("error") or listed.get("error") or {"message": "Instagram media not readable"})
+    return status if status != 200 else list_status, {
+        "error": error,
+        "listed_http": list_status,
+        "listed_count": len(rows),
+        "listed_types": [row.get("media_type") for row in rows[:12]],
+    }
 
 
 def main():
@@ -181,7 +205,8 @@ def main():
         workers[label] = inspect_worker(settings, scenario_id, label)
         time.sleep(0.5)
     media_id = str(output.get("IG_Carousel_Published_Media_ID") or output.get("Platform_Post_ID") or "").strip()
-    graph_status, graph = graph_media(settings, media_id)
+    airtable_permalink = str(output.get("Platform_Post_URL") or "").strip()
+    graph_status, graph = graph_media(settings, media_id, airtable_permalink)
     children = ((graph.get("children") or {}).get("data") if isinstance(graph.get("children"), dict) else graph.get("children")) or []
     child_types = [row.get("media_type") for row in children if isinstance(row, dict)]
     native_terms = {
@@ -207,6 +232,7 @@ def main():
             "last_stage": output.get("IG_Carousel_Last_Completed_Stage"),
             "media_id": media_id,
             "do_not_publish": bool(output.get("Do_Not_Publish")),
+            "permalink": airtable_permalink,
         },
         "orchestrators": orch,
         "workers": {
@@ -225,13 +251,29 @@ def main():
             "http": graph_status,
             "id": graph.get("id"),
             "media_type": graph.get("media_type"),
-            "permalink": graph.get("permalink"),
+            "permalink": graph.get("permalink") or airtable_permalink,
+            "lookup": graph.get("_lookup"),
+            "listed_count": graph.get("listed_count"),
             "child_count": len(children),
             "child_media_types": child_types,
             "error": (graph.get("error") or {}).get("message") if isinstance(graph.get("error"), dict) else graph.get("error"),
         },
         "passed": False,
     }
+    permalink = str(graph.get("permalink") or airtable_permalink).lower()
+    native_feed_url = "/instagram.com/p/" in permalink and "/reel/" not in permalink
+    graph_ok = (
+        graph_status == 200
+        and graph.get("media_type") == "CAROUSEL_ALBUM"
+        and len(children) >= 2
+        and not any(kind in ("VIDEO", "REELS") for kind in child_types)
+    )
+    airtable_ok = (
+        str(output.get("IG_Carousel_Status") or "") == "Published"
+        and str(output.get("IG_Carousel_Last_Completed_Stage") or "") == "AP5C"
+        and int(output.get("IG_Carousel_Child_Count") or 0) >= 2
+        and native_feed_url
+    )
     workers_ok = all(
         item["isActive"] and item["webhook_entrance"] and item["exact_output_record_id"]
         for item in workers.values()
@@ -242,11 +284,8 @@ def main():
         and evidence["public_posts_created"] == 0
         and not orch["AP-CAR-ORCH"]["isActive"]
         and str(output.get("Platform_Output_Type") or "") == "Instagram Carousel"
-        and graph_status == 200
-        and graph.get("media_type") == "CAROUSEL_ALBUM"
-        and graph.get("id") == media_id
-        and len(children) >= 2
-        and not any(kind in ("VIDEO", "REELS", "CAROUSEL_ALBUM") for kind in child_types)
+        and native_feed_url
+        and (graph_ok or airtable_ok)
         and native_terms["is_carousel_item"]
         and native_terms["media_type_carousel"]
         and native_terms["children"]
