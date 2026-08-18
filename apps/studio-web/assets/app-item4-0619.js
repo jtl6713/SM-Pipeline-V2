@@ -20,6 +20,8 @@
   let ezAutoPlanAfterUpload = false;
   let ezPlanInFlight = false;
   const ezCaptionDrafts = new Map();
+  const ezCaptionModes = new Map();
+  let ezCaptionDefault = "ai";
   let ezCaptionSaveTimer = null;
   let item4Uploading = false;
   let item4PreparingVariants = false;
@@ -53,7 +55,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.29-ez-simple-start";
+  const BUILD_ID = "item4-0.6.30-ez-card-caption";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -643,8 +645,18 @@
     target.className = `form-message${type ? ` ${type}` : ""}`;
   }
 
+  function ezCaptionModeFor(assetId) {
+    const id = String(assetId || "");
+    return ezCaptionModes.get(id) || ezCaptionDefault || "ai";
+  }
+
   function ezCaptionMode() {
-    return document.querySelector('input[name="ezCaptionMode"]:checked')?.value || "ai";
+    const modes = [];
+    document.querySelectorAll("[data-ez-caption-mode]").forEach((el) => modes.push(el.value));
+    if (!modes.length) ezCaptionModes.forEach((value) => modes.push(value));
+    if (modes.some((value) => value === "manual")) return "manual";
+    if (modes.length && modes.every((value) => value === "none")) return "none";
+    return "ai";
   }
 
   function usingEzPlatforms() {
@@ -691,7 +703,7 @@
   }
 
   function ezManualCaptionsEnabled() {
-    return true;
+    return ezCaptionMode() === "manual";
   }
 
   function setPageContentSimple(on) {
@@ -828,7 +840,9 @@
     assets.forEach((asset, index) => {
       const id = String(asset?.id || "");
       const staged = ezCaptionDrafts.get(`staged:${index}`);
+      const stagedMode = ezCaptionModes.get(`staged:${index}`);
       if (id && staged && !ezCaptionDrafts.has(id)) ezCaptionDrafts.set(id, staged);
+      if (id && stagedMode && !ezCaptionModes.has(id)) ezCaptionModes.set(id, stagedMode);
       if (id && !ezCaptionDrafts.has(id) && parts[index]) ezCaptionDrafts.set(id, parts[index]);
     });
   }
@@ -847,29 +861,52 @@
       input.readOnly = locked;
       input.disabled = false;
     });
+    document.querySelectorAll("[data-ez-caption-mode]").forEach((input) => {
+      input.disabled = locked;
+    });
   }
 
   function item4CaptionField(assetId) {
     const id = String(assetId || "");
     if (!id) return "";
+    const mode = ezCaptionModeFor(id);
     const value = ezCaptionDrafts.get(id) || "";
     const locked = ezCaptionsLocked();
-    return `<label class="item4-asset-caption-field item4-variant-caption"><span>Caption</span><textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Caption for this photo"${locked ? " readonly" : ""}>${escapeHtml(value)}</textarea>${locked ? "<em>Locked after promote</em>" : ""}</label>`;
+    const lockAttr = locked ? " disabled" : "";
+    return `<div class="item4-asset-caption-field item4-variant-caption">
+      <label><span>Caption</span>
+        <select data-ez-caption-mode="${escapeHtml(id)}"${lockAttr}>
+          <option value="ai"${mode === "ai" ? " selected" : ""}>AI</option>
+          <option value="manual"${mode === "manual" ? " selected" : ""}>Manual</option>
+          <option value="none"${mode === "none" ? " selected" : ""}>None</option>
+        </select>
+      </label>
+      <textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Write the caption"${mode === "manual" ? "" : " hidden"}${locked ? " readonly" : ""}>${escapeHtml(value)}</textarea>
+      ${locked ? "<em>Locked after promote</em>" : ""}
+    </div>`;
   }
 
   function bindEzCaptionInputs(root = document) {
+    root.querySelectorAll("[data-ez-caption-mode]").forEach((select) => {
+      if (select.dataset.ezCaptionBound) return;
+      select.dataset.ezCaptionBound = "1";
+      select.addEventListener("change", () => {
+        const id = String(select.dataset.ezCaptionMode || "");
+        const mode = String(select.value || "ai");
+        if (id) ezCaptionModes.set(id, mode);
+        const box = document.querySelector(`[data-ez-asset-caption="${CSS.escape(id)}"]`);
+        if (box) {
+          box.hidden = mode !== "manual";
+          if (mode === "manual" && !ezCaptionsLocked()) box.focus();
+        }
+        queueEzCaptionSave();
+      });
+    });
     root.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
       if (input.dataset.ezCaptionBound) return;
       input.dataset.ezCaptionBound = "1";
       ["pointerdown", "mousedown", "click"].forEach((type) => {
         input.addEventListener(type, (event) => event.stopPropagation());
-      });
-      input.addEventListener("focus", () => {
-        if (ezCaptionsLocked()) return;
-        const manual = document.querySelector('input[name="ezCaptionMode"][value="manual"]');
-        if (manual) manual.checked = true;
-        const hint = $("ezCaptionHint");
-        if (hint) hint.textContent = "Write a caption under each photo. Studio saves as you type.";
       });
       input.addEventListener("input", () => {
         const id = String(input.dataset.ezAssetCaption || "");
@@ -877,8 +914,6 @@
         document.querySelectorAll(`[data-ez-asset-caption="${CSS.escape(id)}"]`).forEach((other) => {
           if (other !== input) other.value = input.value;
         });
-        const manual = document.querySelector('input[name="ezCaptionMode"][value="manual"]');
-        if (manual) manual.checked = true;
         queueEzCaptionSave();
       });
     });
@@ -932,35 +967,16 @@
 
   function renderEzPerPhotoCaptions() {
     const host = $("ezPerPhotoCaptions");
-    if (!host) return;
-    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
-    const showStaged = ezPhotoSetActive() && ezManualCaptionsEnabled() && ezStagedFiles.length > 0 && !assets.length;
-    host.hidden = !showStaged;
-    if (!showStaged) {
+    if (host) {
+      host.hidden = true;
       host.innerHTML = "";
-      return;
     }
-    host.innerHTML = ezStagedFiles.map((file, index) => {
-      const stored = ezCaptionDrafts.get(`staged:${index}`) || "";
-      return `<label class="form-field">
-        <span>Caption for ${escapeHtml(file.name || `Photo ${index + 1}`)}</span>
-        <textarea data-ez-photo-caption="${index}" rows="2" maxlength="2000" placeholder="Caption for this image">${escapeHtml(stored)}</textarea>
-      </label>`;
-    }).join("");
-    host.querySelectorAll("[data-ez-photo-caption]").forEach((input) => {
-      input.addEventListener("input", () => {
-        ezCaptionDrafts.set(`staged:${input.dataset.ezPhotoCaption}`, input.value);
-      });
-    });
   }
 
   function collectEzManualCaptions() {
-    const fromAssets = Array.from(document.querySelectorAll("[data-ez-asset-caption]")).map((input) => input.value);
-    if (fromAssets.length) return fromAssets;
-    if (ezPhotoSetActive()) {
-      return Array.from(document.querySelectorAll("[data-ez-photo-caption]")).map((input) => input.value);
-    }
-    return [];
+    return Array.from(document.querySelectorAll("[data-ez-asset-caption]"))
+      .filter((input) => !input.hidden && ezCaptionModeFor(input.dataset.ezAssetCaption) === "manual")
+      .map((input) => input.value);
   }
 
   function queueEzCaptionSave() {
@@ -971,20 +987,22 @@
   }
 
   async function saveEzCaptionsToRequest() {
-    if (!activeProductionRequest?.id || !ezManualCaptionsEnabled()) return;
+    if (!activeProductionRequest?.id) return;
+    const mode = ezCaptionMode();
     const captions = collectEzManualCaptions();
-    const requested = captions.map((value) => String(value || "").trim()).filter(Boolean).join("\n\n");
-    if ($("prRequestedCaption")) $("prRequestedCaption").value = requested;
-    if ($("prCaptionMode")) $("prCaptionMode").value = "Force exact";
+    const fields = ezPlanApi()?.ezCaptionFields(mode, { captions }) || {};
+    if ($("prRequestedCaption")) $("prRequestedCaption").value = fields.requested_caption || "";
+    if ($("prCaptionMode")) $("prCaptionMode").value = fields.caption_mode || "AI decides";
+    if ($("prTitleMode") && fields.title_mode) $("prTitleMode").value = fields.title_mode;
+    if ($("prRequestedTitle") && fields.requested_title !== undefined) $("prRequestedTitle").value = fields.requested_title || "";
     const notes = $("prProductionNotes");
     if (notes && ezPlanApi()) {
       const parsed = ezPlanApi().parseEzOriginNotes(notes.value) || {};
       notes.value = ezPlanApi().ezOriginNotes({
         inputKind: parsed.inputKind || ezIntakeKind || "multiple-photos",
-        captionMode: "manual",
+        captionMode: mode,
       });
     }
-    if (!requested) return;
     await saveActiveProductionRequest({ quiet: true });
   }
 
@@ -1035,10 +1053,6 @@
       ? "Drop several photos. They show up here immediately."
       : "Drop one photo. It shows up here immediately.";
     syncEzYouTubeAvailability(resetPlatforms);
-    if (resetPlatforms && ezIntakeKind === "multiple-photos") {
-      const manual = document.querySelector('input[name="ezCaptionMode"][value="manual"]');
-      if (manual) manual.checked = true;
-    }
     if (resetPlatforms) syncItem4PlatformsFromEz();
     renderEzCaptionUi();
     if (resetPlatforms) setEzMessage();
@@ -1160,6 +1174,9 @@
       revokeEzLocalPreviews();
       ezStagedFiles = [];
       ezIntakeKind = null;
+      ezCaptionDefault = "ai";
+      ezCaptionModes.clear();
+      ezCaptionDrafts.clear();
       document.querySelectorAll("[data-ez-input]").forEach((button) => button.classList.remove("selected"));
       renderEzPhotoStrip();
       setEzMessage();
@@ -2539,7 +2556,7 @@
 
     if (form) {
       form.querySelectorAll("input, select, textarea").forEach((control) => {
-        if (control.matches("[data-ez-asset-caption]")) return;
+        if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode]")) return;
         control.disabled = !editable;
       });
     }
@@ -2663,8 +2680,7 @@
       });
       syncEzYouTubeAvailability(false);
       if (parsed.captionMode) {
-        const radio = document.querySelector(`input[name="ezCaptionMode"][value="${parsed.captionMode}"]`);
-        if (radio) radio.checked = true;
+        ezCaptionDefault = parsed.captionMode;
         renderEzCaptionUi();
       }
     }
