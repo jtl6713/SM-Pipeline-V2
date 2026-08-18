@@ -89,13 +89,14 @@ jobs:
             'compatibility_date':'2026-08-02',
             'workers_dev':False,
             'keep_vars':True,
+            'no_bundle':True,
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}
           }
           Path('/tmp/wrangler-production/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
           PY
           cd /tmp/wrangler-production
-          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --dry-run >/tmp/wrangler-dry-run.log 2>&1
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --no-bundle --dry-run >/tmp/wrangler-dry-run.log 2>&1
           echo "wrangler_dry_run=PASS"
 
       - name: Deploy source with preserved vars secrets and explicit R2 binding
@@ -104,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/wrangler-production
-          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/wrangler-deploy.log 2>&1
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --no-bundle >/tmp/wrangler-deploy.log 2>&1
           echo "wrangler_deploy=PASS"
 
       - name: Verify active source and live 10-core binding contract

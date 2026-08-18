@@ -27,3 +27,5 @@ Item 13 Worker deploy: 2026-08-18 — Facebook photo-set planner default is nati
 EZ voice catalog deploy: 2026-08-18 — ElevenLabs v1 catalog fallback and `/api/voices/:id/preview` sample proxy so Studio can list and play the full voice library. Source commit 65a6f63.
 
 EZ voice catalog deploy retry: 2026-08-18 — report Worker source mismatch details if byte-match fails, then keep rollback. Source commit 65a6f63.
+
+EZ voice catalog deploy retry: 2026-08-18 — upload Worker source with Wrangler `--no-bundle` so live bytes match `apps/studio-api/worker.js`. Source commit 65a6f63.
