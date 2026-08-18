@@ -638,16 +638,22 @@ input, select, textarea, button {
 .ez-photo-card .item4-asset-caption-field{padding:8px 10px 12px}
 .item4-asset-caption-field select{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 8px;font:inherit;font-size:12px;font-weight:600;background:#fff;color:var(--ink)}
 .item4-asset-caption-field textarea[hidden]{display:none!important}
+.form-field[hidden],.ez-option-group-body [hidden]{display:none!important}
+.ez-coming-later{margin:-8px 20px 14px;font-size:.75rem;font-weight:600;color:var(--muted)}
 .ez-option-groups{display:grid;gap:10px}
-.ez-option-group{border:1px solid var(--line);border-radius:14px;background:#fff;padding:4px 14px}
-.ez-option-group>summary{cursor:pointer;font-weight:800;padding:12px 0;list-style:revert}
-.ez-option-group-body select{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);padding:10px 11px;font:inherit}
+.ez-option-group{border:1px solid var(--line);border-radius:14px;background:#fff;padding:2px 14px}
+.ez-option-group>summary{cursor:pointer;font-weight:800;padding:10px 0;list-style:revert}
+.ez-option-group-body{display:grid;gap:10px;padding:0 0 12px}
+.ez-option-group-body select{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);padding:8px 10px;font:inherit}
+.ez-audio-toggles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ez-audio-extra{display:grid;gap:4px}
+.ez-audio-hint{font-style:normal;font-size:.72rem;font-weight:600;color:var(--muted)}
 .page-content-simple .ez-busy-panel{display:none}
 @media(max-width:760px){
   .ez-path-fork-grid{grid-template-columns:1fr}
 }
-.ez-card-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:0 20px 20px}
-.ez-card{border:1px solid var(--line);border-radius:14px;background:#fff;padding:16px;text-align:left;display:flex;flex-direction:column;gap:8px;cursor:pointer;font:inherit;color:var(--ink);min-height:148px}
+.ez-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 20px 12px}
+.ez-card{border:1px solid var(--line);border-radius:14px;background:#fff;padding:14px;text-align:left;display:flex;flex-direction:column;gap:6px;cursor:pointer;font:inherit;color:var(--ink);min-height:0}
 .ez-card strong{font-size:.98rem}
 .ez-card span{font-size:.78rem;line-height:1.4;color:var(--muted)}
 .ez-card em{font-style:normal;font-size:.72rem;font-weight:800;color:var(--muted)}
@@ -677,6 +683,6 @@ input, select, textarea, button {
   .ez-card-grid,.ez-composer-grid{grid-template-columns:1fr 1fr}
 }
 @media(max-width:760px){
-  .ez-card-grid,.ez-composer-grid{grid-template-columns:1fr}
+  .ez-card-grid,.ez-composer-grid,.ez-audio-toggles{grid-template-columns:1fr}
 }
 

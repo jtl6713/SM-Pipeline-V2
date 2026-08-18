@@ -55,7 +55,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.31-ez-caption-save";
+  const BUILD_ID = "item4-0.6.32-ez-audio";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -813,28 +813,36 @@
     if (trackField) trackField.hidden = !musicOn;
     if ($("prVoiceover")) $("prVoiceover").value = $("ezAudioVoiceover")?.value || "No";
     if ($("prMusicMode")) $("prMusicMode").value = $("ezAudioMusic")?.value || "No";
-    if ($("prMusicAsset")) $("prMusicAsset").value = $("ezAudioTrack")?.value || "";
-    ezSelectedVoiceId = $("ezAudioVoice")?.value || "";
+    if ($("prMusicAsset")) $("prMusicAsset").value = musicOn ? ($("ezAudioTrack")?.value || "") : "";
+    ezSelectedVoiceId = voiceoverOn ? ($("ezAudioVoice")?.value || "") : "";
   }
 
   async function loadEzAudioOptions() {
-    await ensureProductionRequestMusic();
-    const track = $("ezAudioTrack");
-    const source = $("prMusicAsset");
-    if (track && source) {
-      track.innerHTML = source.innerHTML;
-    }
     const voiceSelect = $("ezAudioVoice");
-    if (voiceSelect && voiceSelect.options.length <= 1) {
-      try {
-        const result = await api("/api/voices");
-        const voices = phase6NormalizeVoices(result.records || result.voices || result.items || []);
-        const current = ezSelectedVoiceId;
-        voiceSelect.innerHTML = `<option value="">Profile default</option>${phase6VoiceOptionList(voices, current)}`;
-      } catch {
-        // Voice catalog is optional on this first screen.
+    const track = $("ezAudioTrack");
+    const hint = $("ezAudioVoiceHint");
+    const musicJob = ensureProductionRequestMusic().then(() => {
+      const source = $("prMusicAsset");
+      if (track && source) track.innerHTML = source.innerHTML;
+    }).catch(() => {});
+    const voiceJob = (async () => {
+      if (!voiceSelect) return;
+      if (hint) hint.textContent = "Loading ElevenLabs voices…";
+      const result = await api("/api/voices");
+      const voices = phase6NormalizeVoices(result.voices || result.records || result.items || []);
+      const current = ezSelectedVoiceId || voiceSelect.value;
+      voiceSelect.innerHTML = `<option value="">Profile default</option>${phase6VoiceOptionList(voices, current)}`;
+      if (hint) {
+        if (voices.length) hint.textContent = `${voices.length} ElevenLabs voices`;
+        else if (result.live_error) hint.textContent = result.live_error;
+        else hint.textContent = result.live_configured === false
+          ? "Add the ElevenLabs API key to load the full voice catalog."
+          : "No ElevenLabs voices returned.";
       }
-    }
+    })().catch(() => {
+      if (hint) hint.textContent = "Could not load ElevenLabs voices.";
+    });
+    await Promise.all([musicJob, voiceJob]);
     syncEzAudioFields();
   }
 
@@ -1272,6 +1280,20 @@
         syncEzAudioFields();
         if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
       });
+    });
+    $("ezAudioVoicePreview")?.addEventListener("click", () => {
+      const select = $("ezAudioVoice");
+      const voice = phase6SelectedVoice(select);
+      if (!voice.id) {
+        setEzMessage("Pick an ElevenLabs voice to preview.", "error-text");
+        return;
+      }
+      if (!voice.preview_url) {
+        setEzMessage(`No ElevenLabs preview is available for ${voice.name || "this voice"}.`, "error-text");
+        return;
+      }
+      setEzMessage();
+      phase6PreviewSelectedVoice(select, $("ezAudioVoicePreview"));
     });
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.addEventListener("click", () => selectEzInput(button.dataset.ezInput));

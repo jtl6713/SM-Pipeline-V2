@@ -5,7 +5,7 @@
  <meta name="viewport" content="width=device-width,initial-scale=1">
  <meta name="robots" content="noindex,nofollow,noarchive">
  <title>ChicagoShining Studio</title>
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.31-ez-caption-save">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.32-ez-audio">
 </head>
 <body>
  <header class="topbar">
@@ -29,7 +29,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.31</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.32</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -94,23 +94,14 @@
  <div class="ez-card-grid" id="ezCardGrid">
  <button type="button" class="ez-card" data-ez-input="single-photo">
  <strong>Single photo</strong>
- <span>One still. Instagram 4:5, Facebook image, TikTok photo draft.</span>
+ <span>Instagram 4:5, Facebook image, TikTok photo draft.</span>
  </button>
  <button type="button" class="ez-card" data-ez-input="multiple-photos">
  <strong>Multiple photos</strong>
  <span>Carousel, album, TikTok photo draft, YouTube Short.</span>
  </button>
- <button type="button" class="ez-card" data-ez-input="video-clips" disabled>
- <strong>Video clips</strong>
- <span>Coming later.</span>
- <em>Coming later</em>
- </button>
- <button type="button" class="ez-card" data-ez-input="finished-video" disabled>
- <strong>Finished video</strong>
- <span>Coming later.</span>
- <em>Coming later</em>
- </button>
  </div>
+ <p class="ez-coming-later">Video clips and finished video come later.</p>
  <div class="ez-composer" id="ezComposer" hidden>
  <input id="ezTitle" maxlength="160" hidden>
  <fieldset class="ez-platform-fieldset" hidden>
@@ -132,16 +123,24 @@
  <details class="ez-option-group" id="ezAudioGroup">
  <summary>Audio / Voiceover</summary>
  <div class="ez-option-group-body">
+ <div class="ez-audio-toggles">
  <label class="form-field"><span>Voiceover</span>
  <select id="ezAudioVoiceover"><option value="No" selected>No</option><option value="Yes">Yes</option></select>
- </label>
- <label class="form-field" id="ezAudioVoiceField" hidden><span>Voice</span>
- <select id="ezAudioVoice"><option value="">Profile default</option></select>
  </label>
  <label class="form-field"><span>Music</span>
  <select id="ezAudioMusic"><option value="No" selected>No</option><option value="Yes">Yes</option></select>
  </label>
- <label class="form-field" id="ezAudioTrackField" hidden><span>Music track</span>
+ </div>
+ <div class="ez-audio-extra" id="ezAudioVoiceField" hidden>
+ <div class="voice-select-wrap">
+ <label class="form-field"><span>Voice</span>
+ <select id="ezAudioVoice"><option value="">Profile default</option></select>
+ </label>
+ <button type="button" class="voice-preview-button" id="ezAudioVoicePreview">▶ Preview</button>
+ </div>
+ <em class="ez-audio-hint" id="ezAudioVoiceHint"></em>
+ </div>
+ <label class="form-field ez-audio-extra" id="ezAudioTrackField" hidden><span>Music track</span>
  <select id="ezAudioTrack"><option value="">AI / profile chooses track</option></select>
  </label>
  </div>
@@ -790,7 +789,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.31-ez-caption-save"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.31-ez-caption-save"></script>
+ <script src="/assets/ez-plan.js?v=0.6.32-ez-audio"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.32-ez-audio"></script>
 </body>
 </html>
