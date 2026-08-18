@@ -56,25 +56,20 @@ jobs:
           curl -fsS "$API/versions/$BEFORE" -H "$AUTH" -o /tmp/version-before.json
           jq -e '.success==true' /tmp/version-before.json >/dev/null
           python - <<'PY'
-          import json
+          import json, sys
           from pathlib import Path
-          expected={
-            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
-            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
-            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
-            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
-          }
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_live_contract
           r=json.loads(Path('/tmp/version-before.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
-          if got != expected:
-              raise SystemExit(f'Predeploy binding contract mismatch: {sorted(got.items())}')
+          contract=assert_live_contract(got, 'Predeploy live Worker')
           r2=next(x for x in bindings if x.get('name')=='STUDIO_MEDIA')
           bucket=r2.get('bucket_name') or r2.get('bucket')
           if not bucket:
               raise SystemExit('STUDIO_MEDIA R2 binding has no recoverable bucket identifier')
           Path('/tmp/studio-media-bucket.txt').write_text(str(bucket))
-          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])}
+          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
           Path('/tmp/predeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
           print('predeploy_binding_contract=PASS')
           PY
@@ -95,7 +90,7 @@ jobs:
             'workers_dev':False,
             'keep_vars':True,
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
-            'secrets':{'required':['AIRTABLE_PAT','ELEVENLABS_API_KEY']}
+            'secrets':{'required':['AIRTABLE_PAT']}
           }
           Path('/tmp/wrangler-production/wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
           PY
@@ -112,7 +107,7 @@ jobs:
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/wrangler-deploy.log 2>&1
           echo "wrangler_deploy=PASS"
 
-      - name: Verify active source and exact 11-binding contract
+      - name: Verify active source and live 10-core binding contract
         shell: bash
         run: |
           set -euo pipefail
@@ -131,20 +126,15 @@ jobs:
           printf '%s' "$ACTIVE" >/tmp/active-after.txt
           curl -fsS "$API/versions/$ACTIVE" -H "$AUTH" -o /tmp/version-after.json
           python - <<'PY'
-          import json
+          import json, sys
           from pathlib import Path
-          expected={
-            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
-            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
-            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
-            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
-          }
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_live_contract
           r=json.loads(Path('/tmp/version-after.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           got={str(x.get('name')):str(x.get('type')) for x in bindings}
-          if got != expected:
-              raise SystemExit(f'Postdeploy binding contract mismatch: {sorted(got.items())}')
-          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])}
+          contract=assert_live_contract(got, 'Postdeploy live Worker')
+          safe={'version_id':r.get('id'),'version_number':r.get('number'),'binding_count':len(bindings),'contract':contract['contract'],'core_ok':contract['core_ok'],'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),'bindings':contract['bindings']}
           Path('/tmp/postdeploy-contract-sanitized.json').write_text(json.dumps(safe,indent=2,sort_keys=True))
           print('postdeploy_binding_contract=PASS')
           PY

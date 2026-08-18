@@ -1,0 +1,52 @@
+name: Prove Item 20 Diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-item20-diagnostics.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Inventory live Worker bindings and unpinned production gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python -m py_compile repair/scripts/studio_api_binding_contract.py repair/scripts/prove-item20-diagnostics.py
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          export ITEM20_EVIDENCE="/tmp/item20-diagnostics-proof.json"
+          python repair/scripts/prove-item20-diagnostics.py
+          jq -e '.passed == true
+            and .make_scenario_runs == 0
+            and .cadenced_scenarios_started == 0
+            and .production_worker_traffic_switched == false
+            and .elevenlabs_required == false
+            and .live_worker.core_ok == true
+            and .source_checks.deploy_does_not_require_elevenlabs == true
+            and .source_checks.rollout_not_pinned_to_v86 == true
+            and .source_checks.audit_not_requiring_11 == true
+            and .source_checks.fixed_gates_unpinned == true' \
+            /tmp/item20-diagnostics-proof.json >/dev/null
+
+      - name: Upload sanitized Item 20 diagnostics evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item20-diagnostics-${{ github.run_id }}
+          path: /tmp/item20-diagnostics-proof.json
+          if-no-files-found: ignore
+          retention-days: 30

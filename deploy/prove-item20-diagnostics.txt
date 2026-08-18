@@ -1,0 +1,10 @@
+Item 20 Cloudflare/GitHub diagnostics proof trigger.
+
+Inventory authoritative Workers/Pages/R2 configs.
+Prove production deploy gates use the 10-core + optional ELEVENLABS contract.
+Do not require ELEVENLABS_API_KEY. Do not pin rollback to stale v86.
+Do not switch production Worker traffic.
+Do not pulse IG-PUB-ORCH, FB-ORCH, YT-ORCH, AP-CAR-ORCH, TTD-ORCH, R4, or R5.
+Evidence may include binding names and types only; never secret values.
+
+Initialized: 2026-08-18

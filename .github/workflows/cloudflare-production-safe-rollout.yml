@@ -22,7 +22,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
-      KNOWN_GOOD_VERSION: fbcf7fbd-7935-44dd-b195-094f505b7df6
       VERIFY_WORKER: chicagoshining-studio-rollout-verify
       WRANGLER_VERSION: 4.123.0
     steps:
@@ -43,7 +42,7 @@ jobs:
           ./node_modules/.bin/wrangler --version | tee /tmp/wrangler-version.txt
           test "$(tr -d '\r\n' </tmp/wrangler-version.txt)" = "$WRANGLER_VERSION"
 
-      - name: Verify production is still on known-good v86
+      - name: Capture current 100 percent production version
         shell: bash
         run: |
           set -euo pipefail
@@ -51,43 +50,42 @@ jobs:
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-before.json
           ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-before.json)
-          test "$ACTIVE" = "$KNOWN_GOOD_VERSION"
-          jq -e --arg v "$KNOWN_GOOD_VERSION" '.result.deployments[0].versions | length==1 and .[0].version_id==$v and .[0].percentage==100' /tmp/deployments-before.json >/dev/null
+          jq -e --arg v "$ACTIVE" '.result.deployments[0].versions | length==1 and .[0].version_id==$v and .[0].percentage==100' /tmp/deployments-before.json >/dev/null
+          printf '%s' "$ACTIVE" >/tmp/prev-version.txt
 
-      - name: Build exact non-secret configuration from v86 and verify secret names
+      - name: Build exact non-secret configuration from the live Worker and verify required secret names
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS "$API/versions/$KNOWN_GOOD_VERSION" -H "$AUTH" -o /tmp/v86.json
+          PREV=$(cat /tmp/prev-version.txt)
+          curl -fsS "$API/versions/$PREV" -H "$AUTH" -o /tmp/live-version.json
           curl -fsS "$API/secrets" -H "$AUTH" -o /tmp/secrets.json
           python - <<'PY'
-          import json
+          import json, sys
           from pathlib import Path
-          expected_plain={
-            'AIRTABLE_BASE_ID','AIRTABLE_CONTENT_TABLE_ID','AIRTABLE_IDEA_TABLE_ID','AIRTABLE_MEDIA_TABLE_ID',
-            'AIRTABLE_MUSIC_VIEW_ID','AIRTABLE_OUTPUT_TABLE_ID','ALLOWED_ORIGINS','I3_DECISION_WEBHOOK_URL'
-          }
-          expected_secrets={'AIRTABLE_PAT','ELEVENLABS_API_KEY'}
-          r=json.loads(Path('/tmp/v86.json').read_text())['result']
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import REQUIRED_SECRETS, assert_live_contract
+          r=json.loads(Path('/tmp/live-version.json').read_text())['result']
           bindings=(r.get('resources') or {}).get('bindings') or []
           by_name={str(b.get('name')):b for b in bindings}
-          expected_types={**{k:'plain_text' for k in expected_plain},**{k:'secret_text' for k in expected_secrets},'STUDIO_MEDIA':'r2_bucket'}
           got={k:str(v.get('type')) for k,v in by_name.items()}
-          if got != expected_types:
-              raise SystemExit(f'v86 binding anchor mismatch: {sorted(got.items())}')
-          vars_out={k:by_name[k].get('text') for k in expected_plain}
+          contract=assert_live_contract(got, 'live Worker binding contract')
+          vars_out={k:by_name[k].get('text') for k in (
+            'AIRTABLE_BASE_ID','AIRTABLE_CONTENT_TABLE_ID','AIRTABLE_IDEA_TABLE_ID','AIRTABLE_MEDIA_TABLE_ID',
+            'AIRTABLE_MUSIC_VIEW_ID','AIRTABLE_OUTPUT_TABLE_ID','ALLOWED_ORIGINS','I3_DECISION_WEBHOOK_URL'
+          )}
           if any(v is None for v in vars_out.values()):
-              raise SystemExit('v86 did not expose all required non-secret text values')
+              raise SystemExit('live Worker did not expose all required non-secret text values')
           bucket=by_name['STUDIO_MEDIA'].get('bucket_name') or by_name['STUDIO_MEDIA'].get('bucket')
           if not bucket:
-              raise SystemExit('v86 did not expose STUDIO_MEDIA bucket identity')
+              raise SystemExit('live Worker did not expose STUDIO_MEDIA bucket identity')
           secret_payload=json.loads(Path('/tmp/secrets.json').read_text())
           if not secret_payload.get('success'):
               raise SystemExit('Could not list configured Worker secret names')
           secret_names={str(x.get('name')) for x in secret_payload.get('result') or []}
-          if not expected_secrets.issubset(secret_names):
+          if not set(REQUIRED_SECRETS).issubset(secret_names):
               raise SystemExit('Required production secret names are not configured')
           cfg={
             'name':'chicagoshining-studio-api',
@@ -96,13 +94,16 @@ jobs:
             'keep_vars':True,
             'vars':vars_out,
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
-            'secrets':{'required':sorted(expected_secrets)}
+            'secrets':{'required':list(REQUIRED_SECRETS)}
           }
           Path('wrangler.production.generated.jsonc').write_text(json.dumps(cfg,indent=2))
           Path('/tmp/sanitized-anchor.json').write_text(json.dumps({
             'binding_count':len(bindings),
-            'bindings':sorted([{'name':k,'type':v} for k,v in expected_types.items()],key=lambda x:x['name']),
-            'secret_names_verified':sorted(expected_secrets),
+            'contract':contract['contract'],
+            'core_ok':contract['core_ok'],
+            'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),
+            'bindings':contract['bindings'],
+            'secret_names_verified':list(REQUIRED_SECRETS),
             'r2_binding_name':'STUDIO_MEDIA'
           },indent=2,sort_keys=True))
           PY
@@ -143,41 +144,45 @@ jobs:
           PY
           echo "version_id=$(cat /tmp/new-version.txt)" >> "$GITHUB_OUTPUT"
 
-      - name: Verify staged version has exact 11-binding contract and is not live
+      - name: Verify staged version has live 10-core binding contract and is not live
         shell: bash
         run: |
           set -euo pipefail
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           NEW=$(cat /tmp/new-version.txt)
+          PREV=$(cat /tmp/prev-version.txt)
           curl -fsS "$API/versions/$NEW" -H "$AUTH" -o /tmp/staged-version.json
-          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-still-v86.json
+          curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/deployments-still-prev.json
           python - <<'PY'
-          import json
+          import json, sys
           from pathlib import Path
-          expected={
-            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
-            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
-            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
-            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
-          }
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_live_contract
           r=json.loads(Path('/tmp/staged-version.json').read_text())['result']
           got={str(b.get('name')):str(b.get('type')) for b in ((r.get('resources') or {}).get('bindings') or [])}
-          if got!=expected: raise SystemExit(f'Staged version binding mismatch: {sorted(got.items())}')
-          Path('/tmp/staged-binding-audit.json').write_text(json.dumps({'binding_count':len(got),'bindings':sorted([{'name':k,'type':v} for k,v in got.items()],key=lambda x:x['name'])},indent=2))
+          contract=assert_live_contract(got, 'Staged version')
+          Path('/tmp/staged-binding-audit.json').write_text(json.dumps({
+            'binding_count':len(got),
+            'contract':contract['contract'],
+            'core_ok':contract['core_ok'],
+            'elevenlabs_present':contract['optional_present'].get('ELEVENLABS_API_KEY'),
+            'bindings':contract['bindings']
+          },indent=2,sort_keys=True))
           PY
-          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-still-v86.json)
-          test "$ACTIVE" = "$KNOWN_GOOD_VERSION"
+          ACTIVE=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/deployments-still-prev.json)
+          test "$ACTIVE" = "$PREV"
 
-      - name: Create 100 percent v86 and 0 percent staged smoke deployment
+      - name: Create 100 percent previous version and 0 percent staged smoke deployment
         id: split
         shell: bash
         run: |
           set -euo pipefail
           NEW=$(cat /tmp/new-version.txt)
+          PREV=$(cat /tmp/prev-version.txt)
           cd /tmp/wrangler-rollout
           ./node_modules/.bin/wrangler versions deploy \
-            "$KNOWN_GOOD_VERSION@100%" "$NEW@0%" \
+            "$PREV@100%" "$NEW@0%" \
             --name "$TARGET_WORKER" \
             --message "0-percent smoke test for repair safety version" -y \
             >/tmp/split-deploy.log 2>&1
@@ -190,10 +195,11 @@ jobs:
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           NEW=$(cat /tmp/new-version.txt)
+          PREV=$(cat /tmp/prev-version.txt)
           ok=false
           for i in 1 2 3 4 5 6 7 8 9 10; do
             curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/split-state.json
-            if jq -e --arg old "$KNOWN_GOOD_VERSION" --arg new "$NEW" '
+            if jq -e --arg old "$PREV" --arg new "$NEW" '
               .result.deployments[0].versions as $v |
               ($v|length)==2 and
               any($v[]; .version_id==$old and .percentage==100) and
@@ -299,17 +305,13 @@ jobs:
           test "$ok" = true
           curl -fsS "$API/versions/$NEW" -H "$AUTH" -o /tmp/final-version.json
           python - <<'PY'
-          import json
+          import json, sys
           from pathlib import Path
-          expected={
-            'AIRTABLE_BASE_ID':'plain_text','AIRTABLE_CONTENT_TABLE_ID':'plain_text','AIRTABLE_IDEA_TABLE_ID':'plain_text',
-            'AIRTABLE_MEDIA_TABLE_ID':'plain_text','AIRTABLE_MUSIC_VIEW_ID':'plain_text','AIRTABLE_OUTPUT_TABLE_ID':'plain_text',
-            'AIRTABLE_PAT':'secret_text','ALLOWED_ORIGINS':'plain_text','ELEVENLABS_API_KEY':'secret_text',
-            'I3_DECISION_WEBHOOK_URL':'plain_text','STUDIO_MEDIA':'r2_bucket'
-          }
+          sys.path.insert(0, str(Path('repair/scripts')))
+          from studio_api_binding_contract import assert_live_contract
           r=json.loads(Path('/tmp/final-version.json').read_text())['result']
           got={str(b.get('name')):str(b.get('type')) for b in ((r.get('resources') or {}).get('bindings') or [])}
-          if got!=expected: raise SystemExit('Final active binding contract mismatch')
+          assert_live_contract(got, 'Final active version')
           PY
 
       - name: Delete rollout verifier
@@ -322,13 +324,14 @@ jobs:
           code=$(curl -sS -o /tmp/verify-delete.json -w '%{http_code}' -X DELETE "$ROOT/workers/scripts/$VERIFY_WORKER" -H "$AUTH")
           if [[ "$code" != "404" && ( "$code" -lt 200 || "$code" -ge 300 ) ]]; then exit 1; fi
 
-      - name: Automatic rollback to v86 on rollout failure
+      - name: Automatic rollback to previous 100 percent version on rollout failure
         if: failure() && steps.split.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
+          PREV=$(cat /tmp/prev-version.txt)
           cd /tmp/wrangler-rollout
-          ./node_modules/.bin/wrangler versions deploy "$KNOWN_GOOD_VERSION@100%" \
+          ./node_modules/.bin/wrangler versions deploy "$PREV@100%" \
             --name "$TARGET_WORKER" --message "Automatic rollback after repair safety rollout failure" -y \
             >/tmp/automatic-rollback.log 2>&1
           API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER"
@@ -336,7 +339,7 @@ jobs:
           ok=false
           for i in 1 2 3 4 5 6 7 8 9 10; do
             curl -fsS "$API/deployments" -H "$AUTH" -o /tmp/rollback-state.json
-            if jq -e --arg old "$KNOWN_GOOD_VERSION" '.result.deployments[0].versions|length==1 and .[0].version_id==$old and .[0].percentage==100' /tmp/rollback-state.json >/dev/null; then ok=true; break; fi
+            if jq -e --arg old "$PREV" '.result.deployments[0].versions|length==1 and .[0].version_id==$old and .[0].percentage==100' /tmp/rollback-state.json >/dev/null; then ok=true; break; fi
             sleep 2
           done
           test "$ok" = true
@@ -358,7 +361,7 @@ jobs:
           final=load('/tmp/final-version.json') or {}
           out={
             'worker':'chicagoshining-studio-api',
-            'known_good_version':'fbcf7fbd-7935-44dd-b195-094f505b7df6',
+            'previous_version_id':Path('/tmp/prev-version.txt').read_text().strip() if Path('/tmp/prev-version.txt').exists() else None,
             'staged_version_id':Path('/tmp/new-version.txt').read_text().strip() if Path('/tmp/new-version.txt').exists() else None,
             'staged_binding_count':len(((staged.get('result') or {}).get('resources') or {}).get('bindings') or []),
             'final_binding_count':len(((final.get('result') or {}).get('resources') or {}).get('bindings') or []),

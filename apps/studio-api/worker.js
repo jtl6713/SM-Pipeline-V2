@@ -95,7 +95,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.7-p3-direct-diagnostic",
+          version: "0.10.8-item20-source-identity",
+          binding_contract: "studio-api-10-core-elevenlabs-optional",
+          elevenlabs_required: false,
+          source_identity: "item20-diagnostics-v1",
           airtable_configured: Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID),
           access_identity_present: Boolean(accessIdentity(request).email || accessIdentity(request).jwt_present),
           r2_configured: Boolean(env.STUDIO_MEDIA),
