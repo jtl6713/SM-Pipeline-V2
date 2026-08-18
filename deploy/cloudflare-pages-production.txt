@@ -53,3 +53,5 @@ EZ path Pages deploy: 2026-08-18 — Home tab for Idea vs Content; Production ke
 EZ path Pages deploy: 2026-08-18 — Home dusk hero with Chicago photos, teal/gold glass, 3D start tiles. UI 0.6.41. Source commit e7f43a3.
 
 EZ path Pages deploy: 2026-08-18 — Home wordmark Chicago Shining plus QA publishing hook. UI 0.6.42. Source commit 0e8511e.
+
+EZ path Pages deploy: 2026-08-18 — Align Studio chrome with Home skyline navy. UI 0.6.43. Source commit e0970fb.
