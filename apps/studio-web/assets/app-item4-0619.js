@@ -21,6 +21,13 @@
   const ITEM4_VARIANT_POLL_TIMEOUT_MS = 900000;
   const ITEM4_MASTER_POLL_MS = 3000;
   const ITEM4_MASTER_POLL_TIMEOUT_MS = 180000;
+  const ITEM4_PREVIEW_RETRY_MAX = 3;
+  const ITEM4_PREVIEW_RETRY_MS = 1200;
+  const ITEM4_POLL_EXTRA_WINDOWS = 2;
+  const ITEM4_POLL_EXTRA_MS = 15000;
+  let item4MasterExtraWindows = 0;
+  let item4VariantExtraWindows = 0;
+  const item4PreviewFailures = new Map();
   let pipelineOutputs = [];
   let activeCreativeOutputId = null;
   let activeCreativeOutput = null;
@@ -34,7 +41,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.18-master-authority-live-poll";
+  const BUILD_ID = "item4-0.6.21-upload-preview-self-heal";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -638,6 +645,65 @@
     return id ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w640` : "";
   }
 
+  function item4NextPreviewRetry(attempt) {
+    const current = Math.max(0, Number(attempt) || 0);
+    if (current >= ITEM4_PREVIEW_RETRY_MAX) {
+      return { retry: false, attempt: current, wait_ms: null, hard_refresh_required: false };
+    }
+    return { retry: true, attempt: current + 1, wait_ms: ITEM4_PREVIEW_RETRY_MS, hard_refresh_required: false };
+  }
+
+  function item4CacheBustedPreviewUrl(url, attempt) {
+    const raw = String(url || "").trim();
+    if (!raw) return "";
+    const [withoutHash, hash = ""] = raw.split("#");
+    const [path, query = ""] = withoutHash.split("?");
+    const params = new URLSearchParams(query);
+    params.set("heal", String(attempt));
+    return `${path}?${params.toString()}${hash ? `#${hash}` : ""}`;
+  }
+
+  function item4NextStatusPoll(elapsedMs, windowMs, extraWindowsUsed) {
+    if (Number(elapsedMs) < Number(windowMs)) {
+      return { continue: true, delay_ms: ITEM4_MASTER_POLL_MS, mode: "observe", extra_windows_used: extraWindowsUsed, hard_refresh_required: false };
+    }
+    if (Number(extraWindowsUsed) < ITEM4_POLL_EXTRA_WINDOWS) {
+      return { continue: true, delay_ms: ITEM4_POLL_EXTRA_MS, mode: "revalidate", extra_windows_used: Number(extraWindowsUsed) + 1, hard_refresh_required: false };
+    }
+    return { continue: false, delay_ms: null, mode: "await-visibility", extra_windows_used: extraWindowsUsed, hard_refresh_required: false };
+  }
+
+  function item4BindPreviewImage(img, { placeholder } = {}) {
+    const original = String(img.dataset.previewSrc || img.getAttribute("src") || "").trim();
+    if (!original) return;
+    const prior = item4PreviewFailures.get(original);
+    if (prior && (prior.attempt >= ITEM4_PREVIEW_RETRY_MAX || (prior.exhaustedAt && Date.now() - prior.exhaustedAt < ITEM4_POLL_EXTRA_MS))) {
+      const host = img.closest(".item4-thumb, .item4-variant-image-wrap");
+      if (host && typeof placeholder === "function") host.innerHTML = placeholder();
+      return;
+    }
+    if (prior?.exhaustedAt && Date.now() - prior.exhaustedAt >= ITEM4_POLL_EXTRA_MS) {
+      item4PreviewFailures.delete(original);
+    }
+    img.addEventListener("error", () => {
+      const recorded = item4PreviewFailures.get(original) || { attempt: 0 };
+      const decision = item4NextPreviewRetry(recorded.attempt);
+      recorded.attempt = decision.attempt;
+      item4PreviewFailures.set(original, recorded);
+      if (decision.retry) {
+        window.setTimeout(() => {
+          if (!img.isConnected) return;
+          img.src = item4CacheBustedPreviewUrl(original, decision.attempt);
+        }, decision.wait_ms);
+        return;
+      }
+      recorded.exhaustedAt = Date.now();
+      item4PreviewFailures.set(original, recorded);
+      const host = img.closest(".item4-thumb, .item4-variant-image-wrap");
+      if (host && typeof placeholder === "function") host.innerHTML = placeholder();
+    }, { once: false });
+  }
+
   function item4AssetPreviewUrl(asset) {
     try {
       const recordId = String(asset?.media_asset_record_id || "").trim();
@@ -663,7 +729,7 @@
     const isHeic = item4IsHeicAsset(asset);
     const previewUrl = item4AssetPreviewUrl(asset);
     const visual = previewUrl
-      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image>`
+      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}">`
       : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
@@ -690,14 +756,13 @@
     }
     if (!host) return;
     host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">No master photos uploaded yet.</div>';
-    host.querySelectorAll("[data-item4-preview-image]").forEach(img => {
-      img.addEventListener("error", () => {
+    host.querySelectorAll("[data-item4-preview-image]").forEach((img) => item4BindPreviewImage(img, {
+      placeholder: () => {
         const card = img.closest("[data-item4-asset]");
-        const asset = assets.find(row => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
-        const thumb = img.closest(".item4-thumb");
-        if (thumb) thumb.innerHTML = item4AssetPlaceholder(asset || {}, item4IsHeicAsset(asset) ? "Original preserved" : "Preview unavailable");
-      }, { once: true });
-    });
+        const asset = assets.find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
+        return item4AssetPlaceholder(asset || {}, item4IsHeicAsset(asset) ? "Original preserved" : "Preview unavailable");
+      },
+    }));
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
   }
 
@@ -777,7 +842,7 @@
     const previewUrl = item4VariantPreviewUrl(variant);
     const safe = ratio === "9:16" ? '<span class="item4-safe-overlay" title="Centered 4:5 critical-content safe zone"></span>' : "";
     const visual = previewUrl
-      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(row.asset?.name || "Platform-ready photo")}" loading="lazy">`
+      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(row.asset?.name || "Platform-ready photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}">`
       : `<div class="item4-heic-placeholder"><strong>${escapeHtml(ratio)}</strong><span>Variant ready</span></div>`;
     return `<article class="item4-variant-thumb">
       <div class="item4-variant-image-wrap">${visual}${safe}</div>
@@ -837,6 +902,9 @@
       const safeNote = ratio === "9:16" ? '<span class="item4-safe-note">Dashed box = centered 4:5 critical-content zone</span>' : "";
       return `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>${escapeHtml(ratio)}</strong><span>${escapeHtml(spec.width || "")}×${escapeHtml(spec.height || "")} · ${rows.length}/${manifest.source_asset_count || rows.length} ready</span></div>${safeNote}</div><div class="item4-variant-strip">${rows.map(row => item4VariantThumb(row,ratio)).join("")}</div></section>`;
     }).join("");
+    host.querySelectorAll("[data-item4-preview-image]").forEach((img) => item4BindPreviewImage(img, {
+      placeholder: () => `<div class="item4-heic-placeholder"><strong>IMAGE</strong><span>Preview retrying automatically</span></div>`,
+    }));
   }
 
   function stopItem4MasterPolling() {
@@ -868,6 +936,7 @@
     } else {
       progress.textContent = `Saving master photos to Google Drive… ${ready}/${target} ready. Previews update automatically.`;
     }
+    progress.dataset.heal = state === "Ready" ? "ready" : state === "Error" ? "error" : "uploading";
   }
 
   async function pollItem4MasterAssets() {
@@ -887,9 +956,16 @@
         setRequestMessage("Master-media preparation needs attention. Your uploaded originals remain preserved.", "error-text");
         return;
       }
-      if (Date.now() - item4MasterPollStartedAt >= ITEM4_MASTER_POLL_TIMEOUT_MS) {
+      const decision = item4NextStatusPoll(Date.now() - item4MasterPollStartedAt, ITEM4_MASTER_POLL_TIMEOUT_MS, item4MasterExtraWindows);
+      if (!decision.continue) {
         stopItem4MasterPolling();
-        setRequestMessage("Master media is still processing in the background. Use Refresh status if it does not complete shortly; you do not need to upload the photos again.", "success");
+        setRequestMessage("Master media is still reconciling. Studio will recheck automatically; you do not need to refresh the page or upload again.", "success");
+        return;
+      }
+      if (decision.mode === "revalidate") {
+        item4MasterExtraWindows = decision.extra_windows_used;
+        setRequestMessage(`Still preparing master previews. Automatic retry ${item4MasterExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}. No refresh needed.`, "success");
+        item4MasterPollTimer = setTimeout(pollItem4MasterAssets, decision.delay_ms);
         return;
       }
     } catch (error) {
@@ -901,6 +977,7 @@
   function startItem4MasterPolling() {
     stopItem4MasterPolling();
     item4MasterPollStartedAt = Date.now();
+    item4MasterExtraWindows = 0;
     item4MasterPollTimer = setTimeout(pollItem4MasterAssets, 800);
   }
 
@@ -926,12 +1003,17 @@
         setRequestMessage(item4Workspace?.variant_error || "Platform-media preparation needs attention.", "error-text");
         return;
       }
-      if (Date.now() - item4VariantPollStartedAt >= ITEM4_VARIANT_POLL_TIMEOUT_MS) {
-        // Do not silently stop while the backend still reports Preparing. Reset
-        // the observation window and continue polling so queued work can self-heal
-        // and the UI remains live without a manual refresh.
-        item4VariantPollStartedAt = Date.now();
-        setRequestMessage("Platform media is still preparing. Studio will keep checking automatically; no refresh or second click is needed.", "success");
+      const decision = item4NextStatusPoll(Date.now() - item4VariantPollStartedAt, ITEM4_VARIANT_POLL_TIMEOUT_MS, item4VariantExtraWindows);
+      if (!decision.continue) {
+        stopItem4VariantPolling();
+        setRequestMessage("Platform media is still reconciling. Studio will recheck automatically; no refresh or second click is needed.", "success");
+        return;
+      }
+      if (decision.mode === "revalidate") {
+        item4VariantExtraWindows = decision.extra_windows_used;
+        setRequestMessage(`Platform media is still preparing. Automatic retry ${item4VariantExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}. No refresh needed.`, "success");
+        item4VariantPollTimer = setTimeout(pollItem4Variants, decision.delay_ms);
+        return;
       }
     } catch (error) {
       // Transient polling errors should not convert a valid background job into a user-facing failure.
@@ -943,6 +1025,7 @@
   function startItem4VariantPolling() {
     stopItem4VariantPolling();
     item4VariantPollStartedAt = Date.now();
+    item4VariantExtraWindows = 0;
     item4VariantPollTimer = setTimeout(pollItem4Variants, 800);
   }
 
@@ -1684,6 +1767,14 @@
   $("item4MediaInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
   $("item4BuildPlan")?.addEventListener("click", buildItem4Plan);
   $("item4PrepareVariants")?.addEventListener("click", prepareItem4Variants);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !activeProductionRequest?.id) return;
+    loadItem4Workspace(activeProductionRequest);
+  });
+  window.addEventListener("focus", () => {
+    if (!activeProductionRequest?.id) return;
+    loadItem4Workspace(activeProductionRequest);
+  });
   const item4Drop = $("item4UploadZone");
   if (item4Drop) {
     ["dragenter","dragover"].forEach(type => item4Drop.addEventListener(type, event => { event.preventDefault(); item4Drop.classList.add("dragging"); }));

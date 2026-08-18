@@ -1,0 +1,42 @@
+name: Prove Item 18 Upload-Preview Self-Heal
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-item18-upload-preview.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Assert observable state, bounded retry, and no hard-refresh dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test apps/studio-upload-preview/contract.test.mjs
+          python -m py_compile repair/scripts/prove-item18-upload-preview.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          node --check /tmp/studio-worker.mjs
+          cp apps/studio-web/assets/app-item4-0619.js /tmp/studio-web.mjs
+          node --check /tmp/studio-web.mjs
+          export ITEM18_EVIDENCE="/tmp/item18-upload-preview-proof.json"
+          python repair/scripts/prove-item18-upload-preview.py
+          jq -e '.passed == true and .make_scenario_runs == 0 and .hard_refresh_required == false and .schema == "upload-preview-self-heal-v1"' \
+            /tmp/item18-upload-preview-proof.json >/dev/null
+
+      - name: Upload Item 18 self-heal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item18-upload-preview-${{ github.run_id }}
+          path: /tmp/item18-upload-preview-proof.json
+          if-no-files-found: ignore
+          retention-days: 30

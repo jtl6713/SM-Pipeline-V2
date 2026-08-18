@@ -194,6 +194,8 @@ export default {
           item4_master_authority_status_worker_pulse: true,
           item4_master_failure_preserves_staging: true,
           item4_upload_async_handoff_resilient: true,
+          item4_upload_preview_self_heal_v1: true,
+          item4_upload_preview_hard_refresh_required: false,
           item4_upload_drain_failure_nonterminal: true,
           item4_smv1_master_drive_uploaded_selector_guard: true,
           item4_smv1_selector_self_repair: true,
@@ -3463,8 +3465,10 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
     }
   }
 
+  let previewPendingCount = 0;
   try {
     const pendingPreviews = await item4PreviewPendingRows(env, recordId);
+    previewPendingCount = pendingPreviews.length;
     if (pendingPreviews.length) {
       await item4DrainPreviewCacheWorker(
         env,
@@ -3506,15 +3510,29 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
     });
   }
 
+  const assetsStatus = f(record, "Studio_Master_Asset_Status") || "None";
+  const variantStatus = f(record, "Studio_Variant_Status") || "None";
+  const previewSelfHealState = assetsStatus === "Error" || variantStatus === "Error"
+    ? "error"
+    : assetsStatus === "Uploading"
+      ? "uploading"
+      : (variantStatus === "Preparing" || previewPendingCount > 0)
+        ? "preview_pending"
+        : (masterAuthorityResume?.attempted || variantResume?.attempted)
+          ? "retrying"
+          : (assetsStatus === "Ready" && (variantStatus === "Ready" || variantStatus === "None"))
+            ? "ready"
+            : "idle";
+
   const manifest = item4VariantManifest(record);
   return respond(request, env, {
     ok: true,
     state: f(record, "Studio_Item4_State") || "Draft",
-    assets_status: f(record, "Studio_Master_Asset_Status") || "None",
+    assets_status: assetsStatus,
     assets,
     plan_status: f(record, "Studio_Output_Plan_Status") || "Needs Plan",
     plan,
-    variant_status: f(record, "Studio_Variant_Status") || "None",
+    variant_status: variantStatus,
     variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
     variant_error: f(record, "Studio_Variant_Error") || null,
     variants: manifest,
@@ -3523,6 +3541,14 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
     make_hardening: makeHardening,
     make_hardening_worker_build: "0.10.4",
     master_authority_resume: masterAuthorityResume,
+    preview_self_heal: {
+      schema: "upload-preview-self-heal-v1",
+      observable_state: previewSelfHealState,
+      preview_pending_count: previewPendingCount,
+      master_resume_attempted: Boolean(masterAuthorityResume?.attempted),
+      variant_resume_attempted: Boolean(variantResume?.attempted),
+      hard_refresh_required: false,
+    },
     request_status: f(record, "Request_Status"),
     outputs,
     publish_status: item4ParseJson(f(record, "Studio_Publish_Status_JSON"), null),

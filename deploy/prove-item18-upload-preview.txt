@@ -1,0 +1,6 @@
+Item 18 upload-preview self-heal proof trigger.
+
+Do not pulse TTD-ORCH, IG-PUB-ORCH, FB-ORCH, YT-ORCH, AP-CAR-ORCH, or SMV1.
+Do not upload production media.
+
+Initialized: 2026-08-18
