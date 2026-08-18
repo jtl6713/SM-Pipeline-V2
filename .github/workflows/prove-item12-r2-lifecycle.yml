@@ -1,0 +1,57 @@
+name: Prove Item 12 R2 Lifecycle Cleanup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-item12-r2-lifecycle.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Report-first list, deny production delete, and clean Output 157 orphans
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python -m py_compile repair/scripts/prove-item12-r2-lifecycle.py
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/key.pem \
+            -in /tmp/pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/pat.txt
+          export AIRTABLE_PAT="$(tr -d '\r\n' </tmp/pat.txt)"
+          export ITEM12_EVIDENCE="/tmp/item12-r2-lifecycle-proof.json"
+          python repair/scripts/prove-item12-r2-lifecycle.py
+          jq -e '.passed == true and .make_scenario_runs == 0 and .airtable_output_157_count == 0 and .after_157.count == 0 and .deny_production_delete.http == 403' \
+            /tmp/item12-r2-lifecycle-proof.json >/dev/null
+
+      - name: Upload sanitized Item 12 lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item12-r2-lifecycle-${{ github.run_id }}
+          path: /tmp/item12-r2-lifecycle-proof.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Destroy transient credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/item12-r2-lifecycle-proof.json
