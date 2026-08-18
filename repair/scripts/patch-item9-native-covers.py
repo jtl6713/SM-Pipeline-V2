@@ -198,7 +198,7 @@ def facebook_thumbnail_module():
             "allowRedirects": True,
             "queryParameters": [
                 {"name": "is_preferred", "value": "true"},
-                {"name": "url", "value": "{{1.Thumbnail_URL}}"},
+                {"name": "source", "value": "{{1.Thumbnail_URL}}"},
             ],
             "stopOnHttpError": False,
             "requestCompressedContent": False,

@@ -365,7 +365,7 @@ def graph_get(settings, path, params=None):
     return json_http(f"https://graph.facebook.com/{version}/{path}?{urllib.parse.urlencode(query)}")
 
 
-def graph_post(settings, path, params):
+def graph_post_form(settings, path, params):
     version = settings["FACEBOOK_GRAPH_API_VERSION"].strip("/")
     query = dict(params)
     query["access_token"] = settings["FACEBOOK_PAGE_ACCESS_TOKEN"]
@@ -374,6 +374,41 @@ def graph_post(settings, path, params):
         method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         body=urllib.parse.urlencode(query),
+    )
+
+
+def graph_post_thumbnail_file(settings, video_id, image):
+    version = settings["FACEBOOK_GRAPH_API_VERSION"].strip("/")
+    token = settings["FACEBOOK_PAGE_ACCESS_TOKEN"]
+    boundary = "----SMItem9" + hashlib.sha256(os.urandom(12)).hexdigest()
+    chunks = []
+
+    def add_field(name, value):
+        chunks.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode()
+        )
+
+    add_field("access_token", token)
+    add_field("is_preferred", "true")
+    chunks.append(
+        (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="source"; filename="cover.jpg"\r\n'
+            f'Content-Type: {image["content_type"]}\r\n\r\n'
+        ).encode()
+        + image["body"]
+        + b"\r\n"
+        + f"--{boundary}--\r\n".encode()
+    )
+    return json_http(
+        f"https://graph.facebook.com/{version}/{video_id}/thumbnails",
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        body=b"".join(chunks),
     )
 
 
@@ -390,14 +425,18 @@ def preferred_thumbs(payload):
     return rows
 
 
-def prove_facebook(settings, output, public_url):
+def prove_facebook(settings, output, public_url, image):
     video_id = output.get("FB_Slideshow_Meta_Video_ID") or output.get("Platform_Post_ID")
     before_status, _, before = graph_get(settings, f"{video_id}/thumbnails")
-    post_status, _, posted = graph_post(
+    post_status, _, posted = graph_post_form(
         settings,
         f"{video_id}/thumbnails",
-        {"is_preferred": "true", "url": public_url},
+        {"is_preferred": "true", "source": public_url},
     )
+    method = "form-source-url"
+    if post_status != 200:
+        post_status, _, posted = graph_post_thumbnail_file(settings, video_id, image)
+        method = "multipart-source-file"
     if post_status != 200:
         raise SystemExit(f"Facebook thumbnails attach failed {post_status}: {posted}")
     time.sleep(3)
@@ -411,6 +450,7 @@ def prove_facebook(settings, output, public_url):
         "before_status": before_status,
         "before_thumbnails": preferred_thumbs(before if before_status == 200 else {}),
         "attach_id": posted.get("id"),
+        "attach_method": method,
         "after_thumbnails": after_rows,
         "preferred_count": len(preferred),
         "attached": bool(posted.get("id") or preferred),
@@ -500,7 +540,7 @@ def main():
             )
             evidence["youtube"]["airtable_status"] = "Uploaded"
             evidence["youtube"]["thumbnail_url"] = hosted["public_url"]
-        evidence["facebook"] = prove_facebook(settings, facebook_output, hosted["public_url"])
+        evidence["facebook"] = prove_facebook(settings, facebook_output, hosted["public_url"], image)
         evidence["instagram"] = prove_instagram(settings, instagram_output, ig_contract)
         evidence["orchestrators_after"] = assert_orchestrators_off(make_base, settings["MAKE_API_TOKEN"])
         evidence["passed"] = bool(

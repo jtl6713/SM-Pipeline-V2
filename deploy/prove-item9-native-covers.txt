@@ -1,2 +1,2 @@
 item9-native-cover-platform-proof
-retry-uncached-jpeg-v2
+retry-facebook-source-param
