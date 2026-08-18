@@ -1,0 +1,16 @@
+{
+  "repair_item": 18,
+  "checkpoint": "upload-preview-self-heal-observable-bounded-revalidate",
+  "proof_run": 32093885952,
+  "source_commit": "6fd62dd",
+  "make_scenario_runs": 0,
+  "tiktok_drafts_created": 0,
+  "ttd_orch_pulsed": false,
+  "schema": "upload-preview-self-heal-v1",
+  "hard_refresh_required": false,
+  "passed": true,
+  "live": {
+    "studio_api_deployed": false,
+    "studio_pages_deployed": false
+  }
+}
