@@ -13,3 +13,5 @@ Item 17 Pages deploy: 2026-08-18 — per-photo title/caption editor, live canvas
 Item 18 Pages deploy: 2026-08-18 — upload-preview self-heal: bounded image retry, automatic revalidation, no hard-refresh prompt. Source commit 6fd62dd.
 
 EZ path Pages deploy: 2026-08-18 — Phase 1 New content door on Production (single/multiple photos), caption Manual/None/AI, current form under Advanced. Photo-count /plan overrides work before studio-api deploy. Source commit db27daf.
+
+EZ path Pages deploy: 2026-08-18 — Auto-build platform plan after photos; per-photo Manual captions on each still. Source commit 78d7213.
