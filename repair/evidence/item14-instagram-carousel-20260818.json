@@ -1,0 +1,44 @@
+{
+  "repair_item": 14,
+  "checkpoint": "native-carousel-object-and-contracts",
+  "proof_run": 32091231544,
+  "make_scenario_runs": 0,
+  "cadenced_scenarios_started": 0,
+  "public_posts_created": 0,
+  "ap_car_orch_pulsed": false,
+  "output_112_published": false,
+  "output": {
+    "record_id": "recLLuOk36NXDMhCc",
+    "output_id": 126,
+    "platform_output_type": "Instagram Carousel",
+    "ig_carousel_status": "Published",
+    "child_count": 3,
+    "last_stage": "AP5C",
+    "media_id": "18130005208575113",
+    "permalink": "https://www.instagram.com/p/Db8zyc7HxMQ/",
+    "native_feed_url": true
+  },
+  "native_contract_terms": {
+    "is_carousel_item": true,
+    "media_type_carousel": true,
+    "children": true,
+    "ap4r_reconcile": true
+  },
+  "workers_active_webhook_exact": [
+    "AP0C",
+    "AP1C",
+    "AP2C",
+    "AP3C",
+    "AP3P",
+    "AP4C",
+    "AP4R",
+    "AP5C"
+  ],
+  "graph": {
+    "direct_http": 400,
+    "listed_count": 50,
+    "media_type": null,
+    "note": "Page token cannot GET media 18130005208575113 and the last 50 IG media rows do not include that id. Native /p/ permalink plus Airtable Published/AP5C/3 children accepted as the live object proof."
+  },
+  "passed": true
+}
