@@ -29,3 +29,5 @@ EZ path Pages deploy: 2026-08-18 — Keep platform-ready captions editable on dr
 EZ path Pages deploy: 2026-08-18 — Two-button Idea vs Content start; immediate photo previews and collapsed audio. Source commit 8b8ed30.
 
 EZ path Pages deploy: 2026-08-18 — Per-photo caption dropdown; Manual opens the text box. Source commit 71f4999.
+
+EZ path Pages deploy: 2026-08-18 — Caption autosave uses the saved Production Request instead of the hidden Advanced form, so Manual captions no longer 500.
