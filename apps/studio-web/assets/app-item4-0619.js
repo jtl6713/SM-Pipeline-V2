@@ -50,7 +50,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.25-ez-crop-drag";
+  const BUILD_ID = "item4-0.6.26-ez-crop-xy";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -1247,17 +1247,72 @@
   }
 
   function item4DefaultCrop() {
-    return { x: 0.5, y: 0.5 };
+    return { x: 0.5, y: 0.5, zoom: 1 };
   }
 
   function item4ClampCrop(point) {
     const x = Number(point?.x);
     const y = Number(point?.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return item4DefaultCrop();
+    const zoom = Number(point?.zoom);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return { ...item4DefaultCrop(), zoom: Number.isFinite(zoom) ? Math.min(4, Math.max(1, zoom)) : 1 };
+    }
     return {
       x: Math.min(1, Math.max(0, x)),
       y: Math.min(1, Math.max(0, y)),
+      zoom: Number.isFinite(zoom) ? Math.min(4, Math.max(1, zoom)) : 1,
     };
+  }
+
+  function item4TwoAxisZoom(frameW, frameH, naturalW, naturalH) {
+    const nw = Math.max(1, naturalW || 1);
+    const nh = Math.max(1, naturalH || 1);
+    const fw = Math.max(1, frameW || 1);
+    const fh = Math.max(1, frameH || 1);
+    const cover = Math.max(fw / nw, fh / nh);
+    const minExtra = Math.max(36, 0.22 * Math.min(fw, fh));
+    const needed = Math.max((fw + minExtra) / nw, (fh + minExtra) / nh);
+    return Math.min(4, Math.max(1, needed / cover));
+  }
+
+  function item4CropMetrics(frame, img, crop) {
+    const fw = Math.max(1, frame.clientWidth || 1);
+    const fh = Math.max(1, frame.clientHeight || 1);
+    const nw = Math.max(1, img.naturalWidth || Number(img.dataset.naturalWidth) || 1);
+    const nh = Math.max(1, img.naturalHeight || Number(img.dataset.naturalHeight) || 1);
+    const cover = Math.max(fw / nw, fh / nh);
+    const zoom = Math.max(1, Number(crop?.zoom) || 1);
+    const scale = cover * zoom;
+    const width = nw * scale;
+    const height = nh * scale;
+    const extraX = Math.max(0, width - fw);
+    const extraY = Math.max(0, height - fh);
+    const point = item4ClampCrop(crop);
+    return {
+      width,
+      height,
+      extraX,
+      extraY,
+      left: extraX > 0 ? -extraX * point.x : (fw - width) / 2,
+      top: extraY > 0 ? -extraY * point.y : (fh - height) / 2,
+      zoom,
+      cover,
+    };
+  }
+
+  function item4ApplyCropPosition(frame, img, crop) {
+    if (!frame || !img) return;
+    const point = item4ClampCrop(crop);
+    const metrics = item4CropMetrics(frame, img, point);
+    img.style.position = "absolute";
+    img.style.inset = "auto";
+    img.style.maxWidth = "none";
+    img.style.width = `${metrics.width}px`;
+    img.style.height = `${metrics.height}px`;
+    img.style.left = `${metrics.left}px`;
+    img.style.top = `${metrics.top}px`;
+    img.style.objectFit = "fill";
+    img.style.objectPosition = "center";
   }
 
   function item4GetCrop(assetId, ratio) {
@@ -1335,10 +1390,14 @@
     return (Array.isArray(status?.assets) ? status.assets : []).map((asset) => ({ asset, variant: null }));
   }
 
-  function item4ApplyCropPosition(img, crop) {
-    if (!img) return;
-    const point = item4ClampCrop(crop);
-    img.style.objectPosition = `${(point.x * 100).toFixed(2)}% ${(point.y * 100).toFixed(2)}%`;
+  function item4LiveCrop(frame, img, assetId, ratio) {
+    const current = item4GetCrop(assetId, ratio);
+    if (current.zoom > 1) return current;
+    if (!img.naturalWidth || !frame.clientWidth) return current;
+    const zoom = item4TwoAxisZoom(frame.clientWidth, frame.clientHeight, img.naturalWidth, img.naturalHeight);
+    const next = { ...current, zoom };
+    item4CropDrafts.set(item4CropKey(assetId, ratio), next);
+    return next;
   }
 
   function item4BindCropFrame(frame) {
@@ -1346,24 +1405,29 @@
     const assetId = frame.dataset.item4CropAsset;
     const ratio = frame.dataset.item4CropRatio;
     if (!img || !assetId || !ratio) return;
-    item4ApplyCropPosition(img, item4GetCrop(assetId, ratio));
+    const layout = () => {
+      if (img.naturalWidth) {
+        img.dataset.naturalWidth = String(img.naturalWidth);
+        img.dataset.naturalHeight = String(img.naturalHeight);
+      }
+      const crop = item4LiveCrop(frame, img, assetId, ratio);
+      item4ApplyCropPosition(frame, img, crop);
+    };
+    if (img.complete && img.naturalWidth) layout();
+    else img.addEventListener("load", layout, { once: true });
     let pointer = null;
     const onMove = (event) => {
       if (!pointer) return;
       event.preventDefault();
-      const naturalW = img.naturalWidth || 1;
-      const naturalH = img.naturalHeight || 1;
-      const coverScale = Math.max(frame.clientWidth / naturalW, frame.clientHeight / naturalH);
-      const extraX = Math.max(0, naturalW * coverScale - frame.clientWidth);
-      const extraY = Math.max(0, naturalH * coverScale - frame.clientHeight);
-      const dx = event.clientX - pointer.x;
-      const dy = event.clientY - pointer.y;
+      const crop = pointer.crop;
+      const metrics = item4CropMetrics(frame, img, crop);
       const next = item4ClampCrop({
-        x: extraX > 1 ? pointer.crop.x - dx / extraX : 0.5,
-        y: extraY > 1 ? pointer.crop.y - dy / extraY : 0.5,
+        ...crop,
+        x: metrics.extraX > 1 ? crop.x - (event.clientX - pointer.x) / metrics.extraX : 0.5,
+        y: metrics.extraY > 1 ? crop.y - (event.clientY - pointer.y) / metrics.extraY : 0.5,
       });
       item4CropDrafts.set(item4CropKey(assetId, ratio), next);
-      item4ApplyCropPosition(img, next);
+      item4ApplyCropPosition(frame, img, next);
     };
     const onUp = () => {
       if (!pointer) return;
@@ -1376,25 +1440,44 @@
     frame.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
-      pointer = { x: event.clientX, y: event.clientY, crop: item4GetCrop(assetId, ratio) };
+      pointer = { x: event.clientX, y: event.clientY, crop: item4LiveCrop(frame, img, assetId, ratio) };
       frame.classList.add("is-dragging");
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     });
+    frame.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const current = item4LiveCrop(frame, img, assetId, ratio);
+      const next = item4ClampCrop({
+        ...current,
+        zoom: current.zoom * (event.deltaY < 0 ? 1.08 : 1 / 1.08),
+      });
+      item4CropDrafts.set(item4CropKey(assetId, ratio), next);
+      item4ApplyCropPosition(frame, img, next);
+      item4PersistCrops();
+    }, { passive: false });
   }
 
   function item4VariantThumb(row, ratio) {
     const master = item4MasterAsset(row.asset?.id) || row.asset;
-    const crop = item4GetCrop(master?.id || row.asset?.id, ratio);
     const previewUrl = item4AssetPreviewUrl(master) || item4VariantPreviewUrl(row.variant);
     const cssRatio = String(ratio || "4:5").replace(":", " / ");
     const safe = ratio === "9:16" ? '<span class="item4-safe-overlay" title="Centered 4:5 critical-content safe zone"></span>' : "";
     const visual = previewUrl
-      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(row.asset?.name || "Platform-ready photo")}" draggable="false" style="object-position:${(crop.x * 100).toFixed(2)}% ${(crop.y * 100).toFixed(2)}%">`
+      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(row.asset?.name || "Platform-ready photo")}" draggable="false">`
       : `<div class="item4-heic-placeholder"><strong>${escapeHtml(ratio)}</strong><span>Preview unavailable</span></div>`;
+    const assetId = master?.id || row.asset?.id || "";
     return `<article class="item4-variant-thumb">
-      <div class="item4-variant-image-wrap item4-crop-frame" data-item4-crop-asset="${escapeHtml(master?.id || row.asset?.id || "")}" data-item4-crop-ratio="${escapeHtml(ratio)}" style="aspect-ratio:${escapeHtml(cssRatio)}">${visual}${safe}</div>
-      <div class="item4-variant-meta"><strong>Photo ${escapeHtml(row.asset?.order || "")}</strong><span>${escapeHtml(row.asset?.name || "")}</span><button type="button" class="item4-crop-reset" data-item4-crop-reset="${escapeHtml(master?.id || "")}" data-item4-crop-ratio="${escapeHtml(ratio)}">Reset to center</button></div>
+      <div class="item4-variant-image-wrap item4-crop-frame" data-item4-crop-asset="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}" style="aspect-ratio:${escapeHtml(cssRatio)}">${visual}${safe}</div>
+      <div class="item4-variant-meta">
+        <strong>Photo ${escapeHtml(row.asset?.order || "")}</strong>
+        <span>${escapeHtml(row.asset?.name || "")}</span>
+        <span class="item4-crop-tools">
+          <button type="button" class="item4-crop-zoom" data-item4-crop-zoom="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}" data-dir="-1">−</button>
+          <button type="button" class="item4-crop-zoom" data-item4-crop-zoom="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}" data-dir="1">+</button>
+          <button type="button" class="item4-crop-reset" data-item4-crop-reset="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}">Reset</button>
+        </span>
+      </div>
     </article>`;
   }
 
@@ -1432,7 +1515,7 @@
           ? `Studio is preparing platform media in the background. This page updates automatically (${readyCount}/${targetCount || "?"} ready).`
           : variantStatus === "Error"
             ? "Preparation stopped at the failed transformation. The originals are still safe."
-            : "Drag a photo to keep the important part in the frame, then prepare or rebuild platform media.";
+            : "Drag any direction. Use + / − or the scroll wheel to zoom.";
     }
     if (!host) return;
     item4HydrateCrops(status);
@@ -1451,14 +1534,36 @@
       return `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>${escapeHtml(ratio)}</strong><span>${escapeHtml(spec.width || "")}${spec.width ? "×" : ""}${escapeHtml(spec.height || "")}${spec.width ? " · " : ""}${rows.length} photo${rows.length === 1 ? "" : "s"} · drag to reframe</span></div>${safeNote}</div><div class="item4-variant-strip">${rows.map(row => item4VariantThumb(row,ratio)).join("")}</div></section>`;
     }).join("");
     host.querySelectorAll(".item4-crop-frame").forEach((frame) => item4BindCropFrame(frame));
+    const refreshFrame = (assetId, ratio) => {
+      const frame = host.querySelector(`.item4-crop-frame[data-item4-crop-asset="${CSS.escape(assetId)}"][data-item4-crop-ratio="${CSS.escape(ratio)}"]`);
+      const img = frame?.querySelector("img");
+      if (!frame || !img) return;
+      item4ApplyCropPosition(frame, img, item4LiveCrop(frame, img, assetId, ratio));
+    };
     host.querySelectorAll("[data-item4-crop-reset]").forEach((button) => {
       button.addEventListener("click", () => {
         const assetId = button.dataset.item4CropReset;
         const ratio = button.dataset.item4CropRatio;
         item4CropDrafts.set(item4CropKey(assetId, ratio), item4DefaultCrop());
         item4PersistCrops();
-        const img = host.querySelector(`.item4-crop-frame[data-item4-crop-asset="${CSS.escape(assetId)}"][data-item4-crop-ratio="${CSS.escape(ratio)}"] img`);
-        item4ApplyCropPosition(img, item4DefaultCrop());
+        refreshFrame(assetId, ratio);
+      });
+    });
+    host.querySelectorAll("[data-item4-crop-zoom]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const assetId = button.dataset.item4CropZoom;
+        const ratio = button.dataset.item4CropRatio;
+        const frame = host.querySelector(`.item4-crop-frame[data-item4-crop-asset="${CSS.escape(assetId)}"][data-item4-crop-ratio="${CSS.escape(ratio)}"]`);
+        const img = frame?.querySelector("img");
+        if (!frame || !img) return;
+        const current = item4LiveCrop(frame, img, assetId, ratio);
+        const next = item4ClampCrop({
+          ...current,
+          zoom: current.zoom * (button.dataset.dir === "1" ? 1.12 : 1 / 1.12),
+        });
+        item4CropDrafts.set(item4CropKey(assetId, ratio), next);
+        item4ApplyCropPosition(frame, img, next);
+        item4PersistCrops();
       });
     });
   }
