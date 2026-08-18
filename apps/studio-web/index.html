@@ -5,7 +5,7 @@
  <meta name="viewport" content="width=device-width,initial-scale=1">
  <meta name="robots" content="noindex,nofollow,noarchive">
  <title>ChicagoShining Studio</title>
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.39-idea-autosave">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.40-home">
 </head>
 <body>
  <header class="topbar">
@@ -23,17 +23,40 @@
 
  <div class="shell">
  <nav class="sidebar" aria-label="Studio navigation">
- <button class="nav-item active" data-page="dashboard">Dashboard</button>
+ <button class="nav-item active" data-page="home">Home</button>
+ <button class="nav-item" data-page="dashboard">Dashboard</button>
  <button class="nav-item" data-page="ideas">Ideas</button>
  <button class="nav-item" data-page="content">Production</button>
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.39</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.40</span></div>
  </nav>
 
  <main class="main" id="main">
- <section id="page-dashboard" class="page active">
+ <section id="page-home" class="page active">
+ <section class="panel ez-path-fork" id="ezPathFork">
+ <div class="ez-path-fork-inner">
+ <div class="ez-path-fork-copy">
+ <span class="eyebrow">Home</span>
+ <h1>How do you want to start?</h1>
+ <p>Two doors. Same pipeline underneath. Come back here anytime to start something new.</p>
+ </div>
+ <div class="ez-path-fork-grid">
+ <button type="button" class="ez-path-choice" id="ezStartIdea">
+ <strong>Start with Idea</strong>
+ <span>Write the idea first. Use this when the photos or video still need to be shot or found.</span>
+ </button>
+ <button type="button" class="ez-path-choice" id="ezStartContent">
+ <strong>Start with Content</strong>
+ <span>You already have photos. Drop them in and Studio handles the rest.</span>
+ </button>
+ </div>
+ </div>
+ </section>
+ </section>
+
+ <section id="page-dashboard" class="page">
  <div class="page-heading">
  <div><span class="eyebrow">Overview</span><h1>Pipeline dashboard</h1><p>Real-time administrative view of the current ChicagoShining content pipeline.</p></div>
  <button class="secondary-button" id="refreshDashboard">Refresh</button>
@@ -62,31 +85,15 @@
  <section class="panel"><div id="ideasList" class="table-wrap"></div></section>
  </section>
 
- <section id="page-content" class="page page-content-simple">
- <section class="panel ez-path-fork" id="ezPathFork">
- <div class="ez-path-fork-inner">
- <div class="ez-path-fork-copy">
- <span class="eyebrow">New</span>
- <h1>How do you want to start?</h1>
- <p>Two doors. Same pipeline underneath.</p>
+ <section id="page-content" class="page">
+ <div class="page-heading ez-busy-panel" id="productionPageHeading">
+ <div><span class="eyebrow">Production</span><h1>Production</h1><p>Open a draft, continue platform prep, or review promoted items.</p></div>
+ <button class="secondary-button" data-refresh="content">Refresh</button>
  </div>
- <div class="ez-path-fork-grid">
- <button type="button" class="ez-path-choice" id="ezStartIdea">
- <strong>Start with Idea</strong>
- <span>Write the idea first. Use this when the photos or video still need to be shot or found.</span>
- </button>
- <button type="button" class="ez-path-choice" id="ezStartContent">
- <strong>Start with Content</strong>
- <span>You already have photos. Drop them in and Studio handles the rest.</span>
- </button>
- </div>
- </div>
- </section>
-
  <section class="panel ez-intake" id="ezIntake" hidden>
  <div class="panel-heading ez-intake-heading">
  <div>
- <button type="button" class="text-button" id="ezStartOver">← Start over</button>
+ <button type="button" class="text-button" id="ezStartOver">← Home</button>
  <h2>Start with content</h2>
  <p>Name it, pick the media you have, then drop it in.</p>
  </div>
@@ -908,7 +915,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.39-idea-autosave"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.39-idea-autosave"></script>
+ <script src="/assets/ez-plan.js?v=0.6.40-home"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.40-home"></script>
 </body>
 </html>

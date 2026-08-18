@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.39-idea-autosave";
+  const BUILD_ID = "item4-0.6.40-home";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -756,10 +756,8 @@
   }
 
   function hideEzFrontDoor() {
-    const fork = $("ezPathFork");
     const intake = $("ezIntake");
     const composer = $("ezComposer");
-    if (fork) fork.hidden = true;
     if (intake) intake.hidden = true;
     if (composer) composer.hidden = true;
   }
@@ -773,26 +771,29 @@
     if (workspace) workspace.hidden = false;
   }
 
-  function showEzFork() {
+  function goHome() {
     ezEntryPath = null;
-    setPageContentSimple(true);
-    const fork = $("ezPathFork");
-    const intake = $("ezIntake");
-    if (fork) fork.hidden = false;
-    if (intake) intake.hidden = true;
-    const composer = $("ezComposer");
-    if (composer) composer.hidden = true;
+    setPageContentSimple(false);
+    hideEzFrontDoor();
     const workspace = $("productionRequestWorkspace");
     if (workspace) workspace.hidden = true;
+    switchToPage("home");
+  }
+
+  function showEzFork() {
+    goHome();
   }
 
   function enterEzContentPath() {
     ezEntryPath = "content";
+    const contentPage = $("page-content");
+    if (contentPage && !contentPage.classList.contains("active")) {
+      switchToPage("content");
+      return;
+    }
     setPageContentSimple(true);
-    const fork = $("ezPathFork");
     const intake = $("ezIntake");
     const composer = $("ezComposer");
-    if (fork) fork.hidden = true;
     if (intake) intake.hidden = false;
     if (composer) composer.hidden = false;
     syncEzStructureCounts();
@@ -1607,7 +1608,7 @@
       document.querySelectorAll("[data-ez-input]").forEach((button) => button.classList.remove("selected"));
       renderEzPhotoStrip();
       setEzMessage();
-      showEzFork();
+      goHome();
     });
     ["ezIdeaTitle", "ezIdeaSummary"].forEach((id) => {
       const el = $(id);
@@ -3248,7 +3249,11 @@
     stopItem4VariantPolling();
     clearOutputMatrix();
     setRequestMessage();
-    if (ezEntryPath === "configure") showEzFork();
+    if (ezEntryPath === "configure") {
+      ezEntryPath = null;
+      setPageContentSimple(false);
+      hideEzFrontDoor();
+    }
   });
 
   function productionRequestPayload() {
@@ -3502,7 +3507,7 @@
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Start from New content above, or open an Idea Candidate and choose Configure Production.</span></div>';
+        target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Start from Home, or open an Idea Candidate and choose Configure Production.</span></div>';
         return;
       }
       target.innerHTML = `<table class="data-table"><thead><tr><th>Request</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th></th></tr></thead><tbody>${records.map(r => {
@@ -3580,12 +3585,12 @@
 
   async function loadContent() {
     if (ezEntryPath === "content") {
-      setPageContentSimple(true);
       enterEzContentPath();
     } else if (ezEntryPath === "configure") {
       showProductionRequestWorkspace();
     } else {
-      showEzFork();
+      setPageContentSimple(false);
+      hideEzFrontDoor();
     }
     loadProductionRequests();
     const target = $("contentList");
@@ -4841,6 +4846,7 @@
   }
 
   function loadPage(page) {
+    if (page === "home") return;
     if (page === "dashboard") return loadDashboard();
     if (page === "ideas") return loadIdeas();
     if (page === "content") return loadContent();
