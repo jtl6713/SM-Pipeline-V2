@@ -86,23 +86,8 @@ def airtable_settings(pat):
 
 
 def load_output(pat):
-    query = urllib.parse.urlencode(
-        [
-            ("fields[]", "Output_ID"),
-            ("fields[]", "Platform"),
-            ("fields[]", "Platform_Output_Type"),
-            ("fields[]", "Format"),
-            ("fields[]", "Platform_Post_ID"),
-            ("fields[]", "Platform_Media_ID"),
-            ("fields[]", "IG_Carousel_Status"),
-            ("fields[]", "IG_Carousel_Child_Count"),
-            ("fields[]", "IG_Carousel_Published_Media_ID"),
-            ("fields[]", "IG_Carousel_Last_Completed_Stage"),
-            ("fields[]", "Do_Not_Publish"),
-        ]
-    )
     status, payload = json_http(
-        f"https://api.airtable.com/v0/{BASE_ID}/{OUTPUTS_TABLE}/{CAROUSEL_RECORD}?{query}",
+        f"https://api.airtable.com/v0/{BASE_ID}/{OUTPUTS_TABLE}/{CAROUSEL_RECORD}",
         headers={"Authorization": f"Bearer {pat}"},
     )
     if status != 200:
@@ -221,6 +206,7 @@ def main():
             "child_count": output.get("IG_Carousel_Child_Count"),
             "last_stage": output.get("IG_Carousel_Last_Completed_Stage"),
             "media_id": media_id,
+            "do_not_publish": bool(output.get("Do_Not_Publish")),
         },
         "orchestrators": orch,
         "workers": {
