@@ -50,7 +50,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.27-ez-variant-captions";
+  const BUILD_ID = "item4-0.6.28-ez-captions-editable";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -700,8 +700,20 @@
     });
   }
 
+  function item4RequestEditable(record = activeProductionRequest) {
+    return ["Draft", "Ready", ""].includes(String(record?.status || "Draft"));
+  }
+
   function ezCaptionsLocked() {
-    return !["Draft", "Ready", ""].includes(String(activeProductionRequest?.status || "Draft"));
+    return !item4RequestEditable();
+  }
+
+  function syncEzCaptionLock() {
+    const locked = ezCaptionsLocked();
+    document.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
+      input.readOnly = locked;
+      input.disabled = false;
+    });
   }
 
   function item4CaptionField(assetId) {
@@ -709,13 +721,23 @@
     if (!id) return "";
     const value = ezCaptionDrafts.get(id) || "";
     const locked = ezCaptionsLocked();
-    return `<label class="item4-asset-caption-field item4-variant-caption"><span>Caption</span><textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Caption for this photo"${locked ? " disabled" : ""}>${escapeHtml(value)}</textarea></label>`;
+    return `<label class="item4-asset-caption-field item4-variant-caption"><span>Caption</span><textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Caption for this photo"${locked ? " readonly" : ""}>${escapeHtml(value)}</textarea>${locked ? "<em>Locked after promote</em>" : ""}</label>`;
   }
 
   function bindEzCaptionInputs(root = document) {
     root.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
       if (input.dataset.ezCaptionBound) return;
       input.dataset.ezCaptionBound = "1";
+      ["pointerdown", "mousedown", "click"].forEach((type) => {
+        input.addEventListener(type, (event) => event.stopPropagation());
+      });
+      input.addEventListener("focus", () => {
+        if (ezCaptionsLocked()) return;
+        const manual = document.querySelector('input[name="ezCaptionMode"][value="manual"]');
+        if (manual) manual.checked = true;
+        const hint = $("ezCaptionHint");
+        if (hint) hint.textContent = "Write a caption under each photo. Studio saves as you type.";
+      });
       input.addEventListener("input", () => {
         const id = String(input.dataset.ezAssetCaption || "");
         ezCaptionDrafts.set(id, input.value);
@@ -727,6 +749,7 @@
         queueEzCaptionSave();
       });
     });
+    syncEzCaptionLock();
   }
 
   function syncEzPlanChrome() {
@@ -1463,6 +1486,7 @@
     };
     frame.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      if (event.target.closest("textarea, input, button, label")) return;
       event.preventDefault();
       pointer = { x: event.clientX, y: event.clientY, crop: item4LiveCrop(frame, img, assetId, ratio) };
       frame.classList.add("is-dragging");
@@ -1543,6 +1567,13 @@
             : "Drag any direction. Use + / − or the scroll wheel to zoom.";
     }
     if (!host) return;
+    const activeCaption = document.activeElement?.matches?.("[data-ez-asset-caption]") ? document.activeElement : null;
+    const restoreCaption = activeCaption ? {
+      id: String(activeCaption.dataset.ezAssetCaption || ""),
+      value: activeCaption.value,
+      start: activeCaption.selectionStart,
+      end: activeCaption.selectionEnd,
+    } : null;
     item4HydrateCrops(status);
     hydrateEzCaptionDrafts(status);
     const ratios = item4PlanRatios(status);
@@ -1593,6 +1624,15 @@
       });
     });
     bindEzCaptionInputs(host);
+    if (restoreCaption?.id) {
+      const next = host.querySelector(`[data-ez-asset-caption="${CSS.escape(restoreCaption.id)}"]`);
+      if (next) {
+        next.value = restoreCaption.value;
+        ezCaptionDrafts.set(restoreCaption.id, restoreCaption.value);
+        next.focus();
+        try { next.setSelectionRange(restoreCaption.start, restoreCaption.end); } catch {}
+      }
+    }
   }
 
   function stopItem4MasterPolling() {
@@ -2331,9 +2371,11 @@
 
     if (form) {
       form.querySelectorAll("input, select, textarea").forEach((control) => {
+        if (control.matches("[data-ez-asset-caption]")) return;
         control.disabled = !editable;
       });
     }
+    syncEzCaptionLock();
 
     const save = $("saveProductionRequest");
     if (save) {
