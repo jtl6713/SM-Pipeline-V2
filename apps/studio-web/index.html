@@ -5,7 +5,7 @@
  <meta name="viewport" content="width=device-width,initial-scale=1">
  <meta name="robots" content="noindex,nofollow,noarchive">
  <title>ChicagoShining Studio</title>
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.28-ez-captions-editable">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.29-ez-simple-start">
 </head>
 <body>
  <header class="topbar">
@@ -29,7 +29,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.28</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.29</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -62,51 +62,65 @@
  <section class="panel"><div id="ideasList" class="table-wrap"></div></section>
  </section>
 
- <section id="page-content" class="page">
- <div class="page-heading">
- <div><span class="eyebrow">Create once · publish everywhere</span><h1>Production workspace</h1><p>Start from photos you already have, or keep using Ideas when the asset still needs to be shot. Studio writes the same production records either way.</p></div>
- <button class="secondary-button" data-refresh="content">Refresh</button>
+ <section id="page-content" class="page page-content-simple">
+ <section class="panel ez-path-fork" id="ezPathFork">
+ <div class="ez-path-fork-inner">
+ <div class="ez-path-fork-copy">
+ <span class="eyebrow">New</span>
+ <h1>How do you want to start?</h1>
+ <p>Two doors. Same pipeline underneath.</p>
  </div>
+ <div class="ez-path-fork-grid">
+ <button type="button" class="ez-path-choice" id="ezStartIdea">
+ <strong>Start with Idea</strong>
+ <span>Write the idea first. Use this when the photos or video still need to be shot or found.</span>
+ </button>
+ <button type="button" class="ez-path-choice" id="ezStartContent">
+ <strong>Start with Content</strong>
+ <span>You already have photos. Drop them in and Studio handles the rest.</span>
+ </button>
+ </div>
+ </div>
+ </section>
 
- <section class="panel ez-intake" id="ezIntake">
- <div class="panel-heading">
+ <section class="panel ez-intake" id="ezIntake" hidden>
+ <div class="panel-heading ez-intake-heading">
  <div>
- <span class="eyebrow">New content</span>
- <h2>Start from assets</h2>
- <p>Pick the kind of media you already have. Ideas remain the demand-first door when you still need assets shot or added.</p>
+ <button type="button" class="text-button" id="ezStartOver">← Start over</button>
+ <h2>Start with content</h2>
+ <p>Pick the media you have, then drop it in.</p>
  </div>
  </div>
  <div class="ez-card-grid" id="ezCardGrid">
  <button type="button" class="ez-card" data-ez-input="single-photo">
  <strong>Single photo</strong>
- <span>One still. Instagram 4:5 feed, Facebook image, TikTok photo draft. YouTube stays off.</span>
+ <span>One still. Instagram 4:5, Facebook image, TikTok photo draft.</span>
  </button>
  <button type="button" class="ez-card" data-ez-input="multiple-photos">
  <strong>Multiple photos</strong>
- <span>Native Instagram carousel, Facebook album, TikTok photo draft, YouTube Short.</span>
+ <span>Carousel, album, TikTok photo draft, YouTube Short.</span>
  </button>
  <button type="button" class="ez-card" data-ez-input="video-clips" disabled>
  <strong>Video clips</strong>
- <span>Coming later. Clip assembly and render are not part of this photo door.</span>
+ <span>Coming later.</span>
  <em>Coming later</em>
  </button>
  <button type="button" class="ez-card" data-ez-input="finished-video" disabled>
  <strong>Finished video</strong>
- <span>Coming later. Pass-through publishing is the next video step after photos.</span>
+ <span>Coming later.</span>
  <em>Coming later</em>
  </button>
  </div>
  <div class="ez-composer" id="ezComposer" hidden>
- <div class="ez-composer-grid">
- <label class="form-field"><span>Title <em>optional</em></span><input id="ezTitle" maxlength="160" placeholder="Defaults from the first filename"></label>
- <fieldset class="ez-caption-fieldset">
+ <input id="ezTitle" maxlength="160" hidden>
+ <fieldset class="ez-caption-fieldset" hidden>
  <legend>Caption</legend>
- <label><input type="radio" name="ezCaptionMode" value="manual"> Manual</label>
+ <label><input type="radio" name="ezCaptionMode" value="manual" checked> Manual</label>
  <label><input type="radio" name="ezCaptionMode" value="none"> None</label>
- <label><input type="radio" name="ezCaptionMode" value="ai" checked> AI</label>
- <p class="ez-caption-hint" id="ezCaptionHint">Manual writes a caption under each photo after you drop them.</p>
+ <label><input type="radio" name="ezCaptionMode" value="ai"> AI</label>
+ <p class="ez-caption-hint" id="ezCaptionHint">Write a caption under each photo.</p>
  </fieldset>
- <fieldset class="ez-platform-fieldset">
+ <fieldset class="ez-platform-fieldset" hidden>
  <legend>Platforms</legend>
  <label><input type="checkbox" data-ez-platform value="Instagram" checked> Instagram</label>
  <label><input type="checkbox" data-ez-platform value="Facebook" checked> Facebook</label>
@@ -114,19 +128,38 @@
  <label id="ezYouTubeLabel"><input type="checkbox" data-ez-platform value="YouTube" id="ezYouTube"> YouTube</label>
  </fieldset>
  <div class="ez-per-photo-captions" id="ezPerPhotoCaptions" hidden></div>
- </div>
  <div class="item4-upload-zone ez-upload-zone" id="ezUploadZone" tabindex="0" role="button" aria-label="Upload photos for New content">
  <input id="ezMediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" hidden>
  <div class="item4-upload-icon">＋</div>
- <div><strong id="ezUploadTitle">Drop photos here or choose files</strong><span id="ezUploadHint">Studio creates the Idea Candidate and Production Request underneath. No email until final pre-publish.</span></div>
+ <div><strong id="ezUploadTitle">Drop photos here or choose files</strong><span id="ezUploadHint">Photos appear here as soon as you drop them.</span></div>
  <button type="button" class="secondary-button" id="ezChooseMedia">Choose photos</button>
+ </div>
+ <div class="ez-photo-strip" id="ezPhotoStrip" hidden></div>
+ <div class="ez-option-groups">
+ <details class="ez-option-group" id="ezAudioGroup">
+ <summary>Audio / Voiceover</summary>
+ <div class="ez-option-group-body">
+ <label class="form-field"><span>Voiceover</span>
+ <select id="ezAudioVoiceover"><option value="No" selected>No</option><option value="Yes">Yes</option></select>
+ </label>
+ <label class="form-field" id="ezAudioVoiceField" hidden><span>Voice</span>
+ <select id="ezAudioVoice"><option value="">Profile default</option></select>
+ </label>
+ <label class="form-field"><span>Music</span>
+ <select id="ezAudioMusic"><option value="No" selected>No</option><option value="Yes">Yes</option></select>
+ </label>
+ <label class="form-field" id="ezAudioTrackField" hidden><span>Music track</span>
+ <select id="ezAudioTrack"><option value="">AI / profile chooses track</option></select>
+ </label>
+ </div>
+ </details>
  </div>
  <button type="button" class="primary-button" id="ezContinue" hidden>Continue with these photos</button>
  <div class="form-message" id="ezMessage" aria-live="polite"></div>
  </div>
  </section>
 
- <section class="panel production-request-shell" id="productionRequestWorkspace" hidden>
+ <section class="panel production-request-shell ez-busy-panel" id="productionRequestWorkspace" hidden>
  <div class="panel-heading production-request-heading">
  <div>
  <span class="eyebrow">Production request</span>
@@ -503,12 +536,12 @@
  </form>
  </section>
 
- <section class="panel request-list-panel">
+ <section class="panel request-list-panel ez-busy-panel" id="productionRequestListPanel">
  <div class="panel-heading"><div><h2>Production request drafts</h2><p>Saved creative requests waiting for approval/promotion.</p></div></div>
  <div id="productionRequestList" class="table-wrap"></div>
  </section>
 
- <section class="panel">
+ <section class="panel ez-busy-panel" id="promotedContentPanel">
  <div class="panel-heading"><div><h2>Promoted content items</h2><p>Items that have entered the existing production pipeline.</p></div></div>
  <div id="contentList" class="table-wrap"></div>
  </section>
@@ -764,7 +797,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.28-ez-captions-editable"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.28-ez-captions-editable"></script>
+ <script src="/assets/ez-plan.js?v=0.6.29-ez-simple-start"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.29-ez-simple-start"></script>
 </body>
 </html>

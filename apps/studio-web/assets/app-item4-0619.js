@@ -13,6 +13,9 @@
   let item4PlanOverrides = {};
   let ezIntakeKind = null;
   let ezStagedFiles = [];
+  let ezEntryPath = null;
+  let ezLocalPreviews = new Map();
+  let ezSelectedVoiceId = "";
   let ezStarting = false;
   let ezAutoPlanAfterUpload = false;
   let ezPlanInFlight = false;
@@ -50,7 +53,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.28-ez-captions-editable";
+  const BUILD_ID = "item4-0.6.29-ez-simple-start";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -688,7 +691,135 @@
   }
 
   function ezManualCaptionsEnabled() {
-    return ezCaptionMode() === "manual";
+    return true;
+  }
+
+  function setPageContentSimple(on) {
+    $("page-content")?.classList.toggle("page-content-simple", Boolean(on));
+  }
+
+  function showEzFork() {
+    ezEntryPath = null;
+    setPageContentSimple(true);
+    const fork = $("ezPathFork");
+    const intake = $("ezIntake");
+    if (fork) fork.hidden = false;
+    if (intake) intake.hidden = true;
+    const composer = $("ezComposer");
+    if (composer) composer.hidden = true;
+    const workspace = $("productionRequestWorkspace");
+    if (workspace) workspace.hidden = true;
+  }
+
+  function enterEzContentPath() {
+    ezEntryPath = "content";
+    setPageContentSimple(true);
+    const fork = $("ezPathFork");
+    const intake = $("ezIntake");
+    const composer = $("ezComposer");
+    if (fork) fork.hidden = true;
+    if (intake) intake.hidden = false;
+    if (composer) composer.hidden = false;
+    loadEzAudioOptions().catch(() => {});
+  }
+
+  function enterEzIdeaPath() {
+    ezEntryPath = "idea";
+    setPageContentSimple(false);
+    switchToPage("ideas");
+    setIdeaFormOpen(true);
+  }
+
+  function revokeEzLocalPreviews() {
+    ezLocalPreviews.forEach((url) => {
+      try { URL.revokeObjectURL(url); } catch {}
+    });
+    ezLocalPreviews.clear();
+  }
+
+  function stageEzLocalPreviews(files) {
+    revokeEzLocalPreviews();
+    (files || []).forEach((file, index) => {
+      const heic = item4IsHeicAsset({ name: file.name, mime_type: file.type });
+      if (heic) return;
+      try { ezLocalPreviews.set(index, URL.createObjectURL(file)); } catch {}
+    });
+  }
+
+  function ezLocalPreviewFor(index, name) {
+    if (ezLocalPreviews.has(index)) return ezLocalPreviews.get(index);
+    const match = ezStagedFiles.findIndex((file) => file.name === name);
+    return match >= 0 ? (ezLocalPreviews.get(match) || "") : "";
+  }
+
+  function renderEzPhotoStrip() {
+    const host = $("ezPhotoStrip");
+    if (!host) return;
+    const files = Array.isArray(ezStagedFiles) ? ezStagedFiles : [];
+    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const count = Math.max(files.length, assets.length);
+    if (!count) {
+      host.hidden = true;
+      host.innerHTML = "";
+      return;
+    }
+    host.hidden = false;
+    hydrateEzCaptionDrafts(item4Workspace || {});
+    const cards = [];
+    for (let index = 0; index < count; index += 1) {
+      const file = files[index];
+      const asset = assets[index] || {};
+      const name = file?.name || asset.name || `Photo ${index + 1}`;
+      const id = String(asset.id || `staged:${index}`);
+      const localUrl = ezLocalPreviewFor(index, name);
+      const remoteUrl = asset.id ? item4AssetPreviewUrl(asset) : "";
+      const previewUrl = localUrl || remoteUrl;
+      const heic = item4IsHeicAsset(file || asset);
+      const visual = previewUrl
+        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
+        : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
+      cards.push(`<article class="ez-photo-card" data-item4-asset="${escapeHtml(id)}">
+        ${visual}
+        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>Photo ${index + 1}</span></div>
+        ${item4CaptionField(id)}
+      </article>`);
+    }
+    host.innerHTML = cards.join("");
+    bindEzCaptionInputs(host);
+  }
+
+  function syncEzAudioFields() {
+    const voiceoverOn = $("ezAudioVoiceover")?.value === "Yes";
+    const musicOn = $("ezAudioMusic")?.value === "Yes";
+    const voiceField = $("ezAudioVoiceField");
+    const trackField = $("ezAudioTrackField");
+    if (voiceField) voiceField.hidden = !voiceoverOn;
+    if (trackField) trackField.hidden = !musicOn;
+    if ($("prVoiceover")) $("prVoiceover").value = $("ezAudioVoiceover")?.value || "No";
+    if ($("prMusicMode")) $("prMusicMode").value = $("ezAudioMusic")?.value || "No";
+    if ($("prMusicAsset")) $("prMusicAsset").value = $("ezAudioTrack")?.value || "";
+    ezSelectedVoiceId = $("ezAudioVoice")?.value || "";
+  }
+
+  async function loadEzAudioOptions() {
+    await ensureProductionRequestMusic();
+    const track = $("ezAudioTrack");
+    const source = $("prMusicAsset");
+    if (track && source) {
+      track.innerHTML = source.innerHTML;
+    }
+    const voiceSelect = $("ezAudioVoice");
+    if (voiceSelect && voiceSelect.options.length <= 1) {
+      try {
+        const result = await api("/api/voices");
+        const voices = phase6NormalizeVoices(result.records || result.voices || result.items || []);
+        const current = ezSelectedVoiceId;
+        voiceSelect.innerHTML = `<option value="">Profile default</option>${phase6VoiceOptionList(voices, current)}`;
+      } catch {
+        // Voice catalog is optional on this first screen.
+      }
+    }
+    syncEzAudioFields();
   }
 
   function hydrateEzCaptionDrafts(status) {
@@ -696,6 +827,8 @@
     const parts = String(activeProductionRequest?.requested_caption || "").split(/\n\n+/);
     assets.forEach((asset, index) => {
       const id = String(asset?.id || "");
+      const staged = ezCaptionDrafts.get(`staged:${index}`);
+      if (id && staged && !ezCaptionDrafts.has(id)) ezCaptionDrafts.set(id, staged);
       if (id && !ezCaptionDrafts.has(id) && parts[index]) ezCaptionDrafts.set(id, parts[index]);
     });
   }
@@ -864,6 +997,7 @@
       else hint.textContent = "Studio writes captions. Switch to Manual to caption each photo yourself.";
     }
     renderEzPerPhotoCaptions();
+    renderEzPhotoStrip();
     const continueBtn = $("ezContinue");
     if (continueBtn) continueBtn.hidden = true;
     if (item4Workspace?.assets?.length) renderItem4Assets(item4Workspace);
@@ -880,8 +1014,13 @@
 
   function selectEzInput(kind, { resetPlatforms = true } = {}) {
     if (kind === "video-clips" || kind === "finished-video") return;
-    ezIntakeKind = kind === "multiple-photos" ? "multiple-photos" : "single-photo";
-    if (resetPlatforms) ezStagedFiles = [];
+    const nextKind = kind === "multiple-photos" ? "multiple-photos" : "single-photo";
+    if (resetPlatforms && ezIntakeKind && ezIntakeKind !== nextKind) {
+      ezStagedFiles = [];
+      revokeEzLocalPreviews();
+      renderEzPhotoStrip();
+    }
+    ezIntakeKind = nextKind;
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.classList.toggle("selected", button.dataset.ezInput === ezIntakeKind);
     });
@@ -893,8 +1032,8 @@
     const hint = $("ezUploadHint");
     if (title) title.textContent = ezIntakeKind === "multiple-photos" ? "Drop several photos here" : "Drop one photo here";
     if (hint) hint.textContent = ezIntakeKind === "multiple-photos"
-      ? "Native carousel / album / TikTok draft, then a YouTube Short. No email until final pre-publish."
-      : "Instagram 4:5, Facebook image, TikTok photo draft. YouTube stays off. No email until final pre-publish.";
+      ? "Drop several photos. They show up here immediately."
+      : "Drop one photo. It shows up here immediately.";
     syncEzYouTubeAvailability(resetPlatforms);
     if (resetPlatforms && ezIntakeKind === "multiple-photos") {
       const manual = document.querySelector('input[name="ezCaptionMode"][value="manual"]');
@@ -938,6 +1077,9 @@
       setEzMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
       return;
     }
+    if (!ezIntakeKind) {
+      selectEzInput(supported.length > 1 ? "multiple-photos" : "single-photo", { resetPlatforms: false });
+    }
     if (ezIntakeKind === "single-photo" && supported.length > 1) {
       setEzMessage("Single photo uses the first image. Choose Multiple photos for a set.", "");
     }
@@ -947,17 +1089,20 @@
       return;
     }
     ezStagedFiles = files;
+    stageEzLocalPreviews(files);
+    renderEzPhotoStrip();
     const captionMode = ezCaptionMode();
     const captions = collectEzManualCaptions();
     if (ezStarting) return;
     ezStarting = true;
     const continueBtn = $("ezContinue");
     if (continueBtn) continueBtn.disabled = true;
-    setEzMessage("Creating the Idea Candidate and Production Request…");
+    setEzMessage("Saving in the background…");
     try {
       item4PlanOverrides = {};
       const planned = applyEzPlanOverrides(files.length, ezSelectedPlatforms());
       syncItem4PlatformsFromEz();
+      syncEzAudioFields();
       let captionFields = apiHelpers.ezCaptionFields(captionMode, { captions });
       if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
         captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
@@ -973,8 +1118,8 @@
       const requestPayload = {
         content_type: planned.master_content_type,
         platforms: planned.platforms,
-        voiceover_mode: "No",
-        background_music_mode: "No",
+        voiceover_mode: $("ezAudioVoiceover")?.value || "No",
+        background_music_mode: $("ezAudioMusic")?.value || "No",
         thumbnail_mode: "Use Profile Default",
         title_mode: captionFields.title_mode,
         requested_title: captionFields.requested_title || "",
@@ -985,18 +1130,20 @@
         carousel_image_mode: "Manual Upload",
         carousel_slide_count_mode: "Exact",
         carousel_slide_count_exact: files.length,
+        selected_music_asset_id: $("ezAudioTrack")?.value || "",
         production_notes: apiHelpers.ezOriginNotes({ inputKind: ezIntakeKind, captionMode }),
       };
       await ensureProductionRequestMusic();
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
       setEzAdvancedOpen(false);
-      populateProductionRequestForm(created.record);
+      populateProductionRequestForm(created.record, { reveal: false });
       await loadProductionRequestOutputs(created.record);
       await loadItem4Workspace(created.record);
       await loadProductionRequests();
       ezAutoPlanAfterUpload = true;
       setEzMessage("Uploading originals…");
       await uploadItem4Files(files);
+      renderEzPhotoStrip();
     } catch (error) {
       setEzMessage(error.message, "error-text");
       setRequestMessage(error.message, "error-text");
@@ -1007,6 +1154,23 @@
   }
 
   function bindEzIntake() {
+    $("ezStartContent")?.addEventListener("click", () => enterEzContentPath());
+    $("ezStartIdea")?.addEventListener("click", () => enterEzIdeaPath());
+    $("ezStartOver")?.addEventListener("click", () => {
+      revokeEzLocalPreviews();
+      ezStagedFiles = [];
+      ezIntakeKind = null;
+      document.querySelectorAll("[data-ez-input]").forEach((button) => button.classList.remove("selected"));
+      renderEzPhotoStrip();
+      setEzMessage();
+      showEzFork();
+    });
+    ["ezAudioVoiceover", "ezAudioMusic", "ezAudioTrack", "ezAudioVoice"].forEach((id) => {
+      $(id)?.addEventListener("change", () => {
+        syncEzAudioFields();
+        if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
+      });
+    });
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.addEventListener("click", () => selectEzInput(button.dataset.ezInput));
     });
@@ -1140,6 +1304,9 @@
 
   function item4AssetPreviewUrl(asset) {
     try {
+      const name = String(asset?.name || "");
+      const local = ezLocalPreviewFor(Number(asset?.order || 0) - 1, name);
+      if (local) return local;
       const recordId = String(asset?.media_asset_record_id || "").trim();
       if (/^rec[A-Za-z0-9]+$/.test(recordId)) {
         return `${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/preview`;
@@ -1916,6 +2083,7 @@
       }
       await maybeAutoEzPlan();
       renderEzCaptionUi();
+      renderEzPhotoStrip();
     } catch (error) {
       ezAutoPlanAfterUpload = false;
       if (progress) progress.textContent = `Upload failed: ${error.message}`;
@@ -2443,10 +2611,15 @@
     }
   }
 
-  function populateProductionRequestForm(record) {
+  function populateProductionRequestForm(record, { reveal = true } = {}) {
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
-    $("productionRequestWorkspace").hidden = false;
+    if (reveal && ezEntryPath !== "content") {
+      setPageContentSimple(false);
+      $("productionRequestWorkspace").hidden = false;
+    } else {
+      $("productionRequestWorkspace").hidden = true;
+    }
     $("productionRequestTitle").textContent = activeIdea?.title || record.production_request_id || "Production request";
     $("productionRequestSubtitle").textContent = `${record.production_request_id || "Draft"} · Creative configuration remains editable until submission.`;
     $("productionRequestStatus").textContent = record.status || "Draft";
@@ -2883,6 +3056,9 @@
   }
 
   async function loadContent() {
+    setPageContentSimple(ezEntryPath !== "idea");
+    if (ezEntryPath === "content") enterEzContentPath();
+    else showEzFork();
     loadProductionRequests();
     const target = $("contentList");
     target.innerHTML = '<div class="empty">Loading content items…</div>';
