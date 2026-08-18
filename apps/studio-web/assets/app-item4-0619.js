@@ -50,7 +50,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.26-ez-crop-xy";
+  const BUILD_ID = "item4-0.6.27-ez-variant-captions";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -691,6 +691,44 @@
     return ezCaptionMode() === "manual";
   }
 
+  function hydrateEzCaptionDrafts(status) {
+    const assets = Array.isArray(status?.assets) ? status.assets : [];
+    const parts = String(activeProductionRequest?.requested_caption || "").split(/\n\n+/);
+    assets.forEach((asset, index) => {
+      const id = String(asset?.id || "");
+      if (id && !ezCaptionDrafts.has(id) && parts[index]) ezCaptionDrafts.set(id, parts[index]);
+    });
+  }
+
+  function ezCaptionsLocked() {
+    return !["Draft", "Ready", ""].includes(String(activeProductionRequest?.status || "Draft"));
+  }
+
+  function item4CaptionField(assetId) {
+    const id = String(assetId || "");
+    if (!id) return "";
+    const value = ezCaptionDrafts.get(id) || "";
+    const locked = ezCaptionsLocked();
+    return `<label class="item4-asset-caption-field item4-variant-caption"><span>Caption</span><textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Caption for this photo"${locked ? " disabled" : ""}>${escapeHtml(value)}</textarea></label>`;
+  }
+
+  function bindEzCaptionInputs(root = document) {
+    root.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
+      if (input.dataset.ezCaptionBound) return;
+      input.dataset.ezCaptionBound = "1";
+      input.addEventListener("input", () => {
+        const id = String(input.dataset.ezAssetCaption || "");
+        ezCaptionDrafts.set(id, input.value);
+        document.querySelectorAll(`[data-ez-asset-caption="${CSS.escape(id)}"]`).forEach((other) => {
+          if (other !== input) other.value = input.value;
+        });
+        const manual = document.querySelector('input[name="ezCaptionMode"][value="manual"]');
+        if (manual) manual.checked = true;
+        queueEzCaptionSave();
+      });
+    });
+  }
+
   function syncEzPlanChrome() {
     const button = $("item4BuildPlan");
     const hint = $("item4PlanHint");
@@ -1107,10 +1145,7 @@
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
     const showCaption = ezManualCaptionsEnabled() && (ezPhotoSetActive() || ezIntakeKind === "single-photo");
-    const captionValue = ezCaptionDrafts.get(String(asset.id || "")) || "";
-    const captionField = showCaption
-      ? `<label class="item4-asset-caption-field"><span>Caption</span><textarea data-ez-asset-caption="${escapeHtml(asset.id)}" rows="2" maxlength="2000" placeholder="Caption for this photo">${escapeHtml(captionValue)}</textarea></label>`
-      : "";
+    const captionField = showCaption ? item4CaptionField(asset.id) : "";
     return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}" data-item4-asset="${escapeHtml(asset.id)}">
       <div class="item4-thumb">${visual}</div>
       <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || "Photo")}</strong><span>Photo ${escapeHtml(asset.order || "")} · ${escapeHtml(dims)}${formatNote}</span></div>
@@ -1134,13 +1169,7 @@
             : `${assets.length} photo${assets.length === 1 ? "" : "s"} processing`;
     }
     if (!host) return;
-    if (ezManualCaptionsEnabled() && assets.length) {
-      const parts = String(activeProductionRequest?.requested_caption || "").split(/\n\n+/);
-      assets.forEach((asset, index) => {
-        const id = String(asset?.id || "");
-        if (id && !ezCaptionDrafts.has(id) && parts[index]) ezCaptionDrafts.set(id, parts[index]);
-      });
-    }
+    hydrateEzCaptionDrafts(status);
     host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">No master photos uploaded yet.</div>';
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => item4BindPreviewImage(img, {
       placeholder: () => {
@@ -1150,12 +1179,7 @@
       },
     }));
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
-    host.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
-      input.addEventListener("input", () => {
-        ezCaptionDrafts.set(String(input.dataset.ezAssetCaption || ""), input.value);
-        queueEzCaptionSave();
-      });
-    });
+    bindEzCaptionInputs(host);
   }
 
   function item4PlanCard(item) {
@@ -1478,6 +1502,7 @@
           <button type="button" class="item4-crop-reset" data-item4-crop-reset="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}">Reset</button>
         </span>
       </div>
+      ${item4CaptionField(assetId)}
     </article>`;
   }
 
@@ -1519,6 +1544,7 @@
     }
     if (!host) return;
     item4HydrateCrops(status);
+    hydrateEzCaptionDrafts(status);
     const ratios = item4PlanRatios(status);
     const assetsReady = Array.isArray(status?.assets) && status.assets.length;
     if (!ratios.length || !assetsReady) {
@@ -1566,6 +1592,7 @@
         item4PersistCrops();
       });
     });
+    bindEzCaptionInputs(host);
   }
 
   function stopItem4MasterPolling() {
