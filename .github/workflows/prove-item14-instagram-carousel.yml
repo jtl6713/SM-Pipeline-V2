@@ -1,0 +1,57 @@
+name: Prove Item 14 Native Instagram Carousel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/prove-item14-instagram-carousel.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read existing Output 126 carousel and AP0C–AP5C contracts without pulsing Make
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python -m py_compile repair/scripts/prove-item14-instagram-carousel.py
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/key.pem \
+            -in /tmp/pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/pat.txt
+          export AIRTABLE_PAT="$(tr -d '\r\n' </tmp/pat.txt)"
+          export ITEM14_EVIDENCE="/tmp/item14-instagram-carousel-proof.json"
+          python repair/scripts/prove-item14-instagram-carousel.py
+          jq -e '.passed == true and .make_scenario_runs == 0 and .public_posts_created == 0 and .ap_car_orch_pulsed == false and .graph.media_type == "CAROUSEL_ALBUM"' \
+            /tmp/item14-instagram-carousel-proof.json >/dev/null
+
+      - name: Upload sanitized Item 14 carousel evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item14-instagram-carousel-${{ github.run_id }}
+          path: /tmp/item14-instagram-carousel-proof.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Destroy transient credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt /tmp/item14-instagram-carousel-proof.json
