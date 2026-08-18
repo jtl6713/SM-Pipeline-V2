@@ -163,7 +163,7 @@ def graph_media(settings, media_id):
     token = settings["FACEBOOK_PAGE_ACCESS_TOKEN"]
     query = urllib.parse.urlencode(
         {
-            "fields": "id,media_type,permalink,children{id,media_type,media_url}",
+            "fields": "id,media_type,permalink,children{id,media_type}",
             "access_token": token,
         }
     )
@@ -228,6 +228,7 @@ def main():
             "permalink": graph.get("permalink"),
             "child_count": len(children),
             "child_media_types": child_types,
+            "error": (graph.get("error") or {}).get("message") if isinstance(graph.get("error"), dict) else graph.get("error"),
         },
         "passed": False,
     }
