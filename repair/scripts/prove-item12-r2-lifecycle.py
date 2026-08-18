@@ -121,16 +121,20 @@ def orchestrators_off(settings):
     return result
 
 
-def wait_for_version(worker):
+def wait_for_version(worker, settings):
     deadline = time.time() + 300
     last = {}
     last_status = 0
+    route_status = 0
     while time.time() < deadline:
         last_status, last = json_http(f"{worker}/health")
-        if last.get("ok") and last.get("version") == WORKER_VERSION:
+        route_status, _ = report(worker, settings, PROOF_PREFIX)
+        if last.get("ok") and last.get("version") == WORKER_VERSION and route_status != 405:
             return last_status, last
         time.sleep(10)
-    raise SystemExit(f"R2 worker version {WORKER_VERSION} not live: {last_status} {last}")
+    raise SystemExit(
+        f"R2 worker version {WORKER_VERSION} not live: health={last_status} {last} report={route_status}"
+    )
 
 
 def auth_headers(settings, extra=None):
@@ -188,7 +192,7 @@ def main():
     orch = orchestrators_off(settings)
     airtable_157 = count_output(pat, 157)
     airtable_151 = count_output(pat, 151)
-    health_status, health = wait_for_version(worker)
+    health_status, health = wait_for_version(worker, settings)
     before_157_status, before_157 = report(worker, settings, ORPHAN_PREFIX)
     put_status, put_payload = put_marker(worker, settings)
     marker_status, marker = head_object(worker, settings, PROOF_KEY)
