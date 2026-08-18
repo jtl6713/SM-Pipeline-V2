@@ -57,7 +57,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.35-ez-config";
+  const BUILD_ID = "item4-0.6.36-ez-configure";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -714,6 +714,24 @@
 
   function setPageContentSimple(on) {
     $("page-content")?.classList.toggle("page-content-simple", Boolean(on));
+  }
+
+  function hideEzFrontDoor() {
+    const fork = $("ezPathFork");
+    const intake = $("ezIntake");
+    const composer = $("ezComposer");
+    if (fork) fork.hidden = true;
+    if (intake) intake.hidden = true;
+    if (composer) composer.hidden = true;
+  }
+
+  function showProductionRequestWorkspace() {
+    ezEntryPath = "configure";
+    ezIntakeKind = null;
+    setPageContentSimple(false);
+    hideEzFrontDoor();
+    const workspace = $("productionRequestWorkspace");
+    if (workspace) workspace.hidden = false;
   }
 
   function showEzFork() {
@@ -2959,8 +2977,7 @@
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
     if (reveal && ezEntryPath !== "content") {
-      setPageContentSimple(false);
-      $("productionRequestWorkspace").hidden = false;
+      showProductionRequestWorkspace();
     } else {
       $("productionRequestWorkspace").hidden = true;
     }
@@ -3000,7 +3017,7 @@
     setProductionRequestControlState(record);
     setRequestMessage();
     const parsed = ezPlanApi()?.parseEzOriginNotes(record.production_notes);
-    if (parsed?.inputKind === "multiple-photos" || parsed?.inputKind === "single-photo") {
+    if (ezEntryPath === "content" && (parsed?.inputKind === "multiple-photos" || parsed?.inputKind === "single-photo")) {
       selectEzInput(parsed.inputKind, { resetPlatforms: false });
       document.querySelectorAll("[data-ez-platform]").forEach((input) => {
         input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
@@ -3011,8 +3028,8 @@
         renderEzCaptionUi();
       }
     }
-    hydrateEzConfigFromRequest(record);
-    setEzAdvancedOpen(!parsed);
+    if (ezEntryPath === "content") hydrateEzConfigFromRequest(record);
+    setEzAdvancedOpen(ezEntryPath !== "content" || !parsed);
   }
 
   async function openProductionRequestForIdea(idea) {
@@ -3032,8 +3049,10 @@
       });
       closeIdeaDrawer();
       activeIdea = idea;
+      ezEntryPath = "configure";
       switchToPage("content");
       populateProductionRequestForm(result.record);
+      showProductionRequestWorkspace();
       await loadProductionRequestOutputs(result.record);
       await loadItem4Workspace(result.record);
       await loadProductionRequests();
@@ -3088,6 +3107,7 @@
     stopItem4VariantPolling();
     clearOutputMatrix();
     setRequestMessage();
+    if (ezEntryPath === "configure") showEzFork();
   });
 
   function productionRequestPayload() {
@@ -3418,9 +3438,14 @@
   }
 
   async function loadContent() {
-    setPageContentSimple(ezEntryPath !== "idea");
-    if (ezEntryPath === "content") enterEzContentPath();
-    else showEzFork();
+    if (ezEntryPath === "content") {
+      setPageContentSimple(true);
+      enterEzContentPath();
+    } else if (ezEntryPath === "configure") {
+      showProductionRequestWorkspace();
+    } else {
+      showEzFork();
+    }
     loadProductionRequests();
     const target = $("contentList");
     target.innerHTML = '<div class="empty">Loading content items…</div>';
