@@ -58,6 +58,9 @@ public/frames/
 *.webp
 *.gif
 
+# Studio Home hero photos (Wikimedia Commons)
+!apps/studio-web/assets/home/*.jpg
+
 # OS / IDE
 .DS_Store
 Thumbs.db

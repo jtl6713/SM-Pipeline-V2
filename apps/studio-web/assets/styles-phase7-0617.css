@@ -620,15 +620,115 @@ input, select, textarea, button {
 .creative-slide-card.title-locked .slide-control-section-title{color:#8a6d1b}
 .creative-editor-shell.title-edit-locked #creativeUnlockTitles{display:inline-flex}
 
-.ez-path-fork{min-height:calc(100vh - 160px);display:grid;place-items:center;padding:48px 24px;border:0;background:transparent;box-shadow:none}
-.ez-path-fork-inner{width:min(760px,100%);display:grid;gap:28px}
-.ez-path-fork-copy h1{margin:6px 0 8px;font-size:2rem}
-.ez-path-fork-copy p{margin:0;color:var(--muted);font-size:1rem}
-.ez-path-fork-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.ez-path-choice{border:1px solid var(--line);border-radius:18px;background:#fff;padding:28px 24px;min-height:200px;text-align:left;display:flex;flex-direction:column;gap:12px;cursor:pointer;font:inherit;color:var(--ink)}
-.ez-path-choice strong{font-size:1.35rem}
-.ez-path-choice span{font-size:.95rem;line-height:1.45;color:var(--muted)}
-.ez-path-choice:hover{border-color:var(--teal);background:var(--teal-soft)}
+.main:has(#page-home.active){padding:0;background:#06161c}
+#page-home.page.active{min-height:calc(100vh - 72px)}
+.ez-path-fork{
+  position:relative;
+  isolation:isolate;
+  min-height:calc(100vh - 72px);
+  display:grid;
+  place-items:center;
+  padding:56px 28px 40px;
+  overflow:hidden;
+  border:0;
+  border-radius:0;
+  background:#06161c;
+  box-shadow:none;
+  color:#f7f4ea
+}
+.ez-path-fork::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background-image:
+    linear-gradient(115deg,rgba(6,22,28,.82) 0%,rgba(8,125,121,.42) 38%,rgba(16,44,48,.48) 62%,rgba(6,22,28,.78) 100%),
+    url("/assets/home/chicago-skyline-dusk.jpg");
+  background-size:cover;
+  background-position:center 38%;
+  transform:scale(1.05);
+  z-index:0
+}
+.ez-path-fork::after{
+  content:"";
+  position:absolute;
+  inset:auto 0 0 0;
+  height:42%;
+  background:linear-gradient(180deg,transparent,rgba(216,170,69,.16));
+  z-index:0;
+  pointer-events:none
+}
+.ez-path-fork-inner{position:relative;z-index:1;width:min(880px,100%);display:grid;gap:32px}
+.ez-path-fork-copy{max-width:640px}
+.ez-path-fork-copy .eyebrow{color:var(--gold)}
+.ez-path-fork-copy h1{margin:8px 0 10px;font-size:clamp(2rem,4vw,3rem);color:#fff;text-shadow:0 8px 28px rgba(0,0,0,.35)}
+.ez-path-fork-copy p{margin:0;color:rgba(247,244,234,.86);font-size:1.05rem;line-height:1.5;text-shadow:0 2px 12px rgba(0,0,0,.35)}
+.ez-path-fork-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;perspective:1100px}
+.ez-path-choice{
+  position:relative;
+  border:0;
+  border-radius:22px;
+  padding:0;
+  min-height:280px;
+  text-align:left;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  cursor:pointer;
+  font:inherit;
+  color:#f7f4ea;
+  background:#0b2c32;
+  transform:translateY(0) rotateX(0);
+  transform-style:preserve-3d;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.28) inset,
+    0 14px 0 #041416,
+    0 28px 36px rgba(0,0,0,.42);
+  transition:transform .18s ease,box-shadow .18s ease
+}
+.ez-path-choice-visual{
+  flex:1;
+  min-height:158px;
+  background-size:cover;
+  background-position:center;
+  position:relative
+}
+.ez-path-choice-visual::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:linear-gradient(180deg,rgba(8,125,121,.16),rgba(6,22,28,.55))
+}
+.ez-path-choice--idea .ez-path-choice-visual{background-image:url("/assets/home/chicago-cloud-gate.jpg")}
+.ez-path-choice--content .ez-path-choice-visual{background-image:url("/assets/home/chicago-theatre.jpg")}
+.ez-path-choice--content .ez-path-choice-visual::after{background:linear-gradient(180deg,rgba(216,170,69,.22),rgba(6,22,28,.58))}
+.ez-path-choice-body{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:18px 20px 20px;
+  background:linear-gradient(180deg,rgba(8,30,36,.28),rgba(6,22,28,.78));
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px)
+}
+.ez-path-choice strong{font-size:1.38rem;color:#fff}
+.ez-path-choice-body>span{font-size:.95rem;line-height:1.45;color:rgba(247,244,234,.86)}
+.ez-path-choice:hover{
+  transform:translateY(-12px) rotateX(4deg);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.34) inset,
+    0 18px 0 #075b58,
+    0 40px 48px rgba(0,0,0,.48)
+}
+.ez-path-choice--content:hover{box-shadow:0 1px 0 rgba(255,255,255,.34) inset,0 18px 0 #8d6b1e,0 40px 48px rgba(0,0,0,.48)}
+.ez-path-choice:active{
+  transform:translateY(-3px) rotateX(1deg);
+  box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 8px 0 #041416,0 16px 22px rgba(0,0,0,.4)
+}
+.ez-path-choice:focus-visible{outline:3px solid var(--gold);outline-offset:4px}
+.ez-path-fork-credit{margin:0;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:rgba(247,244,234,.62);font-weight:750}
+@media(prefers-reduced-motion:reduce){
+  .ez-path-choice,.ez-path-choice:hover,.ez-path-choice:active{transform:none;transition:none}
+}
 .text-button{border:0;background:transparent;color:var(--teal-dark);font:inherit;font-weight:800;padding:0;cursor:pointer;width:fit-content}
 .text-button:hover{text-decoration:underline}
 .ez-intake-heading{align-items:flex-start}
@@ -663,7 +763,10 @@ input, select, textarea, button {
 .ez-audio-hint{font-style:normal;font-size:.72rem;font-weight:600;color:var(--muted)}
 .page-content-simple .ez-busy-panel{display:none}
 @media(max-width:760px){
+  .ez-path-fork{padding:36px 16px 28px;min-height:calc(100vh - 128px)}
   .ez-path-fork-grid{grid-template-columns:1fr}
+  .ez-path-choice{min-height:240px}
+  .ez-path-choice:hover,.ez-path-choice:active{transform:translateY(-6px)}
   .ez-structure-grid,.ez-output-matrix{grid-template-columns:1fr}
 }
 .ez-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 20px 12px}
