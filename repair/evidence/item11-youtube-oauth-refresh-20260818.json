@@ -1,0 +1,25 @@
+{
+  "repair_item": 11,
+  "checkpoint": "oauth-refresh-no-republish",
+  "timestamp_utc": "2026-08-18T00:15:32Z",
+  "status": "PASS_TOKEN_REFRESH_AND_PRIVATE_VIDEO_READ",
+  "github_run_id": 32083795151,
+  "github_run_url": "https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32083795151",
+  "deployed_commit": "73d8935acee4dfe6b21b84cea3621034267b4a07",
+  "uploader_version": "2026-08-18-oauth-status",
+  "yt_orch_active": false,
+  "make_scenario_runs": 0,
+  "upload_attempted": false,
+  "oauth": {
+    "refresh_ok": true,
+    "truncated": false,
+    "refresh_token_length": 103,
+    "access_token_expires_in": 3599
+  },
+  "video": {
+    "id": "4HAhk2Lg7GE",
+    "privacyStatus": "private",
+    "title": "Chicago River at Sunset is Pure Magic"
+  },
+  "remaining_operator_action": "Google Cloud Console → APIs & Services → OAuth consent screen → Publish app (In production). Testing-mode refresh tokens expire after 7 days. YouTube upload is a sensitive scope, so Google may show an unverified-app warning until verification; publishing still stops the 7-day Testing expiry."
+}
