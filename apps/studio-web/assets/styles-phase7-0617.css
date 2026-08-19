@@ -804,4 +804,7 @@ input, select, textarea, button {
 @media(max-width:760px){
   .ez-card-grid,.ez-composer-grid,.ez-audio-toggles{grid-template-columns:1fr}
 }
+#outputsList .data-table tbody tr.pipeline-open-row{cursor:pointer}
+#outputsList .data-table tbody tr.pipeline-open-row:hover{background:#f3fbfa}
+#outputsList .data-table tbody tr.pipeline-open-row:focus{outline:2px solid var(--teal);outline-offset:-2px}
 

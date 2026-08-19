@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.11-tiktok-single-photo-plan",
+          version: "0.10.12-pipeline-photo-review",
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
@@ -993,6 +993,24 @@ function cleanMusicDisplayName(name) {
   return value || String(name || "Untitled track");
 }
 
+function selectedVisualClips(record) {
+  const parsed = phase6ParseJson(f(record, "Selected_Assets_JSON"), null);
+  if (!parsed || typeof parsed !== "object") return [];
+  if (Array.isArray(parsed.selected_clips) && parsed.selected_clips.length) return parsed.selected_clips;
+  if (Array.isArray(parsed.clips) && parsed.clips.length) return parsed.clips;
+  return [];
+}
+
+function outputCreativeAvailable(record) {
+  return Boolean(
+    (f(record, "Carousel Slides") || []).length ||
+    f(record, "Creative_Render_Manifest_JSON") ||
+    f(record, "Final_File_URL") ||
+    f(record, "Studio_Preview_URL") ||
+    selectedVisualClips(record).length
+  );
+}
+
 function mapOutput(record) {
   const studioState = normalizedOutputState(record);
   return {
@@ -1013,6 +1031,7 @@ function mapOutput(record) {
     auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
     do_not_publish: Boolean(f(record, "Do_Not_Publish")),
     final_file_url: f(record, "Final_File_URL"),
+    studio_preview_url: f(record, "Studio_Preview_URL"),
     output_url: f(record, "Output_URL"),
     platform_post_url: f(record, "Platform_Post_URL"),
     published_at: f(record, "Published_At"),
@@ -1027,7 +1046,7 @@ function mapOutput(record) {
     content_item_links: f(record, "Content_Item") || [],
     carousel_slide_links: f(record, "Carousel Slides") || [],
     creative_manifest_present: Boolean(f(record, "Creative_Render_Manifest_JSON")),
-    creative_available: Boolean((f(record, "Carousel Slides") || []).length || f(record, "Creative_Render_Manifest_JSON")),
+    creative_available: outputCreativeAvailable(record),
   };
 }
 
@@ -7809,8 +7828,78 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
   };
 }
 
+function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
+  const parsed = phase6ParseJson(f(outputRecord, "Selected_Assets_JSON"), null) || {};
+  const clips = selectedVisualClips(outputRecord);
+  const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
+  const fps = Number(parsed.fps || 30) || 30;
+  const title = phase6Text(parsed?.render_prep?.title_text || f(outputRecord, "Output_Title"), 1000);
+  return clips.map((clip, index) => {
+    const url = clip.url || clip.src || clip.google_drive_url || null;
+    const durationFrames = Number(clip.durationFrames || clip.duration_frames || 0);
+    const durationSeconds = durationFrames > 0 ? durationFrames / fps : Number(clip.recommended_duration_seconds || 4);
+    const variants = { "4:5": null, "9:16": null, "1:1": null, "16:9": null };
+    if (ratio && url) variants[ratio] = url;
+    return {
+      id: clip.id || `virtual-source-${index + 1}`,
+      name: clip.asset_name || clip.assetName || `Photo ${index + 1}`,
+      slide_number: index + 1,
+      order: Number(clip.order || index + 1),
+      is_cover: index === 0,
+      review_status: null,
+      include: true,
+      duration_seconds: durationSeconds,
+      focal_point: "center",
+      fit_mode: "fill_crop",
+      safe_area_aware: true,
+      overlay: {
+        enabled: Boolean(title),
+        text: title,
+        style_preset: "Chicago Editorial",
+        role: "overlay",
+        position: String(f(outputRecord, "Platform") || "") === "TikTok" && ratio === "9:16" ? "lower-third" : "center",
+        size: 64,
+        version: 1,
+        eyebrow: "",
+        subtitle: "",
+        caption: "",
+        accent_text: "",
+        brand: phase6Text(parsed?.render_prep?.brand_text, 250),
+        background_opacity: 0.4,
+        animation: "fade",
+        start_fraction: 0,
+        end_fraction: 1,
+      },
+      voice_prep_request_id: null,
+      voiceover: {
+        enabled: false,
+        text: "",
+        voice_id: PHASE6_DEFAULT_VOICE_ID,
+        voice: "Kate",
+        url: null,
+        duration_seconds: null,
+        status: "Not Requested",
+        volume_override: null,
+        volume: 1,
+      },
+      motion: { type: "none" },
+      transition: { type: "fade", duration_frames: 12 },
+      preview_url: url,
+      current_image_url: url,
+      final_image_url: url,
+      variants,
+      exact_variant_available: Boolean(ratio && variants[ratio]),
+      tiktok_safe_zone_status: null,
+      tiktok_safe_zone_notes: null,
+      creative_directives_raw: null,
+      virtual: true,
+    };
+  }).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+}
+
 async function phase6SlidesForOutput(env, outputRecord) {
   const ids = Array.isArray(f(outputRecord, "Carousel Slides")) ? f(outputRecord, "Carousel Slides") : [];
+  if (!ids.length) return phase6VirtualSlidesFromSelectedAssets(outputRecord);
   const records = await Promise.all(ids.map(id => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
   const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
   const platform = String(f(outputRecord, "Platform") || "").trim();
@@ -8184,6 +8273,8 @@ function mapPhase6CreativeOutput(record) {
     studio_preview_url: f(record, "Studio_Preview_URL"),
     studio_preview_updated_at: f(record, "Studio_Preview_Updated_At"),
     remotion_job_id: f(record, "Remotion_Job_ID"),
+    output_caption: f(record, "Output_Caption"),
+    output_hashtags: f(record, "Output_Hashtags"),
     voiceover: {
       volume: phase6Clamp(f(record, "Voiceover_Volume"), 0, 1.25, 1),
     },

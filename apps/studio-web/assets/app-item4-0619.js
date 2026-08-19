@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.46-pipeline-poll";
+  const BUILD_ID = "item4-0.6.47-pipeline-review";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -4023,8 +4023,9 @@
   };
 
   const PHASE6_BUTTON_HELP = {
+    "Open review": "Open this output to watch the render, see the photo package, and read the caption.",
     "Open editor": "Open the Phase 6 creative review editor for this output.",
-    "Not editable here": "This output does not currently have a photo/slide package available in the creative editor.",
+    "Not ready yet": "This output does not have a rendered file or photo package to review yet.",
   };
 
   let phase6TooltipPopover = null;
@@ -4133,14 +4134,19 @@
 
   function renderCreativeOutputMeta(output) {
     const target = $("creativeOutputMeta");
-    target.innerHTML = [
+    const watchUrl = output.studio_preview_url || output.final_file_url || output.output_url || "";
+    const rows = [
       ["Platform", output.platform || "—"],
       ["Output type", output.platform_output_type || output.format || "—"],
       ["Ratio", output.aspect_ratio || "—"],
       ["Render", output.render_status || "—"],
       ["Review", output.review_status || "—"],
       ["Publish safety", output.do_not_publish ? "Do Not Publish" : "Publishing enabled"],
-    ].map(([label, v]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(v)}</b></div>`).join("");
+    ];
+    if (output.output_caption) rows.push(["Caption", output.output_caption]);
+    if (output.output_hashtags) rows.push(["Hashtags", output.output_hashtags]);
+    target.innerHTML = rows.map(([label, v]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(v)}</b></div>`).join("")
+      + (watchUrl ? `<div><span>File</span><b><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(watchUrl)}">Open rendered file ↗</a></b></div>` : "");
   }
 
   function renderCreativeRatioPanel() {
@@ -4504,7 +4510,11 @@
     drive.hidden = true;
 
     const fileId = output.final_file_id || phase6DriveFileId(output.final_file_url) || phase6DriveFileId(output.output_url);
-    if (!fileId && !output.final_file_url) {
+    const directPreview = output.studio_preview_url || "";
+    if (!fileId && !output.final_file_url && !directPreview) {
+      empty.textContent = String(output.render_status || "").toLowerCase().includes("native photo")
+        ? "Native photo route — review the stills below. No Remotion MP4."
+        : "No rendered preview is available yet.";
       empty.hidden = false;
       return;
     }
@@ -4525,8 +4535,9 @@
       drive.hidden = false;
     };
 
-    if (output.id) {
-      video.src = `/api/outputs/${encodeURIComponent(output.id)}/preview`;
+    const playableSrc = directPreview || (output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "");
+    if (playableSrc) {
+      video.src = playableSrc;
       video.hidden = false;
       video.onerror = fallbackToDrive;
       video.onloadedmetadata = () => {
@@ -4552,10 +4563,10 @@
     $("creativeEditorSubtitle").textContent = `${output.platform_output_type || output.format || "Photo sequence"}${output.aspect_ratio ? ` · ${output.aspect_ratio}` : ""} · creative review`;
     $("creativeSafetyBadge").textContent = output.do_not_publish
       ? (titleLocked ? "Titles locked" : "Publishing locked")
-      : "Editing locked";
-    $("creativeSafetyBadge").className = `badge ${output.do_not_publish ? "ready-for-review" : "failed"}`;
+      : "Watch-only review";
+    $("creativeSafetyBadge").className = "badge ready-for-review";
     $("creativeSafetyBanner").innerHTML = !output.do_not_publish
-      ? '<strong>Creative editing locked.</strong> This output is not currently in a safe review-only state.'
+      ? "<strong>Watch-only review.</strong> Play the render and confirm the photo and caption here. Save, rerender, and Approve in this editor stay locked for production posts until that path is enabled."
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
         : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
@@ -4829,12 +4840,28 @@
       const pct = r.studio_progress_percent ?? r.youtube_processing_progress_percent ?? r.youtube_upload_progress_percent;
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
-      const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${r.creative_available ? "" : "disabled"}>${r.creative_available ? "Open editor" : "Not editable here"}</button></td>` : "";
-      return `<tr><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(r.studio_state)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
+      const canOpen = Boolean(r.creative_available);
+      const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"}>${canOpen ? "Open review" : "Not ready yet"}</button></td>` : "";
+      const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
+      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(r.studio_state)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
     }).join("")}</tbody></table>`;
     if (isPipeline) {
       target.querySelectorAll("[data-creative-output-id]").forEach((button) => {
-        button.addEventListener("click", () => openCreativeEditor(button.dataset.creativeOutputId));
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openCreativeEditor(button.dataset.creativeOutputId);
+        });
+      });
+      target.querySelectorAll("[data-open-output-id]").forEach((row) => {
+        row.addEventListener("click", (event) => {
+          if (event.target.closest("a, button")) return;
+          openCreativeEditor(row.dataset.openOutputId);
+        });
+        row.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          openCreativeEditor(row.dataset.openOutputId);
+        });
       });
       phase6DecorateTooltips(target);
     }
@@ -4853,6 +4880,8 @@
       r.platform_publish_status || r.publish_status,
       r.studio_progress_percent ?? r.youtube_processing_progress_percent ?? r.youtube_upload_progress_percent,
       r.creative_available,
+      r.final_file_url,
+      r.studio_preview_url,
     ]));
   }
 

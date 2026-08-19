@@ -5,3 +5,5 @@ Deploy current main source through the proven non-live candidate -> core binding
 Purpose of this run: promote the exact SMV1 Test Mode selector pulse. Test processing must refuse active-scenario seizure, require the owning Production Request and every queue row to share the exact Test_Run_ID, temporarily address only that request/test identity, and restore the production-only selector on every exit path.
 
 Purpose of this run: ship worker 0.10.11 so single-photo TikTok Multi-Photo is canonicalized into the Item 4 plan and enabled outputs cannot block Approve & Promote. Source commit aacb49d. No Make activation.
+
+Purpose of this run: ship worker 0.10.12 so Pipeline photo/render review opens from the output row using Selected_Assets_JSON, Final_File_URL, or Studio_Preview_URL. No Make activation.
