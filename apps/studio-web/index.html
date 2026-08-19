@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.53-review-deliverable">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.55-review-audio-mix">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.53</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.55</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -773,7 +773,7 @@
  <label class="toggle-control"><input type="checkbox" id="creativeDuckingEnabled" checked><span>Duck music during narration</span></label>
  <label class="form-field compact"><span>Duck ramp (frames)</span><input type="number" id="creativeDuckFadeFrames" min="0" max="90" step="1" value="6"></label>
  </div>
- <div class="audio-help">100% voiceover is the current proven render level. A slide can optionally override it below. Changes apply to the next preview render; they do not alter the current video in-place.</div>
+ <div class="audio-help" id="creativeAudioHelp">100% voiceover is the current proven render level. A slide can optionally override it below. Changes apply to the next preview render; they do not alter the current video in-place.</div>
  </section>
 
  <section class="creative-ratio-card" id="creativeRatioSection">
@@ -803,7 +803,7 @@
  <span class="creative-change-progress-state" id="creativeChangeProgressState">Idle</span>
  </div>
  <div class="creative-change-progress-steps" id="creativeChangeProgressSteps"></div>
- <div class="creative-change-progress-detail" id="creativeChangeProgressDetail">Save and request changes to begin a new preview revision.</div>
+ <div class="creative-change-progress-detail" id="creativeChangeProgressDetail">Adjust music and voiceover, then apply the mix to render a new preview.</div>
  </section>
 
  <div class="form-message" id="creativeEditorMessage" aria-live="polite"></div>
@@ -811,7 +811,7 @@
  <div class="creative-editor-actions">
  <div class="creative-action-explainer">
  <strong>Choose what happens next</strong>
- <span>Save draft stores edits only. Unlock titles if an approved preview has locked them. Save &amp; rerender creates a new preview. Approve for publishing queues Instagram and Facebook to auto-publish and TikTok as a draft. Email approval still works the same way.</span>
+ <span>Save draft stores edits only on validation posts. On production review, adjust the mix and Apply mix &amp; rerender. The progress panel shows Processing, then Ready when the new preview exists. Approve for publishing queues Instagram and Facebook to auto-publish and TikTok as a draft.</span>
  </div>
  <button type="button" class="secondary-button" id="reloadCreativeEditor">Reset unsaved edits</button>
  <div class="creative-editor-action-group">
@@ -954,7 +954,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.53-review-deliverable"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.53-review-deliverable"></script>
+ <script src="/assets/ez-plan.js?v=0.6.55-review-audio-mix"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.55-review-audio-mix"></script>
 </body>
 </html>

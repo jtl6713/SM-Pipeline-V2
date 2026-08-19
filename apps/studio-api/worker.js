@@ -96,10 +96,14 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.16-remotion-handoff",
+          version: "0.10.19-review-audio-mix",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
+          studio_music_catalog_fallback_v1: true,
+          studio_music_item_voiceover_v1: true,
+          studio_review_audio_mix_v1: true,
+          "0.10.10-elevenlabs-v2-catalog": true,
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
@@ -4983,27 +4987,65 @@ async function productionProfileDefaultsForParentContentItem(env, parentContentI
   }
 }
 
+function emptyStudioMusic() {
+  return {
+    record_id: null,
+    url: null,
+    google_drive_file_id: null,
+    name: null,
+  };
+}
+
+function studioMusicFromMediaRecord(record) {
+  if (!record?.id) return emptyStudioMusic();
+  const fileId = googleDriveFileId(record);
+  return {
+    record_id: record.id,
+    url: stringOrNull(f(record, "Google Drive URL")) || (fileId ? googleDriveDownloadUrl(fileId) : null),
+    google_drive_file_id: fileId,
+    name: stringOrNull(f(record, "Asset Name")),
+  };
+}
+
 async function preferredMusicForProductionRequestOutput(env, outputRow, requestRecord) {
   const overrideLinks = arrayOrEmpty(f(outputRow, "Selected_Music_Asset_Override"));
   const masterLinks = arrayOrEmpty(f(requestRecord, "Selected_Music_Asset"));
   const recordId = overrideLinks[0] || masterLinks[0] || null;
 
-  if (!recordId) {
-    return {
-      record_id: null,
-      url: null,
-      google_drive_file_id: null,
-      name: null,
-    };
-  }
+  if (!recordId) return emptyStudioMusic();
 
   const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
-  return {
-    record_id: recordId,
-    url: stringOrNull(f(media, "Google Drive URL")),
-    google_drive_file_id: stringOrNull(f(media, "Google Drive File ID")),
-    name: stringOrNull(f(media, "Asset Name")),
+  return studioMusicFromMediaRecord(media);
+}
+
+async function catalogFallbackMusic(env) {
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: 50,
+    filterFormula: "AND({Asset_Role}='Music',NOT({Do_Not_Use}))",
+  });
+  const usable = records.filter((record) => Boolean(studioMusicFromMediaRecord(record).url));
+  if (!usable.length) return emptyStudioMusic();
+
+  const score = (record) => {
+    const name = String(f(record, "Asset Name") || "").toLowerCase();
+    let value = 0;
+    if (name.includes("cinematic")) value += 80;
+    if (name.includes("drone")) value += 40;
+    if (name.includes("epic")) value += 30;
+    if (name.includes("night") || name.includes("city")) value += 20;
+    if (name.includes("yoga") || name.includes("meditat") || name.includes("harp")) value -= 40;
+    return value;
   };
+
+  return studioMusicFromMediaRecord(usable.sort((a, b) => score(b) - score(a))[0]);
+}
+
+async function resolveStudioRenderMusic(env, outputRow, requestRecord, effective) {
+  const preferred = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord);
+  if (preferred.url) return preferred;
+  const mode = String(effective?.background_music_mode || "").trim().toLowerCase();
+  if (mode !== "yes") return preferred;
+  return catalogFallbackMusic(env);
 }
 
 function outputEffectiveChoice(outputRow, overrideField, requestRecord, requestField, fallback) {
@@ -5205,7 +5247,7 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
     scheduled_at: f(outputRow, "Scheduled_At") || null,
   };
 
-  effective.music = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord);
+  effective.music = await resolveStudioRenderMusic(env, outputRow, requestRecord, effective);
   const ezOrigin = String(f(requestRecord, "Production_Notes") || "").includes("origin=ez-button");
   if (ezOrigin) {
     const thumbnailOverride = String(f(outputRow, "Thumbnail_Mode_Override") || "Inherit").trim() || "Inherit";
@@ -5314,8 +5356,8 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     output_filename: outputFilename,
     title_text: titleText,
     brand_text: brandText,
-    music_url: "",
-    music_volume: 0.12,
+    music_url: String(effective?.music?.url || "").trim(),
+    music_volume: String(effective?.music?.url || "").trim() ? 0.24 : 0,
     render_total_frames: totalFrames,
     render_clip_count: clips.length,
     compatibility_clip_1_url: clips[0]?.url || "",
@@ -5328,7 +5370,9 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     remotion_props_json: "",
     validation_passed: true,
     validation_errors_text: "",
-    prep_notes: "Studio exact-source visual package. Owner-uploaded prepared variants are immutable; R2 may choose music but must not replace, reorder, or substitute these visuals.",
+    prep_notes: String(effective?.music?.url || "").trim()
+      ? "Studio exact-source visual package. Owner-uploaded prepared variants are immutable. Music is locked from the selected track or catalog fallback so Remotion handoff can render without waiting on R2."
+      : "Studio exact-source visual package. Owner-uploaded prepared variants are immutable; R2 may choose music but must not replace, reorder, or substitute these visuals.",
   };
   const selected = {
     schema_version: "studio.source-selection.2",
@@ -5594,6 +5638,10 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Studio_Effective_Carousel_Image_Mode: effective.carousel_image_mode,
     Preferred_Music_Media_Asset_ID: effective.music?.record_id || null,
     Preferred_Music_URL: effective.music?.url || null,
+    Music_URL: effective.music?.url || null,
+    Selected_Music_URL: effective.music?.url || null,
+    Selected_Music_Media_Asset_ID: effective.music?.record_id || null,
+    Music_Volume: effective.music?.url ? 0.24 : 0,
   };
 }
 
@@ -7815,6 +7863,74 @@ function phase6Clamp(value, min, max, fallback) {
   return Math.max(min, Math.min(max, n));
 }
 
+function phase6ResolvedVoiceoverVolume(record, fallback = 1) {
+  const primary = f(record, "Voiceover_Volume");
+  const render = f(record, "Voiceover_Render_Volume");
+  return phase6Clamp(primary == null || primary === "" ? render : primary, 0, 1.25, fallback);
+}
+
+function phase6AudioMixFieldsFromPayload(payload, current) {
+  const audio = payload?.audio && typeof payload.audio === "object" ? payload.audio : {};
+  const voiceoverVolume = phase6Clamp(audio.voiceover_volume, 0, 1.25, current?.voiceover?.volume ?? 1);
+  const normal = phase6Clamp(audio.normal_volume, 0, 1, current?.music?.normal_volume ?? 0.24);
+  const ducked = phase6Clamp(audio.ducked_volume, 0, 1, current?.music?.ducked_volume ?? 0.084);
+  const duckEnabled = phase6Bool(audio.ducking_enabled, current?.music?.ducking_enabled !== false);
+  const duckFade = Math.round(phase6Clamp(audio.duck_fade_frames, 0, 90, current?.music?.duck_fade_frames ?? 6));
+  if (duckEnabled && ducked > normal) {
+    throw new HttpError(400, "Ducked music volume cannot be greater than normal music volume while ducking is enabled");
+  }
+  return {
+    Voiceover_Volume: voiceoverVolume,
+    Voiceover_Render_Volume: voiceoverVolume,
+    Music_Volume: normal,
+    Music_Ducked_Volume: ducked,
+    Music_Ducking_Enabled: duckEnabled,
+    Music_Duck_Fade_Frames: duckFade,
+  };
+}
+
+function phase6ProductionMixAction(action) {
+  return ["apply_audio_mix", "apply_mix", "remix", "changes", "changes_requested", "revise", "revision"].includes(String(action || ""));
+}
+
+function phase6AssertProductionAudioMixAllowed(record) {
+  if (Boolean(f(record, "Do_Not_Publish"))) {
+    throw new HttpError(409, "Do_Not_Publish outputs use the full creative editor, not production mix revision");
+  }
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  const reviewStatus = String(f(record, "Review_Status") || "").trim();
+  const publishStatus = String(f(record, "Publish_Status") || "").trim();
+  const renderStatus = String(f(record, "Render_Status") || "").trim();
+  if (reviewStatus === "Approved" || outputStatus === "Approved for Publishing" || ["Published", "Publishing", "Scheduled"].includes(publishStatus)) {
+    throw new HttpError(409, "This output is already in publishing and cannot have its mix changed from review");
+  }
+  if (renderStatus === "Rendering") {
+    throw new HttpError(409, "A render is already in progress. Wait until it finishes before applying a new mix.");
+  }
+  const composition = String(f(record, "Composition_ID") || "").trim();
+  const filename = String(f(record, "Output_Filename") || "").trim();
+  const clips = String(f(record, "Render_Clip_List_JSON") || "").trim();
+  if (!composition || !filename || !clips) {
+    throw new HttpError(409, "This output does not have a render package yet, so the mix cannot be rerendered from review.");
+  }
+  const statusOk = ["Ready for Review", "In Production"].includes(outputStatus)
+    || ["Review Sent", "Changes Requested"].includes(reviewStatus);
+  if (!statusOk) {
+    throw new HttpError(409, "Audio mix can be changed only while this output is in review");
+  }
+}
+
+function phase6AllowsProductionMixContinuation(record) {
+  const renderStatus = String(f(record, "Render_Status") || "");
+  const reviewStatus = String(f(record, "Review_Status") || "");
+  const outputStatus = String(f(record, "Output_Status") || "");
+  if (reviewStatus === "Changes Requested") return true;
+  if (["Ready for Render", "Rendering"].includes(renderStatus)) return true;
+  if (renderStatus === "Rendered" && phase6CurrentRenderStartedAfterReview(record)) return true;
+  if (outputStatus === "In Production" && !phase6PreviewFulfillsCurrentReview(record)) return true;
+  return false;
+}
+
 function phase6Bool(value, fallback = false) {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "boolean") return value;
@@ -7955,17 +8071,21 @@ function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
         end_fraction: 1,
       },
       voice_prep_request_id: null,
-      voiceover: {
-        enabled: false,
-        text: "",
-        voice_id: PHASE6_DEFAULT_VOICE_ID,
-        voice: "Kate",
-        url: null,
-        duration_seconds: null,
-        status: "Not Requested",
-        volume_override: null,
-        volume: 1,
-      },
+      voiceover: (() => {
+        const itemVoiceoverUrl = String(f(outputRecord, "Voiceover_URL") || "").trim();
+        const itemVoiceoverOn = String(f(outputRecord, "Studio_Effective_Voiceover_Mode") || "").trim() === "Yes" || Boolean(itemVoiceoverUrl);
+        return {
+          enabled: itemVoiceoverOn,
+          text: "",
+          voice_id: PHASE6_DEFAULT_VOICE_ID,
+          voice: String(f(outputRecord, "Voice_Name") || "Kate"),
+          url: itemVoiceoverUrl || null,
+          duration_seconds: null,
+          status: itemVoiceoverUrl ? "Item voiceover" : (itemVoiceoverOn ? "Requested" : "Not Requested"),
+          volume_override: null,
+          volume: phase6ResolvedVoiceoverVolume(outputRecord),
+        };
+      })(),
       motion: { type: "none" },
       transition: { type: "fade", duration_frames: 12 },
       preview_url: url,
@@ -7987,7 +8107,7 @@ async function phase6SlidesForOutput(env, outputRecord) {
   const records = await Promise.all(ids.map(id => airtableFetch(env, PHASE6_CAROUSEL_SLIDES_TABLE, id)));
   const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
   const platform = String(f(outputRecord, "Platform") || "").trim();
-  const defaultVoiceoverVolume = phase6Clamp(f(outputRecord, "Voiceover_Volume"), 0, 1.25, 1);
+  const defaultVoiceoverVolume = phase6ResolvedVoiceoverVolume(outputRecord);
   return records.map(record => mapPhase6CreativeSlide(record, ratio, defaultVoiceoverVolume, platform))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 }
@@ -8360,7 +8480,12 @@ function mapPhase6CreativeOutput(record) {
     output_caption: f(record, "Output_Caption"),
     output_hashtags: f(record, "Output_Hashtags"),
     voiceover: {
-      volume: phase6Clamp(f(record, "Voiceover_Volume"), 0, 1.25, 1),
+      volume: phase6ResolvedVoiceoverVolume(record),
+      url: f(record, "Voiceover_URL") || null,
+      mode: f(record, "Studio_Effective_Voiceover_Mode") || null,
+      status: f(record, "Voiceover_URL")
+        ? "Item voiceover"
+        : (String(f(record, "Studio_Effective_Voiceover_Mode") || "").trim() === "Yes" ? "Requested" : "Not Requested"),
     },
     music: {
       normal_volume: normal,
@@ -8502,22 +8627,36 @@ async function updateOutputCreative(request, env, url, authorization) {
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const id = phase6RecordIdFromPath(url);
   const existingOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-
-  // Phase 6 initial validation remains deliberately review-only.
-  if (!Boolean(f(existingOutput, "Do_Not_Publish"))) {
-    throw new HttpError(409, "Phase 6 creative editing is limited to Do_Not_Publish outputs during controlled validation");
-  }
-
   const current = mapPhase6CreativeOutput(existingOutput);
-  const audio = payload?.audio && typeof payload.audio === "object" ? payload.audio : {};
-  const voiceoverVolume = phase6Clamp(audio.voiceover_volume, 0, 1.25, current.voiceover?.volume ?? 1);
-  const normal = phase6Clamp(audio.normal_volume, 0, 1, current.music.normal_volume ?? 0.24);
-  const ducked = phase6Clamp(audio.ducked_volume, 0, 1, current.music.ducked_volume ?? 0.084);
-  const duckEnabled = phase6Bool(audio.ducking_enabled, current.music.ducking_enabled !== false);
-  const duckFade = Math.round(phase6Clamp(audio.duck_fade_frames, 0, 90, current.music.duck_fade_frames ?? 6));
-  if (duckEnabled && ducked > normal) {
-    throw new HttpError(400, "Ducked music volume cannot be greater than normal music volume while ducking is enabled");
+
+  // Production review posts can save mix levels only. Slide/title editing stays locked.
+  if (!Boolean(f(existingOutput, "Do_Not_Publish"))) {
+    phase6AssertProductionAudioMixAllowed(existingOutput);
+    if (payload?.unlock_titles === true) {
+      throw new HttpError(409, "Title edits stay locked on production review posts. Adjust the audio mix only.");
+    }
+    const outputFields = phase6AudioMixFieldsFromPayload(payload, current);
+    if (typeof payload?.review_notes === "string") {
+      outputFields.Review_Notes = phase6Text(payload.review_notes, 10000) || null;
+    }
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: outputFields, typecast: false }),
+    });
+    const refreshedOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+    const slides = await phase6SlidesForOutput(env, refreshedOutput);
+    return respond(request, env, {
+      ok: true,
+      saved: true,
+      audio_only: true,
+      record: mapPhase6CreativeOutput(refreshedOutput),
+      slides: phase6SlidesWithTitleRenderInput(refreshedOutput, slides),
+      title_lock: phase6TitleLockView(refreshedOutput, slides),
+      message: "Audio mix saved. Apply mix & rerender to hear it on a new preview.",
+    });
   }
+
+  const outputFields = phase6AudioMixFieldsFromPayload(payload, current);
 
   const creativeSettings = payload?.creative_settings && typeof payload.creative_settings === "object"
     ? payload.creative_settings : current.creative_settings || {};
@@ -8531,15 +8670,7 @@ async function updateOutputCreative(request, env, url, authorization) {
     savedBy: authorization?.email || null,
     title_lock: existingTitleLock,
   };
-
-  const outputFields = {
-    Voiceover_Volume: voiceoverVolume,
-    Music_Volume: normal,
-    Music_Ducked_Volume: ducked,
-    Music_Ducking_Enabled: duckEnabled,
-    Music_Duck_Fade_Frames: duckFade,
-    Studio_Creative_Settings_JSON: JSON.stringify(settingsSnapshot),
-  };
+  outputFields.Studio_Creative_Settings_JSON = JSON.stringify(settingsSnapshot);
   if (payload?.voiceover_tail_seconds !== undefined) {
     outputFields.Voiceover_Tail_Seconds = phase6Clamp(payload.voiceover_tail_seconds, 0, 10, current.voiceover_tail_seconds ?? 2);
   }
@@ -8986,7 +9117,7 @@ async function phase6BuildPreviewRenderPackage(env, outputRecord) {
 
 function phase6PendingVoicePrepSlides(slides) {
   return (Array.isArray(slides) ? slides : [])
-    .filter((slide) => slide?.include !== false)
+    .filter((slide) => slide?.include !== false && slide?.virtual !== true)
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     .filter((slide) => {
       const voiceEnabled = slide?.voiceover?.enabled !== false && Boolean(phase6Text(slide?.voiceover?.text, 5000));
@@ -9400,6 +9531,25 @@ function phase6PreviewFulfillsCurrentReview(record) {
   return previewAt >= requestedAt;
 }
 
+async function phase6RestoreProductionReviewReady(env, record) {
+  if (Boolean(f(record, "Do_Not_Publish"))) return record;
+  if (!phase6PreviewFulfillsCurrentReview(record)) return record;
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  const reviewStatus = String(f(record, "Review_Status") || "").trim();
+  if (outputStatus === "Ready for Review" && (reviewStatus === "Review Sent" || reviewStatus === "Ready for Review")) return record;
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Output_Status: "Ready for Review",
+        Review_Status: "Review Sent",
+        Publish_Status: "Not Ready",
+      },
+      typecast: true,
+    }),
+  });
+}
+
 function phase6RenderHandoffState(record) {
   const renderStatus = String(f(record, "Render_Status") || "");
   if (phase6PreviewFulfillsCurrentReview(record)) return "rendered_preview_ready";
@@ -9464,7 +9614,10 @@ function phase6CreativeHandoffStatus(record, slides = []) {
     stages,
     requested_at: requestedAt ? new Date(requestedAt).toISOString() : null,
     preview_updated_at: previewAt ? new Date(previewAt).toISOString() : null,
-    message: completed ? "Voice prep, rerender, final upload, and Studio preview refresh are complete. Publishing remains blocked."
+    message: completed
+      ? (Boolean(f(record, "Do_Not_Publish"))
+        ? "Voice prep, rerender, final upload, and Studio preview refresh are complete. Publishing remains blocked."
+        : "New preview is ready. Play it, then approve for publishing when the mix sounds right.")
       : failed ? `${failed.label} failed: ${failed.error || failed.detail}`
       : current ? current.detail : "No creative-change handoff is active.",
   };
@@ -9485,7 +9638,9 @@ async function getOutputCreativeHandoffStatus(request, env, url, authorization) 
 
 async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
   let current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
-  if (!Boolean(f(current, "Do_Not_Publish"))) throw new HttpError(409, "Phase 6 automatic rerender requires Do_Not_Publish to remain enabled");
+  if (!Boolean(f(current, "Do_Not_Publish")) && !phase6AllowsProductionMixContinuation(current)) {
+    throw new HttpError(409, "Phase 6 automatic rerender requires Do_Not_Publish or an in-progress mix revision");
+  }
   let state = phase6RenderHandoffState(current);
   if (state === "rendered_preview_ready") {
     return {
@@ -9571,6 +9726,7 @@ async function phase6EnsureRenderPackageForContinuation(env, outputRecord) {
     !phase6PreviewFulfillsCurrentReview(outputRecord) &&
     (outputStatus === "In Production" || reviewStatus === "Changes Requested");
   if (!needsFreshPackage) return outputRecord;
+  if (!Boolean(f(outputRecord, "Do_Not_Publish"))) return outputRecord;
 
   const renderPackage = await phase6BuildPreviewRenderPackage(env, outputRecord);
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecord.id, {
@@ -9599,7 +9755,9 @@ async function continueOutputCreativeHandoff(request, env, url, authorization) {
   if (!match) throw new HttpError(400, "Invalid Phase 6 continuation route");
   const id = match[1];
   let current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-  if (!Boolean(f(current, "Do_Not_Publish"))) throw new HttpError(409, "Phase 6 continuation requires Do_Not_Publish to remain enabled");
+  if (!Boolean(f(current, "Do_Not_Publish")) && !phase6AllowsProductionMixContinuation(current)) {
+    throw new HttpError(409, "No mix rerender is in progress for this output");
+  }
 
   const pendingSlides = phase6PendingVoicePrepSlides(await phase6SlidesForOutput(env, current));
   if (pendingSlides.length) {
@@ -9629,7 +9787,10 @@ async function continueOutputCreativeHandoff(request, env, url, authorization) {
     });
   }
   const step = await phase6AdvanceRenderPipelineShort(env, id);
-  const stepRecord = step.record || current;
+  let stepRecord = step.record || current;
+  if (step.completed || phase6PreviewFulfillsCurrentReview(stepRecord)) {
+    stepRecord = await phase6RestoreProductionReviewReady(env, stepRecord);
+  }
   const mapped = mapPhase6CreativeOutput(stepRecord);
   const handoff = phase6CreativeHandoffStatus(stepRecord, await phase6SlidesForOutput(env, stepRecord));
   return respond(request, env, {
@@ -10036,6 +10197,7 @@ function studioOutputReadyForPublishApproval(record) {
   const publishStatus = String(f(record, "Publish_Status") || "").trim();
   if (["Approved"].includes(reviewStatus) || outputStatus === "Approved for Publishing") return false;
   if (["Published", "Publishing"].includes(publishStatus)) return false;
+  if (outputStatus === "In Production" || ["Ready for Render", "Rendering"].includes(String(f(record, "Render_Status") || "").trim())) return false;
   const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
   if (!rendered && !studioOutputIsNativePhoto(record)) return false;
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
@@ -10078,6 +10240,35 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
       record: mapPhase6CreativeOutput(updated),
       handoff_state: "approved_for_publishing",
       message: "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
+    });
+  }
+  if (!doNotPublish && phase6ProductionMixAction(action)) {
+    phase6AssertProductionAudioMixAllowed(existing);
+    const mapped = mapPhase6CreativeOutput(existing);
+    const audioFields = phase6AudioMixFieldsFromPayload(payload, mapped);
+    const mixFields = {
+      ...audioFields,
+      Review_Status: "Changes Requested",
+      Output_Status: "In Production",
+      Publish_Status: "Not Ready",
+      Render_Status: "Ready for Render",
+      Review_Decision_At: stamp,
+      Review_Notes: [existingNotes, note, `Studio review mix applied at ${stamp}. Music ${audioFields.Music_Volume}, voiceover ${audioFields.Voiceover_Volume}.`].filter(Boolean).join("\n\n"),
+    };
+    const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: mixFields, typecast: true }),
+    });
+    const slides = await phase6SlidesForOutput(env, updated);
+    return respond(request, env, {
+      ok: true,
+      action: "apply_audio_mix",
+      preview_rerender_prepared: true,
+      record: mapPhase6CreativeOutput(updated),
+      slides: phase6SlidesWithTitleRenderInput(updated, slides),
+      handoff: phase6CreativeHandoffStatus(updated, slides),
+      handoff_state: "render_ready",
+      message: "Mix saved. Studio is rendering a new preview. Approve stays locked until that preview is ready.",
     });
   }
   if (!doNotPublish) {
@@ -10201,7 +10392,7 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
       Do_Not_Publish: true,
     };
   } else {
-    throw new HttpError(400, "Review action must be approve or changes_requested");
+    throw new HttpError(400, "Review action must be approve, apply_audio_mix, or changes_requested");
   }
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
     method: "PATCH",

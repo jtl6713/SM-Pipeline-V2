@@ -71,3 +71,5 @@ EZ path Pages deploy: 2026-08-19 — Voice picker sits next to Voiceover Yes; sc
 EZ path Pages deploy: 2026-08-19 — Advanced audio matches Start with content: Yes reveals voice and music lists. UI 0.6.52.
 
 EZ path Pages deploy: 2026-08-19 — Review stays closed until a rendered file exists; Open Review is not preview-ready from clip JSON alone. UI 0.6.53.
+
+Review mix Pages deploy: 2026-08-19 — Open Review can change music and voiceover volume, submit a mix rerender, and show Processing then Ready. UI 0.6.55.

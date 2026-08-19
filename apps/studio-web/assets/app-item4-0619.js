@@ -60,7 +60,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.53-review-deliverable";
+  const BUILD_ID = "item4-0.6.55-review-audio-mix";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -3969,24 +3969,32 @@
     return Boolean(activeCreativeOutput && !activeCreativeOutput.do_not_publish);
   }
 
+  function creativeMixInProgress(handoff = creativeHandoffStatus, output = activeCreativeOutput) {
+    if (handoff?.completed || handoff?.overall_status === "complete") return false;
+    const render = String(output?.render_status || "").trim();
+    const status = String(output?.output_status || "").trim();
+    if (["Ready for Render", "Rendering"].includes(render) || status === "In Production") return true;
+    return Boolean(handoff?.active && handoff?.overall_status === "active");
+  }
+
   function phase6UpdateSaveState() {
     const badge = $("creativeSaveState");
     const reset = $("reloadCreativeEditor");
     if (badge) {
-      if (creativeWatchOnly()) {
-        badge.textContent = "Watch only";
+      if (creativeWatchOnly() && !creativeEditorDirty && !creativeMixInProgress()) {
+        badge.textContent = "Mix ready";
         badge.className = "creative-save-state saved";
       } else {
-        badge.textContent = creativeEditorDirty ? "Unsaved changes" : "Saved";
+        badge.textContent = creativeEditorDirty ? "Unsaved mix" : (creativeMixInProgress() ? "Rendering mix" : "Saved");
         badge.className = `creative-save-state ${creativeEditorDirty ? "dirty" : "saved"}`;
       }
     }
-    if (reset && reset.dataset.busy !== "true") reset.disabled = creativeWatchOnly() || !creativeEditorDirty;
+    if (reset && reset.dataset.busy !== "true") reset.disabled = !creativeEditorDirty;
     phase6UpdatePreviewFreshness();
   }
 
   function phase6MarkDirty() {
-    if (!activeCreativeOutputId || creativeWatchOnly()) return;
+    if (!activeCreativeOutputId) return;
     clearTimeout(creativeDirtyTimer);
     creativeDirtyTimer = setTimeout(() => {
       const current = phase6CreativeFingerprint();
@@ -4045,16 +4053,19 @@
 
     const overall = handoff?.overall_status || "idle";
     panel.dataset.status = overall;
-    state.textContent = overall === "complete" ? "Complete" : overall === "error" ? "Needs attention" : overall === "active" ? "In progress" : "Idle";
+    state.textContent = overall === "complete" ? "Ready" : overall === "error" ? "Needs attention" : overall === "active" ? "Processing" : "Idle";
     state.className = `creative-change-progress-state ${overall}`;
     title.textContent = handoff?.completed
-      ? "Creative change is ready for review"
+      ? "Preview ready"
       : handoff?.error_stage
         ? `${handoff.current_stage_label || "Creative change"} needs attention`
         : handoff?.active
-          ? `${handoff.current_stage_label || "Creative change"} in progress`
-          : "No change request in progress";
-    detail.textContent = handoff?.message || "Save and rerender the preview to begin a new revision.";
+          ? `${handoff.current_stage_label || "Rendering"} in progress`
+          : (creativeWatchOnly() ? "No mix revision in progress" : "No change request in progress");
+    detail.textContent = handoff?.message
+      || (creativeWatchOnly()
+        ? "Adjust music and voiceover, then apply the mix to render a new preview."
+        : "Save and rerender the preview to begin a new revision.");
     phase6UpdatePreviewFreshness();
   }
 
@@ -4083,9 +4094,9 @@
       phase6UpdateSaveState();
       if (creativeWatchOnly()) {
         if ($("saveCreativeEditor")) $("saveCreativeEditor").disabled = true;
-        if ($("creativeRequestChanges")) $("creativeRequestChanges").disabled = true;
-        if ($("creativeApprovePreview")) $("creativeApprovePreview").disabled = !creativeCanApproveForPublishing();
-        if ($("reloadCreativeEditor")) $("reloadCreativeEditor").disabled = true;
+        if ($("creativeRequestChanges")) $("creativeRequestChanges").disabled = creativeMixInProgress();
+        if ($("creativeApprovePreview")) $("creativeApprovePreview").disabled = !creativeCanApproveForPublishing() || creativeMixInProgress();
+        if ($("reloadCreativeEditor")) $("reloadCreativeEditor").disabled = !creativeEditorDirty;
       }
     }
   }
@@ -4141,7 +4152,7 @@
     creativeDuckFadeFrames: "How quickly music ramps between normal and ducked levels. At 30 fps, 6 frames is about 0.2 seconds.",
     creativeReviewNotes: "Notes for this review cycle. Use this to record what should change or why the current preview is being accepted.",
     reloadCreativeEditor: "Discard unsaved edits and reload the latest saved values from Studio.",
-    creativeRequestChanges: "Save the current controls and create a new rendered preview. Publishing stays locked.",
+    creativeRequestChanges: "Save the current music and voiceover levels and render a new preview. Approve stays locked until that preview is ready.",
     "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
     creativeApprovePreview: "Approve this output for publishing. Instagram and Facebook auto-publish. TikTok is created as a draft. You can also approve from the review email.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
@@ -4365,6 +4376,17 @@
     });
   }
 
+  function phase6SlideAudioStatus(slide, output) {
+    const status = String(slide?.voiceover?.status || "").trim();
+    const itemUrl = String(output?.voiceover?.url || output?.voiceover_url || "").trim();
+    const itemMode = String(output?.voiceover?.mode || "").trim();
+    const itemStatus = String(output?.voiceover?.status || "").trim();
+    if (status && status !== "Not Requested") return status;
+    if (itemUrl || itemMode === "Yes" || itemStatus === "Item voiceover" || itemStatus === "Requested") return "Item voiceover";
+    if (slide?.virtual && (!status || status === "Not Requested")) return "Not on this slide";
+    return status || "—";
+  }
+
   function renderCreativeSlides() {
     const target = $("creativeSlidesList");
     $("creativeSlideCount").textContent = `${creativeSlides.length} slide${creativeSlides.length === 1 ? "" : "s"}`;
@@ -4393,6 +4415,7 @@
       const overlayCaption = overlay.caption || overlay.subtitle || "";
       const overlayVersion = Number(overlay.version || slide.title_render_input?.version || 1);
       const voiceover = slide.voiceover || {};
+      const audioStatus = phase6SlideAudioStatus(slide, activeCreativeOutput);
       const variants = slide.variants || {};
       const preview = slide.preview_url;
       const variantChips = ["4:5", "9:16", "1:1", "16:9"].map((ratio) => {
@@ -4460,7 +4483,7 @@
                 <label class="toggle-control"><input data-field="voiceover_enabled" type="checkbox" ${voiceover.enabled !== false ? "checked" : ""}><span>Voiceover on</span></label>
                 <div class="voice-select-wrap"><label class="form-field"><span>Voice</span><select data-field="voiceover_voice">${phase6VoiceOptionList(voices, voiceover.voice_id || "", voiceover.voice || "Kate")}</select></label><button type="button" class="voice-preview-button" data-field="voiceover_voice_preview">▶ Preview</button></div>
                 <label class="form-field"><span>VO volume override (%)</span><input data-field="voiceover_volume_override" type="number" min="0" max="125" step="1" value="${voiceover.volume_override === null || voiceover.volume_override === undefined ? "" : escapeHtml(phase6FormatPercent(Number(voiceover.volume_override) * 100))}" placeholder="Global ${escapeHtml(phase6FormatPercent(Number(activeCreativeOutput?.voiceover?.volume ?? 1) * 100))}%"></label>
-                <div class="form-field"><span>Current audio</span><div class="subtle">${escapeHtml(voiceover.status || "—")}${voiceover.duration_seconds ? ` · ${Number(voiceover.duration_seconds).toFixed(1)}s` : ""} · ${escapeHtml(phase6FormatPercent(Number(voiceover.volume ?? activeCreativeOutput?.voiceover?.volume ?? 1) * 100))}%</div></div>
+                <div class="form-field"><span>Current audio</span><div class="subtle">${escapeHtml(audioStatus)}${voiceover.duration_seconds ? ` · ${Number(voiceover.duration_seconds).toFixed(1)}s` : ""} · ${escapeHtml(phase6FormatPercent(Number(voiceover.volume ?? activeCreativeOutput?.voiceover?.volume ?? 1) * 100))}%</div></div>
               </div>
               <label class="form-field"><span>Narration text</span><textarea class="voiceover-text" data-field="voiceover_text">${escapeHtml(voiceover.text || "")}</textarea></label>
             </div>
@@ -4688,7 +4711,14 @@
       drive.hidden = false;
     };
 
-    const playableSrc = directPreview || (output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "");
+    const playableSrc = (() => {
+      const stamp = output.studio_preview_updated_at || output.remotion_job_id || "";
+      if (directPreview) {
+        const sep = directPreview.includes("?") ? "&" : "?";
+        return stamp ? `${directPreview}${sep}v=${encodeURIComponent(String(stamp))}` : directPreview;
+      }
+      return output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "";
+    })();
     if (playableSrc) {
       video.src = playableSrc;
       video.hidden = false;
@@ -4719,9 +4749,11 @@
       : (creativeCanApproveForPublishing(output) ? "Ready to approve" : "Watch-only review");
     $("creativeSafetyBadge").className = "badge ready-for-review";
     $("creativeSafetyBanner").innerHTML = !output.do_not_publish
-      ? (creativeCanApproveForPublishing(output)
-        ? "<strong>Final publish approval.</strong> Play the render, then Approve for publishing here or in the review email. Instagram and Facebook will auto-publish. TikTok will be saved as a draft."
-        : "<strong>Watch-only review.</strong> Play the render and confirm the photo and caption. Form fields and Save stay locked on production posts.")
+      ? (creativeMixInProgress(data.handoff || creativeHandoffStatus, output)
+        ? "<strong>Rendering a new mix.</strong> This page will show Processing, then Ready when the new preview is available. Approve stays locked until then."
+        : (creativeCanApproveForPublishing(output)
+        ? "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram and Facebook will auto-publish. TikTok will be saved as a draft."
+        : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving."))
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
         : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
@@ -4739,10 +4771,20 @@
     setCreativeBusy(false);
     const watchOnly = !output.do_not_publish;
     $("saveCreativeEditor").disabled = watchOnly;
-    $("creativeRequestChanges").disabled = watchOnly;
+    if ($("creativeRequestChanges")) {
+      $("creativeRequestChanges").textContent = watchOnly ? "Apply mix & rerender" : "Save & rerender preview";
+      $("creativeRequestChanges").disabled = watchOnly ? creativeMixInProgress(data.handoff || creativeHandoffStatus, output) : false;
+    }
+    if ($("creativeAudioHelp")) {
+      $("creativeAudioHelp").textContent = watchOnly
+        ? "Voiceover and music volume apply on the next render. Submit the mix on this page; Processing becomes Ready when the new preview is available."
+        : "100% voiceover is the current proven render level. A slide can optionally override it below. Changes apply to the next preview render; they do not alter the current video in-place.";
+    }
     $("creativeApprovePreview").textContent = watchOnly ? "Approve for publishing" : "Approve preview";
-    $("creativeApprovePreview").disabled = watchOnly ? !creativeCanApproveForPublishing(output) : false;
-    if ($("reloadCreativeEditor") && watchOnly) $("reloadCreativeEditor").disabled = true;
+    $("creativeApprovePreview").disabled = watchOnly
+      ? (!creativeCanApproveForPublishing(output) || creativeMixInProgress(data.handoff || creativeHandoffStatus, output))
+      : false;
+    if ($("reloadCreativeEditor") && watchOnly) $("reloadCreativeEditor").disabled = !creativeEditorDirty;
     if ($("creativeUnlockTitles")) {
       $("creativeUnlockTitles").hidden = !titleLocked;
       $("creativeUnlockTitles").disabled = !output.do_not_publish || !titleLocked;
@@ -4763,8 +4805,9 @@
       const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`);
       populateCreativeEditor(data);
       const handoff = data?.handoff || await refreshCreativeChangeProgress();
-      const resumable = Boolean(handoff?.active && !handoff?.completed && handoff?.overall_status !== "error");
-      if (resumable && data?.output?.do_not_publish) {
+      const resumable = Boolean(handoff?.active && !handoff?.completed && handoff?.overall_status !== "error")
+        || creativeMixInProgress(handoff, data?.output);
+      if (resumable) {
         continueCreativeHandoff({ handoff_state: handoff?.handoff_state || "render_prep_needed", handoff, message: handoff?.message || "Resuming the automatic voice/render handoff…" })
           .catch((e) => phase6Message(e.message, "error-text"));
       } else if (handoff?.message) {
@@ -4974,13 +5017,19 @@
   async function reviewActiveCreative(action) {
     if (!activeCreativeOutputId) return;
     try {
-      if (!creativeWatchOnly() || action === "changes_requested") await saveActiveCreative({ quiet: true });
+      if (!creativeWatchOnly() || action === "changes_requested" || action === "apply_audio_mix") await saveActiveCreative({ quiet: true });
       const publishing = action === "approve_for_publishing" || (action === "approve" && creativeWatchOnly());
-      phase6Message(publishing ? "Saving publish approval…" : (action === "approve" ? "Saving review approval…" : "Saving changes request…"));
+      phase6Message(publishing ? "Saving publish approval…" : (action === "approve" ? "Saving review approval…" : "Applying mix and starting render…"));
       setCreativeBusy(true);
+      const reviewBody = { action, notes: $("creativeReviewNotes").value || "" };
+      if (action === "apply_audio_mix" || action === "changes_requested") {
+        const collected = collectCreativePayload();
+        reviewBody.audio = collected.audio;
+        reviewBody.notes = collected.review_notes || reviewBody.notes;
+      }
       const result = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative/review`, {
         method: "POST",
-        body: JSON.stringify({ action, notes: $("creativeReviewNotes").value || "" }),
+        body: JSON.stringify(reviewBody),
         timeoutMs: 30000,
       });
       const refreshed = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`);
@@ -5165,7 +5214,9 @@
   });
   $("saveCreativeEditor")?.addEventListener("click", () => saveActiveCreative().catch(() => {}));
   $("creativeUnlockTitles")?.addEventListener("click", () => unlockCreativeTitles().catch(() => {}));
-  $("creativeRequestChanges")?.addEventListener("click", () => reviewActiveCreative("changes_requested"));
+  $("creativeRequestChanges")?.addEventListener("click", () => {
+    reviewActiveCreative(creativeWatchOnly() ? "apply_audio_mix" : "changes_requested");
+  });
   $("creativeApprovePreview")?.addEventListener("click", () => {
     if (creativeWatchOnly()) {
       if (!creativeCanApproveForPublishing()) return;
