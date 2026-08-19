@@ -61,3 +61,5 @@ EZ path Pages deploy: 2026-08-18 — Put TikTok Multi-Photo in the single-photo 
 EZ path Pages deploy: 2026-08-19 — Pipeline auto-refreshes studio state every 8 seconds while the page is open. UI 0.6.46.
 
 EZ path Pages deploy: 2026-08-19 — Click a Pipeline row to open photo/render review for Feed Posts and native photo outputs. UI 0.6.47.
+
+EZ path Pages deploy: 2026-08-19 — Lock production Pipeline review to watch-only so Save and form edits cannot fake a dirty state. UI 0.6.48.

@@ -807,4 +807,14 @@ input, select, textarea, button {
 #outputsList .data-table tbody tr.pipeline-open-row{cursor:pointer}
 #outputsList .data-table tbody tr.pipeline-open-row:hover{background:#f3fbfa}
 #outputsList .data-table tbody tr.pipeline-open-row:focus{outline:2px solid var(--teal);outline-offset:-2px}
+.creative-editor-shell.watch-only .creative-global-card,
+.creative-editor-shell.watch-only .creative-audio-card,
+.creative-editor-shell.watch-only .creative-ratio-card,
+.creative-editor-shell.watch-only .creative-slides-section,
+.creative-editor-shell.watch-only .creative-review-section,
+.creative-editor-shell.watch-only .creative-editor-actions{pointer-events:none;opacity:.78}
+.creative-editor-shell.watch-only .creative-preview-card,
+.creative-editor-shell.watch-only .creative-jump-nav,
+.creative-editor-shell.watch-only .creative-heading-actions{pointer-events:auto;opacity:1}
+.creative-editor-shell.watch-only #closeCreativeEditor{pointer-events:auto}
 

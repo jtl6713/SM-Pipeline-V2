@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.47-pipeline-review";
+  const BUILD_ID = "item4-0.6.48-watch-only-lock";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -3831,19 +3831,28 @@
     target.className = `creative-preview-freshness ${state}`;
   }
 
+  function creativeWatchOnly() {
+    return Boolean(activeCreativeOutput && !activeCreativeOutput.do_not_publish);
+  }
+
   function phase6UpdateSaveState() {
     const badge = $("creativeSaveState");
     const reset = $("reloadCreativeEditor");
     if (badge) {
-      badge.textContent = creativeEditorDirty ? "Unsaved changes" : "Saved";
-      badge.className = `creative-save-state ${creativeEditorDirty ? "dirty" : "saved"}`;
+      if (creativeWatchOnly()) {
+        badge.textContent = "Watch only";
+        badge.className = "creative-save-state saved";
+      } else {
+        badge.textContent = creativeEditorDirty ? "Unsaved changes" : "Saved";
+        badge.className = `creative-save-state ${creativeEditorDirty ? "dirty" : "saved"}`;
+      }
     }
-    if (reset && reset.dataset.busy !== "true") reset.disabled = !creativeEditorDirty;
+    if (reset && reset.dataset.busy !== "true") reset.disabled = creativeWatchOnly() || !creativeEditorDirty;
     phase6UpdatePreviewFreshness();
   }
 
   function phase6MarkDirty() {
-    if (!activeCreativeOutputId) return;
+    if (!activeCreativeOutputId || creativeWatchOnly()) return;
     clearTimeout(creativeDirtyTimer);
     creativeDirtyTimer = setTimeout(() => {
       const current = phase6CreativeFingerprint();
@@ -3991,7 +4000,7 @@
     creativeReviewNotes: "Notes for this review cycle. Use this to record what should change or why the current preview is being accepted.",
     reloadCreativeEditor: "Discard unsaved edits and reload the latest saved values from Studio.",
     creativeRequestChanges: "Save the current controls and create a new rendered preview. Publishing stays locked.",
-    saveCreativeEditor: "Save these edits as a draft without creating a new rendered preview.",
+    "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
     creativeApprovePreview: "Approve the current preview. This records review approval, locks per-photo titles, and does not publish the output.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
@@ -4566,7 +4575,7 @@
       : "Watch-only review";
     $("creativeSafetyBadge").className = "badge ready-for-review";
     $("creativeSafetyBanner").innerHTML = !output.do_not_publish
-      ? "<strong>Watch-only review.</strong> Play the render and confirm the photo and caption here. Save, rerender, and Approve in this editor stay locked for production posts until that path is enabled."
+      ? "<strong>Watch-only review.</strong> Play the render and confirm the photo and caption. Form fields and Save are locked on production posts, so a voiceover checkbox will not be stored."
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
         : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
@@ -4579,11 +4588,14 @@
     if (!data.handoff && !creativeHandoffStatus) phase6Message("");
     $("creativeEditorPanel").hidden = false;
     $("creativeEditorPanel").classList.toggle("title-edit-locked", titleLocked);
+    $("creativeEditorPanel").classList.toggle("watch-only", !output.do_not_publish);
     $("creativeEditorPanel").scrollIntoView({ behavior: "smooth", block: "start" });
     setCreativeBusy(false);
-    $("saveCreativeEditor").disabled = !output.do_not_publish;
-    $("creativeRequestChanges").disabled = !output.do_not_publish;
-    $("creativeApprovePreview").disabled = !output.do_not_publish;
+    const watchOnly = !output.do_not_publish;
+    $("saveCreativeEditor").disabled = watchOnly;
+    $("creativeRequestChanges").disabled = watchOnly;
+    $("creativeApprovePreview").disabled = watchOnly;
+    if ($("reloadCreativeEditor") && watchOnly) $("reloadCreativeEditor").disabled = true;
     if ($("creativeUnlockTitles")) {
       $("creativeUnlockTitles").hidden = !titleLocked;
       $("creativeUnlockTitles").disabled = !output.do_not_publish || !titleLocked;
