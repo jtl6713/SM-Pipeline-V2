@@ -240,6 +240,7 @@
 /* Phase 6 0.5.5 — live ElevenLabs voice catalog + audition controls */
 .voice-select-wrap { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:end; }
 .voice-select-wrap .form-field { min-width:0; }
+#ezAudioVoiceField[hidden],#ezAudioTrackField[hidden],#prVoiceField[hidden],#prMusicField[hidden]{display:none!important}
 .voice-preview-button { min-height:38px; padding:0 11px; border:1px solid var(--line, #d5d9e0); border-radius:8px; background:var(--surface, #fff); color:inherit; cursor:pointer; white-space:nowrap; font-weight:600; }
 .voice-preview-button:hover { border-color:currentColor; }
 .voice-preview-button:disabled { opacity:.45; cursor:not-allowed; }

@@ -63,3 +63,9 @@ EZ path Pages deploy: 2026-08-19 — Pipeline auto-refreshes studio state every 
 EZ path Pages deploy: 2026-08-19 — Click a Pipeline row to open photo/render review for Feed Posts and native photo outputs. UI 0.6.47.
 
 EZ path Pages deploy: 2026-08-19 — Pipeline Approve for publishing plus TikTok Video Draft on EZ photo plans. UI 0.6.49.
+
+EZ path Pages deploy: 2026-08-19 — Voiceover voice picker on Advanced and EZ defaults to Kate. UI 0.6.50.
+
+EZ path Pages deploy: 2026-08-19 — Voice picker sits next to Voiceover Yes; script override hint. UI 0.6.51.
+
+EZ path Pages deploy: 2026-08-19 — Advanced audio matches Start with content: Yes reveals voice and music lists. UI 0.6.52.

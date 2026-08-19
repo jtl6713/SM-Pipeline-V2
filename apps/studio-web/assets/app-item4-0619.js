@@ -15,7 +15,9 @@
   let ezStagedFiles = [];
   let ezEntryPath = null;
   let ezLocalPreviews = new Map();
-  let ezSelectedVoiceId = "";
+  let ezSelectedVoiceId = "xVQH621DS3eyBYrseRt5";
+  const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
+  const DEFAULT_VOICE_NAME = "Kate";
   let ezStarting = false;
   let ezAutoPlanAfterUpload = false;
   let ezPlanInFlight = false;
@@ -58,7 +60,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.49-publish-approve";
+  const BUILD_ID = "item4-0.6.52-audio-lists";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -819,6 +821,8 @@
     const composer = $("ezComposer");
     if (intake) intake.hidden = false;
     if (composer) composer.hidden = false;
+    const audio = $("ezAudioGroup");
+    if (audio) audio.open = true;
     syncEzStructureCounts();
     syncEzIdeaIdentityFields();
     loadEzAudioOptions().catch(() => {});
@@ -890,17 +894,99 @@
     bindEzCaptionInputs(host);
   }
 
+  function ensureVoiceOption(select, selectedId = DEFAULT_VOICE_ID, selectedName = DEFAULT_VOICE_NAME) {
+    if (!select) return;
+    const id = String(selectedId || DEFAULT_VOICE_ID).trim() || DEFAULT_VOICE_ID;
+    const name = String(selectedName || DEFAULT_VOICE_NAME).trim() || DEFAULT_VOICE_NAME;
+    if (![...select.options].some((option) => option.value === id)) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.dataset.name = name;
+      option.textContent = name;
+      select.insertAdjacentElement("afterbegin", option);
+    }
+    select.value = id;
+  }
+
+  function applyVoiceToSelects(voiceId, voiceName) {
+    const id = String(voiceId || DEFAULT_VOICE_ID).trim() || DEFAULT_VOICE_ID;
+    const name = String(voiceName || DEFAULT_VOICE_NAME).trim() || DEFAULT_VOICE_NAME;
+    ensureVoiceOption($("ezAudioVoice"), id, name);
+    ensureVoiceOption($("prVoice"), id, name);
+    ezSelectedVoiceId = id;
+  }
+
+  function selectedRequestVoice() {
+    const voiceoverOn = $("prVoiceover")?.value === "Yes" || $("ezAudioVoiceover")?.value === "Yes";
+    if (!voiceoverOn) return { voice_id: "", voice_name: "" };
+    const select = ($("prVoice")?.value ? $("prVoice") : null) || $("ezAudioVoice") || $("prVoice");
+    const picked = phase6SelectedVoice(select);
+    return {
+      voice_id: picked.id || DEFAULT_VOICE_ID,
+      voice_name: picked.name || DEFAULT_VOICE_NAME,
+    };
+  }
+
+  function isAudioYes(value) {
+    return String(value || "") === "Yes";
+  }
+
+  function alignAudioSelect(fromEl, toEl) {
+    if (!fromEl || !toEl) return;
+    if (fromEl.value === "Yes") toEl.value = "Yes";
+    else if (fromEl.value === "No" && toEl.value !== "Use Profile Default") toEl.value = "No";
+  }
+
+  function syncRequestAudioUi({ fromEz = false } = {}) {
+    const ezVo = $("ezAudioVoiceover");
+    const prVo = $("prVoiceover");
+    const ezMu = $("ezAudioMusic");
+    const prMu = $("prMusicMode");
+    if (fromEz) {
+      alignAudioSelect(ezVo, prVo);
+      alignAudioSelect(ezMu, prMu);
+    } else {
+      alignAudioSelect(prVo, ezVo);
+      alignAudioSelect(prMu, ezMu);
+    }
+    if (isAudioYes(prVo?.value) && ezVo) ezVo.value = "Yes";
+    if (isAudioYes(ezVo?.value) && prVo) prVo.value = "Yes";
+    if (isAudioYes(prMu?.value) && ezMu) ezMu.value = "Yes";
+    if (isAudioYes(ezMu?.value) && prMu) prMu.value = "Yes";
+
+    const voiceoverOn = isAudioYes(prVo?.value) || isAudioYes(ezVo?.value);
+    const musicOn = isAudioYes(prMu?.value) || isAudioYes(ezMu?.value);
+    if ($("ezAudioVoiceField")) $("ezAudioVoiceField").hidden = !voiceoverOn;
+    if ($("prVoiceField")) $("prVoiceField").hidden = !voiceoverOn;
+    if ($("ezAudioTrackField")) $("ezAudioTrackField").hidden = !musicOn;
+    if ($("prMusicField")) $("prMusicField").hidden = !musicOn;
+    if (voiceoverOn) {
+      const audio = $("ezAudioGroup");
+      if (audio) audio.open = true;
+      const source = fromEz
+        ? $("ezAudioVoice")
+        : (($("prVoice")?.value && $("prVoice")) || $("ezAudioVoice") || $("prVoice"));
+      const picked = phase6SelectedVoice(source);
+      applyVoiceToSelects(picked.id || DEFAULT_VOICE_ID, picked.name || DEFAULT_VOICE_NAME);
+    } else {
+      ezSelectedVoiceId = "";
+    }
+    if (musicOn) {
+      const track = fromEz ? $("ezAudioTrack")?.value : ($("prMusicAsset")?.value || $("ezAudioTrack")?.value || "");
+      if ($("ezAudioTrack") && track) $("ezAudioTrack").value = track;
+      if ($("prMusicAsset") && track) $("prMusicAsset").value = track;
+    } else {
+      if ($("ezAudioTrack")) $("ezAudioTrack").value = "";
+      if ($("prMusicAsset")) $("prMusicAsset").value = "";
+    }
+  }
+
   function syncEzAudioFields() {
-    const voiceoverOn = $("ezAudioVoiceover")?.value === "Yes";
-    const musicOn = $("ezAudioMusic")?.value === "Yes";
-    const voiceField = $("ezAudioVoiceField");
-    const trackField = $("ezAudioTrackField");
-    if (voiceField) voiceField.hidden = !voiceoverOn;
-    if (trackField) trackField.hidden = !musicOn;
-    if ($("prVoiceover")) $("prVoiceover").value = $("ezAudioVoiceover")?.value || "No";
-    if ($("prMusicMode")) $("prMusicMode").value = $("ezAudioMusic")?.value || "No";
-    if ($("prMusicAsset")) $("prMusicAsset").value = musicOn ? ($("ezAudioTrack")?.value || "") : "";
-    ezSelectedVoiceId = voiceoverOn ? ($("ezAudioVoice")?.value || "") : "";
+    syncRequestAudioUi({ fromEz: true });
+  }
+
+  function syncRequestVoiceUi(opts) {
+    syncRequestAudioUi(opts);
   }
 
   function copySelectValue(fromId, toId) {
@@ -1016,6 +1102,9 @@
     if ($("ezAudioVoiceover")) {
       $("ezAudioVoiceover").value = record.voiceover_mode === "Yes" ? "Yes" : "No";
     }
+    if (record.voiceover_mode === "Yes") {
+      applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
+    }
     if ($("ezAudioMusic")) {
       $("ezAudioMusic").value = record.background_music_mode === "Yes" ? "Yes" : "No";
     }
@@ -1067,35 +1156,44 @@
   }
 
   async function loadEzAudioOptions() {
-    const voiceSelect = $("ezAudioVoice");
     const track = $("ezAudioTrack");
-    const hint = $("ezAudioVoiceHint");
     const musicJob = ensureProductionRequestMusic().then(() => {
       const source = $("prMusicAsset");
       if (track && source) track.innerHTML = source.innerHTML;
     }).catch(() => {});
     const voiceJob = (async () => {
-      if (!voiceSelect) return;
+      const voiceSelect = $("ezAudioVoice");
+      const prVoice = $("prVoice");
+      const hint = $("ezAudioVoiceHint");
+      const prHint = $("prVoiceHint");
       if (hint) hint.textContent = "Loading ElevenLabs voices…";
+      if (prHint) prHint.textContent = "Loading ElevenLabs voices…";
       const result = await api("/api/voices", { timeoutMs: 45000 });
       const voices = phase6NormalizeVoices(result.voices || result.records || result.items || []);
-      const current = ezSelectedVoiceId || voiceSelect.value;
-      voiceSelect.innerHTML = `<option value="">Profile default</option>${phase6VoiceOptionList(voices, current)}`;
-      if (hint) {
-        if (voices.length && result.live_connected) hint.textContent = `${voices.length} ElevenLabs voices`;
-        else if (voices.length) hint.textContent = result.live_error
-          ? `${voices.length} cached voices · ${result.live_error}`
-          : `${voices.length} cached voices`;
-        else if (result.live_error) hint.textContent = result.live_error;
-        else hint.textContent = result.live_configured === false
-          ? "Add the ElevenLabs API key to load the full voice catalog."
-          : "No ElevenLabs voices returned.";
-      }
+      const current = ezSelectedVoiceId || voiceSelect?.value || prVoice?.value || DEFAULT_VOICE_ID;
+      const options = phase6VoiceOptionList(voices, current || DEFAULT_VOICE_ID, DEFAULT_VOICE_NAME);
+      if (voiceSelect) voiceSelect.innerHTML = options;
+      if (prVoice) prVoice.innerHTML = options;
+      const selected = phase6SelectedVoice(voiceSelect || prVoice);
+      applyVoiceToSelects(selected.id || current || DEFAULT_VOICE_ID, selected.name || DEFAULT_VOICE_NAME);
+      const hintText = voices.length && result.live_connected
+        ? `${voices.length} ElevenLabs voices`
+        : voices.length
+          ? (result.live_error ? `${voices.length} cached voices · ${result.live_error}` : `${voices.length} cached voices`)
+          : result.live_error
+            ? result.live_error
+            : (result.live_configured === false
+              ? "Add the ElevenLabs API key to load the full voice catalog."
+              : "No ElevenLabs voices returned.");
+      if (hint) hint.textContent = hintText;
+      if (prHint) prHint.textContent = hintText;
     })().catch(() => {
-      if (hint) hint.textContent = "Could not load ElevenLabs voices.";
+      if ($("ezAudioVoiceHint")) $("ezAudioVoiceHint").textContent = "Could not load ElevenLabs voices.";
+      if ($("prVoiceHint")) $("prVoiceHint").textContent = "Could not load ElevenLabs voices.";
     });
     await Promise.all([musicJob, voiceJob]);
-    syncEzAudioFields();
+    if (ezEntryPath === "content") syncEzAudioFields();
+    else syncRequestVoiceUi({ fromEz: false });
   }
 
   function hydrateEzCaptionDrafts(status) {
@@ -1303,6 +1401,7 @@
       script_mode: ezControlValue("prScriptMode", captionFields.script_mode || record.script_mode || "AI decides"),
       requested_script: String($("prRequestedScript")?.value || captionFields.requested_script || record.requested_script || ""),
       production_notes: mergeEzProductionNotes() || captionFields.production_notes || record.production_notes || "",
+      ...selectedRequestVoice(),
     };
     if (payload.video_clip_count_mode === "Exact" && String(payload.video_clip_count_exact).trim() === "") {
       payload.video_clip_count_mode = "AI decides";
@@ -1587,6 +1686,7 @@
         carousel_slide_count_max: $("ezCarouselSlideMax")?.value || "",
         selected_music_asset_id: $("ezAudioTrack")?.value || "",
         production_notes: mergeEzProductionNotes(),
+        ...selectedRequestVoice(),
       };
       await ensureProductionRequestMusic();
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
@@ -2767,7 +2867,9 @@
           ? `${effective.video_clip_count_mode} clips` : null,
         effective.carousel_slide_count_mode && ["Carousel","Multi-Image Post","Multi-Photo","Slideshow Reel","Slideshow Video"].includes(row.output_type)
           ? `${effective.carousel_slide_count_mode} slides` : null,
-        effective.voiceover_mode ? `VO ${effective.voiceover_mode}` : null,
+        effective.voiceover_mode === "Yes"
+          ? `VO ${activeProductionRequest?.voice_name || DEFAULT_VOICE_NAME}`
+          : (effective.voiceover_mode ? `VO ${effective.voiceover_mode}` : null),
       ].filter(Boolean).join(" · ");
 
       return `<div class="requested-output-card">
@@ -2821,7 +2923,7 @@
   function effectivePreviewHtml(row) {
     const e = row?.effective || {};
     const bits = [
-      ["Voiceover", e.voiceover_mode],
+      ["Voiceover", e.voiceover_mode === "Yes" ? (activeProductionRequest?.voice_name || DEFAULT_VOICE_NAME) : e.voiceover_mode],
       ["Music", e.background_music_mode],
       ["Thumbnail", e.thumbnail_mode],
       ["Duration", e.video_duration_seconds ? `${e.video_duration_seconds}s` : null],
@@ -3146,9 +3248,13 @@
     document.querySelectorAll('input[name="prPlatform"]').forEach(input => {
       input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
     });
-    setSelectValue("prVoiceover", record.voiceover_mode, "Use Profile Default");
-    setSelectValue("prMusicMode", record.background_music_mode, "Use Profile Default");
+    setSelectValue("prVoiceover", record.voiceover_mode, "No");
+    setSelectValue("prMusicMode", record.background_music_mode, "No");
     setSelectValue("prThumbnail", record.thumbnail_mode, "Use Profile Default");
+    if (record.voiceover_mode === "Yes") {
+      applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
+    }
+    syncRequestVoiceUi();
     $("prVideoDuration").value = record.video_duration_seconds ?? 30;
     setSelectValue("prVideoClipMode", record.video_clip_count_mode, "AI decides");
     $("prVideoClipExact").value = record.video_clip_count_exact ?? "";
@@ -3186,6 +3292,7 @@
     }
     if (ezEntryPath === "content") hydrateEzConfigFromRequest(record);
     setEzAdvancedOpen(ezEntryPath !== "content" || !parsed);
+    loadEzAudioOptions().catch(() => {});
   }
 
   async function openProductionRequestForIdea(idea) {
@@ -3198,7 +3305,7 @@
     setManageMessage("Opening Phase 2B Production Request…", "");
 
     try {
-      await ensureProductionRequestMusic();
+      await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
       const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
         method: "POST",
         body: JSON.stringify({}),
@@ -3283,6 +3390,8 @@
 
   function productionRequestPayload() {
     if (usingEzPlatforms() || ezEntryPath === "content") {
+      if ($("prVoiceover")?.value === "Yes" && $("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
+      if ($("prMusicMode")?.value === "Yes" && $("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
       syncEzAudioFields();
       syncEzConfigFields();
     }
@@ -3306,6 +3415,7 @@
       carousel_image_mode: $("prCarouselImageMode").value,
       voiceover_tail_seconds: $("prVoiceoverTail").value,
       selected_music_asset_id: $("prMusicAsset").value,
+      ...selectedRequestVoice(),
       title_mode: $("prTitleMode").value,
       requested_title: $("prRequestedTitle").value.trim(),
       caption_mode: $("prCaptionMode").value,
@@ -3426,6 +3536,26 @@
       setRequestMessage(e.message, "error-text");
       setProductionRequestControlState(activeProductionRequest);
     }
+  });
+
+  ["prVoiceover", "prVoice", "prMusicMode", "prMusicAsset"].forEach((id) => {
+    $(id)?.addEventListener("change", () => {
+      stopStudioAudioPreview();
+      syncRequestAudioUi({ fromEz: false });
+      if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
+    });
+  });
+  $("prVoicePreview")?.addEventListener("click", () => {
+    phase6PreviewSelectedVoice($("prVoice"), $("prVoicePreview"), setRequestMessage);
+  });
+  $("prMusicPreview")?.addEventListener("click", () => {
+    const option = $("prMusicAsset")?.selectedOptions?.[0];
+    const preview = option?.dataset?.preview || ($("prMusicAsset")?.value ? `/api/music/${$("prMusicAsset").value}/preview` : "");
+    if (!preview) {
+      setRequestMessage("Pick a music track to preview.", "error-text");
+      return;
+    }
+    playStudioAudioPreview(preview, $("prMusicPreview"), setRequestMessage, option?.textContent?.trim() || "track");
   });
 
   $("syncProductionRequestDirectives")?.addEventListener("click", async () => {
@@ -3563,11 +3693,15 @@
 
           // Refresh music choices only after the workspace is visible.
           try {
-            await ensureProductionRequestMusic();
+            await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
             const musicId = Array.isArray(record.selected_music_asset_links)
               ? record.selected_music_asset_links[0]
               : "";
             if ($("prMusicAsset")) $("prMusicAsset").value = musicId || "";
+            if (record.voiceover_mode === "Yes") {
+              applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
+            }
+            syncRequestVoiceUi();
           } catch (e) {
             setRequestMessage(
               `Production Request opened. Music catalogue refresh failed: ${e.message}`,
