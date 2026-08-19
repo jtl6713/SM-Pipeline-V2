@@ -10,6 +10,7 @@ import {
   ezOriginNotes,
   ezPhotoCountKind,
   ezPlanFromPhotoCount,
+  ezCanonicalOutputType,
   parseEzOriginNotes,
 } from "./contract.mjs";
 
@@ -55,6 +56,12 @@ test("platform subset is preserved when those platforms have a photo default", (
   });
   assert.deepEqual(plan.platforms, ["Instagram", "TikTok"]);
   assert.deepEqual(plan.overrides, { Instagram: "Carousel", TikTok: "Multi-Photo" });
+});
+
+test("TikTok Single Photo canonicalizes to the proven Multi-Photo draft route", () => {
+  assert.equal(ezCanonicalOutputType("TikTok", "Single Photo"), "Multi-Photo");
+  assert.equal(ezCanonicalOutputType("TikTok", "Multi-Photo"), "Multi-Photo");
+  assert.equal(ezCanonicalOutputType("Instagram", "Single Image"), "Single Image");
 });
 
 test("zero photos uses the single-photo map so the client can seed before upload", () => {

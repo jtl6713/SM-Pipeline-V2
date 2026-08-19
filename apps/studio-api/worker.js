@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.10-elevenlabs-v2-catalog",
+          version: "0.10.11-tiktok-single-photo-plan",
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
@@ -1643,7 +1643,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
 
   for (const item of requested) {
     if (item?.enabled === false) continue;
-    const pair = normalizeOutputType(item?.platform, item?.output_type);
+    const pair = normalizeOutputType(item?.platform, item4CanonicalOutputType(item?.platform, item?.output_type) || item?.output_type);
     const key = `${pair.platform}::${pair.output_type}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1729,13 +1729,14 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   }
 
   const targetPlatforms = [...new Set(normalized.map(item => item.platform))];
-  const updatedParent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, parent.id, {
+  let updatedParent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, parent.id, {
     method: "PATCH",
     body: JSON.stringify({
       fields: { Target_Platforms: targetPlatforms, Updated_At: now },
       typecast: false,
     }),
   });
+  updatedParent = await item4ReconcilePlanWithEnabledOutputs(env, updatedParent, normalized);
 
   const rows = await outputRowsForProductionRequest(env, productionRequestId);
   return respond(request, env, {
@@ -2670,14 +2671,87 @@ function item4DefaultOutputType(platform, photoCount) {
   return map[platform] || null;
 }
 
+function item4CanonicalOutputType(platform, outputType) {
+  const p = String(platform || "").trim();
+  const o = String(outputType || "").trim();
+  if (p === "TikTok" && o === "Single Photo") return "Multi-Photo";
+  return o;
+}
+
 function item4PlanChoice(platform, requestedOutputType, photoCount) {
   const spec = ITEM4_PLAN_SPECS[platform];
   if (!spec) throw new HttpError(400, `Item 4 does not support ${platform}`);
   const fallback = item4DefaultOutputType(platform, photoCount) || spec.default_output_type;
-  const outputType = String(requestedOutputType || fallback).trim();
+  const outputType = item4CanonicalOutputType(platform, String(requestedOutputType || fallback).trim());
   const selected = spec.options[outputType];
   if (!selected) throw new HttpError(400, `${platform} output type ${outputType} is not supported by the Item 4 planner`);
   return { output_type: outputType, ...selected, available_output_types: Object.keys(spec.options) };
+}
+
+function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex) {
+  const mapping = mappingIndex.get(`${platform}::${chosen.mapping_type}`) || null;
+  const aspectRatio = mapping ? String(f(mapping, "Aspect_Ratio") || "").trim() : null;
+  return {
+    platform,
+    output_type: chosen.output_type,
+    mapping_type: chosen.mapping_type,
+    format: chosen.format,
+    aspect_ratio: aspectRatio,
+    ratio_source: mapping ? "Platform Output Mappings" : "Missing mapping",
+    rationale: item4DynamicRationale(chosen.rationale, photoCount),
+    available_output_types: chosen.available_output_types,
+    source_asset_count: photoCount,
+    requires_variant_review: !aspectRatio,
+  };
+}
+
+async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
+  const assets = item4AssetManifest(record);
+  const photoCount = Math.max(assets.length, 1);
+  const mappingIndex = await item4MappingIndex(env);
+  const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  const items = Array.isArray(existingPlan?.items) ? [...existingPlan.items] : [];
+  const previousRatios = item4RequiredRatios(existingPlan).join("|");
+  let changed = false;
+
+  for (const pair of enabledPairs || []) {
+    const outputType = item4CanonicalOutputType(pair.platform, pair.output_type)
+      || item4DefaultOutputType(pair.platform, photoCount);
+    if (!outputType || !ITEM4_PLAN_SPECS[pair.platform]) continue;
+    const key = item4BridgePlanKey(pair.platform, outputType);
+    if (items.some((item) => item4BridgePlanKey(item.platform, item.output_type) === key)) continue;
+    try {
+      const chosen = item4PlanChoice(pair.platform, outputType, photoCount);
+      items.push(item4PlanItemFromChoice(pair.platform, chosen, photoCount, mappingIndex));
+      changed = true;
+    } catch {
+      continue;
+    }
+  }
+  if (!changed) return record;
+
+  const plan = {
+    schema_version: "item4.output-plan.1",
+    generated_at: new Date().toISOString(),
+    production_request_record_id: record.id,
+    source_asset_count: assets.length,
+    photo_count_kind: item4PhotoCountKind(assets.length),
+    items,
+  };
+  const needsReview = items.some((item) => !item.aspect_ratio);
+  const nextRatios = item4RequiredRatios(plan).join("|");
+  const fields = {
+    Target_Platforms: [...new Set(items.map((item) => item.platform))],
+    Studio_Output_Plan_JSON: JSON.stringify(plan),
+    Studio_Output_Plan_Status: needsReview ? "Needs Review" : "Ready",
+  };
+  if (previousRatios && previousRatios !== nextRatios) {
+    fields.Studio_Variant_Status = "None";
+    fields.Studio_Variant_Manifest_JSON = null;
+    fields.Studio_Variant_Updated_At = null;
+    fields.Studio_Variant_Error = null;
+  }
+  return item4UpdateRequestState(env, record.id, fields);
 }
 
 async function item4SyncPlanOutputs(env, requestRecord, items) {
@@ -2732,19 +2806,12 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const items=[];
   let needsReview=false;
   for (const platform of platforms) {
-    const requested=overrides[platform];
-    const fallback=item4DefaultOutputType(platform, assets.length);
+    const requested = item4CanonicalOutputType(platform, overrides[platform] || "");
+    const fallback = item4DefaultOutputType(platform, assets.length);
     if (!requested && !fallback) continue;
-    const chosen=item4PlanChoice(platform, requested, assets.length);
-    const mapping=mappingIndex.get(`${platform}::${chosen.mapping_type}`) || null;
-    const aspectRatio=mapping?String(f(mapping,"Aspect_Ratio")||"").trim():null;
-    if (!aspectRatio) needsReview=true;
-    items.push({
-      platform, output_type:chosen.output_type, mapping_type:chosen.mapping_type, format:chosen.format,
-      aspect_ratio:aspectRatio, ratio_source:mapping?"Platform Output Mappings":"Missing mapping",
-      rationale:item4DynamicRationale(chosen.rationale, assets.length), available_output_types:chosen.available_output_types,
-      source_asset_count:assets.length, requires_variant_review:!aspectRatio,
-    });
+    const chosen = item4PlanChoice(platform, requested || fallback, assets.length);
+    items.push(item4PlanItemFromChoice(platform, chosen, assets.length, mappingIndex));
+    if (!items[items.length - 1].aspect_ratio) needsReview = true;
   }
   const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:assets.length,photo_count_kind:item4PhotoCountKind(assets.length),items};
 
@@ -4723,6 +4790,11 @@ const STUDIO_OUTPUT_ROUTE_SPECS = Object.freeze({
     proven_mapping: "TikTok Video",
   },
   "TikTok::Multi-Photo": {
+    pipeline_family: "Carousel / Photo Set",
+    content_type: "Photo Set",
+    proven_mapping: "TikTok Slideshow",
+  },
+  "TikTok::Single Photo": {
     pipeline_family: "Carousel / Photo Set",
     content_type: "Photo Set",
     proven_mapping: "TikTok Slideshow",

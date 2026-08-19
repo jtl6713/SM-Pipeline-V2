@@ -60,6 +60,13 @@
     };
   }
 
+  function ezCanonicalOutputType(platform, outputType) {
+    const p = String(platform || "").trim();
+    const o = String(outputType || "").trim();
+    if (p === "TikTok" && o === "Single Photo") return "Multi-Photo";
+    return o;
+  }
+
   function ezCaptionFields(mode, { caption = "", captions = [] } = {}) {
     const normalized = String(mode || "ai").trim().toLowerCase();
     if (normalized === "manual") {
@@ -133,6 +140,7 @@
     ezDefaultPassMap,
     ezMasterContentType,
     ezPlanFromPhotoCount,
+    ezCanonicalOutputType,
     ezCaptionFields,
     ezOriginNotes,
     ezIdeaSummary,

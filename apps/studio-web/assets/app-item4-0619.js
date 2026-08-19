@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.43-home";
+  const BUILD_ID = "item4-0.6.45-tiktok";
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -729,6 +729,25 @@
     const planned = ezPlanApi()?.ezPlanFromPhotoCount({ photoCount, platforms }) || { overrides: {}, platforms: platforms || [] };
     item4PlanOverrides = { ...planned.overrides, ...item4PlanOverrides };
     return planned;
+  }
+
+  function ezPlanPlatforms(count, selected) {
+    const usingEz = usingEzPlatforms() || ezStarting || ezAutoPlanAfterUpload;
+    if (!usingEz) {
+      const planned = applyEzPlanOverrides(count, selected);
+      return planned.platforms.length ? planned.platforms : selected;
+    }
+    const defaults = ezPlanApi()?.ezPlanFromPhotoCount({ photoCount: count })?.platforms
+      || ["Instagram", "Facebook", "TikTok"];
+    const boxes = Array.from(document.querySelectorAll("[data-ez-platform]"));
+    const platforms = boxes.length
+      ? defaults.filter((platform) => {
+          const box = boxes.find((input) => input.value === platform);
+          return box ? (box.checked && !box.disabled) : true;
+        })
+      : defaults;
+    applyEzPlanOverrides(count, platforms);
+    return platforms;
   }
 
   function ezIsOriginRecord(record = activeProductionRequest) {
@@ -2174,6 +2193,7 @@
     const assetId = master?.id || row.asset?.id || "";
     return `<article class="item4-variant-thumb">
       <div class="item4-variant-image-wrap item4-crop-frame" data-item4-crop-asset="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}" style="aspect-ratio:${escapeHtml(cssRatio)}">${visual}${safe}</div>
+      <p class="item4-crop-hint">Drag any direction. Use + / − or the scroll wheel to zoom.</p>
       <div class="item4-variant-meta">
         <strong>Photo ${escapeHtml(row.asset?.order || "")}</strong>
         <span>${escapeHtml(row.asset?.name || "")}</span>
@@ -2221,7 +2241,9 @@
           ? `Studio is preparing platform media in the background. This page updates automatically (${readyCount}/${targetCount || "?"} ready).`
           : variantStatus === "Error"
             ? "Preparation stopped at the failed transformation. The originals are still safe."
-            : "Drag any direction. Use + / − or the scroll wheel to zoom.";
+            : variantStatus === "Ready"
+              ? "Rebuild if you change the crop."
+              : "Click Prepare when the framing looks right.";
     }
     if (!host) return;
     const activeCaption = document.activeElement?.matches?.("[data-ez-asset-caption]") ? document.activeElement : null;
@@ -2600,8 +2622,7 @@
     syncItem4PlatformsFromEz();
     const selected = ezSelectedPlatforms().length ? ezSelectedPlatforms() : item4SelectedPlatforms();
     const count = item4Workspace?.assets?.length || 0;
-    const planned = applyEzPlanOverrides(count, selected);
-    const platforms = planned.platforms.length ? planned.platforms : selected;
+    const platforms = ezPlanPlatforms(count, selected);
     if (!platforms.length) { setRequestMessage("Choose at least one platform.", "error-text"); return; }
     const button = $("item4BuildPlan");
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
@@ -2666,7 +2687,7 @@
     "Vertical Short Video": {Instagram:"Reel", Facebook:"Reel", TikTok:"Video Draft", YouTube:"Short"},
     "Story": {Instagram:"Story", Facebook:"Story", TikTok:"Story"},
     "Carousel": {Instagram:"Carousel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo"},
-    "Feed Post": {Instagram:"Single Image", Facebook:"Single Image", TikTok:"Single Photo"},
+    "Feed Post": {Instagram:"Single Image", Facebook:"Single Image", TikTok:"Multi-Photo"},
     "Photo Set": {Instagram:"Reel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo", YouTube:"Slideshow Video"},
     "Longform Video": {YouTube:"Standard Video"},
   };

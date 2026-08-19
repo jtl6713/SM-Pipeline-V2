@@ -75,6 +75,13 @@ export function ezPlanFromPhotoCount({ photoCount, platforms } = {}) {
   };
 }
 
+export function ezCanonicalOutputType(platform, outputType) {
+  const p = String(platform || "").trim();
+  const o = String(outputType || "").trim();
+  if (p === "TikTok" && o === "Single Photo") return "Multi-Photo";
+  return o;
+}
+
 export function ezCaptionFields(mode, { caption = "", captions = [] } = {}) {
   const normalized = String(mode || "ai").trim().toLowerCase();
   if (normalized === "manual") {
