@@ -825,3 +825,22 @@ input, select, textarea, button {
 .creative-editor-shell.watch-only .creative-heading-actions{pointer-events:auto;opacity:1}
 .creative-editor-shell.watch-only #closeCreativeEditor{pointer-events:auto}
 
+.render-preview-busy{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:28px 22px;background:rgba(8,22,26,.82);color:#fff;text-align:center;pointer-events:auto}
+.render-preview-busy[hidden]{display:none!important}
+.render-preview-busy-spinner{width:58px;height:58px;border:5px solid rgba(255,255,255,.22);border-top-color:#7fd3c7;border-radius:50%;animation:creative-spin .85s linear infinite}
+.render-preview-busy-copy{display:grid;gap:8px;max-width:320px}
+.render-preview-busy-copy strong{font-size:1.28rem;line-height:1.2;font-weight:800;letter-spacing:.01em}
+.render-preview-busy-copy span{font-size:.95rem;line-height:1.4;color:#d7ece8}
+.render-preview-frame.is-rendering{outline:3px solid #3aa7b8;outline-offset:2px}
+.creative-preview-card.is-rendering .creative-preview-freshness.active{font-size:.82rem;padding:8px 12px;animation:creative-badge-pulse 1.4s ease-in-out infinite}
+.creative-change-progress[data-status="active"]{padding:22px 20px;border-width:2px;border-color:#3aa7b8;background:#eef8f8;box-shadow:0 0 0 5px rgba(58,167,184,.16);animation:creative-progress-pulse 1.8s ease-in-out infinite}
+.creative-change-progress[data-status="active"] .creative-change-progress-title{font-size:1.18rem}
+.creative-change-progress[data-status="active"] .creative-change-progress-state{font-size:.86rem;padding:8px 14px;animation:creative-badge-pulse 1.4s ease-in-out infinite}
+.creative-change-progress[data-status="active"] .creative-change-progress-detail{font-size:.92rem;font-weight:650}
+@keyframes creative-spin{to{transform:rotate(360deg)}}
+@keyframes creative-badge-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.06);opacity:.86}}
+@keyframes creative-progress-pulse{0%,100%{box-shadow:0 0 0 5px rgba(58,167,184,.12)}50%{box-shadow:0 0 0 10px rgba(58,167,184,.22)}}
+@media (prefers-reduced-motion:reduce){
+  .render-preview-busy-spinner,.creative-change-progress[data-status="active"],.creative-change-progress[data-status="active"] .creative-change-progress-state,.creative-preview-card.is-rendering .creative-preview-freshness.active{animation:none}
+}
+

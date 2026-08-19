@@ -60,7 +60,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.55-review-audio-mix";
+  const BUILD_ID = "item4-0.6.56-render-busy";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -3952,7 +3952,7 @@
       text = "Preview does not include your unsaved edits";
       state = "unsaved";
     } else if (creativeHandoffStatus?.active && !creativeHandoffStatus?.completed) {
-      text = `${creativeHandoffStatus.current_stage_label || "New preview"} in progress`;
+      text = "Previous mix still playing · new render in progress";
       state = "active";
     } else if (phase6SavedRevisionNeedsRender()) {
       text = "Saved edits are not in this preview yet";
@@ -4031,6 +4031,25 @@
     return "";
   }
 
+  function syncCreativeRenderBusyOverlay(handoff = creativeHandoffStatus) {
+    const frame = $("creativeRenderPreviewFrame");
+    const card = $("creativePreviewSection");
+    const overlay = $("creativeRenderBusy");
+    const title = $("creativeRenderBusyTitle");
+    const detail = $("creativeRenderBusyDetail");
+    const busy = Boolean(
+      (handoff?.active && !handoff?.completed && handoff?.overall_status === "active")
+      || creativeMixInProgress(handoff)
+    );
+    frame?.classList.toggle("is-rendering", busy);
+    card?.classList.toggle("is-rendering", busy);
+    if (overlay) overlay.hidden = !busy;
+    if (!busy) return;
+    $("creativeRenderPreview")?.pause();
+    if (title) title.textContent = `${handoff?.current_stage_label || "Rendering"} in progress`;
+    if (detail) detail.textContent = "This player still has the previous mix. The new preview replaces it when this page says Ready.";
+  }
+
   function renderCreativeChangeProgress(handoff = null) {
     creativeHandoffStatus = handoff || null;
     const panel = $("creativeChangeProgress");
@@ -4066,6 +4085,7 @@
       || (creativeWatchOnly()
         ? "Adjust music and voiceover, then apply the mix to render a new preview."
         : "Save and rerender the preview to begin a new revision.");
+    syncCreativeRenderBusyOverlay(handoff);
     phase6UpdatePreviewFreshness();
   }
 
@@ -4924,6 +4944,12 @@
 
     setCreativeBusy(true);
     phase6Message("");
+    syncCreativeRenderBusyOverlay(initialResult?.handoff || {
+      active: true,
+      completed: false,
+      overall_status: "active",
+      current_stage_label: "Rendering",
+    });
 
     for (let attempt = 0; attempt < 60; attempt += 1) {
       if (token !== creativeHandoffPollToken || activeCreativeOutputId !== outputId) return;
@@ -5207,6 +5233,9 @@
     video?.pause();
     video?.removeAttribute("src");
     drive?.removeAttribute("src");
+  });
+  $("creativeRenderPreview")?.addEventListener("play", () => {
+    if ($("creativeRenderBusy") && !$("creativeRenderBusy").hidden) $("creativeRenderPreview").pause();
   });
   $("reloadCreativeEditor")?.addEventListener("click", () => {
     if (!activeCreativeOutputId || !phase6ConfirmDiscardUnsaved("reset to the saved values")) return;
