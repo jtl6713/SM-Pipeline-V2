@@ -57,3 +57,5 @@ EZ path Pages deploy: 2026-08-18 — Home wordmark Chicago Shining plus QA publi
 EZ path Pages deploy: 2026-08-18 — Align Studio chrome with Home skyline navy. UI 0.6.43. Source commit e0970fb.
 
 EZ path Pages deploy: 2026-08-18 — Put TikTok Multi-Photo in the single-photo plan; crop hint under the photo. UI 0.6.45. Source commit aacb49d.
+
+EZ path Pages deploy: 2026-08-19 — Pipeline auto-refreshes studio state every 8 seconds while the page is open. UI 0.6.46.

@@ -58,7 +58,10 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.45-tiktok";
+  const BUILD_ID = "item4-0.6.46-pipeline-poll";
+  let pipelinePollTimer = null;
+  let pipelinePollInFlight = false;
+  const PIPELINE_POLL_MS = 8000;
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -89,6 +92,7 @@
       document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
       button.classList.add("active");
       $(`page-${button.dataset.page}`).classList.add("active");
+      if (button.dataset.page !== "outputs") stopPipelinePoll();
       loadPage(button.dataset.page);
     });
   });
@@ -4836,15 +4840,77 @@
     }
   }
 
-  async function loadOutputs() {
+  function pipelinePageActive() {
+    return Boolean($("page-outputs")?.classList.contains("active"));
+  }
+
+  function pipelineFingerprint(records) {
+    return JSON.stringify((records || []).map((r) => [
+      r.id,
+      r.studio_state,
+      r.render_status,
+      r.review_status,
+      r.platform_publish_status || r.publish_status,
+      r.studio_progress_percent ?? r.youtube_processing_progress_percent ?? r.youtube_upload_progress_percent,
+      r.creative_available,
+    ]));
+  }
+
+  function setPipelineLiveHint(text) {
+    const hint = $("pipelineLiveHint");
+    if (hint) hint.textContent = text;
+  }
+
+  function stopPipelinePoll() {
+    if (pipelinePollTimer) {
+      clearTimeout(pipelinePollTimer);
+      pipelinePollTimer = null;
+    }
+    if ($("pipelineLiveHint") && !pipelinePageActive()) setPipelineLiveHint("Open Pipeline to watch live updates");
+  }
+
+  function schedulePipelinePoll() {
+    stopPipelinePoll();
+    if (!pipelinePageActive() || document.hidden) {
+      if (pipelinePageActive() && document.hidden) setPipelineLiveHint("Paused while this tab is in the background");
+      return;
+    }
+    setPipelineLiveHint("Live · updates every 8 seconds");
+    pipelinePollTimer = setTimeout(() => {
+      refreshPipelineOutputs({ silent: true }).finally(schedulePipelinePoll);
+    }, PIPELINE_POLL_MS);
+  }
+
+  async function refreshPipelineOutputs({ silent = false } = {}) {
     const target = $("outputsList");
-    target.innerHTML = '<div class="empty">Loading outputs…</div>';
+    if (!target) return;
+    if (silent && pipelinePollInFlight) return;
+    pipelinePollInFlight = true;
+    if (!silent) {
+      target.innerHTML = '<div class="empty">Loading outputs…</div>';
+      setPipelineLiveHint("Refreshing…");
+    }
     try {
       const { records = [] } = await api("/api/outputs?limit=100");
+      const unchanged = silent && target.querySelector("table") && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs);
       pipelineOutputs = records;
-      renderOutputsTable(target, records);
+      if (!unchanged) {
+        const scrollTop = target.scrollTop;
+        renderOutputsTable(target, records);
+        target.scrollTop = scrollTop;
+      }
+      if (pipelinePageActive() && !document.hidden) setPipelineLiveHint("Live · updates every 8 seconds");
+    } catch (e) {
+      if (!silent) target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+      else setPipelineLiveHint("Live update failed · retrying");
+    } finally {
+      pipelinePollInFlight = false;
     }
-    catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
+  }
+
+  async function loadOutputs() {
+    await refreshPipelineOutputs({ silent: false });
+    schedulePipelinePoll();
   }
 
   async function loadMusic() {
@@ -4940,6 +5006,16 @@
     if (!creativeEditorDirty) return;
     event.preventDefault();
     event.returnValue = "";
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopPipelinePoll();
+      if (pipelinePageActive()) setPipelineLiveHint("Paused while this tab is in the background");
+      return;
+    }
+    if (!pipelinePageActive()) return;
+    refreshPipelineOutputs({ silent: true }).finally(schedulePipelinePoll);
   });
 
   phase6DecorateTooltips(document);
