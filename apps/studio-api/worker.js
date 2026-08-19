@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.12-pipeline-photo-review",
+          version: "0.10.13-auto-publish-approve",
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
@@ -2684,8 +2684,8 @@ function item4PhotoCountKind(count) {
 
 function item4DefaultOutputType(platform, photoCount) {
   const n = Math.max(0, Number(photoCount) || 0);
-  const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Multi-Photo" });
-  const multiple = Object.freeze({ Instagram: "Carousel", Facebook: "Multi-Image Post", TikTok: "Multi-Photo", YouTube: "Short" });
+  const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Video Draft" });
+  const multiple = Object.freeze({ Instagram: "Carousel", Facebook: "Multi-Image Post", TikTok: "Video Draft", YouTube: "Short" });
   const map = n <= 1 ? single : multiple;
   return map[platform] || null;
 }
@@ -2693,7 +2693,7 @@ function item4DefaultOutputType(platform, photoCount) {
 function item4CanonicalOutputType(platform, outputType) {
   const p = String(platform || "").trim();
   const o = String(outputType || "").trim();
-  if (p === "TikTok" && o === "Single Photo") return "Multi-Photo";
+  if (p === "TikTok" && o === "Single Photo") return "Video Draft";
   return o;
 }
 
@@ -5045,6 +5045,7 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
       profileDefaults.include_thumbnail
     ),
 
+
     video_duration_seconds: outputEffectiveNumber(
       outputRow,
       "Video_Duration_Seconds_Override",
@@ -5126,6 +5127,12 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
   };
 
   effective.music = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord);
+  const ezOrigin = String(f(requestRecord, "Production_Notes") || "").includes("origin=ez-button");
+  if (ezOrigin) {
+    const thumbnailOverride = String(f(outputRow, "Thumbnail_Mode_Override") || "Inherit").trim() || "Inherit";
+    const thumbnailMaster = String(f(requestRecord, "Thumbnail_Mode") || "Use Profile Default").trim() || "Use Profile Default";
+    if (thumbnailOverride !== "Yes" && thumbnailMaster !== "Yes") effective.thumbnail_mode = "No";
+  }
   effective.issues = outputWorkItemIssues(outputRow, route, effective);
   return effective;
 }
@@ -9812,18 +9819,61 @@ async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
   }
 }
 
+function studioOutputReadyForPublishApproval(record) {
+  const reviewStatus = String(f(record, "Review_Status") || "").trim();
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  const publishStatus = String(f(record, "Publish_Status") || "").trim();
+  if (["Approved"].includes(reviewStatus) || outputStatus === "Approved for Publishing") return false;
+  if (["Published", "Publishing"].includes(publishStatus)) return false;
+  const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
+  const nativePhoto = String(f(record, "Platform") || "").trim() === "TikTok"
+    && String(f(record, "Platform_Output_Type") || "").trim() === "TikTok Slideshow"
+    && Boolean(String(f(record, "Render_Clip_List_JSON") || "").trim());
+  if (!rendered && !nativePhoto) return false;
+  return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
+}
+
 async function reviewOutputCreative(request, env, url, authorization) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const id = phase6RecordIdFromPath(url);
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-  if (!Boolean(f(existing, "Do_Not_Publish"))) {
-    throw new HttpError(409, "Phase 6 review actions are limited to Do_Not_Publish outputs during controlled validation");
-  }
   const action = phase6Text(payload?.action, 50).toLowerCase();
   const note = phase6Text(payload?.notes, 10000);
   const existingNotes = String(f(existing, "Review_Notes") || "").trim();
   const stamp = new Date().toISOString();
+  const doNotPublish = Boolean(f(existing, "Do_Not_Publish"));
+  const productionPublishApprove = action === "approve_for_publishing" || ((action === "approve" || action === "approved") && !doNotPublish);
+  if (productionPublishApprove) {
+    if (doNotPublish) throw new HttpError(409, "Do_Not_Publish outputs cannot be approved for live publishing");
+    if (!studioOutputReadyForPublishApproval(existing)) {
+      throw new HttpError(409, "This output is not ready for publishing approval");
+    }
+    const fields = {
+      Review_Status: "Approved",
+      Output_Status: "Approved for Publishing",
+      Publish_Status: "Ready to Schedule",
+      Publish_Method: "Automated",
+      Auto_Publish_Enabled: true,
+      Review_Decision_At: stamp,
+      Do_Not_Publish: false,
+      Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+    };
+    const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+    return respond(request, env, {
+      ok: true,
+      action: "approve_for_publishing",
+      record: mapPhase6CreativeOutput(updated),
+      handoff_state: "approved_for_publishing",
+      message: "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
+    });
+  }
+  if (!doNotPublish) {
+    throw new HttpError(409, "Phase 6 preview edits remain limited to Do_Not_Publish outputs");
+  }
   let fields;
   let renderPackage = null;
   let voiceAutomation = null;

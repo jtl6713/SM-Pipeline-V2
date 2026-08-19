@@ -13,12 +13,12 @@
     single: Object.freeze({
       Instagram: "Single Image",
       Facebook: "Single Image",
-      TikTok: "Multi-Photo",
+      TikTok: "Video Draft",
     }),
     multiple: Object.freeze({
       Instagram: "Carousel",
       Facebook: "Multi-Image Post",
-      TikTok: "Multi-Photo",
+      TikTok: "Video Draft",
       YouTube: "Short",
     }),
   });
@@ -63,7 +63,7 @@
   function ezCanonicalOutputType(platform, outputType) {
     const p = String(platform || "").trim();
     const o = String(outputType || "").trim();
-    if (p === "TikTok" && o === "Single Photo") return "Multi-Photo";
+    if (p === "TikTok" && o === "Single Photo") return "Video Draft";
     return o;
   }
 

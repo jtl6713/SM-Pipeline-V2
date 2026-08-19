@@ -6,4 +6,4 @@ Purpose of this run: promote the exact SMV1 Test Mode selector pulse. Test proce
 
 Purpose of this run: ship worker 0.10.11 so single-photo TikTok Multi-Photo is canonicalized into the Item 4 plan and enabled outputs cannot block Approve & Promote. Source commit aacb49d. No Make activation.
 
-Purpose of this run: ship worker 0.10.12 so Pipeline photo/render review opens from the output row using Selected_Assets_JSON, Final_File_URL, or Studio_Preview_URL. No Make activation.
+Purpose of this run: ship worker 0.10.13 so production Pipeline can approve an output for publishing (same fields as the review email), EZ photo TikTok uses Video Draft, and EZ defaults skip thumbnail generation. No Make activation.

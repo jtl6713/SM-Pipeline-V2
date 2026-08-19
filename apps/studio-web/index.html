@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.48-watch-only-lock">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.49-publish-approve">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.48</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.49</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -209,7 +209,7 @@
  <div class="ez-option-group-body">
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Thumbnail / cover</span>
- <select id="ezThumbnail"><option>Use Profile Default</option><option>Yes</option><option>No</option></select>
+ <select id="ezThumbnail"><option>Use Profile Default</option><option>Yes</option><option value="No" selected>No</option></select>
  </label>
  <label class="form-field"><span>Video after voiceover</span>
  <input id="ezVoiceoverTail" type="number" min="0" max="10" step=".5" value="2">
@@ -785,14 +785,14 @@
  <div class="creative-editor-actions">
  <div class="creative-action-explainer">
  <strong>Choose what happens next</strong>
- <span>Save draft stores edits only. Unlock titles if an approved preview has locked them. Save &amp; rerender creates a new preview. Approve preview records review approval and locks titles; it does not publish.</span>
+ <span>Save draft stores edits only. Unlock titles if an approved preview has locked them. Save &amp; rerender creates a new preview. Approve for publishing queues Instagram and Facebook to auto-publish and TikTok as a draft. Email approval still works the same way.</span>
  </div>
  <button type="button" class="secondary-button" id="reloadCreativeEditor">Reset unsaved edits</button>
  <div class="creative-editor-action-group">
  <button type="button" class="secondary-button" id="creativeUnlockTitles" hidden>Unlock titles</button>
  <button type="button" class="primary-button" id="saveCreativeEditor">Save draft</button>
  <button type="button" class="primary-button rerender-button" id="creativeRequestChanges">Save &amp; rerender preview</button>
- <button type="button" class="primary-button review-approve-button" id="creativeApprovePreview">Approve preview</button>
+ <button type="button" class="primary-button review-approve-button" id="creativeApprovePreview">Approve for publishing</button>
  </div>
  </div>
  </div>
@@ -928,7 +928,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.48-watch-only-lock"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.48-watch-only-lock"></script>
+ <script src="/assets/ez-plan.js?v=0.6.49-publish-approve"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.49-publish-approve"></script>
 </body>
 </html>

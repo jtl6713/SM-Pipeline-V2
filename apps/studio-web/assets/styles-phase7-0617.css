@@ -811,8 +811,13 @@ input, select, textarea, button {
 .creative-editor-shell.watch-only .creative-audio-card,
 .creative-editor-shell.watch-only .creative-ratio-card,
 .creative-editor-shell.watch-only .creative-slides-section,
-.creative-editor-shell.watch-only .creative-review-section,
-.creative-editor-shell.watch-only .creative-editor-actions{pointer-events:none;opacity:.78}
+.creative-editor-shell.watch-only .creative-review-section{pointer-events:none;opacity:.78}
+.creative-editor-shell.watch-only .creative-editor-actions{pointer-events:auto;opacity:1}
+.creative-editor-shell.watch-only #reloadCreativeEditor,
+.creative-editor-shell.watch-only #creativeUnlockTitles,
+.creative-editor-shell.watch-only #saveCreativeEditor,
+.creative-editor-shell.watch-only #creativeRequestChanges{pointer-events:none;opacity:.78}
+.creative-editor-shell.watch-only #creativeApprovePreview{pointer-events:auto;opacity:1}
 .creative-editor-shell.watch-only .creative-preview-card,
 .creative-editor-shell.watch-only .creative-jump-nav,
 .creative-editor-shell.watch-only .creative-heading-actions{pointer-events:auto;opacity:1}

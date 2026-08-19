@@ -58,7 +58,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.48-watch-only-lock";
+  const BUILD_ID = "item4-0.6.49-publish-approve";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -3945,7 +3945,15 @@
         button.dataset.busy = busy ? "true" : "false";
       }
     });
-    if (!busy) phase6UpdateSaveState();
+    if (!busy) {
+      phase6UpdateSaveState();
+      if (creativeWatchOnly()) {
+        if ($("saveCreativeEditor")) $("saveCreativeEditor").disabled = true;
+        if ($("creativeRequestChanges")) $("creativeRequestChanges").disabled = true;
+        if ($("creativeApprovePreview")) $("creativeApprovePreview").disabled = !creativeCanApproveForPublishing();
+        if ($("reloadCreativeEditor")) $("reloadCreativeEditor").disabled = true;
+      }
+    }
   }
 
   function phase6FormatPercent(value) {
@@ -4001,7 +4009,7 @@
     reloadCreativeEditor: "Discard unsaved edits and reload the latest saved values from Studio.",
     creativeRequestChanges: "Save the current controls and create a new rendered preview. Publishing stays locked.",
     "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
-    creativeApprovePreview: "Approve the current preview. This records review approval, locks per-photo titles, and does not publish the output.",
+    creativeApprovePreview: "Approve this output for publishing. Instagram and Facebook auto-publish. TikTok is created as a draft. You can also approve from the review email.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
   };
@@ -4572,10 +4580,12 @@
     $("creativeEditorSubtitle").textContent = `${output.platform_output_type || output.format || "Photo sequence"}${output.aspect_ratio ? ` · ${output.aspect_ratio}` : ""} · creative review`;
     $("creativeSafetyBadge").textContent = output.do_not_publish
       ? (titleLocked ? "Titles locked" : "Publishing locked")
-      : "Watch-only review";
+      : (creativeCanApproveForPublishing(output) ? "Ready to approve" : "Watch-only review");
     $("creativeSafetyBadge").className = "badge ready-for-review";
     $("creativeSafetyBanner").innerHTML = !output.do_not_publish
-      ? "<strong>Watch-only review.</strong> Play the render and confirm the photo and caption. Form fields and Save are locked on production posts, so a voiceover checkbox will not be stored."
+      ? (creativeCanApproveForPublishing(output)
+        ? "<strong>Final publish approval.</strong> Play the render, then Approve for publishing here or in the review email. Instagram and Facebook will auto-publish. TikTok will be saved as a draft."
+        : "<strong>Watch-only review.</strong> Play the render and confirm the photo and caption. Form fields and Save stay locked on production posts.")
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
         : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
@@ -4594,7 +4604,8 @@
     const watchOnly = !output.do_not_publish;
     $("saveCreativeEditor").disabled = watchOnly;
     $("creativeRequestChanges").disabled = watchOnly;
-    $("creativeApprovePreview").disabled = watchOnly;
+    $("creativeApprovePreview").textContent = watchOnly ? "Approve for publishing" : "Approve preview";
+    $("creativeApprovePreview").disabled = watchOnly ? !creativeCanApproveForPublishing(output) : false;
     if ($("reloadCreativeEditor") && watchOnly) $("reloadCreativeEditor").disabled = true;
     if ($("creativeUnlockTitles")) {
       $("creativeUnlockTitles").hidden = !titleLocked;
@@ -4812,11 +4823,20 @@
     }
   }
 
+  function creativeCanApproveForPublishing(output = activeCreativeOutput) {
+    if (!output || output.do_not_publish) return false;
+    const review = String(output.review_status || "").trim();
+    const status = String(output.output_status || "").trim();
+    if (review === "Approved" || status === "Approved for Publishing") return false;
+    return status === "Ready for Review" || review === "Review Sent";
+  }
+
   async function reviewActiveCreative(action) {
     if (!activeCreativeOutputId) return;
     try {
-      await saveActiveCreative({ quiet: true });
-      phase6Message(action === "approve" ? "Saving review approval…" : "Saving changes request…");
+      if (!creativeWatchOnly() || action === "changes_requested") await saveActiveCreative({ quiet: true });
+      const publishing = action === "approve_for_publishing" || (action === "approve" && creativeWatchOnly());
+      phase6Message(publishing ? "Saving publish approval…" : (action === "approve" ? "Saving review approval…" : "Saving changes request…"));
       setCreativeBusy(true);
       const result = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative/review`, {
         method: "POST",
@@ -4826,14 +4846,15 @@
       const refreshed = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`);
       populateCreativeEditor(refreshed);
       renderCreativeChangeProgress(refreshed.handoff || result.handoff || creativeHandoffStatus);
-      if (refreshed?.handoff?.overall_status === "error") phase6Message(refreshed.handoff.message || result.message || "Review state needs attention.", "error-text");
+      if (publishing && result.message) phase6Message(result.message, "success");
+      else if (refreshed?.handoff?.overall_status === "error") phase6Message(refreshed.handoff.message || result.message || "Review state needs attention.", "error-text");
       else phase6Message("");
       await loadOutputs();
-      if (action !== "approve" && phase6HandoffNeedsContinuation(result.handoff_state)) {
+      if (action !== "approve" && action !== "approve_for_publishing" && phase6HandoffNeedsContinuation(result.handoff_state)) {
         continueCreativeHandoff(result).catch((e) => phase6Message(e.message, "error-text"));
       }
     } catch (e) {
-      if (action !== "approve" && isTimeoutError(e) && activeCreativeOutputId) {
+      if (action !== "approve" && action !== "approve_for_publishing" && isTimeoutError(e) && activeCreativeOutputId) {
         phase6Message("The save/review request is still being processed. Studio is resuming the handoff automatically…", "success");
         continueCreativeHandoff({ handoff_state: "voice_prep_running", message: "Resuming after a slow save/review response…" })
           .catch((err) => phase6Message(err.message, "error-text"));
@@ -5006,6 +5027,12 @@
   $("creativeUnlockTitles")?.addEventListener("click", () => unlockCreativeTitles().catch(() => {}));
   $("creativeRequestChanges")?.addEventListener("click", () => reviewActiveCreative("changes_requested"));
   $("creativeApprovePreview")?.addEventListener("click", () => {
+    if (creativeWatchOnly()) {
+      if (!creativeCanApproveForPublishing()) return;
+      if (!window.confirm("Approve this output for publishing?\n\nInstagram and Facebook will auto-publish. TikTok will be saved as a draft/private.")) return;
+      reviewActiveCreative("approve_for_publishing");
+      return;
+    }
     if (window.confirm("Approve this preview? This records review approval and locks per-photo titles; it will not publish the output.")) reviewActiveCreative("approve");
   });
   $("creativeDefaultVoicePreview")?.addEventListener("click", () => phase6PreviewSelectedVoice($("creativeDefaultVoice"), $("creativeDefaultVoicePreview")));
