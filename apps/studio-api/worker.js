@@ -5,7 +5,7 @@ const JSON_HEADERS = {
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url);
 
@@ -96,7 +96,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.13-auto-publish-approve",
+          version: "0.10.16-remotion-handoff",
+          production_make_idle_cadence_v1: true,
+          production_request_kate_voice_v1: true,
+          studio_p3_remotion_handoff_v1: true,
           binding_contract: "studio-api-10-core-elevenlabs-optional",
           elevenlabs_required: false,
           source_identity: "item20-diagnostics-v1",
@@ -364,7 +367,9 @@ export default {
       }
 
       if (isItem4StatusRoute) {
-        return getItem4WorkspaceStatus(request, env, url, authorization);
+        const response = await getItem4WorkspaceStatus(request, env, url, authorization);
+        cadenceScheduleSync(ctx, env);
+        return response;
       }
 
       if (isProductionRequestOutputsRoute) {
@@ -400,7 +405,9 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_promote");
         requirePermission(authorization, "production_configure");
-        return promoteProductionRequestViaI3I4(request, env, url, authorization);
+        const response = await promoteProductionRequestViaI3I4(request, env, url, authorization);
+        cadenceScheduleSync(ctx, env, { startRender: true });
+        return response;
       }
 
       if (isProductionRequestRecordRoute) {
@@ -409,13 +416,17 @@ export default {
           requirePermission(authorization, "production_configure");
           return updateProductionRequest(request, env, url, authorization);
         }
-        return getProductionRequest(request, env, url, authorization);
+        const response = await getProductionRequest(request, env, url, authorization);
+        cadenceScheduleSync(ctx, env);
+        return response;
       }
 
       if (isIdeaPromoteRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_promote");
-        return promoteIdeaViaI3I4(request, env, url, authorization);
+        const response = await promoteIdeaViaI3I4(request, env, url, authorization);
+        cadenceScheduleSync(ctx, env, { startRender: true });
+        return response;
       }
 
       if (isIdeaRecordRoute) {
@@ -433,7 +444,9 @@ export default {
       }
 
       if (url.pathname === "/api/content") {
-        return listContent(request, env, url);
+        const response = await listContent(request, env, url);
+        cadenceScheduleSync(ctx, env);
+        return response;
       }
 
       if (url.pathname.startsWith("/api/content/")) {
@@ -441,7 +454,9 @@ export default {
       }
 
       if (url.pathname === "/api/outputs") {
-        return listOutputs(request, env, url);
+        const response = await listOutputs(request, env, url);
+        cadenceScheduleSync(ctx, env);
+        return response;
       }
 
       if (isOutputPreviewRoute) {
@@ -461,7 +476,7 @@ export default {
       if (isOutputCreativeReviewRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "outputs_review");
-        return reviewOutputCreative(request, env, url, authorization);
+        return reviewOutputCreative(request, env, url, authorization, ctx);
       }
 
       if (isOutputCreativeRoute) {
@@ -493,6 +508,11 @@ export default {
         error: error instanceof Error ? error.message : "Unexpected error",
       }, error?.status || 500);
     }
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(syncProductionCadence(env, { force: true }).catch((error) => {
+      console.warn("production cadence cron failed", error);
+    }));
   },
 };
 
@@ -842,6 +862,25 @@ function f(record, field) {
   return record?.fields?.[field] ?? null;
 }
 
+function studioOutputIsNativePhoto(record) {
+  const platform = String(f(record, "Platform") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || "").trim();
+  const mapping = String(f(record, "Platform_Output_Type") || "").trim();
+  const composition = String(f(record, "Composition_ID") || "").trim();
+  const clips = String(f(record, "Render_Clip_List_JSON") || f(record, "Selected_Assets_JSON") || "").trim();
+  return platform === "TikTok"
+    && (outputType === "Multi-Photo" || mapping === "TikTok Slideshow")
+    && !composition
+    && Boolean(clips);
+}
+
+function studioOutputHasReviewableDeliverable(record) {
+  if (String(f(record, "Final_File_URL") || "").trim()) return true;
+  if (String(f(record, "Studio_Preview_URL") || "").trim()) return true;
+  if ((f(record, "Carousel Slides") || []).length) return true;
+  return studioOutputIsNativePhoto(record);
+}
+
 function normalizedOutputState(record) {
   const fields = record?.fields || {};
   const text = (name) => String(fields[name] || "").trim();
@@ -873,8 +912,8 @@ function normalizedOutputState(record) {
   if (has("YouTube_Upload_Status", "uploading") || has("FB_Slideshow_Status", "uploading") || has("Publish_Status", "publishing")) return "Uploading";
   if (has("YouTube_Processing_Status", "processing") || has("FB_Slideshow_Status", "processing") || has("TikTok_Draft_Status", "processing") || has("IG_Carousel_Status", "processing")) return "Platform Processing";
   if (has("Publish_Status", "scheduled")) return "Scheduled";
-  if (has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) return "Ready for Review";
-  if (has("Render_Status", "rendering") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
+  if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  if (has("Render_Status", "rendering") || has("Render_Status", "ready for render") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
   if (has("Asset_Selection_Status", "needs selection") || has("Asset_Selection_Status", "selecting") || has("TikTok_Draft_Status", "ready for assets") || has("TikTok_Draft_Status", "preparing assets") || has("FB_Publish_Status", "ready for assets") || has("FB_Publish_Status", "preparing assets")) return "Preparing Assets";
   if (has("Review_Status", "approved") || has("Output_Status", "approved")) return "Approved";
   if (has("Output_Status", "skipped")) return "Skipped";
@@ -1005,9 +1044,7 @@ function outputCreativeAvailable(record) {
   return Boolean(
     (f(record, "Carousel Slides") || []).length ||
     f(record, "Creative_Render_Manifest_JSON") ||
-    f(record, "Final_File_URL") ||
-    f(record, "Studio_Preview_URL") ||
-    selectedVisualClips(record).length
+    studioOutputHasReviewableDeliverable(record)
   );
 }
 
@@ -1019,6 +1056,7 @@ function mapOutput(record) {
     platform: f(record, "Platform"),
     format: f(record, "Format"),
     platform_output_type: f(record, "Platform_Output_Type"),
+    studio_output_type: f(record, "Studio_Output_Type"),
     aspect_ratio: f(record, "Aspect_Ratio"),
     output_status: f(record, "Output_Status"),
     studio_state: studioState,
@@ -3751,6 +3789,8 @@ function mapProductionRequest(record) {
     content_type: f(record, "Master_Content_Type"),
     platforms: f(record, "Target_Platforms") || [],
     voiceover_mode: f(record, "Voiceover_Mode"),
+    voice_id: f(record, "Voice_ID") || null,
+    voice_name: f(record, "Voice_Name") || null,
     background_music_mode: f(record, "Background_Music_Mode"),
     thumbnail_mode: f(record, "Thumbnail_Mode"),
     video_duration_seconds: f(record, "Video_Duration_Seconds"),
@@ -3854,6 +3894,28 @@ async function validateMusicAsset(env, recordId) {
   return record;
 }
 
+function normalizeRequestedVoice(payload, voiceoverMode) {
+  if (voiceoverMode !== "Yes") return { voice_id: null, voice_name: null };
+  const voiceId = String(payload?.voice_id || payload?.selected_voice_id || "").trim().slice(0, 120) || PHASE6_DEFAULT_VOICE_ID;
+  const suppliedName = String(payload?.voice_name || "").trim().slice(0, 80);
+  const voiceName = suppliedName
+    || (voiceId === PHASE6_GEORGE_VOICE_ID ? "George" : voiceId === PHASE6_DEFAULT_VOICE_ID ? "Kate" : voiceId);
+  return { voice_id: voiceId, voice_name: voiceName };
+}
+
+function requestedVoiceFromProductionRequest(record) {
+  const mode = String(f(record, "Voiceover_Mode") || "").trim();
+  if (mode !== "Yes") return { voice_id: null, voice_name: null, voice_choice: null };
+  const voiceId = String(f(record, "Voice_ID") || "").trim() || PHASE6_DEFAULT_VOICE_ID;
+  const voiceName = String(f(record, "Voice_Name") || "").trim()
+    || (voiceId === PHASE6_GEORGE_VOICE_ID ? "George" : voiceId === PHASE6_DEFAULT_VOICE_ID ? "Kate" : voiceId);
+  const lower = voiceName.toLowerCase();
+  const voiceChoice = voiceId === PHASE6_GEORGE_VOICE_ID || lower === "george"
+    ? "George"
+    : (voiceId === PHASE6_DEFAULT_VOICE_ID || lower === "kate" ? "Kate" : null);
+  return { voice_id: voiceId, voice_name: voiceName, voice_choice: voiceChoice };
+}
+
 async function cleanProductionRequestPayload(payload, env) {
   const contentTypeRaw = String(payload?.content_type || "").trim();
   const contentType = contentTypeRaw
@@ -3936,6 +3998,8 @@ async function cleanProductionRequestPayload(payload, env) {
   const selectedMusicAssetId = String(payload?.selected_music_asset_id || "").trim() || null;
   if (selectedMusicAssetId) await validateMusicAsset(env, selectedMusicAssetId);
 
+  const requestedVoice = normalizeRequestedVoice(payload, voiceoverMode);
+
   return {
     content_type: contentType,
     platforms,
@@ -3954,6 +4018,8 @@ async function cleanProductionRequestPayload(payload, env) {
     carousel_image_mode: carouselImageMode,
     voiceover_tail_seconds: voiceoverTailSeconds,
     selected_music_asset_id: selectedMusicAssetId,
+    voice_id: requestedVoice.voice_id,
+    voice_name: requestedVoice.voice_name,
     title_mode: titleMode,
     requested_title: requestedTitle,
     caption_mode: captionMode,
@@ -3984,6 +4050,8 @@ function productionRequestFields(input, nowIso) {
     Carousel_Image_Mode: input.carousel_image_mode,
     Voiceover_Tail_Seconds: input.voiceover_tail_seconds,
     Selected_Music_Asset: input.selected_music_asset_id ? [input.selected_music_asset_id] : [],
+    Voice_ID: input.voice_id || null,
+    Voice_Name: input.voice_name || null,
     Title_Mode: input.title_mode,
     Requested_Title: input.requested_title || null,
     Caption_Mode: input.caption_mode,
@@ -4015,6 +4083,8 @@ function productionRequestDefaultsFromIdea(idea) {
     carousel_image_mode: String(f(idea, "Production_Carousel_Image_Mode") || "Make AI Generated").trim() || "Make AI Generated",
     voiceover_tail_seconds: f(idea, "Voiceover_Tail_Seconds") ?? 2,
     selected_music_asset_id: null,
+    voice_id: null,
+    voice_name: null,
     title_mode: "AI decides",
     requested_title: "",
     caption_mode: "AI decides",
@@ -4646,6 +4716,8 @@ function productionRequestDirectiveSnapshot(requestRecord, music) {
     master_content_type: f(requestRecord, "Master_Content_Type"),
     target_platforms: f(requestRecord, "Target_Platforms") || [],
     voiceover_mode: f(requestRecord, "Voiceover_Mode"),
+    voice_id: f(requestRecord, "Voice_ID") || null,
+    voice_name: f(requestRecord, "Voice_Name") || null,
     background_music_mode: f(requestRecord, "Background_Music_Mode"),
     thumbnail_mode: f(requestRecord, "Thumbnail_Mode"),
     video_duration_seconds: f(requestRecord, "Video_Duration_Seconds"),
@@ -4703,6 +4775,13 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
     Production_Request_Directives_JSON: JSON.stringify(snapshot),
     Production_Request_Applied_At: appliedAt,
   };
+
+  const requestedVoice = requestedVoiceFromProductionRequest(requestRecord);
+  if (requestedVoice.voice_id) {
+    fields.Voice_ID = requestedVoice.voice_id;
+    fields.Voice_Name = requestedVoice.voice_name;
+    if (requestedVoice.voice_choice) fields.Voice = requestedVoice.voice_choice;
+  }
 
   const contentItem = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
     method: "PATCH",
@@ -5158,6 +5237,8 @@ function copyWritableParentFields(parentContentItem) {
     "Content_Themes",
     "Publish_Recommendation",
     "Voice",
+    "Voice_ID",
+    "Voice_Name",
   ]) {
     copy(name);
   }
@@ -5277,6 +5358,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     clip_count: clips.length,
     total_frames: totalFrames,
     composition_id: compositionId,
+    output_filename: compositionId ? outputFilename : null,
     selected_assets_json: JSON.stringify(selected),
     render_clip_list_json: renderPrep.render_clip_list_json,
   };
@@ -5483,6 +5565,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Render_Clip_List_JSON: sourcePackage?.render_clip_list_json || null,
     Render_Total_Frames: sourcePackage?.total_frames || 0,
     Composition_ID: sourcePackage?.composition_id || null,
+    Output_Filename: sourcePackage?.composition_id ? (sourcePackage.output_filename || null) : null,
     Clip_1_Duration_Frames: clips[0] ? perClipFrames : 0,
     Clip_2_Duration_Frames: clips[1] ? perClipFrames : 0,
     Clip_3_Duration_Frames: clips[2] ? perClipFrames : 0,
@@ -6879,11 +6962,44 @@ async function item4EnsureP3StudioSourceAuthority(env) {
 
 
 
+const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V1";
+
+function item4P3SingleParentEnrichmentRecord() {
+  return {
+    Output_Title:'{{if(length(102.Studio_Effective_Requested_Title)>0;102.Studio_Effective_Requested_Title;101.Content_Title)}}',
+    Output_Caption:'{{if(length(102.Studio_Effective_Requested_Caption)>0;102.Studio_Effective_Requested_Caption;101.Caption)}}',
+    Output_Hashtags:"{{101.Hashtags}}",
+    Thumbnail_URL:'{{if(ifempty(102.Studio_Effective_Thumbnail_Mode; "Yes") = "No"; ""; 101.Thumbnail_URL)}}',
+    Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
+    Output_Status:'{{if(102.Studio_Output_Type = "Multi-Photo"; "Ready for Review"; "In Production")}}',
+    Asset_Selection_Status:'{{if(102.Studio_Output_Type = "Multi-Photo"; ""; "Selected")}}',
+    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo stays Ready for Review; other Studio outputs stay In Production with assets Selected so R3/R4 can render. Enrichment from Content Item {{101.Content_ID}}.`
+  };
+}
+
+function item4P3Module103HasRemotionHandoff(mod) {
+  const rec = mod?.mapper?.record || {};
+  return String(rec.Output_Status || "").includes("In Production")
+    && Object.prototype.hasOwnProperty.call(rec, "Asset_Selection_Status")
+    && String(rec.Output_Notes || "").includes(STUDIO_P3_REMOTION_HANDOFF_MARKER);
+}
+
+function item4ApplyP3RemotionHandoff(mod) {
+  if (!mod?.mapper) throw new HttpError(409, "P3 module 103 is missing");
+  mod.mapper.record = Object.assign({}, mod.mapper.record || {}, item4P3SingleParentEnrichmentRecord());
+}
+
 function item4PatchP3SingleParentBlueprint(blueprint) {
   if (!blueprint || typeof blueprint !== "object") throw new HttpError(502, "P3 single-parent patch source blueprint is unusable");
   const router=phase6FindModule(blueprint.flow,901);
   if(!router||router.module!=="builtin:BasicRouter") throw new HttpError(409,"P3 module 901 router is missing");
-  if(phase6FindModule(blueprint.flow,101)&&phase6FindModule(blueprint.flow,103)) return {patched:blueprint,already_ready:true};
+  if(phase6FindModule(blueprint.flow,101)&&phase6FindModule(blueprint.flow,103)) {
+    if(item4P3Module103HasRemotionHandoff(phase6FindModule(blueprint.flow,103))) return {patched:blueprint,already_ready:true};
+    const patched=JSON.parse(JSON.stringify(blueprint));
+    item4ApplyP3RemotionHandoff(phase6FindModule(patched.flow,103));
+    item4ValidateGeneratedMakeBlueprint(patched.flow);
+    return {patched,already_ready:false,upgraded_handoff:true};
+  }
   const legacySearch=phase6FindModule(blueprint.flow,1), existingSearch=phase6FindModule(blueprint.flow,5), existingCreate=phase6FindModule(blueprint.flow,6), existingMark=phase6FindModule(blueprint.flow,8);
   if(!legacySearch||!existingSearch||!existingCreate||!existingMark) throw new HttpError(409,"P3 validated modules 1/5/6/8 are required for single-parent hardening");
   const patched=JSON.parse(JSON.stringify(blueprint));
@@ -6901,15 +7017,7 @@ function item4PatchP3SingleParentBlueprint(blueprint) {
   q.metadata.interface=JSON.parse(JSON.stringify(existingCreate?.metadata?.interface||[]));
   for(const name of ["Production_Request_Output","Studio_Output_Type","Studio_Effective_Title_Mode","Studio_Effective_Requested_Title","Studio_Effective_Caption_Mode","Studio_Effective_Requested_Caption","Studio_Effective_Thumbnail_Mode","Studio_Effective_Voiceover_Mode"]){if(!q.metadata.interface.some(x=>x?.name===name))q.metadata.interface.push({name,type:"text",label:name});}
   const u=JSON.parse(JSON.stringify(existingMark)); u.id=103; delete u.filter; u.module="airtable:ActionUpdateRecords";
-  u.mapper={id:"{{102.id}}",base:"appe33zkZn35yirTL",table:STUDIO_PLATFORM_OUTPUT_TABLE,record:{
-    Output_Title:'{{if(length(102.Studio_Effective_Requested_Title)>0;102.Studio_Effective_Requested_Title;101.Content_Title)}}',
-    Output_Caption:'{{if(length(102.Studio_Effective_Requested_Caption)>0;102.Studio_Effective_Requested_Caption;101.Caption)}}',
-    Output_Hashtags:"{{101.Hashtags}}",
-    Thumbnail_URL:'{{if(ifempty(102.Studio_Effective_Thumbnail_Mode; "Yes") = "No"; ""; 101.Thumbnail_URL)}}',
-    Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
-    Output_Status:"Ready for Review",
-    Output_Notes:'{{102.Output_Notes}}\nP3 v4.8 single-parent enrichment completed from Content Item {{101.Content_ID}}.'
-  },typecast:true,useColumnId:false};
+  u.mapper={id:"{{102.id}}",base:"appe33zkZn35yirTL",table:STUDIO_PLATFORM_OUTPUT_TABLE,record:item4P3SingleParentEnrichmentRecord(),typecast:true,useColumnId:false};
   u.filter={name:"Studio parent package ready for seeded output",conditions:[[{a:"{{102.id}}",o:"exist"},{a:"{{101.Caption}}",o:"exist"},{a:'{{if(ifempty(102.Studio_Effective_Thumbnail_Mode; "Yes") = "No"; "NOT_REQUIRED"; 101.Thumbnail_URL)}}',o:"exist"},{a:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; "NOT_REQUIRED"; 101.Voiceover_URL)}}',o:"exist"}]]};
   u.metadata=u.metadata||{};u.metadata.designer={x:990,y:420,name:"103 - Enrich Existing Studio Platform Output from Parent Package"};
   const m=JSON.parse(JSON.stringify(existingMark)); m.id=104; m.filter={name:"After seeded Studio output enriched",conditions:[[{a:"{{103.id}}",o:"exist"}]]}; m.mapper.id="{{101.id}}";
@@ -6964,48 +7072,17 @@ async function item4EnsureP3SingleParentRouteDirect(env) {
   if(!blueprint) throw new HttpError(502,"P3 single-parent hardening did not receive a usable blueprint");
   const router=phase6FindModule(blueprint.flow,901);
   if(!router||router.module!=="builtin:BasicRouter") throw new HttpError(409,"P3 module 901 router is missing");
-  if(phase6FindModule(blueprint.flow,101)&&phase6FindModule(blueprint.flow,103)) return {ok:true,already_ready:true,live_name:blueprint.name};
-  const legacySearch=phase6FindModule(blueprint.flow,1), existingSearch=phase6FindModule(blueprint.flow,5), existingCreate=phase6FindModule(blueprint.flow,6), existingMark=phase6FindModule(blueprint.flow,8);
-  if(!legacySearch||!existingSearch||!existingCreate||!existingMark) throw new HttpError(409,"P3 validated modules 1/5/6/8 are required for single-parent hardening");
-  const patched=JSON.parse(JSON.stringify(blueprint));
-  const pRouter=phase6FindModule(patched.flow,901), pLegacy=phase6FindModule(patched.flow,1);
-  pLegacy.mapper.formula='OR({Production_Request}=BLANK(),{Studio_Is_Output_Work_Item}=TRUE())';
-  if(pLegacy?.metadata?.designer) pLegacy.metadata.designer.name="1 - Search Legacy or Historical Studio Child Work Item";
-  const s=JSON.parse(JSON.stringify(pLegacy)); s.id=101; s.filter=null;
-  s.mapper.formula='AND({Production_Request}!=BLANK(),NOT({Studio_Is_Output_Work_Item}))'; s.mapper.maxRecords="1";
-  if(s?.metadata?.designer){s.metadata.designer.x=310;s.metadata.designer.y=420;s.metadata.designer.name="101 - Search Single Parent Studio Content Item";}
-  const q=JSON.parse(JSON.stringify(existingSearch)); q.id=102; delete q.filter;
-  q.mapper.base="appe33zkZn35yirTL"; q.mapper.table=STUDIO_PLATFORM_OUTPUT_TABLE; q.mapper.maxRecords="25"; delete q.mapper.view; delete q.mapper.sort;
-  q.mapper.formula='AND(FIND(",{{101.Content_ID}},", "," & ARRAYJOIN({Content_Item}) & ",") > 0,{Production_Request_Output}!=BLANK(),{Output_Status}="Planned")';
-  q.mapper.fields=["Output_ID","Content_Item","Platform","Format","Platform_Output_Type","Aspect_Ratio","Output_Status","Output_Title","Output_Caption","Output_Hashtags","Output_Notes","Production_Request_Output","Studio_Output_Type","Studio_Effective_Title_Mode","Studio_Effective_Requested_Title","Studio_Effective_Caption_Mode","Studio_Effective_Requested_Caption","Studio_Effective_Thumbnail_Mode","Studio_Effective_Voiceover_Mode","Voiceover_Tail_Seconds"];
-  q.metadata=q.metadata||{}; q.metadata.designer={x:650,y:420,name:"102 - Search Seeded Studio Platform Outputs for Parent"};
-  q.metadata.interface=JSON.parse(JSON.stringify(existingCreate?.metadata?.interface||[]));
-  for(const name of ["Production_Request_Output","Studio_Output_Type","Studio_Effective_Title_Mode","Studio_Effective_Requested_Title","Studio_Effective_Caption_Mode","Studio_Effective_Requested_Caption","Studio_Effective_Thumbnail_Mode","Studio_Effective_Voiceover_Mode"]){if(!q.metadata.interface.some(x=>x?.name===name))q.metadata.interface.push({name,type:"text",label:name});}
-  const u=JSON.parse(JSON.stringify(existingMark)); u.id=103; delete u.filter; u.module="airtable:ActionUpdateRecords";
-  u.mapper={id:"{{102.id}}",base:"appe33zkZn35yirTL",table:STUDIO_PLATFORM_OUTPUT_TABLE,record:{
-    Output_Title:'{{if(length(102.Studio_Effective_Requested_Title)>0;102.Studio_Effective_Requested_Title;101.Content_Title)}}',
-    Output_Caption:'{{if(length(102.Studio_Effective_Requested_Caption)>0;102.Studio_Effective_Requested_Caption;101.Caption)}}',
-    Output_Hashtags:"{{101.Hashtags}}",
-    Thumbnail_URL:'{{if(ifempty(102.Studio_Effective_Thumbnail_Mode; "Yes") = "No"; ""; 101.Thumbnail_URL)}}',
-    Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
-    Output_Status:"Ready for Review",
-    Output_Notes:'{{102.Output_Notes}}\nP3 v4.8 single-parent enrichment completed from Content Item {{101.Content_ID}}.'
-  },typecast:true,useColumnId:false};
-  u.filter={name:"Studio parent package ready for seeded output",conditions:[[{a:"{{102.id}}",o:"exist"},{a:"{{101.Caption}}",o:"exist"},{a:'{{if(ifempty(102.Studio_Effective_Thumbnail_Mode; "Yes") = "No"; "NOT_REQUIRED"; 101.Thumbnail_URL)}}',o:"exist"},{a:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; "NOT_REQUIRED"; 101.Voiceover_URL)}}',o:"exist"}]]};
-  u.metadata=u.metadata||{};u.metadata.designer={x:990,y:420,name:"103 - Enrich Existing Studio Platform Output from Parent Package"};
-  const m=JSON.parse(JSON.stringify(existingMark)); m.id=104; m.filter={name:"After seeded Studio output enriched",conditions:[[{a:"{{103.id}}",o:"exist"}]]}; m.mapper.id="{{101.id}}";
-  m.mapper.record={fldJ1IFKs6fpc3sct:"Ready for Review",fldczozdEMhI3OUEV:"Not Ready",fldtkhVaQzr0oCTB7:"Assets Matched"};
-  if(m?.metadata?.designer){m.metadata.designer.x=1330;m.metadata.designer.y=420;m.metadata.designer.name="104 - Mark Single Parent Studio Content Item Assets Matched";}
-  pRouter.routes.unshift({flow:[s,q,u,m]});
-  patched.name="P3 - Platform Output Generation v4.8 - Single Parent Studio Outputs + Legacy"; delete patched.idSequence;
-  item4ValidateGeneratedMakeBlueprint(patched.flow);
+  const built=item4PatchP3SingleParentBlueprint(blueprint);
+  if(built.already_ready) return {ok:true,already_ready:true,live_name:blueprint.name};
+  const patched=built.patched;
   const now=new Date().toISOString(); let auditId=null;
-  try{const audit=await airtableFetch(env,"Make Admin Queue","",{method:"POST",body:JSON.stringify({records:[{fields:{Command_ID:`STUDIO-P3-SINGLE-PARENT-${Date.now()}`,Action:"UPDATE_BLUEPRINT",Scenario_ID:ITEM4_P3_SCENARIO_ID,Scenario_Name:patched.name,Proposed_Blueprint_JSON_Original:JSON.stringify(patched),Write_Approved:true,Status:"Processing",Backup_Blueprint_Wrapper_2:JSON.stringify(blueprint),Requested_At:now,Started_At:now,Requested_By:"chicagoshining-studio-api",Correlation_ID:"ITEM4-SINGLE-PARENT-P3",Notes:"Worker 0.10.3. Adds a Studio single-parent route: Module 101 searches the parent Content Item, Module 102 iterates seeded Platform Outputs, Module 103 enriches those existing outputs after P1/P2, Module 104 updates the parent. Legacy P3 route is preserved and explicitly excludes new Studio parent records. Webhook 2567877, schedule, activation, and legacy modules preserved."}}],typecast:true})});auditId=audit?.records?.[0]?.id||null;}catch{}
+  try{const audit=await airtableFetch(env,"Make Admin Queue","",{method:"POST",body:JSON.stringify({records:[{fields:{Command_ID:`STUDIO-P3-SINGLE-PARENT-${Date.now()}`,Action:"UPDATE_BLUEPRINT",Scenario_ID:ITEM4_P3_SCENARIO_ID,Scenario_Name:patched.name,Proposed_Blueprint_JSON_Original:JSON.stringify(patched),Write_Approved:true,Status:"Processing",Backup_Blueprint_Wrapper_2:JSON.stringify(blueprint),Requested_At:now,Started_At:now,Requested_By:"chicagoshining-studio-api",Correlation_ID:"ITEM4-SINGLE-PARENT-P3",Notes:"Worker 0.10.16 remotion handoff. Module 103 keeps TikTok Multi-Photo Ready for Review and leaves other Studio outputs In Production with Asset_Selection_Status=Selected after VO/caption copy so R3/R4 can render. Legacy P3 route, webhook 2567877, schedule, and activation are preserved."}}],typecast:true})});auditId=audit?.records?.[0]?.id||null;}catch{}
   try{
     const patch=await fetch(`${makeApiBase}/scenarios/${ITEM4_P3_SCENARIO_ID}?confirmed=true`,{method:"PATCH",headers,body:JSON.stringify({blueprint:JSON.stringify(patched)})}); const pt=await patch.text(); if(!patch.ok)throw new HttpError(patch.status,`P3 single-parent patch failed (${patch.status}): ${pt.slice(0,300)}`);
     const vr=await fetch(`${makeApiBase}/scenarios/${ITEM4_P3_SCENARIO_ID}/blueprint?draft=false`,{method:"GET",headers});const vt=await vr.text();let vb;try{vb=vt?JSON.parse(vt):{};}catch{vb={raw:vt};} if(!vr.ok)throw new HttpError(vr.status,`P3 single-parent verify failed (${vr.status})`);const live=vb?.response?.blueprint||vb?.blueprint;
     if(!phase6FindModule(live?.flow,101)||!phase6FindModule(live?.flow,102)||!phase6FindModule(live?.flow,103)||!String(phase6FindModule(live?.flow,1)?.mapper?.formula||"").includes("Production_Request"))throw new HttpError(502,"P3 single-parent verification did not match expected modules 101/102/103");
-    if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Succeeded",Completed_At:new Date().toISOString(),Result_JSON:JSON.stringify({ok:true,worker_build:"0.10.3",scenario_id:ITEM4_P3_SCENARIO_ID,live_name:live?.name||null})},typecast:true})});}catch{}}
+    if(!item4P3Module103HasRemotionHandoff(phase6FindModule(live?.flow,103)))throw new HttpError(502,"P3 remotion handoff verification did not match STUDIO_P3_REMOTION_HANDOFF_V1");
+    if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Succeeded",Completed_At:new Date().toISOString(),Result_JSON:JSON.stringify({ok:true,worker_build:"0.10.16-remotion-handoff",scenario_id:ITEM4_P3_SCENARIO_ID,live_name:live?.name||null})},typecast:true})});}catch{}}
     return {ok:true,already_ready:false,live_name:live?.name||patched.name};
   }catch(error){if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Failed",Completed_At:new Date().toISOString(),Error_Message:error instanceof Error?error.message:String(error)},typecast:true})});}catch{}}throw error;}
 }
@@ -9603,6 +9680,140 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
   return started?.scenario || started?.response?.scenario || started || scenario;
 }
 
+const PRODUCTION_CADENCE_RENDER = Object.freeze([
+  { id: 5528742, key: "P1" },
+  { id: 5569495, key: "R2" },
+  { id: 5557966, key: "R3" },
+  { id: 5556716, key: "R4" },
+  { id: 5565333, key: "R5" },
+  { id: 5576363, key: "RR1" },
+]);
+const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
+  { id: 5864632, key: "IG" },
+  { id: 5813561, key: "FB" },
+  { id: 5806668, key: "TTD" },
+]);
+const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
+const PRODUCTION_CADENCE_THROTTLE_MS = 20000;
+let productionCadenceLastSyncAt = 0;
+let productionCadenceRenderHoldUntil = 0;
+let productionCadencePublishHoldUntil = 0;
+
+function cadenceScheduleSync(ctx, env, options = {}) {
+  const run = syncProductionCadence(env, options).catch((error) => {
+    console.warn("production cadence sync failed", error);
+  });
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
+  return run;
+}
+
+async function cadenceQueueHasWork(env, tableId, query) {
+  try {
+    const rows = await listRecords(env, tableId, {
+      limit: 1,
+      view: query.view || null,
+      filterFormula: query.formula || null,
+    });
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (error) {
+    console.warn("production cadence queue probe failed", tableId, query.view || query.formula, error);
+    return false;
+  }
+}
+
+async function cadenceRepairInProgress(env) {
+  try {
+    const rows = await listRecords(env, REPAIR_LEASE_TABLE_ID, {
+      limit: 1,
+      filterFormula: `AND({Status}="Processing",FIND("${REPAIR_LEASE_NOTE_PREFIX}", {Notes}&"")>0)`,
+    });
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function cadenceHasRenderWork(env) {
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
+  const checks = await Promise.all([
+    cadenceQueueHasWork(env, contentTable, { view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK())' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post")))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' }),
+    cadenceQueueHasWork(env, outputTable, { view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!="")))' }),
+  ]);
+  return checks.some(Boolean);
+}
+
+async function cadenceHasPublishWork(env) {
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const checks = await Promise.all([
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Publishing",{IG_Story_Status}="Publishing"))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published")' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published")' }),
+  ]);
+  return checks.some(Boolean);
+}
+
+async function cadenceSetActive(env, scenarioId, active) {
+  try {
+    const state = await phase6ScenarioState(env, scenarioId);
+    if (state?.scenario?.isinvalid === true) {
+      return { id: scenarioId, skipped: "invalid", ok: false };
+    }
+    if (Boolean(state.isActive) === Boolean(active)) {
+      return { id: scenarioId, active: Boolean(state.isActive), ok: true, unchanged: true };
+    }
+    if (active) await phase6EnsureScenarioActive(env, scenarioId);
+    else await phase6SetScenarioActive(env, scenarioId, false);
+    return { id: scenarioId, active, ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!active && /not running|already inactive|is not activated/i.test(message)) {
+      return { id: scenarioId, active: false, ok: true, already: true };
+    }
+    if (active && /already running/i.test(message)) {
+      return { id: scenarioId, active: true, ok: true, already: true };
+    }
+    return { id: scenarioId, active, ok: false, error: message };
+  }
+}
+
+async function syncProductionCadence(env, { force = false, startRender = false, startPublish = false } = {}) {
+  const now = Date.now();
+  if (!force && !startRender && !startPublish && now - productionCadenceLastSyncAt < PRODUCTION_CADENCE_THROTTLE_MS) {
+    return { skipped: "throttled" };
+  }
+  productionCadenceLastSyncAt = now;
+  if (await cadenceRepairInProgress(env)) {
+    return { skipped: "repair_lease" };
+  }
+  if (startRender) productionCadenceRenderHoldUntil = now + PRODUCTION_CADENCE_HOLD_MS;
+  if (startPublish) productionCadencePublishHoldUntil = now + PRODUCTION_CADENCE_HOLD_MS;
+
+  const [renderWork, publishWork] = await Promise.all([
+    cadenceHasRenderWork(env),
+    cadenceHasPublishWork(env),
+  ]);
+  const wantRender = startRender || renderWork || now < productionCadenceRenderHoldUntil;
+  const wantPublish = startPublish || publishWork || now < productionCadencePublishHoldUntil;
+  const actions = [
+    ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender)),
+    ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish)),
+  ];
+  const results = await Promise.all(actions);
+  return {
+    ok: true,
+    render: wantRender,
+    publish: wantPublish,
+    render_work: renderWork,
+    publish_work: publishWork,
+    results,
+  };
+}
+
 async function phase6RunScenario(env, scenarioId, data = null) {
   // Match the proven MAKE-ADMIN-BRIDGE contract: no-input runs send {}.
   // Make documents responsive=false as optional, so omit it unless we actually need inputs.
@@ -9826,14 +10037,11 @@ function studioOutputReadyForPublishApproval(record) {
   if (["Approved"].includes(reviewStatus) || outputStatus === "Approved for Publishing") return false;
   if (["Published", "Publishing"].includes(publishStatus)) return false;
   const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
-  const nativePhoto = String(f(record, "Platform") || "").trim() === "TikTok"
-    && String(f(record, "Platform_Output_Type") || "").trim() === "TikTok Slideshow"
-    && Boolean(String(f(record, "Render_Clip_List_JSON") || "").trim());
-  if (!rendered && !nativePhoto) return false;
+  if (!rendered && !studioOutputIsNativePhoto(record)) return false;
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
 }
 
-async function reviewOutputCreative(request, env, url, authorization) {
+async function reviewOutputCreative(request, env, url, authorization, ctx = null) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const id = phase6RecordIdFromPath(url);
@@ -9863,6 +10071,7 @@ async function reviewOutputCreative(request, env, url, authorization) {
       method: "PATCH",
       body: JSON.stringify({ fields, typecast: true }),
     });
+    cadenceScheduleSync(ctx, env, { startPublish: true });
     return respond(request, env, {
       ok: true,
       action: "approve_for_publishing",

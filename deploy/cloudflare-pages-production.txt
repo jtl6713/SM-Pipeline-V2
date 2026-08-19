@@ -69,3 +69,5 @@ EZ path Pages deploy: 2026-08-19 — Voiceover voice picker on Advanced and EZ d
 EZ path Pages deploy: 2026-08-19 — Voice picker sits next to Voiceover Yes; script override hint. UI 0.6.51.
 
 EZ path Pages deploy: 2026-08-19 — Advanced audio matches Start with content: Yes reveals voice and music lists. UI 0.6.52.
+
+EZ path Pages deploy: 2026-08-19 — Review stays closed until a rendered file exists; Open Review is not preview-ready from clip JSON alone. UI 0.6.53.

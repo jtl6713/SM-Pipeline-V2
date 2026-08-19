@@ -33,3 +33,5 @@ EZ voice catalog deploy retry: 2026-08-18 — upload Worker source with Wrangler
 EZ voice catalog deploy retry: 2026-08-18 — accept Wrangler’s bundled Worker when the uploaded module still contains the expected Studio API source markers. Source commit 65a6f63.
 
 EZ voice catalog deploy: 2026-08-18 — list ElevenLabs voices from v2 without the query params that returned 400. Source commit 349ae93.
+
+Remotion handoff deploy: 2026-08-19 — P3 no longer marks photo-sequence outputs Ready for Review before Remotion; seed Output_Filename; Pipeline review requires a rendered file. Worker 0.10.16-remotion-handoff.

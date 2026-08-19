@@ -60,7 +60,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.52-audio-lists";
+  const BUILD_ID = "item4-0.6.53-review-deliverable";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -4665,7 +4665,9 @@
     if (!fileId && !output.final_file_url && !directPreview) {
       empty.textContent = String(output.render_status || "").toLowerCase().includes("native photo")
         ? "Native photo route — review the stills below. No Remotion MP4."
-        : "No rendered preview is available yet.";
+        : (String(output.render_status || "").toLowerCase().includes("render")
+          ? "The video is still rendering. Open Review will unlock when the MP4 is ready."
+          : "No rendered preview is available yet.");
       empty.hidden = false;
       return;
     }
@@ -4962,6 +4964,10 @@
     const review = String(output.review_status || "").trim();
     const status = String(output.output_status || "").trim();
     if (review === "Approved" || status === "Approved for Publishing") return false;
+    const hasFile = Boolean(String(output.final_file_url || "").trim() || String(output.studio_preview_url || "").trim());
+    const native = String(output.platform || "").trim() === "TikTok"
+      && /slideshow|multi-photo/i.test(String(output.platform_output_type || output.studio_output_type || output.format || ""));
+    if (!hasFile && !native) return false;
     return status === "Ready for Review" || review === "Review Sent";
   }
 
