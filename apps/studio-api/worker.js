@@ -21,6 +21,8 @@ export default {
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
       const isIdeaPromoteRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
+      const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
+      const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isProductionRequestPromoteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
       const isProductionRequestBridgePreflightRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/bridge-preflight$/.test(url.pathname);
@@ -42,6 +44,7 @@ export default {
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
+      const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
       const isIdeaHoldWrite = (isIdeaHoldRoute || isIdeaRestoreRoute) && request.method === "POST";
@@ -66,6 +69,7 @@ export default {
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isIdeaCreateRoute ||
+        isIdeaGenerateWrite ||
         isIdeaEditRoute ||
         isIdeaDeleteRoute ||
         isIdeaHoldWrite ||
@@ -96,7 +100,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.34-public-cover-handoff",
+          version: "0.10.35-manual-ideas",
+          studio_manual_idea_generation_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -300,6 +305,17 @@ export default {
 
       if (url.pathname === "/api/dashboard") {
         return dashboard(request, env);
+      }
+
+      if (isIdeaGenerateRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "ideas_create");
+        return startStudioIdeaGeneration(request, env, authorization, ctx);
+      }
+
+      if (isIdeaGenerateStatusRoute) {
+        return studioIdeaGenerationStatus(request, env, url, authorization);
       }
 
       if (url.pathname === "/api/ideas") {
@@ -13280,4 +13296,249 @@ async function adminMakeDeploy(request, env, authorization) {
     throw error instanceof HttpError ? error : new HttpError(502, String(error?.message || error));
   }
 }
+
+// STUDIO_MANUAL_IDEA_GENERATOR_V1
+// Manual/on-demand Idea generation reuses canonical I1, but temporarily scopes
+// Module 2 to exactly one Content Profile while I1 is inactive. The original
+// blueprint and OFF state are restored after admission so scheduled operation
+// remains unchanged and unrelated profiles cannot be consumed by a manual run.
+const STUDIO_IDEA_I1_SCENARIO_ID = 5514334;
+const STUDIO_IDEA_PROFILE_TABLE_ID = "tblNYg2QB0BmmVACy";
+const STUDIO_IDEA_BATCH_TABLE_ID = "tblpCKSqcTpDtyst3";
+const STUDIO_IDEA_ALLOWED_COUNTS = new Set([5, 10, 25, 50, 100]);
+const STUDIO_IDEA_ALLOWED_QUALITIES = new Set(["Highest Quality", "Balanced", "Quantity"]);
+
+function studioIdeaBatchRecordIdFromPath(url) {
+  const match = /^\/api\/ideas\/generate\/(rec[A-Za-z0-9]+)$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid idea-generation batch path");
+  return match[1];
+}
+
+function studioIdeaBatchView(record) {
+  const requested = Math.max(0, Number(f(record, "Requested_Count")) || 0);
+  const candidates = Array.isArray(f(record, "Idea Candidates")) ? f(record, "Idea Candidates") : [];
+  return {
+    id: record.id,
+    batch_id: String(f(record, "Batch_ID") || ""),
+    status: String(f(record, "Status") || "Pending"),
+    requested_count: requested,
+    generated_count: candidates.length,
+    quality: String(f(record, "Quality") || "Balanced"),
+    requested_at: f(record, "Requested_At") || null,
+    completed_at: f(record, "Completed_At") || null,
+    error: f(record, "Error") || null,
+  };
+}
+
+async function studioIdeaEnabledProfile(env) {
+  const formula = 'AND({Active}=1,{Idea_Generation_Enabled}=1)';
+  const query = `?filterByFormula=${encodeURIComponent(formula)}&maxRecords=2`;
+  const body = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, query);
+  const records = Array.isArray(body?.records) ? body.records : [];
+  if (!records.length) throw new HttpError(409, "No active idea-generation profile is configured");
+  if (records.length > 1) {
+    throw new HttpError(409, "More than one idea-generation profile is active. Selectable profiles must be added before manual generation can run safely.");
+  }
+  const profile = records[0];
+  const existingBatch = Array.isArray(f(profile, "Manual_Idea_Batch")) ? f(profile, "Manual_Idea_Batch") : [];
+  if (existingBatch.length) throw new HttpError(409, "Another manual idea batch is already starting. Try again after it finishes.");
+  return profile;
+}
+
+async function studioIdeaCreateBatch(env, profile, count, quality, authorization) {
+  const stamp = new Date().toISOString();
+  const random = crypto.randomUUID().split("-")[0].toUpperCase();
+  const batchId = `IDEAS-${stamp.slice(0, 10).replace(/-/g, "")}-${random}`;
+  const body = await airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, "", {
+    method: "POST",
+    body: JSON.stringify({
+      records: [{ fields: {
+        Batch_ID: batchId,
+        Status: "Pending",
+        Requested_Count: count,
+        Quality: quality,
+        Generated_Count: 0,
+        Requested_At: stamp,
+        Requested_By: authorization?.email || null,
+        Content_Profile: [profile.id],
+      }}],
+      typecast: true,
+    }),
+  });
+  const record = body?.records?.[0];
+  if (!record?.id) throw new HttpError(502, "Studio could not create the idea-generation batch");
+  return record;
+}
+
+async function studioIdeaUpdateBatch(env, recordId, fields) {
+  return airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
+async function studioIdeaSetProfileOverrides(env, profileId, batchRecordId, count, quality) {
+  return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Manual_Idea_Count_Override: count,
+        Manual_Idea_Quality_Override: quality,
+        Manual_Idea_Batch: [batchRecordId],
+      },
+      typecast: true,
+    }),
+  });
+}
+
+async function studioIdeaClearProfileOverrides(env, profileId) {
+  return airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profileId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Manual_Idea_Count_Override: null,
+        Manual_Idea_Quality_Override: null,
+        Manual_Idea_Batch: [],
+      },
+      typecast: true,
+    }),
+  });
+}
+
+function studioIdeaUnwrapBlueprint(body) {
+  const value = body?.blueprint ?? body?.response?.blueprint ?? body;
+  if (typeof value === "string") {
+    try { return JSON.parse(value); } catch { return null; }
+  }
+  return value && typeof value === "object" ? value : null;
+}
+
+async function studioIdeaReadI1Blueprint(env) {
+  const body = await phase6MakeApiJson(env, `/scenarios/${STUDIO_IDEA_I1_SCENARIO_ID}/blueprint?draft=false`, { method: "GET" });
+  const blueprint = studioIdeaUnwrapBlueprint(body);
+  if (!blueprint?.flow) throw new HttpError(502, "I1 did not return a usable live blueprint");
+  return blueprint;
+}
+
+async function studioIdeaWriteI1Blueprint(env, blueprint) {
+  await phase6MakeApiJson(env, `/scenarios/${STUDIO_IDEA_I1_SCENARIO_ID}?confirmed=true`, {
+    method: "PATCH",
+    body: JSON.stringify({ blueprint: JSON.stringify(blueprint) }),
+  });
+}
+
+async function studioIdeaInstallExactProfileSelector(env, profileId) {
+  const original = await studioIdeaReadI1Blueprint(env);
+  const patched = JSON.parse(JSON.stringify(original));
+  const module2 = phase6FindModule(patched.flow, 2);
+  if (!module2 || module2.module !== "airtable:ActionSearchRecords") {
+    throw new HttpError(409, "I1 Module 2 profile selector contract has drifted");
+  }
+  module2.mapper = module2.mapper || {};
+  module2.mapper.formula = `AND(RECORD_ID()="${String(profileId).replace(/"/g, "")}",{Active}=1,{Idea_Generation_Enabled}=1)`;
+  module2.mapper.maxRecords = "1";
+  await studioIdeaWriteI1Blueprint(env, patched);
+  const verified = await studioIdeaReadI1Blueprint(env);
+  const verified2 = phase6FindModule(verified.flow, 2);
+  if (String(verified2?.mapper?.formula || "") !== module2.mapper.formula || String(verified2?.mapper?.maxRecords || "") !== "1") {
+    throw new HttpError(502, "I1 exact-profile selector verification failed");
+  }
+  return original;
+}
+
+async function studioIdeaExecuteBatch(env, profile, batchRecord) {
+  let originalBlueprint = null;
+  let started = false;
+  const startedAt = new Date().toISOString();
+  try {
+    await studioIdeaUpdateBatch(env, batchRecord.id, { Status: "Running", Started_At: startedAt, Error: null });
+    originalBlueprint = await studioIdeaInstallExactProfileSelector(env, profile.id);
+    await phase6SetScenarioActive(env, STUDIO_IDEA_I1_SCENARIO_ID, true);
+    started = true;
+    // Proven interval-scenario behavior: /start launches one execution. Give the
+    // execution time to consume the exact profile bundle; do not race it with /run.
+    await new Promise((resolve) => setTimeout(resolve, 6500));
+  } catch (error) {
+    try {
+      await studioIdeaUpdateBatch(env, batchRecord.id, {
+        Status: "Failed",
+        Completed_At: new Date().toISOString(),
+        Error: String(error?.message || error || "Idea generation failed").slice(0, 10000),
+      });
+    } catch {}
+    throw error;
+  } finally {
+    if (started) {
+      try { await phase6StopScenarioVerified(env, STUDIO_IDEA_I1_SCENARIO_ID, 4); } catch (error) { console.error("Could not restore I1 OFF", error); }
+    }
+    if (originalBlueprint) {
+      try { await studioIdeaWriteI1Blueprint(env, originalBlueprint); } catch (error) { console.error("Could not restore I1 blueprint", error); }
+    }
+    try { await studioIdeaClearProfileOverrides(env, profile.id); } catch (error) { console.error("Could not clear manual idea overrides", error); }
+  }
+}
+
+async function startStudioIdeaGeneration(request, env, authorization, ctx = null) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const count = Number(payload?.count);
+  const quality = String(payload?.quality || "Highest Quality").trim();
+  if (!STUDIO_IDEA_ALLOWED_COUNTS.has(count)) throw new HttpError(400, "Idea count must be 5, 10, 25, 50, or 100");
+  if (!STUDIO_IDEA_ALLOWED_QUALITIES.has(quality)) throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
+
+  const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
+  if (scenario?.isActive) {
+    throw new HttpError(409, "The scheduled idea generator is currently active. Try manual generation after that run finishes.");
+  }
+  const profile = await studioIdeaEnabledProfile(env);
+  const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
+  try {
+    await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, quality);
+  } catch (error) {
+    await studioIdeaUpdateBatch(env, batch.id, { Status: "Failed", Completed_At: new Date().toISOString(), Error: String(error?.message || error).slice(0, 10000) });
+    throw error;
+  }
+
+  const task = studioIdeaExecuteBatch(env, profile, batch).catch((error) => console.error("Manual idea generation background task failed", error));
+  if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
+
+  return respond(request, env, {
+    ok: true,
+    accepted: true,
+    batch_record_id: batch.id,
+    batch_id: String(f(batch, "Batch_ID") || ""),
+    requested_count: count,
+    quality,
+    status: "Pending",
+    message: "Idea generation started.",
+  }, 202);
+}
+
+async function studioIdeaGenerationStatus(request, env, url) {
+  const recordId = studioIdeaBatchRecordIdFromPath(url);
+  let record = await airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, recordId);
+  let view = studioIdeaBatchView(record);
+  const now = Date.now();
+  const requestedAt = view.requested_at ? Date.parse(view.requested_at) : now;
+  const ageMs = Number.isFinite(requestedAt) ? Math.max(0, now - requestedAt) : 0;
+  const updates = {};
+
+  if (view.generated_count !== Number(f(record, "Generated_Count") || 0)) updates.Generated_Count = view.generated_count;
+  if (view.requested_count > 0 && view.generated_count >= view.requested_count && view.status !== "Complete") {
+    updates.Status = "Complete";
+    updates.Completed_At = new Date().toISOString();
+    updates.Error = null;
+  } else if (["Pending", "Running"].includes(view.status) && ageMs > 15 * 60 * 1000) {
+    updates.Status = "Failed";
+    updates.Completed_At = new Date().toISOString();
+    updates.Error = `Generation stopped after creating ${view.generated_count} of ${view.requested_count} requested ideas.`;
+  }
+
+  if (Object.keys(updates).length) {
+    record = await studioIdeaUpdateBatch(env, recordId, updates);
+    view = studioIdeaBatchView(record);
+  }
+  return respond(request, env, { ok: true, batch: view });
+}
+// STUDIO_MANUAL_IDEA_GENERATOR_V1_END
 

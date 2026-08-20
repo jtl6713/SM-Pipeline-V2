@@ -5,6 +5,9 @@
   const $ = (id) => document.getElementById(id);
   let activeIdea = null;
   let ideasCache = [];
+  let activeIdeaGenerationBatchId = null;
+  let ideaGenerationPollTimer = null;
+  let ideaGenerationInFlight = false;
   let activeProductionRequest = null;
   let productionRequestMusic = [];
   let productionRequestOutputs = [];
@@ -61,7 +64,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.58-pr-media-kind";
+  const BUILD_ID = "item4-0.6.68-idea-generator";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -331,6 +334,113 @@
     if (current && options.some((idea) => idea.id === current)) select.value = current;
     if (hint) hint.textContent = "Shows unpromoted Idea Candidates from the pipeline. Open one to manage, configure production, or promote.";
   }
+
+  // STUDIO_MANUAL_IDEA_GENERATOR_UI_V1
+  function stopIdeaGenerationPoll() {
+    if (ideaGenerationPollTimer) clearTimeout(ideaGenerationPollTimer);
+    ideaGenerationPollTimer = null;
+  }
+
+  function setIdeaGenerateMessage(text = "", type = "") {
+    const node = $("ideaGenerateMessage");
+    if (!node) return;
+    node.textContent = text;
+    node.className = `form-message${type ? ` ${type}` : ""}`;
+  }
+
+  function setIdeaGeneratorOpen(open, { reset = false } = {}) {
+    const panel = $("ideaGeneratePanel");
+    if (!panel) return;
+    panel.hidden = !open;
+    if (open) setIdeaFormOpen(false);
+    if (reset) {
+      stopIdeaGenerationPoll();
+      activeIdeaGenerationBatchId = null;
+      ideaGenerationInFlight = false;
+      $("ideaGenerateForm")?.reset();
+      if ($("ideaGenerateCount")) $("ideaGenerateCount").value = "25";
+      if ($("ideaGenerateQuality")) $("ideaGenerateQuality").value = "Highest Quality";
+      if ($("ideaGenerateSubmit")) {
+        $("ideaGenerateSubmit").disabled = false;
+        $("ideaGenerateSubmit").textContent = "Generate Ideas";
+      }
+      if ($("ideaGenerateComplete")) $("ideaGenerateComplete").hidden = true;
+      setIdeaGenerateMessage();
+    }
+  }
+
+  async function pollIdeaGenerationBatch() {
+    if (!activeIdeaGenerationBatchId) return;
+    try {
+      const result = await api(`/api/ideas/generate/${encodeURIComponent(activeIdeaGenerationBatchId)}`);
+      const batch = result.batch || {};
+      const generated = Number(batch.generated_count || 0);
+      const requested = Number(batch.requested_count || 0);
+      if (batch.status === "Complete") {
+        stopIdeaGenerationPoll();
+        ideaGenerationInFlight = false;
+        if ($("ideaGenerateSubmit")) {
+          $("ideaGenerateSubmit").disabled = false;
+          $("ideaGenerateSubmit").textContent = "Generate Ideas";
+        }
+        setIdeaGenerateMessage(`${generated || requested} ideas created${batch.batch_id ? ` · ${batch.batch_id}` : ""}.`, "success");
+        if ($("ideaGenerateComplete")) $("ideaGenerateComplete").hidden = false;
+        await Promise.all([loadIdeas(), loadDashboard()]);
+        return;
+      }
+      if (batch.status === "Failed") {
+        stopIdeaGenerationPoll();
+        ideaGenerationInFlight = false;
+        if ($("ideaGenerateSubmit")) {
+          $("ideaGenerateSubmit").disabled = false;
+          $("ideaGenerateSubmit").textContent = "Retry";
+        }
+        setIdeaGenerateMessage(batch.error || "Unable to generate ideas. Try again.", "error-text");
+        return;
+      }
+      setIdeaGenerateMessage(generated > 0 && requested > 0 ? `${generated} of ${requested} complete` : "Generating ideas…");
+      ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 3000);
+    } catch (error) {
+      setIdeaGenerateMessage(error.message || "Could not check idea generation. Retrying…", "error-text");
+      ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 5000);
+    }
+  }
+
+  $("generateIdeasButton")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: !ideaGenerationInFlight }));
+  $("ideaGenerateCancel")?.addEventListener("click", () => setIdeaGeneratorOpen(false));
+  $("ideaGenerateMore")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: true }));
+  $("ideaGenerateView")?.addEventListener("click", async () => {
+    await loadIdeas();
+    setIdeaGeneratorOpen(false);
+    $("ideasList")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  $("ideaGenerateForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (ideaGenerationInFlight) return;
+    const count = Number($("ideaGenerateCount")?.value || 25);
+    const quality = String($("ideaGenerateQuality")?.value || "Highest Quality");
+    const button = $("ideaGenerateSubmit");
+    ideaGenerationInFlight = true;
+    stopIdeaGenerationPoll();
+    if (button) { button.disabled = true; button.textContent = "Generating…"; }
+    if ($("ideaGenerateComplete")) $("ideaGenerateComplete").hidden = true;
+    setIdeaGenerateMessage("Starting idea generation…");
+    try {
+      const result = await api("/api/ideas/generate", {
+        method: "POST",
+        body: JSON.stringify({ count, quality }),
+        timeoutMs: 30000,
+      });
+      activeIdeaGenerationBatchId = result.batch_record_id;
+      if (!activeIdeaGenerationBatchId) throw new Error("Studio did not return an idea batch ID.");
+      setIdeaGenerateMessage("Generating ideas…");
+      ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 1800);
+    } catch (error) {
+      ideaGenerationInFlight = false;
+      if (button) { button.disabled = false; button.textContent = "Retry"; }
+      setIdeaGenerateMessage(error.message || "Unable to start idea generation. Try again.", "error-text");
+    }
+  });
 
   function setIdeaFormOpen(open, { mode = null } = {}) {
     const panel = $("ideaCreatePanel");
