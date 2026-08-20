@@ -64,7 +64,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.70-idea-count-entry";
+  const BUILD_ID = "item4-0.6.71-caption-dedupe";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -1671,9 +1671,21 @@
   }
 
   function collectEzManualCaptions() {
-    return Array.from(document.querySelectorAll("[data-ez-asset-caption]"))
-      .filter((input) => !input.hidden && ezCaptionModeFor(input.dataset.ezAssetCaption) === "manual")
-      .map((input) => input.value);
+    const byAsset = new Map();
+    document.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
+      const id = String(input.dataset.ezAssetCaption || "");
+      if (!id || input.hidden || ezCaptionModeFor(id) !== "manual") return;
+      const current = String(byAsset.get(id) || "");
+      const next = String(input.value || "");
+      if (!byAsset.has(id) || (!current.trim() && next.trim())) byAsset.set(id, next);
+    });
+
+    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const ordered = assets
+      .map((asset) => String(asset?.id || ""))
+      .filter((id) => byAsset.has(id))
+      .map((id) => byAsset.get(id));
+    return ordered.length ? ordered : Array.from(byAsset.values());
   }
 
   function queueEzCaptionSave() {
