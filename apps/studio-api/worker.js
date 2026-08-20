@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.28-audio-photo-defaults",
+          version: "0.10.29-item4-prepare-local-preview",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -104,6 +104,7 @@ export default {
           studio_publish_handoff_v1: true,
           studio_cdn_publish_handoff_v1: true,
           studio_photo_audio_defaults_v1: true,
+          studio_item4_prepare_soft_fail_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
           studio_music_catalog_fallback_v1: true,
@@ -371,7 +372,7 @@ export default {
         requirePermission(authorization, "production_configure");
         if (request.method === "POST") {
           assertWriteRequest(request, env);
-          return prepareItem4Variants(request, env, url, authorization);
+          return prepareItem4Variants(request, env, url, authorization, ctx);
         }
         return getItem4Variants(request, env, url, authorization);
       }
@@ -2554,7 +2555,8 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
         const drained = await item4DrainVariantWorker(
           env,
           recordId,
-          Math.min(30, Math.max(4, expected.length + 4))
+          Math.min(8, Math.max(2, expected.length + 2)),
+          { maxMs: ITEM4_DRAIN_POST_BUDGET_MS }
         );
         if (Array.isArray(drained)) executionIds.push(...drained);
       } catch (error) {
@@ -3091,6 +3093,9 @@ async function getItem4OutputPlan(request, env, url, authorization) {
 const ITEM4_VARIANT_QUEUE_TABLE = "tblBZLXPd1p2NRWRK";
 const ITEM4_SMV1_SCENARIO_ID = 5894885;
 const ITEM4_VARIANT_RECIPE_VERSION = "fill-crop-v2";
+const ITEM4_DRAIN_POST_BUDGET_MS = 12000;
+const ITEM4_DRAIN_STATUS_BUDGET_MS = 8000;
+const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 20000;
 const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
@@ -3338,13 +3343,15 @@ async function item4SetSmv1SelectorFormula(env, formula) {
   const vb=await read();const vm=find(vb?.flow||[],1);if(String(vm?.mapper?.formula||"")!==formula||String(vm?.mapper?.maxRecords||"")!=="1")throw new HttpError(502,"SMV1 selector verification failed");return true;
 }
 
-async function item4DrainVariantWorker(env, recordId, maxRuns) {
+async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
   // Hard guarantee: before any pending platform variant is allowed to run,
   // verify the live SMV1 blueprint has filename-only Drive reuse disabled.
   // This keeps variant generation source-locked even when generic filenames
   // (for example images 1.jpg) are reused across different Production Requests.
   await item4EnsureSmv1PreviewCacheWorker(env);
 
+  const maxMs = Number(options.maxMs || 0);
+  const started = Date.now();
   const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const originalState = await phase6ScenarioState(env, ITEM4_SMV1_SCENARIO_ID);
@@ -3353,12 +3360,12 @@ async function item4DrainVariantWorker(env, recordId, maxRuns) {
 
   try {
     for (let attempt = 0; attempt < maxRuns; attempt += 1) {
+      if (maxMs > 0 && (Date.now() - started) >= maxMs) break;
       const current = await item4VariantQueueRows(env, recordId);
       const outstanding = current.filter((row) =>
         ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
       );
-      const failed = current.filter((row) => item4QueueStatus(row) === "Failed");
-      if (!outstanding.length || failed.length) break;
+      if (!outstanding.length) break;
       if (testRunId) {
         const crossBoundary=current.filter((row)=>String(f(row,"Test_Run_ID")||"").trim()!==testRunId);
         if(crossBoundary.length) throw new HttpError(409,"SMV1 Test Mode queue contains a blank or mismatched Test_Run_ID");
@@ -3384,6 +3391,7 @@ async function item4DrainVariantWorker(env, recordId, maxRuns) {
         // whether another pulse is needed.
         const beforeIds = new Set(outstanding.map((row) => row.id));
         for (let wait = 0; wait < 6; wait += 1) {
+          if (maxMs > 0 && (Date.now() - started) >= maxMs) break;
           await new Promise((resolve) => setTimeout(resolve, 1000));
           const after = await item4VariantQueueRows(env, recordId);
           const stillOutstanding = after.filter((row) =>
@@ -3398,11 +3406,12 @@ async function item4DrainVariantWorker(env, recordId, maxRuns) {
       // operating state and use Make's explicit run endpoint instead.
       const run = await phase6RunScenario(env, ITEM4_SMV1_SCENARIO_ID);
       executionIds.push(run.executionId);
+      const remaining = maxMs > 0 ? Math.max(1500, maxMs - (Date.now() - started)) : 60000;
       const done = await phase6WaitForScenarioExecution(
         env,
         ITEM4_SMV1_SCENARIO_ID,
         run.executionId,
-        60000,
+        Math.min(60000, remaining),
         1500
       );
       if (done.done && !done.success) {
@@ -3521,6 +3530,9 @@ async function item4ReconcileVariants(env, recordId, record = null) {
   }
 
   const failed = scoped.filter((row) => item4QueueStatus(row) === "Failed");
+  const pending = scoped.filter((row) =>
+    ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
+  );
   const manifest = item4BuildDriveManifest(recordId, assets, ratios, scoped);
   const mediaAssetIds = [...new Set(
     scoped.filter((row) => item4QueueStatus(row) === "Ready")
@@ -3535,7 +3547,7 @@ async function item4ReconcileVariants(env, recordId, record = null) {
   const now = new Date().toISOString();
   let status = "Preparing";
   let error = null;
-  if (failed.length) {
+  if (failed.length && !pending.length) {
     status = "Error";
     error = failed
       .map((row) => String(f(row, "Error_Message") || "Variant generation failed"))
@@ -3558,7 +3570,7 @@ async function item4ReconcileVariants(env, recordId, record = null) {
   return { record: updated, status, error, manifest, queue_rows: scoped };
 }
 
-async function prepareItem4Variants(request, env, url, authorization) {
+async function prepareItem4Variants(request, env, url, authorization, ctx = null) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
 
@@ -3595,7 +3607,16 @@ async function prepareItem4Variants(request, env, url, authorization) {
   );
   if (missingDrive.length) {
     await item4UpsertMasterQueue(env, recordId, authoritativeAssets);
-    await item4DrainVariantWorker(env, recordId, Math.min(30, Math.max(4, missingDrive.length + 4)));
+    try {
+      await item4DrainVariantWorker(
+        env,
+        recordId,
+        Math.min(8, Math.max(2, missingDrive.length + 2)),
+        { maxMs: ITEM4_DRAIN_POST_BUDGET_MS }
+      );
+    } catch (error) {
+      console.warn("Item 4 master-media drain deferred during platform prepare", error);
+    }
     masterAuthority = await item4ReconcileMasterAuthority(env, recordId);
     record = masterAuthority.record;
     authoritativeAssets = masterAuthority.assets.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
@@ -3624,13 +3645,34 @@ async function prepareItem4Variants(request, env, url, authorization) {
   let reconciled = await item4ReconcileVariants(env, recordId);
 
   if (reconciled.status === "Preparing") {
-    const executionIds = await item4DrainVariantWorker(
-      env,
-      recordId,
-      Math.min(40, Math.max(4, expected.length + 8))
-    );
-    reconciled = await item4ReconcileVariants(env, recordId);
-    reconciled.execution_ids = executionIds;
+    try {
+      const executionIds = await item4DrainVariantWorker(
+        env,
+        recordId,
+        Math.min(8, Math.max(2, expected.length + 2)),
+        { maxMs: ITEM4_DRAIN_POST_BUDGET_MS }
+      );
+      reconciled = await item4ReconcileVariants(env, recordId);
+      reconciled.execution_ids = executionIds;
+    } catch (error) {
+      console.warn("Item 4 platform variant drain deferred to background/status polling", error);
+    }
+  }
+
+  if (reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil((async () => {
+      try {
+        await item4DrainVariantWorker(
+          env,
+          recordId,
+          Math.min(20, Math.max(4, expected.length + 8)),
+          { maxMs: ITEM4_DRAIN_BACKGROUND_BUDGET_MS }
+        );
+        await item4ReconcileVariants(env, recordId);
+      } catch (error) {
+        console.warn("Item 4 background variant drain deferred", error);
+      }
+    })());
   }
 
   if (reconciled.status === "Ready") {
@@ -3638,7 +3680,7 @@ async function prepareItem4Variants(request, env, url, authorization) {
       await item4DrainPreviewCacheWorker(
         env,
         recordId,
-        Math.min(40, Math.max(6, reconciled.manifest.target_count + authoritativeAssets.length + 6))
+        Math.min(12, Math.max(4, reconciled.manifest.target_count + authoritativeAssets.length + 2))
       );
       const masterPreviewReconcile = await item4ReconcileMasterAuthority(env, recordId);
       record = masterPreviewReconcile.record;
@@ -3649,22 +3691,23 @@ async function prepareItem4Variants(request, env, url, authorization) {
   }
 
   const ready = reconciled.status === "Ready";
+  const failed = reconciled.status === "Error";
   return respond(request, env, {
-    ok: ready,
+    ok: !failed,
     status: reconciled.status,
     manifest: reconciled.manifest,
     progress: {
-      ready: reconciled.manifest.ready_count,
-      target: reconciled.manifest.target_count,
+      ready: reconciled.manifest?.ready_count || 0,
+      target: reconciled.manifest?.target_count || 0,
     },
     error: reconciled.error,
     production_request: mapProductionRequest(reconciled.record),
     message: ready
       ? `${reconciled.manifest.ready_count} platform-ready Google Drive variants are ready.`
-      : reconciled.status === "Error"
-        ? "Platform media preparation failed. See error."
+      : failed
+        ? (reconciled.error || "Platform media preparation failed. See error.")
         : "Platform media preparation is still running.",
-  }, reconciled.status === "Error" ? 500 : 200);
+  }, failed ? 500 : ready ? 200 : 202);
 }
 
 async function getItem4Variants(request, env, url, authorization) {
@@ -3726,8 +3769,8 @@ async function item4ResumePendingMasterAuthority(env, recordId, record = null) {
   // SMV1 Module 1 intentionally processes maxRecords=1. Pulse it enough times
   // to drain this request's unfinished masters, while keeping a hard bound so a
   // 3-second browser status poll cannot create an unbounded worker loop.
-  const maxRuns = Math.min(12, Math.max(2, outstanding.length + 2));
-  const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns);
+  const maxRuns = Math.min(6, Math.max(1, outstanding.length));
+  const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns, { maxMs: ITEM4_DRAIN_STATUS_BUDGET_MS });
   const reconciled = await item4ReconcileMasterAuthority(env, recordId);
 
   return {
@@ -3765,21 +3808,21 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   }
 
   const failed = scoped.filter((row) => item4QueueStatus(row) === "Failed");
-  if (failed.length) {
+  const outstanding = scoped.filter((row) =>
+    ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
+  );
+  if (failed.length && !outstanding.length) {
     const reconciled = await item4ReconcileVariants(env, recordId, currentRecord);
     return { attempted: false, reason: "variant-failure-present", record: reconciled.record, execution_ids: [] };
   }
 
-  const outstanding = scoped.filter((row) =>
-    ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
-  );
   if (!outstanding.length) {
     const reconciled = await item4ReconcileVariants(env, recordId, currentRecord);
     return { attempted: false, reason: "no-pending-variants", record: reconciled.record, execution_ids: [] };
   }
 
-  const maxRuns = Math.min(12, Math.max(1, outstanding.length));
-  const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns);
+  const maxRuns = Math.min(6, Math.max(1, outstanding.length));
+  const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns, { maxMs: ITEM4_DRAIN_STATUS_BUDGET_MS });
   const reconciled = await item4ReconcileVariants(env, recordId);
   return {
     attempted: true,

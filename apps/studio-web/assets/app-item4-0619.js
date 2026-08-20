@@ -127,6 +127,9 @@
     let body = {};
     try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
     if (!response.ok || body.ok === false) {
+      const preparing = String(body.status || "") === "Preparing"
+        || /still running/i.test(String(body.message || body.error || ""));
+      if (preparing && (response.status === 200 || response.status === 202)) return body;
       throw new Error(body.error || body.message || `Request failed (${response.status})`);
     }
     return body;
@@ -1010,6 +1013,37 @@
       if (heic) return;
       try { ezLocalPreviews.set(index, URL.createObjectURL(file)); } catch {}
     });
+  }
+
+  function item4OptimisticAssetsFromFiles(files, existing = []) {
+    return (files || []).map((file, index) => {
+      const prior = (existing || []).find((asset) => String(asset?.name || "") === String(file?.name || "")) || {};
+      return {
+        ...prior,
+        id: prior.id || `local:${index}`,
+        order: Number(prior.order || index + 1),
+        name: file.name,
+        mime_type: file.type || prior.mime_type || "",
+        browser_preview_compatible: prior.browser_preview_compatible
+          ?? !item4IsHeicAsset({ name: file.name, mime_type: file.type }),
+      };
+    });
+  }
+
+  function paintItem4LocalPreviews(files, { uploading = true } = {}) {
+    const list = Array.from(files || []);
+    ezStagedFiles = list;
+    stageEzLocalPreviews(list);
+    const optimistic = {
+      ...(item4Workspace || {}),
+      assets: item4OptimisticAssetsFromFiles(list, item4Workspace?.assets || []),
+      assets_status: uploading ? "Uploading" : (item4Workspace?.assets_status || "Uploading"),
+    };
+    item4Workspace = optimistic;
+    renderItem4Assets(optimistic);
+    renderItem4Variants(optimistic);
+    renderEzPhotoStrip();
+    updateItem4MasterProgress(optimistic);
   }
 
   function ezLocalPreviewFor(index, name) {
@@ -2050,12 +2084,10 @@
       const name = String(asset?.name || "");
       const local = ezLocalPreviewFor(Number(asset?.order || 0) - 1, name);
       const cdn = String(asset?.preview_url || "").trim();
-      const ready = String(item4Workspace?.assets_status || "").trim() === "Ready";
-      // While uploading, prefer instant local blobs. Once Drive/CDN authority is
-      // Ready, prefer the durable preview so a stale blob cannot mask a good CDN URL.
-      if (local && !ready) candidates.push(local);
+      // Keep the dropped file on screen for this session while Drive/CDN copies
+      // catch up. Durable URLs remain fallbacks for reload and HEIC originals.
+      if (local) candidates.push(local);
       if (cdn) candidates.push(cdn);
-      if (local && ready) candidates.push(local);
       const recordId = String(asset?.media_asset_record_id || "").trim();
       if (/^rec[A-Za-z0-9]+$/.test(recordId)) {
         candidates.push(`${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/preview`);
@@ -2501,10 +2533,10 @@
     const previewUrl = item4AssetPreviewUrl(master) || item4VariantPreviewUrl(row.variant);
     const cssRatio = String(ratio || "4:5").replace(":", " / ");
     const safe = ratio === "9:16" ? '<span class="item4-safe-overlay" title="Centered 4:5 critical-content safe zone"></span>' : "";
-    const visual = previewUrl
-      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(row.asset?.name || "Platform-ready photo")}" draggable="false">`
-      : `<div class="item4-heic-placeholder"><strong>${escapeHtml(ratio)}</strong><span>Preview unavailable</span></div>`;
     const assetId = master?.id || row.asset?.id || "";
+    const visual = previewUrl
+      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(row.asset?.name || "Platform-ready photo")}" draggable="false" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(assetId || previewUrl))}">`
+      : `<div class="item4-heic-placeholder"><strong>${escapeHtml(ratio)}</strong><span>Preview unavailable</span></div>`;
     return `<article class="item4-variant-thumb">
       <div class="item4-variant-image-wrap item4-crop-frame" data-item4-crop-asset="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}" style="aspect-ratio:${escapeHtml(cssRatio)}">${visual}${safe}</div>
       <p class="item4-crop-hint">Drag any direction. Use + / − or the scroll wheel to zoom.</p>
@@ -2583,6 +2615,16 @@
       const safeNote = ratio === "9:16" ? '<span class="item4-safe-note">Dashed box = centered 4:5 critical-content zone</span>' : "";
       return `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>${escapeHtml(ratio)}</strong><span>${escapeHtml(spec.width || "")}${spec.width ? "×" : ""}${escapeHtml(spec.height || "")}${spec.width ? " · " : ""}${rows.length} photo${rows.length === 1 ? "" : "s"} · drag to reframe</span></div>${safeNote}</div><div class="item4-variant-strip">${rows.map(row => item4VariantThumb(row,ratio)).join("")}</div></section>`;
     }).join("");
+    host.querySelectorAll(".item4-crop-frame img[data-item4-preview-image]").forEach((img) => {
+      const frame = img.closest(".item4-crop-frame");
+      const assetId = frame?.dataset.item4CropAsset;
+      const master = item4MasterAsset(assetId) || {};
+      item4BindPreviewImage(img, {
+        candidates: item4AssetPreviewCandidates(master),
+        failureKey: String(assetId || img.dataset.previewFailureKey || "").trim(),
+        placeholder: () => item4AssetPlaceholder(master, "Preview unavailable"),
+      });
+    });
     host.querySelectorAll(".item4-crop-frame").forEach((frame) => item4BindCropFrame(frame));
     const refreshFrame = (assetId, ratio) => {
       const frame = host.querySelector(`.item4-crop-frame[data-item4-crop-asset="${CSS.escape(assetId)}"][data-item4-crop-ratio="${CSS.escape(ratio)}"]`);
@@ -2751,25 +2793,46 @@
     item4VariantPollTimer = setTimeout(pollItem4Variants, 800);
   }
 
+  function item4PreparingInBackgroundMessage() {
+    return "Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.";
+  }
+
+  function item4IsRetryablePrepareFailure(error, status) {
+    const variantStatus = String(status?.variant_status || "");
+    if (variantStatus === "Preparing") return true;
+    if (variantStatus === "Error") return false;
+    const message = String(error?.message || error || "");
+    return /request failed \(5\d{2}\)/i.test(message)
+      || isTimeoutError(error)
+      || /platform media preparation is still running/i.test(message);
+  }
+
   async function prepareItem4Variants() {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
     item4PreparingVariants = true;
+    if (item4Workspace) {
+      item4Workspace = {
+        ...item4Workspace,
+        variant_status: item4Workspace.variant_status === "Ready" ? "Ready" : "Preparing",
+      };
+    }
     renderItem4Variants(item4Workspace || {});
+    startItem4VariantPolling();
     setRequestMessage("Starting platform-media preparation…", "success");
     try {
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops() }),timeoutMs:180000});
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops() }),timeoutMs:45000});
       if (result.production_request) activeProductionRequest = result.production_request;
       await loadItem4Workspace(activeProductionRequest);
       if (item4Workspace?.variant_status === "Ready") {
         setRequestMessage(result.message || "Platform-ready media prepared. Review the crops below.", "success");
       } else {
-        setRequestMessage("Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.", "success");
+        setRequestMessage(item4PreparingInBackgroundMessage(), "success");
         startItem4VariantPolling();
       }
     } catch (error) {
       await loadItem4Workspace(activeProductionRequest).catch(()=>{});
-      if (item4Workspace?.variant_status === "Preparing") {
-        setRequestMessage("Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.", "success");
+      if (item4IsRetryablePrepareFailure(error, item4Workspace)) {
+        setRequestMessage(item4PreparingInBackgroundMessage(), "success");
         startItem4VariantPolling();
       } else {
         setRequestMessage(error.message, "error-text");
@@ -2901,9 +2964,10 @@
     item4Uploading = true;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
+    paintItem4LocalPreviews(files, { uploading: true });
     if (progress) { progress.hidden = false; progress.textContent = `Uploading ${files.length} master photo${files.length === 1 ? "" : "s"}…`; }
     if (button) button.disabled = true;
-    setRequestMessage();
+    setRequestMessage("Photos are on screen. Studio is saving copies to Google Drive in the background.", "success");
     try {
       mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
