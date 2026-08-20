@@ -1,0 +1,137 @@
+name: Patch I1 Manual Idea Generation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/patch-i1-manual-generator.txt'
+      - '.github/workflows/patch-i1-manual-generator.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Patch I1 while it is OFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CLOUDFLARE_API_TOKEN -in deploy/credential-envelope/private.pem.enc -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt -inkey /tmp/key.pem -in /tmp/pat.enc -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 -out /tmp/pat.txt
+          export AIRTABLE_PAT="$(tr -d '\r\n' </tmp/pat.txt)"
+          python - <<'PY'
+          import json, os, urllib.parse, urllib.request, urllib.error, hashlib, datetime
+          BASE='appe33zkZn35yirTL'; SETTINGS='tblpHPWeEkyJaF7ql'; SID=5514334
+          COUNT_FIELD='Manual_Idea_Count_Override'; QUALITY_FIELD='Manual_Idea_Quality_Override'; BATCH_FIELD='Manual_Idea_Batch'; BATCH_LINK_FID='fldAJzek9I6f7svUg'
+          MARK='STUDIO_MANUAL_IDEA_QUALITY_V1'
+          def call(url, method='GET', headers=None, body=None):
+              data=None if body is None else json.dumps(body).encode()
+              h={'User-Agent':'SM-Pipeline-I1-Manual-Patch/1.0', **(headers or {})}
+              if data is not None: h.setdefault('Content-Type','application/json')
+              req=urllib.request.Request(url,data=data,method=method,headers=h)
+              try:
+                  with urllib.request.urlopen(req,timeout=90) as r:
+                      raw=r.read().decode('utf-8','replace'); return r.status, json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  raw=e.read().decode('utf-8','replace')
+                  try:p=json.loads(raw) if raw else {}
+                  except:p={'raw':raw[:1000]}
+                  return e.code,p
+          pat=os.environ['AIRTABLE_PAT']
+          formula="AND({Active}=1,OR({Setting_Name}='MAKE_API_TOKEN',{Setting_Name}='MAKE_API_BASE_URL'))"
+          q=urllib.parse.urlencode([('filterByFormula',formula),('fields[]','Setting_Name'),('fields[]','Setting_Value')])
+          s,p=call(f'https://api.airtable.com/v0/{BASE}/{SETTINGS}?{q}',headers={'Authorization':f'Bearer {pat}'})
+          assert s==200, f'Airtable settings {s}'
+          vals={r['fields'].get('Setting_Name'):r['fields'].get('Setting_Value','') for r in p.get('records',[])}
+          mb=vals['MAKE_API_BASE_URL'].rstrip('/'); mh={'Authorization':f"Token {vals['MAKE_API_TOKEN']}"}
+          s,meta=call(f'{mb}/scenarios/{SID}',headers=mh); assert s==200,f'scenario {s}'
+          sobj=meta.get('scenario') or (meta.get('response') or {}).get('scenario') or meta
+          assert int(sobj.get('id') or SID)==SID
+          assert 'I1 - Daily Idea Candidate Generator' in str(sobj.get('name') or '')
+          assert sobj.get('isActive') is not True, 'I1 must be OFF during blueprint patch'
+          s,p=call(f'{mb}/scenarios/{SID}/blueprint?draft=false',headers=mh); assert s==200,f'blueprint {s}'
+          bp=p.get('blueprint') or (p.get('response') or {}).get('blueprint') or p
+          if isinstance(bp,str): bp=json.loads(bp)
+          before_hash=hashlib.sha256(json.dumps(bp,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+          def find(flow, mid):
+              for n in flow or []:
+                  if int(n.get('id') or -1)==mid:return n
+                  for route in n.get('routes') or []:
+                      x=find(route.get('flow') or [],mid)
+                      if x:return x
+              return None
+          m9=find(bp.get('flow'),9); m13=find(bp.get('flow'),13); m16=find(bp.get('flow'),16)
+          assert m9 and m13 and m16, 'I1 expected modules 9/13/16 missing'
+          current=str((m9.get('mapper') or {}).get('value') or '')
+          allowed={'{{2.Daily_Idea_Limit}}','{{ifempty(2.Manual_Idea_Count_Override; 2.Daily_Idea_Limit)}}'}
+          assert current in allowed, f'Module 9 drift: {current}'
+          m9.setdefault('mapper',{})['value']='{{ifempty(2.Manual_Idea_Count_Override; 2.Daily_Idea_Limit)}}'
+          # Manual batches may be much larger than the scheduled default of 10.
+          if 'max_output_tokens' in (m13.get('mapper') or {}): m13['mapper']['max_output_tokens']='32768'
+          def patch_prompt(obj):
+              if isinstance(obj,dict):
+                  for k,v in list(obj.items()):
+                      if isinstance(v,str) and 'Generate exactly {{10.remaining_idea_slots}} idea candidate(s).' in v:
+                          if MARK not in v:
+                              obj[k]=v+'\n\n'+MARK+'\nManual quality mode: {{ifempty(2.Manual_Idea_Quality_Override; "Balanced")}}\n- Highest Quality: prioritize originality, specificity, usefulness, and concept strength. Silently self-critique the slate and keep the strongest distinct ideas.\n- Balanced: preserve the existing balanced format slate behavior.\n- Quantity: prioritize breadth and concise distinct concepts while still obeying every factual, safety, format-mix, and JSON requirement.\nThe quality mode changes prioritization only; never weaken the schema, factuality, duplicate-risk, or producibility rules.\nWhen Manual_Idea_Quality_Override is blank, use Balanced.\n'
+                          return True
+                      if patch_prompt(v): return True
+              elif isinstance(obj,list):
+                  for v in obj:
+                      if patch_prompt(v): return True
+              return False
+          assert patch_prompt(m13), 'I1 generation prompt slot not found'
+          def patch_record(obj):
+              if isinstance(obj,dict):
+                  if 'fldocuKqXMPdVnqCK' in obj and any(str(k).startswith('fld') for k in obj):
+                      obj[BATCH_LINK_FID]='{{2.Manual_Idea_Batch}}'; return True
+                  for v in obj.values():
+                      if patch_record(v): return True
+              elif isinstance(obj,list):
+                  for v in obj:
+                      if patch_record(v): return True
+              return False
+          assert patch_record(m16), 'I1 candidate create record map not found'
+          patched_hash=hashlib.sha256(json.dumps(bp,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+          if patched_hash!=before_hash:
+              s,p=call(f'{mb}/scenarios/{SID}?confirmed=true',method='PATCH',headers=mh,body={'blueprint':json.dumps(bp,separators=(',',':'))})
+              assert 200<=s<300, f'patch {s} {str(p)[:500]}'
+          s,p=call(f'{mb}/scenarios/{SID}/blueprint?draft=false',headers=mh); assert s==200
+          vb=p.get('blueprint') or (p.get('response') or {}).get('blueprint') or p
+          if isinstance(vb,str): vb=json.loads(vb)
+          v9=find(vb.get('flow'),9); v13=find(vb.get('flow'),13); v16=find(vb.get('flow'),16)
+          assert (v9.get('mapper') or {}).get('value')=='{{ifempty(2.Manual_Idea_Count_Override; 2.Daily_Idea_Limit)}}'
+          assert MARK in json.dumps(v13)
+          assert BATCH_LINK_FID in json.dumps(v16)
+          s,meta2=call(f'{mb}/scenarios/{SID}',headers=mh); assert s==200
+          so2=meta2.get('scenario') or (meta2.get('response') or {}).get('scenario') or meta2
+          assert so2.get('isActive') is not True, 'I1 changed active state unexpectedly'
+          evidence={'schema':'studio-manual-idea-i1-v1','at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'scenario_id':SID,'scenario_name':so2.get('name'),'scenario_active_before':False,'scenario_active_after':False,'before_blueprint_sha256':before_hash,'after_blueprint_sha256':hashlib.sha256(json.dumps(vb,sort_keys=True,separators=(',',':')).encode()).hexdigest(),'manual_count_override':'module 9 ifempty -> Daily_Idea_Limit','quality_prompt_marker':MARK,'max_output_tokens':(v13.get('mapper') or {}).get('max_output_tokens'),'candidate_batch_link_field_id':BATCH_LINK_FID,'scenario_runs':0}
+          os.makedirs('repair/evidence',exist_ok=True)
+          open('repair/evidence/i1-manual-generator-contract.json','w').write(json.dumps(evidence,indent=2)+'\n')
+          print(json.dumps(evidence,indent=2))
+          PY
+      - name: Commit evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/i1-manual-generator-contract.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'evidence: prove I1 manual generation contract'
+            git push origin HEAD:main
+          fi
+      - name: Destroy credentials
+        if: always()
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt
