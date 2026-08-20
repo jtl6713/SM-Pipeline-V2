@@ -6,7 +6,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { URL } = require("url");
 
-const SERVICE_VERSION = "2026-08-18-oauth-status";
+const SERVICE_VERSION = "2026-08-20-thumbnail-fallback";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -341,22 +341,41 @@ async function videoStatus(videoId) {
   return data;
 }
 
-async function setThumbnail(videoId, sourceUrl) {
+async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
   const token = await accessToken();
-  const downloaded = await fetch(sourceUrl);
-  if (!downloaded.ok) throw new Error(`Thumbnail download failed ${downloaded.status}`);
-  const body = Buffer.from(await downloaded.arrayBuffer());
-  if (body.length > 2097152) throw new Error("Thumbnail exceeds 2 MB");
-  const mime = (downloaded.headers.get("content-type") || "image/jpeg").split(";")[0];
+  const tryDownload = async (url) => {
+    if (!url) return null;
+    const downloaded = await fetch(url);
+    if (!downloaded.ok) throw new Error(`Thumbnail download failed ${downloaded.status}`);
+    const body = Buffer.from(await downloaded.arrayBuffer());
+    const mime = (downloaded.headers.get("content-type") || "image/jpeg").split(";")[0];
+    return { body, mime };
+  };
+  let asset = null;
+  let lastError = null;
+  for (const url of [sourceUrl, fallbackSourceUrl].filter(Boolean)) {
+    try {
+      const next = await tryDownload(url);
+      if (next.body.length > 2097152) {
+        lastError = new Error(`Thumbnail exceeds 2 MB (${next.body.length} bytes)`);
+        continue;
+      }
+      asset = next;
+      break;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  if (!asset) throw lastError || new Error("Thumbnail download failed");
   const url = `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
-      "Content-Type": mime,
-      "Content-Length": String(body.length),
+      "Content-Type": asset.mime,
+      "Content-Length": String(asset.body.length),
     },
-    body,
+    body: asset.body,
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`thumbnails.set failed ${response.status}: ${text}`);
@@ -418,7 +437,7 @@ async function handler(req, res) {
       if (!payload.videoId || !payload.sourceUrl) {
         return json(res, 400, { error: "videoId and sourceUrl are required" });
       }
-      return json(res, 200, await setThumbnail(payload.videoId, payload.sourceUrl));
+      return json(res, 200, await setThumbnail(payload.videoId, payload.sourceUrl, payload.fallbackSourceUrl || payload.fallback_source_url || null));
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {

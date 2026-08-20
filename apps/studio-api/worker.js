@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.23-upload-progress",
+          version: "0.10.24-yt-thumb-retry",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -905,11 +905,20 @@ function normalizedOutputState(record) {
   const text = (name) => String(fields[name] || "").trim();
   const has = (name, value) => text(name).toLowerCase().includes(value.toLowerCase());
 
+  const retryablePublish = Boolean(fields.Publish_Retry_Eligible);
+  const youtubeVideoReady = Boolean(text("YouTube_Video_ID"))
+    && (has("YouTube_Upload_Status", "uploaded") || has("YouTube_Processing_Status", "succeeded"));
+  const thumbnailOnlyError = /thumb/i.test(text("Publish_Error_Stage") + " " + text("YouTube_Error_Message") + " " + text("Publish_Error_Message"));
+
   const errors = [
     "Publish_Error_Message", "Remotion_Error_Message", "Final_File_Error_Message",
     "IG_Carousel_Error_Message", "Music_Error_Message", "FB_Slideshow_Error_Message",
     "YouTube_Error_Message", "YouTube_Processing_Failure_Reason", "YouTube_Rejection_Reason",
-  ].some((name) => Boolean(text(name)));
+  ].some((name) => {
+    if (!text(name)) return false;
+    if ((name === "YouTube_Error_Message" || name === "Publish_Error_Message") && thumbnailOnlyError && (retryablePublish || youtubeVideoReady)) return false;
+    return true;
+  });
 
   const explicitFailed = [
     "Output_Status", "Render_Status", "Publish_Status", "Asset_Selection_Status",
@@ -917,7 +926,7 @@ function normalizedOutputState(record) {
     "YouTube_Package_Status", "YouTube_Upload_Status", "YouTube_Processing_Status",
   ].some((name) => has(name, "failed") || has(name, "error") || has(name, "terminal error"));
 
-  if (errors || explicitFailed) return "Failed";
+  if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) return "Failed";
 
   // Terminal success must win over stale/manual helper flags left behind by
   // earlier workflow stages. This is especially important for Facebook, where
@@ -1010,6 +1019,7 @@ function outputProgressPercent(record, state) {
   const processing = processingRaw === null || processingRaw === "" ? null : Number(processingRaw);
   const upload = uploadRaw === null || uploadRaw === "" ? null : Number(uploadRaw);
   if (state === "Published") return 100;
+  if (state === "Failed") return 0;
 
   const defaults = {
     Queued: 5,
@@ -1027,9 +1037,14 @@ function outputProgressPercent(record, state) {
     Skipped: 100,
   };
   // A stored 0% YouTube upload percent is "job accepted, no bytes yet" — do not
-  // collapse Uploading/Processing to 0% on the Pipeline bar.
-  if (Number.isFinite(processing) && processing > 0) return Math.max(0, Math.min(100, processing));
-  if (Number.isFinite(upload) && upload > 0) return Math.max(0, Math.min(100, upload));
+  // collapse Uploading/Processing to 0% on the Pipeline bar. Do not let a completed
+  // upload percent paint Retry Pending as 100%.
+  if ((state === "Uploading" || state === "Platform Processing") && Number.isFinite(processing) && processing > 0) {
+    return Math.max(0, Math.min(100, processing));
+  }
+  if ((state === "Uploading" || state === "Platform Processing") && Number.isFinite(upload) && upload > 0) {
+    return Math.max(0, Math.min(100, upload));
+  }
   return defaults[state] ?? null;
 }
 
