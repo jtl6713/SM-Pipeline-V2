@@ -39,3 +39,6 @@ Remotion handoff deploy: 2026-08-19 — P3 no longer marks photo-sequence output
 Review mix deploy: 2026-08-19 — Production Open Review can apply music/voiceover mix and poll the rerender until the new preview is ready. Worker 0.10.19-review-audio-mix.
 
 CDN publish handoff + photo-origin audio defaults: 2026-08-20 — Approve writes CDN-ready carousel slides and publisher start-contract fields. Multiple photos default to Instagram Reel and Facebook Slideshow Reel so music and voiceover render. Worker 0.10.28-audio-photo-defaults.
+
+Item 4 prepare drain budget: 2026-08-20 � Return 202 while platform media is still preparing; keep SMV1 draining in the background. Worker 0.10.29-item4-prepare-local-preview. Source commit 654de96.
+

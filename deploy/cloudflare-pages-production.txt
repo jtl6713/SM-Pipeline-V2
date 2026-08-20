@@ -90,3 +90,6 @@ Photo audio defaults Pages deploy: 2026-08-20 — EZ multiple-photo plan default
 
 Idea drawer next-step Pages deploy: 2026-08-20 — Idea Candidate leads with Add photos; library-asset I3 promote is collapsed. UI 0.6.63. Source commit bad42bd.
 
+
+Local preview + prepare Pages deploy: 2026-08-20 � Show dropped photos immediately while Drive copies; treat Prepare as background work instead of a 500. UI 0.6.64. Source commit 654de96.
+
