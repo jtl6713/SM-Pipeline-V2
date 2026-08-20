@@ -1,11 +1,10 @@
-name: Apply Studio Manual Idea Progress Repair
+name: Apply Studio Caption Dedupe Repair
 
 on:
   push:
     branches: [main]
     paths:
       - 'repair/tools/patch_studio_manual_idea_progress.py'
-      - 'deploy/apply-studio-manual-idea-progress.txt'
 
 permissions:
   contents: write
@@ -18,28 +17,27 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Apply guarded progress and execution repair
+
+      - name: Apply guarded caption dedupe repair
         shell: bash
         run: |
           set -euo pipefail
           python repair/tools/patch_studio_manual_idea_progress.py
-          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
           cp apps/studio-web/assets/app-item4-0619.js /tmp/studio-web.mjs
-          node --check /tmp/studio-worker.mjs
           node --check /tmp/studio-web.mjs
-          grep -q '0.10.36-manual-ideas-progress' apps/studio-api/worker.js
-          grep -q 'studio_manual_idea_progress_v1' apps/studio-api/worker.js
-          grep -q '0.6.69-idea-progress' apps/studio-web/index.html
-          grep -q '0 of ${count} complete' apps/studio-web/assets/app-item4-0619.js
-      - name: Commit source repair
+          grep -q 'item4-0.6.71-caption-dedupe' apps/studio-web/assets/app-item4-0619.js
+          grep -q 'UI build 0.6.71' apps/studio-web/index.html
+          grep -q 'const byAsset = new Map();' apps/studio-web/assets/app-item4-0619.js
+
+      - name: Commit source repair and production Pages trigger
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add apps/studio-api/worker.js apps/studio-web/index.html apps/studio-web/assets/app-item4-0619.js
+          git add apps/studio-web/index.html apps/studio-web/assets/app-item4-0619.js deploy/cloudflare-pages-production.txt
           if ! git diff --cached --quiet; then
-            git commit -m 'fix(ideas): run manual I1 explicitly and show live progress'
+            git commit -m 'fix(ui): dedupe manual captions by asset'
             git pull --rebase origin main
             git push origin HEAD:main
           fi
