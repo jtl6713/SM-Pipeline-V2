@@ -1,0 +1,6 @@
+{
+  "worker_version": "0.10.37-manual-idea-count-entry",
+  "ui_build": "0.6.70-idea-count-entry",
+  "count_contract": {"minimum": 1, "maximum": 10, "step": 1, "default": 5},
+  "live_verification": "PASS"
+}
