@@ -1,0 +1,5 @@
+Verify manual AI idea generator production rollout after explicit I1 /run fix.
+Expected Worker: 0.10.36-manual-ideas-run
+Expected Pages: 0.6.69-idea-progress
+Source: bf217ed8850e396ba3a01e766c15478e7f89484d
+Triggered: 2026-08-20
