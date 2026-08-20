@@ -1,0 +1,46 @@
+name: Apply Studio Manual Idea Generator
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/apply-studio-manual-ideas.txt'
+      - 'repair/tools/patch_studio_manual_ideas.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply guarded source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_studio_manual_ideas.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          cp apps/studio-web/assets/app-item4-0619.js /tmp/studio-web.mjs
+          node --check /tmp/studio-worker.mjs
+          node --check /tmp/studio-web.mjs
+          grep -q 'STUDIO_MANUAL_IDEA_GENERATOR_V1' apps/studio-api/worker.js
+          grep -q 'id="ideaGeneratePanel"' apps/studio-web/index.html
+          grep -q 'STUDIO_MANUAL_IDEA_GENERATOR_UI_V1' apps/studio-web/assets/app-item4-0619.js
+          grep -q '0.10.35-manual-ideas' apps/studio-api/worker.js
+          grep -q '0.6.68-idea-generator' apps/studio-web/index.html
+      - name: Commit source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js apps/studio-web/index.html apps/studio-web/assets/app-item4-0619.js apps/studio-web/assets/styles-phase7-0617.css
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(ideas): add manual AI idea generator to Studio'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
