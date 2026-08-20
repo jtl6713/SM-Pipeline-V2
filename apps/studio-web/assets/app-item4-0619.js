@@ -3507,7 +3507,8 @@
       }
     }
     if (ezEntryPath === "content") hydrateEzConfigFromRequest(record);
-    setEzAdvancedOpen(ezEntryPath !== "content" || !parsed);
+    // Always start collapsed; operators can expand when they need the matrix.
+    setEzAdvancedOpen(false);
     loadEzAudioOptions().catch(() => {});
   }
 
@@ -3538,7 +3539,7 @@
       if (!assetCount) selectPrMediaKind(null, { quiet: true });
       else syncPrMediaKindUi();
       await loadProductionRequests();
-      setEzAdvancedOpen(true);
+      setEzAdvancedOpen(false);
       setRequestMessage(result.created ? "Production Request draft created. Choose Single or Multiple photos, then upload." : "Existing Production Request draft opened.", "success");
     } catch (e) {
       setManageMessage(e.message, "error-text");

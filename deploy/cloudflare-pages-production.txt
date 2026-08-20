@@ -81,3 +81,5 @@ Idea path Pages deploy: 2026-08-19 — Start with Idea offers select existing I1
 Configure Production media kind Pages deploy: 2026-08-19 — Idea Configure Production requires Single vs Multiple photo choice before upload, same as Content start. UI 0.6.58.
 
 Master preview heal Pages deploy: 2026-08-19 — Recover stuck “Preview unavailable” thumbs; prefer CDN preview once Ready and cascade fallbacks. UI 0.6.59.
+
+Advanced collapsed Pages deploy: 2026-08-19 — Keep Advanced options collapsed by default on Production Request. UI 0.6.60.
