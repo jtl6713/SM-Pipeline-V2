@@ -1,0 +1,4 @@
+Apply the Studio manual idea count-entry change.
+Requested behavior: replace fixed count dropdown with a whole-number entry field, minimum 1, maximum 10, default 5.
+Worker/API validation must enforce the same 1-10 integer contract.
+Triggered: 2026-08-20
