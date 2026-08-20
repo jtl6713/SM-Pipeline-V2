@@ -1173,6 +1173,13 @@
       if ($("ezAudioTrack")) $("ezAudioTrack").value = "";
       if ($("prMusicAsset")) $("prMusicAsset").value = "";
     }
+    const audioWarning = "Music and voiceover play on video outputs (Reels, Slideshow Reels, TikTok video drafts, YouTube). They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.";
+    ["prAudioPlatformWarning", "ezAudioPlatformWarning"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.hidden = !(voiceoverOn || musicOn);
+      if (!el.hidden) el.textContent = audioWarning;
+    });
   }
 
   function syncEzAudioFields() {
@@ -3502,22 +3509,31 @@
 
     const compatibility = $("productionPromotionCompatibility");
     if (compatibility) {
-      compatibility.className = `form-message${status === "Promoted" ? " success" : ""}`;
-      compatibility.textContent = status === "Promoted"
-        ? "Promotion complete. This Production Request is locked and linked to the existing production pipeline."
-        : status === "Submitted"
-          ? "The request has been submitted to I3. Use Check promotion status; Studio will not send a duplicate I3 trigger."
-          : item4Workspace?.assets?.length
-            ? (item4Workspace?.plan_status !== "Ready"
-                ? "Master media is saved. Build and review the platform plan before production."
-                : item4Workspace?.variant_status !== "Ready"
-                  ? "Platform plan is ready. Prepare the required platform media before production."
-                  : item4BridgePreflight?.ready
-                    ? `Source-to-production bridge validated. ${item4BridgePreflight.enabled_output_count || 0} output route(s) are ready for Approve & Promote.${item4BridgePreflight.idea_summary_mode === "derive-on-promotion" ? " Studio will derive the minimal I4 summary automatically." : ""}`
-                    : item4BridgePreflight
-                      ? `Source bridge blocked: ${(item4BridgePreflight.issues || []).join(" ")}`
-                      : "Validating the source-to-production bridge…")
-            : "The existing I3 → I4 promotion path remains available for legacy requests. Item 4 adds master-media planning without weakening the hardened production path.";
+      const warnings = Array.isArray(item4BridgePreflight?.warnings) ? item4BridgePreflight.warnings.filter(Boolean) : [];
+      let kind = "";
+      let text = "The existing I3 → I4 promotion path remains available for legacy requests. Item 4 adds master-media planning without weakening the hardened production path.";
+      if (status === "Promoted") {
+        kind = "success";
+        text = "Promotion complete. This Production Request is locked and linked to the existing production pipeline.";
+      } else if (status === "Submitted") {
+        text = "The request has been submitted to I3. Use Check promotion status; Studio will not send a duplicate I3 trigger.";
+      } else if (item4Workspace?.assets?.length) {
+        if (item4Workspace?.plan_status !== "Ready") {
+          text = "Master media is saved. Build and review the platform plan before production.";
+        } else if (item4Workspace?.variant_status !== "Ready") {
+          text = "Platform plan is ready. Prepare the required platform media before production.";
+        } else if (item4BridgePreflight?.ready) {
+          kind = warnings.length ? "warning-text" : "success";
+          text = `Source-to-production bridge validated. ${item4BridgePreflight.enabled_output_count || 0} output route(s) are ready for Approve & Promote.${item4BridgePreflight.idea_summary_mode === "derive-on-promotion" ? " Studio will derive the minimal I4 summary automatically." : ""}${warnings.length ? ` ${warnings.join(" ")}` : ""}`;
+        } else if (item4BridgePreflight) {
+          kind = "error-text";
+          text = `Source bridge blocked: ${(item4BridgePreflight.issues || []).join(" ")}`;
+        } else {
+          text = "Validating the source-to-production bridge…";
+        }
+      }
+      compatibility.className = `form-message${kind ? ` ${kind}` : ""}`;
+      compatibility.textContent = text;
     }
   }
 

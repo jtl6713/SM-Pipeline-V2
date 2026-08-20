@@ -855,4 +855,5 @@ input, select, textarea, button {
 @media (prefers-reduced-motion:reduce){
   .render-preview-busy-spinner,.creative-change-progress[data-status="active"],.creative-change-progress[data-status="active"] .creative-change-progress-state,.creative-preview-card.is-rendering .creative-preview-freshness.active{animation:none}
 }
+.form-message.warning-text{color:var(--amber);background:var(--amber-soft);border:1px solid #ead8a0;border-radius:10px;padding:10px 12px}
 

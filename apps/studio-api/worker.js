@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.29-item4-prepare-local-preview",
+          version: "0.10.30-audio-platform-warning",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -105,6 +105,7 @@ export default {
           studio_cdn_publish_handoff_v1: true,
           studio_photo_audio_defaults_v1: true,
           studio_item4_prepare_soft_fail_v1: true,
+          studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
           studio_music_catalog_fallback_v1: true,
@@ -4679,6 +4680,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
 
   const compatibility = productionRequestCompatibilityIssues(requestRecord);
   if (compatibility.length) issues.push(...compatibility);
+  warnings.push(...productionRequestAudioPlatformWarnings(requestRecord, routeRows));
 
   return {
     ready: issues.length === 0,
@@ -4734,6 +4736,37 @@ function linkedContentItemRecordId(ideaRecord) {
   const candidate = links.find((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))) ||
     (/^rec[A-Za-z0-9]+$/.test(promotedId) ? promotedId : null);
   return candidate || null;
+}
+
+function studioOutputSupportsStudioAudio(platform, outputType) {
+  const spec = STUDIO_OUTPUT_ROUTE_SPECS[`${String(platform || "").trim()}::${String(outputType || "").trim()}`];
+  const family = String(spec?.pipeline_family || "").trim();
+  return family === "Video" || family === "Slideshow Video" || family === "Story";
+}
+
+function productionRequestWantsStudioAudio(record) {
+  const musicMode = String(f(record, "Background_Music_Mode") || "").trim();
+  const voiceMode = String(f(record, "Voiceover_Mode") || "").trim();
+  const musicLinks = Array.isArray(f(record, "Selected_Music_Asset")) ? f(record, "Selected_Music_Asset") : [];
+  return musicMode === "Yes" || voiceMode === "Yes" || musicLinks.length > 0;
+}
+
+function productionRequestAudioPlatformWarnings(record, routeRows = []) {
+  if (!productionRequestWantsStudioAudio(record)) return [];
+  const rows = Array.isArray(routeRows) && routeRows.length
+    ? routeRows
+    : ((item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null) || {}).items || []).map((item) => ({
+        platform: item?.platform,
+        output_type: item?.output_type,
+      }));
+  const silent = rows.filter((row) => {
+    const platform = String(row?.platform || "").trim();
+    const outputType = String(row?.output_type || "").trim();
+    return platform && outputType && !studioOutputSupportsStudioAudio(platform, outputType);
+  });
+  if (!silent.length) return [];
+  const labels = [...new Set(silent.map((row) => `${String(row.platform).trim()} ${String(row.output_type).trim()}`))];
+  return [`Music and voiceover play on video outputs. They are not used on ${labels.join(", ")}.`];
 }
 
 function productionRequestCompatibilityIssues(record) {
@@ -4810,13 +4843,6 @@ function productionRequestCompatibilityIssues(record) {
         issues.push("Enter a valid carousel slide-count range from 1 through 20 with minimum less than or equal to maximum.");
       }
     }
-  }
-
-  // Preferred music is now carried Production Request -> Content Item -> Platform Output
-  // and consumed by R2/R2B for video/story asset selection.
-  const musicLinks = Array.isArray(f(record, "Selected_Music_Asset")) ? f(record, "Selected_Music_Asset") : [];
-  if (musicLinks.length && !["Vertical Short Video", "Longform Video", "Story"].includes(contentType)) {
-    issues.push("A specific music track is currently supported only for video/story outputs that use the R2/R2B selection path.");
   }
 
   const titleMode = String(f(record, "Title_Mode") || "AI decides").trim();
