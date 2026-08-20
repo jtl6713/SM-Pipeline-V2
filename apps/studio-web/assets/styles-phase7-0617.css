@@ -102,8 +102,17 @@
 
 
 /* Phase 2B — Production Requests */
-.production-request-launch{border:1px solid #b9d8d3;background:#f4fbf9;border-radius:14px;padding:14px;display:flex;align-items:center;justify-content:space-between;gap:16px}
-.production-request-launch>div{display:grid;gap:3px}.production-request-launch strong{font-size:.9rem;color:var(--teal-dark)}.production-request-launch span{font-size:.75rem;color:var(--muted)}
+.production-request-launch{border:1px solid #087a65;background:#f4fbf9;border-radius:14px;padding:14px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.production-request-launch>div{display:grid;gap:3px}.production-request-launch strong{font-size:.9rem;color:var(--teal-dark)}.production-request-launch span{font-size:.75rem;color:var(--muted);line-height:1.4}
+.idea-library-promote{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:#f7f8f8;padding:0}
+.idea-library-promote[hidden]{display:none}
+.idea-library-promote>summary{cursor:pointer;list-style:none;padding:12px 14px;font-size:.82rem;font-weight:750;color:var(--muted)}
+.idea-library-promote>summary::-webkit-details-marker{display:none}
+.idea-library-promote>summary::before{content:"▸ ";font-size:.7rem}
+.idea-library-promote[open]>summary::before{content:"▾ "}
+.idea-library-promote[open]>summary{border-bottom:1px solid var(--line);color:var(--ink)}
+.idea-library-promote-copy{margin:0;padding:10px 14px 0;font-size:.75rem;color:var(--muted);line-height:1.4}
+.idea-library-promote .promotion-zone{border:0;background:transparent;border-radius:0;padding:12px 14px 14px}
 .production-request-shell{margin-bottom:18px}.production-request-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
 .production-request-form{padding:20px;display:grid;gap:22px}.request-section{border:1px solid var(--line);border-radius:15px;padding:17px;background:#fbfdfd;display:grid;gap:15px}
 .request-section-heading{display:grid;gap:4px}.request-section-heading h3{margin:0;font-size:.98rem}.request-section-heading p{margin:0;font-size:.78rem;color:var(--muted)}

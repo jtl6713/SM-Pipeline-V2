@@ -479,6 +479,10 @@
     $("ideaProductionSnapshot").innerHTML = snapshot.map(([label, val]) =>
       `<div><span>${escapeHtml(label)}</span><strong>${value(val)}</strong></div>`
     ).join("");
+    const snapshotSection = $("ideaProductionSnapshotSection");
+    if (snapshotSection) {
+      snapshotSection.hidden = !snapshot.some(([, val]) => val != null && String(val).trim() !== "");
+    }
 
     const promoted = ideaIsPromoted(idea);
     const modifiable = ideaCanModify(idea);
@@ -490,7 +494,7 @@
     const configureButton = $("configureProductionButton");
     if (configureButton) {
       configureButton.disabled = promoted || Boolean(idea?.is_on_hold);
-      configureButton.textContent = promoted ? "Production locked" : "Configure Production";
+      configureButton.textContent = promoted ? "Production locked" : "Add photos";
     }
     $("holdIdeaButton").hidden = Boolean(idea?.is_on_hold);
     $("restoreIdeaButton").hidden = !idea?.is_on_hold;
@@ -498,6 +502,12 @@
     $("restoreIdeaButton").disabled = ideaIsPromoted(idea);
 
     const promotable = ideaCanPromote(idea);
+    const waitingForI4 = idea?.status === "Approved" && !promoted;
+    const libraryPromote = $("ideaLibraryPromote");
+    if (libraryPromote) {
+      libraryPromote.hidden = Boolean(idea?.is_on_hold) || promoted;
+      libraryPromote.open = waitingForI4;
+    }
     $("promoteIdeaButton").disabled = !promotable;
     $("ideaPromotionZone").classList.toggle("promotion-disabled", !promotable);
     $("ideaPromotionZone").querySelectorAll("select,input,textarea").forEach((control) => { control.disabled = !promotable; });
@@ -508,7 +518,7 @@
     } else if (idea?.is_on_hold) {
       setManageMessage("Restore this idea before approving and promoting it.", "");
     } else if (idea?.status === "Approved") {
-      setManageMessage("This idea is Approved but not yet linked to a Content Item. Approve & Promote can safely retry the existing I3 → I4 handoff.", "");
+      setManageMessage("This idea is Approved but not yet linked to a Content Item. Open Promote without photos to retry the I3 → I4 handoff.", "");
     } else {
       $("promoteIdeaButton").textContent = "Approve & Promote";
       setManageMessage();
@@ -3546,7 +3556,7 @@
     } finally {
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
-        button.textContent = "Configure Production";
+        button.textContent = "Add photos";
       }
     }
   }
@@ -3588,7 +3598,7 @@
       setManageMessage(error.message || "Could not save the idea before opening production.", "error-text");
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
-        button.textContent = "Configure Production";
+        button.textContent = "Add photos";
       }
     }
   });
@@ -3888,7 +3898,7 @@
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Start from Home, or open an Idea Candidate and choose Configure Production.</span></div>';
+        target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Start from Home, or open an Idea Candidate and choose Add photos.</span></div>';
         return;
       }
       target.innerHTML = `<table class="data-table"><thead><tr><th>Request</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th></th></tr></thead><tbody>${records.map(r => {

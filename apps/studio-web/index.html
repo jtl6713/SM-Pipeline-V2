@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.61-native-photo-approve">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.63-idea-drawer-next-step">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.62</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.63</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -83,7 +83,7 @@
 
  <section id="page-ideas" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Review, edit, hold, restore, approve, and promote Idea Candidates into the existing production workflow.</p></div>
+ <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then add photos. Promotion happens after the photos are in — not from the type list on the idea.</p></div>
  <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
  </div>
  <section class="panel idea-create-panel" id="ideaCreatePanel" hidden>
@@ -100,7 +100,7 @@
  <option value="">Loading ideas…</option>
  </select>
  </label>
- <em class="ez-option-hint" id="ideaExistingHint">Shows unpromoted Idea Candidates from the pipeline. Open one to manage, configure production, or promote.</em>
+ <em class="ez-option-hint" id="ideaExistingHint">Shows unpromoted Idea Candidates. Open one to add photos and continue into production.</em>
  </div>
  <div id="ideaManualFields" class="idea-path-pane" hidden>
  <label class="form-field"><span>Idea title</span><input id="ideaTitle" name="title" maxlength="160" placeholder="e.g. Chicago Riverwalk at sunset"></label>
@@ -894,24 +894,27 @@
  <textarea id="editIdeaSummary" maxlength="5000" rows="7"></textarea>
  </label>
 
- <div class="detail-section">
+ <div class="detail-section" id="ideaProductionSnapshotSection" hidden>
  <h3>Production snapshot</h3>
  <div class="detail-grid" id="ideaProductionSnapshot"></div>
  </div>
 
  <div class="production-request-launch" id="productionRequestLaunch">
  <div>
- <strong>Phase 2B Production Request</strong>
- <span>Capture creative intent as a draft before approval and promotion.</span>
+ <strong>Next: add photos</strong>
+ <span>This idea is only a brief. Upload stills, leave the rest on defaults, then approve from Production. Reel / Slideshow Reel / TikTok / Short are chosen from the photos — not from a type list here.</span>
  </div>
- <button type="button" class="primary-button" id="configureProductionButton">Configure Production</button>
+ <button type="button" class="primary-button" id="configureProductionButton">Add photos</button>
  </div>
 
+ <details class="idea-library-promote" id="ideaLibraryPromote">
+ <summary>Promote without photos</summary>
+ <p class="idea-library-promote-copy">Uses the existing media library and R2. This does not attach photos you upload. Open only if footage already lives in the catalog.</p>
  <div class="promotion-zone" id="ideaPromotionZone">
  <div class="promotion-heading">
  <div>
- <strong>Approve &amp; Promote</strong>
- <span>Uses the existing I3 approval workflow, which then triggers I4. Studio does not create Content Items directly.</span>
+ <strong>Library-asset promote</strong>
+ <span>Sends type and platforms to I3 → I4 with no Item 4 photo plan. Requires a summary.</span>
  </div>
  </div>
 
@@ -966,6 +969,7 @@
  <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction passed through the existing I3 approval flow."></textarea></label>
  <button type="button" class="promote-button" id="promoteIdeaButton">Approve &amp; Promote</button>
  </div>
+ </details>
 
  <div class="form-message" id="ideaManageMessage" aria-live="polite"></div>
 
@@ -987,7 +991,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.62-photo-audio-defaults"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.62-photo-audio-defaults"></script>
+ <script src="/assets/ez-plan.js?v=0.6.63-idea-drawer-next-step"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.63-idea-drawer-next-step"></script>
 </body>
 </html>
