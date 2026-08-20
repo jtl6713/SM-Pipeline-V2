@@ -75,3 +75,5 @@ EZ path Pages deploy: 2026-08-19 — Review stays closed until a rendered file e
 Review mix Pages deploy: 2026-08-19 — Open Review can change music and voiceover volume, submit a mix rerender, and show Processing then Ready. UI 0.6.55.
 
 Review mix callout Pages deploy: 2026-08-19 — While a mix rerender is in progress, cover the old video with a large animated Processing overlay. UI 0.6.56.
+
+Idea path Pages deploy: 2026-08-19 — Start with Idea offers select existing I1–I4 Idea Candidate or enter a new one manually. UI 0.6.57.

@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.56-render-busy">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.57-idea-path">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.56</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.57</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -54,7 +54,7 @@
  <span class="ez-path-choice-visual" aria-hidden="true"></span>
  <span class="ez-path-choice-body">
  <strong>Start with Idea</strong>
- <span>Write the idea first. Use this when the photos or video still need to be shot or found.</span>
+ <span>Pick an idea already in I1–I4, or write a new one when the media still needs to be shot or found.</span>
  </span>
  </button>
  <button type="button" class="ez-path-choice ez-path-choice--content" id="ezStartContent">
@@ -87,12 +87,27 @@
  <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
  </div>
  <section class="panel idea-create-panel" id="ideaCreatePanel" hidden>
- <div class="panel-heading"><div><h2>Create idea</h2><p>This creates an Idea Candidate only. It does not promote or start production.</p></div></div>
+ <div class="panel-heading"><div><h2>Start with an idea</h2><p>Choose an Idea Candidate already in the I1–I4 path, or enter a new one manually. Neither step promotes or starts production by itself.</p></div></div>
  <form id="ideaCreateForm" class="idea-form">
- <label class="form-field"><span>Idea title</span><input id="ideaTitle" name="title" maxlength="160" required placeholder="e.g. Chicago Riverwalk at sunset"></label>
+ <fieldset class="idea-path-mode" id="ideaPathMode">
+ <legend>How do you want to start?</legend>
+ <label class="idea-path-mode-option"><input type="radio" name="ideaPathMode" value="existing" checked> Select an existing idea</label>
+ <label class="idea-path-mode-option"><input type="radio" name="ideaPathMode" value="manual"> Enter a new idea manually</label>
+ </fieldset>
+ <div id="ideaExistingFields" class="idea-path-pane">
+ <label class="form-field"><span>Existing idea</span>
+ <select id="ideaExistingSelect">
+ <option value="">Loading ideas…</option>
+ </select>
+ </label>
+ <em class="ez-option-hint" id="ideaExistingHint">Shows unpromoted Idea Candidates from the pipeline. Open one to manage, configure production, or promote.</em>
+ </div>
+ <div id="ideaManualFields" class="idea-path-pane" hidden>
+ <label class="form-field"><span>Idea title</span><input id="ideaTitle" name="title" maxlength="160" placeholder="e.g. Chicago Riverwalk at sunset"></label>
  <label class="form-field"><span>Summary <em>optional</em></span><textarea id="ideaSummary" name="summary" maxlength="5000" rows="5" placeholder="What should this content be about?"></textarea></label>
+ </div>
  <div class="form-message" id="ideaFormMessage" aria-live="polite"></div>
- <div class="form-actions"><button type="button" class="secondary-button" id="cancelIdeaButton">Cancel</button><button type="submit" class="primary-button" id="createIdeaButton">Create idea</button></div>
+ <div class="form-actions"><button type="button" class="secondary-button" id="cancelIdeaButton">Cancel</button><button type="submit" class="primary-button" id="createIdeaButton">Continue with selected idea</button></div>
  </form>
  </section>
  <section class="panel"><div id="ideasList" class="table-wrap"></div></section>
@@ -961,7 +976,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.56-render-busy"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.56-render-busy"></script>
+ <script src="/assets/ez-plan.js?v=0.6.57-idea-path"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.57-idea-path"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@
   const apiBase = configuredBase || window.location.origin;
   const $ = (id) => document.getElementById(id);
   let activeIdea = null;
+  let ideasCache = [];
   let activeProductionRequest = null;
   let productionRequestMusic = [];
   let productionRequestOutputs = [];
@@ -60,7 +61,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.56-render-busy";
+  const BUILD_ID = "item4-0.6.57-idea-path";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -264,34 +265,117 @@
     }
   }
 
-  function setIdeaFormOpen(open) {
+  function ideaPathMode() {
+    const checked = document.querySelector('input[name="ideaPathMode"]:checked');
+    return checked?.value === "manual" ? "manual" : "existing";
+  }
+
+  function syncIdeaPathMode() {
+    const mode = ideaPathMode();
+    const existing = $("ideaExistingFields");
+    const manual = $("ideaManualFields");
+    const button = $("createIdeaButton");
+    const title = $("ideaTitle");
+    if (existing) existing.hidden = mode !== "existing";
+    if (manual) manual.hidden = mode !== "manual";
+    if (title) title.required = mode === "manual";
+    if (button) button.textContent = mode === "manual" ? "Create idea" : "Continue with selected idea";
+    if (mode === "manual") setTimeout(() => title?.focus(), 0);
+    else setTimeout(() => $("ideaExistingSelect")?.focus(), 0);
+  }
+
+  function selectableIdeas(records = ideasCache) {
+    return (records || []).filter((idea) => !ideaIsPromoted(idea));
+  }
+
+  function populateIdeaExistingSelect(records = ideasCache) {
+    const select = $("ideaExistingSelect");
+    const hint = $("ideaExistingHint");
+    if (!select) return;
+    const current = select.value;
+    const options = selectableIdeas(records);
+    if (!options.length) {
+      select.innerHTML = '<option value="">No unpromoted ideas available</option>';
+      select.disabled = true;
+      if (hint) hint.textContent = "The Idea Candidates queue has no open ideas right now. Enter a new idea manually, or wait for I1–I4 to produce one.";
+      return;
+    }
+    select.disabled = false;
+    select.innerHTML = [
+      '<option value="">Select an idea…</option>',
+      ...options.map((idea) => {
+        const idLabel = idea.candidate_id ? `#${idea.candidate_id}` : idea.id;
+        const status = ideaStatusLabel(idea);
+        const title = idea.title || "Untitled idea";
+        return `<option value="${escapeHtml(idea.id)}">${escapeHtml(`${idLabel} · ${title} · ${status}`)}</option>`;
+      }),
+    ].join("");
+    if (current && options.some((idea) => idea.id === current)) select.value = current;
+    if (hint) hint.textContent = "Shows unpromoted Idea Candidates from the pipeline. Open one to manage, configure production, or promote.";
+  }
+
+  function setIdeaFormOpen(open, { mode = null } = {}) {
     const panel = $("ideaCreatePanel");
     panel.hidden = !open;
     $("ideaFormMessage").textContent = "";
     $("ideaFormMessage").className = "form-message";
-    if (open) setTimeout(() => $("ideaTitle").focus(), 0);
+    if (!open) return;
+    if (mode === "manual" || mode === "existing") {
+      const radio = document.querySelector(`input[name="ideaPathMode"][value="${mode}"]`);
+      if (radio) radio.checked = true;
+    }
+    populateIdeaExistingSelect();
+    syncIdeaPathMode();
+    loadIdeas().catch(() => {});
   }
 
-  $("newIdeaButton").addEventListener("click", () => setIdeaFormOpen(true));
+  $("newIdeaButton").addEventListener("click", () => setIdeaFormOpen(true, { mode: "manual" }));
   $("cancelIdeaButton").addEventListener("click", () => {
     $("ideaCreateForm").reset();
+    const existingRadio = document.querySelector('input[name="ideaPathMode"][value="existing"]');
+    if (existingRadio) existingRadio.checked = true;
     setIdeaFormOpen(false);
+  });
+  document.querySelectorAll('input[name="ideaPathMode"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      $("ideaFormMessage").textContent = "";
+      $("ideaFormMessage").className = "form-message";
+      syncIdeaPathMode();
+    });
   });
 
   $("ideaCreateForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const button = $("createIdeaButton");
     const message = $("ideaFormMessage");
-    const title = $("ideaTitle").value.trim();
-    const summary = $("ideaSummary").value.trim();
-    if (!title) return;
-
+    const mode = ideaPathMode();
     button.disabled = true;
-    button.textContent = "Creating…";
     message.className = "form-message";
     message.textContent = "";
 
     try {
+      if (mode === "existing") {
+        const ideaId = $("ideaExistingSelect")?.value || "";
+        const idea = ideasCache.find((record) => record.id === ideaId);
+        if (!ideaId || !idea) {
+          message.className = "form-message error-text";
+          message.textContent = "Select an existing idea to continue.";
+          return;
+        }
+        button.textContent = "Opening…";
+        setIdeaFormOpen(false);
+        openIdeaDrawer(idea);
+        return;
+      }
+
+      const title = $("ideaTitle").value.trim();
+      const summary = $("ideaSummary").value.trim();
+      if (!title) {
+        message.className = "form-message error-text";
+        message.textContent = "Enter an idea title.";
+        return;
+      }
+      button.textContent = "Creating…";
       const result = await api("/api/ideas", {
         method: "POST",
         body: JSON.stringify({ title, summary }),
@@ -299,14 +383,20 @@
       message.className = "form-message success";
       message.textContent = `Created idea ${result.record?.candidate_id ? `#${result.record.candidate_id}` : "successfully"}.`;
       $("ideaCreateForm").reset();
+      const existingRadio = document.querySelector('input[name="ideaPathMode"][value="existing"]');
+      if (existingRadio) existingRadio.checked = true;
       await Promise.all([loadIdeas(), loadDashboard()]);
-      setTimeout(() => setIdeaFormOpen(false), 900);
+      const created = result.record;
+      setTimeout(() => {
+        setIdeaFormOpen(false);
+        if (created?.id) openIdeaDrawer(created);
+      }, 500);
     } catch (e) {
       message.className = "form-message error-text";
       message.textContent = e.message;
     } finally {
       button.disabled = false;
-      button.textContent = "Create idea";
+      syncIdeaPathMode();
     }
   });
 
@@ -833,7 +923,7 @@
     ezEntryPath = "idea";
     setPageContentSimple(false);
     switchToPage("ideas");
-    setIdeaFormOpen(true);
+    setIdeaFormOpen(true, { mode: "existing" });
   }
 
   function revokeEzLocalPreviews() {
@@ -3726,6 +3816,8 @@
     target.innerHTML = '<div class="empty">Loading ideas…</div>';
     try {
       const { records = [] } = await api("/api/ideas?limit=100");
+      ideasCache = records;
+      populateIdeaExistingSelect(records);
       if (!records.length) return target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong><br><span class="subtle">Studio is connected; the Idea Candidates table is simply empty after the recent reset/test cycle.</span></div>';
 
       target.innerHTML = `<table class="data-table idea-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th>Production</th><th></th></tr></thead><tbody>${records.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${r.carousel_slide_count ? `${value(r.carousel_slide_count)} slides` : r.video_clip_count ? `${value(r.video_clip_count)} clips` : "AI / default"}</td><td><div class="subtle">VO: ${value(r.include_voiceover)} · Music: ${value(r.include_background_music)} · Thumbnail: ${value(r.include_thumbnail)}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
@@ -3738,6 +3830,8 @@
         });
       });
     } catch (e) {
+      ideasCache = [];
+      populateIdeaExistingSelect([]);
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
     }
   }
