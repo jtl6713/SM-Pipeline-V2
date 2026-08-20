@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.57-idea-path">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.58-pr-media-kind">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.57</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.58</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -319,13 +319,24 @@
  <form id="productionRequestForm" class="production-request-form">
  <div class="request-section item4-master-media-section">
  <div class="request-section-heading item4-heading-row">
- <div><h3>1. Master media</h3><p>Upload the original photos once. Studio preserves them and plans platform-specific treatments from the same source set.</p></div>
+ <div><h3>1. Master media</h3><p>Choose single or multiple photos first, then upload. Studio preserves the originals and plans platform treatments from the same source set.</p></div>
  <span class="item4-state-pill" id="item4AssetStatus">No media yet</span>
  </div>
- <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos">
+ <div class="ez-card-grid item4-media-kind-grid" id="item4MediaKindGrid">
+ <button type="button" class="ez-card" data-pr-input="single-photo">
+ <strong>Single photo</strong>
+ <span>Instagram 4:5, Facebook image, TikTok photo draft.</span>
+ </button>
+ <button type="button" class="ez-card" data-pr-input="multiple-photos">
+ <strong>Multiple photos</strong>
+ <span>Carousel, album, TikTok photo draft, YouTube Short.</span>
+ </button>
+ </div>
+ <em class="ez-option-hint" id="item4MediaKindHint">Pick one before uploading so the platform plan matches what you intend.</em>
+ <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos" hidden>
  <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
  <div class="item4-upload-icon">＋</div>
- <div><strong>Drop photos here or choose files</strong><span>Up to 20 photos · HEIC/HEIF supported · originals are preserved</span></div>
+ <div><strong id="item4UploadTitle">Drop photos here or choose files</strong><span id="item4UploadHint">Up to 20 photos · HEIC/HEIF supported · originals are preserved</span></div>
  <button type="button" class="secondary-button" id="item4ChooseMedia">Choose photos</button>
  </div>
  <div class="item4-upload-progress" id="item4UploadProgress" hidden></div>
@@ -976,7 +987,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.57-idea-path"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.57-idea-path"></script>
+ <script src="/assets/ez-plan.js?v=0.6.58-pr-media-kind"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.58-pr-media-kind"></script>
 </body>
 </html>

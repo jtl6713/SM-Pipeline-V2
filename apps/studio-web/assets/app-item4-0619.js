@@ -61,7 +61,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.57-idea-path";
+  const BUILD_ID = "item4-0.6.58-pr-media-kind";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -879,11 +879,71 @@
 
   function showProductionRequestWorkspace() {
     ezEntryPath = "configure";
-    ezIntakeKind = null;
     setPageContentSimple(false);
     hideEzFrontDoor();
     const workspace = $("productionRequestWorkspace");
     if (workspace) workspace.hidden = false;
+    syncPrMediaKindUi();
+  }
+
+  function selectPrMediaKind(kind, { quiet = false } = {}) {
+    const nextKind = kind === "multiple-photos" ? "multiple-photos" : kind === "single-photo" ? "single-photo" : null;
+    ezIntakeKind = nextKind;
+    document.querySelectorAll("[data-pr-input]").forEach((button) => {
+      button.classList.toggle("selected", Boolean(nextKind) && button.dataset.prInput === nextKind);
+    });
+    const input = $("item4MediaInput");
+    if (input) input.multiple = nextKind === "multiple-photos";
+    const title = $("item4UploadTitle");
+    const hint = $("item4UploadHint");
+    if (nextKind === "multiple-photos") {
+      if (title) title.textContent = "Drop several photos here or choose files";
+      if (hint) hint.textContent = "At least 2 photos · up to 20 · HEIC/HEIF supported · originals are preserved";
+    } else if (nextKind === "single-photo") {
+      if (title) title.textContent = "Drop one photo here or choose a file";
+      if (hint) hint.textContent = "One photo · HEIC/HEIF supported · original is preserved";
+    } else {
+      if (title) title.textContent = "Drop photos here or choose files";
+      if (hint) hint.textContent = "Up to 20 photos · HEIC/HEIF supported · originals are preserved";
+    }
+    syncPrMediaKindUi();
+    if (!quiet && nextKind) setRequestMessage();
+  }
+
+  function syncPrMediaKindUi() {
+    const grid = $("item4MediaKindGrid");
+    const hint = $("item4MediaKindHint");
+    const zone = $("item4UploadZone");
+    const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
+    const hasAssets = assetCount > 0;
+    if (!ezIntakeKind && hasAssets) {
+      ezIntakeKind = assetCount > 1 ? "multiple-photos" : "single-photo";
+      document.querySelectorAll("[data-pr-input]").forEach((button) => {
+        button.classList.toggle("selected", button.dataset.prInput === ezIntakeKind);
+      });
+      const input = $("item4MediaInput");
+      if (input) input.multiple = ezIntakeKind === "multiple-photos";
+    }
+    const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
+    if (!ezIntakeKind && (parsed?.inputKind === "single-photo" || parsed?.inputKind === "multiple-photos")) {
+      selectPrMediaKind(parsed.inputKind, { quiet: true });
+    }
+    const kindReady = Boolean(ezIntakeKind);
+    if (grid) {
+      grid.hidden = hasAssets;
+      document.querySelectorAll("[data-pr-input]").forEach((button) => {
+        button.disabled = hasAssets;
+        button.classList.toggle("selected", Boolean(ezIntakeKind) && button.dataset.prInput === ezIntakeKind);
+      });
+    }
+    if (hint) {
+      hint.hidden = hasAssets;
+      if (!hasAssets && !kindReady) hint.textContent = "Pick one before uploading so the platform plan matches what you intend.";
+      else if (!hasAssets && ezIntakeKind === "single-photo") hint.textContent = "Single photo selected. Upload one image.";
+      else if (!hasAssets) hint.textContent = "Multiple photos selected. Upload at least two images.";
+    }
+    if (zone) zone.hidden = !kindReady && !hasAssets ? true : false;
+    if (zone && kindReady) zone.hidden = false;
   }
 
   function goHome() {
@@ -2707,6 +2767,7 @@
       const status = await api(`/api/production-requests/${encodeURIComponent(record.id)}/item4`);
       item4BridgePreflight = null;
       renderItem4Workspace(status);
+      syncPrMediaKindUi();
       if (status?.assets?.length && status?.plan_status === "Ready" && status?.variant_status === "Ready") {
         Promise.resolve().then(() => loadItem4BridgePreflight(record));
       }
@@ -2762,8 +2823,21 @@
 
   async function uploadItem4Files(fileList) {
     if (!activeProductionRequest?.id || item4Uploading) return;
-    const files = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
+    if (!ezIntakeKind) {
+      setRequestMessage("Choose Single photo or Multiple photos before uploading.", "error-text");
+      syncPrMediaKindUi();
+      return;
+    }
+    let files = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
     if (!files.length) { setRequestMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text"); return; }
+    if (ezIntakeKind === "single-photo" && files.length > 1) {
+      setRequestMessage("Single photo uses the first image. Choose Multiple photos for a set.", "");
+      files = files.slice(0, 1);
+    }
+    if (ezIntakeKind === "multiple-photos" && files.length < 2) {
+      setRequestMessage("Multiple photos needs at least two images, or choose Single photo.", "error-text");
+      return;
+    }
     item4Uploading = true;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
@@ -2771,6 +2845,7 @@
     if (button) button.disabled = true;
     setRequestMessage();
     try {
+      mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
       const form = new FormData();
       files.forEach(file => form.append("files", file, file.name));
@@ -2779,6 +2854,7 @@
       if (result.record) activeProductionRequest = result.record;
       if (progress) progress.textContent = `${result.uploaded || files.length} photo${(result.uploaded || files.length) === 1 ? "" : "s"} uploaded. Originals preserved.`;
       await loadItem4Workspace(activeProductionRequest);
+      syncPrMediaKindUi();
       if (item4Workspace?.assets_status === "Ready") {
         updateItem4MasterProgress(item4Workspace);
         setRequestMessage("Master photos uploaded and saved to Google Drive. Previews are ready.", "success");
@@ -3408,9 +3484,12 @@
       showProductionRequestWorkspace();
       await loadProductionRequestOutputs(result.record);
       await loadItem4Workspace(result.record);
+      const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
+      if (!assetCount) selectPrMediaKind(null, { quiet: true });
+      else syncPrMediaKindUi();
       await loadProductionRequests();
       setEzAdvancedOpen(true);
-      setRequestMessage(result.created ? "Production Request draft created." : "Existing Production Request draft opened.", "success");
+      setRequestMessage(result.created ? "Production Request draft created. Choose Single or Multiple photos, then upload." : "Existing Production Request draft opened.", "success");
     } catch (e) {
       setManageMessage(e.message, "error-text");
     } finally {
@@ -3425,6 +3504,12 @@
   $("item4MediaInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
   $("item4BuildPlan")?.addEventListener("click", buildItem4Plan);
   $("item4PrepareVariants")?.addEventListener("click", prepareItem4Variants);
+  document.querySelectorAll("[data-pr-input]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      selectPrMediaKind(button.dataset.prInput);
+    });
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible" || !activeProductionRequest?.id) return;
     loadItem4Workspace(activeProductionRequest);
