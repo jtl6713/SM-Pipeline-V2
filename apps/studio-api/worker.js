@@ -96,12 +96,13 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.21-approved-progress",
+          version: "0.10.22-publish-cadence",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
           studio_native_photo_carousel_v1: true,
           studio_approved_progress_v1: true,
+          studio_publish_cadence_carousel_youtube_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
@@ -9878,8 +9879,10 @@ const PRODUCTION_CADENCE_RENDER = Object.freeze([
 ]);
 const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
   { id: 5864632, key: "IG" },
+  { id: 5791537, key: "APCAR" },
   { id: 5813561, key: "FB" },
   { id: 5806668, key: "TTD" },
+  { id: 5823581, key: "YT" },
 ]);
 const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
 const PRODUCTION_CADENCE_THROTTLE_MS = 20000;
@@ -9941,6 +9944,7 @@ async function cadenceHasPublishWork(env) {
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Publishing",{IG_Story_Status}="Publishing"))' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published")' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published")' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published")' }),
   ]);
   return checks.some(Boolean);
 }
