@@ -5258,15 +5258,24 @@
     }
   }
 
+  function creativeIsNativePhotoPackage(output = activeCreativeOutput) {
+    const platform = String(output?.platform || "").trim();
+    const type = String(output?.studio_output_type || output?.platform_output_type || output?.format || "").trim();
+    const render = String(output?.render_status || "").toLowerCase();
+    if (render.includes("native photo")) return true;
+    if (platform === "TikTok" && /multi-photo|slideshow/i.test(type)) return true;
+    if (platform === "Instagram" && /carousel/i.test(type)) return true;
+    if (platform === "Facebook" && /multi-image\s*post|photo\s*set/i.test(type)) return true;
+    return false;
+  }
+
   function creativeCanApproveForPublishing(output = activeCreativeOutput) {
     if (!output || output.do_not_publish) return false;
     const review = String(output.review_status || "").trim();
     const status = String(output.output_status || "").trim();
     if (review === "Approved" || status === "Approved for Publishing") return false;
     const hasFile = Boolean(String(output.final_file_url || "").trim() || String(output.studio_preview_url || "").trim());
-    const native = String(output.platform || "").trim() === "TikTok"
-      && /slideshow|multi-photo/i.test(String(output.platform_output_type || output.studio_output_type || output.format || ""));
-    if (!hasFile && !native) return false;
+    if (!hasFile && !creativeIsNativePhotoPackage(output)) return false;
     return status === "Ready for Review" || review === "Review Sent";
   }
 
