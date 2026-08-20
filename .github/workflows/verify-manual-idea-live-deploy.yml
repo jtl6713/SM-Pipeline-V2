@@ -1,0 +1,95 @@
+name: Verify Manual Idea Live Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/verify-manual-idea-live-deploy.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify-manual-idea-live-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Wait for controlled production deploys
+        run: sleep 45
+
+      - name: Verify live Worker and Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          WORKER_API="$API_ROOT/workers/scripts/chicagoshining-studio-api"
+
+          curl -fsS "$WORKER_API/deployments" -H "$AUTH" -o /tmp/worker-deployments.json
+          jq -e '.success==true' /tmp/worker-deployments.json >/dev/null
+          WORKER_VERSION_ID=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/worker-deployments.json)
+          curl -fsS "$WORKER_API/content/v2" -H "$AUTH" -o /tmp/worker-content.bin
+          grep -aFq '0.10.36-manual-ideas-run' /tmp/worker-content.bin
+          grep -aFq 'studio_manual_idea_run_v2' /tmp/worker-content.bin
+
+          curl -fsS "$API_ROOT/pages/projects/chicagoshining-studio/deployments?env=production&per_page=10" -H "$AUTH" -o /tmp/pages-deployments.json
+          jq -e '.success==true and (.result|length)>0' /tmp/pages-deployments.json >/dev/null
+          PAGES_ID=$(jq -er '.result[0].id' /tmp/pages-deployments.json)
+          PAGES_COMMIT=$(jq -r '.result[0].deployment_trigger.metadata.commit_hash // ""' /tmp/pages-deployments.json)
+          PAGES_URL=$(jq -r '.result[0].url // ""' /tmp/pages-deployments.json)
+          test -n "$PAGES_URL"
+          case "$PAGES_URL" in http*) ;; *) PAGES_URL="https://$PAGES_URL" ;; esac
+          curl -fsSL --max-time 30 "$PAGES_URL/" -o /tmp/live-index.html
+          grep -Fq '0.6.69-idea-progress' /tmp/live-index.html
+          grep -Fq 'UI build 0.6.69' /tmp/live-index.html
+
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          wd=json.loads(Path('/tmp/worker-deployments.json').read_text())
+          pd=json.loads(Path('/tmp/pages-deployments.json').read_text())
+          active=max(wd['result']['deployments'][0]['versions'],key=lambda x:x.get('percentage',0))
+          page=pd['result'][0]
+          out={
+            'checked_at':datetime.now(timezone.utc).isoformat(),
+            'worker':{
+              'name':'chicagoshining-studio-api',
+              'active_version_id':active.get('version_id'),
+              'expected_source_version':'0.10.36-manual-ideas-run',
+              'source_marker_present':True,
+              'explicit_make_run_marker_present':True,
+            },
+            'pages':{
+              'project':'chicagoshining-studio',
+              'deployment_id':page.get('id'),
+              'deployment_url':page.get('url'),
+              'commit_hash':((page.get('deployment_trigger') or {}).get('metadata') or {}).get('commit_hash'),
+              'expected_ui_build':'0.6.69-idea-progress',
+              'live_index_marker_present':True,
+            },
+          }
+          Path('repair/evidence/manual-idea-live-deploy-20260820.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+
+      - name: Commit sanitized verification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/manual-idea-live-deploy-20260820.json
+          git commit -m 'evidence: verify manual idea Worker and Pages live' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
