@@ -1,0 +1,3 @@
+Studio manual AI idea generation contract v1.
+Patch I1 only while inactive; no scenario run.
+2026-08-20
