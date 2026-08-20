@@ -1,0 +1,5 @@
+Verify live Studio manual idea count entry.
+Expected Worker: 0.10.37-manual-idea-count-entry
+Expected UI: 0.6.70-idea-count-entry
+Expected input: whole number, minimum 1, maximum 10, default 5.
+Triggered: 2026-08-20
