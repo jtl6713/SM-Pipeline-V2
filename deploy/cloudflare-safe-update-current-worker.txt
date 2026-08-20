@@ -3,3 +3,5 @@ Dynamic safe update trigger for chicagoshining-studio-api.
 Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run Make scenarios, mutate production Airtable records, render, email, draft, upload, or publish.
 
 Purpose of this run: ship worker 0.10.20 so Instagram Carousel and Facebook Multi-Image Post follow the native photo Ready for Review path (same family as TikTok Multi-Photo), Studio Open Review treats those packages as reviewable, and RR1 cadence includes them. No Make activation during deploy.
+
+Follow-up: flatten RR1/cadence native-photo Airtable formula (nested OR was invalid).
