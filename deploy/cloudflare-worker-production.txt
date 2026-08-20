@@ -53,3 +53,5 @@ Public cover handoff Worker deploy: 2026-08-20 — Approve writes a public CDN J
 Manual AI idea generator Worker deploy: 2026-08-20 — Add POST /api/ideas/generate and batch status with count 5/10/25/50/100, quality mode, exact one-profile I1 one-shot execution, and restoration of the original I1 blueprint and OFF state. Worker 0.10.35-manual-ideas. Source commit 374bb9343c0484f0ea199c2ea1c94b6c630fbcbd.
 
 Manual AI idea generator execution fix: 2026-08-20 — Explicitly invoke Make /run for scheduled I1 after bounded activation, persist Make_Execution_ID, then restore I1 OFF/selector. Worker 0.10.36-manual-ideas-run. Source commit bf217ed8850e396ba3a01e766c15478e7f89484d.
+
+Manual idea count entry deploy: 2026-08-20 — Accept any whole-number manual idea request from 1 through 10; retain the proven explicit I1 /run one-shot execution path. Worker 0.10.37-manual-idea-count-entry. Source commit da93f8cdbf54fc16a2c0a7617557ad0c081fbb64.
