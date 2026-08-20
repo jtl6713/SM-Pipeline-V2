@@ -96,10 +96,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.19-review-audio-mix",
+          version: "0.10.20-native-photo-carousel",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
+          studio_native_photo_carousel_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
@@ -866,16 +867,28 @@ function f(record, field) {
   return record?.fields?.[field] ?? null;
 }
 
+function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
+  const p = String(platform || "").trim();
+  const type = String(outputType || "").trim();
+  const map = String(mapping || "").trim();
+  if (p === "TikTok" && (type === "Multi-Photo" || map === "TikTok Slideshow")) return true;
+  if (p === "Instagram" && type === "Carousel") return true;
+  if (p === "Facebook" && type === "Multi-Image Post") return true;
+  return false;
+}
+
 function studioOutputIsNativePhoto(record) {
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || "").trim();
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
   const composition = String(f(record, "Composition_ID") || "").trim();
   const clips = String(f(record, "Render_Clip_List_JSON") || f(record, "Selected_Assets_JSON") || "").trim();
-  return platform === "TikTok"
-    && (outputType === "Multi-Photo" || mapping === "TikTok Slideshow")
-    && !composition
-    && Boolean(clips);
+  if (!clips || !studioOutputIsNativePhotoRoute(platform, outputType, mapping)) return false;
+  // TikTok Multi-Photo is composition-free by contract. IG/FB native packages may
+  // still carry a stale Composition_ID from older promote paths; treat them as
+  // reviewable when the photo package JSON is present.
+  if (platform === "TikTok" && composition) return false;
+  return true;
 }
 
 function studioOutputHasReviewableDeliverable(record) {
@@ -5337,7 +5350,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   }
   if (!clips.length) return null;
 
-  const nativePhotoRoute = platform === "TikTok" && outputType === "Multi-Photo";
+  const nativePhotoRoute = studioOutputIsNativePhotoRoute(platform, outputType, null);
   const compositionId = nativePhotoRoute ? null : "ChicagoShiningPhotoSequence";
   const titleText = String(effective?.requested_title || f(parentContentItem, "Content_Title") || "").trim();
   const brandNameRaw = f(parentContentItem, "Brand_Name");
@@ -7010,7 +7023,11 @@ async function item4EnsureP3StudioSourceAuthority(env) {
 
 
 
-const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V1";
+const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V2";
+const STUDIO_P3_NATIVE_PHOTO_STATUS_IF =
+  '{{if(or(102.Studio_Output_Type = "Multi-Photo"; 102.Studio_Output_Type = "Carousel"; 102.Studio_Output_Type = "Multi-Image Post"); "Ready for Review"; "In Production")}}';
+const STUDIO_P3_NATIVE_PHOTO_SELECTION_IF =
+  '{{if(or(102.Studio_Output_Type = "Multi-Photo"; 102.Studio_Output_Type = "Carousel"; 102.Studio_Output_Type = "Multi-Image Post"); ""; "Selected")}}';
 
 function item4P3SingleParentEnrichmentRecord() {
   return {
@@ -7019,9 +7036,9 @@ function item4P3SingleParentEnrichmentRecord() {
     Output_Hashtags:"{{101.Hashtags}}",
     Thumbnail_URL:'{{if(ifempty(102.Studio_Effective_Thumbnail_Mode; "Yes") = "No"; ""; 101.Thumbnail_URL)}}',
     Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
-    Output_Status:'{{if(102.Studio_Output_Type = "Multi-Photo"; "Ready for Review"; "In Production")}}',
-    Asset_Selection_Status:'{{if(102.Studio_Output_Type = "Multi-Photo"; ""; "Selected")}}',
-    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo stays Ready for Review; other Studio outputs stay In Production with assets Selected so R3/R4 can render. Enrichment from Content Item {{101.Content_ID}}.`
+    Output_Status: STUDIO_P3_NATIVE_PHOTO_STATUS_IF,
+    Asset_Selection_Status: STUDIO_P3_NATIVE_PHOTO_SELECTION_IF,
+    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render. Enrichment from Content Item {{101.Content_ID}}.`
   };
 }
 
@@ -7124,13 +7141,13 @@ async function item4EnsureP3SingleParentRouteDirect(env) {
   if(built.already_ready) return {ok:true,already_ready:true,live_name:blueprint.name};
   const patched=built.patched;
   const now=new Date().toISOString(); let auditId=null;
-  try{const audit=await airtableFetch(env,"Make Admin Queue","",{method:"POST",body:JSON.stringify({records:[{fields:{Command_ID:`STUDIO-P3-SINGLE-PARENT-${Date.now()}`,Action:"UPDATE_BLUEPRINT",Scenario_ID:ITEM4_P3_SCENARIO_ID,Scenario_Name:patched.name,Proposed_Blueprint_JSON_Original:JSON.stringify(patched),Write_Approved:true,Status:"Processing",Backup_Blueprint_Wrapper_2:JSON.stringify(blueprint),Requested_At:now,Started_At:now,Requested_By:"chicagoshining-studio-api",Correlation_ID:"ITEM4-SINGLE-PARENT-P3",Notes:"Worker 0.10.16 remotion handoff. Module 103 keeps TikTok Multi-Photo Ready for Review and leaves other Studio outputs In Production with Asset_Selection_Status=Selected after VO/caption copy so R3/R4 can render. Legacy P3 route, webhook 2567877, schedule, and activation are preserved."}}],typecast:true})});auditId=audit?.records?.[0]?.id||null;}catch{}
+  try{const audit=await airtableFetch(env,"Make Admin Queue","",{method:"POST",body:JSON.stringify({records:[{fields:{Command_ID:`STUDIO-P3-SINGLE-PARENT-${Date.now()}`,Action:"UPDATE_BLUEPRINT",Scenario_ID:ITEM4_P3_SCENARIO_ID,Scenario_Name:patched.name,Proposed_Blueprint_JSON_Original:JSON.stringify(patched),Write_Approved:true,Status:"Processing",Backup_Blueprint_Wrapper_2:JSON.stringify(blueprint),Requested_At:now,Started_At:now,Requested_By:"chicagoshining-studio-api",Correlation_ID:"ITEM4-SINGLE-PARENT-P3",Notes:"Worker 0.10.20 native photo carousel handoff. Module 103 keeps TikTok Multi-Photo, Instagram Carousel, and Facebook Multi-Image Post Ready for Review and leaves Remotion Studio outputs In Production with Asset_Selection_Status=Selected after VO/caption copy so R3/R4 can render. Legacy P3 route, webhook 2567877, schedule, and activation are preserved."}}],typecast:true})});auditId=audit?.records?.[0]?.id||null;}catch{}
   try{
     const patch=await fetch(`${makeApiBase}/scenarios/${ITEM4_P3_SCENARIO_ID}?confirmed=true`,{method:"PATCH",headers,body:JSON.stringify({blueprint:JSON.stringify(patched)})}); const pt=await patch.text(); if(!patch.ok)throw new HttpError(patch.status,`P3 single-parent patch failed (${patch.status}): ${pt.slice(0,300)}`);
     const vr=await fetch(`${makeApiBase}/scenarios/${ITEM4_P3_SCENARIO_ID}/blueprint?draft=false`,{method:"GET",headers});const vt=await vr.text();let vb;try{vb=vt?JSON.parse(vt):{};}catch{vb={raw:vt};} if(!vr.ok)throw new HttpError(vr.status,`P3 single-parent verify failed (${vr.status})`);const live=vb?.response?.blueprint||vb?.blueprint;
     if(!phase6FindModule(live?.flow,101)||!phase6FindModule(live?.flow,102)||!phase6FindModule(live?.flow,103)||!String(phase6FindModule(live?.flow,1)?.mapper?.formula||"").includes("Production_Request"))throw new HttpError(502,"P3 single-parent verification did not match expected modules 101/102/103");
-    if(!item4P3Module103HasRemotionHandoff(phase6FindModule(live?.flow,103)))throw new HttpError(502,"P3 remotion handoff verification did not match STUDIO_P3_REMOTION_HANDOFF_V1");
-    if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Succeeded",Completed_At:new Date().toISOString(),Result_JSON:JSON.stringify({ok:true,worker_build:"0.10.16-remotion-handoff",scenario_id:ITEM4_P3_SCENARIO_ID,live_name:live?.name||null})},typecast:true})});}catch{}}
+    if(!item4P3Module103HasRemotionHandoff(phase6FindModule(live?.flow,103)))throw new HttpError(502,`P3 remotion handoff verification did not match ${STUDIO_P3_REMOTION_HANDOFF_MARKER}`);
+    if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Succeeded",Completed_At:new Date().toISOString(),Result_JSON:JSON.stringify({ok:true,worker_build:"0.10.20-native-photo-carousel",scenario_id:ITEM4_P3_SCENARIO_ID,live_name:live?.name||null})},typecast:true})});}catch{}}
     return {ok:true,already_ready:false,live_name:live?.name||patched.name};
   }catch(error){if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Failed",Completed_At:new Date().toISOString(),Error_Message:error instanceof Error?error.message:String(error)},typecast:true})});}catch{}}throw error;}
 }
@@ -9912,7 +9929,7 @@ async function cadenceHasRenderWork(env) {
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post")))' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' }),
     cadenceQueueHasWork(env, outputTable, { view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!="")))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",OR({Selected_Assets_JSON}!="",{Render_Clip_List_JSON}!="")),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",OR({Selected_Assets_JSON}!="",{Render_Clip_List_JSON}!=""))))' }),
   ]);
   return checks.some(Boolean);
 }

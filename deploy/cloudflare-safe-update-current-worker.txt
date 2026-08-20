@@ -2,8 +2,4 @@ Dynamic safe update trigger for chicagoshining-studio-api.
 
 Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run Make scenarios, mutate production Airtable records, render, email, draft, upload, or publish.
 
-Purpose of this run: promote the exact SMV1 Test Mode selector pulse. Test processing must refuse active-scenario seizure, require the owning Production Request and every queue row to share the exact Test_Run_ID, temporarily address only that request/test identity, and restore the production-only selector on every exit path.
-
-Purpose of this run: ship worker 0.10.11 so single-photo TikTok Multi-Photo is canonicalized into the Item 4 plan and enabled outputs cannot block Approve & Promote. Source commit aacb49d. No Make activation.
-
-Purpose of this run: ship worker 0.10.13 so production Pipeline can approve an output for publishing (same fields as the review email), EZ photo TikTok uses Video Draft, and EZ defaults skip thumbnail generation. No Make activation.
+Purpose of this run: ship worker 0.10.20 so Instagram Carousel and Facebook Multi-Image Post follow the native photo Ready for Review path (same family as TikTok Multi-Photo), Studio Open Review treats those packages as reviewable, and RR1 cadence includes them. No Make activation during deploy.
