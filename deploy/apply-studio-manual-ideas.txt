@@ -1,0 +1,4 @@
+Studio manual AI idea generator source patch.
+Count: 5/10/25/50/100. Quality: Highest Quality/Balanced/Quantity.
+Minimal Ideas-page UI. Scheduled I1 remains OFF.
+2026-08-20
