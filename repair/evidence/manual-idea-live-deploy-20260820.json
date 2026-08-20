@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-08-20T21:11:25.909626+00:00",
+  "pages": {
+    "commit_hash": "b6a093c62475d7f24be7d09947e20567da8bc304",
+    "deployment_id": "d27ed84a-1c7d-4399-ab8b-7a2dc40b3f1f",
+    "deployment_url": "https://d27ed84a.chicagoshining-studio.pages.dev",
+    "expected_ui_build": "0.6.69-idea-progress",
+    "http_code": "200",
+    "index_sha256": "2544191a23ad30c66406a4f296161a61db5cd3d01dcd6e4adc884f3dd2875b69",
+    "live_build_label_present": true,
+    "live_index_marker_present": true,
+    "project": "chicagoshining-studio"
+  },
+  "pass": false,
+  "worker": {
+    "active_version_id": "070e2f90-2cb6-47de-b9c2-836ee593915c",
+    "content_sha256": "46689ce925428a2614c3d1c90cc1e24f9261d8751d7a9d85498733f2b56e6d1d",
+    "expected_source_version": "0.10.36-manual-ideas-run",
+    "explicit_make_run_marker_present": false,
+    "name": "chicagoshining-studio-api",
+    "source_marker_present": false
+  }
+}
