@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.31-p3-iml-pipe",
+          version: "0.10.33-fb-slideshow-handoff",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -963,11 +963,23 @@ function studioPublishHandoffFields(record) {
     fields.Publish_Status = "Ready to Publish";
     if (clipCount) fields.Image_Count = clipCount;
   }
+  if (platform === "Facebook" && (outputType === "Slideshow Reel" || mapping === "Facebook Reel") && outputType !== "Multi-Image Post" && mapping !== "Facebook Photo Set") {
+    if (preview.startsWith("https://media.chicagoshining.com/")) {
+      if (!current("FB_Slideshow_Status") || current("FB_Slideshow_Status") === "Retry Pending") {
+        fields.FB_Slideshow_Status = "Video Ready";
+      }
+      fields.FB_Slideshow_Public_URL = preview;
+      fields.Publish_Status = "Ready to Publish";
+    }
+  }
   if (platform === "TikTok") {
     if (!current("TikTok_Draft_Status")) fields.TikTok_Draft_Status = "Ready for Assets";
     if (outputType === "Video Draft" || mapping === "TikTok Video") {
       fields.TikTok_Draft_Type = "Video";
       if (preview.startsWith("https://media.chicagoshining.com/")) fields.Publish_Asset_URL = preview;
+      if (!current("Asset_Aspect_Family") && String(f(record, "Aspect_Ratio") || "").includes("9:16")) {
+        fields.Asset_Aspect_Family = "9:16";
+      }
     } else {
       fields.TikTok_Draft_Type = clipCount > 1 ? "Photo Carousel" : "Single Photo";
       fields.Image_Output_Selected = true;
@@ -1094,10 +1106,15 @@ function normalizedOutputState(record) {
   if (has("YouTube_Upload_Status", "uploading") || has("FB_Slideshow_Status", "uploading") || has("Publish_Status", "publishing")) return "Uploading";
   if (has("YouTube_Processing_Status", "processing") || has("FB_Slideshow_Status", "processing") || has("TikTok_Draft_Status", "processing") || has("IG_Carousel_Status", "processing")) return "Platform Processing";
   if (has("Publish_Status", "scheduled")) return "Scheduled";
-  if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
-  if (has("Render_Status", "rendering") || has("Render_Status", "ready for render") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
-  if (has("Asset_Selection_Status", "needs selection") || has("Asset_Selection_Status", "selecting") || has("TikTok_Draft_Status", "ready for assets") || has("TikTok_Draft_Status", "preparing assets") || has("FB_Publish_Status", "ready for assets") || has("FB_Publish_Status", "preparing assets")) return "Preparing Assets";
+  // Publisher "Ready for Assets" is the start of upload, not a rewind to Studio
+  // asset selection. Approved/reviewable work must win or Approve drops 65% → 30%.
   if (has("Review_Status", "approved") || has("Output_Status", "approved")) return "Approved";
+  if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  if (has("Render_Status", "rendering") || has("Render_Status", "ready for render") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
+  const studioAssetPrep = has("Asset_Selection_Status", "needs selection") || has("Asset_Selection_Status", "selecting");
+  const publisherAssetPrep = has("TikTok_Draft_Status", "ready for assets") || has("TikTok_Draft_Status", "preparing assets") || has("FB_Publish_Status", "ready for assets") || has("FB_Publish_Status", "preparing assets");
+  if (studioAssetPrep || (!studioOutputHasReviewableDeliverable(record) && publisherAssetPrep)) return "Preparing Assets";
   if (has("Output_Status", "skipped")) return "Skipped";
   return "Queued";
 }
@@ -1167,6 +1184,22 @@ function mapContent(record) {
   };
 }
 
+function outputProgressMilestoneFloor(record) {
+  const review = String(f(record, "Review_Status") || "").toLowerCase();
+  const output = String(f(record, "Output_Status") || "").toLowerCase();
+  const render = String(f(record, "Render_Status") || "").toLowerCase();
+  const publish = String(f(record, "Publish_Status") || "").toLowerCase();
+  if (publish.includes("published") || output === "published") return 100;
+  if (review === "approved" || output.includes("approved")) return 75;
+  if (
+    render === "rendered"
+    || ((output.includes("ready for review") || review.includes("review sent") || review === "pending")
+      && studioOutputHasReviewableDeliverable(record))
+  ) return 65;
+  if (render.includes("rendering") || render.includes("ready for render")) return 50;
+  return 0;
+}
+
 function outputProgressPercent(record, state) {
   const processingRaw = f(record, "YouTube_Processing_Progress_Percent");
   const uploadRaw = f(record, "YouTube_Upload_Progress_Percent");
@@ -1190,16 +1223,18 @@ function outputProgressPercent(record, state) {
     Failed: 0,
     Skipped: 100,
   };
+  let computed = defaults[state] ?? null;
   // A stored 0% YouTube upload percent is "job accepted, no bytes yet" — do not
   // collapse Uploading/Processing to 0% on the Pipeline bar. Do not let a completed
   // upload percent paint Retry Pending as 100%.
   if ((state === "Uploading" || state === "Platform Processing") && Number.isFinite(processing) && processing > 0) {
-    return Math.max(0, Math.min(100, processing));
+    computed = Math.max(0, Math.min(100, processing));
+  } else if ((state === "Uploading" || state === "Platform Processing") && Number.isFinite(upload) && upload > 0) {
+    computed = Math.max(0, Math.min(100, upload));
   }
-  if ((state === "Uploading" || state === "Platform Processing") && Number.isFinite(upload) && upload > 0) {
-    return Math.max(0, Math.min(100, upload));
-  }
-  return defaults[state] ?? null;
+  const floor = outputProgressMilestoneFloor(record);
+  if (computed == null && !floor) return null;
+  return Math.max(floor, computed == null ? 0 : computed);
 }
 
 function platformPublishStatus(record) {

@@ -46,3 +46,5 @@ Item 4 prepare drain budget: 2026-08-20 — Return 202 while platform media is sti
 Audio platform warning Worker deploy: 2026-08-20 — Photo Set + selected music no longer blocks I3/I4 promote; silent native stills get a warning. Worker 0.10.30-audio-platform-warning. Source commit d920409.
 
 P3 IML pipe + R2 claim-id Worker deploy: 2026-08-20 — P3 module 103 uses Make `|` instead of invalid `or()`; R2 module 2 keeps a nonempty record-id filter. Worker 0.10.31-p3-iml-pipe.
+
+Monotonic pipeline progress Worker deploy: 2026-08-20 — Approve no longer rewinds TikTok/Facebook to Preparing Assets 30%. Remotion Facebook Slideshow Reels hand off as Video Ready for FBS3. Worker 0.10.33-fb-slideshow-handoff.

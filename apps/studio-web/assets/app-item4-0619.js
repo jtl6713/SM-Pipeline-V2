@@ -65,6 +65,21 @@
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
+  const pipelineProgressHighWater = new Map();
+
+  function pipelineDisplayPercent(record) {
+    const raw = record?.studio_progress_percent ?? record?.youtube_processing_progress_percent ?? record?.youtube_upload_progress_percent;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return raw;
+    if (record?.studio_state === "Failed") {
+      pipelineProgressHighWater.delete(record.id);
+      return n;
+    }
+    const prev = pipelineProgressHighWater.get(record.id);
+    const next = prev == null ? n : Math.max(prev, n);
+    pipelineProgressHighWater.set(record.id, next);
+    return next;
+  }
 
   const startupStatus = $("apiStatus");
   if (startupStatus) {
@@ -5414,7 +5429,7 @@
     if (!records.length) return target.innerHTML = '<div class="empty">No Platform Output records were returned.</div>';
     const isPipeline = target?.id === "outputsList";
     target.innerHTML = `<table class="data-table"><thead><tr><th>Output</th><th>Platform</th>${isPipeline ? "<th>Type / ratio</th>" : ""}<th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th>${isPipeline ? "<th>Creative</th>" : ""}</tr></thead><tbody>${records.map((r) => {
-      const pct = r.studio_progress_percent ?? r.youtube_processing_progress_percent ?? r.youtube_upload_progress_percent;
+      const pct = pipelineDisplayPercent(r);
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
       const canOpen = Boolean(r.creative_available);
@@ -5455,7 +5470,7 @@
       r.render_status,
       r.review_status,
       r.platform_publish_status || r.publish_status,
-      r.studio_progress_percent ?? r.youtube_processing_progress_percent ?? r.youtube_upload_progress_percent,
+      pipelineDisplayPercent(r),
       r.creative_available,
       r.final_file_url,
       r.studio_preview_url,
