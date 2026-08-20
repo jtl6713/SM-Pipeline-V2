@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.22-publish-cadence",
+          version: "0.10.23-upload-progress",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -1010,8 +1010,6 @@ function outputProgressPercent(record, state) {
   const processing = processingRaw === null || processingRaw === "" ? null : Number(processingRaw);
   const upload = uploadRaw === null || uploadRaw === "" ? null : Number(uploadRaw);
   if (state === "Published") return 100;
-  if (processing !== null && Number.isFinite(processing)) return Math.max(0, Math.min(100, processing));
-  if (upload !== null && Number.isFinite(upload)) return Math.max(0, Math.min(100, upload));
 
   const defaults = {
     Queued: 5,
@@ -1028,6 +1026,10 @@ function outputProgressPercent(record, state) {
     Failed: 0,
     Skipped: 100,
   };
+  // A stored 0% YouTube upload percent is "job accepted, no bytes yet" — do not
+  // collapse Uploading/Processing to 0% on the Pipeline bar.
+  if (Number.isFinite(processing) && processing > 0) return Math.max(0, Math.min(100, processing));
+  if (Number.isFinite(upload) && upload > 0) return Math.max(0, Math.min(100, upload));
   return defaults[state] ?? null;
 }
 
