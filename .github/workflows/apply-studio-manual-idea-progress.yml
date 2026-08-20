@@ -1,0 +1,45 @@
+name: Apply Studio Manual Idea Progress Repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'repair/tools/patch_studio_manual_idea_progress.py'
+      - 'deploy/apply-studio-manual-idea-progress.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply guarded progress and execution repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_studio_manual_idea_progress.py
+          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
+          cp apps/studio-web/assets/app-item4-0619.js /tmp/studio-web.mjs
+          node --check /tmp/studio-worker.mjs
+          node --check /tmp/studio-web.mjs
+          grep -q '0.10.36-manual-ideas-progress' apps/studio-api/worker.js
+          grep -q 'studio_manual_idea_progress_v1' apps/studio-api/worker.js
+          grep -q '0.6.69-idea-progress' apps/studio-web/index.html
+          grep -q '0 of ${count} complete' apps/studio-web/assets/app-item4-0619.js
+      - name: Commit source repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js apps/studio-web/index.html apps/studio-web/assets/app-item4-0619.js
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(ideas): run manual I1 explicitly and show live progress'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
