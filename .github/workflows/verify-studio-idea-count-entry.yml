@@ -1,0 +1,73 @@
+name: Verify Studio Idea Count Entry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/verify-studio-idea-count-entry.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify-studio-idea-count-entry
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Wait for live Worker and Pages markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          ok=0
+          for i in $(seq 1 24); do
+            worker_ok=0
+            pages_ok=0
+            curl -fsS "$API_ROOT/workers/scripts/chicagoshining-studio-api/content/v2" -H "$AUTH" -o /tmp/worker.bin || true
+            if grep -aFq '0.10.37-manual-idea-count-entry' /tmp/worker.bin && grep -aFq 'studio_manual_idea_count_range' /tmp/worker.bin; then worker_ok=1; fi
+
+            curl -fsS "$API_ROOT/pages/projects/chicagoshining-studio/deployments?env=production&per_page=5" -H "$AUTH" -o /tmp/pages.json || true
+            if jq -e '.success==true and (.result|length)>0' /tmp/pages.json >/dev/null 2>&1; then
+              url=$(jq -r '.result[0].url // ""' /tmp/pages.json)
+              if [ -n "$url" ]; then
+                case "$url" in http*) ;; *) url="https://$url" ;; esac
+                if curl -fsSL --max-time 30 "$url/" -o /tmp/index.html && grep -Fq '0.6.70-idea-count-entry' /tmp/index.html && grep -Fq 'id="ideaGenerateCount" type="number" min="1" max="10" step="1" value="5"' /tmp/index.html; then pages_ok=1; fi
+              fi
+            fi
+            if [ "$worker_ok" = 1 ] && [ "$pages_ok" = 1 ]; then ok=1; break; fi
+            sleep 10
+          done
+          test "$ok" = 1
+          echo 'live_count_entry_verification=PASS'
+
+      - name: Commit sanitized evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p repair/evidence
+          cat > repair/evidence/manual-idea-count-entry-live-20260820.json <<'JSON'
+          {
+            "worker_version": "0.10.37-manual-idea-count-entry",
+            "ui_build": "0.6.70-idea-count-entry",
+            "count_contract": {"minimum": 1, "maximum": 10, "step": 1, "default": 5},
+            "live_verification": "PASS"
+          }
+          JSON
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/manual-idea-count-entry-live-20260820.json
+          git commit -m 'evidence: verify live 1-10 manual idea entry' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
