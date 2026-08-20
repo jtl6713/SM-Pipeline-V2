@@ -72,7 +72,7 @@ EZ path Pages deploy: 2026-08-19 — Advanced audio matches Start with content: 
 
 EZ path Pages deploy: 2026-08-19 — Review stays closed until a rendered file exists; Open Review is not preview-ready from clip JSON alone. UI 0.6.53.
 
-Review mix Pages deploy: 2026-08-19 — Open Review can change music and voiceover volume, submit a mix rerender, and show Processing then Ready. UI 0.6.55.
+Review mix Pages deploy: 2026-08-19 — Open Review can change music/voiceover mix and poll the rerender until the new preview is ready. UI 0.6.55.
 
 Review mix callout Pages deploy: 2026-08-19 — While a mix rerender is in progress, cover the old video with a large animated Processing overlay. UI 0.6.56.
 
@@ -101,3 +101,5 @@ Public publish copy Pages deploy: 2026-08-20 — Approve copy says Instagram, Fa
 Manual AI idea generator Pages deploy: 2026-08-20 — Add minimal Ideas-page generator with count 5/10/25/50/100, Highest Quality/Balanced/Quantity, inline progress, View Ideas, and Generate More. UI 0.6.68-idea-generator. Source commit 374bb9343c0484f0ea199c2ea1c94b6c630fbcbd.
 
 Manual AI idea live progress deploy: 2026-08-20 — Show 0 of N immediately and poll linked Idea Candidates every 2 seconds through N of N. UI 0.6.69-idea-progress. Source commit bf217ed8850e396ba3a01e766c15478e7f89484d.
+
+Manual idea count entry Pages deploy: 2026-08-20 — Replace the fixed idea-count dropdown with a whole-number field, minimum 1, maximum 10, default 5, retaining live N-of-N progress. UI 0.6.70-idea-count-entry. Source commit da93f8cdbf54fc16a2c0a7617557ad0c081fbb64.
