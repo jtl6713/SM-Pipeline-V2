@@ -96,11 +96,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.20-native-photo-carousel",
+          version: "0.10.21-approved-progress",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
           studio_native_photo_carousel_v1: true,
+          studio_approved_progress_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
@@ -1013,12 +1014,12 @@ function outputProgressPercent(record, state) {
 
   const defaults = {
     Queued: 5,
-    Approved: 15,
     "Preparing Assets": 30,
     Rendering: 50,
     "Ready for Review": 65,
+    Approved: 75,
     Scheduled: 80,
-    Uploading: 75,
+    Uploading: 85,
     "Platform Processing": 88,
     "Draft Delivered": 92,
     "Manual Action Required": 85,
