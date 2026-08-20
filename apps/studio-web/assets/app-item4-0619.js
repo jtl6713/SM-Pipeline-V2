@@ -2034,52 +2034,96 @@
     return { continue: false, delay_ms: null, mode: "await-visibility", extra_windows_used: extraWindowsUsed, hard_refresh_required: false };
   }
 
-  function item4BindPreviewImage(img, { placeholder } = {}) {
-    const original = String(img.dataset.previewSrc || img.getAttribute("src") || "").trim();
-    if (!original) return;
-    const prior = item4PreviewFailures.get(original);
-    if (prior && (prior.attempt >= ITEM4_PREVIEW_RETRY_MAX || (prior.exhaustedAt && Date.now() - prior.exhaustedAt < ITEM4_POLL_EXTRA_MS))) {
+  function item4AssetPreviewCandidates(asset) {
+    try {
+      const candidates = [];
+      const name = String(asset?.name || "");
+      const local = ezLocalPreviewFor(Number(asset?.order || 0) - 1, name);
+      const cdn = String(asset?.preview_url || "").trim();
+      const ready = String(item4Workspace?.assets_status || "").trim() === "Ready";
+      // While uploading, prefer instant local blobs. Once Drive/CDN authority is
+      // Ready, prefer the durable preview so a stale blob cannot mask a good CDN URL.
+      if (local && !ready) candidates.push(local);
+      if (cdn) candidates.push(cdn);
+      if (local && ready) candidates.push(local);
+      const recordId = String(asset?.media_asset_record_id || "").trim();
+      if (/^rec[A-Za-z0-9]+$/.test(recordId)) {
+        candidates.push(`${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/preview`);
+      }
+      const driveThumb = item4DriveThumbnailUrl(asset?.google_drive_file_id);
+      if (driveThumb) candidates.push(driveThumb);
+      return [...new Set(candidates.filter(Boolean))];
+    } catch {
+      return [];
+    }
+  }
+
+  function item4BindPreviewImage(img, { placeholder, candidates, failureKey } = {}) {
+    const chain = (Array.isArray(candidates) && candidates.length
+      ? candidates
+      : [String(img.dataset.previewSrc || img.getAttribute("src") || "").trim()])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    if (!chain.length) return;
+
+    const key = String(failureKey || img.dataset.previewFailureKey || chain[0] || "").trim();
+    const prior = item4PreviewFailures.get(key);
+    if (prior?.exhaustedAt && Date.now() - prior.exhaustedAt >= ITEM4_POLL_EXTRA_MS) {
+      item4PreviewFailures.delete(key);
+    }
+    const blocked = item4PreviewFailures.get(key);
+    // Only suppress while cooldown is active. After cooldown, retry even if
+    // earlier attempts hit ITEM4_PREVIEW_RETRY_MAX (previews often become Ready later).
+    if (blocked?.exhaustedAt && Date.now() - blocked.exhaustedAt < ITEM4_POLL_EXTRA_MS) {
       const host = img.closest(".item4-thumb, .item4-variant-image-wrap");
       if (host && typeof placeholder === "function") host.innerHTML = placeholder();
       return;
     }
-    if (prior?.exhaustedAt && Date.now() - prior.exhaustedAt >= ITEM4_POLL_EXTRA_MS) {
-      item4PreviewFailures.delete(original);
+
+    let candidateIndex = Math.max(0, Number(img.dataset.previewCandidate || 0) || 0);
+    if (candidateIndex >= chain.length) candidateIndex = 0;
+    img.dataset.previewFailureKey = key;
+    img.dataset.previewCandidate = String(candidateIndex);
+    if (String(img.getAttribute("src") || "") !== chain[candidateIndex]) {
+      img.src = chain[candidateIndex];
     }
+
+    img.addEventListener("load", () => {
+      item4PreviewFailures.delete(key);
+    }, { once: true });
+
     img.addEventListener("error", () => {
-      const recorded = item4PreviewFailures.get(original) || { attempt: 0 };
+      if (!img.isConnected) return;
+      const nextIndex = candidateIndex + 1;
+      if (nextIndex < chain.length) {
+        candidateIndex = nextIndex;
+        img.dataset.previewCandidate = String(candidateIndex);
+        img.src = item4CacheBustedPreviewUrl(chain[candidateIndex], candidateIndex);
+        return;
+      }
+
+      const recorded = item4PreviewFailures.get(key) || { attempt: 0 };
       const decision = item4NextPreviewRetry(recorded.attempt);
       recorded.attempt = decision.attempt;
-      item4PreviewFailures.set(original, recorded);
+      item4PreviewFailures.set(key, recorded);
       if (decision.retry) {
+        candidateIndex = 0;
+        img.dataset.previewCandidate = "0";
         window.setTimeout(() => {
           if (!img.isConnected) return;
-          img.src = item4CacheBustedPreviewUrl(original, decision.attempt);
+          img.src = item4CacheBustedPreviewUrl(chain[0], decision.attempt);
         }, decision.wait_ms);
         return;
       }
       recorded.exhaustedAt = Date.now();
-      item4PreviewFailures.set(original, recorded);
+      item4PreviewFailures.set(key, recorded);
       const host = img.closest(".item4-thumb, .item4-variant-image-wrap");
       if (host && typeof placeholder === "function") host.innerHTML = placeholder();
     }, { once: false });
   }
 
   function item4AssetPreviewUrl(asset) {
-    try {
-      const name = String(asset?.name || "");
-      const local = ezLocalPreviewFor(Number(asset?.order || 0) - 1, name);
-      if (local) return local;
-      const recordId = String(asset?.media_asset_record_id || "").trim();
-      if (/^rec[A-Za-z0-9]+$/.test(recordId)) {
-        return `${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/preview`;
-      }
-      return String(asset?.preview_url || "").trim()
-        || item4DriveThumbnailUrl(asset?.google_drive_file_id)
-        || (!item4IsHeicAsset(asset) ? String(asset?.url || "").trim() : "");
-    } catch {
-      return "";
-    }
+    return item4AssetPreviewCandidates(asset)[0] || "";
   }
 
   function item4AssetPlaceholder(asset, label = "Preview unavailable") {
@@ -2091,9 +2135,10 @@
   function item4AssetThumb(asset) {
     const dims = asset.width && asset.height ? `${asset.width}×${asset.height}` : "Original";
     const isHeic = item4IsHeicAsset(asset);
-    const previewUrl = item4AssetPreviewUrl(asset);
+    const candidates = item4AssetPreviewCandidates(asset);
+    const previewUrl = candidates[0] || "";
     const visual = previewUrl
-      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}">`
+      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
       : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
@@ -2111,8 +2156,9 @@
     const assets = Array.isArray(status?.assets) ? status.assets : [];
     const host = $("item4AssetStrip");
     const badge = $("item4AssetStatus");
+    const authority = String(status?.assets_status || "None");
+    if (authority === "Ready") item4PreviewFailures.clear();
     if (badge) {
-      const authority = String(status?.assets_status || "None");
       badge.textContent = !assets.length
         ? "No media yet"
         : authority === "Ready"
@@ -2124,13 +2170,15 @@
     if (!host) return;
     hydrateEzCaptionDrafts(status);
     host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">No master photos uploaded yet.</div>';
-    host.querySelectorAll("[data-item4-preview-image]").forEach((img) => item4BindPreviewImage(img, {
-      placeholder: () => {
-        const card = img.closest("[data-item4-asset]");
-        const asset = assets.find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
-        return item4AssetPlaceholder(asset || {}, item4IsHeicAsset(asset) ? "Original preserved" : "Preview unavailable");
-      },
-    }));
+    host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
+      const card = img.closest("[data-item4-asset]");
+      const asset = assets.find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
+      item4BindPreviewImage(img, {
+        candidates: item4AssetPreviewCandidates(asset || {}),
+        failureKey: String(asset?.id || asset?.media_asset_record_id || img.dataset.previewFailureKey || "").trim(),
+        placeholder: () => item4AssetPlaceholder(asset || {}, item4IsHeicAsset(asset) ? "Original preserved" : "Preview unavailable"),
+      });
+    });
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
     bindEzCaptionInputs(host);
   }
@@ -2185,7 +2233,9 @@
 
   function item4VariantPreviewUrl(variant) {
     if (!variant) return "";
-    return item4MediaAssetPreviewUrl(variant.media_asset_record_id) || variant.preview_url || variant.url || "";
+    return String(variant.preview_url || "").trim()
+      || item4MediaAssetPreviewUrl(variant.media_asset_record_id)
+      || String(variant.url || "").trim();
   }
 
   function item4VariantAssets(manifest) {

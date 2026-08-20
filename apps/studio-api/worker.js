@@ -7577,10 +7577,19 @@ async function item4PreviewQueueRowForMediaAsset(env, mediaAssetRecordId) {
   if (!/^rec[A-Za-z0-9]+$/.test(safeId)) return null;
   const escaped = safeId.replace(/'/g, "\\'");
   const rows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
-    limit: 5,
+    limit: 10,
     filterFormula: `{Media_Asset_Record_ID}='${escaped}'`,
   });
-  return rows[0] || null;
+  if (!rows.length) return null;
+  const score = (row) => {
+    let value = 0;
+    if (String(f(row, "Asset_Kind") || "").trim() === "Master Original") value += 8;
+    if (String(f(row, "Preview_Status") || "").trim() === "Ready") value += 4;
+    if (String(f(row, "Preview_URL") || "").trim()) value += 2;
+    if (String(f(row, "Transfer_Status") || "").trim() === "Ready") value += 1;
+    return value;
+  };
+  return [...rows].sort((a, b) => score(b) - score(a))[0] || null;
 }
 
 async function fetchStudioR2Preview(previewUrl, request) {
