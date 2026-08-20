@@ -93,3 +93,6 @@ Idea drawer next-step Pages deploy: 2026-08-20 â€” Idea Candidate leads with Add
 
 Local preview + prepare Pages deploy: 2026-08-20 — Show dropped photos immediately while Drive copies; treat Prepare as background work instead of a 500. UI 0.6.64. Source commit 654de96.
 
+
+Audio platform warning Pages deploy: 2026-08-20 — Music/voiceover on still-photo platforms is a warning, not an Approve block. UI 0.6.65. Source commit d920409.
+

@@ -42,3 +42,6 @@ CDN publish handoff + photo-origin audio defaults: 2026-08-20 â€” Approve writes
 
 Item 4 prepare drain budget: 2026-08-20 — Return 202 while platform media is still preparing; keep SMV1 draining in the background. Worker 0.10.29-item4-prepare-local-preview. Source commit 654de96.
 
+
+Audio platform warning Worker deploy: 2026-08-20 — Photo Set + selected music no longer blocks I3/I4 promote; silent native stills get a warning. Worker 0.10.30-audio-platform-warning. Source commit d920409.
+
