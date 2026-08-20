@@ -64,7 +64,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.69-idea-progress";
+  const BUILD_ID = "item4-0.6.70-idea-count-entry";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -358,7 +358,7 @@
       activeIdeaGenerationBatchId = null;
       ideaGenerationInFlight = false;
       $("ideaGenerateForm")?.reset();
-      if ($("ideaGenerateCount")) $("ideaGenerateCount").value = "25";
+      if ($("ideaGenerateCount")) $("ideaGenerateCount").value = "5";
       if ($("ideaGenerateQuality")) $("ideaGenerateQuality").value = "Highest Quality";
       if ($("ideaGenerateSubmit")) {
         $("ideaGenerateSubmit").disabled = false;
@@ -417,9 +417,14 @@
   $("ideaGenerateForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (ideaGenerationInFlight) return;
-    const count = Number($("ideaGenerateCount")?.value || 25);
+    const count = Number($("ideaGenerateCount")?.value || 5);
     const quality = String($("ideaGenerateQuality")?.value || "Highest Quality");
     const button = $("ideaGenerateSubmit");
+    if (!Number.isInteger(count) || count < 1 || count > 10) {
+      setIdeaGenerateMessage("Enter a whole number from 1 to 10.", "error-text");
+      $("ideaGenerateCount")?.focus();
+      return;
+    }
     ideaGenerationInFlight = true;
     stopIdeaGenerationPoll();
     if (button) { button.disabled = true; button.textContent = "Generating…"; }

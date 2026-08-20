@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.69-idea-progress">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.70-idea-count-entry">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.69</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.70</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -89,7 +89,7 @@
  <section class="panel idea-generate-panel" id="ideaGeneratePanel" hidden>
  <form id="ideaGenerateForm" class="idea-generate-form">
  <div class="idea-generate-fields">
- <label class="form-field"><span>Ideas</span><select id="ideaGenerateCount"><option>5</option><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label>
+ <label class="form-field"><span>Ideas</span><input id="ideaGenerateCount" type="number" min="1" max="10" step="1" value="5" inputmode="numeric" required></label>
  <label class="form-field"><span>Quality</span><select id="ideaGenerateQuality"><option selected>Highest Quality</option><option>Balanced</option><option>Quantity</option></select></label>
  </div>
  <div class="idea-generate-actions"><button type="submit" class="primary-button" id="ideaGenerateSubmit">Generate Ideas</button><button type="button" class="secondary-button" id="ideaGenerateCancel">Cancel</button></div>
@@ -1004,7 +1004,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.69-idea-progress"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.69-idea-progress"></script>
+ <script src="/assets/ez-plan.js?v=0.6.70-idea-count-entry"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.70-idea-count-entry"></script>
 </body>
 </html>

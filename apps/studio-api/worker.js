@@ -100,9 +100,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.36-manual-ideas-progress",
+          version: "0.10.37-manual-idea-count-entry",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
+          studio_manual_idea_count_range: "1-10",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -13306,7 +13307,8 @@ async function adminMakeDeploy(request, env, authorization) {
 const STUDIO_IDEA_I1_SCENARIO_ID = 5514334;
 const STUDIO_IDEA_PROFILE_TABLE_ID = "tblNYg2QB0BmmVACy";
 const STUDIO_IDEA_BATCH_TABLE_ID = "tblpCKSqcTpDtyst3";
-const STUDIO_IDEA_ALLOWED_COUNTS = new Set([5, 10, 25, 50, 100]);
+const STUDIO_IDEA_MIN_COUNT = 1;
+const STUDIO_IDEA_MAX_COUNT = 10;
 const STUDIO_IDEA_ALLOWED_QUALITIES = new Set(["Highest Quality", "Balanced", "Quantity"]);
 
 function studioIdeaBatchRecordIdFromPath(url) {
@@ -13503,7 +13505,7 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const count = Number(payload?.count);
   const quality = String(payload?.quality || "Highest Quality").trim();
-  if (!STUDIO_IDEA_ALLOWED_COUNTS.has(count)) throw new HttpError(400, "Idea count must be 5, 10, 25, 50, or 100");
+  if (!Number.isInteger(count) || count < STUDIO_IDEA_MIN_COUNT || count > STUDIO_IDEA_MAX_COUNT) throw new HttpError(400, "Idea count must be a whole number from 1 to 10");
   if (!STUDIO_IDEA_ALLOWED_QUALITIES.has(quality)) throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
 
   const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
