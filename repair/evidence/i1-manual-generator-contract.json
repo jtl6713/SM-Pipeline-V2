@@ -1,0 +1,15 @@
+{
+  "schema": "studio-manual-idea-i1-v1",
+  "at": "2026-08-20T19:57:41.293943+00:00",
+  "scenario_id": 5514334,
+  "scenario_name": "I1 - Daily Idea Candidate Generator - Balanced Format Slate v4",
+  "scenario_active_before": false,
+  "scenario_active_after": false,
+  "before_blueprint_sha256": "d40cc48d6437df8b8b07c8e2a68d421f287bd4dce3665939fcf8dbc86bf22ca9",
+  "after_blueprint_sha256": "d40cc48d6437df8b8b07c8e2a68d421f287bd4dce3665939fcf8dbc86bf22ca9",
+  "manual_count_override": "module 9 ifempty -> Daily_Idea_Limit",
+  "quality_prompt_marker": "STUDIO_MANUAL_IDEA_QUALITY_V1",
+  "max_output_tokens": "32768",
+  "candidate_batch_link_field_id": "fldAJzek9I6f7svUg",
+  "scenario_runs": 0
+}
