@@ -8,7 +8,7 @@ on:
       - '.github/workflows/inspect-idea-generator.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   inspect:
@@ -76,11 +76,23 @@ jobs:
               sched=(mobj.get('scheduling') or {}) if isinstance(mobj,dict) else {}
               out['matches'].append({'id':sid,'name':x.get('name'),'list_active':x.get('isActive'),'meta_http':ms,'blueprint_http':bs,'scheduling':sched,'hookId':mobj.get('hookId') if isinstance(mobj,dict) else None,'modules':modules,'blueprint':b})
           text=json.dumps(out,indent=2,ensure_ascii=False)
-          # redact obvious bearer/token-like values only; preserve structural mappings
           text=re.sub(r'(?i)(bearer\s+|token\s+)[A-Za-z0-9._~-]{16,}', r'\1[REDACTED]', text)
           open('/tmp/idea-generator-inspection.json','w',encoding='utf-8').write(text)
           print(json.dumps({'matched_count':len(matches),'matches':[{'id':m['id'],'name':m['name'],'active':m['list_active'],'scheduling':m['scheduling']} for m in out['matches']]},indent=2))
           PY
+      - name: Commit sanitized inspection evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p repair/evidence
+          cp /tmp/idea-generator-inspection.json repair/evidence/idea-generator-inspection.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/idea-generator-inspection.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'evidence: capture existing idea generator contract'
+            git push origin HEAD:main
+          fi
       - name: Upload inspection
         uses: actions/upload-artifact@v4
         with:
