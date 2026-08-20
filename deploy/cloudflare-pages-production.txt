@@ -85,3 +85,5 @@ Master preview heal Pages deploy: 2026-08-19 — Recover stuck “Preview unavai
 Advanced collapsed Pages deploy: 2026-08-19 — Keep Advanced options collapsed by default on Production Request. UI 0.6.60.
 
 Native photo approve Pages deploy: 2026-08-20 — Enable Approve for publishing on Instagram Carousel and Facebook Multi-Image Post native photo packages. UI 0.6.61.
+
+Photo audio defaults Pages deploy: 2026-08-20 — EZ multiple-photo plan defaults to Instagram Reel and Facebook Slideshow Reel. Silent native carousel / multi-photo remain opt-in. UI 0.6.62.

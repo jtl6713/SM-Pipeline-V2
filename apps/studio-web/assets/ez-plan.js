@@ -16,8 +16,8 @@
       TikTok: "Video Draft",
     }),
     multiple: Object.freeze({
-      Instagram: "Carousel",
-      Facebook: "Multi-Image Post",
+      Instagram: "Reel",
+      Facebook: "Slideshow Reel",
       TikTok: "Video Draft",
       YouTube: "Short",
     }),

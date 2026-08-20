@@ -96,11 +96,14 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.24-yt-thumb-retry",
+          version: "0.10.28-audio-photo-defaults",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
           studio_native_photo_carousel_v1: true,
+          studio_publish_handoff_v1: true,
+          studio_cdn_publish_handoff_v1: true,
+          studio_photo_audio_defaults_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
           studio_music_catalog_fallback_v1: true,
@@ -228,8 +231,8 @@ export default {
           item4_output_plan: true,
           item4_audio_capability_routing: true,
           item4_instagram_default_output: "Reel",
-          item4_facebook_default_output: "Multi-Image Post",
-          item4_facebook_photo_object: "native_multi_photo",
+          item4_facebook_default_output: "Slideshow Reel",
+          item4_facebook_photo_object: "reel",
           item4_facebook_slideshow_reel_opt_in: true,
           item4_facebook_slideshow_voiceover_hardening: true,
           item4_ratio_authority: "platform-output-mappings",
@@ -900,6 +903,153 @@ function studioOutputHasReviewableDeliverable(record) {
   return studioOutputIsNativePhoto(record);
 }
 
+function studioClipPublicCdnUrl(clipOrUrl) {
+  const url = String(clipOrUrl?.url || clipOrUrl?.src || clipOrUrl || "").trim();
+  return url.startsWith("https://media.chicagoshining.com/") ? url : "";
+}
+
+function studioNativeClipsArePublicCdn(record) {
+  const clips = selectedVisualClips(record);
+  return clips.length > 0 && clips.every((clip) => studioClipPublicCdnUrl(clip));
+}
+
+function studioNativeSlidePublicFields(clip, platform) {
+  const url = studioClipPublicCdnUrl(clip);
+  if (!url) {
+    return {
+      Asset_4x5_Public_Status: "Needs Preparation",
+      Shared_Asset_Approved: true,
+    };
+  }
+  const fields = {
+    Asset_4x5_Public_URL: url,
+    Asset_4x5_Public_Status: "Ready",
+    Shared_Asset_Approved: true,
+  };
+  if (platform === "Instagram") {
+    fields.IG_Public_Asset_URL = url;
+    fields.IG_Public_Asset_Status = "Ready";
+  }
+  return fields;
+}
+
+function studioPublishHandoffFields(record) {
+  const platform = String(f(record, "Platform") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || "").trim();
+  const mapping = String(f(record, "Platform_Output_Type") || "").trim();
+  const preview = String(f(record, "Studio_Preview_URL") || "").trim();
+  const clipCount = selectedVisualClips(record).length || Number(f(record, "Selected_Clip_Count") || 0) || 0;
+  const current = (name) => String(f(record, name) || "").trim();
+  const cdnReady = studioNativeClipsArePublicCdn(record);
+  const fields = {};
+  if (platform === "Instagram" && (outputType === "Carousel" || mapping === "Instagram Carousel")) {
+    if (cdnReady) fields.IG_Carousel_Status = "Assets Ready";
+    else if (!current("IG_Carousel_Status")) fields.IG_Carousel_Status = "Ready for Asset Prep";
+    fields.Publish_Status = "Ready to Publish";
+    fields.Image_Output_Selected = true;
+    if (clipCount) {
+      fields.Image_Count = clipCount;
+      fields.IG_Carousel_Child_Count = clipCount;
+    }
+  }
+  if (platform === "Facebook" && (outputType === "Multi-Image Post" || mapping === "Facebook Photo Set")) {
+    fields.Image_Output_Selected = true;
+    if (!current("FB_Publish_Status") || current("FB_Publish_Status") === "Retry Pending") {
+      fields.FB_Publish_Status = "Ready for Assets";
+    }
+    fields.FB_Image_Publish_Mode = "Multi-Photo Collage";
+    fields.Publish_Status = "Ready to Publish";
+    if (clipCount) fields.Image_Count = clipCount;
+  }
+  if (platform === "TikTok") {
+    if (!current("TikTok_Draft_Status")) fields.TikTok_Draft_Status = "Ready for Assets";
+    if (outputType === "Video Draft" || mapping === "TikTok Video") {
+      fields.TikTok_Draft_Type = "Video";
+      if (preview.startsWith("https://media.chicagoshining.com/")) fields.Publish_Asset_URL = preview;
+    } else {
+      fields.TikTok_Draft_Type = clipCount > 1 ? "Photo Carousel" : "Single Photo";
+      fields.Image_Output_Selected = true;
+      fields.Image_Publish_Mode = "TikTok Draft";
+    }
+    fields.Publish_Status = "Ready to Publish";
+  }
+  return fields;
+}
+
+async function studioPatchExistingNativeSlides(env, record, slideIds, clips) {
+  const platform = String(f(record, "Platform") || "").trim();
+  if (!slideIds.length) return;
+  const params = new URLSearchParams({
+    filterByFormula: `OR(${slideIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`,
+  });
+  for (const field of ["Slide Number", "Current Order", "Current Image URL", "Asset_4x5_Public_Status", "IG_Public_Asset_Status"]) {
+    params.append("fields[]", field);
+  }
+  const listed = await airtableFetch(env, "tblcnQDBvUngpjDED", `?${params.toString()}`);
+  const rows = [...(listed.records || [])].sort((a, b) => {
+    const order = (row) => Number(row?.fields?.["Current Order"] || row?.fields?.["Slide Number"] || 0);
+    return order(a) - order(b);
+  });
+  const updates = rows.map((row, index) => {
+    const clip = clips[index] || {};
+    const url = studioClipPublicCdnUrl(clip) || studioClipPublicCdnUrl(row?.fields?.["Current Image URL"]);
+    if (!url) return null;
+    return {
+      id: row.id,
+      fields: studioNativeSlidePublicFields({ url }, platform),
+    };
+  }).filter(Boolean);
+  if (!updates.length) return;
+  await airtableFetch(env, "tblcnQDBvUngpjDED", "", {
+    method: "PATCH",
+    body: JSON.stringify({ records: updates, typecast: true }),
+  });
+}
+
+async function studioEnsureNativePublishSlides(env, record) {
+  if (!studioOutputIsNativePhoto(record)) return record;
+  const clips = selectedVisualClips(record);
+  if (!clips.length) return record;
+  const existing = f(record, "Carousel Slides") || [];
+  if (existing.length) {
+    await studioPatchExistingNativeSlides(env, record, existing, clips);
+    return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
+  }
+  const platform = String(f(record, "Platform") || "").trim();
+  const outputId = f(record, "Output_ID");
+  const records = clips.map((clip, index) => {
+    const url = String(clip.url || clip.src || "").trim();
+    const driveId = String(clip.google_drive_file_id || "").trim();
+    const driveUrl = String(clip.google_drive_url || "").trim();
+    const order = Number(clip.order || index + 1);
+    return {
+      fields: {
+        "Slide Name": `${platform} ${outputId} slide ${order}`,
+        "Slide Number": order,
+        "Current Order": order,
+        "Is Cover": index === 0,
+        "Current Image URL": url || null,
+        "Final Image URL": url || null,
+        "Google Drive File ID": driveId || null,
+        "Final Google Drive File ID": driveId || null,
+        "Platform Output": [record.id],
+        "Platform": platform,
+        "Aspect Ratio": String(clip.aspect_ratio || f(record, "Aspect_Ratio") || "").trim() || null,
+        "Asset_4x5_File_ID": driveId || null,
+        "Asset_4x5_File_URL": driveUrl || url || null,
+        "Asset_Family_Key": String(clip.media_asset_record_id || clip.id || `${record.id}-${order}`).trim(),
+        "Approved For Final": true,
+        ...studioNativeSlidePublicFields(clip, platform),
+      },
+    };
+  });
+  await airtableFetch(env, "tblcnQDBvUngpjDED", "", {
+    method: "POST",
+    body: JSON.stringify({ records, typecast: true }),
+  });
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
+}
+
 function normalizedOutputState(record) {
   const fields = record?.fields || {};
   const text = (name) => String(fields[name] || "").trim();
@@ -935,7 +1085,9 @@ function normalizedOutputState(record) {
   if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
 
   if (has("TikTok_Draft_Status", "manual action") || has("Manual_Completion_Status", "required") || has("Music_Status", "manual action")) return "Manual Action Required";
-  if (fields.Publish_Retry_Eligible || fields.Asset_Selection_Retry_Eligible || has("FB_Slideshow_Status", "retry") || has("TikTok_Draft_Status", "retry")) return "Retry Pending";
+  // A leftover retry flag must not hide a YouTube video that is already on the platform.
+  if (!youtubeVideoReady && (fields.Publish_Retry_Eligible || fields.Asset_Selection_Retry_Eligible || has("FB_Slideshow_Status", "retry") || has("TikTok_Draft_Status", "retry"))) return "Retry Pending";
+  if (youtubeVideoReady && !has("Publish_Status", "published") && text("YouTube_Stage") !== "Complete") return "Platform Processing";
   if (has("TikTok_Draft_Status", "draft delivered")) return "Draft Delivered";
   if (has("YouTube_Upload_Status", "uploading") || has("FB_Slideshow_Status", "uploading") || has("Publish_Status", "publishing")) return "Uploading";
   if (has("YouTube_Processing_Status", "processing") || has("FB_Slideshow_Status", "processing") || has("TikTok_Draft_Status", "processing") || has("IG_Carousel_Status", "processing")) return "Platform Processing";
@@ -1946,18 +2098,18 @@ const ITEM4_RATIO_SPECS = Object.freeze({
 
 const ITEM4_PLAN_SPECS = Object.freeze({
   Instagram: Object.freeze({
-    default_output_type: "Carousel",
+    default_output_type: "Reel",
     options: Object.freeze({
-      "Carousel": { mapping_type: "Instagram Carousel", format: "Carousel", rationale: "Five photos are strongest as a swipeable 4:5 Instagram carousel." },
-      "Reel": { mapping_type: "Instagram Reel", format: "Vertical Short Video", rationale: "Turns the photo set into a vertical motion sequence." },
+      "Carousel": { mapping_type: "Instagram Carousel", format: "Carousel", rationale: "Optional. Publishes a silent swipeable 4:5 Instagram carousel with no music or voiceover." },
+      "Reel": { mapping_type: "Instagram Reel", format: "Vertical Short Video", rationale: "Default. Renders the photos as a 9:16 Instagram Reel with music and voiceover." },
       "Single Image": { mapping_type: "Instagram Feed Post", format: "Feed Post", rationale: "Use one hero photo as a feed post." },
     }),
   }),
   Facebook: Object.freeze({
-    default_output_type: "Multi-Image Post",
+    default_output_type: "Slideshow Reel",
     options: Object.freeze({
-      "Multi-Image Post": { mapping_type: "Facebook Photo Set", format: "Photo Set", rationale: "Default. Publishes a native Facebook multi-photo so people can swipe and inspect each still. Not a Reel." },
-      "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Optional. Renders the same photos as a 9:16 Facebook Reel for Reels distribution." },
+      "Multi-Image Post": { mapping_type: "Facebook Photo Set", format: "Photo Set", rationale: "Optional. Publishes a silent native Facebook multi-photo so people can swipe each still. No music or voiceover." },
+      "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Default. Renders the same photos as a 9:16 Facebook Reel with music and voiceover." },
       "Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Creates a 9:16 Facebook Reel from shot video, not from a photo set." },
       "Single Image": { mapping_type: "Facebook Post", format: "Feed Post", rationale: "Use one hero photo as a Facebook post." },
     }),
@@ -2759,7 +2911,7 @@ function item4PhotoCountKind(count) {
 function item4DefaultOutputType(platform, photoCount) {
   const n = Math.max(0, Number(photoCount) || 0);
   const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Video Draft" });
-  const multiple = Object.freeze({ Instagram: "Carousel", Facebook: "Multi-Image Post", TikTok: "Video Draft", YouTube: "Short" });
+  const multiple = Object.freeze({ Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" });
   const map = n <= 1 ? single : multiple;
   return map[platform] || null;
 }
@@ -10276,10 +10428,12 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
       Review_Decision_At: stamp,
       Do_Not_Publish: false,
       Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+      ...studioPublishHandoffFields(existing),
     };
-    const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+    const prepared = await studioEnsureNativePublishSlides(env, existing);
+    const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
       method: "PATCH",
-      body: JSON.stringify({ fields, typecast: true }),
+      body: JSON.stringify({ fields: { ...fields, ...studioPublishHandoffFields(prepared) }, typecast: true }),
     });
     cadenceScheduleSync(ctx, env, { startPublish: true });
     return respond(request, env, {

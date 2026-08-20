@@ -3008,7 +3008,7 @@
     "Story": {Instagram:"Story", Facebook:"Story", TikTok:"Story"},
     "Carousel": {Instagram:"Carousel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo"},
     "Feed Post": {Instagram:"Single Image", Facebook:"Single Image", TikTok:"Multi-Photo"},
-    "Photo Set": {Instagram:"Reel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo", YouTube:"Slideshow Video"},
+    "Photo Set": {Instagram:"Reel", Facebook:"Slideshow Reel", TikTok:"Video Draft", YouTube:"Short"},
     "Longform Video": {YouTube:"Standard Video"},
   };
 
