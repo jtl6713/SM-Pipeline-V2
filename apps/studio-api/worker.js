@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.30-audio-platform-warning",
+          version: "0.10.31-p3-iml-pipe",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -6949,7 +6949,7 @@ async function item4EnsureMakeHardeningFromWorkspaceOpen(env, options = {}) {
   // a Worker deployment. This prevents an older in-memory result from suppressing
   // a newly deployed repair contract.
   const force = options?.force === true;
-  const buildKey = "0.10.6";
+  const buildKey = "0.10.31";
   const now = Date.now();
   if (!force && item4MakeHardeningOpenCache.promise) return item4MakeHardeningOpenCache.promise;
   if (!force && item4MakeHardeningOpenCache.result && item4MakeHardeningOpenCache.buildKey === buildKey && now - item4MakeHardeningOpenCache.at < 120000) {
@@ -6995,7 +6995,13 @@ async function item4EnsureR2StudioExactSourceGuard(env) {
   if (!prompt) throw new HttpError(409,"R2 module 12 canonical selection prompt could not be identified safely");
   const marker="STUDIO_EXACT_SOURCE_AUTHORITY_V1";
   const contextInterface=Array.isArray(context?.metadata?.interface)?context.metadata.interface:[];
-  const canonicalRecordIdExpr='{{1.id}}';
+  // Make Airtable Search Records can emit a wrapper bundle with empty 1.id.
+  // Keep a nonempty-id filter and ifempty fallback so module 2 never claims with a blank Record ID.
+  const canonicalRecordIdExpr='{{ifempty(1.id; ifempty(1.__IMTKEY__; 1.recordId))}}';
+  const claimHasRecordIdFilter={
+    name:"Has Airtable record ID",
+    conditions:[[{a:canonicalRecordIdExpr,o:"exist"}]]
+  };
   const claimSource=item4FlattenMakeModules(blueprint.flow).find(m=>m?.id===1);
   const claimSourceInterface=Array.isArray(claimSource?.metadata?.interface)?claimSource.metadata.interface:[];
   const eligibilityMarker='STUDIO_OR_LEGACY_R2_ELIGIBILITY_V1';
@@ -7027,7 +7033,9 @@ async function item4EnsureR2StudioExactSourceGuard(env) {
     )
   )
 )`;
-  const alreadyReady=prompt.value.includes(marker) && contextInterface.some(row=>row?.label==="Studio_Source_Authority_Status") && !claimGate.filter && claimGate?.mapper?.id===canonicalRecordIdExpr && claimSourceInterface.some(row=>row?.name==="id") && claimSource?.mapper?.formula===explicitEligibilityFormula && !claimSource?.mapper?.view && claimSource?.metadata?.notes?.includes(eligibilityMarker);
+  const claimIdReady=String(claimGate?.mapper?.id||"")===canonicalRecordIdExpr;
+  const claimFilterReady=JSON.stringify(claimGate?.filter||{}).includes("1.id") && JSON.stringify(claimGate?.filter||{}).includes("exist");
+  const alreadyReady=prompt.value.includes(marker) && contextInterface.some(row=>row?.label==="Studio_Source_Authority_Status") && claimIdReady && claimFilterReady && claimSourceInterface.some(row=>row?.name==="id") && claimSource?.mapper?.formula===explicitEligibilityFormula && !claimSource?.mapper?.view && claimSource?.metadata?.notes?.includes(eligibilityMarker);
   if (alreadyReady) return {ok:true,already_ready:true,live_name:blueprint.name};
 
   const patched=JSON.parse(JSON.stringify(blueprint));
@@ -7037,10 +7045,7 @@ async function item4EnsureR2StudioExactSourceGuard(env) {
   const pClaimGate=item4FlattenMakeModules(patched.flow).find(m=>m?.id===2 && m?.module==="airtable:ActionUpdateRecords");
   const pClaimSource=item4FlattenMakeModules(patched.flow).find(m=>m?.id===1);
   if (!pClaimGate || !pClaimSource) throw new HttpError(409,"R2 claim modules 1/2 disappeared during patch generation");
-  // Airtable Search Records emits no bundle when it finds no record, so the legacy post-search exists filter is redundant.
-  // Use the native Airtable Search Records bundle id as the update target. This is record metadata, not a table field,
-  // and avoids depending on formula/output-field projection behavior.
-  delete pClaimGate.filter;
+  pClaimGate.filter=claimHasRecordIdFilter;
   pClaimSource.mapper=pClaimSource.mapper||{};
   // The legacy Airtable view excludes Studio exact-source outputs because it requires
   // selected/render-package fields to be blank. R2 now owns an explicit, auditable
@@ -7056,16 +7061,6 @@ async function item4EnsureR2StudioExactSourceGuard(env) {
   }
   pClaimGate.mapper=pClaimGate.mapper||{};
   pClaimGate.mapper.id=canonicalRecordIdExpr;
-  // Normalize any earlier workaround tokens back to the native module-1 record id.
-  const replaceModule1RecordId=(node)=>{
-    if (Array.isArray(node)) { for (let i=0;i<node.length;i++) node[i]=replaceModule1RecordId(node[i]); return node; }
-    if (node && typeof node==='object') { for (const k of Object.keys(node)) node[k]=replaceModule1RecordId(node[k]); return node; }
-    if (typeof node==='string') return node
-      .split('{{ifempty(1.id; ifempty(1.__IMTKEY__; 1.recordId))}}').join(canonicalRecordIdExpr)
-      .split('{{1.fldORZPifsK33ofzB}}').join(canonicalRecordIdExpr);
-    return node;
-  };
-  replaceModule1RecordId(patched);
   pContext.metadata.interface=Array.isArray(pContext?.metadata?.interface)?pContext.metadata.interface:[];
   for (const row of item4SourceAuthorityInterfaceRows()) {
     if (!pContext.metadata.interface.some(x=>x?.label===row.label || x?.name===row.name)) pContext.metadata.interface.push(row);
@@ -7100,7 +7095,7 @@ async function item4EnsureR2StudioExactSourceGuard(env) {
       Command_ID:`STUDIO-R2-SOURCE-GUARD-${Date.now()}`,Action:"UPDATE_BLUEPRINT",Scenario_ID:ITEM4_R2_SCENARIO_ID,Scenario_Name:patched.name,
       Proposed_Blueprint_JSON_Original:JSON.stringify(patched),Write_Approved:true,Status:"Processing",Backup_Blueprint_Wrapper_2:JSON.stringify(blueprint),
       Requested_At:requestedAt,Started_At:requestedAt,Requested_By:"chicagoshining-studio-api",Correlation_ID:"ITEM4-R2-EXACT-SOURCE-GUARD",
-      Notes:"Worker 0.9.4 automatic R2 hardening with forced /item4 live inspection. Replaces the incompatible legacy R2 view dependency in module 1 with an explicit eligibility formula that accepts both legacy blank-selection outputs and Studio exact-source packages preloaded by P3, while preserving publication/render safety stops. Studio owner-uploaded visuals remain immutable; R2 retains canonical validation/music selection. Module 2 uses native bundle id (1.id). Zero-candidate fail-fast, scheduling and activation are preserved."
+      Notes:"Worker 0.10.31 R2 hardening. Module 1 keeps the explicit Studio + legacy eligibility formula. Module 2 claims only when a record id exists, using ifempty(1.id; 1.__IMTKEY__; 1.recordId) so empty search wrappers cannot invalidate the scenario. Zero-candidate fail-fast, scheduling and activation are preserved."
     }}],typecast:true})}); auditId=audit?.records?.[0]?.id||null;
   } catch {}
   try {
@@ -7114,10 +7109,10 @@ async function item4EnsureR2StudioExactSourceGuard(env) {
     const v2=item4FlattenMakeModules(live?.flow).find(m=>m?.id===2 && m?.module==="airtable:ActionUpdateRecords");
     const v1=item4FlattenMakeModules(live?.flow).find(m=>m?.id===1);
     const livePrompt=item4R2PromptSlot(v12);
-    if(!livePrompt?.value?.includes(marker) || !Array.isArray(v3?.metadata?.interface) || !v3.metadata.interface.some(x=>x?.label==="Studio_Source_Authority_Status") || !JSON.stringify(v14?.filter||{}).includes("BLOCK_FAILFAST") || !v2 || !!v2.filter || v2?.mapper?.id!==canonicalRecordIdExpr || !Array.isArray(v1?.metadata?.interface) || !v1.metadata.interface.some(x=>x?.name==="id") || v1?.mapper?.formula!==explicitEligibilityFormula || !!v1?.mapper?.view || !v1?.metadata?.notes?.includes(eligibilityMarker)) {
+    if(!livePrompt?.value?.includes(marker) || !Array.isArray(v3?.metadata?.interface) || !v3.metadata.interface.some(x=>x?.label==="Studio_Source_Authority_Status") || !JSON.stringify(v14?.filter||{}).includes("BLOCK_FAILFAST") || !v2 || !JSON.stringify(v2.filter||{}).includes("1.id") || v2?.mapper?.id!==canonicalRecordIdExpr || !Array.isArray(v1?.metadata?.interface) || !v1.metadata.interface.some(x=>x?.name==="id") || v1?.mapper?.formula!==explicitEligibilityFormula || !!v1?.mapper?.view || !v1?.metadata?.notes?.includes(eligibilityMarker)) {
       throw new HttpError(502,"R2 post-deploy verification did not match the explicit Studio + legacy eligibility contract");
     }
-    if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Succeeded",Completed_At:new Date().toISOString(),Result_JSON:JSON.stringify({ok:true,worker_build:"0.9.4",scenario_id:ITEM4_R2_SCENARIO_ID,live_name:live?.name||null})},typecast:true})});}catch{}}
+    if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Succeeded",Completed_At:new Date().toISOString(),Result_JSON:JSON.stringify({ok:true,worker_build:"0.10.31",scenario_id:ITEM4_R2_SCENARIO_ID,live_name:live?.name||null})},typecast:true})});}catch{}}
     return {ok:true,already_ready:false,live_name:live?.name||patched.name};
   } catch(error) {
     if(auditId){try{await airtableFetch(env,"Make Admin Queue",auditId,{method:"PATCH",body:JSON.stringify({fields:{Status:"Failed",Completed_At:new Date().toISOString(),Error_Message:error instanceof Error?error.message:String(error)},typecast:true})});}catch{}}
@@ -7264,10 +7259,11 @@ async function item4EnsureP3StudioSourceAuthority(env) {
 
 
 const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V2";
+// Make IML has no or() function. Use | inside if(), matching Make's own repair hint.
 const STUDIO_P3_NATIVE_PHOTO_STATUS_IF =
-  '{{if(or(102.Studio_Output_Type = "Multi-Photo"; 102.Studio_Output_Type = "Carousel"; 102.Studio_Output_Type = "Multi-Image Post"); "Ready for Review"; "In Production")}}';
+  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post"; "Ready for Review"; "In Production")}}';
 const STUDIO_P3_NATIVE_PHOTO_SELECTION_IF =
-  '{{if(or(102.Studio_Output_Type = "Multi-Photo"; 102.Studio_Output_Type = "Carousel"; 102.Studio_Output_Type = "Multi-Image Post"); ""; "Selected")}}';
+  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post"; ""; "Selected")}}';
 
 function item4P3SingleParentEnrichmentRecord() {
   return {
@@ -7284,7 +7280,12 @@ function item4P3SingleParentEnrichmentRecord() {
 
 function item4P3Module103HasRemotionHandoff(mod) {
   const rec = mod?.mapper?.record || {};
-  return String(rec.Output_Status || "").includes("In Production")
+  const status = String(rec.Output_Status || "");
+  const selection = String(rec.Asset_Selection_Status || "");
+  return status.includes("|")
+    && !/\bor\s*\(/.test(status)
+    && !/\bor\s*\(/.test(selection)
+    && status.includes("In Production")
     && Object.prototype.hasOwnProperty.call(rec, "Asset_Selection_Status")
     && String(rec.Output_Notes || "").includes(STUDIO_P3_REMOTION_HANDOFF_MARKER);
 }
@@ -10122,6 +10123,9 @@ const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
   { id: 5806668, key: "TTD" },
   { id: 5823581, key: "YT" },
 ]);
+const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([
+  { id: 5531703, key: "P3" },
+]);
 const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
 const PRODUCTION_CADENCE_THROTTLE_MS = 20000;
 let productionCadenceLastSyncAt = 0;
@@ -10167,6 +10171,7 @@ async function cadenceHasRenderWork(env) {
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const checks = await Promise.all([
     cadenceQueueHasWork(env, contentTable, { view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Planned",{Production_Request_Output}!=BLANK())' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK())' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post")))' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' }),
@@ -10191,6 +10196,7 @@ async function cadenceSetActive(env, scenarioId, active) {
   try {
     const state = await phase6ScenarioState(env, scenarioId);
     if (state?.scenario?.isinvalid === true) {
+      console.error("production cadence skipped invalid scenario", scenarioId);
       return { id: scenarioId, skipped: "invalid", ok: false };
     }
     if (Boolean(state.isActive) === Boolean(active)) {
@@ -10230,6 +10236,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
   const wantRender = startRender || renderWork || now < productionCadenceRenderHoldUntil;
   const wantPublish = startPublish || publishWork || now < productionCadencePublishHoldUntil;
   const actions = [
+    ...PRODUCTION_CADENCE_ALWAYS_ON.map((item) => cadenceSetActive(env, item.id, true)),
     ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender)),
     ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish)),
   ];
