@@ -6,7 +6,9 @@ const path = require("path");
 const crypto = require("crypto");
 const { URL } = require("url");
 
-const SERVICE_VERSION = "2026-08-20-thumbnail-fallback";
+const { spawnSync } = require("child_process");
+
+const SERVICE_VERSION = "2026-08-20-public-16x9-thumb";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -212,7 +214,7 @@ async function downloadToFile(url, file) {
 }
 
 function metadataFrom(payload) {
-  const privacy = String(payload.privacyStatus || "private").toLowerCase();
+  const privacy = String(payload.privacyStatus || "public").toLowerCase();
   if (!["private", "unlisted", "public"].includes(privacy)) {
     throw new Error("privacyStatus must be private, unlisted, or public");
   }
@@ -341,6 +343,38 @@ async function videoStatus(videoId) {
   return data;
 }
 
+function fitYoutubeGridJpeg(asset) {
+  const tmpIn = path.join(cfg.tempDir, `thumb-in-${crypto.randomUUID()}`);
+  const tmpOut = path.join(cfg.tempDir, `thumb-out-${crypto.randomUUID()}.jpg`);
+  try {
+    fs.mkdirSync(cfg.tempDir, { recursive: true });
+    fs.writeFileSync(tmpIn, asset.body);
+    const result = spawnSync(
+      "ffmpeg",
+      [
+        "-y",
+        "-i",
+        tmpIn,
+        "-vf",
+        "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720",
+        "-q:v",
+        "3",
+        tmpOut,
+      ],
+      { encoding: "utf8", windowsHide: true }
+    );
+    if (result.status !== 0 || !fs.existsSync(tmpOut)) return asset;
+    const body = fs.readFileSync(tmpOut);
+    if (!body.length || body.length > 2097152) return asset;
+    return { body, mime: "image/jpeg" };
+  } catch {
+    return asset;
+  } finally {
+    fsp.unlink(tmpIn).catch(() => {});
+    fsp.unlink(tmpOut).catch(() => {});
+  }
+}
+
 async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
   const token = await accessToken();
   const tryDownload = async (url) => {
@@ -367,6 +401,7 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
     }
   }
   if (!asset) throw lastError || new Error("Thumbnail download failed");
+  asset = fitYoutubeGridJpeg(asset);
   const url = `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`;
   const response = await fetch(url, {
     method: "POST",
@@ -380,6 +415,34 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
   const text = await response.text();
   if (!response.ok) throw new Error(`thumbnails.set failed ${response.status}: ${text}`);
   return JSON.parse(text);
+}
+
+async function updatePrivacy(videoId, privacyStatus) {
+  const privacy = String(privacyStatus || "public").toLowerCase();
+  if (!["private", "unlisted", "public"].includes(privacy)) {
+    throw new Error("privacyStatus must be private, unlisted, or public");
+  }
+  const current = await videoStatus(videoId);
+  const item = (current.items || [])[0];
+  if (!item) throw new Error("YouTube video not found");
+  const token = await accessToken();
+  const response = await fetch("https://www.googleapis.com/youtube/v3/videos?part=status", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      id: videoId,
+      status: {
+        ...(item.status || {}),
+        privacyStatus: privacy,
+      },
+    }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`videos.update failed ${response.status}: ${JSON.stringify(data)}`);
+  return data;
 }
 
 async function handler(req, res) {
@@ -438,6 +501,13 @@ async function handler(req, res) {
         return json(res, 400, { error: "videoId and sourceUrl are required" });
       }
       return json(res, 200, await setThumbnail(payload.videoId, payload.sourceUrl, payload.fallbackSourceUrl || payload.fallback_source_url || null));
+    }
+    if (req.method === "POST" && url.pathname === "/youtube/privacy") {
+      const payload = await readJson(req);
+      if (!payload.videoId || !payload.privacyStatus) {
+        return json(res, 400, { error: "videoId and privacyStatus are required" });
+      }
+      return json(res, 200, await updatePrivacy(payload.videoId, payload.privacyStatus));
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {

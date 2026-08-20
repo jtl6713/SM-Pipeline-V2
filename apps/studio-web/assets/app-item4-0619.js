@@ -4509,7 +4509,7 @@
     reloadCreativeEditor: "Discard unsaved edits and reload the latest saved values from Studio.",
     creativeRequestChanges: "Save the current music and voiceover levels and render a new preview. Approve stays locked until that preview is ready.",
     "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
-    creativeApprovePreview: "Approve this output for publishing. Instagram and Facebook auto-publish. TikTok is created as a draft. You can also approve from the review email.",
+    creativeApprovePreview: "Approve this output for publishing. Instagram, Facebook, and YouTube auto-publish publicly. TikTok is created as a draft. You can also approve from the review email.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
   };
@@ -5107,7 +5107,7 @@
       ? (creativeMixInProgress(data.handoff || creativeHandoffStatus, output)
         ? "<strong>Rendering a new mix.</strong> This page will show Processing, then Ready when the new preview is available. Approve stays locked until then."
         : (creativeCanApproveForPublishing(output)
-        ? "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram and Facebook will auto-publish. TikTok will be saved as a draft."
+        ? "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."
         : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving."))
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
@@ -5593,7 +5593,7 @@
   $("creativeApprovePreview")?.addEventListener("click", () => {
     if (creativeWatchOnly()) {
       if (!creativeCanApproveForPublishing()) return;
-      if (!window.confirm("Approve this output for publishing?\n\nInstagram and Facebook will auto-publish. TikTok will be saved as a draft/private.")) return;
+      if (!window.confirm("Approve this output for publishing?\n\nInstagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.")) return;
       reviewActiveCreative("approve_for_publishing");
       return;
     }

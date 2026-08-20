@@ -97,3 +97,5 @@ Local preview + prepare Pages deploy: 2026-08-20 — Show dropped photos immediate
 Audio platform warning Pages deploy: 2026-08-20 — Music/voiceover on still-photo platforms is a warning, not an Approve block. UI 0.6.65. Source commit d920409.
 
 Monotonic pipeline progress Pages deploy: 2026-08-20 - Pipeline progress bar keeps a high-water mark so Approve cannot drop the percent. UI 0.6.66.
+
+Public publish copy Pages deploy: 2026-08-20 - Approve copy says Instagram, Facebook, and YouTube publish publicly; TikTok remains a draft. UI 0.6.67.

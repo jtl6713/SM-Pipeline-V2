@@ -96,7 +96,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.33-fb-slideshow-handoff",
+          version: "0.10.34-public-cover-handoff",
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -935,6 +935,18 @@ function studioNativeSlidePublicFields(clip, platform) {
   return fields;
 }
 
+function studioPublicJpegCoverUrl(record) {
+  const candidates = [
+    f(record, "Clip_1_URL"),
+    f(record, "Selected_Clip_1_URL"),
+    ...selectedVisualClips(record).map((clip) => clip?.url || clip?.src || clip),
+    f(record, "Thumbnail_URL"),
+  ];
+  const urls = candidates.map((value) => studioClipPublicCdnUrl(value)).filter(Boolean);
+  const jpeg = urls.find((url) => /\.(jpe?g)(\?|$)/i.test(url));
+  return jpeg || urls[0] || "";
+}
+
 function studioPublishHandoffFields(record) {
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || "").trim();
@@ -943,7 +955,20 @@ function studioPublishHandoffFields(record) {
   const clipCount = selectedVisualClips(record).length || Number(f(record, "Selected_Clip_Count") || 0) || 0;
   const current = (name) => String(f(record, name) || "").trim();
   const cdnReady = studioNativeClipsArePublicCdn(record);
+  const cover = studioPublicJpegCoverUrl(record);
   const fields = {};
+  if (cover && (/drive\.google\.com/i.test(current("Thumbnail_URL")) || !current("Thumbnail_URL") || /\.png(\?|$)/i.test(current("Thumbnail_URL")))) {
+    fields.Thumbnail_URL = cover;
+  }
+  if (platform === "YouTube" && !current("YouTube_Privacy_Status")) {
+    fields.YouTube_Privacy_Status = "public";
+  }
+  if (platform === "Instagram" && (outputType === "Reel" || mapping === "Instagram Reel") && outputType !== "Carousel" && mapping !== "Instagram Carousel") {
+    if (preview.startsWith("https://media.chicagoshining.com/")) {
+      fields.Publish_Asset_URL = preview;
+      fields.Publish_Status = "Ready to Publish";
+    }
+  }
   if (platform === "Instagram" && (outputType === "Carousel" || mapping === "Instagram Carousel")) {
     if (cdnReady) fields.IG_Carousel_Status = "Assets Ready";
     else if (!current("IG_Carousel_Status")) fields.IG_Carousel_Status = "Ready for Asset Prep";
