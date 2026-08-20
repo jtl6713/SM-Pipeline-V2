@@ -100,8 +100,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.35-manual-ideas",
+          version: "0.10.36-manual-ideas-progress",
           studio_manual_idea_generation_v1: true,
+          studio_manual_idea_progress_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -13455,8 +13456,27 @@ async function studioIdeaExecuteBatch(env, profile, batchRecord) {
     originalBlueprint = await studioIdeaInstallExactProfileSelector(env, profile.id);
     await phase6SetScenarioActive(env, STUDIO_IDEA_I1_SCENARIO_ID, true);
     started = true;
-    // Proven interval-scenario behavior: /start launches one execution. Give the
-    // execution time to consume the exact profile bundle; do not race it with /run.
+
+    // Manual generation must explicitly request one execution. Some Make schedule
+    // types launch immediately on /start while others only become active. Calling
+    // /run makes the one-shot contract deterministic; if /start already launched
+    // the execution, Make returns a running/422 response and we simply keep the
+    // activation-triggered run.
+    let executionId = null;
+    try {
+      const run = await phase6RunScenario(env, STUDIO_IDEA_I1_SCENARIO_ID);
+      executionId = run?.executionId || null;
+    } catch (runError) {
+      const message = String(runError?.message || runError || "");
+      if (!/422|already.*running|currently.*running|active execution/i.test(message)) throw runError;
+    }
+    if (executionId) {
+      await studioIdeaUpdateBatch(env, batchRecord.id, { Make_Execution_ID: String(executionId) });
+    }
+
+    // Leave the exact selector and manual overrides in place long enough for the
+    // Make execution to consume Module 2, then restore the production blueprint
+    // and OFF state in finally.
     await new Promise((resolve) => setTimeout(resolve, 6500));
   } catch (error) {
     try {

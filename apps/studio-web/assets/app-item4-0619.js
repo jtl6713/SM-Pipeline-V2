@@ -64,7 +64,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.68-idea-generator";
+  const BUILD_ID = "item4-0.6.69-idea-progress";
   let pipelinePollTimer = null;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
@@ -398,8 +398,8 @@
         setIdeaGenerateMessage(batch.error || "Unable to generate ideas. Try again.", "error-text");
         return;
       }
-      setIdeaGenerateMessage(generated > 0 && requested > 0 ? `${generated} of ${requested} complete` : "Generating ideas…");
-      ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 3000);
+      setIdeaGenerateMessage(requested > 0 ? `${generated} of ${requested} complete` : "Generating ideas…");
+      ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 1000);
     } catch (error) {
       setIdeaGenerateMessage(error.message || "Could not check idea generation. Retrying…", "error-text");
       ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 5000);
@@ -433,8 +433,8 @@
       });
       activeIdeaGenerationBatchId = result.batch_record_id;
       if (!activeIdeaGenerationBatchId) throw new Error("Studio did not return an idea batch ID.");
-      setIdeaGenerateMessage("Generating ideas…");
-      ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 1800);
+      setIdeaGenerateMessage(`0 of ${count} complete`);
+      ideaGenerationPollTimer = setTimeout(pollIdeaGenerationBatch, 500);
     } catch (error) {
       ideaGenerationInFlight = false;
       if (button) { button.disabled = false; button.textContent = "Retry"; }
