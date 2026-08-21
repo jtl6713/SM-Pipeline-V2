@@ -134,4 +134,8 @@ Keep EZ modes Pages deploy: 2026-08-21 - Opening a request copies saved title/ca
 
 Pipeline sort Pages deploy: 2026-08-21 - Platform Pipeline column headings sort Output, Platform, Type/ratio, Studio state, Render, Review, Publish, and Progress. Live refresh keeps the current sort. UI 0.6.87-pipeline-sort.
 
+Audio Yes latch Pages deploy: 2026-08-21 - New content defaults Voiceover/Music to Yes. Autosave cannot write No over a saved Yes unless the operator changes it. UI 0.6.88-audio-yes-latch.
+
+Approve All Pages deploy: 2026-08-21 - Platform Pipeline adds Approve All for Ready-for-Review outputs. Confirm still warns that Instagram, Facebook, and YouTube publish publicly and TikTok stays a draft. UI 0.6.90-approve-all.
+
 

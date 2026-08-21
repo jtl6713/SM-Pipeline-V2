@@ -57,6 +57,7 @@
   let item4CropRequestId = null;
   let pipelineOutputs = [];
   let pipelineSort = { key: "", dir: "asc" };
+  const audioUserTouched = new Set();
   let activeCreativeOutputId = null;
   let activeCreativeOutput = null;
   let creativeSlides = [];
@@ -69,7 +70,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.87-pipeline-sort";
+  const BUILD_ID = "item4-0.6.90-approve-all";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -81,7 +82,7 @@
     const raw = record?.studio_progress_percent ?? record?.youtube_processing_progress_percent ?? record?.youtube_upload_progress_percent;
     const n = Number(raw);
     if (!Number.isFinite(n)) return raw;
-    if (record?.studio_state === "Failed") {
+    if (pipelineIsTerminalFailure(record)) {
       pipelineProgressHighWater.delete(record.id);
       return n;
     }
@@ -173,6 +174,31 @@
   function badge(value) {
     const safe = escapeHtml(value || "Unknown");
     return `<span class="badge ${stateClass(value)}">${safe}</span>`;
+  }
+
+  function pipelineIsRetryingRender(record) {
+    const state = String(record?.studio_state || "").trim();
+    const output = String(record?.output_status || "").trim();
+    const render = String(record?.render_status || "").trim();
+    if (/published|ready for review|approved|skipped/i.test(output)) return false;
+    if (state === "Trying Again") return true;
+    if (state !== "Failed" && state !== "Error") return false;
+    return /in production|rendering|ready for render|not ready|failed|error/i.test(`${output} ${render}`);
+  }
+
+  function pipelineIsTerminalFailure(record) {
+    return (record?.studio_state === "Failed" || record?.studio_state === "Error") && !pipelineIsRetryingRender(record);
+  }
+
+  function pipelineStudioStateLabel(record) {
+    if (pipelineIsRetryingRender(record)) return "Trying Again";
+    return String(record?.studio_state || "").trim();
+  }
+
+  function pipelineRenderLabel(record) {
+    const render = String(record?.render_status || "").trim();
+    if (pipelineIsRetryingRender(record) && /failed|error/i.test(render)) return "Trying Again";
+    return render;
   }
 
   function normalizeDisplayText(value) {
@@ -1259,8 +1285,18 @@
     };
   }
 
-  function isAudioYes(value) {
-    return String(value || "") === "Yes";
+  function resolvedAudioMode(kind) {
+    const ezId = kind === "voiceover" ? "ezAudioVoiceover" : "ezAudioMusic";
+    const prId = kind === "voiceover" ? "prVoiceover" : "prMusicMode";
+    const recKey = kind === "voiceover" ? "voiceover_mode" : "background_music_mode";
+    const ez = String($(ezId)?.value || "");
+    const pr = String($(prId)?.value || "");
+    const rec = String(activeProductionRequest?.[recKey] || "");
+    if (audioUserTouched.has(ezId) || audioUserTouched.has(prId)) {
+      return pr === "Yes" || ez === "Yes" ? "Yes" : "No";
+    }
+    if (ez === "Yes" || pr === "Yes" || rec === "Yes") return "Yes";
+    return rec || pr || ez || "No";
   }
 
   function alignAudioSelect(fromEl, toEl) {
@@ -1470,6 +1506,7 @@
 
   function hydrateEzConfigFromRequest(record = activeProductionRequest) {
     ezDirty.clear();
+    audioUserTouched.clear();
     if (!record) {
       syncEzStructureCounts();
       return;
@@ -1610,6 +1647,7 @@
         </select>
       </label>
       <textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Label this photo. This is not the post caption."${mode === "manual" ? "" : " hidden"}${locked ? " readonly" : ""}>${escapeHtml(value)}</textarea>
+      ${mode === "ai" ? "<em>AI writes a short on-photo label for this still when the video is built.</em>" : ""}
       ${locked ? "<em>Locked after promote</em>" : ""}
     </div>`;
   }
@@ -2076,8 +2114,8 @@
       const requestPayload = {
         content_type: planned.master_content_type,
         platforms: planned.platforms,
-        voiceover_mode: $("ezAudioVoiceover")?.value || "No",
-        background_music_mode: $("ezAudioMusic")?.value || "No",
+        voiceover_mode: $("ezAudioVoiceover")?.value || "Yes",
+        background_music_mode: $("ezAudioMusic")?.value || "Yes",
         thumbnail_mode: $("ezThumbnail")?.value || "Yes",
         video_duration_seconds: $("ezVideoDuration")?.value || 30,
         video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
@@ -2159,7 +2197,10 @@
       if ($("ezAudioVoice")?.value) clearPreviewPickMessage();
     });
     ["ezAudioVoiceover", "ezAudioMusic", "ezAudioTrack", "ezAudioVoice"].forEach((id) => {
-      $(id)?.addEventListener("change", () => {
+      $(id)?.addEventListener("change", (event) => {
+        if (event.isTrusted !== false && (id === "ezAudioVoiceover" || id === "ezAudioMusic")) {
+          audioUserTouched.add(id);
+        }
         stopStudioAudioPreview();
         syncRequestAudioUi({ fromEz: true, userChanged: true });
         if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
@@ -4133,10 +4174,12 @@
 
   function productionRequestPayload() {
     if (usingEzPlatforms() || ezEntryPath === "content") {
-      if ($("prVoiceover")?.value === "Yes" && $("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
-      if ($("prMusicMode")?.value === "Yes" && $("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
-      if ($("ezAudioVoiceover")?.value === "Yes" && $("prVoiceover")) $("prVoiceover").value = "Yes";
-      if ($("ezAudioMusic")?.value === "Yes" && $("prMusicMode")) $("prMusicMode").value = "Yes";
+      const voiceoverMode = resolvedAudioMode("voiceover");
+      const musicMode = resolvedAudioMode("music");
+      if ($("prVoiceover")) $("prVoiceover").value = voiceoverMode;
+      if ($("prMusicMode")) $("prMusicMode").value = musicMode;
+      if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = voiceoverMode === "Yes" ? "Yes" : "No";
+      if ($("ezAudioMusic")) $("ezAudioMusic").value = musicMode === "Yes" ? "Yes" : "No";
       syncRequestAudioUi({ fromEz: false });
       syncEzConfigFields();
     }
@@ -4145,8 +4188,8 @@
     const payload = {
       content_type: syncHiddenMasterContentType(),
       platforms: requestedPlatforms.length ? requestedPlatforms : planPlatforms,
-      voiceover_mode: $("prVoiceover").value,
-      background_music_mode: $("prMusicMode").value,
+      voiceover_mode: resolvedAudioMode("voiceover"),
+      background_music_mode: resolvedAudioMode("music"),
       thumbnail_mode: $("prThumbnail").value,
       video_duration_seconds: $("prVideoDuration").value,
       video_clip_count_mode: $("prVideoClipMode").value,
@@ -4290,7 +4333,10 @@
   });
 
   ["prVoiceover", "prVoice", "prMusicMode", "prMusicAsset"].forEach((id) => {
-    $(id)?.addEventListener("change", () => {
+    $(id)?.addEventListener("change", (event) => {
+      if (event.isTrusted !== false && (id === "prVoiceover" || id === "prMusicMode")) {
+        audioUserTouched.add(id);
+      }
       stopStudioAudioPreview();
       if ((id === "prMusicAsset" && $("prMusicAsset")?.value) || (id === "prVoice" && $("prVoice")?.value)) {
         clearPreviewPickMessage();
@@ -5147,6 +5193,7 @@
     creativeRequestChanges: "Save the current music and voiceover levels and render a new preview. Approve stays locked until that preview is ready.",
     "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
     creativeApprovePreview: "Approve this output for publishing. Instagram, Facebook, and YouTube auto-publish publicly. TikTok is created as a draft. You can also approve from the review email.",
+    pipelineApproveAll: "Approve every Ready for Review output on this page for publishing. Instagram, Facebook, and YouTube auto-publish publicly. TikTok is created as a draft.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
   };
@@ -5256,6 +5303,7 @@
     saveProductionRequest: "Save the current draft without promoting it into the pipeline.",
     syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",
     promoteProductionRequest: "Approve this request and send it into the production pipeline. Publishing stays a later step.",
+    pipelineApproveAll: "Approve every Ready for Review output on this page for publishing. Instagram, Facebook, and YouTube auto-publish publicly. TikTok is created as a draft.",
     prVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     prMusicPreview: "Play a preview of the selected music track.",
     savePrOverride: "Save overrides for this one platform output without changing the master defaults.",
@@ -6268,6 +6316,65 @@
     return status === "Ready for Review" || review === "Review Sent";
   }
 
+  function pipelineApprovableOutputs(records = pipelineOutputs) {
+    return (records || []).filter((record) => creativeCanApproveForPublishing(record));
+  }
+
+  function pipelineOutputLabel(record) {
+    const id = record.output_id || record.id;
+    const platform = record.platform || "Platform";
+    const type = record.platform_output_type || record.studio_output_type || record.format || "output";
+    return `${id} · ${platform} ${type}`.trim();
+  }
+
+  function updatePipelineApproveAllButton() {
+    const button = $("pipelineApproveAll");
+    if (!button) return;
+    const ready = pipelineApprovableOutputs();
+    const count = ready.length;
+    button.disabled = !count || button.dataset.busy === "true";
+    button.textContent = count ? `Approve All (${count})` : "Approve All";
+  }
+
+  async function approveAllPipelineOutputs() {
+    const button = $("pipelineApproveAll");
+    const ready = pipelineApprovableOutputs();
+    if (!ready.length) return;
+    const list = ready.map((record) => `• ${pipelineOutputLabel(record)}`).join("\n");
+    const confirmed = window.confirm(
+      `Approve ${ready.length} output${ready.length === 1 ? "" : "s"} for publishing?\n\nInstagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
+    );
+    if (!confirmed) return;
+    try {
+      if (button) {
+        button.dataset.busy = "true";
+        button.disabled = true;
+        button.textContent = "Approving…";
+      }
+      setPipelineLiveHint("Approving all ready outputs…");
+      const result = await api("/api/outputs/approve-all", {
+        method: "POST",
+        body: JSON.stringify({ notes: "Studio Pipeline Approve All" }),
+        timeoutMs: 120000,
+      });
+      await refreshPipelineOutputs({ silent: true });
+      const approved = Number(result.approved_count || 0);
+      const failed = Number(result.failed_count || 0);
+      if (failed) {
+        setPipelineLiveHint(result.message || `Approved ${approved}, ${failed} failed`);
+      } else {
+        setPipelineLiveHint(result.message || `Approved ${approved} output${approved === 1 ? "" : "s"}`);
+      }
+    } catch (e) {
+      setPipelineLiveHint(e.message || "Approve All failed");
+    } finally {
+      if (button) {
+        button.dataset.busy = "false";
+        updatePipelineApproveAllButton();
+      }
+    }
+  }
+
   async function reviewActiveCreative(action) {
     if (!activeCreativeOutputId) return;
     try {
@@ -6367,7 +6474,7 @@
       const canOpen = Boolean(r.creative_available);
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"}>${canOpen ? "Open review" : "Not ready yet"}</button></td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
-      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(r.studio_state)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
     }).join("")}</tbody></table>`;
     if (isPipeline) {
       target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
@@ -6485,6 +6592,7 @@
       const { records = [] } = await api("/api/outputs?limit=100");
       const unchanged = silent && target.querySelector("table") && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs);
       pipelineOutputs = records;
+      updatePipelineApproveAllButton();
       if (!unchanged) {
         const scrollTop = target.scrollTop;
         renderOutputsTable(target, records);
@@ -6561,6 +6669,9 @@
   $("creativeRequestChanges")?.addEventListener("click", () => {
     reviewActiveCreative(creativeWatchOnly() ? "apply_audio_mix" : "changes_requested");
   });
+  $("pipelineApproveAll")?.addEventListener("click", () => {
+    approveAllPipelineOutputs().catch((e) => setPipelineLiveHint(e.message || "Approve All failed"));
+  });
   $("creativeApprovePreview")?.addEventListener("click", () => {
     if (creativeWatchOnly()) {
       if (!creativeCanApproveForPublishing()) return;
@@ -6623,6 +6734,7 @@
 
   phase6DecorateTooltips(document);
   productionDecorateTooltips($("page-content"));
+  phase6BindTooltipTarget($("pipelineApproveAll"), PRODUCTION_BUTTON_HELP.pipelineApproveAll);
   window.addEventListener("scroll", phase6HideTooltip, true);
   window.addEventListener("resize", phase6HideTooltip);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") phase6HideTooltip(); });

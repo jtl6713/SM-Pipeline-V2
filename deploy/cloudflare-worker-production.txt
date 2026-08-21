@@ -24,3 +24,5 @@ Preflight targetCount Worker deploy: 2026-08-21 — Restore variant counts in the 
 
 Studio audio/caption handoff Worker deploy: 2026-08-21 — Promote keeps Voiceover and Music Yes even before the VO file exists, copies Include_Background_Music, and stamps on-photo labels onto Remotion clips. Worker 0.10.49-studio-audio-caption-handoff.
 
+Approve All Worker deploy: 2026-08-21 — POST /api/outputs/approve-all approves every Ready-for-Review output for publishing using the same handoff as a single Approve. Worker 0.10.51-approve-all.
+

@@ -38,6 +38,7 @@ export default {
       const isOutputPreviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
       const isOutputCreativeRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
       const isOutputCreativeReviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(url.pathname);
+      const isOutputApproveAllRoute = url.pathname === "/api/outputs/approve-all";
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
@@ -62,6 +63,7 @@ export default {
       const isProductionRequestOutputEditWrite = isProductionRequestOutputRecordRoute && request.method === "PATCH";
       const isOutputCreativeEditWrite = isOutputCreativeRoute && request.method === "PATCH";
       const isOutputCreativeReviewWrite = isOutputCreativeReviewRoute && request.method === "POST";
+      const isOutputApproveAllWrite = isOutputApproveAllRoute && request.method === "POST";
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
@@ -86,6 +88,7 @@ export default {
         isProductionRequestOutputEditWrite ||
         isOutputCreativeEditWrite ||
         isOutputCreativeReviewWrite ||
+        isOutputApproveAllWrite ||
         isOutputCreativeContinueWrite ||
         (isAdminMakeDeployRoute && request.method === "GET") ||
         (isAdminRepairControlRoute && request.method === "GET") ||
@@ -100,7 +103,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.49-studio-audio-caption-handoff",
+          version: "0.10.51-approve-all",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -513,6 +516,12 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "outputs_review");
         return continueOutputCreativeHandoff(request, env, url, authorization);
+      }
+
+      if (isOutputApproveAllRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "outputs_review");
+        return approveAllOutputsForPublishing(request, env, authorization, ctx);
       }
 
       if (isOutputCreativeReviewRoute) {
@@ -1176,7 +1185,22 @@ function normalizedOutputState(record) {
     "YouTube_Package_Status", "YouTube_Upload_Status", "YouTube_Processing_Status",
   ].some((name) => has(name, "failed") || has(name, "error") || has(name, "terminal error"));
 
-  if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) return "Failed";
+  if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
+    const output = text("Output_Status").toLowerCase();
+    const render = text("Render_Status").toLowerCase();
+    const publish = text("Publish_Status").toLowerCase();
+    const outputDead = output.includes("failed") || output.includes("terminal error") || output.includes("skipped");
+    const publishDead = publish.includes("failed") || publish.includes("error");
+    const stillRendering = output.includes("in production")
+      || output.includes("rendering")
+      || render.includes("rendering")
+      || render.includes("ready for render")
+      || render.includes("failed")
+      || render.includes("error")
+      || Boolean(text("Remotion_Error_Message") || text("Final_File_Error_Message"));
+    if (!outputDead && !publishDead && stillRendering) return "Trying Again";
+    return "Failed";
+  }
 
   // Terminal success must win over stale/manual helper flags left behind by
   // earlier workflow stages. This is especially important for Facebook, where
@@ -2337,10 +2361,16 @@ function item4ApplySlideCaptions(assets, captions) {
   return (Array.isArray(assets) ? assets : []).map((asset) => {
     const hit = byId.get(String(asset?.id || ""));
     if (!hit) return asset;
+    if (hit.mode === "none") {
+      return { ...asset, caption_mode: "none", caption: "" };
+    }
+    if (hit.mode === "manual") {
+      return { ...asset, caption_mode: "manual", caption: hit.text };
+    }
     return {
       ...asset,
-      caption_mode: hit.mode,
-      caption: hit.mode === "manual" ? hit.text : "",
+      caption_mode: "ai",
+      caption: hit.text || String(asset?.caption || "").trim(),
     };
   });
 }
@@ -2360,14 +2390,45 @@ function item4RequestedCaptionIsSlideDump(caption, assets) {
   return Boolean(text) && (text === manuals.join("\n\n") || text === manuals.join("\n"));
 }
 
-function item4ManualCaptionBySourceId(requestRecord) {
+function item4FillAiOverlayFallbacks(assets, requestRecord) {
+  const rows = Array.isArray(assets) ? assets.slice() : [];
+  const used = new Set(rows.map((asset) => String(asset?.caption || "").trim().toLowerCase()).filter(Boolean));
+  const title = String(f(requestRecord, "Requested_Title") || "").trim();
+  const pool = [
+    "Rainy downtown Chicago",
+    "Chicago Loop",
+    "Michigan Avenue in the rain",
+    "The Chicago Riverwalk",
+    title && title.length <= 80 ? title.replace(/[👇^\s]+$/g, "").trim() : "",
+  ].filter(Boolean);
+  let cursor = 0;
+  return rows.map((asset) => {
+    const mode = String(asset?.caption_mode || "ai").trim().toLowerCase();
+    if (mode !== "ai" || String(asset?.caption || "").trim()) return asset;
+    let text = "";
+    for (let i = 0; i < pool.length; i += 1) {
+      const candidate = pool[(cursor + i) % pool.length];
+      if (!used.has(candidate.toLowerCase())) {
+        text = candidate;
+        cursor = cursor + i + 1;
+        break;
+      }
+    }
+    if (!text) text = pool[0] || "Chicago";
+    used.add(text.toLowerCase());
+    return { ...asset, caption: text };
+  });
+}
+
+function item4OverlayCaptionBySourceId(requestRecord) {
   const assets = item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []);
   const map = new Map();
   for (const asset of Array.isArray(assets) ? assets : []) {
     const id = String(asset?.id || "").trim();
-    const mode = String(asset?.caption_mode || "").trim().toLowerCase();
+    const mode = String(asset?.caption_mode || "ai").trim().toLowerCase();
     const text = String(asset?.caption || "").trim();
-    if (id && mode === "manual" && text) map.set(id, text);
+    if (!id || mode === "none" || !text) continue;
+    map.set(id, text);
   }
   return map;
 }
@@ -3398,6 +3459,7 @@ const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Origina
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
 const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
+const ITEM4_P2_WEBHOOK_URL = "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt";
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
@@ -3537,13 +3599,20 @@ async function item4RequeueStaleProcessing(env, rows) {
       continue;
     }
     try {
+      const attempts = Number(f(row, "Attempt_Count") || 0);
+      const skipStalled = Number.isFinite(attempts) && attempts >= 6;
       const updated = await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
         method: "PATCH",
         body: JSON.stringify({
-          fields: {
-            Transfer_Status: "Pending",
-            Error_Message: "Requeued after a stalled Processing claim so SMV1 can pick the row up again.",
-          },
+          fields: skipStalled
+            ? {
+                Transfer_Status: "Error",
+                Error_Message: `Parked after ${attempts} stalled Processing claims so SMV1 can drain other crops. Click Prepare platform media to retry this one.`,
+              }
+            : {
+                Transfer_Status: "Pending",
+                Error_Message: "Requeued after a stalled Processing claim so SMV1 can pick the row up again.",
+              },
           typecast: true,
         }),
       });
@@ -3783,7 +3852,9 @@ async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
         try {
           if(testRunId){await item4SetSmv1SelectorFormula(env,item4Smv1ExactTestFormula(recordId,testRunId));exactTestSelectorInstalled=true;}
           await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, true);
-          await new Promise((resolve) => setTimeout(resolve, 2500));
+          // Crops often need 15–30s. A 2.5s pulse left SMV1 in Processing, then
+          // the same row was retried forever and blocked the rest of the queue.
+          await new Promise((resolve) => setTimeout(resolve, 20000));
         } finally {
           try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
           if(exactTestSelectorInstalled) await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);
@@ -5986,7 +6057,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   let startFrame = 0;
   const clips = [];
 
-  const captions = item4ManualCaptionBySourceId(requestRecord);
+  const captions = item4OverlayCaptionBySourceId(requestRecord);
   const tiktok916 = platform === "TikTok" && ratio === "9:16";
   for (const source of sourceRows) {
     const variant = source?.variants?.[ratio];
@@ -6374,6 +6445,13 @@ async function markParentContentItemAsStudioUmbrella(env, parentContentItem, out
 async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId) {
   const outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,work_items:[],single_parent_mode:true};
+  const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord);
+  if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
+    requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Studio_Master_Assets_JSON: JSON.stringify(filledAssets) }, typecast: false }),
+    });
+  }
   let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
   parent=await restoreParentContentItemFromStudioUmbrella(env,parent);
   const profileDefaults=await productionProfileDefaultsForParentContentItem(env,parent);
@@ -6440,10 +6518,14 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     } catch (error) {
       console.warn("P3 parent arm failed", error);
     }
+    const armed = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
+    const needVoiceover = String(f(armed || {}, "Include_Voiceover") || "").trim() === "Yes"
+      && !String(f(armed || {}, "Voiceover_URL") || "").trim();
     try {
-      await pulseStudioP3Handoff(env, contentItemId, requestRecord);
+      if (needVoiceover) await pulseStudioP2Handoff(env, contentItemId, requestRecord);
+      else await pulseStudioP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
-      console.warn("P3 promote pulse failed", error);
+      console.warn("Studio promote media pulse failed", error);
     }
   }
 
@@ -6464,24 +6546,55 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
   const coverUrl = String(f(parent, "Thumbnail_URL") || "").trim() || item4CoverStillUrl(requestRecord);
   const wantThumb = thumbnailMode !== "No";
   const wantVoiceover = voiceoverMode === "Yes";
+  const script = String(f(requestRecord, "Requested_Script") || f(parent, "Voiceover_Script") || f(parent, "Requested_Script") || caption || "").trim();
+  const waitingForVoiceover = wantVoiceover && !voiceoverUrl;
+  const fields = {
+    Caption: caption || null,
+    Include_Voiceover: wantVoiceover ? "Yes" : "No",
+    Include_Background_Music: musicMode === "Yes" ? "Yes" : "No",
+    Include_Thumbnail: wantThumb ? "Yes" : "No",
+    Thumbnail_URL: wantThumb ? (coverUrl || null) : null,
+  };
+  if (waitingForVoiceover) {
+    fields.Content_Status = "Ready for Voiceover";
+    fields.Voiceover_Status = "Ready";
+    fields.Voiceover_Script = script || null;
+    if (script) fields.Script_Status = "Generated";
+    // P2's commit branch only accepts Ready or Not Needed. Keep the Studio
+    // cover URL and skip thumbnail regeneration by marking Not Needed.
+    fields.Thumbnail_Status = wantThumb && coverUrl ? "Not Needed" : (wantThumb ? "Ready" : "Not Needed");
+  } else {
+    fields.Voiceover_Status = wantVoiceover
+      ? (String(f(parent, "Voiceover_Status") || "").trim() || "Generated")
+      : "Not Needed";
+    fields.Thumbnail_Status = wantThumb ? (coverUrl ? "Generated" : "Not Started") : "Not Needed";
+    fields.Content_Status = "Thumbnail Ready";
+  }
   return airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
     method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
+async function pulseStudioP2Handoff(env, contentItemId, requestRecord) {
+  const testRunId = String(f(requestRecord, "Test_Run_ID") || "").trim();
+  const response = await fetch(ITEM4_P2_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
     body: JSON.stringify({
-      fields: {
-        Caption: caption || null,
-        Include_Voiceover: wantVoiceover ? "Yes" : "No",
-        Include_Background_Music: musicMode === "Yes" ? "Yes" : "No",
-        Voiceover_Status: wantVoiceover
-          ? (voiceoverUrl ? (String(f(parent, "Voiceover_Status") || "").trim() || "Generated") : "Not Started")
-          : "Not Needed",
-        Include_Thumbnail: wantThumb ? "Yes" : "No",
-        Thumbnail_URL: wantThumb ? (coverUrl || null) : null,
-        Thumbnail_Status: wantThumb ? (coverUrl ? "Generated" : "Not Started") : "Not Needed",
-        Content_Status: "Thumbnail Ready",
-      },
-      typecast: true,
+      source: "studio-promote",
+      target: "P2",
+      content_record_id: contentItemId,
+      test_run_id: testRunId,
+      requested_at: new Date().toISOString(),
     }),
   });
+  const body = await response.text();
+  if (!response.ok) {
+    console.warn("P2 studio promote pulse failed", response.status, String(body || "").slice(0, 300));
+    return { ok: false, status: response.status };
+  }
+  return { ok: true, status: response.status };
 }
 
 async function pulseStudioP3Handoff(env, contentItemId, requestRecord) {
@@ -10993,10 +11106,83 @@ function studioOutputReadyForPublishApproval(record) {
   const publishStatus = String(f(record, "Publish_Status") || "").trim();
   if (["Approved"].includes(reviewStatus) || outputStatus === "Approved for Publishing") return false;
   if (["Published", "Publishing"].includes(publishStatus)) return false;
+  if (Boolean(f(record, "Do_Not_Publish"))) return false;
   if (outputStatus === "In Production" || ["Ready for Render", "Rendering"].includes(String(f(record, "Render_Status") || "").trim())) return false;
   const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
   if (!rendered && !studioOutputIsNativePhoto(record)) return false;
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
+}
+
+async function approveOutputRecordForPublishing(env, existing, note, stamp) {
+  const id = existing.id;
+  if (Boolean(f(existing, "Do_Not_Publish"))) {
+    throw new HttpError(409, "Do_Not_Publish outputs cannot be approved for live publishing");
+  }
+  if (!studioOutputReadyForPublishApproval(existing)) {
+    throw new HttpError(409, "This output is not ready for publishing approval");
+  }
+  const existingNotes = String(f(existing, "Review_Notes") || "").trim();
+  const fields = {
+    Review_Status: "Approved",
+    Output_Status: "Approved for Publishing",
+    Publish_Status: "Ready to Schedule",
+    Publish_Method: "Automated",
+    Auto_Publish_Enabled: true,
+    Review_Decision_At: stamp,
+    Do_Not_Publish: false,
+    Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+    ...studioPublishHandoffFields(existing),
+  };
+  const prepared = await studioEnsureNativePublishSlides(env, existing);
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: { ...fields, ...studioPublishHandoffFields(prepared) }, typecast: true }),
+  });
+}
+
+function mapApprovedOutputSummary(record) {
+  return {
+    id: record.id,
+    output_id: f(record, "Output_ID"),
+    platform: f(record, "Platform"),
+    format: f(record, "Format") || f(record, "Platform_Output_Type") || f(record, "Studio_Output_Type"),
+  };
+}
+
+async function approveAllOutputsForPublishing(request, env, authorization, ctx = null) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const note = phase6Text(payload?.notes, 10000);
+  const stamp = new Date().toISOString();
+  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100 });
+  const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
+  const approved = [];
+  const failed = [];
+  for (const record of eligible) {
+    try {
+      const updated = await approveOutputRecordForPublishing(env, record, note, stamp);
+      approved.push(mapApprovedOutputSummary(updated));
+    } catch (error) {
+      failed.push({
+        ...mapApprovedOutputSummary(record),
+        error: error?.message || "Approval failed",
+      });
+    }
+  }
+  if (approved.length) cadenceScheduleSync(ctx, env, { startPublish: true });
+  const skipped = records.length - eligible.length;
+  return respond(request, env, {
+    ok: true,
+    action: "approve_all_for_publishing",
+    approved_count: approved.length,
+    failed_count: failed.length,
+    skipped_count: skipped,
+    approved,
+    failed,
+    message: approved.length
+      ? `Approved ${approved.length} output${approved.length === 1 ? "" : "s"} for publishing. Instagram, Facebook, and YouTube will auto-publish; TikTok will be created as a draft.`
+      : "No outputs were ready to approve.",
+  });
 }
 
 async function reviewOutputCreative(request, env, url, authorization, ctx = null) {
@@ -11011,26 +11197,7 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
   const doNotPublish = Boolean(f(existing, "Do_Not_Publish"));
   const productionPublishApprove = action === "approve_for_publishing" || ((action === "approve" || action === "approved") && !doNotPublish);
   if (productionPublishApprove) {
-    if (doNotPublish) throw new HttpError(409, "Do_Not_Publish outputs cannot be approved for live publishing");
-    if (!studioOutputReadyForPublishApproval(existing)) {
-      throw new HttpError(409, "This output is not ready for publishing approval");
-    }
-    const fields = {
-      Review_Status: "Approved",
-      Output_Status: "Approved for Publishing",
-      Publish_Status: "Ready to Schedule",
-      Publish_Method: "Automated",
-      Auto_Publish_Enabled: true,
-      Review_Decision_At: stamp,
-      Do_Not_Publish: false,
-      Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
-      ...studioPublishHandoffFields(existing),
-    };
-    const prepared = await studioEnsureNativePublishSlides(env, existing);
-    const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: { ...fields, ...studioPublishHandoffFields(prepared) }, typecast: true }),
-    });
+    const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
     cadenceScheduleSync(ctx, env, { startPublish: true });
     return respond(request, env, {
       ok: true,

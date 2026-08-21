@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.87-pipeline-sort">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.90-approve-all">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.87</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.90</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -181,7 +181,7 @@
  <div class="ez-option-group-body">
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Voiceover</span>
- <select id="ezAudioVoiceover"><option value="No" selected>No</option><option value="Yes">Yes</option></select>
+ <select id="ezAudioVoiceover"><option value="Yes" selected>Yes</option><option value="No">No</option></select>
  </label>
  <div class="ez-audio-extra" id="ezAudioVoiceField" hidden>
  <div class="voice-select-wrap">
@@ -193,7 +193,7 @@
  <em class="ez-audio-hint" id="ezAudioVoiceHint">Kate is the default. Change it here.</em>
  </div>
  <label class="form-field"><span>Music</span>
- <select id="ezAudioMusic"><option value="No" selected>No</option><option value="Yes">Yes</option></select>
+ <select id="ezAudioMusic"><option value="Yes" selected>Yes</option><option value="No">No</option></select>
  </label>
  </div>
  <div class="ez-audio-toggles">
@@ -669,10 +669,10 @@
  <div class="form-message warning-text" id="prAudioPlatformWarning" hidden>Music and voiceover play on video outputs. They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.</div>
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Voiceover</span>
- <select id="prVoiceover"><option>No</option><option>Yes</option><option>Use Profile Default</option></select>
+ <select id="prVoiceover"><option>Yes</option><option>No</option><option>Use Profile Default</option></select>
  </label>
  <label class="form-field"><span>Background music</span>
- <select id="prMusicMode"><option>No</option><option>Yes</option><option>Use Profile Default</option></select>
+ <select id="prMusicMode"><option>Yes</option><option>No</option><option>Use Profile Default</option></select>
  </label>
  </div>
  <div class="ez-audio-toggles">
@@ -748,7 +748,7 @@
  </section>
 
  <section id="page-outputs" class="page">
- <div class="page-heading"><div><span class="eyebrow">Execution + creative review</span><h1>Platform pipeline</h1><p>Click an output row to watch the render, see the photo package, and read the caption. Studio state refreshes automatically while this page is open.</p></div><div class="heading-actions"><span class="subtle" id="pipelineLiveHint">Checking for updates…</span><button class="secondary-button" data-refresh="outputs">Refresh now</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow">Execution + creative review</span><h1>Platform pipeline</h1><p>Click an output row to watch the render, see the photo package, and read the caption. Studio state refreshes automatically while this page is open.</p></div><div class="heading-actions"><span class="subtle" id="pipelineLiveHint">Checking for updates…</span><button class="secondary-button" data-refresh="outputs">Refresh now</button><button type="button" class="primary-button" id="pipelineApproveAll" disabled>Approve All</button></div></div>
 
  <section class="panel creative-editor-shell" id="creativeEditorPanel" hidden>
  <div class="panel-heading creative-editor-heading">
@@ -1010,7 +1010,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.87-pipeline-sort"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.87-pipeline-sort"></script>
+ <script src="/assets/ez-plan.js?v=0.6.90-approve-all"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.90-approve-all"></script>
 </body>
 </html>
