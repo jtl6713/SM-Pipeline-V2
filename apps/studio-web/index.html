@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.77-story-review-facts">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.78-simple-video-review">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.77</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.78</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -758,10 +758,10 @@
 
  <nav class="creative-jump-nav" aria-label="Creative editor sections">
  <button type="button" data-creative-jump="creativePreviewSection" title="Jump to preview controls">Preview</button>
- <button type="button" data-creative-jump="creativeDefaultsSection" data-story-nav="story" title="Jump to defaults controls">Defaults</button>
+ <button type="button" data-creative-jump="creativeDefaultsSection" data-simple-nav="label" title="Jump to this video">Defaults</button>
  <button type="button" data-creative-jump="creativeAudioSection" title="Jump to audio controls">Audio</button>
- <button type="button" data-creative-jump="creativeRatioSection" data-story-nav="hide" title="Jump to ratios controls">Ratios</button>
- <button type="button" data-creative-jump="creativeSlidesSection" data-story-nav="hide" title="Jump to slides controls">Slides</button>
+ <button type="button" data-creative-jump="creativeRatioSection" data-simple-nav="hide" title="Jump to ratios controls">Ratios</button>
+ <button type="button" data-creative-jump="creativeSlidesSection" data-simple-nav="story-hide" title="Jump to slides controls">Slides</button>
  <button type="button" data-creative-jump="creativeReviewSection" title="Jump to review controls">Review</button>
  </nav>
 
@@ -788,14 +788,7 @@
 
  <section class="creative-global-card" id="creativeDefaultsSection">
  <div class="creative-section-heading"><div><h3 id="creativeDefaultsHeading">Global creative controls</h3><p id="creativeDefaultsCopy">Shared defaults. Individual slides can override these values.</p></div></div>
- <dl class="creative-story-facts" id="creativeStoryFacts" hidden>
- <div><dt>Length</dt><dd>15 seconds</dd></div>
- <div><dt>Source</dt><dd>First vertical photo</dd></div>
- <div><dt>Motion</dt><dd>Slight zoom</dd></div>
- <div><dt>Voiceover</dt><dd>Off</dd></div>
- <div><dt>Music</dt><dd>On · catalog track if none was picked</dd></div>
- <div><dt>Change mix</dt><dd>Use Audio below, then Apply mix &amp; rerender</dd></div>
- </dl>
+ <dl class="creative-story-facts" id="creativeStoryFacts" hidden></dl>
  <div class="creative-form-grid" id="creativeDefaultsGrid">
  <label class="form-field"><span>Style strategy</span><select id="creativeStyleStrategy"><option>AI vary naturally</option><option>Consistent campaign</option><option>Manual per slide</option></select></label>
  <label class="form-field"><span>Default slide duration</span><input type="number" id="creativeDefaultDuration" min="0.5" max="60" step="0.1" value="4"></label>
@@ -1005,7 +998,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.77-story-review-facts"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.77-story-review-facts"></script>
+ <script src="/assets/ez-plan.js?v=0.6.78-simple-video-review"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.78-simple-video-review"></script>
 </body>
 </html>

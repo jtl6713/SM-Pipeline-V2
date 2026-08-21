@@ -114,4 +114,6 @@ Story review facts Pages deploy: 2026-08-21 ? Story Open Review replaces unused 
 
 Story review facts Pages retry: 2026-08-21 ? syntax fix for Open Review Story chrome. UI 0.6.77.
 
+Simple video review Pages deploy: 2026-08-21 ? IG/FB Story, IG Reel, FB Reel, TikTok Video, and YouTube Short Open Review use the fact card instead of leftover Remotion defaults. UI 0.6.78-simple-video-review.
+
 

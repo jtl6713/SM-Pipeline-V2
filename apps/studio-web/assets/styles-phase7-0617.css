@@ -847,16 +847,17 @@ input, select, textarea, button {
 .creative-story-facts>div{display:grid;grid-template-columns:110px 1fr;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
 .creative-story-facts dt{margin:0;font-size:.72rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
 .creative-story-facts dd{margin:0;font-size:.88rem;font-weight:700;color:var(--ink)}
-.creative-editor-shell.story-teaser-mode .creative-form-grid{display:none}
-.creative-editor-shell.story-teaser-mode .creative-story-facts{display:grid}
-.creative-editor-shell.story-teaser-mode .creative-global-card{pointer-events:auto;opacity:1}
-.creative-editor-shell.story-teaser-mode .creative-ratio-card,
+.creative-editor-shell.simple-video-review .creative-form-grid{display:none}
+.creative-editor-shell.simple-video-review .creative-story-facts{display:grid}
+.creative-editor-shell.simple-video-review .creative-global-card{pointer-events:auto;opacity:1}
+.creative-editor-shell.simple-video-review .creative-ratio-card,
 .creative-editor-shell.story-teaser-mode .creative-slides-section{display:none}
-.creative-editor-shell.story-teaser-mode [data-story-nav="hide"]{display:none}
-.creative-editor-shell.story-teaser-mode .audio-control:has(#creativeVoiceoverVolumeRange),
-.creative-editor-shell.story-teaser-mode .audio-control:has(#creativeMusicDuckedRange),
-.creative-editor-shell.story-teaser-mode .toggle-control:has(#creativeDuckingEnabled),
-.creative-editor-shell.story-teaser-mode .form-field.compact:has(#creativeDuckFadeFrames){display:none}
+.creative-editor-shell.simple-video-review [data-simple-nav="hide"]{display:none}
+.creative-editor-shell.story-teaser-mode [data-simple-nav="story-hide"]{display:none}
+.creative-editor-shell.no-voiceover-review .audio-control:has(#creativeVoiceoverVolumeRange),
+.creative-editor-shell.no-voiceover-review .audio-control:has(#creativeMusicDuckedRange),
+.creative-editor-shell.no-voiceover-review .toggle-control:has(#creativeDuckingEnabled),
+.creative-editor-shell.no-voiceover-review .form-field.compact:has(#creativeDuckFadeFrames){display:none}
 
 .render-preview-busy{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:28px 22px;background:rgba(8,22,26,.82);color:#fff;text-align:center;pointer-events:auto}
 .render-preview-busy[hidden]{display:none!important}
