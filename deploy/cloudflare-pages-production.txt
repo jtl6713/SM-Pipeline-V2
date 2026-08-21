@@ -124,4 +124,6 @@ Slide vs post caption Pages deploy: 2026-08-21 ? On-photo crop labels no longer 
 
 Approve click Pages deploy: 2026-08-21 ? Approve & Promote stays clickable and no longer no-ops on a stale crop check. UI 0.6.82-approve-click.
 
+Approve lock Pages deploy: 2026-08-21 ? Approve & Promote disables immediately after confirm and stays locked through the production send. UI 0.6.83-approve-lock.
+
 
