@@ -110,4 +110,6 @@ Caption mode Pages deploy: 2026-08-21 ? Sync Manual/AI/None caption boxes across
 
 Calm production copy Pages deploy: 2026-08-21 ? Hide Worker/500 jargon on Production; keep Approve & Promote on success; Story note is green success copy. UI 0.6.76-calm-production-copy.
 
+Story review facts Pages deploy: 2026-08-21 ? Story Open Review replaces unused global Remotion defaults with a 15s/music fact card. UI 0.6.77-story-review-facts.
+
 

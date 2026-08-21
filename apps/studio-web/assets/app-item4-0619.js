@@ -65,7 +65,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.76-calm-production-copy";
+  const BUILD_ID = "item4-0.6.77-story-review-facts";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -4657,6 +4657,44 @@
     return false;
   }
 
+  function creativeIsStoryTeaser(output = activeCreativeOutput) {
+    return /story/i.test(String(output?.studio_output_type || output?.platform_output_type || output?.format || ""));
+  }
+
+  function syncCreativeStoryTeaserChrome(output = activeCreativeOutput) {
+    const story = creativeIsStoryTeaser(output);
+    const panel = $("creativeEditorPanel");
+    if (panel) panel.classList.toggle("story-teaser-mode", story);
+    document.querySelectorAll("[data-creative-jump][data-story-nav]").forEach((button) => {
+      if (button.dataset.storyNav === "story") button.textContent = story ? "Story" : "Defaults";
+    });
+    const facts = $("creativeStoryFacts");
+    const heading = $("creativeDefaultsHeading");
+    const copy = $("creativeDefaultsCopy");
+    if (facts) facts.hidden = !story;
+    if (heading) heading.textContent = story ? "This Story" : "Global creative controls";
+    if (copy) {
+      copy.textContent = story
+        ? "Fixed 15-second teaser. Music volume is the useful control."
+        : "Shared defaults. Individual slides can override these values.";
+    }
+    if (story && facts) {
+      const music = facts.querySelector("div:nth-child(5) dd");
+      if (music) {
+        const named = String(output?.music?.track_name || output?.music?.name || output?.selected_music_name || "").trim();
+        music.textContent = named ? `On · ${named}` : "On · catalog track if none was picked";
+      }
+    }
+    const audioHeading = document.querySelector("#creativeAudioSection .creative-section-heading h3");
+    const audioCopy = document.querySelector("#creativeAudioSection .creative-section-heading p");
+    if (audioHeading) audioHeading.textContent = story ? "Story music" : "Review-time audio mix";
+    if (audioCopy) {
+      audioCopy.textContent = story
+        ? "No voiceover on Stories. Change volume, then Apply mix & rerender to hear a new preview."
+        : "Voiceover, normal music, and music-under-narration are independent controls. Voiceover starts at the existing 100% render level.";
+    }
+    updateCreativeAudioSummary();
+
   function phase6NativeStillUrl(output = activeCreativeOutput) {
     const direct = String(output?.native_still_url || "").trim();
     if (direct) return direct;
@@ -4857,9 +4895,11 @@
     const normal = Math.max(0, Math.min(100, Number($("creativeMusicNormal")?.value || 0)));
     const ducked = Math.max(0, Math.min(100, Number($("creativeMusicDucked")?.value || 0)));
     const enabled = Boolean($("creativeDuckingEnabled")?.checked);
-    $("creativeAudioSummary").textContent = enabled
+    $("creativeAudioSummary").textContent = creativeIsStoryTeaser()
+      ? `Music ${phase6FormatPercent(normal)}% · no voiceover`
+      : (enabled
       ? `VO ${phase6FormatPercent(voice)}% · music ${phase6FormatPercent(normal)}% · ${phase6FormatPercent(ducked)}% under narration`
-      : `VO ${phase6FormatPercent(voice)}% · music ${phase6FormatPercent(normal)}% · ducking off`;
+      : `VO ${phase6FormatPercent(voice)}% · music ${phase6FormatPercent(normal)}% · ducking off`);
   }
 
   function syncCreativeAudioPair(sourceId, targetId) {
@@ -5720,7 +5760,9 @@
         : (creativeCanApproveForPublishing(output)
         ? (phase6IsNativeStillPreview(output)
           ? "<strong>Final publish approval.</strong> Review the still, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."
-          : "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.")
+          : (creativeIsStoryTeaser(output)
+            ? "<strong>Final publish approval.</strong> Play the 15-second Story, change music volume under Audio if you want, then Approve for publishing."
+            : "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."))
         : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving."))
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
@@ -5735,6 +5777,7 @@
     $("creativeEditorPanel").hidden = false;
     $("creativeEditorPanel").classList.toggle("title-edit-locked", titleLocked);
     $("creativeEditorPanel").classList.toggle("watch-only", !output.do_not_publish);
+    syncCreativeStoryTeaserChrome(output);
     $("creativeEditorPanel").scrollIntoView({ behavior: "smooth", block: "start" });
     setCreativeBusy(false);
     const watchOnly = !output.do_not_publish;
@@ -5744,9 +5787,11 @@
       $("creativeRequestChanges").disabled = watchOnly ? creativeMixInProgress(data.handoff || creativeHandoffStatus, output) : false;
     }
     if ($("creativeAudioHelp")) {
-      $("creativeAudioHelp").textContent = watchOnly
+      $("creativeAudioHelp").textContent = creativeIsStoryTeaser(output)
+        ? "Stories have no voiceover. Change music volume here, then Apply mix & rerender to hear it in a new preview."
+        : (watchOnly
         ? "Voiceover and music volume apply on the next render. Submit the mix on this page; Processing becomes Ready when the new preview is available."
-        : "100% voiceover is the current proven render level. A slide can optionally override it below. Changes apply to the next preview render; they do not alter the current video in-place.";
+        : "100% voiceover is the current proven render level. A slide can optionally override it below. Changes apply to the next preview render; they do not alter the current video in-place.");
     }
     $("creativeApprovePreview").textContent = watchOnly ? "Approve for publishing" : "Approve preview";
     $("creativeApprovePreview").disabled = watchOnly
@@ -6205,6 +6250,7 @@
     if (!phase6ConfirmDiscardUnsaved("close the editor")) return;
     creativeHandoffPollToken += 1;
     $("creativeEditorPanel").hidden = true;
+    $("creativeEditorPanel").classList.remove("story-teaser-mode");
     activeCreativeOutputId = null;
     activeCreativeOutput = null;
     creativeSlides = [];
