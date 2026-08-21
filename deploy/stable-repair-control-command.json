@@ -1,12 +1,7 @@
 {
-  "action": "rollback_replace_transaction",
-  "lease_id": "ITEM6_REPLACE_LEASE_20260817_0836",
-  "scenario_id": 5813561,
-  "test_run_id": "ITEM6_REPLACE_20260817T0836CT",
-  "platform_output_record_id": "recfiTvMN0nsw0MNF",
-  "replace_transaction_id": "ITEM6_TXN_20260817_0836",
-  "replace_fingerprint": "sha256:item6-fixture-v1",
-  "rollback_reason": "Item 6 isolated controller proof complete; restore synthetic last-good state",
+  "action": "inspect_make_scenario",
+  "confirm": "INSPECT-MAKE-MODULES-V1",
+  "scenario_id": 5893243,
   "expected_upstream_status": 200,
-  "note": "Item 6 rollback proof from Prepared state; no external publication exists"
+  "note": "Read-only recovery of MAKE-ADMIN-BRIDGE Direct Webhook Runner contract for exact CI82 P2 pulse; no activation, publishing, or production record mutation"
 }
