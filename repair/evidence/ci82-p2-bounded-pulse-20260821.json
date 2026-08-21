@@ -1,0 +1,57 @@
+{
+  "captured_at": "2026-08-21T11:15:22Z",
+  "test_run_id": "CI82-E2E-20260821",
+  "lease_id": "CI82_P2_BRIDGE_LEASE_20260821_1113",
+  "scenario_id": 5893243,
+  "command_record_id": "recuuUt1giHWYq2k4",
+  "no_public_publish": true,
+  "acquire": {
+    "bridge_http": "200",
+    "bridge_ok": true,
+    "upstream_status": 200,
+    "upstream_ok": true,
+    "action": "acquire",
+    "lease": {
+      "record_id": "recUmJNFWWh63RPk1",
+      "contract": {
+        "kind": "REPAIR_LEASE_V1",
+        "lease_id": "CI82_P2_BRIDGE_LEASE_20260821_1113",
+        "test_run_id": "CI82-E2E-20260821",
+        "scenario_id": 5893243,
+        "expires_at": "2026-08-21T11:25:17.000Z",
+        "max_runs": 1,
+        "max_operations": 6,
+        "allowed_platform_output_record_ids": [],
+        "allowed_content_item_record_ids": [
+          "receDxOQmMHqaIUqs"
+        ],
+        "deny_fixture_record_ids": [],
+        "allow_public_publish": false,
+        "explicit_publish_platform": null
+      },
+      "state": {
+        "kind": "REPAIR_LEASE_V1",
+        "state": "active",
+        "operations_used": 0,
+        "runs_used": 0,
+        "acquired_at": "2026-08-21T11:15:18.626Z"
+      },
+      "status": "Processing",
+      "scenario_id": 5893243,
+      "test_run_id": "CI82-E2E-20260821",
+      "lease_id": "CI82_P2_BRIDGE_LEASE_20260821_1113",
+      "expires_at": "2026-08-21T11:25:17.000Z",
+      "operations_used": 0,
+      "runs_used": 0
+    }
+  },
+  "pulse": {
+    "bridge_http": "200",
+    "bridge_ok": true,
+    "upstream_status": 200,
+    "upstream_ok": true,
+    "action": "pulse_admin_bridge",
+    "output": null,
+    "error": null
+  }
+}
