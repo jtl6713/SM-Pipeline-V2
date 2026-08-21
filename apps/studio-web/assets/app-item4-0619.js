@@ -33,6 +33,7 @@
   let ezCaptionSaveTimer = null;
   let ezPinnedExtraOutputs = [];
   let ezConfigSaveTimer = null;
+  const ezDirty = new Set();
   let ezIdeaIdentitySaveTimer = null;
   let item4Uploading = false;
   let item4PreparingVariants = false;
@@ -67,7 +68,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.84-audio-caption-handoff";
+  const BUILD_ID = "item4-0.6.85-keep-advanced-config";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -1387,34 +1388,61 @@
     return mode !== "AI decides" || Boolean(text);
   }
 
-  function syncEzConfigFields() {
-    copySelectValue("ezTitleMode", "prTitleMode");
-    if ($("prRequestedTitle")) $("prRequestedTitle").value = $("ezRequestedTitle")?.value || "";
-    if ($("ezTitle")) $("ezTitle").value = String($("ezRequestedTitle")?.value || "").trim().slice(0, 160);
-    if (ezCaptionIsCustomized()) {
-      copySelectValue("ezCaptionMode", "prCaptionMode");
-      if ($("prRequestedCaption")) $("prRequestedCaption").value = $("ezRequestedCaption")?.value || "";
-    } else if ($("ezRequestedCaption") && $("prRequestedCaption") && String($("prRequestedCaption").value || "").trim()) {
-      $("ezRequestedCaption").value = $("prRequestedCaption").value;
-      if ($("ezCaptionMode") && $("prCaptionMode")?.value) $("ezCaptionMode").value = $("prCaptionMode").value;
-    } else {
-      copySelectValue("ezCaptionMode", "prCaptionMode");
-      if ($("prRequestedCaption")) $("prRequestedCaption").value = $("ezRequestedCaption")?.value || "";
+  function ezFieldDirty(...ids) {
+    return ids.some((id) => ezDirty.has(id));
+  }
+
+  function syncTextPair(ezModeId, ezTextId, prModeId, prTextId, dirtyIds) {
+    if (ezFieldDirty(...dirtyIds)) {
+      copySelectValue(ezModeId, prModeId);
+      if ($(prTextId)) $(prTextId).value = $(ezTextId)?.value || "";
+      return;
     }
-    copySelectValue("ezScriptMode", "prScriptMode");
-    if ($("prRequestedScript")) $("prRequestedScript").value = $("ezRequestedScript")?.value || "";
-    copySelectValue("ezThumbnail", "prThumbnail");
-    if ($("prVoiceoverTail")) $("prVoiceoverTail").value = $("ezVoiceoverTail")?.value || "2";
-    if ($("prVideoDuration")) $("prVideoDuration").value = $("ezVideoDuration")?.value || "30";
-    copySelectValue("ezVideoClipMode", "prVideoClipMode");
-    if ($("prVideoClipExact")) $("prVideoClipExact").value = $("ezVideoClipExact")?.value || "";
-    if ($("prVideoClipMin")) $("prVideoClipMin").value = $("ezVideoClipMin")?.value || "";
-    if ($("prVideoClipMax")) $("prVideoClipMax").value = $("ezVideoClipMax")?.value || "";
-    copySelectValue("ezCarouselSlideMode", "prCarouselSlideMode");
-    if ($("prCarouselSlideExact")) $("prCarouselSlideExact").value = $("ezCarouselSlideExact")?.value || "";
-    if ($("prCarouselSlideMin")) $("prCarouselSlideMin").value = $("ezCarouselSlideMin")?.value || "";
-    if ($("prCarouselSlideMax")) $("prCarouselSlideMax").value = $("ezCarouselSlideMax")?.value || "";
-    copySelectValue("ezCarouselImageMode", "prCarouselImageMode");
+    copySelectValue(prModeId, ezModeId);
+    if ($(ezTextId)) $(ezTextId).value = $(prTextId)?.value || "";
+  }
+
+  function syncValuePair(ezId, prId, dirtyId) {
+    const ez = $(ezId);
+    const pr = $(prId);
+    if (!ez || !pr) return;
+    if (ezFieldDirty(dirtyId)) pr.value = ez.value;
+    else if (String(pr.value ?? "").trim() !== "") ez.value = pr.value;
+  }
+
+  function syncEzConfigFields() {
+    syncTextPair("ezTitleMode", "ezRequestedTitle", "prTitleMode", "prRequestedTitle", ["ezTitleMode", "ezRequestedTitle"]);
+    if ($("ezTitle")) $("ezTitle").value = String(($("ezRequestedTitle")?.value || $("prRequestedTitle")?.value || "")).trim().slice(0, 160);
+    syncTextPair("ezCaptionMode", "ezRequestedCaption", "prCaptionMode", "prRequestedCaption", ["ezCaptionMode", "ezRequestedCaption"]);
+    syncTextPair("ezScriptMode", "ezRequestedScript", "prScriptMode", "prRequestedScript", ["ezScriptMode", "ezRequestedScript"]);
+    if (ezFieldDirty("ezThumbnail")) copySelectValue("ezThumbnail", "prThumbnail");
+    else copySelectValue("prThumbnail", "ezThumbnail");
+    syncValuePair("ezVoiceoverTail", "prVoiceoverTail", "ezVoiceoverTail");
+    syncValuePair("ezVideoDuration", "prVideoDuration", "ezVideoDuration");
+    if (ezFieldDirty("ezVideoClipMode", "ezVideoClipExact", "ezVideoClipMin", "ezVideoClipMax")) {
+      copySelectValue("ezVideoClipMode", "prVideoClipMode");
+      if ($("prVideoClipExact")) $("prVideoClipExact").value = $("ezVideoClipExact")?.value || "";
+      if ($("prVideoClipMin")) $("prVideoClipMin").value = $("ezVideoClipMin")?.value || "";
+      if ($("prVideoClipMax")) $("prVideoClipMax").value = $("ezVideoClipMax")?.value || "";
+    } else {
+      copySelectValue("prVideoClipMode", "ezVideoClipMode");
+      if ($("ezVideoClipExact")) $("ezVideoClipExact").value = $("prVideoClipExact")?.value || "";
+      if ($("ezVideoClipMin")) $("ezVideoClipMin").value = $("prVideoClipMin")?.value || "";
+      if ($("ezVideoClipMax")) $("ezVideoClipMax").value = $("prVideoClipMax")?.value || "";
+    }
+    if (ezFieldDirty("ezCarouselSlideMode", "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax", "ezCarouselImageMode")) {
+      copySelectValue("ezCarouselSlideMode", "prCarouselSlideMode");
+      if ($("prCarouselSlideExact")) $("prCarouselSlideExact").value = $("ezCarouselSlideExact")?.value || "";
+      if ($("prCarouselSlideMin")) $("prCarouselSlideMin").value = $("ezCarouselSlideMin")?.value || "";
+      if ($("prCarouselSlideMax")) $("prCarouselSlideMax").value = $("ezCarouselSlideMax")?.value || "";
+      copySelectValue("ezCarouselImageMode", "prCarouselImageMode");
+    } else {
+      copySelectValue("prCarouselSlideMode", "ezCarouselSlideMode");
+      if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = $("prCarouselSlideExact")?.value || "";
+      if ($("ezCarouselSlideMin")) $("ezCarouselSlideMin").value = $("prCarouselSlideMin")?.value || "";
+      if ($("ezCarouselSlideMax")) $("ezCarouselSlideMax").value = $("prCarouselSlideMax")?.value || "";
+      copySelectValue("prCarouselImageMode", "ezCarouselImageMode");
+    }
     mergeEzProductionNotes();
     syncEzStructureCounts();
     if ($("prVideoClipMode") && $("prCarouselSlideMode")) syncAllStructureControls();
@@ -1450,6 +1478,7 @@
   }
 
   function hydrateEzConfigFromRequest(record = activeProductionRequest) {
+    ezDirty.clear();
     if (!record) {
       syncEzStructureCounts();
       return;
@@ -2165,8 +2194,10 @@
     ].forEach((id) => {
       const el = $(id);
       if (!el) return;
-      el.addEventListener("change", queueEzConfigSave);
-      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") el.addEventListener("input", queueEzConfigSave);
+      el.addEventListener("change", () => { ezDirty.add(id); queueEzConfigSave(); });
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+        el.addEventListener("input", () => { ezDirty.add(id); queueEzConfigSave(); });
+      }
     });
     document.querySelectorAll("[data-ez-output]").forEach((input) => {
       input.addEventListener("change", () => {

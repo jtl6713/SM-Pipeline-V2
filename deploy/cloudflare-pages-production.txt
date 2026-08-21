@@ -128,4 +128,6 @@ Approve lock Pages deploy: 2026-08-21 ? Approve & Promote disables immediately a
 
 Audio caption handoff Pages deploy: 2026-08-21 ? EZ keeps Voiceover/Music Yes, adds a Post caption control, and does not wipe Advanced audio on photo-caption autosave. UI 0.6.84-audio-caption-handoff.
 
+Keep Advanced config Pages deploy: 2026-08-21 ? Saving no longer copies empty EZ title/caption/voiceover-tail defaults over Pipeline Text direction. UI 0.6.85-keep-advanced-config.
+
 
