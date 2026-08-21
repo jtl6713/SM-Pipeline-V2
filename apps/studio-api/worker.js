@@ -100,12 +100,14 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.39-story-variant-relink",
+          version: "0.10.40-studio-p3-handoff",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
           studio_story_variant_relink_v1: true,
+          studio_p3_promote_pulse_v1: true,
+          studio_r3_seed_selected_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -3278,6 +3280,7 @@ const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 20000;
 const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
+const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
@@ -6020,6 +6023,12 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
   const route = effective.route || {};
   const clips = sourcePackage?.clips || [];
   const perClipFrames = sourcePackage?.clip_count ? Math.round(sourcePackage.total_frames / sourcePackage.clip_count) : 0;
+  const nativePhoto = studioOutputIsNativePhotoRoute(
+    effective.platform,
+    effective.output_type,
+    planItem.mapping_type || route.proven_mapping
+  );
+  const remotionReady = !nativePhoto && sourcePackage?.status === "Ready" && Boolean(sourcePackage?.selected_assets_json);
   const snapshot = {
     production_request_record_id: requestRecord.id,
     production_request_output_record_id: outputRow.id,
@@ -6047,7 +6056,8 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Format: String(planItem.format || route.content_type || "").trim(),
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
-    Output_Status: "Planned",
+    Output_Status: nativePhoto ? "Ready for Review" : "Planned",
+    Asset_Selection_Status: remotionReady ? "Selected" : null,
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
     Output_Caption: effective.requested_caption || null,
     Output_Hashtags: String(f(parentContentItem,"Hashtags") || "").trim() || null,
@@ -6198,9 +6208,66 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       requestRecord,
       contentItemId
     );
+
+    try {
+      await armStudioParentForP3Handoff(env, contentItemId, requestRecord);
+    } catch (error) {
+      console.warn("P3 parent arm failed", error);
+    }
+    try {
+      await pulseStudioP3Handoff(env, contentItemId, requestRecord);
+    } catch (error) {
+      console.warn("P3 promote pulse failed", error);
+    }
   }
 
   return { requestRecord, contentItemId, directiveBridge, outputFanout };
+}
+
+async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
+  const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId);
+  const requestedCaption = String(f(requestRecord, "Requested_Caption") || "").trim();
+  const caption = requestedCaption
+    || String(f(parent, "Caption") || "").trim()
+    || String(f(parent, "Hook") || "").trim()
+    || String(f(parent, "Content_Title") || "").trim();
+  const voiceoverMode = String(f(requestRecord, "Voiceover_Mode") || f(parent, "Include_Voiceover") || "No").trim();
+  const thumbnailMode = String(f(requestRecord, "Thumbnail_Mode") || f(parent, "Include_Thumbnail") || "No").trim();
+  const voiceoverUrl = String(f(parent, "Voiceover_URL") || "").trim();
+  const thumbnailUrl = String(f(parent, "Thumbnail_URL") || "").trim();
+  return airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Caption: caption || null,
+        Include_Voiceover: voiceoverMode === "Yes" && voiceoverUrl ? "Yes" : "No",
+        Include_Thumbnail: thumbnailMode === "Yes" && thumbnailUrl ? "Yes" : "No",
+        Content_Status: "Thumbnail Ready",
+      },
+      typecast: true,
+    }),
+  });
+}
+
+async function pulseStudioP3Handoff(env, contentItemId, requestRecord) {
+  const testRunId = String(f(requestRecord, "Test_Run_ID") || "").trim();
+  const response = await fetch(ITEM4_P3_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
+    body: JSON.stringify({
+      source: "studio-promote",
+      target: "P3",
+      content_record_id: contentItemId,
+      test_run_id: testRunId,
+      requested_at: new Date().toISOString(),
+    }),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    console.warn("P3 studio promote pulse failed", response.status, String(body || "").slice(0, 300));
+    return { ok: false, status: response.status };
+  }
+  return { ok: true, status: response.status };
 }
 
 async function promoteProductionRequestViaI3I4(request, env, url, authorization) {

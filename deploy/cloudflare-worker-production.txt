@@ -1,5 +1,7 @@
-make-execution-inspector-ci82-20260821=reviewed-pr-trigger-2026-08-21T11:23:00Z
+studio-p3-handoff-20260821=unattended-promote-pulse-2026-08-21T18:15:00Z
 
 Companion Stories Worker deploy: 2026-08-21 — Instagram and Facebook Story extras stay in the saved plan as silent 9:16 companions so Approve is not source-bridge blocked. P3 treats Story as Ready for Review. TikTok Story is dropped. Worker 0.10.38-companion-stories.
 
 Companion Story variant relink Worker deploy: 2026-08-21 — Existing 9:16 platform variants attach to Instagram and Facebook Story outputs on Save/Approve, so companion Stories do not require a second Prepare. Worker 0.10.39-story-variant-relink.
+
+Studio P3 handoff Worker deploy: 2026-08-21 — Approve & Promote stamps the parent Content Item for P3, pulses webhook 2567877, and seeds Remotion outputs as Selected so R3/R4 can run without agent isolation pulses. Worker 0.10.40-studio-p3-handoff.
