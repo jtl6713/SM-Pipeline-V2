@@ -100,11 +100,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.38-companion-stories",
+          version: "0.10.39-story-variant-relink",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
+          studio_story_variant_relink_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -2067,6 +2068,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
     }),
   });
   updatedParent = await item4ReconcilePlanWithEnabledOutputs(env, updatedParent, normalized);
+  updatedParent = await item4RelinkVariantQueueOutputs(env, updatedParent);
 
   const rows = await outputRowsForProductionRequest(env, productionRequestId);
   return respond(request, env, {
@@ -3162,7 +3164,8 @@ async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
       platform: String(f(row, "Platform") || "").trim(),
       output_type: String(f(row, "Output_Type") || "").trim(),
     }));
-  return item4ReconcilePlanWithEnabledOutputs(env, requestRecord, enabled);
+  const updated = await item4ReconcilePlanWithEnabledOutputs(env, requestRecord, enabled);
+  return item4RelinkVariantQueueOutputs(env, updated);
 }
 
 async function item4SyncPlanOutputs(env, requestRecord, items) {
@@ -3383,6 +3386,32 @@ function item4OutputIdsForRatio(outputRows, plan, ratio) {
       return wanted.has(key);
     })
     .map((row) => row.id);
+}
+
+function item4SameRecordIds(left, right) {
+  const a = [...new Set((Array.isArray(left) ? left : []).filter(Boolean))].sort();
+  const b = [...new Set((Array.isArray(right) ? right : []).filter(Boolean))].sort();
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+async function item4RelinkVariantQueueOutputs(env, record) {
+  const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  if (!plan?.items?.length) return record;
+  const outputRows = await outputRowsForProductionRequest(env, record.id);
+  const queueRows = await item4VariantQueueRows(env, record.id);
+  for (const row of queueRows) {
+    if (String(f(row, "Asset_Kind") || "").trim() !== "Platform Variant") continue;
+    const ratio = String(f(row, "Aspect_Ratio") || "").trim();
+    if (!ratio) continue;
+    const wanted = item4OutputIdsForRatio(outputRows, plan, ratio);
+    const current = arrayOrEmpty(f(row, "Target_Production_Request_Outputs"));
+    if (item4SameRecordIds(current, wanted)) continue;
+    await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Target_Production_Request_Outputs: wanted }, typecast: true }),
+    });
+  }
+  return record;
 }
 
 async function item4VariantQueueRows(env, recordId) {
@@ -4888,8 +4917,8 @@ async function productionRequestBridgePreflightRoute(request, env, url, authoriz
 
   // Reconcile/sanitize Studio-created Media Asset links before evaluating compatibility.
   await item4ReconcileMasterAuthority(env, recordId, requestRecord);
-  await item4ReconcileVariants(env, recordId);
   await item4ReconcileEnabledPlanOutputs(env, requestRecord);
+  await item4ReconcileVariants(env, recordId);
   const refreshedRequestRecord = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const preflight = await item4SourceToProductionBridgePreflight(env, refreshedRequestRecord);
 
