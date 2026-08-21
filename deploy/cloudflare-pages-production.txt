@@ -103,3 +103,6 @@ Manual AI idea generator Pages deploy: 2026-08-20 — Add minimal Ideas-page gen
 Pipeline countdown Pages deploy: 2026-08-21 — Show a repeating 8-to-1 live countdown, refresh pipeline data at zero, and restart continuously while the Pipeline page is open. UI 0.6.72-pipeline-countdown. Source commit 2817477abcdf806d2d2337ed0d9db99f8be5d961.
 
 Companion Stories Pages deploy: 2026-08-21 - Keep Instagram and Facebook Story as companion 9:16 outputs beside the main Reel/Slideshow; hide leftover Master creative defaults; music preview no longer sticks on the red pick-a-track line. TikTok Story is not a posting destination. UI 0.6.73.
+
+Story teaser Pages deploy: 2026-08-21 ? Photo-based Instagram and Facebook Stories render as a 15-second first-photo slow-zoom clip with music. Review waits for that MP4. UI 0.6.74-story-teaser-15s.
+

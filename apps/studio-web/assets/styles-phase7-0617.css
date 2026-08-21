@@ -878,3 +878,14 @@ input, select, textarea, button {
 @media(max-width:760px){.idea-generate-form{align-items:stretch}.idea-generate-fields{display:grid;grid-template-columns:1fr 1fr;width:100%}.idea-generate-actions{width:100%}.idea-generate-actions button{flex:1}}
 /* STUDIO_MANUAL_IDEA_GENERATOR_UI_V1_END */
 
+/* Companion Story / native still preview in the Review player */
+#creativeRenderPreviewStill{
+  display:block;
+  width:100%;
+  max-height:70vh;
+  object-fit:contain;
+  background:#0b1c1e;
+  border-radius:12px;
+}
+#creativeRenderPreviewStill[hidden]{display:none!important}
+

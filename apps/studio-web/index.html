@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.73-companion-stories">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.74-story-teaser-15s">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.73</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.74</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -768,10 +768,11 @@
  <div class="creative-editor-body">
  <div class="creative-top-grid">
  <section class="creative-preview-card" id="creativePreviewSection">
- <div class="creative-section-heading"><div><h3>Rendered preview</h3><p>Listen to the current mix, adjust below, then save for the next preview render.</p></div></div>
+ <div class="creative-section-heading"><div><h3 id="creativePreviewHeading">Rendered preview</h3><p id="creativePreviewCopy">Listen to the current mix, adjust below, then save for the next preview render.</p></div></div>
  <div class="creative-preview-freshness" id="creativePreviewFreshness">Current rendered preview</div>
  <div class="render-preview-frame" id="creativeRenderPreviewFrame">
  <video id="creativeRenderPreview" controls playsinline preload="metadata"></video>
+ <img id="creativeRenderPreviewStill" alt="Story still preview" hidden>
  <iframe id="creativeRenderPreviewDrive" class="render-preview-drive" title="Rendered Google Drive preview" allow="autoplay; fullscreen" allowfullscreen hidden></iframe>
  <div class="render-preview-empty" id="creativeRenderPreviewEmpty">No rendered preview is available yet.</div>
  <div class="render-preview-busy" id="creativeRenderBusy" hidden>
@@ -996,7 +997,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.73-companion-stories"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.73-companion-stories"></script>
+ <script src="/assets/ez-plan.js?v=0.6.74-story-teaser-15s"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.74-story-teaser-15s"></script>
 </body>
 </html>

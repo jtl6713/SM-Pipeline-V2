@@ -100,12 +100,14 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.40-studio-p3-handoff",
+          version: "0.10.41-story-teaser-15s",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
           studio_story_variant_relink_v1: true,
+          studio_story_still_preview_v1: true,
+          studio_story_teaser_15s_v1: true,
           studio_p3_promote_pulse_v1: true,
           studio_r3_seed_selected_v1: true,
           production_make_idle_cadence_v1: true,
@@ -902,8 +904,8 @@ function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
   const type = String(outputType || "").trim();
   const map = String(mapping || "").trim();
   if (p === "TikTok" && (type === "Multi-Photo" || map === "TikTok Slideshow")) return true;
-  if (p === "Instagram" && (type === "Carousel" || type === "Story")) return true;
-  if (p === "Facebook" && (type === "Multi-Image Post" || type === "Story")) return true;
+  if (p === "Instagram" && type === "Carousel") return true;
+  if (p === "Facebook" && type === "Multi-Image Post") return true;
   return false;
 }
 
@@ -958,6 +960,14 @@ function studioNativeSlidePublicFields(clip, platform) {
   return fields;
 }
 
+function studioUrlLooksLikeImage(url) {
+  return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(String(url || ""));
+}
+
+function studioUrlLooksLikeVideo(url) {
+  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(String(url || ""));
+}
+
 function studioPublicJpegCoverUrl(record) {
   const candidates = [
     f(record, "Clip_1_URL"),
@@ -968,6 +978,29 @@ function studioPublicJpegCoverUrl(record) {
   const urls = candidates.map((value) => studioClipPublicCdnUrl(value)).filter(Boolean);
   const jpeg = urls.find((url) => /\.(jpe?g)(\?|$)/i.test(url));
   return jpeg || urls[0] || "";
+}
+
+function studioNativeStillPreviewUrl(record) {
+  const stored = String(f(record, "Studio_Preview_URL") || "").trim();
+  if (stored && studioUrlLooksLikeImage(stored)) return stored;
+  return studioPublicJpegCoverUrl(record);
+}
+
+function studioPreviewKind(record) {
+  const stored = String(f(record, "Studio_Preview_URL") || "").trim();
+  const finalUrl = String(f(record, "Final_File_URL") || "").trim();
+  if (stored && studioUrlLooksLikeVideo(stored)) return "video";
+  if (finalUrl && studioUrlLooksLikeVideo(finalUrl)) return "video";
+  const still = studioNativeStillPreviewUrl(record);
+  const nativePhoto = studioOutputIsNativePhoto(record) || studioOutputIsNativePhotoRoute(
+    f(record, "Platform"),
+    f(record, "Studio_Output_Type"),
+    f(record, "Platform_Output_Type")
+  );
+  if (nativePhoto && (still || (stored && studioUrlLooksLikeImage(stored)))) return "still";
+  if (stored && studioUrlLooksLikeImage(stored)) return "still";
+  if (stored || finalUrl) return "video";
+  return still ? "still" : "none";
 }
 
 function studioPublishHandoffFields(record) {
@@ -1342,7 +1375,9 @@ function mapOutput(record) {
     auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
     do_not_publish: Boolean(f(record, "Do_Not_Publish")),
     final_file_url: f(record, "Final_File_URL"),
-    studio_preview_url: f(record, "Studio_Preview_URL"),
+    studio_preview_url: f(record, "Studio_Preview_URL") || studioNativeStillPreviewUrl(record) || null,
+    native_still_url: studioNativeStillPreviewUrl(record) || null,
+    preview_kind: studioPreviewKind(record),
     output_url: f(record, "Output_URL"),
     platform_post_url: f(record, "Platform_Post_URL"),
     published_at: f(record, "Published_At"),
@@ -2031,7 +2066,9 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
             Voiceover_Mode_Override: storyFields.Voiceover_Mode_Override || "Inherit",
             Background_Music_Mode_Override: storyFields.Background_Music_Mode_Override || "Inherit",
             Thumbnail_Mode_Override: "Inherit",
-            Video_Clip_Count_Mode_Override: "Inherit",
+            Video_Duration_Seconds_Override: storyFields.Video_Duration_Seconds_Override ?? null,
+            Video_Clip_Count_Mode_Override: storyFields.Video_Clip_Count_Mode_Override || "Inherit",
+            Video_Clip_Count_Exact_Override: storyFields.Video_Clip_Count_Exact_Override ?? null,
             Carousel_Slide_Count_Mode_Override: "Inherit",
             Carousel_Image_Mode_Override: "Inherit",
             Title_Mode_Override: "Inherit",
@@ -2192,7 +2229,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Carousel": { mapping_type: "Instagram Carousel", format: "Carousel", rationale: "Optional. Publishes a silent swipeable 4:5 Instagram carousel with no music or voiceover." },
       "Reel": { mapping_type: "Instagram Reel", format: "Vertical Short Video", rationale: "Default. Renders the photos as a 9:16 Instagram Reel with music and voiceover." },
       "Single Image": { mapping_type: "Instagram Feed Post", format: "Feed Post", rationale: "Use one hero photo as a feed post." },
-      "Story": { mapping_type: "Instagram Story", format: "Story", rationale: "Companion 9:16 Story from the same photos. After the main post is live, the Story can link through to that Reel or feed post." },
+      "Story": { mapping_type: "Instagram Story", format: "Story", rationale: "Companion 15-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or feed post." },
     }),
   }),
   Facebook: Object.freeze({
@@ -2202,7 +2239,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Default. Renders the same photos as a 9:16 Facebook Reel with music and voiceover." },
       "Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Creates a 9:16 Facebook Reel from shot video, not from a photo set." },
       "Single Image": { mapping_type: "Facebook Post", format: "Feed Post", rationale: "Use one hero photo as a Facebook post." },
-      "Story": { mapping_type: "Facebook Story", format: "Story", rationale: "Companion 9:16 Story from the same photos. After the main post is live, the Story can link through to that Reel or photo post." },
+      "Story": { mapping_type: "Facebook Story", format: "Story", rationale: "Companion 15-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or photo post." },
     }),
   }),
   TikTok: Object.freeze({
@@ -3023,11 +3060,16 @@ function item4IsUnsupportedCompanion(platform, outputType) {
   return String(platform || "").trim() === "TikTok" && item4IsCompanionOutputType(outputType);
 }
 
+const ITEM4_STORY_TEASER_SECONDS = 15;
+
 function item4CompanionStoryFields(outputType) {
   if (!item4IsCompanionOutputType(outputType)) return {};
   return {
     Voiceover_Mode_Override: "No",
-    Background_Music_Mode_Override: "No",
+    Background_Music_Mode_Override: "Yes",
+    Video_Duration_Seconds_Override: ITEM4_STORY_TEASER_SECONDS,
+    Video_Clip_Count_Mode_Override: "Exact",
+    Video_Clip_Count_Exact_Override: 1,
   };
 }
 
@@ -4889,7 +4931,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   if (compatibility.length) issues.push(...compatibility);
   warnings.push(...productionRequestAudioPlatformWarnings(requestRecord, routeRows));
   if (routeRows.some((row) => row.output_type === "Story" && (row.platform === "Instagram" || row.platform === "Facebook"))) {
-    warnings.push("Companion Stories reuse the 9:16 stills. After the matching Reel or photo post is live, the Story publishers can attach that post URL as the Story link.");
+    warnings.push("Companion Stories render a 15-second teaser from the first 9:16 photo, with a slight zoom and the selected music. After the matching Reel or photo post is live, the Story publishers can attach that post URL as the Story link.");
   }
 
   return {
@@ -5764,10 +5806,14 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   const ratio = String(planItem?.aspect_ratio || "").trim();
   if (!ratio || !manifest?.complete) return null;
 
-  const sourceRows = (Array.isArray(manifest?.assets) ? manifest.assets : [])
+  const sourceRowsAll = (Array.isArray(manifest?.assets) ? manifest.assets : [])
     .slice()
     .sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
-  const durationSeconds = Math.max(1, Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 30));
+  const storyTeaser = String(outputType || "").trim() === "Story";
+  const sourceRows = storyTeaser ? sourceRowsAll.slice(0, 1) : sourceRowsAll;
+  const durationSeconds = storyTeaser
+    ? ITEM4_STORY_TEASER_SECONDS
+    : Math.max(1, Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 30));
   const fps = 30;
   const totalFrames = Math.max(sourceRows.length, Math.round(durationSeconds * fps));
   const baseFrames = sourceRows.length ? Math.floor(totalFrames / sourceRows.length) : 0;
@@ -5792,7 +5838,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
       src: url,
       startFrame,
       durationFrames: frames,
-      motionStyle: "stillPhoto",
+      motionStyle: storyTeaser ? "slowZoom" : "stillPhoto",
       source: "studio_platform_variant",
       aspect_ratio: ratio,
       google_drive_file_id: String(variant?.google_drive_file_id || "").trim() || null,
@@ -5803,7 +5849,9 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
 
   const nativePhotoRoute = studioOutputIsNativePhotoRoute(platform, outputType, null);
   const compositionId = nativePhotoRoute ? null : "ChicagoShiningPhotoSequence";
-  const titleText = String(effective?.requested_title || f(parentContentItem, "Content_Title") || "").trim();
+  const titleText = storyTeaser
+    ? ""
+    : String(effective?.requested_title || f(parentContentItem, "Content_Title") || "").trim();
   const brandNameRaw = f(parentContentItem, "Brand_Name");
   const brandText = Array.isArray(brandNameRaw) ? String(brandNameRaw[0] || "ChicagoShining") : String(brandNameRaw || "ChicagoShining");
   const safeOutputType = outputType.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "output";
@@ -6057,6 +6105,9 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
     Output_Status: nativePhoto ? "Ready for Review" : "Planned",
+    Render_Status: nativePhoto ? "Native Photo Route" : null,
+    Studio_Preview_URL: nativePhoto ? (String(clips[0]?.url || "").trim() || null) : null,
+    Thumbnail_URL: nativePhoto ? (studioClipPublicCdnUrl(clips[0]) || String(clips[0]?.url || "").trim() || null) : null,
     Asset_Selection_Status: remotionReady ? "Selected" : null,
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
     Output_Caption: effective.requested_caption || null,
@@ -6064,7 +6115,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Output_Notes: [
       `Studio single-parent output seed. Production Request Output ${String(f(outputRow,"Production_Request_Output_ID")||outputRow.id)} is the per-platform execution authority.`,
       effective.output_type === "Story"
-        ? `Companion Story. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
+        ? `Companion 15-second Story teaser from the first photo, slight zoom, music, no voiceover. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
         : "",
     ].filter(Boolean).join(" "),
     Asset_Need_Status: "Not Needed",
@@ -7539,12 +7590,12 @@ async function item4EnsureP3StudioSourceAuthority(env) {
 
 
 
-const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V3";
+const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V4";
 // Make IML has no or() function. Use | inside if(), matching Make's own repair hint.
 const STUDIO_P3_NATIVE_PHOTO_STATUS_IF =
-  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post" | 102.Studio_Output_Type = "Story"; "Ready for Review"; "In Production")}}';
+  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post"; "Ready for Review"; "In Production")}}';
 const STUDIO_P3_NATIVE_PHOTO_SELECTION_IF =
-  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post" | 102.Studio_Output_Type = "Story"; ""; "Selected")}}';
+  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post"; ""; "Selected")}}';
 
 function item4P3SingleParentEnrichmentRecord() {
   return {
@@ -7555,7 +7606,7 @@ function item4P3SingleParentEnrichmentRecord() {
     Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
     Output_Status: STUDIO_P3_NATIVE_PHOTO_STATUS_IF,
     Asset_Selection_Status: STUDIO_P3_NATIVE_PHOTO_SELECTION_IF,
-    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post / Instagram and Facebook Story stay Ready for Review; Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render. Enrichment from Content Item {{101.Content_ID}}.`
+    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Instagram and Facebook Story plus other Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render the 15-second Story teaser. Enrichment from Content Item {{101.Content_ID}}.`
   };
 }
 
@@ -7567,6 +7618,7 @@ function item4P3Module103HasRemotionHandoff(mod) {
     && !/\bor\s*\(/.test(status)
     && !/\bor\s*\(/.test(selection)
     && status.includes("In Production")
+    && !status.includes('Studio_Output_Type = "Story"')
     && Object.prototype.hasOwnProperty.call(rec, "Asset_Selection_Status")
     && String(rec.Output_Notes || "").includes(STUDIO_P3_REMOTION_HANDOFF_MARKER);
 }
@@ -9022,7 +9074,9 @@ function mapPhase6CreativeOutput(record) {
     voiceover_tail_seconds: f(record, "Voiceover_Tail_Seconds"),
     review_notes: f(record, "Review_Notes"),
     review_decision_at: f(record, "Review_Decision_At"),
-    studio_preview_url: f(record, "Studio_Preview_URL"),
+    studio_preview_url: f(record, "Studio_Preview_URL") || studioNativeStillPreviewUrl(record) || null,
+    native_still_url: studioNativeStillPreviewUrl(record) || null,
+    preview_kind: studioPreviewKind(record),
     studio_preview_updated_at: f(record, "Studio_Preview_Updated_At"),
     remotion_job_id: f(record, "Remotion_Job_ID"),
     output_caption: f(record, "Output_Caption"),
@@ -10454,10 +10508,10 @@ async function cadenceHasRenderWork(env) {
     cadenceQueueHasWork(env, contentTable, { view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Planned",{Production_Request_Output}!=BLANK())' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK())' }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post")))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' }),
     cadenceQueueHasWork(env, outputTable, { view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",OR({Studio_Output_Type}="Carousel",{Studio_Output_Type}="Story"),{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",OR({Studio_Output_Type}="Multi-Image Post",{Studio_Output_Type}="Story"),{Composition_ID}="",{Selected_Assets_JSON}!="")))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))' }),
   ]);
   return checks.some(Boolean);
 }

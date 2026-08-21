@@ -64,7 +64,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.72-pipeline-countdown";
+  const BUILD_ID = "item4-0.6.74-story-teaser-15s";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -3360,7 +3360,7 @@
     if (dropped) {
       updateOutputMatrixSummary();
       if (announce) {
-        const text = "TikTok Story is not a posting destination. Instagram and Facebook Stories are companion 9:16 stills that can link to the main post after it is live.";
+        const text = "TikTok Story is not a posting destination. Instagram and Facebook Stories are 15-second 9:16 teasers from the first photo, with a slight zoom and music. After the main post is live, the Story can link through to it.";
         setEzMessage(text);
         setRequestMessage(text);
       }
@@ -4560,10 +4560,34 @@
     return !Number.isFinite(previewAt) || savedAt > previewAt;
   }
 
+  function phase6PreviewLooksLikeImage(url) {
+    return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(String(url || ""));
+  }
+
+  function phase6IsNativeStillPreview(output = activeCreativeOutput) {
+    if (!output) return false;
+    if (/story/i.test(String(output.studio_output_type || output.platform_output_type || output.format || ""))) return false;
+    if (String(output.preview_kind || "") === "still") return true;
+    if (creativeIsNativePhotoPackage(output)) return true;
+    return false;
+  }
+
+  function phase6NativeStillUrl(output = activeCreativeOutput) {
+    const direct = String(output?.native_still_url || "").trim();
+    if (direct) return direct;
+    const preview = String(output?.studio_preview_url || "").trim();
+    if (preview && phase6PreviewLooksLikeImage(preview)) return preview;
+    const slide = Array.isArray(creativeSlides) ? creativeSlides.find((item) => String(item?.preview_url || "").trim()) : null;
+    return String(slide?.preview_url || "").trim();
+  }
+
   function phase6UpdatePreviewFreshness() {
     const target = $("creativePreviewFreshness");
     if (!target) return;
-    let text = "Current rendered preview";
+    const stillPreview = phase6IsNativeStillPreview();
+    let text = stillPreview
+      ? (/story/i.test(String(activeCreativeOutput?.studio_output_type || activeCreativeOutput?.platform_output_type || "")) ? "Current Story still" : "Current photo still")
+      : "Current rendered preview";
     let state = "current";
     if (creativeEditorDirty) {
       text = "Preview does not include your unsaved edits";
@@ -4822,7 +4846,7 @@
   };
 
   const PHASE6_BUTTON_HELP = {
-    "Open review": "Open this output to watch the render, see the photo package, and read the caption.",
+    "Open review": "Open this output to watch the render or review the still, see the photo package, and read the caption.",
     "Open editor": "Open the Phase 6 creative review editor for this output.",
     "Not ready yet": "This output does not have a rendered file or photo package to review yet.",
   };
@@ -5035,7 +5059,7 @@
       const text = type === "Story" && platform === "TikTok"
         ? "TikTok’s posting API does not have a separate Stories destination. Leave this off; the Video Draft is the TikTok post."
         : type === "Story"
-          ? `Add a companion 9:16 ${platform} Story from the same photos. After the main ${platform} post is live, the Story can link through to it.`
+          ? `Add a companion 15-second 9:16 ${platform} Story from the first photo, with a slight zoom and music. After the main ${platform} post is live, the Story can link through to it.`
           : `Add ${platform} ${type} as an extra output beyond the recommended plan.`.replace(/\s+/g, " ").trim();
       phase6BindTooltipTarget(label, text);
     });
@@ -5492,8 +5516,11 @@
 
   function showCreativeRenderedPreview(output) {
     const video = $("creativeRenderPreview");
+    const still = $("creativeRenderPreviewStill");
     const drive = $("creativeRenderPreviewDrive");
     const empty = $("creativeRenderPreviewEmpty");
+    const heading = $("creativePreviewHeading");
+    const copy = $("creativePreviewCopy");
     if (!video || !drive || !empty) return;
 
     video.pause();
@@ -5501,16 +5528,49 @@
     video.onloadedmetadata = null;
     video.removeAttribute("src");
     drive.removeAttribute("src");
+    if (still) {
+      still.removeAttribute("src");
+      still.hidden = true;
+    }
     video.hidden = true;
     drive.hidden = true;
 
+    const storyOutput = /story/i.test(String(output?.studio_output_type || output?.platform_output_type || output?.format || ""));
+    if (heading && copy) {
+      if (phase6IsNativeStillPreview(output)) {
+        heading.textContent = "Photo preview";
+        copy.textContent = "This output posts as native stills. Review the photo package below. There is no Remotion video.";
+      } else {
+        heading.textContent = storyOutput ? "Story teaser" : "Rendered preview";
+        copy.textContent = storyOutput
+          ? "A 15-second 9:16 clip from the first photo, with a slight zoom and the selected music."
+          : "Listen to the current mix, adjust below, then save for the next preview render.";
+      }
+    }
+
+    const stillUrl = phase6NativeStillUrl(output);
+    if (!storyOutput && (phase6IsNativeStillPreview(output) || (stillUrl && phase6PreviewLooksLikeImage(output?.studio_preview_url || stillUrl) && !output?.final_file_url && !output?.final_file_id))) {
+      if (stillUrl && still) {
+        still.alt = storyOutput ? "Story still preview" : "Native photo preview";
+        still.src = stillUrl;
+        still.hidden = false;
+        empty.hidden = true;
+        return;
+      }
+      empty.textContent = "Native photo route — review the stills below. No Remotion MP4.";
+      empty.hidden = false;
+      return;
+    }
+
     const fileId = output.final_file_id || phase6DriveFileId(output.final_file_url) || phase6DriveFileId(output.output_url);
-    const directPreview = output.studio_preview_url || "";
+    const directPreview = phase6PreviewLooksLikeImage(output.studio_preview_url) ? "" : (output.studio_preview_url || "");
     if (!fileId && !output.final_file_url && !directPreview) {
       empty.textContent = String(output.render_status || "").toLowerCase().includes("native photo")
         ? "Native photo route — review the stills below. No Remotion MP4."
-        : (String(output.render_status || "").toLowerCase().includes("render")
-          ? "The video is still rendering. Open Review will unlock when the MP4 is ready."
+        : (String(output.render_status || "").toLowerCase().includes("render") || /story/i.test(String(output.studio_output_type || output.platform_output_type || ""))
+          ? (/story/i.test(String(output.studio_output_type || output.platform_output_type || ""))
+            ? "The 15-second Story teaser is still rendering. Open Review will show the zoom-and-music clip when the MP4 is ready."
+            : "The video is still rendering. Open Review will unlock when the MP4 is ready.")
           : "No rendered preview is available yet.");
       empty.hidden = false;
       return;
@@ -5573,7 +5633,9 @@
       ? (creativeMixInProgress(data.handoff || creativeHandoffStatus, output)
         ? "<strong>Rendering a new mix.</strong> This page will show Processing, then Ready when the new preview is available. Approve stays locked until then."
         : (creativeCanApproveForPublishing(output)
-        ? "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."
+        ? (phase6IsNativeStillPreview(output)
+          ? "<strong>Final publish approval.</strong> Review the still, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."
+          : "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.")
         : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving."))
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
@@ -5835,8 +5897,8 @@
     const render = String(output?.render_status || "").toLowerCase();
     if (render.includes("native photo")) return true;
     if (platform === "TikTok" && /multi-photo|slideshow/i.test(type)) return true;
-    if (platform === "Instagram" && /carousel/i.test(type)) return true;
-    if (platform === "Facebook" && /multi-image\s*post|photo\s*set/i.test(type)) return true;
+    if (platform === "Instagram" && /carousel/i.test(type) && !/story/i.test(type)) return true;
+    if (platform === "Facebook" && /multi-image\s*post|photo\s*set/i.test(type) && !/story/i.test(type)) return true;
     return false;
   }
 
