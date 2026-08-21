@@ -116,4 +116,6 @@ Story review facts Pages retry: 2026-08-21 ? syntax fix for Open Review Story ch
 
 Simple video review Pages deploy: 2026-08-21 ? IG/FB Story, IG Reel, FB Reel, TikTok Video, and YouTube Short Open Review use the fact card instead of leftover Remotion defaults. UI 0.6.78-simple-video-review.
 
+Pipeline review facts Pages deploy: 2026-08-21 ? Every Pipeline Open Review uses the fact card; leftover Remotion defaults stay hidden. UI 0.6.79-pipeline-review-facts.
+
 

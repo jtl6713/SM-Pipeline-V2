@@ -65,7 +65,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.78-simple-video-review";
+  const BUILD_ID = "item4-0.6.79-pipeline-review-facts";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -4666,7 +4666,8 @@
   }
 
   function creativeSimpleVideoKind(output = activeCreativeOutput) {
-    if (!output || phase6IsNativeStillPreview(output)) return null;
+    if (!output) return null;
+    if (phase6IsNativeStillPreview(output) || creativeIsNativePhotoPackage(output)) return "still";
     const type = creativeOutputTypeLabel(output);
     const platform = String(output?.platform || "").trim();
     if (/story/i.test(type)) return "story";
@@ -4674,7 +4675,7 @@
     if (/video\s*draft/i.test(type) || (platform === "TikTok" && /video/i.test(type))) return "tiktok";
     if (/^short$/i.test(type) || (platform === "YouTube" && /short/i.test(type))) return "short";
     if (/^reel$/i.test(type) || (platform === "Instagram" && /reel/i.test(type))) return "reel";
-    return null;
+    return "video";
   }
 
   function creativeVoiceoverOn(output = activeCreativeOutput) {
@@ -4745,19 +4746,35 @@
         ["Music", creativeMusicLabel(output, kind)],
         ["Change mix", "Use Audio below, then Apply mix & rerender"],
       ],
+      still: [
+        ["Post type", creativeOutputTypeLabel(output) || "Photo post"],
+        ["Photos", photos ? `${photos}` : "Photo package"],
+        ["Ratio", output?.aspect_ratio || "—"],
+        ["Render", "Native photos · no video mix"],
+      ],
+      video: [
+        ["Length", duration],
+        ["Photos", photos ? `${photos} in sequence` : "Uploaded set"],
+        ["Ratio", output?.aspect_ratio || "—"],
+        ["Voiceover", creativeVoiceoverOn(output) ? "On" : "Off"],
+        ["Music", creativeMusicLabel(output, kind)],
+        ["Change mix", "Use Audio below, then Apply mix & rerender"],
+      ],
     };
-    return labels[kind] || labels.reel;
+    return labels[kind] || labels.video;
   }
 
   function syncCreativeStoryTeaserChrome(output = activeCreativeOutput) {
     const kind = creativeSimpleVideoKind(output);
     const story = kind === "story";
+    const still = kind === "still";
     const voiceOn = creativeVoiceoverOn(output);
     const panel = $("creativeEditorPanel");
     if (panel) {
       panel.classList.toggle("simple-video-review", Boolean(kind));
       panel.classList.toggle("story-teaser-mode", story);
-      panel.classList.toggle("no-voiceover-review", Boolean(kind) && !voiceOn);
+      panel.classList.toggle("native-still-review", still);
+      panel.classList.toggle("no-voiceover-review", Boolean(kind) && !still && !voiceOn);
     }
     const navLabel = {
       story: "Story",
@@ -4765,7 +4782,9 @@
       slideshow: "Reel",
       tiktok: "Video",
       short: "Short",
-    }[kind] || "Defaults";
+      still: "Post",
+      video: "Video",
+    }[kind] || "Video";
     document.querySelectorAll("[data-creative-jump][data-simple-nav='label']").forEach((button) => {
       button.textContent = navLabel;
     });
@@ -4789,19 +4808,21 @@
       slideshow: ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
       tiktok: ["This TikTok video", "Photo sequence saved as a TikTok draft. Music volume is the useful control."],
       short: ["This YouTube Short", "Photo sequence with your audio settings. Music volume is the useful control."],
+      still: ["This photo post", "These photos publish as stills. There is no video mix to edit."],
+      video: [`This ${String(output?.platform || "video").trim()} ${creativeOutputTypeLabel(output) || "output"}`.replace(/\s+/g, " ").trim(), "Play the render. Music volume is the useful control."],
     };
-    if (heading) heading.textContent = kind ? titles[kind][0] : "Global creative controls";
+    if (heading) heading.textContent = kind ? titles[kind][0] : "This output";
     if (copy) {
       copy.textContent = kind
         ? titles[kind][1]
-        : "Shared defaults. Individual slides can override these values.";
+        : "Play the render. Music volume is the useful control.";
     }
     const audioHeading = document.querySelector("#creativeAudioSection .creative-section-heading h3");
     const audioCopy = document.querySelector("#creativeAudioSection .creative-section-heading p");
-    if (audioHeading) audioHeading.textContent = !kind ? "Review-time audio mix" : (voiceOn ? "Audio mix" : "Music");
+    if (audioHeading) audioHeading.textContent = still ? "Audio" : (voiceOn ? "Audio mix" : "Music");
     if (audioCopy) {
-      audioCopy.textContent = !kind
-        ? "Voiceover, normal music, and music-under-narration are independent controls. Voiceover starts at the existing 100% render level."
+      audioCopy.textContent = still
+        ? "Photo posts do not use a video mix."
         : (voiceOn
           ? "Change volumes, then Apply mix & rerender to hear a new preview."
           : "No voiceover on this output. Change music volume, then Apply mix & rerender.");
@@ -5795,9 +5816,12 @@
       } else if (videoKind === "short") {
         heading.textContent = "YouTube Short";
         copy.textContent = "Play the rendered Short, then change music under Audio if you want a new mix.";
+      } else if (videoKind === "video") {
+        heading.textContent = `${output?.platform || "Platform"} preview`;
+        copy.textContent = "Play the render, then change music under Audio if you want a new mix.";
       } else {
         heading.textContent = "Rendered preview";
-        copy.textContent = "Listen to the current mix, adjust below, then save for the next preview render.";
+        copy.textContent = "Play the render, then change music under Audio if you want a new mix.";
       }
     }
 
@@ -6379,7 +6403,7 @@
     if (!phase6ConfirmDiscardUnsaved("close the editor")) return;
     creativeHandoffPollToken += 1;
     $("creativeEditorPanel").hidden = true;
-    $("creativeEditorPanel").classList.remove("story-teaser-mode", "simple-video-review", "no-voiceover-review");
+    $("creativeEditorPanel").classList.remove("story-teaser-mode", "simple-video-review", "no-voiceover-review", "native-still-review");
     activeCreativeOutputId = null;
     activeCreativeOutput = null;
     creativeSlides = [];
