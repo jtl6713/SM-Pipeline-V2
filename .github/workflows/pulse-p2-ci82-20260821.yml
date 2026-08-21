@@ -7,7 +7,7 @@ on:
       - 'deploy/pulse-p2-ci82-20260821.txt'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: pulse-p2-ci82-20260821
@@ -18,15 +18,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v6
       - name: POST exact CI82 payload to preserved P2 webhook
         shell: bash
         run: |
           set -euo pipefail
           body='{"content_record_id":"receDxOQmMHqaIUqs","test_run_id":"","source":"CI82 manual E2E pulse 20260821"}'
-          response="$(curl --fail-with-body --silent --show-error --max-time 120 \
+          http_code="$(curl --silent --show-error --max-time 120 \
+            -o /tmp/p2-response.txt -w '%{http_code}' \
             -X POST 'https://hook.us2.make.com/6c8csqts18iom2mzjamw7gp6l9e7f91i' \
             -H 'Content-Type: application/json' \
             --data "$body")"
-          echo "P2 webhook accepted exact CI82 payload."
-          printf '%s\n' "$response" | head -c 2000
-          echo
+          mkdir -p repair/evidence
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "content_record_id=receDxOQmMHqaIUqs"
+            echo "p2_webhook_id=2567880"
+            echo "http_code=$http_code"
+            echo "response_begin"
+            head -c 4000 /tmp/p2-response.txt || true
+            echo
+            echo "response_end"
+          } > repair/evidence/p2-ci82-pulse-20260821.txt
+          test "$http_code" -ge 200
+          test "$http_code" -lt 300
+      - name: Commit pulse evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add repair/evidence/p2-ci82-pulse-20260821.txt
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'Record exact P2 CI82 pulse evidence'
+          git push origin HEAD:main
