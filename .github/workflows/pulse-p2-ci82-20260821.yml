@@ -1,0 +1,32 @@
+name: Pulse P2 for CI82 20260821
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/pulse-p2-ci82-20260821.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pulse-p2-ci82-20260821
+  cancel-in-progress: false
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST exact CI82 payload to preserved P2 webhook
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"content_record_id":"receDxOQmMHqaIUqs","test_run_id":"","source":"CI82 manual E2E pulse 20260821"}'
+          response="$(curl --fail-with-body --silent --show-error --max-time 120 \
+            -X POST 'https://hook.us2.make.com/6c8csqts18iom2mzjamw7gp6l9e7f91i' \
+            -H 'Content-Type: application/json' \
+            --data "$body")"
+          echo "P2 webhook accepted exact CI82 payload."
+          printf '%s\n' "$response" | head -c 2000
+          echo
