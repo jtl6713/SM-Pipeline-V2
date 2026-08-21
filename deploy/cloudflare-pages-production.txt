@@ -120,4 +120,6 @@ Pipeline review facts Pages deploy: 2026-08-21 ? Every Pipeline Open Review uses
 
 Cover thumbs Pages deploy: 2026-08-21 ? New content defaults Thumbnail/cover to Yes so the next music run prepares platform grid covers. UI 0.6.80-cover-thumbs.
 
+Slide vs post caption Pages deploy: 2026-08-21 ? On-photo crop labels no longer overwrite the Pipeline post caption. UI 0.6.81-slide-post-caption-split.
+
 

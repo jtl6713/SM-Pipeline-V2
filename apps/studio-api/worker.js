@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.44-studio-cover-thumbs",
+          version: "0.10.45-slide-post-caption-split",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -121,6 +121,7 @@ export default {
           studio_item4_subrequest_cap_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
           studio_photo_cover_thumbs_v1: true,
+          studio_slide_post_caption_split_v1: true,
           studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
@@ -2313,6 +2314,47 @@ function item4AssetManifest(record) {
   return Array.isArray(parsed)
     ? parsed.filter((x) => x && x.id && (x.google_drive_file_id || x.r2_key || x.url))
     : [];
+}
+
+function item4NormalizeSlideCaptions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((row) => {
+    const mode = String(row?.mode || row?.caption_mode || "ai").trim().toLowerCase();
+    return {
+      id: String(row?.id || "").trim(),
+      mode: mode === "manual" || mode === "none" ? mode : "ai",
+      text: String(row?.text || row?.caption || "").trim().slice(0, 2000),
+    };
+  }).filter((row) => row.id);
+}
+
+function item4ApplySlideCaptions(assets, captions) {
+  const byId = new Map(item4NormalizeSlideCaptions(captions).map((row) => [row.id, row]));
+  if (!byId.size) return Array.isArray(assets) ? assets : [];
+  return (Array.isArray(assets) ? assets : []).map((asset) => {
+    const hit = byId.get(String(asset?.id || ""));
+    if (!hit) return asset;
+    return {
+      ...asset,
+      caption_mode: hit.mode,
+      caption: hit.mode === "manual" ? hit.text : "",
+    };
+  });
+}
+
+function item4JoinedSlideCaptions(assets) {
+  return (Array.isArray(assets) ? assets : [])
+    .slice()
+    .sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+    .map((asset) => String(asset?.caption || "").trim())
+    .filter(Boolean);
+}
+
+function item4RequestedCaptionIsSlideDump(caption, assets) {
+  const manuals = item4JoinedSlideCaptions(assets);
+  if (manuals.length < 2) return false;
+  const text = String(caption || "").trim();
+  return Boolean(text) && (text === manuals.join("\n\n") || text === manuals.join("\n"));
 }
 
 const ITEM4_MEDIA_ASSET_TABLE = "tblSITCujCsJTNcDe";
@@ -4719,10 +4761,24 @@ async function updateProductionRequest(request, env, url, authorization) {
 
   const input = await cleanProductionRequestPayload(payload, env);
   const now = new Date().toISOString();
+  const fields = productionRequestFields(input, now);
+  const slideCaptions = item4NormalizeSlideCaptions(payload?.slide_captions);
+  if (slideCaptions.length) {
+    const nextAssets = item4ApplySlideCaptions(
+      item4ParseJson(f(existing, "Studio_Master_Assets_JSON"), []),
+      slideCaptions
+    );
+    fields.Studio_Master_Assets_JSON = JSON.stringify(nextAssets);
+    if (item4RequestedCaptionIsSlideDump(input.requested_caption, nextAssets)) {
+      fields.Caption_Mode = "AI decides";
+      fields.Requested_Caption = null;
+    }
+  }
+
   const updated = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId, {
     method: "PATCH",
     body: JSON.stringify({
-      fields: productionRequestFields(input, now),
+      fields,
       typecast: false,
     }),
   });

@@ -14,3 +14,5 @@ Calm bridge-preflight Worker deploy: 2026-08-21 — Approve readiness check reads 
 
 Studio cover thumbs Worker deploy: 2026-08-21 — Photo-video Approve stamps a prepared JPEG cover onto Thumbnail_URL, keeps Include_Thumbnail Yes, and prepares 16:9 for YouTube grid. Worker 0.10.44-studio-cover-thumbs.
 
+Slide vs post caption Worker deploy: 2026-08-21 — Per-photo crop labels save on the master asset, not Requested_Caption. Worker 0.10.45-slide-post-caption-split.
+

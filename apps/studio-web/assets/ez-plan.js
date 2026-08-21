@@ -71,14 +71,14 @@
     const normalized = String(mode || "ai").trim().toLowerCase();
     if (normalized === "manual") {
       const parts = Array.isArray(captions) ? captions.map((value) => String(value || "").trim()).filter(Boolean) : [];
-      const text = String(caption || "").trim() || parts.join("\n\n");
       return {
         mode: "manual",
         overlay_titles: true,
         title_mode: "AI decides",
         requested_title: "",
-        caption_mode: "Force exact",
-        requested_caption: text,
+        caption_mode: "AI decides",
+        requested_caption: String(caption || "").trim(),
+        slide_captions: parts,
       };
     }
     if (normalized === "none") {

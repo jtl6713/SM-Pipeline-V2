@@ -29,6 +29,7 @@
   const ezCaptionDrafts = new Map();
   const ezCaptionModes = new Map();
   let ezCaptionDefault = "ai";
+  let ezSlideCaptionHealDone = false;
   let ezCaptionSaveTimer = null;
   let ezPinnedExtraOutputs = [];
   let ezConfigSaveTimer = null;
@@ -65,7 +66,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.80-cover-thumbs";
+  const BUILD_ID = "item4-0.6.81-slide-post-caption-split";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -1533,14 +1534,15 @@
 
   function hydrateEzCaptionDrafts(status) {
     const assets = Array.isArray(status?.assets) ? status.assets : [];
-    const parts = String(activeProductionRequest?.requested_caption || "").split(/\n\n+/);
     assets.forEach((asset, index) => {
       const id = String(asset?.id || "");
       const staged = ezCaptionDrafts.get(`staged:${index}`);
       const stagedMode = ezCaptionModes.get(`staged:${index}`);
       if (id && staged && !ezCaptionDrafts.has(id)) ezCaptionDrafts.set(id, staged);
       if (id && stagedMode && !ezCaptionModes.has(id)) ezCaptionModes.set(id, stagedMode);
-      if (id && !ezCaptionDrafts.has(id) && parts[index]) ezCaptionDrafts.set(id, parts[index]);
+      const savedMode = String(asset?.caption_mode || "").trim().toLowerCase();
+      if (id && savedMode && !ezCaptionModes.has(id)) ezCaptionModes.set(id, savedMode);
+      if (id && asset?.caption && !ezCaptionDrafts.has(id)) ezCaptionDrafts.set(id, String(asset.caption));
     });
   }
 
@@ -1571,14 +1573,14 @@
     const locked = ezCaptionsLocked();
     const lockAttr = locked ? " disabled" : "";
     return `<div class="item4-asset-caption-field item4-variant-caption">
-      <label><span>Caption</span>
+      <label><span>On-photo caption</span>
         <select data-ez-caption-mode="${escapeHtml(id)}"${lockAttr}>
           <option value="ai"${mode === "ai" ? " selected" : ""}>AI</option>
           <option value="manual"${mode === "manual" ? " selected" : ""}>Manual</option>
           <option value="none"${mode === "none" ? " selected" : ""}>None</option>
         </select>
       </label>
-      <textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Write the caption"${mode === "manual" ? "" : " hidden"}${locked ? " readonly" : ""}>${escapeHtml(value)}</textarea>
+      <textarea data-ez-asset-caption="${escapeHtml(id)}" rows="2" maxlength="2000" placeholder="Label this photo. This is not the post caption."${mode === "manual" ? "" : " hidden"}${locked ? " readonly" : ""}>${escapeHtml(value)}</textarea>
       ${locked ? "<em>Locked after promote</em>" : ""}
     </div>`;
   }
@@ -1625,6 +1627,7 @@
       });
     });
     syncEzCaptionLock();
+    if (detachLeakedPostCaption()) queueEzCaptionSave();
   }
 
   function syncEzPlanChrome() {
@@ -1684,22 +1687,44 @@
     }
   }
 
-  function collectEzManualCaptions() {
-    const byAsset = new Map();
+  function collectEzSlideCaptionRecords() {
+    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const ids = assets.map((asset) => String(asset?.id || "")).filter(Boolean);
+    document.querySelectorAll("[data-ez-caption-mode]").forEach((select) => {
+      const id = String(select.dataset.ezCaptionMode || "");
+      if (id) ezCaptionModes.set(id, String(select.value || "ai"));
+    });
     document.querySelectorAll("[data-ez-asset-caption]").forEach((input) => {
       const id = String(input.dataset.ezAssetCaption || "");
-      if (!id || input.hidden || ezCaptionModeFor(id) !== "manual") return;
-      const current = String(byAsset.get(id) || "");
-      const next = String(input.value || "");
-      if (!byAsset.has(id) || (!current.trim() && next.trim())) byAsset.set(id, next);
+      if (id) ezCaptionDrafts.set(id, input.value);
     });
+    const ordered = ids.length ? ids : Array.from(new Set([
+      ...Array.from(ezCaptionModes.keys()),
+      ...Array.from(ezCaptionDrafts.keys()),
+    ]));
+    return ordered.map((id) => ({
+      id,
+      mode: ezCaptionModeFor(id),
+      text: String(ezCaptionDrafts.get(id) || "").trim(),
+    }));
+  }
 
-    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
-    const ordered = assets
-      .map((asset) => String(asset?.id || ""))
-      .filter((id) => byAsset.has(id))
-      .map((id) => byAsset.get(id));
-    return ordered.length ? ordered : Array.from(byAsset.values());
+  function joinedManualSlideCaptions() {
+    return collectEzSlideCaptionRecords()
+      .filter((row) => row.mode === "manual" && row.text)
+      .map((row) => row.text);
+  }
+
+  function detachLeakedPostCaption() {
+    if (ezSlideCaptionHealDone) return false;
+    const manuals = joinedManualSlideCaptions();
+    if (manuals.length < 2) return false;
+    const post = String($("prRequestedCaption")?.value || "").trim();
+    if (!post || (post !== manuals.join("\n\n") && post !== manuals.join("\n"))) return false;
+    if ($("prCaptionMode")) $("prCaptionMode").value = "AI decides";
+    if ($("prRequestedCaption")) $("prRequestedCaption").value = "";
+    ezSlideCaptionHealDone = true;
+    return true;
   }
 
   function queueEzCaptionSave() {
@@ -1793,25 +1818,19 @@
 
   async function saveEzCaptionsToRequest() {
     if (!activeProductionRequest?.id || ezStarting) return;
-    const mode = ezCaptionMode();
-    const captions = collectEzManualCaptions();
-    if (mode === "manual" && !captions.some((value) => String(value || "").trim())) return;
-    const fields = ezPlanApi()?.ezCaptionFields(mode, { captions }) || {};
-    const payload = ezCaptionSavePayload(fields);
-    if ($("prRequestedCaption")) $("prRequestedCaption").value = payload.requested_caption || "";
-    if ($("prCaptionMode") && Array.from($("prCaptionMode").options).some((option) => option.value === payload.caption_mode)) {
-      $("prCaptionMode").value = payload.caption_mode;
-    }
-    if ($("prTitleMode") && Array.from($("prTitleMode").options).some((option) => option.value === payload.title_mode)) {
-      $("prTitleMode").value = payload.title_mode;
-    }
-    if ($("prRequestedTitle")) $("prRequestedTitle").value = payload.requested_title || "";
-    if ($("prProductionNotes")) $("prProductionNotes").value = payload.production_notes || "";
+    detachLeakedPostCaption();
+    const payload = productionRequestPayload();
+    payload.slide_captions = collectEzSlideCaptionRecords();
+    if (!payload.slide_captions.length) return;
     const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     });
-    if (result.record) activeProductionRequest = result.record;
+    if (result.record) {
+      activeProductionRequest = result.record;
+      if ($("prCaptionMode")) setSelectValue("prCaptionMode", result.record.caption_mode, "AI decides");
+      if ($("prRequestedCaption")) $("prRequestedCaption").value = result.record.requested_caption || "";
+    }
   }
 
   function renderEzCaptionUi() {
@@ -1820,7 +1839,7 @@
     if (hint) {
       if (mode === "manual") hint.textContent = "Write a caption under each photo. Studio saves as you type.";
       else if (mode === "none") hint.textContent = "No AI text and no overlay titles.";
-      else hint.textContent = "Studio writes captions. Switch to Manual to caption each photo yourself.";
+      else hint.textContent = "Studio writes the post caption. On-photo labels under each crop stay on that photo only.";
     }
     renderEzPerPhotoCaptions();
     renderEzPhotoStrip();
@@ -1984,7 +2003,7 @@
     stageEzLocalPreviews(files);
     renderEzPhotoStrip();
     const captionMode = ezCaptionMode();
-    const captions = collectEzManualCaptions();
+    const captions = joinedManualSlideCaptions();
     if (ezStarting) return;
     ezStarting = true;
     const continueBtn = $("ezContinue");
@@ -2079,6 +2098,7 @@
       ezStagedFiles = [];
       ezIntakeKind = null;
       ezCaptionDefault = "ai";
+      ezSlideCaptionHealDone = false;
       ezCaptionModes.clear();
       ezCaptionDrafts.clear();
       if ($("ezIdeaTitle")) $("ezIdeaTitle").value = "";
@@ -3923,6 +3943,8 @@
     $("prRequestedTitle").value = record.requested_title || "";
     setSelectValue("prCaptionMode", record.caption_mode, "AI decides");
     $("prRequestedCaption").value = record.requested_caption || "";
+    hydrateEzCaptionDrafts({ assets: record.studio_master_assets || [] });
+    ezSlideCaptionHealDone = false;
     setSelectValue("prScriptMode", record.script_mode, "AI decides");
     $("prRequestedScript").value = record.requested_script || "";
     $("prProductionNotes").value = record.production_notes || "";
@@ -4104,6 +4126,7 @@
       script_mode: $("prScriptMode").value,
       requested_script: $("prRequestedScript").value.trim(),
       production_notes: $("prProductionNotes").value.trim(),
+      slide_captions: collectEzSlideCaptionRecords(),
     };
     if (payload.video_clip_count_mode === "Exact" && !String(payload.video_clip_count_exact || "").trim()) {
       payload.video_clip_count_mode = activeProductionRequest?.video_clip_count_mode || "AI decides";
@@ -5153,7 +5176,7 @@
     prVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
     prTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     prRequestedTitle: "The on-post title. Separate from the idea name.",
-    prCaptionMode: "AI decides writes captions. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
+    prCaptionMode: "This is the post caption on Instagram, Facebook, TikTok, and YouTube. It is separate from the on-photo labels under each crop.",
     prRequestedCaption: "Shared caption direction for requested outputs unless a photo has its own caption.",
     prScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     prRequestedScript: "Paste spoken words here only if you want to control the voiceover.",
@@ -5327,10 +5350,10 @@
       phase6BindTooltipTarget(button, "Remove this photo from the master set. Other originals stay in Studio.");
     });
     searchRoot.querySelectorAll?.("[data-ez-caption-mode]").forEach((select) => {
-      phase6BindTooltipTarget(select, "AI writes a caption, Manual uses your wording, None skips a caption for this photo.");
+      phase6BindTooltipTarget(select, "AI, Manual, or None for this photo only. This does not change the post caption.");
     });
     searchRoot.querySelectorAll?.("[data-ez-asset-caption]").forEach((box) => {
-      phase6BindTooltipTarget(box, "Write the caption for this photo. Saved with the production request.");
+      phase6BindTooltipTarget(box, "Label this photo. The Pipeline Caption field is the post text, not this.");
     });
     searchRoot.querySelectorAll?.("[data-item4-format]").forEach((select) => {
       phase6BindTooltipTarget(select, "Override the recommended format for this platform. Native stills stay photos; video formats use the render path.");
