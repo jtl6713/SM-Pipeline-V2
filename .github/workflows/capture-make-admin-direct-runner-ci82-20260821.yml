@@ -1,0 +1,61 @@
+name: Capture MAKE-ADMIN Direct Runner Contract for CI82
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/capture-make-admin-direct-runner-ci82-20260821.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capture-make-admin-direct-runner-ci82-20260821
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Inspect Direct Webhook Runner scenario read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n '{action:"inspect_make_scenario",confirm:"INSPECT-MAKE-MODULES-V1",scenario_id:5893243}' >/tmp/request.json
+          code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' -X POST "$URL" -H "Authorization: Bearer $SECRET" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+          unset SECRET
+          test "$code" = '200'
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.inspected.scenario_id==5893243' /tmp/result.json >/dev/null
+          mkdir -p repair/evidence
+          jq --arg captured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{
+            captured_at_utc:$captured_at,
+            purpose:"Recover redacted Direct Webhook Runner request contract for exact CI82 P2 pulse",
+            publishing:false,
+            inspected:.upstream_json.inspected
+          }' /tmp/result.json > repair/evidence/make-admin-direct-runner-contract-ci82-20260821.json
+      - name: Commit redacted contract evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- repair/evidence/make-admin-direct-runner-contract-ci82-20260821.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'Capture MAKE-ADMIN direct runner contract for CI82'
+          git pull --rebase origin main
+          git push origin HEAD:main
