@@ -36,6 +36,7 @@
   let ezIdeaIdentitySaveTimer = null;
   let item4Uploading = false;
   let item4PreparingVariants = false;
+  let item4PromoteInFlight = false;
   let item4VariantPollTimer = null;
   let item4VariantPollStartedAt = 0;
   let item4MasterPollTimer = null;
@@ -66,7 +67,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.82-approve-click";
+  const BUILD_ID = "item4-0.6.83-approve-lock";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -3824,7 +3825,10 @@
 
     const promote = $("promoteProductionRequest");
     if (promote) {
-      if (status === "Promoted") {
+      if (item4PromoteInFlight || promote.dataset.busy === "true") {
+        promote.disabled = true;
+        promote.textContent = status === "Submitted" ? "Checking…" : "Submitting…";
+      } else if (status === "Promoted") {
         promote.disabled = true;
         promote.textContent = "Promoted";
       } else if (status === "Submitted") {
@@ -4301,7 +4305,7 @@
     event.stopPropagation();
     if (!activeProductionRequest?.id) return;
     const promoteButton = $("promoteProductionRequest");
-    if (promoteButton?.dataset.busy === "true") return;
+    if (item4PromoteInFlight || promoteButton?.dataset.busy === "true" || promoteButton?.disabled) return;
 
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
       await buildItem4Plan();
@@ -4321,15 +4325,15 @@
       if (!confirmed) return;
     }
 
+    item4PromoteInFlight = true;
     if (promoteButton) {
       promoteButton.disabled = true;
       promoteButton.dataset.busy = "true";
       promoteButton.textContent = status === "Submitted" ? "Checking…" : "Submitting…";
     }
-    setRequestMessage();
+    setRequestMessage("Sending this into production…", "success");
 
     try {
-      // Save the visible form first so the handoff always uses the latest draft.
       if (status === "Draft" || status === "Ready") {
         await saveActiveProductionRequest({ quiet: true });
       }
@@ -4340,23 +4344,36 @@
       });
 
       if (result.production_request) {
+        activeProductionRequest = result.production_request;
         populateProductionRequestForm(result.production_request);
+      } else if (result.promoted && activeProductionRequest) {
+        activeProductionRequest = { ...activeProductionRequest, status: "Promoted" };
       }
-
-      await Promise.all([loadProductionRequests(), loadContent(), loadIdeas(), loadDashboard()]);
+      setProductionRequestControlState(activeProductionRequest);
 
       if (result.promoted) {
         const content = result.content_item_record_id ? ` Content Item: ${result.content_item_record_id}.` : "";
-        setRequestMessage(`${result.message || "Promotion complete."}${content}`, "success");
+        setRequestMessage(`${result.message || "Approved. This request is in production."}${content}`, "success");
       } else {
         setRequestMessage(result.message || "Promotion is processing.", "");
       }
+
+      Promise.all([loadProductionRequests(), loadContent(), loadIdeas(), loadDashboard()]).catch(() => {});
     } catch (e) {
+      item4PromoteInFlight = false;
+      if (promoteButton) {
+        delete promoteButton.dataset.busy;
+        promoteButton.disabled = false;
+        promoteButton.textContent = "Approve & Promote";
+      }
       setRequestMessage(e.message, "error-text");
-    } finally {
-      if (promoteButton) delete promoteButton.dataset.busy;
       setProductionRequestControlState(activeProductionRequest);
+      return;
     }
+
+    item4PromoteInFlight = false;
+    if (promoteButton) delete promoteButton.dataset.busy;
+    setProductionRequestControlState(activeProductionRequest);
   });
 
   async function loadProductionRequests() {
