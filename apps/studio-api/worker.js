@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.48-preflight-targetcount",
+          version: "0.10.49-studio-audio-caption-handoff",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -122,6 +122,7 @@ export default {
           studio_item4_calm_bridge_preflight_v1: true,
           studio_photo_cover_thumbs_v1: true,
           studio_slide_post_caption_split_v1: true,
+          studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
           studio_approve_plan_crops_v1: true,
           studio_audio_platform_warning_v1: true,
@@ -2357,6 +2358,35 @@ function item4RequestedCaptionIsSlideDump(caption, assets) {
   if (manuals.length < 2) return false;
   const text = String(caption || "").trim();
   return Boolean(text) && (text === manuals.join("\n\n") || text === manuals.join("\n"));
+}
+
+function item4ManualCaptionBySourceId(requestRecord) {
+  const assets = item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []);
+  const map = new Map();
+  for (const asset of Array.isArray(assets) ? assets : []) {
+    const id = String(asset?.id || "").trim();
+    const mode = String(asset?.caption_mode || "").trim().toLowerCase();
+    const text = String(asset?.caption || "").trim();
+    if (id && mode === "manual" && text) map.set(id, text);
+  }
+  return map;
+}
+
+function item4PhotoOverlayFromCaption(text, { tiktok916 = false } = {}) {
+  const overlayText = String(text || "").trim();
+  if (!overlayText) return null;
+  return {
+    enabled: true,
+    text: overlayText,
+    role: "caption",
+    position: tiktok916 ? "lower-third" : "bottom",
+    size: 52,
+    stylePreset: "Lower Third / Minimal",
+    animation: "fade",
+    startFraction: 0,
+    endFraction: 1,
+    backgroundOpacity: 0.4,
+  };
 }
 
 const ITEM4_MEDIA_ASSET_TABLE = "tblSITCujCsJTNcDe";
@@ -5401,6 +5431,8 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
     Requested_Title: String(f(requestRecord, "Requested_Title") || "").trim() || null,
     Requested_Caption_Mode: String(f(requestRecord, "Caption_Mode") || "AI decides"),
     Requested_Caption: String(f(requestRecord, "Requested_Caption") || "").trim() || null,
+    Include_Voiceover: String(f(requestRecord, "Voiceover_Mode") || "").trim() === "Yes" ? "Yes" : "No",
+    Include_Background_Music: String(f(requestRecord, "Background_Music_Mode") || "").trim() === "Yes" ? "Yes" : "No",
     Requested_Script_Mode: String(f(requestRecord, "Script_Mode") || "AI decides"),
     Requested_Script: String(f(requestRecord, "Requested_Script") || "").trim() || null,
     Production_Request_Notes: String(f(requestRecord, "Production_Notes") || "").trim() || null,
@@ -5954,6 +5986,8 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   let startFrame = 0;
   const clips = [];
 
+  const captions = item4ManualCaptionBySourceId(requestRecord);
+  const tiktok916 = platform === "TikTok" && ratio === "9:16";
   for (const source of sourceRows) {
     const variant = source?.variants?.[ratio];
     const url = String(variant?.preview_url || "").trim();
@@ -5961,10 +5995,12 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     if (!url || !/^rec[A-Za-z0-9]+$/.test(mediaAssetId)) return null;
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
+    const overlay = storyTeaser ? null : item4PhotoOverlayFromCaption(captions.get(String(source?.id || "").trim()), { tiktok916 });
     clips.push({
       id: `studio-source-${clips.length + 1}`,
       order: Number(source?.order || clips.length + 1),
       media_asset_record_id: mediaAssetId,
+      source_asset_id: String(source?.id || "").trim() || null,
       asset_name: String(variant?.file_name || source?.name || `photo-${clips.length + 1}.jpg`),
       google_drive_url: String(variant?.google_drive_url || "").trim() || null,
       url,
@@ -5975,6 +6011,8 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
       source: "studio_platform_variant",
       aspect_ratio: ratio,
       google_drive_file_id: String(variant?.google_drive_file_id || "").trim() || null,
+      overlay: overlay || undefined,
+      caption: overlay?.text || "",
     });
     startFrame += frames;
   }
@@ -5992,7 +6030,9 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   const clipList = clips.map(c => ({
     id:c.id, order:c.order, mediaAssetRecordId:c.media_asset_record_id,
     assetName:c.asset_name, url:c.url, src:c.src, startFrame:c.startFrame,
-    durationFrames:c.durationFrames, motionStyle:c.motionStyle
+    durationFrames:c.durationFrames, motionStyle:c.motionStyle,
+    overlay: c.overlay || undefined,
+    caption: c.caption || "",
   }));
   const renderPrep = {
     render_status: nativePhotoRoute ? "Native Photo Route" : "Ready for Render",
@@ -6418,16 +6458,22 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     || String(f(parent, "Hook") || "").trim()
     || String(f(parent, "Content_Title") || "").trim();
   const voiceoverMode = String(f(requestRecord, "Voiceover_Mode") || f(parent, "Include_Voiceover") || "No").trim();
+  const musicMode = String(f(requestRecord, "Background_Music_Mode") || f(parent, "Include_Background_Music") || "No").trim();
   const thumbnailMode = String(f(requestRecord, "Thumbnail_Mode") || f(parent, "Include_Thumbnail") || "Yes").trim();
   const voiceoverUrl = String(f(parent, "Voiceover_URL") || "").trim();
   const coverUrl = String(f(parent, "Thumbnail_URL") || "").trim() || item4CoverStillUrl(requestRecord);
   const wantThumb = thumbnailMode !== "No";
+  const wantVoiceover = voiceoverMode === "Yes";
   return airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
     method: "PATCH",
     body: JSON.stringify({
       fields: {
         Caption: caption || null,
-        Include_Voiceover: voiceoverMode === "Yes" && voiceoverUrl ? "Yes" : "No",
+        Include_Voiceover: wantVoiceover ? "Yes" : "No",
+        Include_Background_Music: musicMode === "Yes" ? "Yes" : "No",
+        Voiceover_Status: wantVoiceover
+          ? (voiceoverUrl ? (String(f(parent, "Voiceover_Status") || "").trim() || "Generated") : "Not Started")
+          : "Not Needed",
         Include_Thumbnail: wantThumb ? "Yes" : "No",
         Thumbnail_URL: wantThumb ? (coverUrl || null) : null,
         Thumbnail_Status: wantThumb ? (coverUrl ? "Generated" : "Not Started") : "Not Needed",
@@ -8771,13 +8817,14 @@ function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
   const clips = selectedVisualClips(outputRecord);
   const ratio = String(f(outputRecord, "Aspect_Ratio") || "").trim() || null;
   const fps = Number(parsed.fps || 30) || 30;
-  const title = phase6Text(parsed?.render_prep?.title_text || f(outputRecord, "Output_Title"), 1000);
   return clips.map((clip, index) => {
     const url = clip.url || clip.src || clip.google_drive_url || null;
     const durationFrames = Number(clip.durationFrames || clip.duration_frames || 0);
     const durationSeconds = durationFrames > 0 ? durationFrames / fps : Number(clip.recommended_duration_seconds || 4);
     const variants = { "4:5": null, "9:16": null, "1:1": null, "16:9": null };
     if (ratio && url) variants[ratio] = url;
+    const overlayText = String(clip.overlay?.text || clip.caption || "").trim();
+    const overlayEnabled = clip.overlay?.enabled !== false && Boolean(overlayText);
     return {
       id: clip.id || `virtual-source-${index + 1}`,
       name: clip.asset_name || clip.assetName || `Photo ${index + 1}`,
@@ -8791,20 +8838,20 @@ function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
       fit_mode: "fill_crop",
       safe_area_aware: true,
       overlay: {
-        enabled: Boolean(title),
-        text: title,
-        style_preset: "Chicago Editorial",
-        role: "overlay",
-        position: String(f(outputRecord, "Platform") || "") === "TikTok" && ratio === "9:16" ? "lower-third" : "center",
-        size: 64,
+        enabled: overlayEnabled,
+        text: overlayText,
+        style_preset: String(clip.overlay?.stylePreset || clip.overlay?.style_preset || "Lower Third / Minimal"),
+        role: String(clip.overlay?.role || "caption"),
+        position: String(clip.overlay?.position || (String(f(outputRecord, "Platform") || "") === "TikTok" && ratio === "9:16" ? "lower-third" : "bottom")),
+        size: Number(clip.overlay?.size || 52),
         version: 1,
         eyebrow: "",
         subtitle: "",
-        caption: "",
+        caption: overlayText,
         accent_text: "",
         brand: phase6Text(parsed?.render_prep?.brand_text, 250),
-        background_opacity: 0.4,
-        animation: "fade",
+        background_opacity: Number(clip.overlay?.backgroundOpacity ?? 0.4),
+        animation: String(clip.overlay?.animation || "fade"),
         start_fraction: 0,
         end_fraction: 1,
       },

@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.83-approve-lock">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.84-audio-caption-handoff">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.83</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.84</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -219,6 +219,18 @@
  <input id="ezRequestedTitle" maxlength="500" placeholder="Optional unless forcing exact wording">
  </label>
  <em class="ez-option-hint">This is the on-post title. The idea name at the top is what shows in Ideas.</em>
+ </div>
+ </details>
+ <details class="ez-option-group" id="ezCaptionGroup">
+ <summary>Post caption</summary>
+ <div class="ez-option-group-body">
+ <label class="form-field"><span>Caption control</span>
+ <select id="ezCaptionMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select>
+ </label>
+ <label class="form-field"><span>Post caption</span>
+ <textarea id="ezRequestedCaption" rows="4" maxlength="10000" placeholder="The Instagram / Facebook / TikTok / YouTube caption. Not the labels under each photo."></textarea>
+ </label>
+ <em class="ez-option-hint">This is the post caption. On-photo labels under each crop stay on that photo only.</em>
  </div>
  </details>
  <details class="ez-option-group" id="ezScriptGroup">
@@ -998,7 +1010,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.83-approve-lock"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.83-approve-lock"></script>
+ <script src="/assets/ez-plan.js?v=0.6.84-audio-caption-handoff"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.84-audio-caption-handoff"></script>
 </body>
 </html>

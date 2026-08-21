@@ -22,3 +22,5 @@ Approve plan-crops Worker deploy: 2026-08-21 — Approve no longer waits on extra 
 
 Preflight targetCount Worker deploy: 2026-08-21 — Restore variant counts in the Approve readiness response so the UI does not throw targetCount is not defined. Worker 0.10.48-preflight-targetcount.
 
+Studio audio/caption handoff Worker deploy: 2026-08-21 — Promote keeps Voiceover and Music Yes even before the VO file exists, copies Include_Background_Music, and stamps on-photo labels onto Remotion clips. Worker 0.10.49-studio-audio-caption-handoff.
+

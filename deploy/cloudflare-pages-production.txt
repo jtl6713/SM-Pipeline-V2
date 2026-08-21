@@ -126,4 +126,6 @@ Approve click Pages deploy: 2026-08-21 ? Approve & Promote stays clickable and n
 
 Approve lock Pages deploy: 2026-08-21 ? Approve & Promote disables immediately after confirm and stays locked through the production send. UI 0.6.83-approve-lock.
 
+Audio caption handoff Pages deploy: 2026-08-21 ? EZ keeps Voiceover/Music Yes, adds a Post caption control, and does not wipe Advanced audio on photo-caption autosave. UI 0.6.84-audio-caption-handoff.
+
 

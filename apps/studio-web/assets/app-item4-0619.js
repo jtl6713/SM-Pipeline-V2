@@ -67,7 +67,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.83-approve-lock";
+  const BUILD_ID = "item4-0.6.84-audio-caption-handoff";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -1264,17 +1264,19 @@
   function alignAudioSelect(fromEl, toEl) {
     if (!fromEl || !toEl) return;
     if (fromEl.value === "Yes") toEl.value = "Yes";
-    else if (fromEl.value === "No" && toEl.value !== "Use Profile Default") toEl.value = "No";
+    else if (fromEl.value === "No") toEl.value = "No";
   }
 
-  function syncRequestAudioUi({ fromEz = false } = {}) {
+  function syncRequestAudioUi({ fromEz = false, userChanged = false } = {}) {
     const ezVo = $("ezAudioVoiceover");
     const prVo = $("prVoiceover");
     const ezMu = $("ezAudioMusic");
     const prMu = $("prMusicMode");
     if (fromEz) {
-      alignAudioSelect(ezVo, prVo);
-      alignAudioSelect(ezMu, prMu);
+      if (userChanged || isAudioYes(ezVo?.value) || isAudioYes(ezMu?.value)) {
+        alignAudioSelect(ezVo, prVo);
+        alignAudioSelect(ezMu, prMu);
+      }
     } else {
       alignAudioSelect(prVo, ezVo);
       alignAudioSelect(prMu, ezMu);
@@ -1305,7 +1307,7 @@
       const track = fromEz ? $("ezAudioTrack")?.value : ($("prMusicAsset")?.value || $("ezAudioTrack")?.value || "");
       if ($("ezAudioTrack") && track) $("ezAudioTrack").value = track;
       if ($("prMusicAsset") && track) $("prMusicAsset").value = track;
-    } else {
+    } else if (userChanged) {
       if ($("ezAudioTrack")) $("ezAudioTrack").value = "";
       if ($("prMusicAsset")) $("prMusicAsset").value = "";
     }
@@ -1379,10 +1381,26 @@
     return mode !== "AI decides" || Boolean(text);
   }
 
+  function ezCaptionIsCustomized() {
+    const mode = $("ezCaptionMode")?.value || "AI decides";
+    const text = String($("ezRequestedCaption")?.value || "").trim();
+    return mode !== "AI decides" || Boolean(text);
+  }
+
   function syncEzConfigFields() {
     copySelectValue("ezTitleMode", "prTitleMode");
     if ($("prRequestedTitle")) $("prRequestedTitle").value = $("ezRequestedTitle")?.value || "";
     if ($("ezTitle")) $("ezTitle").value = String($("ezRequestedTitle")?.value || "").trim().slice(0, 160);
+    if (ezCaptionIsCustomized()) {
+      copySelectValue("ezCaptionMode", "prCaptionMode");
+      if ($("prRequestedCaption")) $("prRequestedCaption").value = $("ezRequestedCaption")?.value || "";
+    } else if ($("ezRequestedCaption") && $("prRequestedCaption") && String($("prRequestedCaption").value || "").trim()) {
+      $("ezRequestedCaption").value = $("prRequestedCaption").value;
+      if ($("ezCaptionMode") && $("prCaptionMode")?.value) $("ezCaptionMode").value = $("prCaptionMode").value;
+    } else {
+      copySelectValue("ezCaptionMode", "prCaptionMode");
+      if ($("prRequestedCaption")) $("prRequestedCaption").value = $("ezRequestedCaption")?.value || "";
+    }
     copySelectValue("ezScriptMode", "prScriptMode");
     if ($("prRequestedScript")) $("prRequestedScript").value = $("ezRequestedScript")?.value || "";
     copySelectValue("ezThumbnail", "prThumbnail");
@@ -1447,7 +1465,7 @@
     }
     const musicId = Array.isArray(record.selected_music_asset_links) ? record.selected_music_asset_links[0] : "";
     if ($("ezAudioTrack") && musicId) $("ezAudioTrack").value = musicId;
-    syncEzAudioFields();
+    syncRequestAudioUi({ fromEz: false });
     if ($("ezTitleMode")) {
       const titleText = String(record.requested_title || "").trim();
       const titleMode = !titleText && (record.title_mode === "Force exact" || record.title_mode === "Leave blank")
@@ -1457,6 +1475,14 @@
     }
     if ($("ezRequestedTitle")) $("ezRequestedTitle").value = String(record.requested_title || "").trim();
     if ($("ezTitle")) $("ezTitle").value = String(record.requested_title || "").trim().slice(0, 160);
+    if ($("ezCaptionMode")) {
+      const captionText = String(record.requested_caption || "").trim();
+      const captionMode = !captionText && (record.caption_mode === "Force exact" || record.caption_mode === "Leave blank")
+        ? "AI decides"
+        : record.caption_mode;
+      setSelectValue("ezCaptionMode", captionMode, "AI decides");
+    }
+    if ($("ezRequestedCaption")) $("ezRequestedCaption").value = String(record.requested_caption || "").trim();
     if ($("ezScriptMode")) {
       const scriptText = String(record.requested_script || "").trim();
       const scriptMode = !scriptText && (record.script_mode === "Force exact" || record.script_mode === "Leave blank")
@@ -1483,7 +1509,7 @@
   }
 
   function queueEzConfigSave() {
-    syncEzAudioFields();
+    syncRequestAudioUi({ fromEz: false });
     syncEzConfigFields();
     if (!activeProductionRequest?.id) return;
     clearTimeout(ezConfigSaveTimer);
@@ -1529,7 +1555,7 @@
       if ($("prVoiceHint")) $("prVoiceHint").textContent = "Could not load ElevenLabs voices.";
     });
     await Promise.all([musicJob, voiceJob]);
-    if (ezEntryPath === "content") syncEzAudioFields();
+    if (ezEntryPath === "content") syncRequestAudioUi({ fromEz: false });
     else syncRequestVoiceUi({ fromEz: false });
   }
 
@@ -1751,7 +1777,7 @@
   }
 
   function ezCaptionSavePayload(captionFields) {
-    syncEzAudioFields();
+    syncRequestAudioUi({ fromEz: false });
     syncEzConfigFields();
     const record = activeProductionRequest || {};
     const requestedPlatforms = selectedRequestPlatforms();
@@ -2014,7 +2040,7 @@
       item4PlanOverrides = {};
       const planned = applyEzPlanOverrides(files.length, ezSelectedPlatforms());
       syncItem4PlatformsFromEz();
-      syncEzAudioFields();
+      syncRequestAudioUi({ fromEz: true, userChanged: true });
       syncEzConfigFields();
       const extras = ezExtraOutputSnapshot();
       let captionFields = apiHelpers.ezCaptionFields(captionMode, { captions });
@@ -2052,8 +2078,8 @@
         voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 2,
         title_mode: ezTitleIsCustomized() ? ($("ezTitleMode")?.value || "AI decides") : (captionFields.title_mode || "AI decides"),
         requested_title: ezTitleIsCustomized() ? String($("ezRequestedTitle")?.value || "").trim() : (captionFields.requested_title || ""),
-        caption_mode: captionFields.caption_mode,
-        requested_caption: captionFields.requested_caption || "",
+        caption_mode: ezCaptionIsCustomized() ? ($("ezCaptionMode")?.value || "AI decides") : (captionFields.caption_mode || "AI decides"),
+        requested_caption: ezCaptionIsCustomized() ? String($("ezRequestedCaption")?.value || "").trim() : (captionFields.requested_caption || ""),
         script_mode: ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides"),
         requested_script: ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || ""),
         carousel_image_mode: $("ezCarouselImageMode")?.value || "Manual Upload",
@@ -2126,12 +2152,12 @@
     ["ezAudioVoiceover", "ezAudioMusic", "ezAudioTrack", "ezAudioVoice"].forEach((id) => {
       $(id)?.addEventListener("change", () => {
         stopStudioAudioPreview();
-        syncEzAudioFields();
+        syncRequestAudioUi({ fromEz: true, userChanged: true });
         if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
       });
     });
     [
-      "ezTitleMode", "ezRequestedTitle", "ezScriptMode", "ezRequestedScript",
+      "ezTitleMode", "ezRequestedTitle", "ezCaptionMode", "ezRequestedCaption", "ezScriptMode", "ezRequestedScript",
       "ezThumbnail", "ezVoiceoverTail", "ezVideoDuration", "ezVideoClipMode",
       "ezVideoClipExact", "ezVideoClipMin", "ezVideoClipMax", "ezCarouselSlideMode",
       "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax",
@@ -4090,7 +4116,9 @@
     if (usingEzPlatforms() || ezEntryPath === "content") {
       if ($("prVoiceover")?.value === "Yes" && $("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
       if ($("prMusicMode")?.value === "Yes" && $("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
-      syncEzAudioFields();
+      if ($("ezAudioVoiceover")?.value === "Yes" && $("prVoiceover")) $("prVoiceover").value = "Yes";
+      if ($("ezAudioMusic")?.value === "Yes" && $("prMusicMode")) $("prMusicMode").value = "Yes";
+      syncRequestAudioUi({ fromEz: false });
       syncEzConfigFields();
     }
     const requestedPlatforms = selectedRequestPlatforms();
@@ -5143,6 +5171,8 @@
     ezAudioTrack: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
     ezTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     ezRequestedTitle: "The on-post title. Separate from the idea name at the top of this screen.",
+    ezCaptionMode: "This is the Instagram / Facebook / TikTok / YouTube post caption. It is separate from the on-photo labels under each crop.",
+    ezRequestedCaption: "Write the post caption here. Force exact uses this wording. On-photo labels stay on each photo.",
     ezScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     ezRequestedScript: "Paste spoken words here only if you want to control the voiceover. Leave blank to let AI write it.",
     ezThumbnail: "Whether Studio should generate a thumbnail or cover still for video outputs.",
