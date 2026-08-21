@@ -146,6 +146,7 @@ export default {
           repair_activation_leases_v1: true,
           repair_make_admin_module19_v1: true,
           repair_make_module_inspector_v1: true,
+          repair_make_execution_inspector_v1: true,
           repair_make_scenario_inventory_v1: true,
           repair_make_start_scenario_probe_v1: true,
           repair_r4_exact_output_entry_v1: true,
@@ -12987,6 +12988,22 @@ async function repairInspectMakeBlueprintHistory(env, scenarioId, moduleId) {
   };
 }
 
+
+async function repairInspectMakeExecution(env, scenarioId, executionId) {
+  const id = Number(scenarioId);
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "scenario_id must be a positive integer");
+  const execution = repairString(executionId, "execution_id", 100);
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(execution)) throw new HttpError(400, "execution_id format is invalid");
+  const body = await phase6MakeApiJson(env, `/scenarios/${id}/executions/${execution}`, { method: "GET" });
+  const details = body?.response || body?.execution || body || {};
+  return {
+    scenario_id: id,
+    execution_id: execution,
+    status: String(details?.status || ""),
+    details: repairInspectorClone(details),
+  };
+}
+
 async function adminRepairControlStatus(request, env) {
   const records = await repairLeaseRecords(env);
   const leases = records.map(repairLeaseState).map((l) => ({
@@ -13031,6 +13048,12 @@ async function adminRepairControl(request, env, authorization) {
     if (confirm !== "REPAIR-R4-EXACT-OUTPUT-ENTRY-V1") throw new HttpError(400, "Exact R4 entrance repair confirmation is required");
     const repaired = await repairR4ExactOutputEntry(env);
     return respond(request, env, { ok: true, action, repaired });
+  }
+  if (action === "inspect_make_execution") {
+    const confirm = repairString(input?.confirm, "confirm", 80);
+    if (confirm !== "INSPECT-MAKE-EXECUTION-V1") throw new HttpError(400, "Exact Make execution inspection confirmation is required");
+    const inspected = await repairInspectMakeExecution(env, input?.scenario_id, input?.execution_id);
+    return respond(request, env, { ok: true, action, inspected });
   }
   if (action === "inspect_make_scenario") {
     const confirm = repairString(input?.confirm, "confirm", 80);
