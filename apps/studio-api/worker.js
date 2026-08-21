@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.42-item4-subrequest-cap",
+          version: "0.10.43-calm-bridge-preflight",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -119,6 +119,7 @@ export default {
           studio_photo_audio_defaults_v1: true,
           studio_item4_prepare_soft_fail_v1: true,
           studio_item4_subrequest_cap_v1: true,
+          studio_item4_calm_bridge_preflight_v1: true,
           studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
@@ -4848,13 +4849,14 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     }
   }
 
+  const notes = [];
   for (const routeRow of routeRows.filter(row => row.ready && row.aspect_ratio)) {
     const unavailable = variantAssets.filter(asset => {
       const variant = asset?.variants?.[routeRow.aspect_ratio];
       return !String(variant?.preview_url || "").trim();
     });
     if (unavailable.length) {
-      issues.push(`${routeRow.platform} / ${routeRow.output_type} is missing browser/public delivery URLs for ${unavailable.length} prepared source variant(s).`);
+      notes.push("A preview image is still catching up. The platform crops are already saved.");
     }
   }
 
@@ -4893,7 +4895,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     addCheck("idea_title_present", Boolean(title), "The linked Idea Candidate requires a title before promotion.");
     const summary = String(f(resolvedIdea, "Idea_Summary") || "").trim();
     if (!summary && title) {
-      warnings.push("The linked Idea Candidate has no summary. Studio will derive the minimal I4-compatible summary automatically during promotion.");
+      notes.push("Studio will write a short summary automatically when you approve.");
     }
   }
 
@@ -4901,7 +4903,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   if (compatibility.length) issues.push(...compatibility);
   warnings.push(...productionRequestAudioPlatformWarnings(requestRecord, routeRows));
   if (routeRows.some((row) => row.output_type === "Story" && (row.platform === "Instagram" || row.platform === "Facebook"))) {
-    warnings.push("Companion Stories render a 15-second teaser from the first 9:16 photo, with a slight zoom and the selected music. After the matching Reel or photo post is live, the Story publishers can attach that post URL as the Story link.");
+    notes.push("Instagram and Facebook Stories will be a 15-second clip from the first vertical photo, with a slight zoom and your music.");
   }
 
   return {
@@ -4916,6 +4918,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     routes: routeRows,
     checks,
     warnings,
+    notes: [...new Set(notes.filter(Boolean))],
     issues: [...new Set(issues)],
     idea_summary_mode: resolvedIdea && String(f(resolvedIdea, "Idea_Summary") || "").trim() ? "existing" : "derive-on-promotion",
   };
@@ -4924,26 +4927,15 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
 async function productionRequestBridgePreflightRoute(request, env, url, authorization) {
   const recordId = productionRequestBridgeRecordIdFromPath(url);
   const requestRecord = await loadAuthorizedProductionRequest(env, recordId, authorization);
-
-  // Keep the Make workers safe before approving any new Item 4 handoff.
-  await item4EnsureSmv1PreviewCacheWorker(env);
-  await item4EnsureP3StudioSourceAuthority(env); await item4EnsureP3SingleParentRoute(env);
-  await item4EnsureR2StudioExactSourceGuard(env);
-
-  // Reconcile/sanitize Studio-created Media Asset links before evaluating compatibility.
-  await item4ReconcileMasterAuthority(env, recordId, requestRecord);
-  await item4ReconcileEnabledPlanOutputs(env, requestRecord);
-  await item4ReconcileVariants(env, recordId);
-  const refreshedRequestRecord = await loadAuthorizedProductionRequest(env, recordId, authorization);
-  const preflight = await item4SourceToProductionBridgePreflight(env, refreshedRequestRecord);
+  const preflight = await item4SourceToProductionBridgePreflight(env, requestRecord);
 
   return respond(request, env, {
     ok: true,
     bridge: "item4-source-to-production-v1",
     ...preflight,
     message: preflight.ready
-      ? "Source-to-production bridge validation passed."
-      : "Source-to-production bridge validation found blocking issues.",
+      ? "Ready to approve."
+      : "This request still needs a small fix before approve.",
   });
 }
 

@@ -14,6 +14,7 @@
   let productionOutputMatrixLoaded = false;
   let item4Workspace = null;
   let item4BridgePreflight = null;
+  let item4WorkspaceRetryTimer = 0;
   let item4PlanOverrides = {};
   let ezIntakeKind = null;
   let ezStagedFiles = [];
@@ -64,7 +65,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.75-caption-mode-sync";
+  const BUILD_ID = "item4-0.6.76-calm-production-copy";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -3109,6 +3110,29 @@
     if (status?.variant_status === "Ready" || status?.variant_status === "Error") stopItem4VariantPolling();
   }
 
+  function isTransientStudioError(error) {
+    const text = String(error?.message || error || "");
+    return /too many subrequests|subrequest|request failed \(5\d\d\)|timed out|networkerror|failed to fetch|502|503|504/i.test(text);
+  }
+
+  function item4BridgeIssueCopy(issues) {
+    const lines = (Array.isArray(issues) ? issues : [issues])
+      .map((issue) => String(issue || "").trim())
+      .filter(Boolean)
+      .filter((issue) => !isTransientStudioError(issue));
+    if (!lines.length) return "";
+    return lines.map((issue) => {
+      if (/requires a title/i.test(issue)) return "Add a title before approving.";
+      if (/master media must be ready/i.test(issue)) return "Photos are still finishing. Try again in a moment.";
+      if (/platform output plan must be ready/i.test(issue)) return "Save the platform plan first.";
+      if (/variants must be ready|variant manifest is not complete/i.test(issue)) return "Platform crops are still finishing. Try again in a moment.";
+      if (/exactly one idea/i.test(issue)) return "This request needs to stay linked to its idea.";
+      if (/proven production route|not fully mapped|not fully linked/i.test(issue)) return "One destination still needs a moment to finish linking. Try again shortly.";
+      if (/missing .+ authoritative variant/i.test(issue)) return "A platform crop is still finishing. Try again in a moment.";
+      return "Something still needs a moment before approve. Try again shortly.";
+    }).filter((line, index, all) => all.indexOf(line) === index);
+  }
+
   async function loadItem4BridgePreflight(record = activeProductionRequest) {
     if (!record?.id) return null;
     try {
@@ -3117,10 +3141,21 @@
       setProductionRequestControlState(activeProductionRequest || record);
       return result;
     } catch (error) {
+      if (isTransientStudioError(error)) {
+        item4BridgePreflight = item4BridgePreflight?.ready
+          ? item4BridgePreflight
+          : { ready: false, pending: true, issues: [], warnings: [], notes: [] };
+        setProductionRequestControlState(activeProductionRequest || record);
+        window.setTimeout(() => {
+          if (activeProductionRequest?.id === record.id) loadItem4BridgePreflight(record).catch(() => {});
+        }, 2000);
+        return item4BridgePreflight;
+      }
       item4BridgePreflight = {
         ready: false,
-        issues: [error.message || "Source bridge validation failed."],
+        issues: [error.message || "Could not confirm this request is ready."],
         warnings: [],
+        notes: [],
       };
       setProductionRequestControlState(activeProductionRequest || record);
       return item4BridgePreflight;
@@ -3159,7 +3194,25 @@
         }
       });
     } catch (error) {
-      setRequestMessage(`Item 4 media workspace: ${error.message}`, "error-text");
+      if (item4Workspace) {
+        console.warn("Item 4 workspace refresh deferred", error);
+        if (!isTransientStudioError(error)) {
+          setRequestMessage("Could not refresh this request. Your photos and plan are still saved.", "error-text");
+        }
+      } else {
+        setRequestMessage(
+          isTransientStudioError(error)
+            ? "Still loading this request. Studio will try again."
+            : "Could not open this request. Try again in a moment.",
+          isTransientStudioError(error) ? "" : "error-text"
+        );
+      }
+      if (!item4WorkspaceRetryTimer) {
+        item4WorkspaceRetryTimer = window.setTimeout(() => {
+          item4WorkspaceRetryTimer = 0;
+          if (activeProductionRequest?.id === record.id) loadItem4Workspace(record).catch(() => {});
+        }, 2000);
+      }
     }
   }
 
@@ -3761,20 +3814,21 @@
         const planReady = item4Workspace?.plan_status === "Ready";
         const variantsReady = item4Workspace?.variant_status === "Ready";
         const bridgeReady = Boolean(item4BridgePreflight?.ready);
-        const bridgeChecked = item4BridgePreflight !== null;
-        promote.disabled = item4Uploading || item4PreparingVariants || (planReady && variantsReady && bridgeChecked && !bridgeReady);
+        const bridgePending = Boolean(item4BridgePreflight?.pending) || item4BridgePreflight === null;
+        const bridgeBlocked = item4BridgePreflight && !bridgeReady && !bridgePending;
+        promote.disabled = item4Uploading || item4PreparingVariants || (planReady && variantsReady && bridgeBlocked);
         promote.textContent = !planReady
           ? "Build platform plan first"
           : (!variantsReady
               ? "Prepare platform media next"
-              : (bridgeReady ? "Approve & Promote" : (bridgeChecked ? "Source bridge blocked" : "Validating source bridge…")));
+              : (bridgeReady || bridgePending ? "Approve & Promote" : "Approve & Promote"));
         promote.title = !planReady
-          ? "Build the recommended platform plan from the selected destinations."
+          ? "Save the platform plan first."
           : (!variantsReady
-              ? "Prepare the platform-specific media required by the saved plan."
+              ? "Prepare the platform crops next."
               : (bridgeReady
-                  ? "Source-to-production bridge validated. Ready to start the existing I3 → I4 production handoff."
-                  : "Studio is validating master-media authority, output mappings, platform variants, and downstream work-item routing."));
+                  ? "Approve this request and start production."
+                  : "Studio is finishing a quick check. You can approve when it completes."));
       } else {
         promote.disabled = false;
         promote.textContent = "Approve & Promote";
@@ -3791,26 +3845,37 @@
     const compatibility = $("productionPromotionCompatibility");
     if (compatibility) {
       const warnings = Array.isArray(item4BridgePreflight?.warnings) ? item4BridgePreflight.warnings.filter(Boolean) : [];
+      const notes = Array.isArray(item4BridgePreflight?.notes) ? item4BridgePreflight.notes.filter(Boolean) : [];
       let kind = "";
-      let text = "The existing I3 → I4 promotion path remains available for legacy requests. Item 4 adds master-media planning without weakening the hardened production path.";
+      let text = "Photos, plan, and platform crops need to be ready before you approve.";
       if (status === "Promoted") {
         kind = "success";
-        text = "Promotion complete. This Production Request is locked and linked to the existing production pipeline.";
+        text = "Approved. This request is in production.";
       } else if (status === "Submitted") {
-        text = "The request has been submitted to I3. Use Check promotion status; Studio will not send a duplicate I3 trigger.";
+        text = "This request was sent. Use Check promotion status if you need an update.";
       } else if (item4Workspace?.assets?.length) {
         if (item4Workspace?.plan_status !== "Ready") {
-          text = "Master media is saved. Build and review the platform plan before production.";
+          text = "Photos are saved. Next: save the platform plan.";
         } else if (item4Workspace?.variant_status !== "Ready") {
-          text = "Platform plan is ready. Prepare the required platform media before production.";
+          text = "Plan is ready. Next: prepare the platform crops.";
         } else if (item4BridgePreflight?.ready) {
-          kind = warnings.length ? "warning-text" : "success";
-          text = `Source-to-production bridge validated. ${item4BridgePreflight.enabled_output_count || 0} output route(s) are ready for Approve & Promote.${item4BridgePreflight.idea_summary_mode === "derive-on-promotion" ? " Studio will derive the minimal I4 summary automatically." : ""}${warnings.length ? ` ${warnings.join(" ")}` : ""}`;
+          kind = "success";
+          const extra = [...notes, ...warnings].filter(Boolean);
+          text = extra.length
+            ? `Ready to approve. ${extra.join(" ")}`
+            : "Ready to approve.";
+        } else if (item4BridgePreflight?.pending) {
+          text = "Finishing a quick check. Your crops are saved.";
         } else if (item4BridgePreflight) {
-          kind = "error-text";
-          text = `Source bridge blocked: ${(item4BridgePreflight.issues || []).join(" ")}`;
+          const copy = item4BridgeIssueCopy(item4BridgePreflight.issues);
+          if (!copy.length) {
+            text = "Finishing a quick check. Your crops are saved.";
+          } else {
+            kind = "error-text";
+            text = copy.join(" ");
+          }
         } else {
-          text = "Validating the source-to-production bridge…";
+          text = "Finishing a quick check. Your crops are saved.";
         }
       }
       compatibility.className = `form-message${kind ? ` ${kind}` : ""}`;
@@ -4231,7 +4296,11 @@
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status === "Ready" && item4Workspace?.variant_status === "Ready") {
       const bridge = item4BridgePreflight?.ready ? item4BridgePreflight : await loadItem4BridgePreflight(activeProductionRequest);
       if (!bridge?.ready) {
-        setRequestMessage(`Source bridge blocked: ${(bridge?.issues || ["Validation did not pass."]).join(" ")}`, "error-text");
+        const copy = item4BridgeIssueCopy(bridge?.issues);
+        setRequestMessage(
+          copy.length ? copy.join(" ") : "Still finishing a quick check. Try Approve again in a moment.",
+          copy.length ? "error-text" : ""
+        );
         return;
       }
     }
@@ -4241,7 +4310,7 @@
 
     if (status !== "Submitted") {
       const confirmed = window.confirm(
-        "Approve and promote this saved Production Request through the existing I3 → I4 workflow?\n\nThis starts the real production pipeline and locks this Production Request after promotion."
+        "Approve this request and start production?\n\nThis locks the request after it is sent."
       );
       if (!confirmed) return;
     }

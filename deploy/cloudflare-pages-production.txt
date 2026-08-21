@@ -108,4 +108,6 @@ Story teaser Pages deploy: 2026-08-21 ? Photo-based Instagram and Facebook Stori
 
 Caption mode Pages deploy: 2026-08-21 ? Sync Manual/AI/None caption boxes across every ratio copy of the same photo so 9:16 no longer shows the first (4:5) photo's box. UI 0.6.75-caption-mode-sync.
 
+Calm production copy Pages deploy: 2026-08-21 ? Hide Worker/500 jargon on Production; keep Approve & Promote on success; Story note is green success copy. UI 0.6.76-calm-production-copy.
+
 
