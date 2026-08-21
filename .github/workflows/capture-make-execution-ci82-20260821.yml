@@ -1,0 +1,83 @@
+name: Capture CI82 Make Execution 20260821
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/capture-make-execution-ci82-20260821.txt
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capture-make-execution-ci82-20260821
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+      SCENARIO_ID: "5530955"
+      EXECUTION_ID: ff70e512c4ce4d02b677ec9264f7ec2c
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Wait for deployed read-only inspector and capture exact execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain"             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          jq -n             --arg action inspect_make_execution             --arg confirm INSPECT-MAKE-EXECUTION-V1             --argjson scenario_id "$SCENARIO_ID"             --arg execution_id "$EXECUTION_ID"             '{action:$action,confirm:$confirm,scenario_id:$scenario_id,execution_id:$execution_id}'             > /tmp/inspect-command.json
+
+          success=false
+          for attempt in $(seq 1 40); do
+            code=$(curl -sS --max-time 90 -o /tmp/inspect-result.json -w '%{http_code}'               -X POST "$URL"               -H "Authorization: Bearer $SECRET"               -H 'Content-Type: application/json'               --data-binary @/tmp/inspect-command.json || true)
+            printf 'attempt=%s bridge_http=%s\n' "$attempt" "$code"
+            if [[ "$code" == "200" ]] && jq -e               '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true and .upstream_json.action=="inspect_make_execution"'               /tmp/inspect-result.json >/dev/null 2>&1; then
+              success=true
+              break
+            fi
+            sleep 15
+          done
+          unset SECRET
+          test "$success" = true
+
+      - name: Commit sanitized execution evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p repair/evidence
+          jq '{
+            captured_at:(now|todateiso8601),
+            read_only:true,
+            no_public_publish:true,
+            scenario_id:.upstream_json.inspected.scenario_id,
+            execution_id:.upstream_json.inspected.execution_id,
+            status:.upstream_json.inspected.status,
+            details:.upstream_json.inspected.details
+          }' /tmp/inspect-result.json > repair/evidence/ci82-p2-execution-ff70e512-20260821.json
+          git pull --rebase origin main
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add repair/evidence/ci82-p2-execution-ff70e512-20260821.json
+          git commit -m 'evidence: capture CI82 P2 execution status'
+          git push origin HEAD:main
+
+      - name: Upload raw response
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci82-p2-execution-${{ github.run_id }}
+          path: /tmp/inspect-result.json
+          if-no-files-found: ignore
+          retention-days: 30

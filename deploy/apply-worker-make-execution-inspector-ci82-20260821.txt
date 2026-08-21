@@ -1,0 +1,1 @@
+Apply bounded read-only Make execution inspector for CI82 P2 diagnosis. No scenario activation or publishing.
