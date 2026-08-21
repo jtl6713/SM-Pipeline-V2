@@ -19,30 +19,38 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - name: POST exact CI82 payload to preserved P2 webhook
+        with:
+          fetch-depth: 0
+      - name: POST exact CI82 payload and capture response
+        id: post
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           body='{"content_record_id":"receDxOQmMHqaIUqs","test_run_id":"","source":"CI82 manual E2E pulse 20260821"}'
           http_code="$(curl --silent --show-error --max-time 120 \
             -o /tmp/p2-response.txt -w '%{http_code}' \
             -X POST 'https://hook.us2.make.com/6c8csqts18iom2mzjamw7gp6l9e7f91i' \
             -H 'Content-Type: application/json' \
             --data "$body")"
+          curl_rc=$?
           mkdir -p repair/evidence
           {
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "content_record_id=receDxOQmMHqaIUqs"
+            echo "p2_scenario_id=5530955"
             echo "p2_webhook_id=2567880"
+            echo "curl_rc=$curl_rc"
             echo "http_code=$http_code"
             echo "response_begin"
-            head -c 4000 /tmp/p2-response.txt || true
+            head -c 4000 /tmp/p2-response.txt 2>/dev/null || true
             echo
             echo "response_end"
           } > repair/evidence/p2-ci82-pulse-20260821.txt
-          test "$http_code" -ge 200
-          test "$http_code" -lt 300
+          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
+          echo "curl_rc=$curl_rc" >> "$GITHUB_OUTPUT"
+          exit 0
       - name: Commit pulse evidence
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -53,4 +61,14 @@ jobs:
             exit 0
           fi
           git commit -m 'Record exact P2 CI82 pulse evidence'
+          git pull --rebase origin main
           git push origin HEAD:main
+      - name: Require successful webhook response
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.post.outputs.curl_rc }}" = "0"
+          code="${{ steps.post.outputs.http_code }}"
+          test "$code" -ge 200
+          test "$code" -lt 300
