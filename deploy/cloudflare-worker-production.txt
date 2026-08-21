@@ -20,3 +20,5 @@ Variant plan-ready Worker deploy: 2026-08-21 — 9:16 platform crops mark Prepare 
 
 Approve plan-crops Worker deploy: 2026-08-21 — Approve no longer waits on extra 16:9 YouTube cover stills. 9:16 plan crops are enough. Worker 0.10.47-approve-plan-crops.
 
+Preflight targetCount Worker deploy: 2026-08-21 — Restore variant counts in the Approve readiness response so the UI does not throw targetCount is not defined. Worker 0.10.48-preflight-targetcount.
+

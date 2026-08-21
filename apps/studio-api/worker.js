@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.47-approve-plan-crops",
+          version: "0.10.48-preflight-targetcount",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -4996,6 +4996,8 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   );
 
   const variantAssets = Array.isArray(variantManifest?.assets) ? variantManifest.assets : [];
+  const targetCount = Number(variantManifest?.plan_target_count || variantManifest?.target_count || 0);
+  const readyCount = Number(variantManifest?.plan_ready_count || variantManifest?.ready_count || 0);
   const manifestComplete = item4VariantManifestPlanComplete(variantManifest, plan, masterAssets);
 
   addCheck(
