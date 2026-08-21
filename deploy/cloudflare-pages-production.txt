@@ -105,3 +105,5 @@ Manual AI idea live progress deploy: 2026-08-20 — Show 0 of N immediately and 
 Manual idea count entry Pages deploy: 2026-08-20 — Replace the fixed idea-count dropdown with a whole-number field, minimum 1, maximum 10, default 5, retaining live N-of-N progress. UI 0.6.70-idea-count-entry. Source commit da93f8cdbf54fc16a2c0a7617557ad0c081fbb64.
 
 Caption dedupe Pages deploy: 2026-08-20 — Manual per-photo caption collection deduplicates repeated DOM controls by asset ID so one photo saves one caption. UI 0.6.71-caption-dedupe.
+
+Pipeline countdown Pages deploy: 2026-08-21 — Show a repeating 8-to-1 live countdown, refresh pipeline data at zero, and restart continuously while the Pipeline page is open. UI 0.6.72-pipeline-countdown. Source commit 2817477abcdf806d2d2337ed0d9db99f8be5d961.
