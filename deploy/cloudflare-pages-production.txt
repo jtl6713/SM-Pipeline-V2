@@ -118,4 +118,6 @@ Simple video review Pages deploy: 2026-08-21 ? IG/FB Story, IG Reel, FB Reel, Ti
 
 Pipeline review facts Pages deploy: 2026-08-21 ? Every Pipeline Open Review uses the fact card; leftover Remotion defaults stay hidden. UI 0.6.79-pipeline-review-facts.
 
+Cover thumbs Pages deploy: 2026-08-21 ? New content defaults Thumbnail/cover to Yes so the next music run prepares platform grid covers. UI 0.6.80-cover-thumbs.
+
 

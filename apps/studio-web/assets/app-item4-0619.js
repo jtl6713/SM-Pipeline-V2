@@ -65,7 +65,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.79-pipeline-review-facts";
+  const BUILD_ID = "item4-0.6.80-cover-thumbs";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -2023,7 +2023,7 @@
         platforms: planned.platforms,
         voiceover_mode: $("ezAudioVoiceover")?.value || "No",
         background_music_mode: $("ezAudioMusic")?.value || "No",
-        thumbnail_mode: $("ezThumbnail")?.value || "Use Profile Default",
+        thumbnail_mode: $("ezThumbnail")?.value || "Yes",
         video_duration_seconds: $("ezVideoDuration")?.value || 30,
         video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
         video_clip_count_exact: $("ezVideoClipExact")?.value || "",

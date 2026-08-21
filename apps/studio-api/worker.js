@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.43-calm-bridge-preflight",
+          version: "0.10.44-studio-cover-thumbs",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -120,6 +120,7 @@ export default {
           studio_item4_prepare_soft_fail_v1: true,
           studio_item4_subrequest_cap_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
+          studio_photo_cover_thumbs_v1: true,
           studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
@@ -3334,12 +3335,46 @@ function item4VariantManifest(record) {
   return parsed && typeof parsed === "object" ? parsed : null;
 }
 
+function item4CoverStillUrl(requestRecord, outputRow = null) {
+  const manifest = item4VariantManifest(requestRecord);
+  const assets = Array.isArray(manifest?.assets)
+    ? manifest.assets.slice().sort((a, b) => Number(a?.order || 0) - Number(b?.order || 0))
+    : [];
+  const first = assets[0];
+  if (!first?.variants || typeof first.variants !== "object") return "";
+
+  const platform = String(f(outputRow, "Platform") || "").trim();
+  const outputType = String(f(outputRow, "Output_Type") || "").trim();
+  const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
+  const planItem = (Array.isArray(plan?.items) ? plan.items : []).find((item) =>
+    item4BridgePlanKey(item?.platform, item?.output_type) === item4BridgePlanKey(platform, outputType)
+  );
+  const planRatio = String(planItem?.aspect_ratio || "").trim();
+  const preferred = platform === "YouTube"
+    ? ["16:9", "9:16", "4:5", "1:1"]
+    : [planRatio, "9:16", "4:5", "1:1", "16:9"].filter(Boolean);
+
+  for (const ratio of [...new Set(preferred)]) {
+    const variant = first.variants[ratio];
+    const preview = String(variant?.preview_url || "").trim();
+    const drive = String(variant?.google_drive_url || "").trim();
+    const cdn = studioClipPublicCdnUrl(preview);
+    if (cdn) return cdn;
+    if (preview) return preview;
+    if (drive) return drive;
+  }
+  return "";
+}
+
 function item4RequiredRatios(plan) {
   const ratios = [];
-  for (const item of Array.isArray(plan?.items) ? plan.items : []) {
+  const items = Array.isArray(plan?.items) ? plan.items : [];
+  for (const item of items) {
     const ratio = String(item?.aspect_ratio || "").trim();
     if (ITEM4_RATIO_SPECS[ratio] && !ratios.includes(ratio)) ratios.push(ratio);
   }
+  const needsYoutubeCover = items.some((item) => String(item?.platform || "").trim() === "YouTube");
+  if (needsYoutubeCover && !ratios.includes("16:9")) ratios.push("16:9");
   return ratios;
 }
 
@@ -5720,7 +5755,9 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
   if (ezOrigin) {
     const thumbnailOverride = String(f(outputRow, "Thumbnail_Mode_Override") || "Inherit").trim() || "Inherit";
     const thumbnailMaster = String(f(requestRecord, "Thumbnail_Mode") || "Use Profile Default").trim() || "Use Profile Default";
-    if (thumbnailOverride !== "Yes" && thumbnailMaster !== "Yes") effective.thumbnail_mode = "No";
+    if (thumbnailOverride === "No" || (thumbnailOverride === "Inherit" && thumbnailMaster === "No")) {
+      effective.thumbnail_mode = "No";
+    }
   }
   effective.issues = outputWorkItemIssues(outputRow, route, effective);
   return effective;
@@ -6069,7 +6106,9 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Output_Status: nativePhoto ? "Ready for Review" : "Planned",
     Render_Status: nativePhoto ? "Native Photo Route" : null,
     Studio_Preview_URL: nativePhoto ? (String(clips[0]?.url || "").trim() || null) : null,
-    Thumbnail_URL: nativePhoto ? (studioClipPublicCdnUrl(clips[0]) || String(clips[0]?.url || "").trim() || null) : null,
+    Thumbnail_URL: (nativePhoto || effective.thumbnail_mode === "Yes")
+      ? (item4CoverStillUrl(requestRecord, outputRow) || (nativePhoto ? (studioClipPublicCdnUrl(clips[0]) || String(clips[0]?.url || "").trim() || null) : null))
+      : null,
     Asset_Selection_Status: remotionReady ? "Selected" : null,
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
     Output_Caption: effective.requested_caption || null,
@@ -6245,16 +6284,19 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     || String(f(parent, "Hook") || "").trim()
     || String(f(parent, "Content_Title") || "").trim();
   const voiceoverMode = String(f(requestRecord, "Voiceover_Mode") || f(parent, "Include_Voiceover") || "No").trim();
-  const thumbnailMode = String(f(requestRecord, "Thumbnail_Mode") || f(parent, "Include_Thumbnail") || "No").trim();
+  const thumbnailMode = String(f(requestRecord, "Thumbnail_Mode") || f(parent, "Include_Thumbnail") || "Yes").trim();
   const voiceoverUrl = String(f(parent, "Voiceover_URL") || "").trim();
-  const thumbnailUrl = String(f(parent, "Thumbnail_URL") || "").trim();
+  const coverUrl = String(f(parent, "Thumbnail_URL") || "").trim() || item4CoverStillUrl(requestRecord);
+  const wantThumb = thumbnailMode !== "No";
   return airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
     method: "PATCH",
     body: JSON.stringify({
       fields: {
         Caption: caption || null,
         Include_Voiceover: voiceoverMode === "Yes" && voiceoverUrl ? "Yes" : "No",
-        Include_Thumbnail: thumbnailMode === "Yes" && thumbnailUrl ? "Yes" : "No",
+        Include_Thumbnail: wantThumb ? "Yes" : "No",
+        Thumbnail_URL: wantThumb ? (coverUrl || null) : null,
+        Thumbnail_Status: wantThumb ? (coverUrl ? "Generated" : "Not Started") : "Not Needed",
         Content_Status: "Thumbnail Ready",
       },
       typecast: true,

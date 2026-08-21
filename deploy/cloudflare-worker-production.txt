@@ -12,3 +12,5 @@ Item 4 subrequest-cap Worker deploy: 2026-08-21 ù Production workspace GET no lo
 
 Calm bridge-preflight Worker deploy: 2026-08-21 ó Approve readiness check reads saved plan and variants only. Companion Story copy is a note, not a warning. Worker 0.10.43-calm-bridge-preflight.
 
+Studio cover thumbs Worker deploy: 2026-08-21 ó Photo-video Approve stamps a prepared JPEG cover onto Thumbnail_URL, keeps Include_Thumbnail Yes, and prepares 16:9 for YouTube grid. Worker 0.10.44-studio-cover-thumbs.
+
