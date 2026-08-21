@@ -64,7 +64,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.74-story-teaser-15s";
+  const BUILD_ID = "item4-0.6.75-caption-mode-sync";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -1582,6 +1582,18 @@
     </div>`;
   }
 
+  function syncEzCaptionModeUi(assetId, mode) {
+    const id = String(assetId || "");
+    const next = String(mode || ezCaptionModeFor(id) || "ai");
+    if (id) ezCaptionModes.set(id, next);
+    document.querySelectorAll(`[data-ez-caption-mode="${CSS.escape(id)}"]`).forEach((select) => {
+      if (select.value !== next) select.value = next;
+    });
+    document.querySelectorAll(`[data-ez-asset-caption="${CSS.escape(id)}"]`).forEach((box) => {
+      box.hidden = next !== "manual";
+    });
+  }
+
   function bindEzCaptionInputs(root = document) {
     root.querySelectorAll("[data-ez-caption-mode]").forEach((select) => {
       if (select.dataset.ezCaptionBound) return;
@@ -1589,12 +1601,9 @@
       select.addEventListener("change", () => {
         const id = String(select.dataset.ezCaptionMode || "");
         const mode = String(select.value || "ai");
-        if (id) ezCaptionModes.set(id, mode);
-        const box = document.querySelector(`[data-ez-asset-caption="${CSS.escape(id)}"]`);
-        if (box) {
-          box.hidden = mode !== "manual";
-          if (mode === "manual" && !ezCaptionsLocked()) box.focus();
-        }
+        syncEzCaptionModeUi(id, mode);
+        const box = select.closest(".item4-asset-caption-field")?.querySelector("[data-ez-asset-caption]");
+        if (box && mode === "manual" && !ezCaptionsLocked()) box.focus();
         if (mode === "manual") return;
         queueEzCaptionSave();
       });
@@ -2777,6 +2786,7 @@
       value: activeCaption.value,
       start: activeCaption.selectionStart,
       end: activeCaption.selectionEnd,
+      ratio: String(activeCaption.closest(".item4-variant-thumb")?.querySelector("[data-item4-crop-ratio]")?.dataset.item4CropRatio || ""),
     } : null;
     item4HydrateCrops(status);
     hydrateEzCaptionDrafts(status);
@@ -2839,9 +2849,15 @@
     });
     bindEzCaptionInputs(host);
     if (restoreCaption?.id) {
-      const next = host.querySelector(`[data-ez-asset-caption="${CSS.escape(restoreCaption.id)}"]`);
+      const thumb = restoreCaption.ratio
+        ? host.querySelector(`.item4-crop-frame[data-item4-crop-asset="${CSS.escape(restoreCaption.id)}"][data-item4-crop-ratio="${CSS.escape(restoreCaption.ratio)}"]`)?.closest(".item4-variant-thumb")
+        : null;
+      const next = thumb?.querySelector("[data-ez-asset-caption]")
+        || host.querySelector(`[data-ez-asset-caption="${CSS.escape(restoreCaption.id)}"]`);
+      document.querySelectorAll(`[data-ez-asset-caption="${CSS.escape(restoreCaption.id)}"]`).forEach((box) => {
+        box.value = restoreCaption.value;
+      });
       if (next) {
-        next.value = restoreCaption.value;
         ezCaptionDrafts.set(restoreCaption.id, restoreCaption.value);
         next.focus();
         try { next.setSelectionRange(restoreCaption.start, restoreCaption.end); } catch {}

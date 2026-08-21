@@ -106,3 +106,6 @@ Companion Stories Pages deploy: 2026-08-21 - Keep Instagram and Facebook Story a
 
 Story teaser Pages deploy: 2026-08-21 ? Photo-based Instagram and Facebook Stories render as a 15-second first-photo slow-zoom clip with music. Review waits for that MP4. UI 0.6.74-story-teaser-15s.
 
+Caption mode Pages deploy: 2026-08-21 ? Sync Manual/AI/None caption boxes across every ratio copy of the same photo so 9:16 no longer shows the first (4:5) photo's box. UI 0.6.75-caption-mode-sync.
+
+
