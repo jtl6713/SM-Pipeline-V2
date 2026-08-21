@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.46-variant-plan-ready",
+          version: "0.10.47-approve-plan-crops",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -123,6 +123,7 @@ export default {
           studio_photo_cover_thumbs_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_variant_plan_ready_v1: true,
+          studio_approve_plan_crops_v1: true,
           studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
@@ -3799,10 +3800,11 @@ async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
   return executionIds;
 }
 
-function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
+function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios = null) {
   const queueById = new Map(
     queueRows.map((row) => [String(f(row, "Transfer_ID") || "").trim(), row])
   );
+  const planSet = new Set(Array.isArray(planRatios) && planRatios.length ? planRatios : ratios);
 
   const manifest = {
     schema_version: "item4.variant-manifest.2",
@@ -3812,8 +3814,11 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
     persistent_cloudflare_storage: false,
     source_asset_count: assets.length,
     required_ratios: ratios,
+    plan_ratios: [...planSet],
     target_count: assets.length * ratios.length,
+    plan_target_count: assets.length * planSet.size,
     ready_count: 0,
+    plan_ready_count: 0,
     generated_at: new Date().toISOString(),
     assets: [],
   };
@@ -3864,13 +3869,33 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
         authoritative_storage: "google_drive",
         persistent_cloudflare_storage: false,
       };
-      if (previewStatus === "Ready") manifest.ready_count += 1;
+      if (previewStatus === "Ready") {
+        manifest.ready_count += 1;
+        if (planSet.has(ratio)) manifest.plan_ready_count += 1;
+      }
     }
     manifest.assets.push(row);
   }
 
-  manifest.complete = manifest.ready_count === manifest.target_count;
+  manifest.complete = manifest.plan_target_count > 0 && manifest.plan_ready_count === manifest.plan_target_count;
   return manifest;
+}
+
+function item4VariantManifestPlanComplete(manifest, plan, masterAssets = null) {
+  const planRatios = item4PlanRatios(plan);
+  if (!planRatios.length) return false;
+  const assets = Array.isArray(masterAssets) && masterAssets.length
+    ? masterAssets
+    : (Array.isArray(manifest?.assets) ? manifest.assets : []);
+  if (!assets.length) return false;
+  if (Number(manifest?.plan_target_count || 0) > 0) {
+    return Number(manifest.plan_ready_count || 0) === Number(manifest.plan_target_count);
+  }
+  const rows = Array.isArray(manifest?.assets) ? manifest.assets : [];
+  return assets.every((asset) => {
+    const row = rows.find((item) => String(item?.id || "") === String(asset?.id || ""));
+    return planRatios.every((ratio) => Boolean(row?.variants?.[ratio]));
+  });
 }
 
 async function item4ReconcileVariants(env, recordId, record = null, options = {}) {
@@ -3912,8 +3937,8 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
     ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
   );
   const planPending = pending.filter((row) => planExpectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
-  const manifest = item4BuildDriveManifest(recordId, assets, ratios, scoped);
-  const planManifest = item4BuildDriveManifest(recordId, assets, planRatios, scoped);
+  const manifest = item4BuildDriveManifest(recordId, assets, ratios, scoped, planRatios);
+  const planManifest = item4BuildDriveManifest(recordId, assets, planRatios, scoped, planRatios);
   const mediaAssetIds = [...new Set(
     scoped.filter((row) => item4QueueStatus(row) === "Ready")
       .map(item4QueueMediaAssetId)
@@ -4971,9 +4996,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   );
 
   const variantAssets = Array.isArray(variantManifest?.assets) ? variantManifest.assets : [];
-  const targetCount = Number(variantManifest?.target_count || 0);
-  const readyCount = Number(variantManifest?.ready_count || 0);
-  const manifestComplete = Boolean(variantManifest?.complete) && targetCount > 0 && readyCount === targetCount;
+  const manifestComplete = item4VariantManifestPlanComplete(variantManifest, plan, masterAssets);
 
   addCheck(
     "variant_manifest_complete",
@@ -5912,7 +5935,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     item4BridgePlanKey(item?.platform, item?.output_type) === item4BridgePlanKey(platform, outputType)
   );
   const ratio = String(planItem?.aspect_ratio || "").trim();
-  if (!ratio || !manifest?.complete) return null;
+  if (!ratio || !item4VariantManifestPlanComplete(manifest, plan, item4AssetManifest(requestRecord))) return null;
 
   const sourceRowsAll = (Array.isArray(manifest?.assets) ? manifest.assets : [])
     .slice()

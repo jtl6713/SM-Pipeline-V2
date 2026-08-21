@@ -18,3 +18,5 @@ Slide vs post caption Worker deploy: 2026-08-21 — Per-photo crop labels save on 
 
 Variant plan-ready Worker deploy: 2026-08-21 — 9:16 platform crops mark Prepare Ready; extra 16:9 YouTube covers keep finishing in the background. Stalled Processing rows requeue. Worker 0.10.46-variant-plan-ready.
 
+Approve plan-crops Worker deploy: 2026-08-21 — Approve no longer waits on extra 16:9 YouTube cover stills. 9:16 plan crops are enough. Worker 0.10.47-approve-plan-crops.
+
