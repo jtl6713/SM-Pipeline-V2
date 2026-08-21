@@ -100,10 +100,6 @@ Public publish copy Pages deploy: 2026-08-20 — Approve copy says Instagram, Fa
 
 Manual AI idea generator Pages deploy: 2026-08-20 — Add minimal Ideas-page generator with count 5/10/25/50/100, Highest Quality/Balanced/Quantity, inline progress, View Ideas, and Generate More. UI 0.6.68-idea-generator. Source commit 374bb9343c0484f0ea199c2ea1c94b6c630fbcbd.
 
-Manual AI idea live progress deploy: 2026-08-20 — Show 0 of N immediately and poll linked Idea Candidates every 2 seconds through N of N. UI 0.6.69-idea-progress. Source commit bf217ed8850e396ba3a01e766c15478e7f89484d.
-
-Manual idea count entry Pages deploy: 2026-08-20 — Replace the fixed idea-count dropdown with a whole-number field, minimum 1, maximum 10, default 5, retaining live N-of-N progress. UI 0.6.70-idea-count-entry. Source commit da93f8cdbf54fc16a2c0a7617557ad0c081fbb64.
-
-Caption dedupe Pages deploy: 2026-08-20 — Manual per-photo caption collection deduplicates repeated DOM controls by asset ID so one photo saves one caption. UI 0.6.71-caption-dedupe.
-
 Pipeline countdown Pages deploy: 2026-08-21 — Show a repeating 8-to-1 live countdown, refresh pipeline data at zero, and restart continuously while the Pipeline page is open. UI 0.6.72-pipeline-countdown. Source commit 2817477abcdf806d2d2337ed0d9db99f8be5d961.
+
+Companion Stories Pages deploy: 2026-08-21 - Keep Instagram and Facebook Story as companion 9:16 outputs beside the main Reel/Slideshow; hide leftover Master creative defaults; music preview no longer sticks on the red pick-a-track line. TikTok Story is not a posting destination. UI 0.6.73.

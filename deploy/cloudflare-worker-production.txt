@@ -1,1 +1,3 @@
 make-execution-inspector-ci82-20260821=reviewed-pr-trigger-2026-08-21T11:23:00Z
+
+Companion Stories Worker deploy: 2026-08-21 — Instagram and Facebook Story extras stay in the saved plan as silent 9:16 companions so Approve is not source-bridge blocked. P3 treats Story as Ready for Review. TikTok Story is dropped. Worker 0.10.38-companion-stories.

@@ -100,10 +100,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.37-manual-idea-count-entry",
+          version: "0.10.38-companion-stories",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
+          studio_companion_stories_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
           studio_p3_remotion_handoff_v1: true,
@@ -898,8 +899,8 @@ function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
   const type = String(outputType || "").trim();
   const map = String(mapping || "").trim();
   if (p === "TikTok" && (type === "Multi-Photo" || map === "TikTok Slideshow")) return true;
-  if (p === "Instagram" && type === "Carousel") return true;
-  if (p === "Facebook" && type === "Multi-Image Post") return true;
+  if (p === "Instagram" && (type === "Carousel" || type === "Story")) return true;
+  if (p === "Facebook" && (type === "Multi-Image Post" || type === "Story")) return true;
   return false;
 }
 
@@ -1970,6 +1971,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   for (const item of requested) {
     if (item?.enabled === false) continue;
     const pair = normalizeOutputType(item?.platform, item4CanonicalOutputType(item?.platform, item?.output_type) || item?.output_type);
+    if (item4IsUnsupportedCompanion(pair.platform, pair.output_type)) continue;
     const key = `${pair.platform}::${pair.output_type}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1990,6 +1992,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
     const item = normalized[i];
     const key = `${item.platform}::${item.output_type}`;
     const current = byKey.get(key);
+    const storyFields = item4CompanionStoryFields(item.output_type);
 
     if (current) {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, current.id, {
@@ -2001,6 +2004,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
             Output_Order: i + 1,
             Output_Status: "Draft",
             Updated_At: now,
+            ...storyFields,
           },
           typecast: false,
         }),
@@ -2021,8 +2025,8 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
             Output_Status: "Draft",
             Output_Order: i + 1,
             Enabled: true,
-            Voiceover_Mode_Override: "Inherit",
-            Background_Music_Mode_Override: "Inherit",
+            Voiceover_Mode_Override: storyFields.Voiceover_Mode_Override || "Inherit",
+            Background_Music_Mode_Override: storyFields.Background_Music_Mode_Override || "Inherit",
             Thumbnail_Mode_Override: "Inherit",
             Video_Clip_Count_Mode_Override: "Inherit",
             Carousel_Slide_Count_Mode_Override: "Inherit",
@@ -2184,6 +2188,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Carousel": { mapping_type: "Instagram Carousel", format: "Carousel", rationale: "Optional. Publishes a silent swipeable 4:5 Instagram carousel with no music or voiceover." },
       "Reel": { mapping_type: "Instagram Reel", format: "Vertical Short Video", rationale: "Default. Renders the photos as a 9:16 Instagram Reel with music and voiceover." },
       "Single Image": { mapping_type: "Instagram Feed Post", format: "Feed Post", rationale: "Use one hero photo as a feed post." },
+      "Story": { mapping_type: "Instagram Story", format: "Story", rationale: "Companion 9:16 Story from the same photos. After the main post is live, the Story can link through to that Reel or feed post." },
     }),
   }),
   Facebook: Object.freeze({
@@ -2193,6 +2198,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Default. Renders the same photos as a 9:16 Facebook Reel with music and voiceover." },
       "Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Creates a 9:16 Facebook Reel from shot video, not from a photo set." },
       "Single Image": { mapping_type: "Facebook Post", format: "Feed Post", rationale: "Use one hero photo as a Facebook post." },
+      "Story": { mapping_type: "Facebook Story", format: "Story", rationale: "Companion 9:16 Story from the same photos. After the main post is live, the Story can link through to that Reel or photo post." },
     }),
   }),
   TikTok: Object.freeze({
@@ -3005,6 +3011,43 @@ function item4CanonicalOutputType(platform, outputType) {
   return o;
 }
 
+function item4IsCompanionOutputType(outputType) {
+  return String(outputType || "").trim() === "Story";
+}
+
+function item4IsUnsupportedCompanion(platform, outputType) {
+  return String(platform || "").trim() === "TikTok" && item4IsCompanionOutputType(outputType);
+}
+
+function item4CompanionStoryFields(outputType) {
+  if (!item4IsCompanionOutputType(outputType)) return {};
+  return {
+    Voiceover_Mode_Override: "No",
+    Background_Music_Mode_Override: "No",
+  };
+}
+
+function item4NormalizePlanExtras(payloadExtras, platforms, existingItems = []) {
+  const allowed = new Set((Array.isArray(platforms) ? platforms : []).map((platform) => String(platform || "").trim()).filter(Boolean));
+  const extras = [];
+  const seen = new Set((Array.isArray(existingItems) ? existingItems : []).map((item) => item4BridgePlanKey(item?.platform, item?.output_type)));
+  for (const pair of Array.isArray(payloadExtras) ? payloadExtras : []) {
+    const platform = String(pair?.platform || "").trim();
+    const outputType = item4CanonicalOutputType(platform, pair?.output_type);
+    if (!platform || !ITEM4_PLAN_SPECS[platform]?.options?.[outputType] || item4IsUnsupportedCompanion(platform, outputType)) continue;
+    if (allowed.size && !allowed.has(platform)) continue;
+    const key = item4BridgePlanKey(platform, outputType);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extras.push({
+      platform,
+      output_type: outputType,
+      companion: item4IsCompanionOutputType(outputType),
+    });
+  }
+  return extras;
+}
+
 function item4PlanChoice(platform, requestedOutputType, photoCount) {
   const spec = ITEM4_PLAN_SPECS[platform];
   if (!spec) throw new HttpError(400, `Item 4 does not support ${platform}`);
@@ -3015,20 +3058,29 @@ function item4PlanChoice(platform, requestedOutputType, photoCount) {
   return { output_type: outputType, ...selected, available_output_types: Object.keys(spec.options) };
 }
 
-function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex) {
+function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { companion = false } = {}) {
   const mapping = mappingIndex.get(`${platform}::${chosen.mapping_type}`) || null;
-  const aspectRatio = mapping ? String(f(mapping, "Aspect_Ratio") || "").trim() : null;
+  let aspectRatio = mapping ? String(f(mapping, "Aspect_Ratio") || "").trim() : null;
+  let ratioSource = mapping ? "Platform Output Mappings" : "Missing mapping";
+  if (!aspectRatio && chosen.output_type === "Story") {
+    aspectRatio = "9:16";
+    ratioSource = "Story default 9:16";
+  }
+  const available = companion || chosen.output_type === "Story"
+    ? [chosen.output_type]
+    : (chosen.available_output_types || []).filter((type) => type !== "Story");
   return {
     platform,
     output_type: chosen.output_type,
     mapping_type: chosen.mapping_type,
     format: chosen.format,
     aspect_ratio: aspectRatio,
-    ratio_source: mapping ? "Platform Output Mappings" : "Missing mapping",
+    ratio_source: ratioSource,
     rationale: item4DynamicRationale(chosen.rationale, photoCount),
-    available_output_types: chosen.available_output_types,
+    available_output_types: available,
     source_asset_count: photoCount,
     requires_variant_review: !aspectRatio,
+    companion: Boolean(companion || chosen.output_type === "Story"),
   };
 }
 
@@ -3045,11 +3097,14 @@ async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
     const outputType = item4CanonicalOutputType(pair.platform, pair.output_type)
       || item4DefaultOutputType(pair.platform, photoCount);
     if (!outputType || !ITEM4_PLAN_SPECS[pair.platform]) continue;
+    if (item4IsUnsupportedCompanion(pair.platform, outputType)) continue;
     const key = item4BridgePlanKey(pair.platform, outputType);
     if (items.some((item) => item4BridgePlanKey(item.platform, item.output_type) === key)) continue;
     try {
       const chosen = item4PlanChoice(pair.platform, outputType, photoCount);
-      items.push(item4PlanItemFromChoice(pair.platform, chosen, photoCount, mappingIndex));
+      items.push(item4PlanItemFromChoice(pair.platform, chosen, photoCount, mappingIndex, {
+        companion: item4IsCompanionOutputType(outputType),
+      }));
       changed = true;
     } catch {
       continue;
@@ -3081,6 +3136,35 @@ async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
   return item4UpdateRequestState(env, record.id, fields);
 }
 
+async function item4DisableUnsupportedCompanions(env, requestRecord) {
+  const rows = await outputRowsForProductionRequest(env, requestRecord.id);
+  const now = new Date().toISOString();
+  let changed = false;
+  for (const row of rows) {
+    const platform = String(f(row, "Platform") || "").trim();
+    const outputType = String(f(row, "Output_Type") || "").trim();
+    if (!item4IsUnsupportedCompanion(platform, outputType) || !f(row, "Enabled")) continue;
+    await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Enabled: false, Active: false, Updated_At: now }, typecast: false }),
+    });
+    changed = true;
+  }
+  return changed;
+}
+
+async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
+  await item4DisableUnsupportedCompanions(env, requestRecord);
+  const rows = await outputRowsForProductionRequest(env, requestRecord.id);
+  const enabled = rows
+    .filter((row) => Boolean(f(row, "Enabled")))
+    .map((row) => ({
+      platform: String(f(row, "Platform") || "").trim(),
+      output_type: String(f(row, "Output_Type") || "").trim(),
+    }));
+  return item4ReconcilePlanWithEnabledOutputs(env, requestRecord, enabled);
+}
+
 async function item4SyncPlanOutputs(env, requestRecord, items) {
   const productionRequestId = requestRecord.id;
   const existing = await outputRowsForProductionRequest(env, productionRequestId);
@@ -3092,10 +3176,11 @@ async function item4SyncPlanOutputs(env, requestRecord, items) {
     const key = `${item.platform}::${item.output_type}`;
     wanted.add(key);
     const current = byKey.get(key);
+    const storyFields = item4CompanionStoryFields(item.output_type);
     if (current) {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, current.id, {
         method:"PATCH",
-        body:JSON.stringify({fields:{Enabled:true,Active:true,Output_Order:i+1,Output_Status:"Draft",Carousel_Image_Mode_Override:"Manual Upload",Updated_At:now},typecast:false}),
+        body:JSON.stringify({fields:{Enabled:true,Active:true,Output_Order:i+1,Output_Status:"Draft",Carousel_Image_Mode_Override:"Manual Upload",...storyFields,Updated_At:now},typecast:false}),
       });
     } else {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
@@ -3105,7 +3190,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items) {
           Test_Run_ID:String(f(requestRecord,"Test_Run_ID")||"").trim()||null,
           Organization:arrayOrEmpty(f(requestRecord,"Organization")), Brand:arrayOrEmpty(f(requestRecord,"Brand")), Created_By:arrayOrEmpty(f(requestRecord,"Created_By")),
           Platform:item.platform, Output_Type:item.output_type, Output_Status:"Draft", Output_Order:i+1, Enabled:true, Active:true,
-          Carousel_Image_Mode_Override:"Manual Upload", Created_At:now, Updated_At:now,
+          Carousel_Image_Mode_Override:"Manual Upload", ...storyFields, Created_At:now, Updated_At:now,
         },typecast:false}),
       });
     }
@@ -3133,12 +3218,23 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const items=[];
   let needsReview=false;
   for (const platform of platforms) {
-    const requested = item4CanonicalOutputType(platform, overrides[platform] || "");
+    const requestedRaw = item4CanonicalOutputType(platform, overrides[platform] || "");
+    const requested = item4IsCompanionOutputType(requestedRaw) ? "" : requestedRaw;
     const fallback = item4DefaultOutputType(platform, assets.length);
     if (!requested && !fallback) continue;
     const chosen = item4PlanChoice(platform, requested || fallback, assets.length);
     items.push(item4PlanItemFromChoice(platform, chosen, assets.length, mappingIndex));
     if (!items[items.length - 1].aspect_ratio) needsReview = true;
+  }
+  const extras = item4NormalizePlanExtras(payload.extras, platforms, items);
+  for (const extra of extras) {
+    try {
+      const chosen = item4PlanChoice(extra.platform, extra.output_type, assets.length);
+      items.push(item4PlanItemFromChoice(extra.platform, chosen, assets.length, mappingIndex, { companion: extra.companion }));
+      if (!items[items.length - 1].aspect_ratio) needsReview = true;
+    } catch {
+      continue;
+    }
   }
   const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:assets.length,photo_count_kind:item4PhotoCountKind(assets.length),items};
 
@@ -4760,6 +4856,9 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   const compatibility = productionRequestCompatibilityIssues(requestRecord);
   if (compatibility.length) issues.push(...compatibility);
   warnings.push(...productionRequestAudioPlatformWarnings(requestRecord, routeRows));
+  if (routeRows.some((row) => row.output_type === "Story" && (row.platform === "Instagram" || row.platform === "Facebook"))) {
+    warnings.push("Companion Stories reuse the 9:16 stills. After the matching Reel or photo post is live, the Story publishers can attach that post URL as the Story link.");
+  }
 
   return {
     ready: issues.length === 0,
@@ -4790,6 +4889,7 @@ async function productionRequestBridgePreflightRoute(request, env, url, authoriz
   // Reconcile/sanitize Studio-created Media Asset links before evaluating compatibility.
   await item4ReconcileMasterAuthority(env, recordId, requestRecord);
   await item4ReconcileVariants(env, recordId);
+  await item4ReconcileEnabledPlanOutputs(env, requestRecord);
   const refreshedRequestRecord = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const preflight = await item4SourceToProductionBridgePreflight(env, refreshedRequestRecord);
 
@@ -5922,7 +6022,12 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
     Output_Caption: effective.requested_caption || null,
     Output_Hashtags: String(f(parentContentItem,"Hashtags") || "").trim() || null,
-    Output_Notes: `Studio single-parent output seed. Production Request Output ${String(f(outputRow,"Production_Request_Output_ID")||outputRow.id)} is the per-platform execution authority.`,
+    Output_Notes: [
+      `Studio single-parent output seed. Production Request Output ${String(f(outputRow,"Production_Request_Output_ID")||outputRow.id)} is the per-platform execution authority.`,
+      effective.output_type === "Story"
+        ? `Companion Story. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
+        : "",
+    ].filter(Boolean).join(" "),
     Asset_Need_Status: "Not Needed",
     Production_Request_Output: [outputRow.id],
     Studio_Output_Type: effective.output_type,
@@ -6090,6 +6195,7 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization)
     item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []).length > 0;
 
   if (hasItem4Source) {
+    requestRecord = await item4ReconcileEnabledPlanOutputs(env, requestRecord);
     const bridgePreflight = await item4SourceToProductionBridgePreflight(env, requestRecord, ideaRecord);
     if (!bridgePreflight.ready) {
       throw new HttpError(
@@ -7337,12 +7443,12 @@ async function item4EnsureP3StudioSourceAuthority(env) {
 
 
 
-const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V2";
+const STUDIO_P3_REMOTION_HANDOFF_MARKER = "STUDIO_P3_REMOTION_HANDOFF_V3";
 // Make IML has no or() function. Use | inside if(), matching Make's own repair hint.
 const STUDIO_P3_NATIVE_PHOTO_STATUS_IF =
-  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post"; "Ready for Review"; "In Production")}}';
+  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post" | 102.Studio_Output_Type = "Story"; "Ready for Review"; "In Production")}}';
 const STUDIO_P3_NATIVE_PHOTO_SELECTION_IF =
-  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post"; ""; "Selected")}}';
+  '{{if(102.Studio_Output_Type = "Multi-Photo" | 102.Studio_Output_Type = "Carousel" | 102.Studio_Output_Type = "Multi-Image Post" | 102.Studio_Output_Type = "Story"; ""; "Selected")}}';
 
 function item4P3SingleParentEnrichmentRecord() {
   return {
@@ -7353,7 +7459,7 @@ function item4P3SingleParentEnrichmentRecord() {
     Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
     Output_Status: STUDIO_P3_NATIVE_PHOTO_STATUS_IF,
     Asset_Selection_Status: STUDIO_P3_NATIVE_PHOTO_SELECTION_IF,
-    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render. Enrichment from Content Item {{101.Content_ID}}.`
+    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post / Instagram and Facebook Story stay Ready for Review; Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render. Enrichment from Content Item {{101.Content_ID}}.`
   };
 }
 
@@ -10255,7 +10361,7 @@ async function cadenceHasRenderWork(env) {
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post")))' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' }),
     cadenceQueueHasWork(env, outputTable, { view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",OR({Studio_Output_Type}="Carousel",{Studio_Output_Type}="Story"),{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",OR({Studio_Output_Type}="Multi-Image Post",{Studio_Output_Type}="Story"),{Composition_ID}="",{Selected_Assets_JSON}!="")))' }),
   ]);
   return checks.some(Boolean);
 }

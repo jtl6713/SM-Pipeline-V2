@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.72-pipeline-countdown">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.73-companion-stories">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.72</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.73</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -127,7 +127,7 @@
  <section id="page-content" class="page">
  <div class="page-heading ez-busy-panel" id="productionPageHeading">
  <div><span class="eyebrow">Production</span><h1>Production</h1><p>Open a draft, continue platform prep, or review promoted items.</p></div>
- <button class="secondary-button" data-refresh="content">Refresh</button>
+ <button class="secondary-button" data-refresh="content" title="Reload drafts and promoted items without interrupting photo uploads.">Refresh</button>
  </div>
  <section class="panel ez-intake" id="ezIntake" hidden>
  <div class="panel-heading ez-intake-heading">
@@ -170,9 +170,10 @@
  <div class="item4-upload-zone ez-upload-zone" id="ezUploadZone" tabindex="0" role="button" aria-label="Upload photos for New content">
  <input id="ezMediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" hidden>
  <div class="item4-upload-icon">＋</div>
- <div><strong id="ezUploadTitle">Drop photos here or choose files</strong><span id="ezUploadHint">Photos appear here as soon as you drop them.</span></div>
+ <div> <strong id="ezUploadTitle">Drop photos here or choose files</strong><span id="ezUploadHint">Photos appear here as soon as you drop them. Drive copies can finish in the background.</span></div>
  <button type="button" class="secondary-button" id="ezChooseMedia">Choose photos</button>
  </div>
+ <div class="item4-upload-progress ez-upload-progress" id="ezUploadProgress" hidden></div>
  <div class="ez-photo-strip" id="ezPhotoStrip" hidden></div>
  <div class="ez-option-groups">
  <details class="ez-option-group" id="ezAudioGroup">
@@ -348,7 +349,7 @@
  <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos" hidden>
  <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
  <div class="item4-upload-icon">＋</div>
- <div><strong id="item4UploadTitle">Drop photos here or choose files</strong><span id="item4UploadHint">Up to 20 photos · HEIC/HEIF supported · originals are preserved</span></div>
+ <div> <strong id="item4UploadTitle">Drop photos here or choose files</strong><span id="item4UploadHint">Up to 20 photos · HEIC/HEIF supported · originals are preserved. You can keep working or leave while Drive copies finish.</span></div>
  <button type="button" class="secondary-button" id="item4ChooseMedia">Choose photos</button>
  </div>
  <div class="item4-upload-progress" id="item4UploadProgress" hidden></div>
@@ -388,24 +389,16 @@
 
  <details class="ez-advanced" id="ezAdvancedOptions">
  <summary>Advanced options</summary>
- <p class="ez-advanced-note">The current Production Request form stays here. EZ only sets defaults. Facebook Slideshow Reel is opt-in in this matrix, not an EZ default.</p>
+ <p class="ez-advanced-note">Use this only for extra outputs, structure, audio, wording, or notes. Facebook Slideshow Reel is opt-in here, not an EZ default.</p>
 
- <div class="request-section">
- <div class="request-section-heading"><h3>4. Master creative defaults</h3><p>Configure shared defaults once. Requested platform outputs inherit these values unless overridden.</p></div>
- <div class="request-grid">
- <label class="form-field"><span>Master content type</span>
- <select id="prContentType">
+ <div class="request-section" id="prMasterDefaultsSection" hidden>
+ <select id="prContentType" hidden aria-hidden="true" tabindex="-1">
  <option value="">Choose content type…</option>
  <option>Vertical Short Video</option><option>Story</option><option>Carousel</option>
  <option>Feed Post</option><option>Text Post</option><option>Thread</option>
  <option>Longform Video</option><option>Thumbnail / Promo Still</option>
  <option>Event / Flyer Post</option><option>Photo Set</option>
  </select>
- </label>
- <div class="derived-platform-note">
- <strong>Platforms</strong>
- <span>Derived automatically from the requested platform outputs below.</span>
- </div>
  <fieldset class="platform-fieldset request-platforms legacy-target-platforms" hidden aria-hidden="true">
  <legend>Target platforms</legend>
  <div class="platform-checks">
@@ -417,11 +410,10 @@
  </div>
  </fieldset>
  </div>
- </div>
 
  <div class="request-section" id="prOutputMatrixSection">
  <div class="request-section-heading">
- <h3>5. Requested platform outputs</h3>
+ <h3>4. Requested platform outputs</h3>
  <p>Advanced output selection. The recommended plan above selects these automatically; use this matrix only when you want additional or alternative outputs.</p>
  </div>
  <div class="output-matrix" id="prOutputMatrix">
@@ -634,7 +626,7 @@
  </div>
 
  <div class="request-section">
- <div class="request-section-heading"><h3>6. Structure</h3><p>Use AI, force an exact count, or provide a target range.</p></div>
+ <div class="request-section-heading"><h3>5. Structure</h3><p>Use AI, force an exact count, or provide a target range.</p></div>
  <div class="request-grid">
  <div class="structure-card" id="prVideoStructure">
  <strong>Video</strong>
@@ -661,7 +653,7 @@
  </div>
 
  <div class="request-section">
- <div class="request-section-heading"><h3>7. Audio &amp; cover</h3><p>Same as Start with content: Yes reveals the list so you can pick a voice or track.</p></div>
+ <div class="request-section-heading"><h3>6. Audio &amp; cover</h3><p>Same as Start with content: Yes reveals the list so you can pick a voice or track.</p></div>
  <div class="form-message warning-text" id="prAudioPlatformWarning" hidden>Music and voiceover play on video outputs. They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.</div>
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Voiceover</span>
@@ -697,7 +689,7 @@
  </div>
 
  <div class="request-section">
- <div class="request-section-heading"><h3>8. Text direction</h3><p>Let AI decide, force exact wording, or ask AI to improve your wording.</p></div>
+ <div class="request-section-heading"><h3>7. Text direction</h3><p>Let AI decide, force exact wording, or ask AI to improve your wording.</p></div>
  <div class="text-control">
  <label class="form-field"><span>Title control</span><select id="prTitleMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select></label>
  <label class="form-field grow"><span>Title</span><input id="prRequestedTitle" maxlength="500" placeholder="Optional unless forcing exact wording"></label>
@@ -714,7 +706,7 @@
  </div>
 
  <div class="request-section">
- <div class="request-section-heading"><h3>9. Production notes</h3><p>Any additional direction for assets, pacing, style, or execution.</p></div>
+ <div class="request-section-heading"><h3>8. Production notes</h3><p>Any additional direction for assets, pacing, style, or execution.</p></div>
  <label class="form-field"><textarea id="prProductionNotes" rows="5" maxlength="10000"></textarea></label>
  </div>
  </details>
@@ -733,7 +725,7 @@
  </section>
 
  <section class="panel request-list-panel ez-busy-panel" id="productionRequestListPanel">
- <div class="panel-heading"><div><h2>Production request drafts</h2><p>Saved creative requests waiting for approval/promotion.</p></div></div>
+ <div class="panel-heading"><div><h2>Production request drafts</h2><p>Saved creative requests waiting for approval/promotion. Opening a draft does not interrupt photo uploads.</p></div></div>
  <div id="productionRequestList" class="table-wrap"></div>
  </section>
 
@@ -1004,7 +996,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.72-pipeline-countdown"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.72-pipeline-countdown"></script>
+ <script src="/assets/ez-plan.js?v=0.6.73-companion-stories"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.73-companion-stories"></script>
 </body>
 </html>

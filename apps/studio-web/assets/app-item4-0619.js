@@ -1218,6 +1218,7 @@
     }
     host.innerHTML = cards.join("");
     bindEzCaptionInputs(host);
+    productionDecorateTooltips(host);
   }
 
   function ensureVoiceOption(select, selectedId = DEFAULT_VOICE_ID, selectedName = DEFAULT_VOICE_NAME) {
@@ -1411,7 +1412,7 @@
     );
     const checked = Array.from(document.querySelectorAll("[data-ez-output]:checked"))
       .map((input) => `${input.dataset.platform}::${input.value}`)
-      .filter((key) => !recommended.has(key));
+      .filter((key) => !recommended.has(key) && key !== "TikTok::Story");
     ezPinnedExtraOutputs = checked;
     return checked;
   }
@@ -1654,7 +1655,8 @@
       setEzMessage("Building the platform plan…");
       await buildItem4Plan();
       applyEzExtraOutputs(extras);
-      if (extras.length) await saveProductionRequestOutputs(activeProductionRequest);
+      item4DropUnsupportedStoryChecks(false);
+      if (extras.filter((key) => key !== "TikTok::Story").length) await saveProductionRequestOutputs(activeProductionRequest);
       setEzMessage("Platform plan ready.", "success");
     } catch (error) {
       setEzMessage(error.message || "Could not build the platform plan.", "error-text");
@@ -1719,7 +1721,7 @@
     const requestedPlatforms = selectedRequestPlatforms();
     const recordPlatforms = Array.isArray(record.platforms) ? record.platforms : [];
     const payload = {
-      content_type: ezControlValue("prContentType", record.content_type || "Photo Set"),
+      content_type: syncHiddenMasterContentType() || ezControlValue("prContentType", record.content_type || "Photo Set"),
       platforms: requestedPlatforms.length ? requestedPlatforms : (recordPlatforms.length ? recordPlatforms : item4SelectedPlatforms()),
       voiceover_mode: ezControlValue("prVoiceover", record.voiceover_mode || "No"),
       background_music_mode: ezControlValue("prMusicMode", record.background_music_mode || "No"),
@@ -2084,6 +2086,12 @@
       el.addEventListener("input", queueEzIdeaIdentitySave);
       el.addEventListener("change", queueEzIdeaIdentitySave);
     });
+    $("ezAudioTrack")?.addEventListener("change", () => {
+      if ($("ezAudioTrack")?.value) clearPreviewPickMessage();
+    });
+    $("ezAudioVoice")?.addEventListener("change", () => {
+      if ($("ezAudioVoice")?.value) clearPreviewPickMessage();
+    });
     ["ezAudioVoiceover", "ezAudioMusic", "ezAudioTrack", "ezAudioVoice"].forEach((id) => {
       $(id)?.addEventListener("change", () => {
         stopStudioAudioPreview();
@@ -2105,6 +2113,10 @@
     });
     document.querySelectorAll("[data-ez-output]").forEach((input) => {
       input.addEventListener("change", () => {
+        if (input.dataset.platform === "TikTok" && input.value === "Story" && input.checked) {
+          item4DropUnsupportedStoryChecks(true);
+          return;
+        }
         const match = outputMatrixInputs().find((row) => row.dataset.platform === input.dataset.platform && row.value === input.value);
         if (match) match.checked = input.checked;
         ezExtraOutputSnapshot();
@@ -2115,6 +2127,8 @@
       });
     });
     $("ezAudioVoicePreview")?.addEventListener("click", () => {
+      const voice = phase6SelectedVoice($("ezAudioVoice"));
+      if (voice.id) setEzMessage();
       phase6PreviewSelectedVoice($("ezAudioVoice"), $("ezAudioVoicePreview"), setEzMessage);
     });
     $("ezAudioTrackPreview")?.addEventListener("click", () => {
@@ -2362,7 +2376,11 @@
     }
     if (!host) return;
     hydrateEzCaptionDrafts(status);
-    host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">No master photos uploaded yet.</div>';
+    if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
+      host.innerHTML = '<div class="empty compact-empty">Photos are loading into the system. You can keep working or leave this screen.</div>';
+    } else {
+      host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">No master photos uploaded yet.</div>';
+    }
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
       const card = img.closest("[data-item4-asset]");
       const asset = assets.find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
@@ -2374,16 +2392,21 @@
     });
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
     bindEzCaptionInputs(host);
+    productionDecorateTooltips(host);
   }
 
   function item4PlanCard(item) {
+    const companion = Boolean(item.companion) || item.output_type === "Story";
     const options = Array.isArray(item.available_output_types) ? item.available_output_types : [item.output_type];
     const ratio = item.aspect_ratio || "Needs review";
     const count = Number(item.source_asset_count || item4Workspace?.assets?.length || 0);
     const rationale = String(item.rationale || "").replace(/five photos/ig, `${count} photo${count === 1 ? "" : "s"}`);
+    const formatControl = companion
+      ? `<div class="form-field"><span>Format</span><strong>${escapeHtml(item.output_type)} companion</strong></div>`
+      : `<label class="form-field"><span>Format</span><select data-item4-format="${escapeHtml(item.platform)}">${options.map(x => `<option${x === item.output_type ? " selected" : ""}>${escapeHtml(x)}</option>`).join("")}</select></label>`;
     return `<article class="item4-plan-card" data-item4-plan-platform="${escapeHtml(item.platform)}">
       <div class="item4-plan-card-top"><strong>${escapeHtml(item.platform)}</strong><span class="item4-ratio-chip">${escapeHtml(ratio)}</span></div>
-      <label class="form-field"><span>Format</span><select data-item4-format="${escapeHtml(item.platform)}">${options.map(x => `<option${x === item.output_type ? " selected" : ""}>${escapeHtml(x)}</option>`).join("")}</select></label>
+      ${formatControl}
       <div class="item4-plan-why">${escapeHtml(rationale)}</div>
       <div class="item4-plan-source">${item.aspect_ratio ? `Ratio authority: ${escapeHtml(item.ratio_source || "Platform Output Mappings")}` : "Ratio mapping needs review before production."}</div>
     </article>`;
@@ -2402,7 +2425,11 @@
       return;
     }
     host.innerHTML = plan.items.map(item4PlanCard).join("");
-    item4PlanOverrides = Object.fromEntries(plan.items.map(item => [item.platform, item.output_type]));
+    item4PlanOverrides = Object.fromEntries(
+      plan.items
+        .filter((item) => !item.companion && item.output_type !== "Story")
+        .map((item) => [item.platform, item.output_type])
+    );
     host.querySelectorAll("[data-item4-format]").forEach(select => {
       select.addEventListener("change", () => {
         item4PlanOverrides[select.dataset.item4Format] = select.value;
@@ -2415,6 +2442,7 @@
       });
     });
     if (gate) gate.hidden = status?.plan_status !== "Ready";
+    productionDecorateTooltips(host);
   }
 
   function item4MediaAssetPreviewUrl(recordId) {
@@ -2819,6 +2847,7 @@
         try { next.setSelectionRange(restoreCaption.start, restoreCaption.end); } catch {}
       }
     }
+    productionDecorateTooltips(host);
   }
 
   function stopItem4MasterPolling() {
@@ -2835,22 +2864,67 @@
     ).length;
   }
 
-  function updateItem4MasterProgress(status) {
+  function item4MasterProgressMarkup(status) {
     const assets = Array.isArray(status?.assets) ? status.assets : [];
-    const progress = $("item4UploadProgress");
-    if (!progress || !assets.length) return;
-    progress.hidden = false;
     const ready = item4MasterReadyCount(status);
-    const target = assets.length;
-    const state = String(status?.assets_status || "None");
+    const target = assets.length || ezStagedFiles.length;
+    const state = String(status?.assets_status || (item4Uploading ? "Uploading" : "None"));
+    const loading = item4Uploading || state === "Uploading" || state === "Processing" || (target && state !== "Ready" && state !== "Error");
+    if (!target && !loading) return null;
     if (state === "Ready") {
-      progress.textContent = `${target} photo${target === 1 ? "" : "s"} saved to Google Drive and ready.`;
-    } else if (state === "Error") {
-      progress.textContent = `Master media needs attention (${ready}/${target} ready).`;
-    } else {
-      progress.textContent = `Saving master photos to Google Drive… ${ready}/${target} ready. Previews update automatically.`;
+      return {
+        heal: "ready",
+        title: "Photos are loaded into the system.",
+        body: `${target} photo${target === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
+      };
     }
-    progress.dataset.heal = state === "Ready" ? "ready" : state === "Error" ? "error" : "uploading";
+    if (state === "Error") {
+      return {
+        heal: "error",
+        title: "Master photos need attention.",
+        body: `${ready} of ${target} saved. Your originals remain in Studio. You can keep working or leave this screen.`,
+      };
+    }
+    const count = target ? ` ${ready} of ${target} saved so far.` : "";
+    return {
+      heal: "uploading",
+      title: "Photos are loading into the system.",
+      body: `You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background.${count}`,
+    };
+  }
+
+  function updateItem4MasterProgress(status) {
+    const markup = item4MasterProgressMarkup(status || {});
+    ["item4UploadProgress", "ezUploadProgress"].forEach((id) => {
+      const progress = $(id);
+      if (!progress) return;
+      if (!markup) {
+        progress.hidden = true;
+        progress.innerHTML = "";
+        delete progress.dataset.heal;
+        return;
+      }
+      progress.hidden = false;
+      progress.dataset.heal = markup.heal;
+      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}</span>`;
+    });
+  }
+
+  function mergeItem4WorkspaceStatus(incoming) {
+    const next = incoming && typeof incoming === "object" ? { ...incoming } : {};
+    const incomingAssets = Array.isArray(next.assets) ? next.assets : [];
+    const currentAssets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const uploading = item4Uploading
+      || String(item4Workspace?.assets_status || "") === "Uploading"
+      || String(next.assets_status || "") === "Uploading"
+      || ezStagedFiles.length > 0;
+    if (!incomingAssets.length && currentAssets.length && uploading) {
+      next.assets = currentAssets;
+      if (!next.assets_status || next.assets_status === "None") {
+        next.assets_status = item4Workspace?.assets_status || "Uploading";
+      }
+    }
+    return next;
   }
 
   async function pollItem4MasterAssets() {
@@ -2862,7 +2936,7 @@
       updateItem4MasterProgress(item4Workspace || {});
       if (state === "Ready") {
         stopItem4MasterPolling();
-        setRequestMessage("Master photos are saved to Google Drive and previews are ready. No refresh was required.", "success");
+        setRequestMessage("Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
         await maybeAutoEzPlan();
         return;
       }
@@ -2874,12 +2948,12 @@
       const decision = item4NextStatusPoll(Date.now() - item4MasterPollStartedAt, ITEM4_MASTER_POLL_TIMEOUT_MS, item4MasterExtraWindows);
       if (!decision.continue) {
         stopItem4MasterPolling();
-        setRequestMessage("Master media is still reconciling. Studio will recheck automatically; you do not need to refresh the page or upload again.", "success");
+        setRequestMessage("Photos are still loading into the system. You can keep working or leave this screen; Studio will finish Drive copies in the background.", "success");
         return;
       }
       if (decision.mode === "revalidate") {
         item4MasterExtraWindows = decision.extra_windows_used;
-        setRequestMessage(`Still preparing master previews. Automatic retry ${item4MasterExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}. No refresh needed.`, "success");
+        setRequestMessage(`Photos are still loading into the system. You can keep working or leave. Automatic retry ${item4MasterExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}.`, "success");
         item4MasterPollTimer = setTimeout(pollItem4MasterAssets, decision.delay_ms);
         return;
       }
@@ -3009,7 +3083,9 @@
       if (planPlatforms.length) input.checked = planPlatforms.includes(input.value);
     });
     setProductionRequestControlState(activeProductionRequest);
+    syncHiddenMasterContentType();
     updateItem4MasterProgress(status || {});
+    productionDecorateTooltips($("productionRequestWorkspace") || $("page-content"));
     syncEzPlanChrome();
     if (status?.assets?.length && status?.assets_status === "Uploading" && !item4MasterPollTimer) startItem4MasterPolling();
     if (status?.assets_status === "Ready" || status?.assets_status === "Error") stopItem4MasterPolling();
@@ -3038,7 +3114,7 @@
   async function loadItem4Workspace(record = activeProductionRequest) {
     if (!record?.id) return;
     try {
-      const status = await api(`/api/production-requests/${encodeURIComponent(record.id)}/item4`);
+      const status = mergeItem4WorkspaceStatus(await api(`/api/production-requests/${encodeURIComponent(record.id)}/item4`));
       item4BridgePreflight = null;
       renderItem4Workspace(status);
       syncPrMediaKindUi();
@@ -3116,9 +3192,8 @@
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
     paintItem4LocalPreviews(files, { uploading: true });
-    if (progress) { progress.hidden = false; progress.textContent = `Uploading ${files.length} master photo${files.length === 1 ? "" : "s"}…`; }
     if (button) button.disabled = true;
-    setRequestMessage("Photos are on screen. Studio is saving copies to Google Drive in the background.", "success");
+    setRequestMessage("Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background.", "success");
     try {
       mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
@@ -3127,15 +3202,14 @@
       form.append("metadata", JSON.stringify(metadata));
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, { method: "POST", body: form, timeoutMs: 90000 });
       if (result.record) activeProductionRequest = result.record;
-      if (progress) progress.textContent = `${result.uploaded || files.length} photo${(result.uploaded || files.length) === 1 ? "" : "s"} uploaded. Originals preserved.`;
       await loadItem4Workspace(activeProductionRequest);
       syncPrMediaKindUi();
       if (item4Workspace?.assets_status === "Ready") {
         updateItem4MasterProgress(item4Workspace);
-        setRequestMessage("Master photos uploaded and saved to Google Drive. Previews are ready.", "success");
+        setRequestMessage("Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
       } else {
         updateItem4MasterProgress(item4Workspace || {});
-        setRequestMessage("Master photos uploaded. Studio is saving them to Google Drive and preparing previews; this page updates automatically.", "success");
+        setRequestMessage("Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background.", "success");
         startItem4MasterPolling();
       }
       await maybeAutoEzPlan();
@@ -3143,7 +3217,11 @@
       renderEzPhotoStrip();
     } catch (error) {
       ezAutoPlanAfterUpload = false;
-      if (progress) progress.textContent = `Upload failed: ${error.message}`;
+      if (progress) {
+        progress.hidden = false;
+        progress.dataset.heal = "error";
+        progress.innerHTML = `<strong>Photo upload needs attention.</strong><span>${escapeHtml(error.message)}</span>`;
+      }
       setRequestMessage(error.message, "error-text");
     } finally {
       item4Uploading = false;
@@ -3173,7 +3251,7 @@
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
     setRequestMessage();
     try {
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {method:"POST", body:JSON.stringify({platforms,overrides:item4PlanOverrides}), timeoutMs:30000});
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {method:"POST", body:JSON.stringify({platforms,overrides:item4PlanOverrides,extras:item4EnabledExtraPairs()}), timeoutMs:30000});
       if (result.production_request) activeProductionRequest = result.production_request;
       productionRequestOutputs = Array.isArray(result.outputs) ? result.outputs : productionRequestOutputs;
       populateProductionRequestForm(activeProductionRequest);
@@ -3199,6 +3277,17 @@
     const target = $("productionRequestMessage");
     target.textContent = text;
     target.className = `form-message${type ? ` ${type}` : ""}`;
+  }
+
+  function isPreviewPickMessage(text) {
+    return /pick a music track to preview|pick an elevenlabs voice to preview/i.test(String(text || ""));
+  }
+
+  function clearPreviewPickMessage() {
+    const request = $("productionRequestMessage");
+    if (request && isPreviewPickMessage(request.textContent)) setRequestMessage();
+    const ez = $("ezMessage");
+    if (ez && isPreviewPickMessage(ez.textContent)) setEzMessage();
   }
 
   function syncCountInputs(modeId, containerId) {
@@ -3247,6 +3336,36 @@
       output_type: input.value,
       enabled: true,
     }));
+  }
+
+  function item4EnabledExtraPairs() {
+    item4DropUnsupportedStoryChecks(false);
+    return selectedOutputMatrix()
+      .filter((row) => {
+        if (row.platform === "TikTok" && row.output_type === "Story") return false;
+        const primary = item4PlanOverrides?.[row.platform] || recommendedOutputFor(row.platform);
+        return row.output_type !== primary;
+      })
+      .map((row) => ({ platform: row.platform, output_type: row.output_type }));
+  }
+
+  function item4DropUnsupportedStoryChecks(announce = false) {
+    const inputs = document.querySelectorAll('[data-pr-output][data-platform="TikTok"][value="Story"], [data-ez-output][data-platform="TikTok"][value="Story"]');
+    let dropped = false;
+    inputs.forEach((input) => {
+      if (!input.checked) return;
+      input.checked = false;
+      dropped = true;
+    });
+    if (dropped) {
+      updateOutputMatrixSummary();
+      if (announce) {
+        const text = "TikTok Story is not a posting destination. Instagram and Facebook Stories are companion 9:16 stills that can link to the main post after it is live.";
+        setEzMessage(text);
+        setRequestMessage(text);
+      }
+    }
+    return dropped;
   }
 
   function updateOutputMatrixSummary() {
@@ -3304,7 +3423,7 @@
       const effective = row.effective || {};
       const detail = [
         effective.video_duration_seconds ? `${effective.video_duration_seconds}s` : null,
-        effective.video_clip_count_mode && ["Reel","Story","Video Draft","Short","Standard Video"].includes(row.output_type)
+        effective.video_clip_count_mode && ["Reel","Video Draft","Short","Standard Video"].includes(row.output_type)
           ? `${effective.video_clip_count_mode} clips` : null,
         effective.carousel_slide_count_mode && ["Carousel","Multi-Image Post","Multi-Photo","Slideshow Reel","Slideshow Video"].includes(row.output_type)
           ? `${effective.carousel_slide_count_mode} slides` : null,
@@ -3343,7 +3462,7 @@
   }
 
   function isVideoClipOutput(outputType) {
-    return ["Reel","Story","Video Draft","Short","Standard Video"].includes(outputType);
+    return ["Reel","Video Draft","Short","Standard Video"].includes(outputType);
   }
 
   function isSlideOutput(outputType) {
@@ -3551,6 +3670,7 @@
       outputMatrixInputs().forEach(input => {
         input.checked = selected.has(`${input.dataset.platform}::${input.value}`);
       });
+      item4DropUnsupportedStoryChecks(false);
     } else {
       seedOutputMatrixFromLegacyPlatforms(record);
     }
@@ -3570,6 +3690,7 @@
 
   async function saveProductionRequestOutputs(record = activeProductionRequest) {
     if (!record?.id || !productionOutputMatrixLoaded) return null;
+    item4DropUnsupportedStoryChecks(false);
     let outputs = selectedOutputMatrix();
     if (!outputs.length) {
       const planPlatforms = item4SelectedPlatforms();
@@ -3695,6 +3816,7 @@
     $("productionRequestStatus").className = `badge ${stateClass(record.status || "Draft")}`;
 
     setSelectValue("prContentType", record.content_type, "");
+    syncHiddenMasterContentType();
     document.querySelectorAll('input[name="prPlatform"]').forEach(input => {
       input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
     });
@@ -3848,6 +3970,24 @@
     }
   });
 
+  function inferredMasterContentType() {
+    const count = Number(item4Workspace?.assets?.length || ezStagedFiles.length || 0);
+    return ezPlanApi()?.ezMasterContentType?.(count)
+      || (count <= 1 ? "Feed Post" : "Photo Set");
+  }
+
+  function syncHiddenMasterContentType() {
+    const select = $("prContentType");
+    const inferred = inferredMasterContentType();
+    const current = String(select?.value || "").trim();
+    const fromRecord = String(activeProductionRequest?.content_type || "").trim();
+    const next = (item4Workspace?.assets?.length || ezStagedFiles.length)
+      ? inferred
+      : (current || fromRecord || inferred);
+    if (select && select.value !== next) select.value = next;
+    return next;
+  }
+
   function productionRequestPayload() {
     if (usingEzPlatforms() || ezEntryPath === "content") {
       if ($("prVoiceover")?.value === "Yes" && $("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
@@ -3858,7 +3998,7 @@
     const requestedPlatforms = selectedRequestPlatforms();
     const planPlatforms = item4SelectedPlatforms();
     const payload = {
-      content_type: $("prContentType").value,
+      content_type: syncHiddenMasterContentType(),
       platforms: requestedPlatforms.length ? requestedPlatforms : planPlatforms,
       voiceover_mode: $("prVoiceover").value,
       background_music_mode: $("prMusicMode").value,
@@ -3950,6 +4090,10 @@
 
   outputMatrixInputs().forEach(input => {
     input.addEventListener("change", () => {
+      if (input.dataset.platform === "TikTok" && input.value === "Story" && input.checked) {
+        item4DropUnsupportedStoryChecks(true);
+        return;
+      }
       syncLegacyPlatformsFromOutputMatrix();
       updateOutputMatrixSummary();
     });
@@ -4001,20 +4145,28 @@
   ["prVoiceover", "prVoice", "prMusicMode", "prMusicAsset"].forEach((id) => {
     $(id)?.addEventListener("change", () => {
       stopStudioAudioPreview();
+      if ((id === "prMusicAsset" && $("prMusicAsset")?.value) || (id === "prVoice" && $("prVoice")?.value)) {
+        clearPreviewPickMessage();
+      }
       syncRequestAudioUi({ fromEz: false });
       if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
     });
   });
   $("prVoicePreview")?.addEventListener("click", () => {
+    const voice = phase6SelectedVoice($("prVoice"));
+    if (voice.id) setRequestMessage();
     phase6PreviewSelectedVoice($("prVoice"), $("prVoicePreview"), setRequestMessage);
   });
   $("prMusicPreview")?.addEventListener("click", () => {
-    const option = $("prMusicAsset")?.selectedOptions?.[0];
-    const preview = option?.dataset?.preview || ($("prMusicAsset")?.value ? `/api/music/${$("prMusicAsset").value}/preview` : "");
-    if (!preview) {
+    const select = $("prMusicAsset");
+    const id = String(select?.value || "").trim();
+    if (!id) {
       setRequestMessage("Pick a music track to preview.", "error-text");
       return;
     }
+    const option = select?.selectedOptions?.[0];
+    const preview = String(option?.dataset?.preview || "").trim() || `${apiBase}/api/music/${encodeURIComponent(id)}/preview`;
+    setRequestMessage();
     playStudioAudioPreview(preview, $("prMusicPreview"), setRequestMessage, option?.textContent?.trim() || "track");
   });
 
@@ -4175,6 +4327,7 @@
           });
         });
       });
+      productionDecorateTooltips(target);
     } catch (e) {
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
     }
@@ -4674,6 +4827,99 @@
     "Not ready yet": "This output does not have a rendered file or photo package to review yet.",
   };
 
+  const PRODUCTION_CONTROL_HELP = {
+    ezIdeaTitle: "Name this content. You can change it later — dropping photos does not lock the title.",
+    ezIdeaSummary: "Optional description for the idea. Helps the pipeline write captions and scripts.",
+    ezAudioVoiceover: "Turn spoken narration on or off. Voiceover is used on video outputs, not native still carousels.",
+    ezAudioVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
+    ezAudioMusic: "Turn background music on or off. Music is used on video outputs, not native still carousels.",
+    ezAudioTrack: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
+    ezTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
+    ezRequestedTitle: "The on-post title. Separate from the idea name at the top of this screen.",
+    ezScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
+    ezRequestedScript: "Paste spoken words here only if you want to control the voiceover. Leave blank to let AI write it.",
+    ezThumbnail: "Whether Studio should generate a thumbnail or cover still for video outputs.",
+    ezVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
+    ezVideoDuration: "Requested video length in seconds for video outputs.",
+    ezVideoClipMode: "How many clips Studio should aim for in a video. AI decides unless you force a count or range.",
+    ezVideoClipExact: "Exact number of clips to use in the video.",
+    ezVideoClipMin: "Minimum clip count when using a target range.",
+    ezVideoClipMax: "Maximum clip count when using a target range.",
+    ezCarouselSlideMode: "How many slides Studio should aim for in a carousel or photo sequence.",
+    ezCarouselSlideExact: "Exact number of slides in the carousel.",
+    ezCarouselSlideMin: "Minimum slide count when using a target range.",
+    ezCarouselSlideMax: "Maximum slide count when using a target range.",
+    ezCarouselImageMode: "Use the photos you uploaded, or let Make generate additional images.",
+    ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
+    prVideoDuration: "Requested video length in seconds for video outputs.",
+    prVideoClipMode: "How many clips Studio should aim for in a video.",
+    prVideoClipExact: "Exact number of clips to use in the video.",
+    prVideoClipMin: "Minimum clip count when using a target range.",
+    prVideoClipMax: "Maximum clip count when using a target range.",
+    prCarouselSlideMode: "How many slides Studio should aim for in a carousel or photo sequence.",
+    prCarouselSlideExact: "Exact number of slides in the carousel.",
+    prCarouselSlideMin: "Minimum slide count when using a target range.",
+    prCarouselSlideMax: "Maximum slide count when using a target range.",
+    prCarouselImageMode: "Use uploaded photos, or let Make generate additional images.",
+    prVoiceover: "Turn spoken narration on or off for video outputs. Native stills ignore this.",
+    prMusicMode: "Turn background music on or off for video outputs. Native stills ignore this.",
+    prVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
+    prMusicAsset: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
+    prThumbnail: "Whether Studio should generate a thumbnail or cover still for video outputs.",
+    prVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
+    prTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
+    prRequestedTitle: "The on-post title. Separate from the idea name.",
+    prCaptionMode: "AI decides writes captions. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
+    prRequestedCaption: "Shared caption direction for requested outputs unless a photo has its own caption.",
+    prScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
+    prRequestedScript: "Paste spoken words here only if you want to control the voiceover.",
+    prProductionNotes: "Anything extra for pacing, style, or execution.",
+    prOverrideVoiceover: "Override voiceover for this one output, or inherit the master setting.",
+    prOverrideMusicMode: "Override background music for this one output, or inherit the master setting.",
+    prOverrideThumbnail: "Override thumbnail / cover for this one output, or inherit the master setting.",
+    prOverrideMusicAsset: "Override the music track for this one output, or inherit the master track.",
+    prOverrideDuration: "Override duration for this one output. Leave blank to inherit.",
+    prOverrideVoiceoverTail: "Override extra seconds after narration for this one output.",
+    prOverrideClipMode: "Override video clip count for this one output, or inherit the master setting.",
+    prOverridePublishMode: "Override whether this output auto-publishes, waits for review, or stays unpublished.",
+    prOverrideScheduledAt: "Optional publish time for this one output.",
+    prOverrideNotes: "Notes that apply only to this output, not the whole request.",
+  };
+
+  const PRODUCTION_BUTTON_HELP = {
+    ezStartOver: "Return to the Production home without deleting photos that already uploaded.",
+    ezChooseMedia: "Open a file picker. Dropping photos onto the dashed box does the same thing.",
+    ezContinue: "Save these photos into a production request and continue to platform planning.",
+    ezAudioVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
+    ezAudioTrackPreview: "Play a preview of the selected music track.",
+    item4ChooseMedia: "Open a file picker for master photos. You can also drop files onto the dashed box.",
+    item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
+    item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. Drag each photo to keep the important part in frame first.",
+    closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
+    saveProductionRequest: "Save the current draft without promoting it into the pipeline.",
+    syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",
+    promoteProductionRequest: "Approve this request and send it into the production pipeline. Publishing stays a later step.",
+    prVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
+    prMusicPreview: "Play a preview of the selected music track.",
+    savePrOverride: "Save overrides for this one platform output without changing the master defaults.",
+    closePrOverride: "Close the per-output override editor without promoting the request.",
+  };
+
+  const PRODUCTION_TARGET_HELP = {
+    ezUploadZone: "Drop photos here. They appear immediately. Drive copies can finish in the background — you can keep working or leave this screen.",
+    item4UploadZone: "Drop master photos here. They appear immediately. You can keep working or leave while Google Drive copies finish.",
+    ezUploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
+    item4UploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
+    item4AssetStatus: "Shows whether master photos are still loading into Drive or already saved.",
+    item4PlanStatus: "Shows whether Studio has recommended a format for each selected platform.",
+    item4VariantStatus: "Shows whether cropped platform versions have been prepared.",
+    productionRequestStatus: "Draft means you can still edit. Promoted means it has entered the pipeline.",
+    item4PlanHint: "Build the plan after photos are on screen. You do not have to wait for Drive copies to finish.",
+    item4VariantHint: "Prepare crops after the platform plan is ready. Drag each photo to keep the important part in frame.",
+    item4ProductionGate: "The plan is saved. Studio still checks the source-to-production bridge before promote.",
+    productionPromotionCompatibility: "Promote stays locked until master photos, the platform plan, and required crops are ready.",
+  };
+
   let phase6TooltipPopover = null;
   let phase6TooltipActive = null;
 
@@ -4737,6 +4983,97 @@
     target.addEventListener("mouseleave", phase6HideTooltip);
     target.addEventListener("focus", () => phase6ShowTooltip(target, text));
     target.addEventListener("blur", phase6HideTooltip);
+  }
+
+  function productionDecorateTooltips(root) {
+    const scope = root && root.querySelectorAll ? root : $("page-content");
+    if (!scope?.querySelectorAll) return;
+    const page = $("page-content");
+    const searchRoot = scope === document || (page && page.contains(scope)) ? scope : page;
+    if (!searchRoot?.querySelectorAll) return;
+
+    Object.entries(PRODUCTION_CONTROL_HELP).forEach(([id, text]) => {
+      const control = searchRoot.id === id ? searchRoot : searchRoot.querySelector?.(`#${id}`) || $(id);
+      if (!control || (searchRoot !== document && searchRoot !== page && !searchRoot.contains(control) && control !== searchRoot)) return;
+      if (control.closest?.("#creativeEditorPanel")) return;
+      phase6AttachHelpDot(control.closest("label"), text);
+      phase6BindTooltipTarget(control, text);
+    });
+
+    Object.entries(PRODUCTION_BUTTON_HELP).forEach(([id, text]) => {
+      const button = searchRoot.id === id ? searchRoot : searchRoot.querySelector?.(`#${id}`) || $(id);
+      if (!button || button.closest?.("#creativeEditorPanel")) return;
+      phase6BindTooltipTarget(button, text);
+    });
+
+    Object.entries(PRODUCTION_TARGET_HELP).forEach(([id, text]) => {
+      const target = searchRoot.id === id ? searchRoot : searchRoot.querySelector?.(`#${id}`) || $(id);
+      if (!target || target.closest?.("#creativeEditorPanel")) return;
+      phase6BindTooltipTarget(target, text);
+    });
+
+    searchRoot.querySelectorAll?.("[data-pr-id]").forEach((button) => {
+      phase6BindTooltipTarget(button, "Open this draft to continue photos, platform plan, crops, and promote.");
+    });
+    searchRoot.querySelectorAll?.("[data-refresh='content']").forEach((button) => {
+      phase6BindTooltipTarget(button, "Reload drafts and promoted items. Photo uploads keep running in the background.");
+    });
+    searchRoot.querySelectorAll?.("[data-ez-input='single-photo'], [data-pr-input='single-photo']").forEach((card) => {
+      phase6BindTooltipTarget(card, "One photo. Studio plans Instagram 4:5, Facebook image, and TikTok photo draft from that original.");
+    });
+    searchRoot.querySelectorAll?.("[data-ez-input='multiple-photos'], [data-pr-input='multiple-photos']").forEach((card) => {
+      phase6BindTooltipTarget(card, "A set of photos. Studio plans carousel, album, TikTok photo draft, or YouTube Short from the same originals.");
+    });
+    searchRoot.querySelectorAll?.("[data-item4-platform], [data-ez-platform]").forEach((input) => {
+      const label = input.closest("label") || input;
+      phase6BindTooltipTarget(label, `Include ${input.value} in the recommended platform plan. You can change this before you promote.`);
+    });
+    searchRoot.querySelectorAll?.("[data-pr-output], [data-ez-output]").forEach((input) => {
+      const label = input.closest("label") || input;
+      const platform = input.dataset.platform || "";
+      const type = input.value;
+      const text = type === "Story" && platform === "TikTok"
+        ? "TikTok’s posting API does not have a separate Stories destination. Leave this off; the Video Draft is the TikTok post."
+        : type === "Story"
+          ? `Add a companion 9:16 ${platform} Story from the same photos. After the main ${platform} post is live, the Story can link through to it.`
+          : `Add ${platform} ${type} as an extra output beyond the recommended plan.`.replace(/\s+/g, " ").trim();
+      phase6BindTooltipTarget(label, text);
+    });
+    searchRoot.querySelectorAll?.("[data-remove-item4-asset]").forEach((button) => {
+      phase6BindTooltipTarget(button, "Remove this photo from the master set. Other originals stay in Studio.");
+    });
+    searchRoot.querySelectorAll?.("[data-ez-caption-mode]").forEach((select) => {
+      phase6BindTooltipTarget(select, "AI writes a caption, Manual uses your wording, None skips a caption for this photo.");
+    });
+    searchRoot.querySelectorAll?.("[data-ez-asset-caption]").forEach((box) => {
+      phase6BindTooltipTarget(box, "Write the caption for this photo. Saved with the production request.");
+    });
+    searchRoot.querySelectorAll?.("[data-item4-format]").forEach((select) => {
+      phase6BindTooltipTarget(select, "Override the recommended format for this platform. Native stills stay photos; video formats use the render path.");
+    });
+    searchRoot.querySelectorAll?.(".item4-crop-frame").forEach((frame) => {
+      phase6BindTooltipTarget(frame, "Drag to keep the important part in the frame. Scroll or use + / − to zoom. The original photo stays uncropped.");
+    });
+    searchRoot.querySelectorAll?.("[data-item4-crop-zoom]").forEach((button) => {
+      phase6BindTooltipTarget(button, Number(button.dataset.dir) < 0 ? "Zoom out so more of the photo stays in frame." : "Zoom in on the part of the photo you want to keep.");
+    });
+    searchRoot.querySelectorAll?.("[data-item4-crop-reset]").forEach((button) => {
+      phase6BindTooltipTarget(button, "Reset this crop to the default center framing.");
+    });
+    searchRoot.querySelectorAll?.(".ez-option-group > summary, #ezAdvancedOptions > summary").forEach((summary) => {
+      const map = {
+        "Audio / Voiceover": "Optional. Voiceover and music apply to video outputs, not native still carousels.",
+        "Post title": "Optional on-post title. Separate from the idea name at the top.",
+        Script: "Optional spoken-script control. Leave closed to let AI write narration when needed.",
+        Cover: "Optional thumbnail / cover still and extra seconds after voiceover.",
+        Structure: "Optional clip and slide counts. Closed means AI decides.",
+        Notes: "Optional production notes for pacing, style, or execution.",
+        Outputs: "Optional extra formats. Defaults already follow your platforms and photos.",
+        "Advanced options": "Extra outputs, structure, audio, wording, and notes. Closed means the photo plan and EZ defaults already apply.",
+      };
+      const text = map[summary.textContent.trim()];
+      if (text) phase6BindTooltipTarget(summary, text);
+    });
   }
 
   function phase6AttachHelpDot(label, text) {
@@ -5805,6 +6142,7 @@
   });
 
   phase6DecorateTooltips(document);
+  productionDecorateTooltips($("page-content"));
   window.addEventListener("scroll", phase6HideTooltip, true);
   window.addEventListener("resize", phase6HideTooltip);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") phase6HideTooltip(); });
