@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.41-story-teaser-15s",
+          version: "0.10.42-item4-subrequest-cap",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -118,6 +118,7 @@ export default {
           studio_cdn_publish_handoff_v1: true,
           studio_photo_audio_defaults_v1: true,
           studio_item4_prepare_soft_fail_v1: true,
+          studio_item4_subrequest_cap_v1: true,
           studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
@@ -404,9 +405,7 @@ export default {
       }
 
       if (isItem4StatusRoute) {
-        const response = await getItem4WorkspaceStatus(request, env, url, authorization);
-        cadenceScheduleSync(ctx, env);
-        return response;
+        return getItem4WorkspaceStatus(request, env, url, authorization);
       }
 
       if (isProductionRequestOutputsRoute) {
@@ -1978,7 +1977,7 @@ function assertEditableProductionRequest(parent) {
 async function listProductionRequestOutputs(request, env, url, authorization) {
   // v0.10.6: this endpoint is part of every Production workspace data refresh.
   // Force the P3 single-parent hardener here so UI refresh semantics cannot bypass it.
-  try { await item4EnsureMakeHardeningFromWorkspaceOpen(env, { force: true }); } catch (error) {
+  try { await item4EnsureMakeHardeningFromWorkspaceOpen(env); } catch (error) {
     console.warn("Item 4 Make hardening deferred from Production Request Outputs list", error);
   }
   const productionRequestId = productionRequestIdFromOutputsPath(url);
@@ -3752,7 +3751,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows) {
   return manifest;
 }
 
-async function item4ReconcileVariants(env, recordId, record = null) {
+async function item4ReconcileVariants(env, recordId, record = null, options = {}) {
   record = record || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
@@ -3790,8 +3789,10 @@ async function item4ReconcileVariants(env, recordId, record = null) {
       .filter(Boolean)
   )];
 
-  for (const mediaAssetId of mediaAssetIds) {
-    await item4SanitizeStudioImageMediaAsset(env, mediaAssetId);
+  if (!options.skipSanitize) {
+    for (const mediaAssetId of mediaAssetIds) {
+      await item4SanitizeStudioImageMediaAsset(env, mediaAssetId);
+    }
   }
 
   const now = new Date().toISOString();
@@ -4095,7 +4096,7 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
   // itself destructive or unavailable.
   let makeHardening;
   try {
-    makeHardening = await item4EnsureMakeHardeningFromWorkspaceOpen(env, { force: true });
+    makeHardening = await item4EnsureMakeHardeningFromWorkspaceOpen(env);
   } catch (error) {
     makeHardening = { p3: null, r2: { ok: false, deferred: true, error: error instanceof Error ? error.message : String(error) }, stale_recovery: null };
     console.warn("Item 4 Make hardening deferred from workspace status", error);
@@ -4137,7 +4138,7 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
   let variantResume = { attempted: false, reason: "not-needed", execution_ids: [] };
   if (plan?.items?.length) {
     try {
-      let reconciled = await item4ReconcileVariants(env, recordId, record);
+      let reconciled = await item4ReconcileVariants(env, recordId, record, { skipSanitize: true });
       record = reconciled.record;
       if (reconciled.status === "Preparing" && Array.isArray(reconciled.queue_rows) && reconciled.queue_rows.length) {
         variantResume = await item4ResumePendingVariants(env, recordId, record);
@@ -4158,46 +4159,15 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
   try {
     const pendingPreviews = await item4PreviewPendingRows(env, recordId);
     previewPendingCount = pendingPreviews.length;
-    if (pendingPreviews.length) {
-      await item4DrainPreviewCacheWorker(
-        env,
-        recordId,
-        Math.min(40, Math.max(6, pendingPreviews.length + 4))
-      );
-      const masterPreviewReconcile = await item4ReconcileMasterAuthority(env, recordId);
-      record = masterPreviewReconcile.record;
-      assets = masterPreviewReconcile.assets.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-      if (plan?.items?.length) {
-        const variantPreviewReconcile = await item4ReconcileVariants(env, recordId, record);
-        record = variantPreviewReconcile.record;
-      }
-    }
   } catch (error) {
-    console.warn("Item 4 browser preview cache drain failed without affecting production state", error);
+    console.warn("Item 4 browser preview pending count failed without affecting production state", error);
   }
 
   const rows = await outputRowsForProductionRequest(env, recordId);
-  const outputs = [];
-  for (const row of rows.filter((r) => Boolean(f(r, "Enabled")))) {
-    const poLinks = arrayOrEmpty(f(row, "Platform_Output"));
-    let platformOutput = null;
-    if (poLinks.length) {
-      try { platformOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, poLinks[0]); } catch {}
-    }
-    outputs.push({
-      ...mapProductionRequestOutput(row, record),
-      platform_output: platformOutput ? {
-        id: platformOutput.id,
-        output_id: f(platformOutput, "Output_ID"),
-        output_status: f(platformOutput, "Output_Status"),
-        render_status: f(platformOutput, "Render_Status"),
-        review_status: f(platformOutput, "Review_Status"),
-        publish_status: f(platformOutput, "Publish_Status"),
-        do_not_publish: Boolean(f(platformOutput, "Do_Not_Publish")),
-        output_url: f(platformOutput, "Output_URL") || f(platformOutput, "Final_File_URL") || null,
-      } : null,
-    });
-  }
+  const outputs = rows.filter((r) => Boolean(f(r, "Enabled"))).map((row) => ({
+    ...mapProductionRequestOutput(row, record),
+    platform_output: null,
+  }));
 
   const assetsStatus = f(record, "Studio_Master_Asset_Status") || "None";
   const variantStatus = f(record, "Studio_Variant_Status") || "None";
@@ -4228,7 +4198,7 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
     variant_progress: manifest ? { ready: Number(manifest.ready_count || 0), target: Number(manifest.target_count || 0) } : null,
     variant_resume: variantResume,
     make_hardening: makeHardening,
-    make_hardening_worker_build: "0.10.4",
+    make_hardening_worker_build: "0.10.42",
     master_authority_resume: masterAuthorityResume,
     preview_self_heal: {
       schema: "upload-preview-self-heal-v1",
@@ -4681,7 +4651,7 @@ function mapProductionRequestSummary(record) {
 
 async function listProductionRequests(request, env, url, authorization) {
   // v0.10.6: collection refresh is a guaranteed hardening entry point.
-  try { await item4EnsureMakeHardeningFromWorkspaceOpen(env, { force: true }); } catch (error) {
+  try { await item4EnsureMakeHardeningFromWorkspaceOpen(env); } catch (error) {
     console.warn("Item 4 Make hardening deferred from Production Request list", error);
   }
   const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: clampLimit(url, 100, 100) });
@@ -7281,7 +7251,7 @@ async function item4EnsureMakeHardeningFromWorkspaceOpen(env, options = {}) {
   // a Worker deployment. This prevents an older in-memory result from suppressing
   // a newly deployed repair contract.
   const force = options?.force === true;
-  const buildKey = "0.10.31";
+  const buildKey = "0.10.42";
   const now = Date.now();
   if (!force && item4MakeHardeningOpenCache.promise) return item4MakeHardeningOpenCache.promise;
   if (!force && item4MakeHardeningOpenCache.result && item4MakeHardeningOpenCache.buildKey === buildKey && now - item4MakeHardeningOpenCache.at < 120000) {
@@ -8221,7 +8191,7 @@ async function mediaAssetImagePreview(request, env, url, authorization) {
       await item4DrainPreviewCacheWorker(
         env,
         String(f(queueRow, "Production_Request_Record_ID") || "").trim(),
-        30
+        2
       );
       queueRow = await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, queueRow.id);
       previewUrl = String(f(queueRow, "Preview_URL") || "").trim();

@@ -8,3 +8,5 @@ Studio P3 handoff Worker deploy: 2026-08-21 — Approve & Promote stamps the paren
 
 Story teaser Worker deploy: 2026-08-21 — Photo-based Instagram and Facebook Stories seed as Remotion 15-second first-photo slow-zoom clips with music and no voiceover. P3 no longer treats Story as a native still. Worker 0.10.41-story-teaser-15s.
 
+Item 4 subrequest-cap Worker deploy: 2026-08-21 — Production workspace GET no longer force-hardens Make, drains SMV1 previews, or cadence-syncs in the same invocation. Worker 0.10.42-item4-subrequest-cap.
+
