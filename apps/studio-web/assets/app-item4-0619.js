@@ -56,6 +56,7 @@
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
   let pipelineOutputs = [];
+  let pipelineSort = { key: "", dir: "asc" };
   let activeCreativeOutputId = null;
   let activeCreativeOutput = null;
   let creativeSlides = [];
@@ -68,7 +69,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.86-keep-ez-modes";
+  const BUILD_ID = "item4-0.6.87-pipeline-sort";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -6308,10 +6309,58 @@
   }
 
 
+  function pipelineSortValue(record, key) {
+    if (key === "output") return String(record.output_id || "");
+    if (key === "platform") return String(record.platform || "");
+    if (key === "type") return `${record.platform_output_type || record.format || ""} ${record.aspect_ratio || ""}`.trim();
+    if (key === "state") return String(record.studio_state || "");
+    if (key === "render") return String(record.render_status || "");
+    if (key === "review") return String(record.review_status || "");
+    if (key === "publish") return String(record.platform_publish_status || record.publish_status || "");
+    if (key === "progress") {
+      const pct = pipelineDisplayPercent(record);
+      return Number.isFinite(Number(pct)) ? Number(pct) : -1;
+    }
+    return "";
+  }
+
+  function comparePipelineRows(a, b, key) {
+    if (key === "output") {
+      const na = Number(String(a.output_id || "").replace(/\D/g, ""));
+      const nb = Number(String(b.output_id || "").replace(/\D/g, ""));
+      if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+    }
+    if (key === "progress") return pipelineSortValue(a, key) - pipelineSortValue(b, key);
+    return String(pipelineSortValue(a, key)).localeCompare(String(pipelineSortValue(b, key)), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+
+  function sortedPipelineRecords(records) {
+    if (!pipelineSort.key) return records;
+    const dir = pipelineSort.dir === "desc" ? -1 : 1;
+    return [...records].sort((a, b) => {
+      const primary = comparePipelineRows(a, b, pipelineSort.key);
+      if (primary) return dir * primary;
+      return dir * comparePipelineRows(a, b, "output");
+    });
+  }
+
+  function pipelineSortHeader(key, label) {
+    const active = pipelineSort.key === key;
+    const arrow = !active ? "↕" : pipelineSort.dir === "asc" ? "↑" : "↓";
+    return `<th><button type="button" class="pipeline-sort${active ? " is-active" : ""}" data-pipeline-sort="${escapeHtml(key)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span aria-hidden="true">${arrow}</span></button></th>`;
+  }
+
   function renderOutputsTable(target, records) {
     if (!records.length) return target.innerHTML = '<div class="empty">No Platform Output records were returned.</div>';
     const isPipeline = target?.id === "outputsList";
-    target.innerHTML = `<table class="data-table"><thead><tr><th>Output</th><th>Platform</th>${isPipeline ? "<th>Type / ratio</th>" : ""}<th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th>${isPipeline ? "<th>Creative</th>" : ""}</tr></thead><tbody>${records.map((r) => {
+    const rows = isPipeline ? sortedPipelineRecords(records) : records;
+    const head = isPipeline
+      ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
+      : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
+    target.innerHTML = `<table class="data-table"><thead>${head}</thead><tbody>${rows.map((r) => {
       const pct = pipelineDisplayPercent(r);
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
@@ -6321,6 +6370,19 @@
       return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(r.studio_state)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
     }).join("")}</tbody></table>`;
     if (isPipeline) {
+      target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const key = button.dataset.pipelineSort;
+          if (pipelineSort.key === key) {
+            pipelineSort.dir = pipelineSort.dir === "asc" ? "desc" : "asc";
+          } else {
+            pipelineSort.key = key;
+            pipelineSort.dir = key === "output" || key === "progress" ? "desc" : "asc";
+          }
+          renderOutputsTable(target, pipelineOutputs);
+        });
+      });
       target.querySelectorAll("[data-creative-output-id]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();

@@ -132,4 +132,6 @@ Keep Advanced config Pages deploy: 2026-08-21 ? Saving no longer copies empty EZ
 
 Keep EZ modes Pages deploy: 2026-08-21 - Opening a request copies saved title/caption/tail into EZ first. Autosave no longer writes EZ "AI decides" / 2-second defaults over Force exact, AI improve, or a 4-second VO tail. UI 0.6.86-keep-ez-modes.
 
+Pipeline sort Pages deploy: 2026-08-21 - Platform Pipeline column headings sort Output, Platform, Type/ratio, Studio state, Render, Review, Publish, and Progress. Live refresh keeps the current sort. UI 0.6.87-pipeline-sort.
+
 
