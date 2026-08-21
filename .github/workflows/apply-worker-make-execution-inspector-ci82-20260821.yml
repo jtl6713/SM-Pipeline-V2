@@ -1,0 +1,47 @@
+name: Apply Worker Make Execution Inspector
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/apply-worker-make-execution-inspector-ci82-20260821.txt
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-make-execution-inspector
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate bounded read-only inspector
+        shell: bash
+        run: |
+          set -euo pipefail
+          python repair/tools/patch_worker_make_execution_inspector.py
+          cp apps/studio-api/worker.js /tmp/worker.mjs
+          node --check /tmp/worker.mjs
+          grep -q 'repair_make_execution_inspector_v1: true' apps/studio-api/worker.js
+          grep -q 'action === "inspect_make_execution"' apps/studio-api/worker.js
+          grep -q 'INSPECT-MAKE-EXECUTION-V1' apps/studio-api/worker.js
+
+      - name: Commit source and deployment/capture triggers
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'make-execution-inspector-ci82-20260821=%s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" > deploy/cloudflare-worker-production.txt
+          printf 'capture-execution=ff70e512c4ce4d02b677ec9264f7ec2c\n' > deploy/capture-make-execution-ci82-20260821.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apps/studio-api/worker.js deploy/cloudflare-worker-production.txt deploy/capture-make-execution-ci82-20260821.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'Add bounded read-only Make execution inspector'
+          git push origin HEAD:main
