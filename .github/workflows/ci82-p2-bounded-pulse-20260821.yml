@@ -1,0 +1,128 @@
+name: CI82 P2 Bounded Pulse 20260821
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/ci82-p2-bounded-pulse-20260821.txt
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci82-p2-bounded-pulse-20260821
+  cancel-in-progress: false
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BRIDGE_WORKER: chicagoshining-repair-control-bridge
+      LEASE_ID: CI82_P2_BRIDGE_LEASE_20260821_1113
+      TEST_RUN_ID: CI82-E2E-20260821
+      SCENARIO_ID: "5893243"
+      COMMAND_RECORD_ID: recuuUt1giHWYq2k4
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Acquire exact one-run lease and pulse MAKE-ADMIN-BRIDGE
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$ROOT/workers/subdomain"             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -o /tmp/subdomain.json
+          SUB=$(jq -er '.result.subdomain' /tmp/subdomain.json)
+          URL="https://$BRIDGE_WORKER.$SUB.workers.dev/control"
+          SECRET=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+
+          EXPIRES_AT=$(date -u -d '+10 minutes' +'%Y-%m-%dT%H:%M:%SZ')
+          jq -n             --arg action acquire             --arg lease_id "$LEASE_ID"             --arg test_run_id "$TEST_RUN_ID"             --argjson scenario_id "$SCENARIO_ID"             --arg expires_at "$EXPIRES_AT"             '{
+              action:$action,
+              lease_id:$lease_id,
+              test_run_id:$test_run_id,
+              scenario_id:$scenario_id,
+              expires_at:$expires_at,
+              max_runs:1,
+              max_operations:6,
+              allowed_content_item_record_ids:["receDxOQmMHqaIUqs"],
+              allowed_platform_output_record_ids:[],
+              deny_fixture_record_ids:[],
+              allow_public_publish:false
+            }' > /tmp/acquire-command.json
+
+          acquire_code=$(curl -sS --max-time 120 -o /tmp/acquire-result.json -w '%{http_code}'             -X POST "$URL"             -H "Authorization: Bearer $SECRET"             -H 'Content-Type: application/json'             --data-binary @/tmp/acquire-command.json)
+          printf '%s' "$acquire_code" > /tmp/acquire-code.txt
+          test "$acquire_code" = "200"
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true'             /tmp/acquire-result.json >/dev/null
+
+          jq -n             --arg action pulse_admin_bridge             --arg lease_id "$LEASE_ID"             --arg test_run_id "$TEST_RUN_ID"             --argjson scenario_id "$SCENARIO_ID"             --arg exact_make_admin_command_record_id "$COMMAND_RECORD_ID"             '{
+              action:$action,
+              lease_id:$lease_id,
+              test_run_id:$test_run_id,
+              scenario_id:$scenario_id,
+              exact_make_admin_command_record_id:$exact_make_admin_command_record_id
+            }' > /tmp/pulse-command.json
+
+          pulse_code=$(curl -sS --max-time 180 -o /tmp/pulse-result.json -w '%{http_code}'             -X POST "$URL"             -H "Authorization: Bearer $SECRET"             -H 'Content-Type: application/json'             --data-binary @/tmp/pulse-command.json)
+          unset SECRET
+          printf '%s' "$pulse_code" > /tmp/pulse-code.txt
+          test "$pulse_code" = "200"
+          jq -e '.bridge_ok==true and .upstream_status==200 and .upstream_json.ok==true'             /tmp/pulse-result.json >/dev/null
+
+      - name: Save sanitized evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p repair/evidence
+          acquire_code=$(cat /tmp/acquire-code.txt 2>/dev/null || printf 'missing')
+          pulse_code=$(cat /tmp/pulse-code.txt 2>/dev/null || printf 'missing')
+          jq -n             --arg captured_at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"             --arg test_run_id "$TEST_RUN_ID"             --arg lease_id "$LEASE_ID"             --argjson scenario_id "$SCENARIO_ID"             --arg command_record_id "$COMMAND_RECORD_ID"             --arg acquire_http "$acquire_code"             --arg pulse_http "$pulse_code"             --slurpfile acquire /tmp/acquire-result.json             --slurpfile pulse /tmp/pulse-result.json             '{
+              captured_at:$captured_at,
+              test_run_id:$test_run_id,
+              lease_id:$lease_id,
+              scenario_id:$scenario_id,
+              command_record_id:$command_record_id,
+              no_public_publish:true,
+              acquire:{
+                bridge_http:$acquire_http,
+                bridge_ok:($acquire[0].bridge_ok // null),
+                upstream_status:($acquire[0].upstream_status // null),
+                upstream_ok:($acquire[0].upstream_json.ok // null),
+                action:($acquire[0].upstream_json.action // null),
+                lease:($acquire[0].upstream_json.lease // null)
+              },
+              pulse:{
+                bridge_http:$pulse_http,
+                bridge_ok:($pulse[0].bridge_ok // null),
+                upstream_status:($pulse[0].upstream_status // null),
+                upstream_ok:($pulse[0].upstream_json.ok // null),
+                action:($pulse[0].upstream_json.action // null),
+                output:($pulse[0].upstream_json.output // null),
+                error:($pulse[0].upstream_json.error // null)
+              }
+            }' > repair/evidence/ci82-p2-bounded-pulse-20260821.json
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add repair/evidence/ci82-p2-bounded-pulse-20260821.json
+          if ! git diff --cached --quiet; then
+            git commit -m "evidence: record CI82 bounded P2 pulse"
+            git push origin HEAD:main
+          fi
+
+      - name: Upload raw bounded results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci82-p2-bounded-pulse-${{ github.run_id }}
+          path: |
+            /tmp/acquire-result.json
+            /tmp/pulse-result.json
+          if-no-files-found: ignore
+          retention-days: 30

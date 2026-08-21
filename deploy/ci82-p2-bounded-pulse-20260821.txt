@@ -1,0 +1,7 @@
+CI82 P2 bounded pulse
+test_run_id=CI82-E2E-20260821
+content_item_record_id=receDxOQmMHqaIUqs
+make_admin_command_record_id=recuuUt1giHWYq2k4
+scenario_id=5530955
+bridge_scenario_id=5893243
+allow_public_publish=false
