@@ -64,8 +64,10 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.71-caption-dedupe";
+  const BUILD_ID = "item4-0.6.72-pipeline-countdown";
   let pipelinePollTimer = null;
+  let pipelineCountdownTimer = null;
+  let pipelineNextRefreshAt = 0;
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
   const pipelineProgressHighWater = new Map();
@@ -5614,7 +5616,23 @@
       clearTimeout(pipelinePollTimer);
       pipelinePollTimer = null;
     }
+    if (pipelineCountdownTimer) {
+      clearInterval(pipelineCountdownTimer);
+      pipelineCountdownTimer = null;
+    }
+    pipelineNextRefreshAt = 0;
     if ($("pipelineLiveHint") && !pipelinePageActive()) setPipelineLiveHint("Open Pipeline to watch live updates");
+  }
+
+  function updatePipelineCountdownHint() {
+    if (!pipelinePageActive() || document.hidden || !pipelineNextRefreshAt) return;
+    const remainingMs = pipelineNextRefreshAt - Date.now();
+    if (remainingMs <= 0) {
+      setPipelineLiveHint("Live · refreshing…");
+      return;
+    }
+    const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    setPipelineLiveHint(`Live · refreshing in ${seconds} second${seconds === 1 ? "" : "s"}`);
   }
 
   function schedulePipelinePoll() {
@@ -5623,8 +5641,17 @@
       if (pipelinePageActive() && document.hidden) setPipelineLiveHint("Paused while this tab is in the background");
       return;
     }
-    setPipelineLiveHint("Live · updates every 8 seconds");
+    pipelineNextRefreshAt = Date.now() + PIPELINE_POLL_MS;
+    updatePipelineCountdownHint();
+    pipelineCountdownTimer = setInterval(updatePipelineCountdownHint, 250);
     pipelinePollTimer = setTimeout(() => {
+      pipelinePollTimer = null;
+      if (pipelineCountdownTimer) {
+        clearInterval(pipelineCountdownTimer);
+        pipelineCountdownTimer = null;
+      }
+      pipelineNextRefreshAt = 0;
+      setPipelineLiveHint("Live · refreshing…");
       refreshPipelineOutputs({ silent: true }).finally(schedulePipelinePoll);
     }, PIPELINE_POLL_MS);
   }
@@ -5647,7 +5674,7 @@
         renderOutputsTable(target, records);
         target.scrollTop = scrollTop;
       }
-      if (pipelinePageActive() && !document.hidden) setPipelineLiveHint("Live · updates every 8 seconds");
+      if (pipelinePageActive() && !document.hidden && !pipelineCountdownTimer) setPipelineLiveHint("Live · refreshed just now");
     } catch (e) {
       if (!silent) target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
       else setPipelineLiveHint("Live update failed · retrying");
