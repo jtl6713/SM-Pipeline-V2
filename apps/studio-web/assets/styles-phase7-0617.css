@@ -121,7 +121,12 @@
 .request-grid select:focus,.request-grid input:focus,.request-section select:focus,.request-section input:focus,.request-section textarea:focus{border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
 .request-platforms{align-self:end}.request-platforms .platform-checks{grid-template-columns:repeat(3,minmax(0,1fr))}
 .structure-card{border:1px solid var(--line);border-radius:12px;background:#fff;padding:14px;display:grid;gap:11px}.structure-card>strong{font-size:.85rem}.count-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.count-inputs .exact-count{grid-column:1/-1}.count-inputs [hidden]{display:none!important}
-.text-control{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;align-items:start}.text-control .grow{min-width:0}.request-actions{display:flex;justify-content:flex-end;gap:10px}
+.text-control{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px;align-items:start}.text-control .grow{min-width:0}.request-actions{display:flex;justify-content:flex-end;gap:10px;position:relative;z-index:5}
+.request-actions button{pointer-events:auto}
+.request-actions .primary-button.phase6-tooltip-target,
+.request-actions .secondary-button.phase6-tooltip-target{cursor:pointer}
+.request-actions .primary-button:disabled,
+.request-actions .secondary-button:disabled{cursor:not-allowed}
 .request-list-panel{margin-bottom:18px}.badge.draft{background:#eef3f2;color:var(--teal-dark)}.badge.ready{background:var(--blue-soft);color:var(--blue)}
 @media(max-width:980px){.request-grid,.request-grid.three{grid-template-columns:1fr 1fr}.request-platforms .platform-checks{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.production-request-launch{align-items:stretch;flex-direction:column}.request-grid,.request-grid.three,.text-control{grid-template-columns:1fr}.request-platforms .platform-checks{grid-template-columns:1fr}.request-actions{justify-content:stretch}.request-actions button{flex:1}}

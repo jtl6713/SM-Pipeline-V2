@@ -66,7 +66,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.81-slide-post-caption-split";
+  const BUILD_ID = "item4-0.6.82-approve-click";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -3833,22 +3833,13 @@
       } else if (item4Workspace?.assets?.length) {
         const planReady = item4Workspace?.plan_status === "Ready";
         const variantsReady = item4Workspace?.variant_status === "Ready";
-        const bridgeReady = Boolean(item4BridgePreflight?.ready);
-        const bridgePending = Boolean(item4BridgePreflight?.pending) || item4BridgePreflight === null;
-        const bridgeBlocked = item4BridgePreflight && !bridgeReady && !bridgePending;
-        promote.disabled = item4Uploading || item4PreparingVariants || (planReady && variantsReady && bridgeBlocked);
-        promote.textContent = !planReady
-          ? "Build platform plan first"
-          : (!variantsReady
-              ? "Prepare platform media next"
-              : (bridgeReady || bridgePending ? "Approve & Promote" : "Approve & Promote"));
+        promote.disabled = Boolean(item4Uploading);
+        promote.textContent = "Approve & Promote";
         promote.title = !planReady
-          ? "Save the platform plan first."
+          ? "Save the platform plan first. Approve will build it if needed."
           : (!variantsReady
-              ? "Prepare the platform crops next."
-              : (bridgeReady
-                  ? "Approve this request and start production."
-                  : "Studio is finishing a quick check. You can approve when it completes."));
+              ? "Prepare the platform crops next. Approve will start that if needed."
+              : "Approve this request and start production.");
       } else {
         promote.disabled = false;
         promote.textContent = "Approve & Promote";
@@ -4305,8 +4296,12 @@
     }
   });
 
-  $("promoteProductionRequest")?.addEventListener("click", async () => {
+  $("promoteProductionRequest")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     if (!activeProductionRequest?.id) return;
+    const promoteButton = $("promoteProductionRequest");
+    if (promoteButton?.dataset.busy === "true") return;
 
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
       await buildItem4Plan();
@@ -4316,20 +4311,8 @@
       await prepareItem4Variants();
       return;
     }
-    if (item4Workspace?.assets?.length && item4Workspace?.plan_status === "Ready" && item4Workspace?.variant_status === "Ready") {
-      const bridge = item4BridgePreflight?.ready ? item4BridgePreflight : await loadItem4BridgePreflight(activeProductionRequest);
-      if (!bridge?.ready) {
-        const copy = item4BridgeIssueCopy(bridge?.issues);
-        setRequestMessage(
-          copy.length ? copy.join(" ") : "Still finishing a quick check. Try Approve again in a moment.",
-          copy.length ? "error-text" : ""
-        );
-        return;
-      }
-    }
 
     const status = String(activeProductionRequest.status || "Draft");
-    const promoteButton = $("promoteProductionRequest");
 
     if (status !== "Submitted") {
       const confirmed = window.confirm(

@@ -122,4 +122,6 @@ Cover thumbs Pages deploy: 2026-08-21 ? New content defaults Thumbnail/cover to 
 
 Slide vs post caption Pages deploy: 2026-08-21 ? On-photo crop labels no longer overwrite the Pipeline post caption. UI 0.6.81-slide-post-caption-split.
 
+Approve click Pages deploy: 2026-08-21 ? Approve & Promote stays clickable and no longer no-ops on a stale crop check. UI 0.6.82-approve-click.
+
 
