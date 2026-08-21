@@ -4694,6 +4694,7 @@
         : "Voiceover, normal music, and music-under-narration are independent controls. Voiceover starts at the existing 100% render level.";
     }
     updateCreativeAudioSummary();
+  }
 
   function phase6NativeStillUrl(output = activeCreativeOutput) {
     const direct = String(output?.native_still_url || "").trim();
