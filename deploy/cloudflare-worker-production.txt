@@ -16,3 +16,5 @@ Studio cover thumbs Worker deploy: 2026-08-21 — Photo-video Approve stamps a pre
 
 Slide vs post caption Worker deploy: 2026-08-21 — Per-photo crop labels save on the master asset, not Requested_Caption. Worker 0.10.45-slide-post-caption-split.
 
+Variant plan-ready Worker deploy: 2026-08-21 — 9:16 platform crops mark Prepare Ready; extra 16:9 YouTube covers keep finishing in the background. Stalled Processing rows requeue. Worker 0.10.46-variant-plan-ready.
+

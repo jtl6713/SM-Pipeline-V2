@@ -100,7 +100,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.45-slide-post-caption-split",
+          version: "0.10.46-variant-plan-ready",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -122,6 +122,7 @@ export default {
           studio_item4_calm_bridge_preflight_v1: true,
           studio_photo_cover_thumbs_v1: true,
           studio_slide_post_caption_split_v1: true,
+          studio_variant_plan_ready_v1: true,
           studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
@@ -3408,16 +3409,26 @@ function item4CoverStillUrl(requestRecord, outputRow = null) {
   return "";
 }
 
-function item4RequiredRatios(plan) {
+function item4PlanRatios(plan) {
   const ratios = [];
   const items = Array.isArray(plan?.items) ? plan.items : [];
   for (const item of items) {
     const ratio = String(item?.aspect_ratio || "").trim();
     if (ITEM4_RATIO_SPECS[ratio] && !ratios.includes(ratio)) ratios.push(ratio);
   }
-  const needsYoutubeCover = items.some((item) => String(item?.platform || "").trim() === "YouTube");
-  if (needsYoutubeCover && !ratios.includes("16:9")) ratios.push("16:9");
   return ratios;
+}
+
+function item4CoverExtraRatios(plan) {
+  const extras = [];
+  const items = Array.isArray(plan?.items) ? plan.items : [];
+  const needsYoutubeCover = items.some((item) => String(item?.platform || "").trim() === "YouTube");
+  if (needsYoutubeCover && !item4PlanRatios(plan).includes("16:9")) extras.push("16:9");
+  return extras;
+}
+
+function item4RequiredRatios(plan) {
+  return [...item4PlanRatios(plan), ...item4CoverExtraRatios(plan)];
 }
 
 function item4VariantRatioKey(ratio) {
@@ -3479,6 +3490,39 @@ function item4QueueTransferId(recordId, assetId, ratio, asset = null) {
 
 function item4QueueStatus(row) {
   return String(f(row, "Transfer_Status") || "").trim();
+}
+
+async function item4RequeueStaleProcessing(env, rows) {
+  const now = Date.now();
+  const next = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (item4QueueStatus(row) !== "Processing") {
+      next.push(row);
+      continue;
+    }
+    const stamp = Date.parse(String(f(row, "Updated_At") || f(row, "Started_At") || f(row, "Created_At") || "")) || 0;
+    if (stamp && (now - stamp) < 90000) {
+      next.push(row);
+      continue;
+    }
+    try {
+      const updated = await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Transfer_Status: "Pending",
+            Error_Message: "Requeued after a stalled Processing claim so SMV1 can pick the row up again.",
+          },
+          typecast: true,
+        }),
+      });
+      next.push(updated || row);
+    } catch (error) {
+      console.warn("Item 4 stale Processing requeue failed", error);
+      next.push(row);
+    }
+  }
+  return next;
 }
 
 function item4QueueMediaAssetId(row) {
@@ -3833,8 +3877,10 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   record = record || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  const planRatios = item4PlanRatios(plan || {});
   const ratios = item4RequiredRatios(plan || {});
-  const queueRows = await item4VariantQueueRows(env, recordId);
+  let queueRows = await item4VariantQueueRows(env, recordId);
+  queueRows = await item4RequeueStaleProcessing(env, queueRows);
   const expectedIds = new Set(
     assets.flatMap((asset) => ratios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio, asset)))
   );
@@ -3856,11 +3902,18 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
     return { record: updated, status: "None", error: null, manifest: null, queue_rows: [] };
   }
 
-  const failed = scoped.filter((row) => item4QueueStatus(row) === "Failed");
+  const planExpectedIds = new Set(
+    assets.flatMap((asset) => planRatios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio, asset)))
+  );
+  const planFailed = scoped.filter((row) =>
+    planExpectedIds.has(String(f(row, "Transfer_ID") || "").trim()) && item4QueueStatus(row) === "Failed"
+  );
   const pending = scoped.filter((row) =>
     ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
   );
+  const planPending = pending.filter((row) => planExpectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
   const manifest = item4BuildDriveManifest(recordId, assets, ratios, scoped);
+  const planManifest = item4BuildDriveManifest(recordId, assets, planRatios, scoped);
   const mediaAssetIds = [...new Set(
     scoped.filter((row) => item4QueueStatus(row) === "Ready")
       .map(item4QueueMediaAssetId)
@@ -3876,14 +3929,14 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   const now = new Date().toISOString();
   let status = "Preparing";
   let error = null;
-  if (failed.length && !pending.length) {
+  if (planFailed.length && !planPending.length) {
     status = "Error";
-    error = failed
+    error = planFailed
       .map((row) => String(f(row, "Error_Message") || "Variant generation failed"))
       .filter(Boolean)
       .join(" | ")
       .slice(0, 10000);
-  } else if (manifest.complete) {
+  } else if (planManifest.complete) {
     status = "Ready";
   }
 
