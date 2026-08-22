@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.90-approve-all">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.91-dashboard-open">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.90</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.91</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -71,7 +71,7 @@
 
  <section id="page-dashboard" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Overview</span><h1>Pipeline dashboard</h1><p>Real-time administrative view of the current ChicagoShining content pipeline.</p></div>
+ <div><span class="eyebrow">Overview</span><h1>Pipeline dashboard</h1><p>Click a card to open those records. Real-time counts come from the current ChicagoShining pipeline.</p></div>
  <button class="secondary-button" id="refreshDashboard">Refresh</button>
  </div>
  <div class="metrics" id="metrics"></div>
@@ -876,7 +876,13 @@
  </div>
  </section>
 
- <section class="panel"><div id="outputsList" class="table-wrap"></div></section>
+ <section class="panel">
+ <div class="pipeline-filter-bar" id="pipelineFilterBar" hidden>
+ <span id="pipelineFilterLabel">Filtered view</span>
+ <button type="button" class="secondary-button" id="pipelineFilterClear">Show all</button>
+ </div>
+ <div id="outputsList" class="table-wrap"></div>
+ </section>
  </section>
 
  <section id="page-music" class="page">
@@ -1010,7 +1016,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.90-approve-all"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.90-approve-all"></script>
+ <script src="/assets/ez-plan.js?v=0.6.91-dashboard-open"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.91-dashboard-open"></script>
 </body>
 </html>

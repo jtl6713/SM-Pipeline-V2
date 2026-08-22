@@ -138,4 +138,6 @@ Audio Yes latch Pages deploy: 2026-08-21 - New content defaults Voiceover/Music 
 
 Approve All Pages deploy: 2026-08-21 - Platform Pipeline adds Approve All for Ready-for-Review outputs. Confirm still warns that Instagram, Facebook, and YouTube publish publicly and TikTok stays a draft. UI 0.6.90-approve-all.
 
+Dashboard card open Pages deploy: 2026-08-21 - Pipeline dashboard metric cards open Ideas, Production, or a filtered Platform Pipeline list. UI 0.6.91-dashboard-open.
+
 

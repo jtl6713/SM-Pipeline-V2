@@ -57,6 +57,8 @@
   let item4CropRequestId = null;
   let pipelineOutputs = [];
   let pipelineSort = { key: "", dir: "asc" };
+  let pipelineViewFilter = "all";
+  let pipelineOpenSingleOnLoad = false;
   const audioUserTouched = new Set();
   let activeCreativeOutputId = null;
   let activeCreativeOutput = null;
@@ -70,7 +72,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.90-approve-all";
+  const BUILD_ID = "item4-0.6.91-dashboard-open";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -121,6 +123,7 @@
       document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
       button.classList.add("active");
       $(`page-${button.dataset.page}`).classList.add("active");
+      if (button.dataset.page === "outputs") pipelineViewFilter = "all";
       if (button.dataset.page !== "outputs") stopPipelinePoll();
       loadPage(button.dataset.page);
     });
@@ -308,10 +311,17 @@
       const data = await api("/api/dashboard");
       const m = data.metrics || {};
       const cards = [
-        ["Ideas", m.ideas], ["Content items", m.content_items], ["Platform outputs", m.platform_outputs],
-        ["Active outputs", m.active_outputs], ["Needs attention", m.attention_outputs], ["Published", m.published_outputs]
+        { label: "Ideas", page: "ideas", number: m.ideas },
+        { label: "Content items", page: "content", number: m.content_items },
+        { label: "Platform outputs", page: "outputs", filter: "all", number: m.platform_outputs },
+        { label: "Active outputs", page: "outputs", filter: "active", number: m.active_outputs },
+        { label: "Needs attention", page: "outputs", filter: "attention", number: m.attention_outputs },
+        { label: "Published", page: "outputs", filter: "published", number: m.published_outputs },
       ];
-      metrics.innerHTML = cards.map(([label, number]) => `<div class="metric"><div class="metric-label">${label}</div><div class="metric-value">${number ?? 0}</div></div>`).join("");
+      metrics.innerHTML = cards.map((card) => `<button type="button" class="metric metric-button" data-dash-page="${escapeHtml(card.page)}" data-dash-filter="${escapeHtml(card.filter || "")}" title="Open ${escapeHtml(card.label)}"><div class="metric-label">${escapeHtml(card.label)}</div><div class="metric-value">${card.number ?? 0}</div></button>`).join("");
+      metrics.querySelectorAll("[data-dash-page]").forEach((button) => {
+        button.addEventListener("click", () => openDashboardCard(button.dataset.dashPage, button.dataset.dashFilter));
+      });
       renderOutputsTable(list, data.recent_outputs || []);
     } catch (e) {
       metrics.innerHTML = "";
@@ -948,7 +958,20 @@
     document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
     $(`page-${page}`).classList.add("active");
+    if (page !== "outputs") stopPipelinePoll();
     loadPage(page);
+  }
+
+  function openDashboardCard(page, filter) {
+    if (!phase6ConfirmDiscardUnsaved("leave this editor")) return;
+    if (page === "outputs") {
+      pipelineViewFilter = filter || "all";
+      pipelineOpenSingleOnLoad = pipelineViewFilter === "attention";
+    } else {
+      pipelineViewFilter = "all";
+      pipelineOpenSingleOnLoad = false;
+    }
+    switchToPage(page);
   }
 
   function ezPlanApi() {
@@ -6416,6 +6439,45 @@
   }
 
 
+  function pipelineFilterLabel(filter = pipelineViewFilter) {
+    if (filter === "active") return "Active outputs";
+    if (filter === "attention") return "Needs attention";
+    if (filter === "published") return "Published";
+    return "All outputs";
+  }
+
+  function pipelineRecordMatchesFilter(record, filter = pipelineViewFilter) {
+    const state = String(record?.studio_state || "");
+    if (!filter || filter === "all") return true;
+    if (filter === "published") return state === "Published";
+    if (filter === "attention") return ["Failed", "Retry Pending", "Manual Action Required"].includes(state);
+    if (filter === "active") return !["Published", "Skipped", "Failed"].includes(state);
+    return true;
+  }
+
+  function filteredPipelineRecords(records) {
+    return (records || []).filter((record) => pipelineRecordMatchesFilter(record));
+  }
+
+  function updatePipelineFilterBar(visibleCount = 0) {
+    const bar = $("pipelineFilterBar");
+    const label = $("pipelineFilterLabel");
+    if (!bar) return;
+    if (!pipelineViewFilter || pipelineViewFilter === "all") {
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+    if (label) label.textContent = `Showing ${pipelineFilterLabel()} · ${visibleCount}`;
+  }
+
+  function maybeOpenFilteredPipelineOutput() {
+    if (!pipelineOpenSingleOnLoad) return;
+    pipelineOpenSingleOnLoad = false;
+    const openable = filteredPipelineRecords(pipelineOutputs).filter((record) => record.creative_available);
+    if (openable.length === 1) openCreativeEditor(openable[0].id);
+  }
+
   function pipelineSortValue(record, key) {
     if (key === "output") return String(record.output_id || "");
     if (key === "platform") return String(record.platform || "");
@@ -6461,9 +6523,16 @@
   }
 
   function renderOutputsTable(target, records) {
-    if (!records.length) return target.innerHTML = '<div class="empty">No Platform Output records were returned.</div>';
     const isPipeline = target?.id === "outputsList";
-    const rows = isPipeline ? sortedPipelineRecords(records) : records;
+    const source = isPipeline ? filteredPipelineRecords(records) : records;
+    if (isPipeline) updatePipelineFilterBar(source.length);
+    if (!source.length) {
+      target.innerHTML = isPipeline && pipelineViewFilter && pipelineViewFilter !== "all"
+        ? `<div class="empty">No ${escapeHtml(pipelineFilterLabel().toLowerCase())} right now.</div>`
+        : '<div class="empty">No Platform Output records were returned.</div>';
+      return;
+    }
+    const rows = isPipeline ? sortedPipelineRecords(source) : source;
     const head = isPipeline
       ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
       : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
@@ -6598,6 +6667,7 @@
         renderOutputsTable(target, records);
         target.scrollTop = scrollTop;
       }
+      maybeOpenFilteredPipelineOutput();
       if (pipelinePageActive() && !document.hidden && !pipelineCountdownTimer) setPipelineLiveHint("Live · refreshed just now");
     } catch (e) {
       if (!silent) target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
@@ -6671,6 +6741,12 @@
   });
   $("pipelineApproveAll")?.addEventListener("click", () => {
     approveAllPipelineOutputs().catch((e) => setPipelineLiveHint(e.message || "Approve All failed"));
+  });
+  $("pipelineFilterClear")?.addEventListener("click", () => {
+    pipelineViewFilter = "all";
+    pipelineOpenSingleOnLoad = false;
+    const target = $("outputsList");
+    if (target) renderOutputsTable(target, pipelineOutputs);
   });
   $("creativeApprovePreview")?.addEventListener("click", () => {
     if (creativeWatchOnly()) {
