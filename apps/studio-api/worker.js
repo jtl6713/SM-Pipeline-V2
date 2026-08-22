@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.69-wizard-ai-plan",
+          version: "0.10.70-variant-drive-ready",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -167,6 +167,7 @@ export default {
           studio_photo_audio_defaults_v1: true,
           studio_item4_prepare_soft_fail_v1: true,
           studio_item4_subrequest_cap_v1: true,
+          studio_variant_drive_ready_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
           studio_photo_cover_thumbs_v1: true,
           studio_slide_post_caption_split_v1: true,
@@ -3730,9 +3731,9 @@ async function getItem4OutputPlan(request, env, url, authorization) {
 const ITEM4_VARIANT_QUEUE_TABLE = "tblBZLXPd1p2NRWRK";
 const ITEM4_SMV1_SCENARIO_ID = 5894885;
 const ITEM4_VARIANT_RECIPE_VERSION = "fill-crop-v2";
-const ITEM4_DRAIN_POST_BUDGET_MS = 12000;
-const ITEM4_DRAIN_STATUS_BUDGET_MS = 8000;
-const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 20000;
+const ITEM4_DRAIN_POST_BUDGET_MS = 20000;
+const ITEM4_DRAIN_STATUS_BUDGET_MS = 12000;
+const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 25000;
 const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
@@ -4242,10 +4243,8 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
         authoritative_storage: "google_drive",
         persistent_cloudflare_storage: false,
       };
-      if (previewStatus === "Ready") {
-        manifest.ready_count += 1;
-        if (planSet.has(ratio)) manifest.plan_ready_count += 1;
-      }
+      manifest.ready_count += 1;
+      if (planSet.has(ratio)) manifest.plan_ready_count += 1;
     }
     manifest.assets.push(row);
   }
@@ -4588,9 +4587,12 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   }
 
   const failed = scoped.filter((row) => item4QueueStatus(row) === "Failed");
-  const outstanding = scoped.filter((row) =>
-    ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
-  );
+  const outstanding = scoped.filter((row) => {
+    const status = item4QueueStatus(row);
+    const preview = String(f(row, "Preview_Status") || "").trim();
+    if (["Pending", "Drive Uploaded", "Processing"].includes(status)) return true;
+    return status === "Ready" && preview === "Pending";
+  });
   if (failed.length && !outstanding.length) {
     const reconciled = await item4ReconcileVariants(env, recordId, currentRecord);
     return { attempted: false, reason: "variant-failure-present", record: reconciled.record, execution_ids: [] };
@@ -4724,7 +4726,7 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
     variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
     variant_error: f(record, "Studio_Variant_Error") || null,
     variants: manifest,
-    variant_progress: manifest ? { ready: Number(manifest.ready_count || 0), target: Number(manifest.target_count || 0) } : null,
+    variant_progress: manifest ? { ready: Number(manifest.plan_ready_count || manifest.ready_count || 0), target: Number(manifest.plan_target_count || manifest.target_count || 0) } : null,
     variant_resume: variantResume,
     make_hardening: makeHardening,
     make_hardening_worker_build: "0.10.42",

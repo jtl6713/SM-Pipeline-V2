@@ -63,3 +63,5 @@ Idea I1 wait Worker deploy: 2026-08-22 - Do not poll Make GET /executions while 
 
 Publishing wizard Worker deploy: 2026-08-22 - Platform plan can use exact AI slide count when Make AI Generated and no masters are uploaded yet. Mixed sets keep AI mode instead of resetting to Manual Upload. Worker 0.10.69-wizard-ai-plan.
 
+Variant Drive-ready Worker deploy: 2026-08-22 - Platform Prepare is Ready when Google Drive crops exist for the plan. Missing browser preview URLs no longer keep the workspace at 5/6. Worker 0.10.70-variant-drive-ready.
+

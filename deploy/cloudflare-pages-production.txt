@@ -179,3 +179,5 @@ Home profile Pages deploy: 2026-08-22 - Drop the duplicate Working profile picke
 
 Add-one-photo Pages deploy: 2026-08-22 - Multiple-photo sets accept add/remove one at a time instead of requiring two files in a single drop. UI 0.6.110-add-one-photo.
 
+Variant Drive-ready Pages deploy: 2026-08-22 - Prepare is complete when the 4:5 and 9:16 Drive crops exist. Browser preview cache no longer holds the button at 5/6. UI 0.6.111-variant-ready.
+

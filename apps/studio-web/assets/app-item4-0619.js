@@ -80,7 +80,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.110-add-one-photo";
+  const BUILD_ID = "item4-0.6.111-variant-ready";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -3832,8 +3832,8 @@
     const button = $("item4PrepareVariants");
     const variantStatus = status?.variant_status || "None";
     const manifest = status?.variants || null;
-    const readyCount = Number(manifest?.ready_count || 0);
-    const targetCount = Number(manifest?.target_count || manifest?.source_asset_count || 0);
+    const readyCount = Number(manifest?.plan_ready_count || manifest?.ready_count || 0);
+    const targetCount = Number(manifest?.plan_target_count || manifest?.target_count || manifest?.source_asset_count || 0);
     if (badge) badge.textContent = variantStatus === "Ready"
       ? `${readyCount} variants ready`
       : variantStatus === "Preparing"
