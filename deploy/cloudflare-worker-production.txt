@@ -37,3 +37,5 @@ A0 daisy-chain Worker deploy: 2026-08-22 - Process intake folder pulses A2; A2B/
 
 Intake progress Worker deploy: 2026-08-22 - Operations tab checks classification and oversized queues; A2 runs report empty vs processed with a live progress bar. Worker 0.10.56-intake-progress.
 
+Intake empty-fast Worker deploy: 2026-08-22 - Empty A2 returns no-assets immediately instead of waiting on later stages. Worker 0.10.57-intake-empty.
+

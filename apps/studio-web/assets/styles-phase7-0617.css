@@ -947,7 +947,9 @@ input, select, textarea, button {
 .ops-intake-progress p{margin:0;font-size:.86rem;font-weight:700}
 .ops-intake-stages{list-style:none;margin:0;padding:0;display:grid;gap:6px}
 .ops-intake-stages li{display:flex;justify-content:space-between;gap:12px;font-size:.8rem;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fbfdfd}
-.ops-intake-stages li[data-state="success"]{border-color:#b7d8d3}
+.ops-intake-stages li[data-state="empty"],
+.ops-intake-stages li[data-state="success"],
+.ops-intake-stages li[data-state="processed"]{border-color:#b7d8d3}
 .ops-intake-stages li[data-state="error"]{border-color:#e3b6b6;background:#fdf6f6}
 .ops-intake-meta{padding:0 20px 16px}
 

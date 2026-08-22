@@ -122,7 +122,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.56-intake-progress",
+          version: "0.10.57-intake-empty",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -14746,15 +14746,17 @@ async function pulseStudioLibraryIntake(request, env, authorization) {
   const response = await fetch(url.toString(), { method: "GET", headers: { Accept: "text/plain, application/json" } });
   const body = await response.text();
   if (!response.ok) throw new HttpError(502, `A2 webhook returned ${response.status}: ${body.slice(0, 200)}`);
+  const a2Run = await waitForA2IntakeRun(env, startedAt);
+  const status = await buildLibraryIntakeStatus(env, startedAt, a2Run);
   return respond(request, env, {
     ok: true,
     triggered: "a2-webhook",
-    started_at: startedAt,
     scenario_id: STUDIO_A2_SCENARIO_ID,
     daisy_chain: ["A2", "A2B", "A3", "A4"],
-    message: "A2 started. Watch the intake progress for whether files were found.",
     hook_response: body.slice(0, 200),
-  }, 202);
+    ...status,
+    message: status.summary,
+  }, status.complete ? 200 : 202);
 }
 
 function mapLibraryIntakeAsset(record) {
@@ -14806,8 +14808,24 @@ function mapMakeIntakeRun(row) {
 }
 
 function makeExecutionList(body) {
-  const raw = body?.executions || body?.response?.executions || body?.data || (Array.isArray(body) ? body : []);
-  return (Array.isArray(raw) ? raw : []).map(mapMakeIntakeRun).filter(Boolean);
+  const bags = [];
+  if (Array.isArray(body)) bags.push(body);
+  if (body && typeof body === "object") {
+    bags.push(
+      body.executions,
+      body.scenarioExecutions,
+      body.data,
+      body.response,
+      body.response?.executions,
+      body.response?.scenarioExecutions,
+      body.response?.data
+    );
+  }
+  for (const bag of bags) {
+    if (Array.isArray(bag)) return bag.map(mapMakeIntakeRun).filter(Boolean);
+    if (bag && Array.isArray(bag.executions)) return bag.executions.map(mapMakeIntakeRun).filter(Boolean);
+  }
+  return [];
 }
 
 async function listMakeIntakeExecutions(env, scenarioId) {
@@ -14816,10 +14834,19 @@ async function listMakeIntakeExecutions(env, scenarioId) {
 }
 
 function firstRunSince(runs, startedAt) {
-  if (!startedAt) return runs[0] || null;
+  if (!runs.length) return null;
+  if (!startedAt) return runs[0];
   const startMs = Date.parse(startedAt);
-  if (!Number.isFinite(startMs)) return runs[0] || null;
-  return runs.find((run) => Date.parse(run.timestamp || "") >= startMs - 2500) || null;
+  if (!Number.isFinite(startMs)) return runs[0];
+  const matched = runs.find((run) => {
+    const t = Date.parse(run.timestamp || "");
+    return Number.isFinite(t) && t >= startMs - 8000;
+  });
+  if (matched) return matched;
+  const newest = runs[0];
+  const newestMs = Date.parse(newest.timestamp || "");
+  if (Number.isFinite(newestMs) && Math.abs(newestMs - startMs) < 20000) return newest;
+  return null;
 }
 
 function describeA2Run(run) {
@@ -14831,40 +14858,56 @@ function describeA2Run(run) {
   return { files_found: true, result: "processed", detail: `A2 found files to intake (${run.operations} Make operations).` };
 }
 
-async function getStudioLibraryIntakeStatus(request, env, url) {
-  const startedAt = String(url.searchParams.get("started_at") || "").trim() || null;
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForA2IntakeRun(env, startedAt, timeoutMs = 3500) {
+  const deadline = Date.now() + timeoutMs;
+  let runs = [];
+  while (Date.now() <= deadline) {
+    runs = await listMakeIntakeExecutions(env, STUDIO_A2_SCENARIO_ID).catch(() => []);
+    const run = firstRunSince(runs, startedAt);
+    if (run) return run;
+    await sleepMs(200);
+  }
+  return firstRunSince(runs, startedAt);
+}
+
+async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const [a2Runs, a2bRuns, a3Runs, a4Runs, needingClassification, oversized] = await Promise.all([
-    listMakeIntakeExecutions(env, STUDIO_A2_SCENARIO_ID).catch(() => []),
+    knownA2 ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A2_SCENARIO_ID).catch(() => []),
     listMakeIntakeExecutions(env, STUDIO_A2B_SCENARIO_ID).catch(() => []),
     listMakeIntakeExecutions(env, STUDIO_A3_SCENARIO_ID).catch(() => []),
     listMakeIntakeExecutions(env, STUDIO_A4_SCENARIO_ID).catch(() => []),
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
     listOversizedMedia(env).catch(() => []),
   ]);
-  const a2 = firstRunSince(a2Runs, startedAt);
+  const a2 = knownA2 || firstRunSince(a2Runs, startedAt);
   const a2b = firstRunSince(a2bRuns, startedAt);
   const a3 = firstRunSince(a3Runs, startedAt);
   const a4 = firstRunSince(a4Runs, startedAt);
   const a2Result = describeA2Run(a2);
+  const skipped = a2Result.files_found === false ? "Skipped — no files to intake." : null;
   const stages = [
     { key: "A2", label: "Intake", run: a2, ...a2Result },
-    { key: "A2B", label: "Video backfill", run: a2b, detail: a2b ? (a2b.state === "error" ? "A2B failed." : "A2B finished.") : (a2 ? "Waiting for A2B…" : "Waiting for A2…") },
-    { key: "A3", label: "Classification", run: a3, detail: a3 ? (a3.state === "error" ? "A3 failed." : "A3 finished.") : (a2b ? "Waiting for A3…" : "Queued") },
-    { key: "A4", label: "Reconciliation", run: a4, detail: a4 ? (a4.state === "error" ? "A4 failed." : "A4 finished.") : (a3 ? "Waiting for A4…" : "Queued") },
+    { key: "A2B", label: "Video backfill", run: a2b, detail: a2b ? (a2b.state === "error" ? "A2B failed." : "A2B finished.") : (skipped || (a2 ? "Starting A2B…" : "Queued")) },
+    { key: "A3", label: "Classification", run: a3, detail: a3 ? (a3.state === "error" ? "A3 failed." : "A3 finished.") : (skipped || (a2b ? "Starting A3…" : "Queued")) },
+    { key: "A4", label: "Reconciliation", run: a4, detail: a4 ? (a4.state === "error" ? "A4 failed." : "A4 finished.") : (skipped || (a3 ? "Starting A4…" : "Queued")) },
   ];
-  const doneCount = stages.filter((stage) => stage.run).length;
-  const failed = stages.some((stage) => stage.run?.state === "error");
-  const a3AgeMs = a3?.timestamp ? Date.now() - Date.parse(a3.timestamp) : 0;
-  const a4Skipped = Boolean(a3 && !a4 && a2Result.files_found === false);
-  const a4TimedOut = Boolean(a3 && !a4 && Number.isFinite(a3AgeMs) && a3AgeMs > 45000);
-  const complete = failed || Boolean(a4) || a4Skipped || a4TimedOut;
-  const percent = failed ? Math.max(20, doneCount * 25) : complete ? 100 : Math.min(90, 8 + doneCount * 23);
-  let summary = a2Result.detail;
-  if (complete && !failed && a2Result.files_found === false) summary = "No assets to process in the ingestion folder.";
-  else if (complete && !failed && a2Result.files_found) summary = "Intake finished. Downstream classification and reconciliation ran.";
-  else if (a2 && a2Result.files_found) summary = a2Result.detail;
-  return respond(request, env, {
-    ok: true,
+  const failed = a2Result.result === "error" || [a2b, a3, a4].some((run) => run?.state === "error");
+  const empty = a2Result.files_found === false;
+  const processedDone = Boolean(a2Result.files_found && (a4 || (a3 && Date.now() - Date.parse(a3.timestamp || "") > 45000)));
+  const complete = failed || empty || processedDone;
+  const percent = empty || (complete && !failed) ? 100 : failed ? 40 : a2Result.files_found ? 55 : 12;
+  const summary = empty
+    ? "No assets to process in the ingestion folder."
+    : failed
+      ? a2Result.detail
+      : complete
+        ? "Intake finished. Downstream classification and reconciliation ran."
+        : a2Result.detail;
+  return {
     started_at: startedAt,
     percent,
     complete,
@@ -14873,6 +14916,12 @@ async function getStudioLibraryIntakeStatus(request, env, url) {
     a2: a2Result,
     stages,
     library_intake: mapLibraryIntakeSnapshot(needingClassification, oversized),
-  });
+  };
+}
+
+async function getStudioLibraryIntakeStatus(request, env, url) {
+  const startedAt = String(url.searchParams.get("started_at") || "").trim() || null;
+  const status = await buildLibraryIntakeStatus(env, startedAt);
+  return respond(request, env, { ok: true, ...status });
 }
 

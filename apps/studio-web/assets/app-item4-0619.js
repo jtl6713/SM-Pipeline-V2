@@ -74,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.95-intake-progress";
+  const BUILD_ID = "item4-0.6.96-intake-empty";
   const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
   const uiBuildLabel = $("uiBuildLabel");
   if (uiBuildLabel) uiBuildLabel.textContent = `UI build ${uiBuildMatch ? uiBuildMatch[1] : BUILD_ID}`;
@@ -162,15 +162,27 @@
     const button = $("operationsRunIntake");
     try {
       if (button) button.disabled = true;
-      setOperationsMessage("Starting library intake…");
+      setOperationsMessage("Starting A2…");
+      showIntakeProgress({ percent: 8, summary: "Starting A2…", complete: false, a2: { result: "waiting", detail: "Starting A2…" }, stages: [
+        { key: "A2", label: "Intake", detail: "Starting A2…" },
+        { key: "A2B", label: "Video backfill", detail: "Queued" },
+        { key: "A3", label: "Classification", detail: "Queued" },
+        { key: "A4", label: "Reconciliation", detail: "Queued" },
+      ] });
       const result = await api("/api/operations/intake", { method: "POST", body: JSON.stringify({}) });
       intakePollStartedAt = result.started_at || new Date().toISOString();
-      setOperationsMessage(result.message || "A2 started.");
-      showIntakeProgress({ percent: 8, summary: "Starting A2…", stages: [], complete: false });
-      const done = await pollIntakeStatus();
-      if (!done) {
-        stopIntakePoll();
-        intakePollTimer = setInterval(pollIntakeStatus, 2000);
+      showIntakeProgress(result);
+      if (result.library_intake) renderLibraryIntakeNotice(result.library_intake);
+      setOperationsMessage(result.summary || result.message || "A2 finished.");
+      if (result.complete || result.failed || result.a2?.result === "empty") {
+        if (button) button.disabled = false;
+        loadOperations();
+      } else {
+        const done = await pollIntakeStatus();
+        if (!done) {
+          stopIntakePoll();
+          intakePollTimer = setInterval(pollIntakeStatus, 400);
+        }
       }
     } catch (error) {
       setOperationsMessage(error.message || "Library intake failed.", "error-text");
@@ -7019,14 +7031,14 @@
       const stages = Array.isArray(status.stages) && status.stages.length
         ? status.stages
         : [
-            { key: "A2", label: "Intake", detail: "Starting…", run: null },
-            { key: "A2B", label: "Video backfill", detail: "Queued", run: null },
-            { key: "A3", label: "Classification", detail: "Queued", run: null },
-            { key: "A4", label: "Reconciliation", detail: "Queued", run: null },
+            { key: "A2", label: "Intake", detail: "Starting A2…" },
+            { key: "A2B", label: "Video backfill", detail: "Queued" },
+            { key: "A3", label: "Classification", detail: "Queued" },
+            { key: "A4", label: "Reconciliation", detail: "Queued" },
           ];
       list.innerHTML = stages.map((stage) => {
-        const state = stage.run?.state || (stage.result === "empty" || stage.result === "processed" ? "success" : "");
-        return `<li data-state="${escapeHtml(state)}"><span>${escapeHtml(stage.key)} · ${escapeHtml(stage.label)}</span><span>${escapeHtml(stage.detail || stage.a2?.detail || "Queued")}</span></li>`;
+        const state = stage.run?.state || stage.result || "";
+        return `<li data-state="${escapeHtml(state)}"><span>${escapeHtml(stage.key)} · ${escapeHtml(stage.label)}</span><span>${escapeHtml(stage.detail || "Queued")}</span></li>`;
       }).join("");
     }
   }

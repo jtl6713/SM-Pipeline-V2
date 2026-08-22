@@ -151,3 +151,5 @@ UI build label Pages deploy: 2026-08-22 - Sidebar "UI build" reads 0.6.94 from t
 
 Intake progress Pages deploy: 2026-08-22 - Library intake notice, Operations badge, and A2 progress bar. UI 0.6.95-intake-progress.
 
+Intake empty-fast Pages deploy: 2026-08-22 - Starting A2 then No assets to process when the ingestion folder is empty. UI 0.6.96-intake-empty.
+
