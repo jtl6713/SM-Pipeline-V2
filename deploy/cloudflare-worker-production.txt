@@ -81,3 +81,5 @@ Item 4 queue owner Worker deploy: 2026-08-22 - Cron drains every pending master/
 
 Promote subrequest budget Worker deploy: 2026-08-22 - Approve writes I3/I4 and fans out outputs; continuation and SMV1 drain stay on waitUntil/cron so the Worker does not hit the subrequest ceiling. Worker 0.10.79-promote-subrequest-budget.
 
+Queued auto-render Worker deploy: 2026-08-22 - Photo Sets with ready masters package from the uploaded count instead of waiting on a stale Make AI exact count; stop reseeding empty AI carousel slides every tick. Worker 0.10.80-queued-auto-render.
+

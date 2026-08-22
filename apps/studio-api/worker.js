@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.79-promote-subrequest-budget",
+          version: "0.10.80-queued-auto-render",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -177,6 +177,7 @@ export default {
           studio_youtube_16x9_all_v1: true,
           studio_item4_queue_owner_v1: true,
           studio_promote_subrequest_budget_v1: true,
+          studio_queued_auto_render_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -3482,7 +3483,13 @@ function item4EffectivePhotoCount(record, assets) {
   if (origin.manualCount && origin.aiCount) return origin.manualCount + origin.aiCount;
   const mode = String(f(record, "Carousel_Image_Mode") || "").trim();
   const exact = Number(f(record, "Carousel_Slide_Count_Exact") || 0);
-  if (mode === "Make AI Generated" && Number.isFinite(exact) && exact > n) return exact;
+  // Wait for Make AI fill only when the wizard/origin asked for AI slides, or
+  // there are no uploaded masters yet. A Photo Set that already has uploaded
+  // masters must not sit Queued forever because Carousel_Slide_Count_Exact was
+  // left on a higher Make AI Generated default.
+  if (mode === "Make AI Generated" && Number.isFinite(exact) && exact > n) {
+    if (origin.aiCount || !n) return exact;
+  }
   if (!n && mode === "Make AI Generated" && Number.isFinite(exact) && exact >= 1) return exact;
   return n;
 }
@@ -6454,7 +6461,7 @@ function copyWritableParentFields(parentContentItem) {
 async function item4ListParentCarouselSlides(env, parentId) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(parentId || ""))) return [];
   return listRecords(env, "Carousel Slides", {
-    limit: 50,
+    limit: 200,
     filterFormula: `AND(FIND("${parentId}", ARRAYJOIN({Content Item})),{Deleted From Carousel}=0)`,
   }).catch(() => []);
 }
@@ -6462,14 +6469,35 @@ async function item4ListParentCarouselSlides(env, parentId) {
 async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed) {
   if (!parentId || needed < 1) return [];
   const existing = await item4ListParentCarouselSlides(env, parentId);
-  const studioRows = (existing || []).filter((row) => /^Studio AI /i.test(String(f(row, "Slide Name") || "")));
-  const missing = Math.max(0, needed - studioRows.length);
-  if (!missing) return studioRows;
+  const live = (existing || []).filter((row) => !Boolean(f(row, "Deleted From Carousel")));
+  // Every live slide is a reserved generation slot. Do not keep inserting
+  // "Studio AI N" rows on every cron tick when C1 renamed or left slides blank.
+  if (live.length > needed) {
+    const emptyNewestFirst = live
+      .filter((row) => !item4SlideImageUrl(row))
+      .slice()
+      .sort((a, b) => String(b.createdTime || "").localeCompare(String(a.createdTime || "")));
+    const surplus = live.length - needed;
+    for (const row of emptyNewestFirst.slice(0, Math.min(surplus, 25))) {
+      try {
+        await airtableFetch(env, "Carousel Slides", row.id, {
+          method: "PATCH",
+          body: JSON.stringify({ fields: { "Deleted From Carousel": true }, typecast: true }),
+        });
+      } catch (error) {
+        console.warn("Studio AI surplus slide cleanup failed", row.id, error);
+      }
+    }
+  }
+  const afterLive = (await item4ListParentCarouselSlides(env, parentId))
+    .filter((row) => !Boolean(f(row, "Deleted From Carousel")));
+  const missing = Math.max(0, needed - afterLive.length);
+  if (!missing) return afterLive;
   const title = String(f(requestRecord, "Requested_Title") || f(requestRecord, "Production_Request_ID") || "Chicago").trim();
   const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
   const created = [];
   for (let i = 0; i < missing; i += 1) {
-    const n = studioRows.length + created.length + 1;
+    const n = afterLive.length + created.length + 1;
     const prompt = [
       `Photorealistic Chicago travel photograph for ChicagoShining, complementary to "${title}".`,
       caption ? `Context: ${caption.slice(0, 400)}` : "",
@@ -6493,7 +6521,7 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed) {
     });
     created.push(row);
   }
-  return [...studioRows, ...created];
+  return [...afterLive, ...created];
 }
 
 async function item4IngestAiSlideAsMaster(env, requestRecord, slide) {
@@ -6618,7 +6646,12 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   const eligibleSources = [];
   for (const source of sourceRows) {
     const variant = source?.variants?.[ratio];
-    const url = String(variant?.preview_url || "").trim();
+    const url = String(
+      variant?.preview_url
+      || studioClipPublicCdnUrl(variant?.google_drive_url || variant?.google_drive_file_id)
+      || variant?.google_drive_url
+      || ""
+    ).trim();
     const mediaAssetId = String(variant?.media_asset_record_id || "").trim();
     if (!url || !/^rec[A-Za-z0-9]+$/.test(mediaAssetId)) {
       omittedSourceIds.push(String(source?.id || source?.name || "").trim() || "unknown");
