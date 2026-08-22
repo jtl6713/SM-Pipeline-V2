@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.72-r2-queue",
+          version: "0.10.73-continuation",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -169,6 +169,7 @@ export default {
           studio_item4_subrequest_cap_v1: true,
           studio_variant_drive_ready_v1: true,
           studio_unattended_advance_v1: true,
+          studio_continuation_controller_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
           studio_photo_cover_thumbs_v1: true,
           studio_slide_post_caption_split_v1: true,
@@ -6327,30 +6328,49 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     item4BridgePlanKey(item?.platform, item?.output_type) === item4BridgePlanKey(platform, outputType)
   );
   const ratio = String(planItem?.aspect_ratio || "").trim();
-  if (!ratio || !item4VariantManifestPlanComplete(manifest, plan, item4AssetManifest(requestRecord))) return null;
+  if (!ratio) return null;
 
   const sourceRowsAll = (Array.isArray(manifest?.assets) ? manifest.assets : [])
     .slice()
     .sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
   const storyTeaser = String(outputType || "").trim() === "Story";
   const sourceRows = storyTeaser ? sourceRowsAll.slice(0, 1) : sourceRowsAll;
+  const omittedSourceIds = [];
+  const eligibleSources = [];
+  for (const source of sourceRows) {
+    const variant = source?.variants?.[ratio];
+    const url = String(variant?.preview_url || "").trim();
+    const mediaAssetId = String(variant?.media_asset_record_id || "").trim();
+    if (!url || !/^rec[A-Za-z0-9]+$/.test(mediaAssetId)) {
+      omittedSourceIds.push(String(source?.id || source?.name || "").trim() || "unknown");
+      continue;
+    }
+    eligibleSources.push({ source, variant, url, mediaAssetId });
+  }
+  if (omittedSourceIds.length) {
+    console.warn("Studio source package omitted photos missing ratio", {
+      production_request: requestRecord.id,
+      platform,
+      output_type: outputType,
+      ratio,
+      omitted: omittedSourceIds,
+    });
+  }
+  if (!eligibleSources.length) return null;
+
   const durationSeconds = storyTeaser
     ? ITEM4_STORY_TEASER_SECONDS
     : Math.max(1, Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 30));
   const fps = 30;
-  const totalFrames = Math.max(sourceRows.length, Math.round(durationSeconds * fps));
-  const baseFrames = sourceRows.length ? Math.floor(totalFrames / sourceRows.length) : 0;
-  let remainder = sourceRows.length ? totalFrames - (baseFrames * sourceRows.length) : 0;
+  const totalFrames = Math.max(eligibleSources.length, Math.round(durationSeconds * fps));
+  const baseFrames = Math.floor(totalFrames / eligibleSources.length);
+  let remainder = totalFrames - (baseFrames * eligibleSources.length);
   let startFrame = 0;
   const clips = [];
 
   const captions = item4OverlayCaptionBySourceId(requestRecord);
   const tiktok916 = platform === "TikTok" && ratio === "9:16";
-  for (const source of sourceRows) {
-    const variant = source?.variants?.[ratio];
-    const url = String(variant?.preview_url || "").trim();
-    const mediaAssetId = String(variant?.media_asset_record_id || "").trim();
-    if (!url || !/^rec[A-Za-z0-9]+$/.test(mediaAssetId)) return null;
+  for (const { source, variant, url, mediaAssetId } of eligibleSources) {
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
     const overlay = storyTeaser ? null : item4PhotoOverlayFromCaption(captions.get(String(source?.id || "").trim()), { tiktok916 });
@@ -6374,7 +6394,6 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     });
     startFrame += frames;
   }
-  if (!clips.length) return null;
 
   const nativePhotoRoute = studioOutputIsNativePhotoRoute(platform, outputType, null);
   const compositionId = nativePhotoRoute ? null : "ChicagoShiningPhotoSequence";
@@ -6435,7 +6454,9 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     selected_clips: clips,
     render_prep: renderPrep,
     selection_summary: `Studio exact source: ${clips.length} owner-uploaded prepared variant(s), preserved in user order.`,
-    missing_asset_notes: "",
+    missing_asset_notes: omittedSourceIds.length
+      ? `Omitted ${omittedSourceIds.length} source(s) missing ${ratio}: ${omittedSourceIds.join(", ")}`
+      : "",
     confidence_score: 1,
   };
   return {
@@ -6443,6 +6464,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     ratio,
     clips,
     clip_count: clips.length,
+    omitted_source_ids: omittedSourceIds,
     total_frames: totalFrames,
     composition_id: compositionId,
     output_filename: compositionId ? outputFilename : null,
@@ -6608,6 +6630,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     planItem.mapping_type || route.proven_mapping
   );
   const nativeReady = nativePhoto && clips.length > 0;
+  const nativeMissing = nativePhoto && clips.length === 0;
   const remotionReady = !nativePhoto && sourcePackage?.status === "Ready" && Boolean(sourcePackage?.selected_assets_json);
   const snapshot = {
     production_request_record_id: requestRecord.id,
@@ -6636,7 +6659,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Format: String(planItem.format || route.content_type || "").trim(),
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
-    Output_Status: nativeReady ? "Ready for Review" : (remotionReady ? "In Production" : "Ready for Review"),
+    Output_Status: nativeReady ? "Ready for Review" : (remotionReady ? "In Production" : (nativeMissing ? "In Production" : "Ready for Review")),
     Render_Status: nativeReady ? "Native Photo Route" : null,
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (nativePhoto || effective.thumbnail_mode === "Yes")
@@ -6644,7 +6667,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
       : null,
     Asset_Selection_Status: remotionReady ? "Selected" : null,
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
-    Output_Caption: effective.requested_caption || null,
+    Output_Caption: effective.requested_caption || String(f(parentContentItem, "Caption") || "").trim() || null,
     Output_Hashtags: String(f(parentContentItem,"Hashtags") || "").trim() || null,
     Output_Notes: [
       `Studio single-parent output seed. Production Request Output ${String(f(outputRow,"Production_Request_Output_ID")||outputRow.id)} is the per-platform execution authority.`,
@@ -6674,7 +6697,11 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Clip_1_Duration_Frames: clips[0] ? perClipFrames : 0,
     Clip_2_Duration_Frames: clips[1] ? perClipFrames : 0,
     Clip_3_Duration_Frames: clips[2] ? perClipFrames : 0,
-    Asset_Selection_Notes: sourcePackage?.status === "Ready" ? "Studio exact source authority locked before R2; visuals may not be replaced or reordered." : null,
+    Asset_Selection_Notes: sourcePackage?.status === "Ready"
+      ? "Studio exact source authority locked before R2; visuals may not be replaced or reordered."
+      : (nativeMissing
+        ? `Missing ${String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim() || "plan"} crop for this output.`
+        : null),
     Studio_Output_Override_Applied: true,
     Studio_Effective_Title_Mode: effective.title_mode,
     Studio_Effective_Requested_Title: effective.requested_title || null,
@@ -6816,6 +6843,11 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       await pulseStudioP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
       console.warn("Studio promote media pulse failed", error);
+    }
+    try {
+      await advanceStudioProductionOutputs(env, { contentItemId, requestRecordId: requestRecord.id });
+    } catch (error) {
+      console.warn("Studio continuation after promote failed", error);
     }
     if (String(f(requestRecord, "Master_Content_Type") || "").trim() === "Carousel") {
       try { await pulseOnDemandCarouselChain(env); } catch (error) {
@@ -9047,8 +9079,11 @@ const PHASE6_VOICE_CATALOG_TABLE = "ElevenLabs Voices";
 const PHASE6_DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
 const PHASE6_GEORGE_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 const PHASE6_P0202_SCENARIO_ID = 5893683;
+const PHASE6_R2_SCENARIO_ID = 5569495;
+const PHASE6_R3_SCENARIO_ID = 5557966;
 const PHASE6_R4_SCENARIO_ID = 5556716;
 const PHASE6_R5_SCENARIO_ID = 5565333;
+const PHASE6_RR1_SCENARIO_ID = 5576363;
 const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 
 function phase6RecordIdFromPath(url) {
@@ -11112,6 +11147,10 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
 }
 
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
+const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))';
+const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))';
+const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
+const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
 const PRODUCTION_CADENCE_RENDER = Object.freeze([
   { id: 5528742, key: "P1" },
   { id: 5569495, key: "R2" },
@@ -11187,15 +11226,12 @@ function cadenceScheduleSync(ctx, env, options = {}) {
 
 function continueParkedProductionAfterPromote(ctx, env) {
   const run = (async () => {
-    await syncProductionCadence(env, { startRender: true, startCarousel: true }).catch((error) => {
+    await syncProductionCadence(env, { startCarousel: true }).catch((error) => {
       console.warn("promote cadence start failed", error);
     });
     await new Promise((resolve) => setTimeout(resolve, 10000));
-    try { await pulseStudioP3ForPlannedOutputs(env); } catch (error) {
-      console.warn("promote follow-up P3 pulse failed", error);
-    }
-    try { await pulseOnDemandRenderChain(env); } catch (error) {
-      console.warn("promote follow-up render pulse failed", error);
+    try { await advanceStudioProductionOutputs(env); } catch (error) {
+      console.warn("promote follow-up continuation failed", error);
     }
     try { await pulseOnDemandCarouselChain(env); } catch (error) {
       console.warn("promote follow-up carousel pulse failed", error);
@@ -11271,13 +11307,46 @@ async function cadenceHasRenderWork(env) {
   const checks = await Promise.all([
     cadenceQueueHasWork(env, contentTable, { view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" }),
     cadenceQueueHasWork(env, outputTable, { formula: STUDIO_R2_WORK_FORMULA }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK())' }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))' }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: STUDIO_R3_WORK_FORMULA }),
+    cadenceQueueHasWork(env, outputTable, { formula: STUDIO_R4_WORK_FORMULA }),
     cadenceQueueHasWork(env, outputTable, { view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))' }),
+    cadenceQueueHasWork(env, outputTable, { formula: STUDIO_RR1_WORK_FORMULA }),
   ]);
   return checks.some(Boolean);
+}
+
+function studioFirstLinkedId(value) {
+  return (Array.isArray(value) ? value : [value]).find((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))) || null;
+}
+
+function studioOutputIsPhotoSequenceRoute(record) {
+  if (studioOutputIsNativePhotoRoute(
+    f(record, "Platform"),
+    f(record, "Studio_Output_Type"),
+    f(record, "Platform_Output_Type")
+  )) return true;
+  return String(f(record, "Composition_ID") || "").trim() === "ChicagoShiningPhotoSequence";
+}
+
+function studioOutputIsTerminalForContinuation(record) {
+  const status = String(f(record, "Output_Status") || "");
+  const publish = String(f(record, "Publish_Status") || "");
+  return /published/i.test(status) || /published/i.test(publish) || /approved for publishing/i.test(status);
+}
+
+function studioOutputWrongVideoSelectorPath(record) {
+  const selection = String(f(record, "Asset_Selection_Status") || "");
+  return /partial match/i.test(selection)
+    || Boolean(f(record, "Asset_Selection_Retry_Eligible"))
+    || /partial match/i.test(String(f(record, "Asset_Match_Status") || ""));
+}
+
+function studioContinuationClearRetryFields() {
+  return {
+    Asset_Selection_Retry_Eligible: false,
+    Remotion_Error_Message: null,
+    Final_File_Error_Message: null,
+  };
 }
 
 async function resetEmptyP3RemotionHandoffForR2(env) {
@@ -11287,7 +11356,7 @@ async function resetEmptyP3RemotionHandoffForR2(env) {
   }).catch(() => []);
   let reset = 0;
   for (const row of rows || []) {
-    if (studioOutputIsNativePhoto(row)) continue;
+    if (studioOutputIsNativePhoto(row) || studioOutputIsPhotoSequenceRoute(row)) continue;
     try {
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
         method: "PATCH",
@@ -11307,35 +11376,269 @@ async function resetEmptyP3RemotionHandoffForR2(env) {
   return { key: "R2-requeue", reset };
 }
 
-async function pulseOnDemandRenderChain(env, options = {}) {
-  const waitMs = Number(options.waitMs || 15000);
-  try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
-    console.warn("R2 remotion requeue failed", error);
+async function studioContinuationLoadContext(env, po, cache) {
+  const outputRowId = studioFirstLinkedId(f(po, "Production_Request_Output"));
+  if (!outputRowId) return null;
+  if (!cache.outputRows.has(outputRowId)) {
+    cache.outputRows.set(outputRowId, await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, outputRowId));
   }
+  const outputRow = cache.outputRows.get(outputRowId);
+  const requestId = studioFirstLinkedId(f(outputRow, "Production_Request"));
+  if (!requestId) return null;
+  if (!cache.requests.has(requestId)) {
+    cache.requests.set(requestId, await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId));
+  }
+  const requestRecord = cache.requests.get(requestId);
+  const parentId = studioFirstLinkedId(f(po, "Content_Item"));
+  if (!parentId) return null;
+  if (!cache.parents.has(parentId)) {
+    cache.parents.set(parentId, await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId));
+  }
+  const parent = cache.parents.get(parentId);
+  if (!cache.profiles.has(parentId)) {
+    cache.profiles.set(parentId, await productionProfileDefaultsForParentContentItem(env, parent));
+  }
+  const effective = await buildOutputWorkItemEffective(env, outputRow, requestRecord, parent, cache.profiles.get(parentId));
+  return { outputRow, requestRecord, parent, effective };
+}
+
+async function studioContinuationStampPackage(env, po, context) {
+  const { outputRow, requestRecord, parent, effective } = context;
+  const sourcePackage = item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, parent);
+  const nativePhoto = studioOutputIsNativePhotoRoute(
+    effective.platform,
+    effective.output_type,
+    effective.route?.proven_mapping || f(po, "Platform_Output_Type")
+  );
+  const seed = platformOutputSeedFields(parent, requestRecord, outputRow, effective, sourcePackage);
+  const fields = {
+    ...studioContinuationClearRetryFields(),
+    Output_Caption: seed.Output_Caption || String(f(parent, "Caption") || "").trim() || null,
+    Thumbnail_URL: seed.Thumbnail_URL || f(po, "Thumbnail_URL") || null,
+    Aspect_Ratio: seed.Aspect_Ratio || f(po, "Aspect_Ratio") || null,
+    Asset_Need_Status: "Not Needed",
+    Format: seed.Format || f(po, "Format") || null,
+    Platform_Output_Type: seed.Platform_Output_Type || f(po, "Platform_Output_Type") || null,
+    Studio_Output_Type: seed.Studio_Output_Type || f(po, "Studio_Output_Type") || null,
+    Selected_Clip_1_URL: seed.Selected_Clip_1_URL,
+    Selected_Clip_2_URL: seed.Selected_Clip_2_URL,
+    Selected_Clip_3_URL: seed.Selected_Clip_3_URL,
+    Clip_1_URL: seed.Clip_1_URL,
+    Clip_2_URL: seed.Clip_2_URL,
+    Clip_3_URL: seed.Clip_3_URL,
+    Selected_Clip_1_Media_Asset_ID: seed.Selected_Clip_1_Media_Asset_ID,
+    Selected_Clip_2_Media_Asset_ID: seed.Selected_Clip_2_Media_Asset_ID,
+    Selected_Clip_3_Media_Asset_ID: seed.Selected_Clip_3_Media_Asset_ID,
+    Selected_Clip_Count: seed.Selected_Clip_Count,
+    Selected_Assets_JSON: seed.Selected_Assets_JSON,
+    Render_Clip_List_JSON: seed.Render_Clip_List_JSON,
+    Render_Total_Frames: seed.Render_Total_Frames,
+    Composition_ID: seed.Composition_ID,
+    Output_Filename: seed.Output_Filename,
+    Clip_1_Duration_Frames: seed.Clip_1_Duration_Frames,
+    Clip_2_Duration_Frames: seed.Clip_2_Duration_Frames,
+    Clip_3_Duration_Frames: seed.Clip_3_Duration_Frames,
+    Asset_Selection_Notes: seed.Asset_Selection_Notes,
+    Preferred_Music_Media_Asset_ID: seed.Preferred_Music_Media_Asset_ID,
+    Preferred_Music_URL: seed.Preferred_Music_URL,
+    Music_URL: seed.Music_URL,
+    Selected_Music_URL: seed.Selected_Music_URL,
+    Selected_Music_Media_Asset_ID: seed.Selected_Music_Media_Asset_ID,
+    Music_Volume: seed.Music_Volume,
+  };
+  if (nativePhoto && (sourcePackage?.clips || []).length) {
+    fields.Output_Status = "Ready for Review";
+    fields.Render_Status = "Native Photo Route";
+    fields.Asset_Selection_Status = null;
+    fields.Studio_Preview_URL = seed.Studio_Preview_URL;
+    fields.Composition_ID = null;
+    fields.Output_Filename = null;
+  } else if (nativePhoto) {
+    fields.Output_Status = "In Production";
+    fields.Render_Status = null;
+    fields.Asset_Selection_Status = null;
+    fields.Asset_Selection_Notes = seed.Asset_Selection_Notes
+      || `Missing ${String(seed.Aspect_Ratio || "plan")} crop for this output.`;
+  } else if (sourcePackage?.status === "Ready") {
+    fields.Output_Status = "In Production";
+    fields.Render_Status = null;
+    fields.Asset_Selection_Status = "Selected";
+    fields.Composition_ID = "ChicagoShiningPhotoSequence";
+  } else {
+    fields.Output_Status = "Ready for Review";
+    fields.Render_Status = null;
+    fields.Asset_Selection_Status = null;
+    fields.Composition_ID = null;
+  }
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
+async function studioContinuationInspectOutput(env, po, cache) {
+  if (studioOutputIsTerminalForContinuation(po)) return { action: "stop", reason: "terminal" };
+  const outputStatus = String(f(po, "Output_Status") || "");
+  const renderStatus = String(f(po, "Render_Status") || "");
+  const finalUrl = String(f(po, "Final_File_URL") || "").trim();
+
+  if (finalUrl && /rendered/i.test(renderStatus)) {
+    if (!/^ready for review$/i.test(outputStatus)) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Output_Status: "Ready for Review" }, typecast: true }),
+      });
+      return { action: "opened_review", reason: "rendered_file" };
+    }
+    return { action: "reviewable", reason: "rendered_file" };
+  }
+
+  if (/rendering/i.test(renderStatus) && String(f(po, "Remotion_Job_ID") || "").trim()) {
+    return { action: "poll_render", reason: "rendering" };
+  }
+
+  if (studioOutputHasReviewableDeliverable(po) && /^ready for review$/i.test(outputStatus) && !studioOutputWrongVideoSelectorPath(po)) {
+    return { action: "reviewable", reason: "deliverable" };
+  }
+
+  const context = await studioContinuationLoadContext(env, po, cache).catch((error) => {
+    console.warn("Studio continuation context failed", po.id, error);
+    return null;
+  });
+  if (!context) return { action: "skip", reason: "no_context" };
+
+  const sourcePackage = item4StudioSourcePackageForOutput(
+    context.requestRecord,
+    context.outputRow,
+    context.effective,
+    context.parent
+  );
+  const nativePhoto = studioOutputIsNativePhotoRoute(
+    context.effective.platform,
+    context.effective.output_type,
+    context.effective.route?.proven_mapping || f(po, "Platform_Output_Type")
+  );
+  const hasClips = Boolean(sourcePackage?.clips?.length);
+  const alreadyExact = /studio_owner_uploaded_exact_source/.test(String(f(po, "Selected_Assets_JSON") || ""))
+    && String(f(po, "Asset_Selection_Status") || "") === "Selected"
+    && String(f(po, "Composition_ID") || "") === "ChicagoShiningPhotoSequence";
+  const readyForRender = /ready for render/i.test(renderStatus)
+    && String(f(po, "Composition_ID") || "").trim()
+    && String(f(po, "Render_Clip_List_JSON") || "").trim();
+
+  if (readyForRender && hasClips && !studioOutputWrongVideoSelectorPath(po)) {
+    return { action: "start_render", reason: "ready_for_render" };
+  }
+
+  if (!nativePhoto && alreadyExact && !studioOutputWrongVideoSelectorPath(po) && String(f(po, "Render_Clip_List_JSON") || "").trim()) {
+    return { action: "prep_render", reason: "already_stamped" };
+  }
+
+  if (nativePhoto && hasClips && studioOutputIsNativePhoto(po) && /^ready for review$/i.test(outputStatus)) {
+    return { action: "reviewable", reason: "native_package" };
+  }
+
+  if (hasClips || nativePhoto || studioOutputWrongVideoSelectorPath(po) || studioOutputIsPhotoSequenceRoute(po)) {
+    await studioContinuationStampPackage(env, po, context);
+    if (nativePhoto && hasClips) return { action: "opened_review", reason: "native_stamp" };
+    if (!nativePhoto && hasClips) return { action: "prep_render", reason: "photo_sequence_stamp" };
+    if (nativePhoto && !hasClips) return { action: "blocked", reason: "missing_ratio_crop" };
+    return { action: "asset_select", reason: "no_variants" };
+  }
+
+  if (/^ready for review$/i.test(outputStatus) && !String(f(po, "Asset_Selection_Status") || "").trim()) {
+    return { action: "asset_select", reason: "blank_selection" };
+  }
+
+  return { action: "skip", reason: "no_package" };
+}
+
+async function listStudioContinuationCandidates(env, options = {}) {
+  const contentItemId = String(options.contentItemId || "").trim();
+  const requestRecordId = String(options.requestRecordId || "").trim();
+  const limit = Number(options.limit || 40);
+  if (contentItemId && /^rec[A-Za-z0-9]+$/.test(contentItemId)) {
+    return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},FIND("${contentItemId}", ARRAYJOIN({Content_Item})))`,
+    });
+  }
+  if (requestRecordId && /^rec[A-Za-z0-9]+$/.test(requestRecordId)) {
+    const outputRows = await outputRowsForProductionRequest(env, requestRecordId);
+    const ids = outputRows.flatMap((row) => arrayOrEmpty(f(row, "Platform_Output"))).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+    const records = [];
+    for (const id of ids.slice(0, limit)) {
+      try { records.push(await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id)); } catch {}
+    }
+    return records;
+  }
+  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit,
+    filterFormula: STUDIO_CONTINUATION_CANDIDATE_FORMULA,
+  });
+}
+
+async function pulseStudioContinuationJobs(env, options = {}) {
+  const waitMs = Number(options.waitMs || 15000);
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const jobs = [
     { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
-    { id: 5569495, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA },
-    { id: 5557966, key: "R3", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))' },
-    { id: 5556716, key: "R4", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' },
-    { id: 5576363, key: "RR1", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))' },
+    { id: PHASE6_R2_SCENARIO_ID, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA, skipPhotoSequence: true },
+    { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA },
+    { id: PHASE6_R4_SCENARIO_ID, key: "R4", table: outputTable, formula: STUDIO_R4_WORK_FORMULA },
+    { id: PHASE6_R5_SCENARIO_ID, key: "R5", table: outputTable, view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" },
+    { id: PHASE6_RR1_SCENARIO_ID, key: "RR1", table: outputTable, formula: STUDIO_RR1_WORK_FORMULA },
   ];
   const pulses = [];
   for (const job of jobs) {
-    const hasWork = await cadenceQueueHasWork(env, job.table, { view: job.view || null, formula: job.formula || null });
-    if (!hasWork) {
+    const rows = await listRecords(env, job.table, {
+      limit: 5,
+      view: job.view || null,
+      filterFormula: job.formula || null,
+    }).catch(() => []);
+    const eligible = job.skipPhotoSequence
+      ? (rows || []).filter((row) => !studioOutputIsPhotoSequenceRoute(row) && !studioOutputIsNativePhotoRoute(f(row, "Platform"), f(row, "Studio_Output_Type"), f(row, "Platform_Output_Type")))
+      : (rows || []);
+    if (!eligible.length) {
       pulses.push({ key: job.key, skipped: "no_work" });
       continue;
     }
     try {
       await phase6PulseOnDemandScenario(env, job.id, { waitMs });
-      pulses.push({ key: job.key, pulsed: true });
+      pulses.push({ key: job.key, pulsed: true, matched: eligible.length });
     } catch (error) {
       pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
     }
   }
   return pulses;
+}
+
+async function advanceStudioProductionOutputs(env, options = {}) {
+  const cache = { outputRows: new Map(), requests: new Map(), parents: new Map(), profiles: new Map() };
+  const candidates = await listStudioContinuationCandidates(env, options).catch((error) => {
+    console.warn("Studio continuation candidate list failed", error);
+    return [];
+  });
+  const inspected = [];
+  for (const po of candidates || []) {
+    try {
+      const result = await studioContinuationInspectOutput(env, po, cache);
+      inspected.push({ id: po.id, ...result });
+    } catch (error) {
+      inspected.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
+    console.warn("R2 remotion requeue failed", error);
+  }
+  const pulses = await pulseStudioContinuationJobs(env, options);
+  return { inspected, pulses };
+}
+
+async function pulseOnDemandRenderChain(env, options = {}) {
+  const result = await advanceStudioProductionOutputs(env, options);
+  return Array.isArray(result?.pulses) ? result.pulses : [];
 }
 
 async function pulseOnDemandPublishChain(env) {
@@ -11484,8 +11787,8 @@ async function handleR5DoneCallback(request, env, ctx) {
     try { await pulseOnDemandM1(env); } catch (error) {
       console.error("M1 r5-done pulse failed", error);
     }
-    try { await pulseOnDemandRenderChain(env, { waitMs: 8000 }); } catch (error) {
-      console.error("render-chain r5-done pulse failed", error);
+    try { await advanceStudioProductionOutputs(env, { waitMs: 8000 }); } catch (error) {
+      console.error("continuation r5-done failed", error);
     }
   })();
   if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
@@ -11552,7 +11855,6 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
     ]);
     const pulses = [];
-    if (startRender || force) pulses.push(...await pulseStudioP3ForPlannedOutputs(env));
     if (startRender || force) pulses.push(...await pulseOnDemandRenderChain(env, { waitMs: force && !startRender ? 4000 : 15000 }));
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
