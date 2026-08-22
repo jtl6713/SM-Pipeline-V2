@@ -65,3 +65,5 @@ Publishing wizard Worker deploy: 2026-08-22 - Platform plan can use exact AI sli
 
 Variant Drive-ready Worker deploy: 2026-08-22 - Platform Prepare is Ready when Google Drive crops exist for the plan. Missing browser preview URLs no longer keep the workspace at 5/6. Worker 0.10.70-variant-drive-ready.
 
+Unattended advance Worker deploy: 2026-08-22 - Keep P2/P3 webhooks live while cadence is parked, drain the render chain on cron, and follow up after promote so Remotion rows do not sit Planned. Worker 0.10.71-unattended-advance.
+

@@ -80,7 +80,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.111-variant-ready";
+  const BUILD_ID = "item4-0.6.112-approve-open-review";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -7375,6 +7375,7 @@
     if (review === "Approved" || status === "Approved for Publishing") return false;
     const hasFile = Boolean(String(output.final_file_url || "").trim() || String(output.studio_preview_url || "").trim());
     if (!hasFile && !creativeIsNativePhotoPackage(output)) return false;
+    if (!output.creative_available) return false;
     return status === "Ready for Review" || review === "Review Sent";
   }
 

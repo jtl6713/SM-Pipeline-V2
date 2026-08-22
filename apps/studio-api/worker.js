@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.70-variant-drive-ready",
+          version: "0.10.71-unattended-advance",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -168,6 +168,7 @@ export default {
           studio_item4_prepare_soft_fail_v1: true,
           studio_item4_subrequest_cap_v1: true,
           studio_variant_drive_ready_v1: true,
+          studio_unattended_advance_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
           studio_photo_cover_thumbs_v1: true,
           studio_slide_post_caption_split_v1: true,
@@ -562,7 +563,7 @@ export default {
         requirePermission(authorization, "ideas_promote");
         requirePermission(authorization, "production_configure");
         const response = await promoteProductionRequestViaI3I4(request, env, url, authorization);
-        cadenceScheduleSync(ctx, env, { startRender: true });
+        continueParkedProductionAfterPromote(ctx, env);
         return response;
       }
 
@@ -581,7 +582,7 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_promote");
         const response = await promoteIdeaViaI3I4(request, env, url, authorization);
-        cadenceScheduleSync(ctx, env, { startRender: true });
+        continueParkedProductionAfterPromote(ctx, env);
         return response;
       }
 
@@ -3738,6 +3739,7 @@ const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Origina
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
 const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
+const ITEM4_P2_SCENARIO_ID = 5530955;
 const ITEM4_P2_WEBHOOK_URL = "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt";
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
@@ -6605,6 +6607,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     effective.output_type,
     planItem.mapping_type || route.proven_mapping
   );
+  const nativeReady = nativePhoto && clips.length > 0;
   const remotionReady = !nativePhoto && sourcePackage?.status === "Ready" && Boolean(sourcePackage?.selected_assets_json);
   const snapshot = {
     production_request_record_id: requestRecord.id,
@@ -6633,9 +6636,9 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Format: String(planItem.format || route.content_type || "").trim(),
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
-    Output_Status: nativePhoto ? "Ready for Review" : "Planned",
-    Render_Status: nativePhoto ? "Native Photo Route" : null,
-    Studio_Preview_URL: nativePhoto ? (String(clips[0]?.url || "").trim() || null) : null,
+    Output_Status: nativeReady ? "Ready for Review" : (remotionReady ? "In Production" : "Planned"),
+    Render_Status: nativeReady ? "Native Photo Route" : null,
+    Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (nativePhoto || effective.thumbnail_mode === "Yes")
       ? (item4CoverStillUrl(requestRecord, outputRow) || (nativePhoto ? (studioClipPublicCdnUrl(clips[0]) || String(clips[0]?.url || "").trim() || null) : null))
       : null,
@@ -6808,7 +6811,9 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       && !String(f(armed || {}, "Voiceover_URL") || "").trim();
     try {
       if (needVoiceover) await pulseStudioP2Handoff(env, contentItemId, requestRecord);
-      else await pulseStudioP3Handoff(env, contentItemId, requestRecord);
+      // P3 is a no-op until voiceover/cover filters pass; always fire it so
+      // photo-only promotes and post-P2 retries do not wait for a manual pulse.
+      await pulseStudioP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
       console.warn("Studio promote media pulse failed", error);
     }
@@ -6868,6 +6873,9 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
 
 async function pulseStudioP2Handoff(env, contentItemId, requestRecord) {
   const testRunId = String(f(requestRecord, "Test_Run_ID") || "").trim();
+  try { await phase6EnsureScenarioActive(env, ITEM4_P2_SCENARIO_ID); } catch (error) {
+    console.warn("P2 webhook could not be armed before pulse", error);
+  }
   const response = await fetch(ITEM4_P2_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
@@ -6889,6 +6897,9 @@ async function pulseStudioP2Handoff(env, contentItemId, requestRecord) {
 
 async function pulseStudioP3Handoff(env, contentItemId, requestRecord) {
   const testRunId = String(f(requestRecord, "Test_Run_ID") || "").trim();
+  try { await phase6EnsureScenarioActive(env, ITEM4_P3_SCENARIO_ID); } catch (error) {
+    console.warn("P3 webhook could not be armed before pulse", error);
+  }
   const response = await fetch(ITEM4_P3_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
@@ -11122,6 +11133,8 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: 5816502, key: "FBS3" },
   { id: 5816520, key: "FBS4" },
   { id: 5806658, key: "TTD0" },
+  { id: ITEM4_P2_SCENARIO_ID, key: "P2" },
+  { id: ITEM4_P3_SCENARIO_ID, key: "P3" },
 ]);
 const STUDIO_AP0_WEBHOOK_URL = "https://hook.us2.make.com/q1lx2g0gg7khxzgvnkums12wu649pjnw";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
@@ -11132,9 +11145,7 @@ const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
   { id: 5806668, key: "TTD" },
   { id: 5791537, key: "APCAR" },
 ]);
-const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([
-  { id: 5531703, key: "P3" },
-]);
+const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([]);
 const PRODUCTION_CADENCE_MEDIA = Object.freeze([
   { id: 5894885, key: "SMV1" },
   { id: 5893683, key: "P020-2" },
@@ -11173,6 +11184,26 @@ function cadenceScheduleSync(ctx, env, options = {}) {
   return run;
 }
 
+function continueParkedProductionAfterPromote(ctx, env) {
+  const run = (async () => {
+    await syncProductionCadence(env, { startRender: true, startCarousel: true }).catch((error) => {
+      console.warn("promote cadence start failed", error);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+    try { await pulseStudioP3ForPlannedOutputs(env); } catch (error) {
+      console.warn("promote follow-up P3 pulse failed", error);
+    }
+    try { await pulseOnDemandRenderChain(env); } catch (error) {
+      console.warn("promote follow-up render pulse failed", error);
+    }
+    try { await pulseOnDemandCarouselChain(env); } catch (error) {
+      console.warn("promote follow-up carousel pulse failed", error);
+    }
+  })();
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
+  return run;
+}
+
 async function cadenceQueueHasWork(env, tableId, query) {
   try {
     const rows = await listRecords(env, tableId, {
@@ -11199,6 +11230,40 @@ async function cadenceRepairInProgress(env) {
   }
 }
 
+async function pulseStudioP3ForPlannedOutputs(env) {
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 25,
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Output_Status}="Planned",{Production_Request_Output}!=BLANK(),{Content_Item}!=BLANK())',
+  }).catch(() => []);
+  const parentIds = [...new Set((rows || []).flatMap((row) => {
+    const linked = f(row, "Content_Item");
+    return Array.isArray(linked) ? linked.filter(Boolean) : [];
+  }))].slice(0, 8);
+  if (!parentIds.length) return [{ key: "P3", skipped: "no_work" }];
+  try { await phase6EnsureScenarioActive(env, ITEM4_P3_SCENARIO_ID); } catch (error) {
+    console.warn("P3 planned-output arm failed", error);
+  }
+  const pulses = [];
+  for (const contentItemId of parentIds) {
+    try {
+      const response = await fetch(ITEM4_P3_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
+        body: JSON.stringify({
+          source: "studio-cadence",
+          target: "P3",
+          content_record_id: contentItemId,
+          requested_at: new Date().toISOString(),
+        }),
+      });
+      pulses.push({ key: "P3", parent: contentItemId, ok: response.ok, status: response.status });
+    } catch (error) {
+      pulses.push({ key: "P3", parent: contentItemId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return pulses;
+}
+
 async function cadenceHasRenderWork(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
@@ -11214,7 +11279,8 @@ async function cadenceHasRenderWork(env) {
   return checks.some(Boolean);
 }
 
-async function pulseOnDemandRenderChain(env) {
+async function pulseOnDemandRenderChain(env, options = {}) {
+  const waitMs = Number(options.waitMs || 15000);
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const jobs = [
@@ -11232,7 +11298,7 @@ async function pulseOnDemandRenderChain(env) {
       continue;
     }
     try {
-      await phase6PulseOnDemandScenario(env, job.id);
+      await phase6PulseOnDemandScenario(env, job.id, { waitMs });
       pulses.push({ key: job.key, pulsed: true });
     } catch (error) {
       pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
@@ -11387,6 +11453,9 @@ async function handleR5DoneCallback(request, env, ctx) {
     try { await pulseOnDemandM1(env); } catch (error) {
       console.error("M1 r5-done pulse failed", error);
     }
+    try { await pulseOnDemandRenderChain(env, { waitMs: 8000 }); } catch (error) {
+      console.error("render-chain r5-done pulse failed", error);
+    }
   })();
   if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
   return respond(request, env, {
@@ -11452,7 +11521,8 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
     ]);
     const pulses = [];
-    if (startRender) pulses.push(...await pulseOnDemandRenderChain(env));
+    if (startRender || force) pulses.push(...await pulseStudioP3ForPlannedOutputs(env));
+    if (startRender || force) pulses.push(...await pulseOnDemandRenderChain(env, { waitMs: force && !startRender ? 4000 : 15000 }));
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
     if (startCarousel || force) pulses.push(...await pulseOnDemandCarouselChain(env));

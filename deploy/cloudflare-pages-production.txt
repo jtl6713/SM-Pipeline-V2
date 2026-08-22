@@ -181,3 +181,5 @@ Add-one-photo Pages deploy: 2026-08-22 - Multiple-photo sets accept add/remove o
 
 Variant Drive-ready Pages deploy: 2026-08-22 - Prepare is complete when the 4:5 and 9:16 Drive crops exist. Browser preview cache no longer holds the button at 5/6. UI 0.6.111-variant-ready.
 
+Approve All count Pages deploy: 2026-08-22 - Approve All only counts outputs that can Open review. UI 0.6.112-approve-open-review.
+
