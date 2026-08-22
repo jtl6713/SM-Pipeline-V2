@@ -79,7 +79,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.107-plain-copy";
+  const BUILD_ID = "item4-0.6.108-idea-media";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1613,6 +1613,10 @@
     else if (fromEl.value === "No") toEl.value = "No";
   }
 
+  function isAudioYes(value) {
+    return String(value || "").trim() === "Yes";
+  }
+
   function syncRequestAudioUi({ fromEz = false, userChanged = false } = {}) {
     const ezVo = $("ezAudioVoiceover");
     const prVo = $("prVoiceover");
@@ -2429,10 +2433,6 @@
     const helpers = ezPlanApi();
     if (!helpers) return null;
     const answers = { ...ezWizardAnswers };
-    if (answers.start === "idea" && !answers.inputKind) {
-      answers.inputKind = "multiple-ai";
-      answers.photoCount = answers.photoCount || 4;
-    }
     const planned = helpers.ezWizardResolvePackage(answers);
     const intake = helpers.ezIntakeKindFromWizard(answers.inputKind);
     const count = helpers.ezWizardPhotoCount(answers);
@@ -2443,12 +2443,10 @@
       input.checked = planned.platforms.includes(input.value);
     });
     syncEzYouTubeAvailability(false);
-    if (answers.start !== "idea") {
-      if ($("ezCarouselImageMode")) $("ezCarouselImageMode").value = helpers.ezImageModeFromWizard(answers.inputKind);
-      if ($("ezCarouselSlideMode")) $("ezCarouselSlideMode").value = "Exact";
-      if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = String(count);
-      ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact"].forEach((id) => ezDirty.add(id));
-    }
+    if ($("ezCarouselImageMode")) $("ezCarouselImageMode").value = helpers.ezImageModeFromWizard(answers.inputKind);
+    if ($("ezCarouselSlideMode")) $("ezCarouselSlideMode").value = "Exact";
+    if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = String(count);
+    ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact"].forEach((id) => ezDirty.add(id));
     ezPinnedExtraOutputs = planned.extras || [];
     applyEzExtraOutputs(ezPinnedExtraOutputs);
     const expected = helpers.ezWizardExpectedUploads(answers);
@@ -2492,9 +2490,9 @@
       requested_caption: ezCaptionIsCustomized() ? String($("ezRequestedCaption")?.value || "").trim() : (captionFields.requested_caption || ""),
       script_mode: ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides"),
       requested_script: ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || ""),
-      carousel_image_mode: (ezWizardPending || ezWizardAnswers)?.start === "idea"
-        ? "Make AI Generated"
-        : ($("ezCarouselImageMode")?.value || "Manual Upload"),
+      carousel_image_mode: helpers?.ezImageModeFromWizard?.((ezWizardPending || ezWizardAnswers)?.inputKind)
+        || $("ezCarouselImageMode")?.value
+        || "Manual Upload",
       carousel_slide_count_mode: slideMode,
       carousel_slide_count_exact: $("ezCarouselSlideExact")?.value || (slideMode === "Exact" ? count : ""),
       carousel_slide_count_min: $("ezCarouselSlideMin")?.value || "",
@@ -2545,6 +2543,7 @@
       ideaMode: "Do you want an existing idea, or a new one?",
       ideaExisting: "Which idea should we open?",
       ideaWrite: "What’s the idea?",
+      ideaKind: "What images should this idea use?",
       photoKind: "Single photo, or several?",
       photoCount: "How many photos do you prefer?",
       aiKind: "Single AI image, or several?",
@@ -2633,7 +2632,7 @@
           (data) => {
             const ideaId = String(data.get("ideaId") || "");
             const idea = options.find((row) => row.id === ideaId);
-            ezWizardPick(idea?.title || "Selected idea", { ideaId, ideaTitle: idea?.title || "" }, "package");
+            ezWizardPick(idea?.title || "Selected idea", { ideaId, ideaTitle: idea?.title || "" }, "ideaKind");
           }
         );
       }).catch((error) => ezWizardSetMessage(error.message, "error-text"));
@@ -2654,9 +2653,21 @@
             ezWizardSetMessage("Enter an idea title.", "error-text");
             return;
           }
-          ezWizardPick(title, { ideaTitle: title, ideaSummary: String(data.get("summary") || "").trim() }, "package");
+          ezWizardPick(title, { ideaTitle: title, ideaSummary: String(data.get("summary") || "").trim() }, "ideaKind");
         }
       );
+      return;
+    }
+
+    if (ezWizardStep === "ideaKind") {
+      prompt.textContent = "What images should this idea use?";
+      renderEzWizardChips([
+        { label: "Single photo I’ll upload", onClick: () => ezWizardPick("Single photo I’ll upload", { inputKind: "single-photo", photoCount: 1 }, "package") },
+        { label: "Multiple photos I’ll upload", onClick: () => ezWizardPick("Multiple photos I’ll upload", { inputKind: "multiple-photos" }, "photoCount") },
+        { label: "Single AI image", onClick: () => ezWizardPick("Single AI image", { inputKind: "single-ai", photoCount: 1 }, "package") },
+        { label: "Multiple AI images", onClick: () => ezWizardPick("Multiple AI images", { inputKind: "multiple-ai" }, "aiCount") },
+        { label: "Mix of my photos and AI", onClick: () => ezWizardPick("Mix of my photos and AI", { inputKind: "mixed" }, "mixManual") },
+      ]);
       return;
     }
 
@@ -2832,26 +2843,23 @@
       const planned = applyEzWizardAnswersToIntake();
       const answers = ezWizardPending || ezWizardAnswers;
       if (answers.start === "idea") {
+        let idea = null;
         if (answers.ideaMode === "existing" && answers.ideaId) {
-          const idea = ideasCache.find((row) => row.id === answers.ideaId) || { id: answers.ideaId, title: answers.ideaTitle };
-          enterEzIdeaPath();
-          setIdeaFormOpen(false);
-          openIdeaDrawer(idea);
-          return;
-        }
-        if (answers.ideaTitle) {
+          idea = ideasCache.find((row) => row.id === answers.ideaId) || { id: answers.ideaId, title: answers.ideaTitle };
+        } else if (answers.ideaTitle) {
           const result = await api("/api/ideas", {
             method: "POST",
             body: JSON.stringify({ title: answers.ideaTitle, summary: answers.ideaSummary || "" }),
           });
           await loadIdeas();
+          idea = result.record;
+        }
+        if (!idea?.id) {
           enterEzIdeaPath();
-          setIdeaFormOpen(false);
-          if (result.record) openIdeaDrawer(result.record);
+          setIdeaFormOpen(true, { mode: "manual" });
           return;
         }
-        enterEzIdeaPath();
-        setIdeaFormOpen(true, { mode: "manual" });
+        await openProductionRequestForIdea(idea);
         return;
       }
       if (!helpers.ezWizardRequiresUploads(answers)) {
@@ -4217,8 +4225,12 @@
       files = files.slice(0, 1);
     }
     if (ezIntakeKind === "multiple-photos" && files.length < 2) {
-      setRequestMessage("Multiple photos needs at least two images, or choose Single photo.", "error-text");
-      return;
+      const expected = ezPlanApi()?.ezWizardExpectedUploads?.(ezWizardPending || ezWizardAnswers);
+      const mixedOne = (ezWizardPending || ezWizardAnswers)?.inputKind === "mixed" && expected === 1;
+      if (!mixedOne) {
+        setRequestMessage("Multiple photos needs at least two images, or choose Single photo.", "error-text");
+        return;
+      }
     }
     item4Uploading = true;
     const progress = $("item4UploadProgress");
@@ -4962,7 +4974,15 @@
       await loadProductionRequests();
       setEzAdvancedOpen(false);
       if (ezWizardPending) {
-        setRequestMessage(result.created ? "Production request created from the publishing wizard." : "Existing Production Request draft opened.", "success");
+        const needsUpload = ezPlanApi()?.ezWizardRequiresUploads?.(ezWizardPending);
+        if (!needsUpload) {
+          setRequestMessage("Studio will generate the images. You can still add a title, script, or notes before you approve.", "success");
+        } else if (ezWizardPending.inputKind === "mixed") {
+          const n = ezPlanApi()?.ezWizardExpectedUploads?.(ezWizardPending) || 1;
+          setRequestMessage(`Drop ${n} of your photo${n === 1 ? "" : "s"}. Studio will add ${ezWizardPending.aiCount} AI image${Number(ezWizardPending.aiCount) === 1 ? "" : "s"}.`, "success");
+        } else {
+          setRequestMessage("Drop your photos here to continue.", "success");
+        }
       } else {
         setRequestMessage(result.created ? "Production Request draft created. Choose Single or Multiple photos, then upload." : "Existing Production Request draft opened.", "success");
       }
