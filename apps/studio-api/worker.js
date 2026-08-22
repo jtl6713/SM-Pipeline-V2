@@ -103,7 +103,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.52-publish-dispatch",
+          version: "0.10.53-cadence-parked",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -10788,6 +10788,7 @@ const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([
 ]);
 const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
 const PRODUCTION_CADENCE_THROTTLE_MS = 20000;
+const PRODUCTION_CADENCE_PARKED = true;
 let productionCadenceLastSyncAt = 0;
 let productionCadenceRenderHoldUntil = 0;
 let productionCadencePublishHoldUntil = 0;
@@ -10883,6 +10884,15 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
     return { skipped: "throttled" };
   }
   productionCadenceLastSyncAt = now;
+  if (PRODUCTION_CADENCE_PARKED) {
+    const parked = [
+      ...PRODUCTION_CADENCE_ALWAYS_ON,
+      ...PRODUCTION_CADENCE_RENDER,
+      ...PRODUCTION_CADENCE_PUBLISH,
+    ];
+    const results = await Promise.all(parked.map((item) => cadenceSetActive(env, item.id, false)));
+    return { ok: true, parked: true, results };
+  }
   if (await cadenceRepairInProgress(env)) {
     return { skipped: "repair_lease" };
   }

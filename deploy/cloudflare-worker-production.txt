@@ -28,3 +28,5 @@ Approve All Worker deploy: 2026-08-21 — POST /api/outputs/approve-all approves e
 
 Publish dispatch Worker deploy: 2026-08-21 — Approve pulses the exact IG/FB/TikTok publisher webhooks, copies Story CDN URLs and 9:16 aspect onto the output, Graph-publishes Facebook Stories by binary upload, keeps AP0/IGS/FBS3/FBS4/TTD0 on during cadence, and maps encoding to Platform Processing. Worker 0.10.52-publish-dispatch.
 
+Cadence park Worker deploy: 2026-08-21 — Production Make cadence stays OFF so Studio page loads do not reactivate interval orchestrators. Worker 0.10.53-cadence-parked.
+
