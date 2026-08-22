@@ -175,3 +175,5 @@ Plain-language Home copy Pages deploy: 2026-08-22 - Drop I1?I4 and other scenari
 
 Idea wizard media Pages deploy: 2026-08-22 - After picking an idea, ask single/multiple and upload vs AI vs mix. Fix Add photos crashing on isAudioYes. UI 0.6.108-idea-media.
 
+Home profile Pages deploy: 2026-08-22 - Drop the duplicate Working profile picker from Home; the top-bar Profile control is enough. UI 0.6.109-home-profile.
+

@@ -79,7 +79,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.108-idea-media";
+  const BUILD_ID = "item4-0.6.109-home-profile";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -121,7 +121,7 @@
     const subtitle = $("brandSubtitle");
     if (subtitle) subtitle.textContent = profile.name || "Pipeline administration";
     document.title = `${city}Shining Studio`;
-    ["studioProfileSelect", "homeProfileSelect"].forEach((id) => {
+    ["studioProfileSelect"].forEach((id) => {
       const select = $(id);
       if (select && select.value !== profile.id) select.value = profile.id;
     });
@@ -135,7 +135,7 @@
     const options = studioProfiles.map((profile) =>
       `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name || profile.city_label || profile.id)}</option>`
     ).join("");
-    ["studioProfileSelect", "homeProfileSelect"].forEach((id) => {
+    ["studioProfileSelect"].forEach((id) => {
       const select = $(id);
       if (!select) return;
       select.innerHTML = options || '<option value="">No profiles</option>';
@@ -7959,11 +7959,9 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") phase6HideTooltip(); });
 
   checkHealth().finally(() => loadDashboard());
-  ["studioProfileSelect", "homeProfileSelect"].forEach((id) => {
-    $(id)?.addEventListener("change", (event) => {
-      const profile = studioProfiles.find((item) => item.id === event.target.value);
-      if (profile) applyStudioProfile(profile, { reload: true });
-    });
+  $("studioProfileSelect")?.addEventListener("change", (event) => {
+    const profile = studioProfiles.find((item) => item.id === event.target.value);
+    if (profile) applyStudioProfile(profile, { reload: true });
   });
 })();
 
