@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.94-ui-label">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.95-intake-progress">
 </head>
 <body>
  <header class="topbar">
@@ -32,9 +32,9 @@
  <button class="nav-item" data-page="content">Production</button>
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
- <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations</button>
+ <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.94</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.95</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -905,9 +905,16 @@
  <div id="operationsProfiles" class="ops-profile-list"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Library intake</h2><p>Starts A2 on the Drive ingestion folder. A2B backfill, A3 classification, and A4 reconciliation run when the previous stage finishes. A0 no longer ticks every 2 hours.</p></div>
+ <div class="panel-heading"><div><h2>Library intake</h2><p>Opening this tab checks Airtable for assets that need classification or compression. Process intake only when you want A2 to scan the Drive folder.</p></div>
  <button type="button" class="secondary-button" id="operationsRunIntake">Process intake folder</button>
  </div>
+ <div id="operationsIntakeNotice" class="ops-intake-notice" hidden></div>
+ <div id="operationsIntakeProgress" class="ops-intake-progress" hidden>
+ <div class="ops-progress-track" aria-hidden="true"><div class="ops-progress-fill" id="operationsIntakeBar"></div></div>
+ <p id="operationsIntakeProgressLabel">Waiting to start…</p>
+ <ol id="operationsIntakeStages" class="ops-intake-stages"></ol>
+ </div>
+ <p class="subtle" id="operationsIntakeMeta"></p>
  </section>
  <section class="panel">
  <div class="panel-heading"><div><h2>Ready to schedule</h2><p>Approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</p></div></div>
@@ -1049,7 +1056,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.94-ui-label"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.94-ui-label"></script>
+ <script src="/assets/ez-plan.js?v=0.6.95-intake-progress"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.95-intake-progress"></script>
 </body>
 </html>

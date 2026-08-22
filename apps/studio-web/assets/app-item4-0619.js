@@ -74,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.94-a0-daisychain";
+  const BUILD_ID = "item4-0.6.95-intake-progress";
   const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
   const uiBuildLabel = $("uiBuildLabel");
   if (uiBuildLabel) uiBuildLabel.textContent = `UI build ${uiBuildMatch ? uiBuildMatch[1] : BUILD_ID}`;
@@ -150,14 +150,31 @@
       setOperationsMessage(error.message || "Daily idea run failed.", "error-text");
     }
   });
+  let intakePollTimer = null;
+  let intakePollStartedAt = null;
+  function stopIntakePoll() {
+    if (intakePollTimer) {
+      clearInterval(intakePollTimer);
+      intakePollTimer = null;
+    }
+  }
   $("operationsRunIntake")?.addEventListener("click", async () => {
+    const button = $("operationsRunIntake");
     try {
+      if (button) button.disabled = true;
       setOperationsMessage("Starting library intake…");
       const result = await api("/api/operations/intake", { method: "POST", body: JSON.stringify({}) });
-      setOperationsMessage(result.message || "A2 started. A2B, A3, and A4 will follow.");
-      loadOperations();
+      intakePollStartedAt = result.started_at || new Date().toISOString();
+      setOperationsMessage(result.message || "A2 started.");
+      showIntakeProgress({ percent: 8, summary: "Starting A2…", stages: [], complete: false });
+      const done = await pollIntakeStatus();
+      if (!done) {
+        stopIntakePoll();
+        intakePollTimer = setInterval(pollIntakeStatus, 2000);
+      }
     } catch (error) {
       setOperationsMessage(error.message || "Library intake failed.", "error-text");
+      if (button) button.disabled = false;
     }
   });
 
@@ -6953,15 +6970,93 @@
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
       renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");
       renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles));
+      renderLibraryIntakeNotice(data.library_intake || {});
       const run = $("operationsRunDailyIdeas");
       if (run) run.hidden = !data.can_edit_profiles;
+      const intake = $("operationsRunIntake");
+      if (intake) intake.hidden = !data.can_edit_profiles;
     } catch (error) {
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
       if (meta) meta.textContent = "Unable to load operations.";
     }
   }
 
+  function updateOperationsBadge(count) {
+    const badgeNode = $("navOperationsBadge");
+    if (!badgeNode) return;
+    const n = Number(count) || 0;
+    badgeNode.hidden = n < 1;
+    badgeNode.textContent = n > 99 ? "99+" : String(n);
+  }
+
+  function renderLibraryIntakeNotice(intake) {
+    const notice = $("operationsIntakeNotice");
+    const meta = $("operationsIntakeMeta");
+    const actionRequired = Number(intake.action_required) || 0;
+    updateOperationsBadge(actionRequired);
+    if (notice) {
+      notice.hidden = false;
+      notice.dataset.tone = actionRequired ? "action" : "ok";
+      notice.textContent = intake.notice || "No library assets currently require action.";
+    }
+    if (meta) {
+      const names = (intake.needing_classification || []).map((row) => row.name).filter(Boolean).slice(0, 5);
+      meta.textContent = names.length
+        ? `Waiting on classification: ${names.join(", ")}${intake.needing_classification.length > 5 ? "…" : ""}`
+        : "Classification queue is empty. Oversized videos still appear in the list below.";
+    }
+  }
+
+  function showIntakeProgress(status) {
+    const wrap = $("operationsIntakeProgress");
+    const bar = $("operationsIntakeBar");
+    const label = $("operationsIntakeProgressLabel");
+    const list = $("operationsIntakeStages");
+    if (wrap) wrap.hidden = false;
+    if (bar) bar.style.width = `${Math.max(0, Math.min(100, Number(status.percent) || 0))}%`;
+    if (label) label.textContent = status.summary || status.a2?.detail || "Working…";
+    if (list) {
+      const stages = Array.isArray(status.stages) && status.stages.length
+        ? status.stages
+        : [
+            { key: "A2", label: "Intake", detail: "Starting…", run: null },
+            { key: "A2B", label: "Video backfill", detail: "Queued", run: null },
+            { key: "A3", label: "Classification", detail: "Queued", run: null },
+            { key: "A4", label: "Reconciliation", detail: "Queued", run: null },
+          ];
+      list.innerHTML = stages.map((stage) => {
+        const state = stage.run?.state || (stage.result === "empty" || stage.result === "processed" ? "success" : "");
+        return `<li data-state="${escapeHtml(state)}"><span>${escapeHtml(stage.key)} · ${escapeHtml(stage.label)}</span><span>${escapeHtml(stage.detail || stage.a2?.detail || "Queued")}</span></li>`;
+      }).join("");
+    }
+  }
+
+  async function pollIntakeStatus() {
+    if (!intakePollStartedAt) return;
+    try {
+      const status = await api(`/api/operations/intake?started_at=${encodeURIComponent(intakePollStartedAt)}`);
+      showIntakeProgress(status);
+      if (status.library_intake) renderLibraryIntakeNotice(status.library_intake);
+      if (status.complete || status.failed) {
+        stopIntakePoll();
+        const button = $("operationsRunIntake");
+        if (button) button.disabled = false;
+        setOperationsMessage(status.summary || (status.failed ? "Intake finished with an error." : "Intake finished."));
+        loadOperations();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      stopIntakePoll();
+      const button = $("operationsRunIntake");
+      if (button) button.disabled = false;
+      setOperationsMessage(error.message || "Could not read intake progress.", "error-text");
+      return true;
+    }
+  }
+
   function loadPage(page) {
+    if (page !== "operations") stopIntakePoll();
     if (page === "home") return;
     if (page === "dashboard") return loadDashboard();
     if (page === "ideas") return loadIdeas();

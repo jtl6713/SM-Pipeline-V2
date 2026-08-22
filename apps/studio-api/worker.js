@@ -122,10 +122,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.55-a0-daisychain",
+          version: "0.10.56-intake-progress",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
+          studio_intake_progress_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -369,6 +370,7 @@ export default {
 
       if (isOperationsIntakeRoute) {
         requirePermission(authorization, "tenant_admin");
+        if (request.method === "GET") return getStudioLibraryIntakeStatus(request, env, url);
         assertWriteRequest(request, env);
         return pulseStudioLibraryIntake(request, env, authorization);
       }
@@ -14216,7 +14218,12 @@ async function adminMakeDeploy(request, env, authorization) {
 const STUDIO_IDEA_I1_SCENARIO_ID = 5514334;
 const STUDIO_A1S_SCENARIO_ID = 5715530;
 const STUDIO_A2_SCENARIO_ID = 5531974;
+const STUDIO_A2B_SCENARIO_ID = 5568863;
+const STUDIO_A3_SCENARIO_ID = 5569035;
+const STUDIO_A4_SCENARIO_ID = 5578180;
 const STUDIO_A2_WEBHOOK_URL = "https://hook.us2.make.com/issyeyva2ac2kyn0419w8sie63nv2bpw";
+const STUDIO_A3_CLASSIFY_VIEW_ID = "viwf6dxUJrMx2yNoe";
+const STUDIO_A2_EMPTY_MAX_OPERATIONS = 4;
 const STUDIO_PIPELINE_SETTINGS_TABLE_ID = "tblpHPWeEkyJaF7ql";
 const STUDIO_PUB1_VIEW_ID = "viwtrn8YmGacQWVzU";
 const STUDIO_PUB2_VIEW_ID = "viwf0hxXl8oYUClim";
@@ -14561,13 +14568,15 @@ async function listOversizedMedia(env) {
 async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
-  const [profiles, readyToSchedule, readyToPublish, published, oversized] = await Promise.all([
+  const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification] = await Promise.all([
     listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listOversizedMedia(env).catch(() => []),
+    listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
   ]);
+  const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
   return respond(request, env, {
     ok: true,
     page: "operations",
@@ -14583,11 +14592,7 @@ async function getStudioOperations(request, env, authorization) {
     recently_published: published.map(mapOperationsOutput),
     oversized_media: oversized,
     a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
-    library_intake: {
-      a0_parked: true,
-      a2_webhook: true,
-      daisy_chain: ["A2", "A2B", "A3", "A4"],
-    },
+    library_intake: libraryIntake,
   });
 }
 
@@ -14733,20 +14738,141 @@ async function pulseStudioLibraryIntake(request, env, authorization) {
   const state = await phase6ScenarioState(env, STUDIO_A2_SCENARIO_ID);
   if (!state) throw new HttpError(502, "Could not read A2 scenario state");
   if (!state.isActive) throw new HttpError(409, "A2 is off. The intake webhook only runs while A2 is active.");
+  const startedAt = new Date().toISOString();
   const url = new URL(STUDIO_A2_WEBHOOK_URL);
   url.searchParams.set("make08_owner", "studio-operations");
   url.searchParams.set("make08_stage", "A2");
-  url.searchParams.set("make08_cycle_id", `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}-studio`);
+  url.searchParams.set("make08_cycle_id", `${startedAt.replace(/[-:]/g, "").slice(0, 15)}-studio`);
   const response = await fetch(url.toString(), { method: "GET", headers: { Accept: "text/plain, application/json" } });
   const body = await response.text();
   if (!response.ok) throw new HttpError(502, `A2 webhook returned ${response.status}: ${body.slice(0, 200)}`);
   return respond(request, env, {
     ok: true,
     triggered: "a2-webhook",
+    started_at: startedAt,
     scenario_id: STUDIO_A2_SCENARIO_ID,
     daisy_chain: ["A2", "A2B", "A3", "A4"],
-    message: "A2 started. A2B, A3, and A4 follow when each stage finishes.",
+    message: "A2 started. Watch the intake progress for whether files were found.",
     hook_response: body.slice(0, 200),
   }, 202);
+}
+
+function mapLibraryIntakeAsset(record) {
+  return {
+    id: record.id,
+    name: f(record, "Asset Name"),
+    mime_type: f(record, "MIME_Type"),
+    classification_status: f(record, "Classification_Status"),
+    intake_status: f(record, "Intake_Status"),
+    file_size_mb: f(record, "File_Size_MB"),
+  };
+}
+
+function mapLibraryIntakeSnapshot(needingClassification, oversized) {
+  const classify = (needingClassification || []).map(mapLibraryIntakeAsset);
+  const oversize = Array.isArray(oversized) ? oversized : [];
+  const notices = [];
+  if (classify.length) notices.push(`${classify.length} asset${classify.length === 1 ? "" : "s"} waiting for classification`);
+  if (oversize.length) notices.push(`${oversize.length} oversized video${oversize.length === 1 ? "" : "s"} need compression`);
+  return {
+    a0_parked: true,
+    a2_webhook: true,
+    daisy_chain: ["A2", "A2B", "A3", "A4"],
+    action_required: classify.length + oversize.length,
+    notice: notices.length ? notices.join(". ") + "." : "No library assets currently require action.",
+    needing_classification: classify,
+    oversized_count: oversize.length,
+  };
+}
+
+function mapMakeIntakeRun(row) {
+  if (!row) return null;
+  if (row.eventType && row.eventType !== "EXECUTION_END" && !Number.isFinite(Number(row.operations))) return null;
+  if (row.type && !row.operations && row.type !== "auto") return null;
+  const statusCode = Number(row.status);
+  const operations = Number(row.operations) || 0;
+  let state = "unknown";
+  if (statusCode === 1) state = "success";
+  else if (statusCode === 2) state = "warning";
+  else if (Number.isFinite(statusCode) && statusCode >= 3) state = "error";
+  return {
+    id: row.id || null,
+    timestamp: row.timestamp || null,
+    duration_ms: Number(row.duration) || 0,
+    operations,
+    state,
+    status_code: Number.isFinite(statusCode) ? statusCode : null,
+  };
+}
+
+function makeExecutionList(body) {
+  const raw = body?.executions || body?.response?.executions || body?.data || (Array.isArray(body) ? body : []);
+  return (Array.isArray(raw) ? raw : []).map(mapMakeIntakeRun).filter(Boolean);
+}
+
+async function listMakeIntakeExecutions(env, scenarioId) {
+  const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/executions?pg%5Blimit%5D=12`, { method: "GET" });
+  return makeExecutionList(body);
+}
+
+function firstRunSince(runs, startedAt) {
+  if (!startedAt) return runs[0] || null;
+  const startMs = Date.parse(startedAt);
+  if (!Number.isFinite(startMs)) return runs[0] || null;
+  return runs.find((run) => Date.parse(run.timestamp || "") >= startMs - 2500) || null;
+}
+
+function describeA2Run(run) {
+  if (!run) return { files_found: null, result: "waiting", detail: "Starting A2…" };
+  if (run.state === "error") return { files_found: null, result: "error", detail: "A2 failed. Check Make for the error." };
+  if (run.operations <= STUDIO_A2_EMPTY_MAX_OPERATIONS) {
+    return { files_found: false, result: "empty", detail: "No assets to process in the ingestion folder." };
+  }
+  return { files_found: true, result: "processed", detail: `A2 found files to intake (${run.operations} Make operations).` };
+}
+
+async function getStudioLibraryIntakeStatus(request, env, url) {
+  const startedAt = String(url.searchParams.get("started_at") || "").trim() || null;
+  const [a2Runs, a2bRuns, a3Runs, a4Runs, needingClassification, oversized] = await Promise.all([
+    listMakeIntakeExecutions(env, STUDIO_A2_SCENARIO_ID).catch(() => []),
+    listMakeIntakeExecutions(env, STUDIO_A2B_SCENARIO_ID).catch(() => []),
+    listMakeIntakeExecutions(env, STUDIO_A3_SCENARIO_ID).catch(() => []),
+    listMakeIntakeExecutions(env, STUDIO_A4_SCENARIO_ID).catch(() => []),
+    listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
+    listOversizedMedia(env).catch(() => []),
+  ]);
+  const a2 = firstRunSince(a2Runs, startedAt);
+  const a2b = firstRunSince(a2bRuns, startedAt);
+  const a3 = firstRunSince(a3Runs, startedAt);
+  const a4 = firstRunSince(a4Runs, startedAt);
+  const a2Result = describeA2Run(a2);
+  const stages = [
+    { key: "A2", label: "Intake", run: a2, ...a2Result },
+    { key: "A2B", label: "Video backfill", run: a2b, detail: a2b ? (a2b.state === "error" ? "A2B failed." : "A2B finished.") : (a2 ? "Waiting for A2B…" : "Waiting for A2…") },
+    { key: "A3", label: "Classification", run: a3, detail: a3 ? (a3.state === "error" ? "A3 failed." : "A3 finished.") : (a2b ? "Waiting for A3…" : "Queued") },
+    { key: "A4", label: "Reconciliation", run: a4, detail: a4 ? (a4.state === "error" ? "A4 failed." : "A4 finished.") : (a3 ? "Waiting for A4…" : "Queued") },
+  ];
+  const doneCount = stages.filter((stage) => stage.run).length;
+  const failed = stages.some((stage) => stage.run?.state === "error");
+  const a3AgeMs = a3?.timestamp ? Date.now() - Date.parse(a3.timestamp) : 0;
+  const a4Skipped = Boolean(a3 && !a4 && a2Result.files_found === false);
+  const a4TimedOut = Boolean(a3 && !a4 && Number.isFinite(a3AgeMs) && a3AgeMs > 45000);
+  const complete = failed || Boolean(a4) || a4Skipped || a4TimedOut;
+  const percent = failed ? Math.max(20, doneCount * 25) : complete ? 100 : Math.min(90, 8 + doneCount * 23);
+  let summary = a2Result.detail;
+  if (complete && !failed && a2Result.files_found === false) summary = "No assets to process in the ingestion folder.";
+  else if (complete && !failed && a2Result.files_found) summary = "Intake finished. Downstream classification and reconciliation ran.";
+  else if (a2 && a2Result.files_found) summary = a2Result.detail;
+  return respond(request, env, {
+    ok: true,
+    started_at: startedAt,
+    percent,
+    complete,
+    failed,
+    summary,
+    a2: a2Result,
+    stages,
+    library_intake: mapLibraryIntakeSnapshot(needingClassification, oversized),
+  });
 }
 

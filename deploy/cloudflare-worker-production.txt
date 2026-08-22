@@ -35,3 +35,5 @@ Operations Worker deploy: 2026-08-22 — Studio Operations gates daily I1 per Cont
 
 A0 daisy-chain Worker deploy: 2026-08-22 - Process intake folder pulses A2; A2B/A3/A4 follow when each stage finishes. A0 stays on-demand and off. Worker 0.10.55-a0-daisychain.
 
+Intake progress Worker deploy: 2026-08-22 - Operations tab checks classification and oversized queues; A2 runs report empty vs processed with a live progress bar. Worker 0.10.56-intake-progress.
+

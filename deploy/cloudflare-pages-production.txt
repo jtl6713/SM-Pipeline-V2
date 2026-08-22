@@ -149,3 +149,5 @@ A0 daisy-chain Pages deploy: 2026-08-22 - Operations Process intake folder start
 UI build label Pages deploy: 2026-08-22 - Sidebar "UI build" reads 0.6.94 from the JS BUILD_ID instead of the leftover 0.6.93 label.
 
 
+Intake progress Pages deploy: 2026-08-22 - Library intake notice, Operations badge, and A2 progress bar. UI 0.6.95-intake-progress.
+
