@@ -12,3 +12,31 @@ chicago-theatre.jpg
 chicago-cloud-gate.jpg
   File: Chicago from under the Cloud Gate (9694666470).jpg
   https://commons.wikimedia.org/wiki/File:Chicago_from_under_the_Cloud_Gate_(9694666470).jpg
+
+la-hollywood-sign.jpg
+  File: Hollywood Sign (Zuschnitt).jpg
+  https://commons.wikimedia.org/wiki/File:Hollywood_Sign_(Zuschnitt).jpg
+
+la-disney-concert-hall.jpg
+  File: Walt Disney Concert Hall (28192338576).jpg
+  https://commons.wikimedia.org/wiki/File:Walt_Disney_Concert_Hall_(28192338576).jpg
+
+la-santa-monica-pier.jpg
+  File: Santa Monica Pier Ferris Wheel.JPG
+  https://commons.wikimedia.org/wiki/File:Santa_Monica_Pier_Ferris_Wheel.JPG
+
+nyc-manhattan-skyline.jpg
+  File: NYC Downtown Manhattan Skyline seen from Paulus Hook 2019-12-20 IMG 7347 FRD (cropped).jpg
+  https://commons.wikimedia.org/wiki/File:NYC_Downtown_Manhattan_Skyline_seen_from_Paulus_Hook_2019-12-20_IMG_7347_FRD_(cropped).jpg
+
+nyc-statue-of-liberty.jpg
+  File: Statue of Liberty 7.jpg
+  https://commons.wikimedia.org/wiki/File:Statue_of_Liberty_7.jpg
+
+nyc-brooklyn-bridge.jpg
+  File: Brooklyn Bridge Manhattan.jpg
+  https://commons.wikimedia.org/wiki/File:Brooklyn_Bridge_Manhattan.jpg
+
+nyc-times-square.jpg
+  File: New york times square-terabass.jpg
+  https://commons.wikimedia.org/wiki/File:New_york_times_square-terabass.jpg

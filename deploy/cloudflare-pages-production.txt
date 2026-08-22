@@ -163,3 +163,5 @@ Support + AP0 Pages deploy: 2026-08-22 - Support tab with idea-to-publish walkth
 
 Support screen grabs Pages deploy: 2026-08-22 - Support examples include Studio screen grabs of Home, Ideas, Production, Pipeline, Dashboard, Music, and Operations. UI 0.6.102-support-shots.
 
+City home photos Pages deploy: 2026-08-22 - New York and Los Angeles profiles use their own landmark Home backgrounds the same way Chicago uses the skyline. UI 0.6.103-city-home-photos.
+
