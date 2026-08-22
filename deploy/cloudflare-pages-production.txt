@@ -177,3 +177,5 @@ Idea wizard media Pages deploy: 2026-08-22 - After picking an idea, ask single/m
 
 Home profile Pages deploy: 2026-08-22 - Drop the duplicate Working profile picker from Home; the top-bar Profile control is enough. UI 0.6.109-home-profile.
 
+Add-one-photo Pages deploy: 2026-08-22 - Multiple-photo sets accept add/remove one at a time instead of requiring two files in a single drop. UI 0.6.110-add-one-photo.
+

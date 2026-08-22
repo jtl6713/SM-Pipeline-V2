@@ -41,6 +41,7 @@
   const ezDirty = new Set();
   let ezIdeaIdentitySaveTimer = null;
   let item4Uploading = false;
+  let item4PendingUploads = [];
   let item4PreparingVariants = false;
   let item4PromoteInFlight = false;
   let item4VariantPollTimer = null;
@@ -79,7 +80,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.109-home-profile";
+  const BUILD_ID = "item4-0.6.110-add-one-photo";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1381,8 +1382,8 @@
     const title = $("item4UploadTitle");
     const hint = $("item4UploadHint");
     if (nextKind === "multiple-photos") {
-      if (title) title.textContent = "Drop several photos here or choose files";
-      if (hint) hint.textContent = "At least 2 photos · up to 20 · HEIC/HEIF supported · originals are preserved";
+      if (title) title.textContent = "Drop photos here or choose files";
+      if (hint) hint.textContent = "Add or remove one at a time · 2 or more in the set · up to 20 · HEIC/HEIF supported";
     } else if (nextKind === "single-photo") {
       if (title) title.textContent = "Drop one photo here or choose a file";
       if (hint) hint.textContent = "One photo · HEIC/HEIF supported · original is preserved";
@@ -1424,7 +1425,7 @@
       hint.hidden = hasAssets;
       if (!hasAssets && !kindReady) hint.textContent = "Pick one before uploading so the platform plan matches what you intend.";
       else if (!hasAssets && ezIntakeKind === "single-photo") hint.textContent = "Single photo selected. Upload one image.";
-      else if (!hasAssets) hint.textContent = "Multiple photos selected. Upload at least two images.";
+      else if (!hasAssets) hint.textContent = "Multiple photos selected. Add photos one at a time. The set needs two or more before the platform plan.";
     }
     if (zone) zone.hidden = !kindReady && !hasAssets ? true : false;
     if (zone && kindReady) zone.hidden = false;
@@ -1482,8 +1483,67 @@
     (files || []).forEach((file, index) => {
       const heic = item4IsHeicAsset({ name: file.name, mime_type: file.type });
       if (heic) return;
-      try { ezLocalPreviews.set(index, URL.createObjectURL(file)); } catch {}
+      try {
+        const url = URL.createObjectURL(file);
+        ezLocalPreviews.set(index, url);
+        if (file?.name) ezLocalPreviews.set(file.name, url);
+      } catch {}
     });
+  }
+
+  function appendEzLocalPreview(file) {
+    if (!file || item4IsHeicAsset({ name: file.name, mime_type: file.type })) return;
+    try {
+      const url = URL.createObjectURL(file);
+      const index = ezStagedFiles.length;
+      ezLocalPreviews.set(index, url);
+      if (file.name) ezLocalPreviews.set(file.name, url);
+    } catch {}
+  }
+
+  function ezPersistedAssetCount() {
+    return (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
+      .filter((asset) => asset && !String(asset.id || "").startsWith("local:")).length;
+  }
+
+  function ezTargetPhotoCount() {
+    const pending = ezWizardPending || ezWizardAnswers;
+    const helpers = ezPlanApi();
+    if (pending?.inputKind === "mixed") return helpers?.ezWizardExpectedUploads?.(pending) || 1;
+    if (pending?.inputKind === "multiple-photos" || ezIntakeKind === "multiple-photos") {
+      return Math.max(2, Number(pending?.photoCount) || 2);
+    }
+    return 1;
+  }
+
+  function ezMasterSetReadyForPlan() {
+    const pending = ezWizardPending || ezWizardAnswers;
+    const kind = pending?.inputKind || ezIntakeKind;
+    const total = ezPersistedAssetCount();
+    if (kind === "single-ai" || kind === "multiple-ai") return ezWizardAllowsPlanWithoutAssets();
+    if (kind === "mixed") return total >= (ezPlanApi()?.ezWizardExpectedUploads?.(pending) || 1);
+    if (kind === "multiple-photos") return total >= ezTargetPhotoCount();
+    return total >= 1;
+  }
+
+  function ezIncompleteSetMessage(total) {
+    const pending = ezWizardPending || ezWizardAnswers;
+    const kind = pending?.inputKind || ezIntakeKind;
+    if (kind === "mixed") {
+      const expected = ezPlanApi()?.ezWizardExpectedUploads?.(pending) || 1;
+      if (total < expected) {
+        return `${total} of ${expected} of your photos added. Add more one at a time, or remove any you don’t want.`;
+      }
+    }
+    if (kind === "multiple-photos") {
+      const want = ezTargetPhotoCount();
+      if (Number(pending?.photoCount) && total < want) {
+        return `${total} of ${want} photos added. Add more one at a time, or remove any you don’t want.`;
+      }
+      if (total < 2) return "1 photo in the set. Add another, or remove this one.";
+      if (total < want) return `${total} photos in the set. Add more one at a time, or remove any you don’t want.`;
+    }
+    return "";
   }
 
   function item4OptimisticAssetsFromFiles(files, existing = []) {
@@ -1502,12 +1562,19 @@
   }
 
   function paintItem4LocalPreviews(files, { uploading = true } = {}) {
-    const list = Array.from(files || []);
-    ezStagedFiles = list;
-    stageEzLocalPreviews(list);
+    const incoming = Array.from(files || []);
+    const existing = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
+      .filter((asset) => asset && !String(asset.id || "").startsWith("local:"));
+    incoming.forEach((file) => appendEzLocalPreview(file));
+    ezStagedFiles = [...(Array.isArray(ezStagedFiles) ? ezStagedFiles : []), ...incoming];
+    const optimisticNew = item4OptimisticAssetsFromFiles(incoming, []).map((asset, index) => ({
+      ...asset,
+      id: `local:${existing.length + index}`,
+      order: existing.length + index + 1,
+    }));
     const optimistic = {
       ...(item4Workspace || {}),
-      assets: item4OptimisticAssetsFromFiles(list, item4Workspace?.assets || []),
+      assets: [...existing, ...optimisticNew],
       assets_status: uploading ? "Uploading" : (item4Workspace?.assets_status || "Uploading"),
     };
     item4Workspace = optimistic;
@@ -1518,9 +1585,10 @@
   }
 
   function ezLocalPreviewFor(index, name) {
+    if (name && ezLocalPreviews.has(name)) return ezLocalPreviews.get(name);
     if (ezLocalPreviews.has(index)) return ezLocalPreviews.get(index);
     const match = ezStagedFiles.findIndex((file) => file.name === name);
-    return match >= 0 ? (ezLocalPreviews.get(match) || "") : "";
+    return match >= 0 ? (ezLocalPreviews.get(match) || ezLocalPreviews.get(name) || "") : "";
   }
 
   function renderEzPhotoStrip() {
@@ -1528,7 +1596,7 @@
     if (!host) return;
     const files = Array.isArray(ezStagedFiles) ? ezStagedFiles : [];
     const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
-    const count = Math.max(files.length, assets.length);
+    const count = assets.length || files.length;
     if (!count) {
       host.hidden = true;
       host.innerHTML = "";
@@ -1540,22 +1608,27 @@
     for (let index = 0; index < count; index += 1) {
       const file = files[index];
       const asset = assets[index] || {};
-      const name = file?.name || asset.name || `Photo ${index + 1}`;
+      const name = asset.name || file?.name || `Photo ${index + 1}`;
       const id = String(asset.id || `staged:${index}`);
       const localUrl = ezLocalPreviewFor(index, name);
-      const remoteUrl = asset.id ? item4AssetPreviewUrl(asset) : "";
+      const remoteUrl = asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
       const previewUrl = localUrl || remoteUrl;
       const heic = item4IsHeicAsset(file || asset);
       const visual = previewUrl
         ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
         : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
+      const canRemove = asset.id && !String(asset.id).startsWith("local:") && !String(asset.id).startsWith("staged:");
       cards.push(`<article class="ez-photo-card" data-item4-asset="${escapeHtml(id)}">
         ${visual}
         <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>Photo ${index + 1}</span></div>
         ${item4CaptionField(id)}
+        ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="Remove this photo">×</button>` : ""}
       </article>`);
     }
     host.innerHTML = cards.join("");
+    host.querySelectorAll("[data-remove-item4-asset]").forEach((button) => {
+      button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset));
+    });
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
   }
@@ -2041,6 +2114,7 @@
     if (!activeProductionRequest?.id) return;
     if (!ezIsOriginRecord() && !ezAutoPlanAfterUpload && !ezStarting) return;
     if (!item4Workspace?.assets?.length && !ezWizardAllowsPlanWithoutAssets()) return;
+    if (!ezMasterSetReadyForPlan()) return;
     if (!force && item4Workspace?.plan_status === "Ready" && item4Workspace?.plan?.items?.length) {
       ezAutoPlanAfterUpload = false;
       syncEzPlanChrome();
@@ -2268,9 +2342,9 @@
     if (input) input.multiple = ezIntakeKind === "multiple-photos";
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
-    if (title) title.textContent = ezIntakeKind === "multiple-photos" ? "Drop several photos here" : "Drop one photo here";
+    if (title) title.textContent = ezIntakeKind === "multiple-photos" ? "Drop photos here" : "Drop one photo here";
     if (hint) hint.textContent = ezIntakeKind === "multiple-photos"
-      ? "Drop several photos. They show up here immediately."
+      ? "Add or remove one at a time. They show up here immediately."
       : "Drop one photo. It shows up here immediately.";
     syncEzYouTubeAvailability(resetPlatforms);
     if (resetPlatforms) syncItem4PlatformsFromEz();
@@ -2453,8 +2527,11 @@
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
     if (answers.inputKind === "mixed") {
-      if (title) title.textContent = expected === 1 ? "Drop your photo" : `Drop ${expected} of your photos`;
-      if (hint) hint.textContent = `Studio adds ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"} on top of these uploads.`;
+      if (title) title.textContent = expected === 1 ? "Drop your photo" : `Add ${expected} of your photos`;
+      if (hint) hint.textContent = `Add them one at a time. Studio then adds ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"}.`;
+    } else if (answers.inputKind === "multiple-photos") {
+      if (title) title.textContent = `Add ${count} photos`;
+      if (hint) hint.textContent = "Add or remove one at a time. You can also drop several together.";
     } else if (answers.inputKind === "single-ai" || answers.inputKind === "multiple-ai") {
       if (title) title.textContent = "No upload needed for AI images";
       if (hint) hint.textContent = "Make generates the images from this plan.";
@@ -2872,10 +2949,10 @@
       enterEzContentPath();
       const expected = helpers.ezWizardExpectedUploads(answers);
       setEzMessage(answers.inputKind === "mixed"
-        ? `Drop ${expected} of your photo${expected === 1 ? "" : "s"}. Studio will add ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"}.`
+        ? `Add ${expected} of your photo${expected === 1 ? "" : "s"} one at a time. Studio will add ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"}.`
         : expected === 1
           ? "Drop one photo to continue."
-          : `Drop ${expected} photos, or at least two if you change the set.`);
+          : `Add ${expected} photos one at a time, or drop several together.`);
     } catch (error) {
       ezWizardSetMessage(error.message || "Could not continue.", "error-text");
     } finally {
@@ -2883,8 +2960,33 @@
     }
   }
 
+  function drainPendingMasterUploads() {
+    if (item4Uploading || ezStarting || !item4PendingUploads.length) return;
+    const queued = item4PendingUploads.splice(0);
+    receiveMasterPhotos(queued);
+  }
+
+  function receiveMasterPhotos(fileList) {
+    const files = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
+    if (!files.length) {
+      setEzMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
+      setRequestMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
+      return;
+    }
+    if (item4Uploading || ezStarting) {
+      item4PendingUploads.push(...files);
+      setEzMessage("Adding to the set…");
+      return;
+    }
+    if (activeProductionRequest?.id) {
+      uploadItem4Files(files);
+      return;
+    }
+    startEzProduction({ files });
+  }
+
   async function startEzFromFiles(fileList) {
-    await startEzProduction({ files: fileList });
+    receiveMasterPhotos(fileList);
   }
 
   async function startEzProduction({ files = [] } = {}) {
@@ -2904,20 +3006,23 @@
     if (ezIntakeKind === "single-photo" && supported.length > 1) {
       setEzMessage("Single photo uses the first image. Choose Multiple photos for a set.", "");
     }
-    let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
-    if (pending?.inputKind === "mixed") {
-      if (nextFiles.length !== expected) {
-        setEzMessage(`Drop exactly ${expected} of your photo${expected === 1 ? "" : "s"} for this mixed set.`, "error-text");
-        return;
-      }
-    } else if (!allowEmpty && ezIntakeKind === "multiple-photos" && nextFiles.length < 2) {
-      setEzMessage("Drop at least two photos, or choose Single photo.", "error-text");
+    const existingCount = ezPersistedAssetCount();
+    if (ezIntakeKind === "single-photo" && existingCount >= 1) {
+      setEzMessage("This piece already has a photo. Remove it first to replace it.", "error-text");
       return;
     }
-    if (nextFiles.length) {
-      ezStagedFiles = nextFiles;
-      stageEzLocalPreviews(nextFiles);
-      renderEzPhotoStrip();
+    let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
+    if (pending?.inputKind === "mixed") {
+      const remaining = Math.max(0, Number(expected || 0) - existingCount);
+      if (!remaining) {
+        setEzMessage("This mixed set already has your photos.", "error-text");
+        return;
+      }
+      nextFiles = nextFiles.slice(0, remaining);
+    }
+    if (activeProductionRequest?.id && nextFiles.length) {
+      await uploadItem4Files(nextFiles);
+      return;
     }
     const captionMode = ezCaptionMode();
     const captions = joinedManualSlideCaptions();
@@ -2928,9 +3033,10 @@
     setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
     try {
       const wizardPlanned = pending?.planned;
+      const totalAfter = existingCount + nextFiles.length;
       const photoCount = allowEmpty
         ? (apiHelpers.ezWizardPhotoCount(pending) || 1)
-        : nextFiles.length;
+        : (Number(pending?.photoCount) || (pending?.inputKind === "mixed" ? apiHelpers.ezWizardPhotoCount(pending) : 0) || Math.max(totalAfter, ezIntakeKind === "multiple-photos" ? 2 : 1));
       let planned;
       if (wizardPlanned) {
         planned = wizardPlanned;
@@ -2980,7 +3086,7 @@
       } else if (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos" || nextFiles.length) {
         requestPayload.carousel_image_mode = "Manual Upload";
         requestPayload.carousel_slide_count_mode = "Exact";
-        requestPayload.carousel_slide_count_exact = nextFiles.length;
+        requestPayload.carousel_slide_count_exact = photoCount;
       }
       await ensureProductionRequestMusic();
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
@@ -3013,6 +3119,7 @@
     } finally {
       ezStarting = false;
       if (continueBtn) continueBtn.disabled = false;
+      drainPendingMasterUploads();
     }
   }
 
@@ -3133,7 +3240,7 @@
     document.querySelectorAll("[data-ez-platform]").forEach((input) => {
       input.addEventListener("change", () => {
         syncItem4PlatformsFromEz();
-        if ((ezIsOriginRecord() || ezStarting) && item4Workspace?.assets?.length) {
+        if ((ezIsOriginRecord() || ezStarting) && ezMasterSetReadyForPlan()) {
           maybeAutoEzPlan(true);
         }
       });
@@ -3147,7 +3254,10 @@
       startEzFromFiles(event.target.files);
       event.target.value = "";
     });
-    $("ezContinue")?.addEventListener("click", () => startEzFromFiles(ezStagedFiles));
+    $("ezContinue")?.addEventListener("click", () => {
+      if (activeProductionRequest?.id && ezPersistedAssetCount()) return;
+      startEzFromFiles(ezStagedFiles);
+    });
     const drop = $("ezUploadZone");
     if (!drop) return;
     drop.addEventListener("click", (event) => {
@@ -3332,11 +3442,12 @@
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
     const showCaption = ezManualCaptionsEnabled() && (ezPhotoSetActive() || ezIntakeKind === "single-photo");
     const captionField = showCaption ? item4CaptionField(asset.id) : "";
+    const canRemove = asset.id && !String(asset.id).startsWith("local:");
     return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}" data-item4-asset="${escapeHtml(asset.id)}">
       <div class="item4-thumb">${visual}</div>
       <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || "Photo")}</strong><span>Photo ${escapeHtml(asset.order || "")} · ${escapeHtml(dims)}${formatNote}</span></div>
       ${captionField}
-      <button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="Remove this master photo">×</button>
+      ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="Remove this photo">×</button>` : ""}
     </article>`;
   }
 
@@ -4212,7 +4323,11 @@
   }
 
   async function uploadItem4Files(fileList) {
-    if (!activeProductionRequest?.id || item4Uploading) return;
+    if (!activeProductionRequest?.id) return;
+    if (item4Uploading) {
+      item4PendingUploads.push(...Array.from(fileList || []).filter(item4IsSupportedPhotoFile));
+      return;
+    }
     if (!ezIntakeKind) {
       setRequestMessage("Choose Single photo or Multiple photos before uploading.", "error-text");
       syncPrMediaKindUi();
@@ -4220,17 +4335,26 @@
     }
     let files = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
     if (!files.length) { setRequestMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text"); return; }
-    if (ezIntakeKind === "single-photo" && files.length > 1) {
-      setRequestMessage("Single photo uses the first image. Choose Multiple photos for a set.", "");
-      files = files.slice(0, 1);
-    }
-    if (ezIntakeKind === "multiple-photos" && files.length < 2) {
-      const expected = ezPlanApi()?.ezWizardExpectedUploads?.(ezWizardPending || ezWizardAnswers);
-      const mixedOne = (ezWizardPending || ezWizardAnswers)?.inputKind === "mixed" && expected === 1;
-      if (!mixedOne) {
-        setRequestMessage("Multiple photos needs at least two images, or choose Single photo.", "error-text");
+    const existingCount = ezPersistedAssetCount();
+    if (ezIntakeKind === "single-photo") {
+      if (existingCount >= 1) {
+        setRequestMessage("This piece already has a photo. Remove it first to replace it.", "error-text");
         return;
       }
+      if (files.length > 1) {
+        setRequestMessage("Single photo uses the first image. Choose Multiple photos for a set.", "");
+        files = files.slice(0, 1);
+      }
+    }
+    const pending = ezWizardPending || ezWizardAnswers;
+    if (pending?.inputKind === "mixed") {
+      const expected = ezPlanApi()?.ezWizardExpectedUploads?.(pending) || 1;
+      const remaining = Math.max(0, expected - existingCount);
+      if (!remaining) {
+        setRequestMessage("This mixed set already has your photos.", "error-text");
+        return;
+      }
+      files = files.slice(0, remaining);
     }
     item4Uploading = true;
     const progress = $("item4UploadProgress");
@@ -4247,8 +4371,16 @@
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, { method: "POST", body: form, timeoutMs: 90000 });
       if (result.record) activeProductionRequest = result.record;
       await loadItem4Workspace(activeProductionRequest);
+      ezStagedFiles = [];
       syncPrMediaKindUi();
-      if (item4Workspace?.assets_status === "Ready") {
+      const total = ezPersistedAssetCount();
+      const incomplete = ezIncompleteSetMessage(total);
+      if (incomplete) {
+        updateItem4MasterProgress(item4Workspace || {});
+        setRequestMessage(incomplete, "success");
+        setEzMessage(incomplete, "success");
+        if (item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
+      } else if (item4Workspace?.assets_status === "Ready") {
         updateItem4MasterProgress(item4Workspace);
         setRequestMessage("Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
       } else {
@@ -4256,7 +4388,7 @@
         setRequestMessage("Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background.", "success");
         startItem4MasterPolling();
       }
-      await maybeAutoEzPlan();
+      if (!incomplete) await maybeAutoEzPlan();
       renderEzCaptionUi();
       renderEzPhotoStrip();
     } catch (error) {
@@ -4270,17 +4402,24 @@
     } finally {
       item4Uploading = false;
       if (button) button.disabled = !(item4Workspace?.assets?.length);
+      drainPendingMasterUploads();
     }
   }
 
   async function removeItem4Asset(assetId) {
     if (!activeProductionRequest?.id || !assetId) return;
-    if (!window.confirm("Remove this photo from the master source set? The other originals will be preserved.")) return;
+    if (String(assetId).startsWith("local:") || String(assetId).startsWith("staged:")) return;
+    if (!window.confirm("Remove this photo from the set? You can add it again afterward.")) return;
     try {
       await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(assetId)}`, {method:"DELETE", body:JSON.stringify({})});
       await loadItem4Workspace(activeProductionRequest);
-      setRequestMessage("Master photo removed. Rebuild the platform plan before production.", "success");
-      if (ezIsOriginRecord()) await maybeAutoEzPlan(true);
+      ezStagedFiles = [];
+      const total = ezPersistedAssetCount();
+      const incomplete = ezIncompleteSetMessage(total);
+      setRequestMessage(incomplete || "Photo removed. Add another, or rebuild the platform plan when the set is ready.", "success");
+      setEzMessage(incomplete || "Photo removed.", incomplete ? "success" : "");
+      renderEzPhotoStrip();
+      if (ezIsOriginRecord() && ezMasterSetReadyForPlan()) await maybeAutoEzPlan(true);
     } catch (error) { setRequestMessage(error.message, "error-text"); }
   }
 
@@ -4981,7 +5120,7 @@
           const n = ezPlanApi()?.ezWizardExpectedUploads?.(ezWizardPending) || 1;
           setRequestMessage(`Drop ${n} of your photo${n === 1 ? "" : "s"}. Studio will add ${ezWizardPending.aiCount} AI image${Number(ezWizardPending.aiCount) === 1 ? "" : "s"}.`, "success");
         } else {
-          setRequestMessage("Drop your photos here to continue.", "success");
+          setRequestMessage("Add photos one at a time, or drop several together.", "success");
         }
       } else {
         setRequestMessage(result.created ? "Production Request draft created. Choose Single or Multiple photos, then upload." : "Existing Production Request draft opened.", "success");
