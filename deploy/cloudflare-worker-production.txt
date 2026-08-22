@@ -57,3 +57,5 @@ AP0 webhook live Worker deploy: 2026-08-22 - AP0/IGS/FBS3/FBS4/TTD0 stay on whil
 
 Dashboard 429 Worker deploy: 2026-08-22 - Dashboard loads Ideas, Content, and Outputs in one sequential Airtable pass and retries 429s. Worker 0.10.66-dashboard-429.
 
+Idea I1 view Worker deploy: 2026-08-22 - Manual Generate AI Ideas searches the selected profile by record id instead of the daily Enabled Profiles view, then waits for I1 to finish. Worker 0.10.67-idea-i1-view.
+

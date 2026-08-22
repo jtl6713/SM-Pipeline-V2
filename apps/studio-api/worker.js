@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.66-dashboard-429",
+          version: "0.10.67-idea-i1-view",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -14836,12 +14836,19 @@ async function studioIdeaInstallExactProfileSelector(env, profileId) {
     throw new HttpError(409, "I1 Module 2 profile selector contract has drifted");
   }
   module2.mapper = module2.mapper || {};
+  // Daily I1 uses view "I1 - Enabled Profiles". Manual runs must ignore that view
+  // or LA/NYC (checkbox off) return zero rows even with an exact RECORD_ID formula.
+  delete module2.mapper.view;
   module2.mapper.formula = `AND(RECORD_ID()="${String(profileId).replace(/"/g, "")}",{Active}=1)`;
   module2.mapper.maxRecords = "1";
   await studioIdeaWriteI1Blueprint(env, patched);
   const verified = await studioIdeaReadI1Blueprint(env);
   const verified2 = phase6FindModule(verified.flow, 2);
-  if (String(verified2?.mapper?.formula || "") !== module2.mapper.formula || String(verified2?.mapper?.maxRecords || "") !== "1") {
+  if (
+    String(verified2?.mapper?.formula || "") !== module2.mapper.formula
+    || String(verified2?.mapper?.maxRecords || "") !== "1"
+    || verified2?.mapper?.view
+  ) {
     throw new HttpError(502, "I1 exact-profile selector verification failed");
   }
   return original;
@@ -14872,12 +14879,14 @@ async function studioIdeaExecuteBatch(env, profile, batchRecord) {
     }
     if (executionId) {
       await studioIdeaUpdateBatch(env, batchRecord.id, { Make_Execution_ID: String(executionId) });
+      const waited = await phase6WaitForScenarioExecution(env, STUDIO_IDEA_I1_SCENARIO_ID, executionId, 180000, 4000);
+      if (waited.done && !waited.success) {
+        throw new HttpError(502, `I1 failed (${waited.status || "ERROR"}). Check the Make execution before retrying.`);
+      }
+    } else {
+      // /start already launched a run; give Module 2 time to read the exact profile.
+      await new Promise((resolve) => setTimeout(resolve, 8000));
     }
-
-    // Leave the exact selector and manual overrides in place long enough for the
-    // Make execution to consume Module 2, then restore the production blueprint
-    // and OFF state in finally.
-    await new Promise((resolve) => setTimeout(resolve, 6500));
   } catch (error) {
     try {
       await studioIdeaUpdateBatch(env, batchRecord.id, {
