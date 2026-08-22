@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.67-idea-i1-view",
+          version: "0.10.68-idea-i1-wait",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -11508,11 +11508,18 @@ async function phase6StopExactScenarioExecution(env, scenarioId, executionId) {
 async function phase6WaitForScenarioExecution(env, scenarioId, executionId, timeoutMs = 90000, pollMs = 3000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/executions/${executionId}`, { method: "GET" });
-    const details = body?.response || body?.execution || body || {};
-    const status = String(details?.status || "").toUpperCase();
-    if (["SUCCESS", "WARNING"].includes(status)) return { done: true, success: true, status, details };
-    if (["ERROR", "FAILED"].includes(status)) return { done: true, success: false, status, details };
+    try {
+      const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/executions/${executionId}`, { method: "GET" });
+      const details = body?.response || body?.execution || body || {};
+      const status = String(details?.status || "").toUpperCase();
+      if (["SUCCESS", "WARNING"].includes(status)) return { done: true, success: true, status, details };
+      if (["ERROR", "FAILED"].includes(status)) return { done: true, success: false, status, details };
+    } catch (error) {
+      // In-progress executions often 404 on GET until Make writes the log row.
+      const status = Number(error?.status || 0);
+      const message = String(error?.message || error || "");
+      if (status !== 404 && !/SC404|Resource not found|\(404\)/.test(message)) throw error;
+    }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
   return { done: false, success: false, status: "TIMEOUT", details: null };
@@ -14879,13 +14886,20 @@ async function studioIdeaExecuteBatch(env, profile, batchRecord) {
     }
     if (executionId) {
       await studioIdeaUpdateBatch(env, batchRecord.id, { Make_Execution_ID: String(executionId) });
-      const waited = await phase6WaitForScenarioExecution(env, STUDIO_IDEA_I1_SCENARIO_ID, executionId, 180000, 4000);
-      if (waited.done && !waited.success) {
-        throw new HttpError(502, `I1 failed (${waited.status || "ERROR"}). Check the Make execution before retrying.`);
-      }
-    } else {
-      // /start already launched a run; give Module 2 time to read the exact profile.
-      await new Promise((resolve) => setTimeout(resolve, 8000));
+    }
+    // Wait on Airtable candidates, not Make GET /executions/:id. That route 404s
+    // while I1 is still running, which used to fail the batch and stop I1.
+    const requested = Math.max(0, Number(f(batchRecord, "Requested_Count")) || 0);
+    const deadline = Date.now() + 180000;
+    let generated = 0;
+    while (Date.now() < deadline) {
+      const current = await airtableFetch(env, STUDIO_IDEA_BATCH_TABLE_ID, batchRecord.id);
+      generated = studioIdeaBatchView(current).generated_count;
+      if (requested > 0 && generated >= requested) break;
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    }
+    if (requested > 0 && generated < requested) {
+      throw new HttpError(504, `I1 finished without creating all requested ideas (${generated} of ${requested}).`);
     }
   } catch (error) {
     try {

@@ -59,3 +59,5 @@ Dashboard 429 Worker deploy: 2026-08-22 - Dashboard loads Ideas, Content, and Ou
 
 Idea I1 view Worker deploy: 2026-08-22 - Manual Generate AI Ideas searches the selected profile by record id instead of the daily Enabled Profiles view, then waits for I1 to finish. Worker 0.10.67-idea-i1-view.
 
+Idea I1 wait Worker deploy: 2026-08-22 - Do not poll Make GET /executions while I1 is running (that 404s). Wait for Idea Candidates on the batch instead. Worker 0.10.68-idea-i1-wait.
+
