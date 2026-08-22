@@ -43,3 +43,5 @@ Intake logs Worker deploy: 2026-08-22 - Read A2 status from Make scenario logs s
 
 On-demand render chain Worker deploy: 2026-08-22 - P1/R2/R3/R4/R5/RR1 stay on-demand. Remotion done POSTs /api/hooks/r5-done so R5 runs only when a job finished. Worker 0.10.59-ondemand-r5.
 
+On-demand publish orch Worker deploy: 2026-08-22 - IG/FB/YT/TTD/AP-CAR orchestrators stay on-demand and run only when Approve or a due scheduled post has work. Worker 0.10.60-ondemand-pub.
+

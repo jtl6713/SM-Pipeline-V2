@@ -129,12 +129,13 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.59-ondemand-r5",
+          version: "0.10.60-ondemand-pub",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
           studio_intake_progress_v1: true,
           studio_r5_done_callback_v1: true,
+          studio_ondemand_publish_orch_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -361,7 +362,7 @@ export default {
       if (isOperationsOutputScheduleRoute) {
         requirePermission(authorization, "publishing_control");
         assertWriteRequest(request, env);
-        return scheduleStudioPublishOutput(request, env, url, authorization);
+        return scheduleStudioPublishOutput(request, env, url, authorization, ctx);
       }
 
       if (isOperationsOutputPublishedRoute) {
@@ -10926,6 +10927,13 @@ const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
   { id: 5806658, key: "TTD0" },
   { id: 5823581, key: "YT" },
 ]);
+const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
+  { id: 5864632, key: "IG" },
+  { id: 5813561, key: "FB" },
+  { id: 5823581, key: "YT" },
+  { id: 5806668, key: "TTD" },
+  { id: 5791537, key: "APCAR" },
+]);
 const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([
   { id: 5531703, key: "P3" },
 ]);
@@ -10998,6 +11006,32 @@ async function pulseOnDemandRenderChain(env) {
   const pulses = [];
   for (const job of jobs) {
     const hasWork = await cadenceQueueHasWork(env, job.table, { view: job.view || null, formula: job.formula || null });
+    if (!hasWork) {
+      pulses.push({ key: job.key, skipped: "no_work" });
+      continue;
+    }
+    try {
+      await phase6PulseOnDemandScenario(env, job.id);
+      pulses.push({ key: job.key, pulsed: true });
+    } catch (error) {
+      pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return pulses;
+}
+
+async function pulseOnDemandPublishChain(env) {
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const jobs = [
+    { id: 5864632, key: "IG", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Publishing",{IG_Story_Status}="Publishing"),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
+    { id: 5813561, key: "FB", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
+    { id: 5806668, key: "TTD", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
+    { id: 5823581, key: "YT", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
+    { id: 5791537, key: "APCAR", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Studio_Output_Type}="Carousel",{Platform_Output_Type}="Instagram Carousel"),{Output_Status}="Approved for Publishing",{IG_Carousel_Status}!="Published",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
+  ];
+  const pulses = [];
+  for (const job of jobs) {
+    const hasWork = await cadenceQueueHasWork(env, outputTable, { formula: job.formula });
     if (!hasWork) {
       pulses.push({ key: job.key, skipped: "no_work" });
       continue;
@@ -11100,7 +11134,9 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_PUBLISH,
     ];
     const results = await Promise.all(parked.map((item) => cadenceSetActive(env, item.id, false)));
-    const pulses = startRender ? await pulseOnDemandRenderChain(env) : [];
+    const pulses = [];
+    if (startRender) pulses.push(...await pulseOnDemandRenderChain(env));
+    if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     return { ok: true, parked: true, results, pulses };
   }
   if (await cadenceRepairInProgress(env)) {
@@ -14794,7 +14830,7 @@ async function runStudioDailyIdeas(request, env, authorization, ctx, options = {
   return respond(request, env, { ok: true, ...result }, result.started ? 202 : 200);
 }
 
-async function scheduleStudioPublishOutput(request, env, url, authorization) {
+async function scheduleStudioPublishOutput(request, env, url, authorization, ctx = null) {
   const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/schedule$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid output path");
   let payload;
@@ -14802,16 +14838,18 @@ async function scheduleStudioPublishOutput(request, env, url, authorization) {
   const value = String(payload?.scheduled_post_date || "").trim();
   if (!value || Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
   const iso = new Date(value).toISOString();
+  const due = Date.parse(iso) <= Date.now() + 120000;
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({
       fields: {
         Scheduled_Post_Date: iso,
-        Publish_Status: "Ready to Publish",
+        Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
       },
       typecast: true,
     }),
   });
+  if (due) cadenceScheduleSync(ctx, env, { startPublish: true });
   return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
 }
 
