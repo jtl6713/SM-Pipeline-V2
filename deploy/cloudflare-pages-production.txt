@@ -193,3 +193,5 @@ AI thumbnail Pages deploy: 2026-08-22 - Cover defaults to AI generated. Use a ph
 
 Wizard question label Pages deploy: 2026-08-22 - Home wizard questions render as labels, not input-shaped pills. UI 0.6.117-wizard-question-label.
 
+Upload hint Pages deploy: 2026-08-22 - Drop HEIC/HEIF teaser copy; warn only on unsupported files; red saved-so-far count. UI 0.6.118-upload-hint-unsupported.
+

@@ -81,7 +81,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.117-wizard-question-label";
+  const BUILD_ID = "item4-0.6.118-upload-hint-unsupported";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1384,13 +1384,13 @@
     const hint = $("item4UploadHint");
     if (nextKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos here or choose files";
-      if (hint) hint.textContent = "Add or remove one at a time · 2 or more in the set · up to 20 · HEIC/HEIF supported";
+      if (hint) hint.textContent = "Add or remove one at a time · 2 or more in the set · up to 20";
     } else if (nextKind === "single-photo") {
       if (title) title.textContent = "Drop one photo here or choose a file";
-      if (hint) hint.textContent = "One photo · HEIC/HEIF supported · original is preserved";
+      if (hint) hint.textContent = "One photo · original is preserved";
     } else {
       if (title) title.textContent = "Drop photos here or choose files";
-      if (hint) hint.textContent = "Up to 20 photos · HEIC/HEIF supported · originals are preserved";
+      if (hint) hint.textContent = "Up to 20 photos · originals are preserved";
     }
     syncPrMediaKindUi();
     if (!quiet && nextKind) setRequestMessage();
@@ -2976,10 +2976,16 @@
   }
 
   function receiveMasterPhotos(fileList) {
-    const files = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
-    if (!files.length) {
-      setEzMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
-      setRequestMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
+    const incoming = Array.from(fileList || []);
+    const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
+    const files = incoming.filter(item4IsSupportedPhotoFile);
+    if (unsupportedNote) {
+      setEzMessage(unsupportedNote, "error-text");
+      setRequestMessage(unsupportedNote, "error-text");
+      if (!files.length) return;
+    } else if (!files.length) {
+      setEzMessage("Choose one or more photo files.", "error-text");
+      setRequestMessage("Choose one or more photo files.", "error-text");
       return;
     }
     if (item4Uploading || ezStarting) {
@@ -3004,9 +3010,14 @@
     const pending = ezWizardPending || ezWizardAnswers;
     const expected = pending?.inputKind ? apiHelpers.ezWizardExpectedUploads(pending) : null;
     const allowEmpty = expected === 0;
-    const supported = Array.from(files || []).filter(item4IsSupportedPhotoFile);
-    if (!allowEmpty && !supported.length) {
-      setEzMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
+    const incoming = Array.from(files || []);
+    const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
+    const supported = incoming.filter(item4IsSupportedPhotoFile);
+    if (unsupportedNote) {
+      setEzMessage(unsupportedNote, "error-text");
+      if (!supported.length) return;
+    } else if (!allowEmpty && !supported.length) {
+      setEzMessage("Choose one or more photo files.", "error-text");
       return;
     }
     if (!ezIntakeKind && supported.length) {
@@ -3993,11 +4004,12 @@
         body: `${ready} of ${target} saved. Your originals remain in Studio. You can keep working or leave this screen.`,
       };
     }
-    const count = target ? ` ${ready} of ${target} saved so far.` : "";
+    const count = target ? `${ready} of ${target} saved so far.` : "";
     return {
       heal: "uploading",
       title: "Photos are loading into the system.",
-      body: `You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background.${count}`,
+      body: "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background.",
+      count,
     };
   }
 
@@ -4014,7 +4026,10 @@
       }
       progress.hidden = false;
       progress.dataset.heal = markup.heal;
-      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}</span>`;
+      const countHtml = markup.count
+        ? ` <em class="item4-upload-progress-count">${escapeHtml(markup.count)}</em>`
+        : "";
+      progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>`;
     });
   }
 
@@ -4318,6 +4333,15 @@
     return mime.startsWith("image/") || ext === "heic" || ext === "heif";
   }
 
+  function item4UnsupportedPhotoMessage(files) {
+    const rejected = Array.from(files || []).filter((file) => !item4IsSupportedPhotoFile(file));
+    if (!rejected.length) return "";
+    const names = rejected.map((file) => String(file?.name || "").trim()).filter(Boolean);
+    if (names.length === 1) return `${names[0]} is not a supported photo.`;
+    if (names.length === 2 || names.length === 3) return `${names.join(", ")} are not supported photos.`;
+    return `${rejected.length} files are not supported photos.`;
+  }
+
   async function imageMetadataForFiles(files) {
     const result = [];
     for (const file of files) {
@@ -4342,8 +4366,16 @@
       syncPrMediaKindUi();
       return;
     }
-    let files = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
-    if (!files.length) { setRequestMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text"); return; }
+    const incoming = Array.from(fileList || []);
+    const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
+    let files = incoming.filter(item4IsSupportedPhotoFile);
+    if (unsupportedNote) {
+      setRequestMessage(unsupportedNote, "error-text");
+      if (!files.length) return;
+    } else if (!files.length) {
+      setRequestMessage("Choose one or more photo files.", "error-text");
+      return;
+    }
     const existingCount = ezPersistedAssetCount();
     if (ezIntakeKind === "single-photo") {
       if (existingCount >= 1) {
