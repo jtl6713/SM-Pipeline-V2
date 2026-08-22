@@ -26,3 +26,5 @@ Studio audio/caption handoff Worker deploy: 2026-08-21 — Promote keeps Voiceover
 
 Approve All Worker deploy: 2026-08-21 — POST /api/outputs/approve-all approves every Ready-for-Review output for publishing using the same handoff as a single Approve. Worker 0.10.51-approve-all.
 
+Publish dispatch Worker deploy: 2026-08-21 — Approve pulses the exact IG/FB/TikTok publisher webhooks, copies Story CDN URLs and 9:16 aspect onto the output, Graph-publishes Facebook Stories by binary upload, keeps AP0/IGS/FBS3/FBS4/TTD0 on during cadence, and maps encoding to Platform Processing. Worker 0.10.52-publish-dispatch.
+

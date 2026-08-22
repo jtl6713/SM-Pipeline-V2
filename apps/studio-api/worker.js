@@ -103,7 +103,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.51-approve-all",
+          version: "0.10.52-publish-dispatch",
           studio_manual_idea_generation_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
@@ -131,6 +131,7 @@ export default {
           studio_audio_platform_warning_v1: true,
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
+          studio_publish_dispatch_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
@@ -1033,7 +1034,26 @@ function studioPublishHandoffFields(record) {
   if (platform === "YouTube" && !current("YouTube_Privacy_Status")) {
     fields.YouTube_Privacy_Status = "public";
   }
+  if (!current("Asset_Aspect_Family") && (
+    /9:16/.test(String(f(record, "Aspect_Ratio") || ""))
+    || outputType === "Story"
+    || /Story|Reel|Short|Video Draft/.test(`${outputType} ${mapping}`)
+  )) {
+    fields.Asset_Aspect_Family = "9:16";
+  }
   if (platform === "Instagram" && (outputType === "Reel" || mapping === "Instagram Reel") && outputType !== "Carousel" && mapping !== "Instagram Carousel") {
+    if (preview.startsWith("https://media.chicagoshining.com/")) {
+      fields.Publish_Asset_URL = preview;
+      fields.Publish_Status = "Ready to Publish";
+    }
+  }
+  if (platform === "Instagram" && (outputType === "Story" || mapping === "Instagram Story")) {
+    if (preview.startsWith("https://media.chicagoshining.com/")) {
+      fields.Publish_Asset_URL = preview;
+      fields.Publish_Status = "Ready to Publish";
+    }
+  }
+  if (platform === "Facebook" && (outputType === "Story" || mapping === "Facebook Story")) {
     if (preview.startsWith("https://media.chicagoshining.com/")) {
       fields.Publish_Asset_URL = preview;
       fields.Publish_Status = "Ready to Publish";
@@ -1209,6 +1229,7 @@ function normalizedOutputState(record) {
   if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
 
   if (has("TikTok_Draft_Status", "manual action") || has("Manual_Completion_Status", "required") || has("Music_Status", "manual action")) return "Manual Action Required";
+  if (has("FB_Slideshow_Status", "reel processing") || has("IG_Story_Status", "publishing")) return "Platform Processing";
   // A leftover retry flag must not hide a YouTube video that is already on the platform.
   if (!youtubeVideoReady && (fields.Publish_Retry_Eligible || fields.Asset_Selection_Retry_Eligible || has("FB_Slideshow_Status", "retry") || has("TikTok_Draft_Status", "retry"))) return "Retry Pending";
   if (youtubeVideoReady && !has("Publish_Status", "published") && text("YouTube_Stage") !== "Complete") return "Platform Processing";
@@ -10751,9 +10772,15 @@ const PRODUCTION_CADENCE_RENDER = Object.freeze([
 ]);
 const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
   { id: 5864632, key: "IG" },
+  { id: 5612096, key: "AP0" },
+  { id: 5612664, key: "IGS" },
+  { id: 5845193, key: "IGSPOLL" },
   { id: 5791537, key: "APCAR" },
   { id: 5813561, key: "FB" },
+  { id: 5816502, key: "FBS3" },
+  { id: 5816520, key: "FBS4" },
   { id: 5806668, key: "TTD" },
+  { id: 5806658, key: "TTD0" },
   { id: 5823581, key: "YT" },
 ]);
 const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([
@@ -11113,6 +11140,167 @@ function studioOutputReadyForPublishApproval(record) {
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
 }
 
+async function studioActivePipelineSettings(env, names) {
+  const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
+  if (!wanted.length) return {};
+  const formula = `AND({Active}=1,OR(${wanted.map((name) => `{Setting_Name}='${name.replace(/'/g, "\\'")}'`).join(",")}))`;
+  const rows = await listRecords(env, "Pipeline Settings", { limit: 20, filterFormula: formula });
+  const map = {};
+  for (const row of rows) {
+    const name = String(f(row, "Setting_Name") || "").trim();
+    if (name) map[name] = String(f(row, "Setting_Value") || "").trim();
+  }
+  return map;
+}
+
+async function studioPulseMakeWebhook(env, url, recordId, target) {
+  const hook = String(url || "").trim();
+  if (!hook) return { ok: false, skipped: "missing-url", target };
+  const response = await fetch(hook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": "chicagoshining-studio-api/publish-dispatch" },
+    body: JSON.stringify({
+      output_record_id: recordId,
+      source: "studio-approve",
+      target,
+      requested_at: new Date().toISOString(),
+    }),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    console.warn("studio publish webhook failed", target, response.status, body.slice(0, 240));
+    return { ok: false, target, status: response.status };
+  }
+  return { ok: true, target, status: response.status };
+}
+
+function studioPublishDispatchTarget(record) {
+  const platform = String(f(record, "Platform") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || "").trim();
+  const mapping = String(f(record, "Platform_Output_Type") || "").trim();
+  const published = /published/i.test(String(f(record, "Publish_Status") || "")) || Boolean(f(record, "Published_At"));
+  if (published || Boolean(f(record, "Do_Not_Publish"))) return null;
+  if (platform === "Instagram" && (outputType === "Story" || mapping === "Instagram Story")) {
+    return { setting: "AP1_IGS_WEBHOOK_URL", poll: "AP1_IGS_POLL_WEBHOOK_URL", target: "AP1-IGS" };
+  }
+  if (platform === "Instagram" && (outputType === "Reel" || mapping === "Instagram Reel") && outputType !== "Carousel") {
+    return { setting: "AP1_IG_WEBHOOK_URL", target: "AP1-IG" };
+  }
+  if (platform === "Facebook" && (outputType === "Story" || mapping === "Facebook Story")) {
+    return { graphStory: true, target: "FB-STORY-GRAPH" };
+  }
+  if (platform === "Facebook" && (outputType === "Slideshow Reel" || mapping === "Facebook Reel") && outputType !== "Multi-Image Post") {
+    return { setting: "FBS3_WEBHOOK_URL", poll: "FBS4_WEBHOOK_URL", target: "FBS3" };
+  }
+  if (platform === "TikTok") {
+    return { setting: "TTD0_WEBHOOK_URL", target: "TTD0" };
+  }
+  return null;
+}
+
+async function studioPublishFacebookPageStory(env, record) {
+  const preview = String(f(record, "Publish_Asset_URL") || f(record, "Studio_Preview_URL") || "").trim();
+  if (!preview.startsWith("https://media.chicagoshining.com/")) {
+    return { ok: false, skipped: "missing-cdn-preview" };
+  }
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ID",
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+  ]);
+  const pageId = settings.FACEBOOK_PAGE_ID;
+  const token = settings.FACEBOOK_PAGE_ACCESS_TOKEN;
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+  if (!pageId || !token) return { ok: false, skipped: "missing-facebook-settings" };
+
+  const storiesUrl = `https://graph.facebook.com/${version}/${pageId}/video_stories`;
+  const startResponse = await fetch(storiesUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ upload_phase: "start", access_token: token }),
+  });
+  const start = await startResponse.json().catch(() => ({}));
+  if (!startResponse.ok || !start.video_id || !start.upload_url) {
+    console.warn("facebook story start failed", startResponse.status, start?.error?.message || "");
+    return { ok: false, error: start?.error?.message || `start ${startResponse.status}` };
+  }
+
+  const mediaResponse = await fetch(preview, { headers: { "User-Agent": "chicagoshining-studio-api/publish-dispatch" } });
+  if (!mediaResponse.ok) return { ok: false, error: `cdn ${mediaResponse.status}` };
+  const videoBytes = await mediaResponse.arrayBuffer();
+  const uploadResponse = await fetch(start.upload_url, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${token}`,
+      offset: "0",
+      file_size: String(videoBytes.byteLength),
+      "Content-Type": "application/octet-stream",
+    },
+    body: videoBytes,
+  });
+  const upload = await uploadResponse.json().catch(() => ({}));
+  if (!uploadResponse.ok || upload.success === false) {
+    console.warn("facebook story upload failed", uploadResponse.status, upload?.debug_info?.message || upload?.error?.message || "");
+    return { ok: false, error: upload?.debug_info?.message || upload?.error?.message || `upload ${uploadResponse.status}` };
+  }
+
+  const finishResponse = await fetch(storiesUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ upload_phase: "finish", video_id: String(start.video_id), access_token: token }),
+  });
+  const finish = await finishResponse.json().catch(() => ({}));
+  if (!finishResponse.ok || finish.success !== true) {
+    console.warn("facebook story finish failed", finishResponse.status, finish?.error?.message || "");
+    return { ok: false, error: finish?.error?.message || `finish ${finishResponse.status}` };
+  }
+
+  const postId = String(finish.post_id || start.video_id);
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      typecast: true,
+      fields: {
+        Publish_Status: "Published",
+        Output_Status: "Published",
+        Published_At: new Date().toISOString(),
+        Platform_Post_ID: postId,
+        Platform_Media_ID: String(start.video_id),
+        Platform_Post_URL: `https://www.facebook.com/stories/${postId}`,
+        FB_Publish_Status: "Published",
+        Publish_Error_Message: "",
+        Publish_Error_Stage: "",
+        Publish_Retry_Eligible: false,
+        Publish_Locked_By: "",
+      },
+    }),
+  });
+  return { ok: true, post_id: postId };
+}
+
+async function studioDispatchApprovedPublish(env, record) {
+  const plan = studioPublishDispatchTarget(record);
+  if (!plan) return { ok: true, skipped: "no-dispatch" };
+  if (plan.graphStory) return studioPublishFacebookPageStory(env, record);
+  const names = [plan.setting, plan.poll].filter(Boolean);
+  const settings = await studioActivePipelineSettings(env, names);
+  const first = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target);
+  if (plan.poll) {
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
+    await studioPulseMakeWebhook(env, settings[plan.poll], record.id, pollTarget);
+  }
+  return first;
+}
+
+function studioSchedulePublishDispatch(ctx, env, record) {
+  const run = studioDispatchApprovedPublish(env, record).catch((error) => {
+    console.warn("studio publish dispatch failed", record?.id, error);
+  });
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
+  return run;
+}
+
 async function approveOutputRecordForPublishing(env, existing, note, stamp) {
   const id = existing.id;
   if (Boolean(f(existing, "Do_Not_Publish"))) {
@@ -11162,6 +11350,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     try {
       const updated = await approveOutputRecordForPublishing(env, record, note, stamp);
       approved.push(mapApprovedOutputSummary(updated));
+      studioSchedulePublishDispatch(ctx, env, updated);
     } catch (error) {
       failed.push({
         ...mapApprovedOutputSummary(record),
@@ -11199,6 +11388,7 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
   if (productionPublishApprove) {
     const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
     cadenceScheduleSync(ctx, env, { startPublish: true });
+    studioSchedulePublishDispatch(ctx, env, updated);
     return respond(request, env, {
       ok: true,
       action: "approve_for_publishing",
