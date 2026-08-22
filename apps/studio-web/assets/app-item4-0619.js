@@ -63,6 +63,7 @@
   let item4CropRequestId = null;
   let pipelineOutputs = [];
   let pipelineSort = { key: "output", dir: "desc" };
+  const pipelineGroupOpen = new Map();
   let pipelineViewFilter = "all";
   let pipelineOpenSingleOnLoad = false;
   let dashboardCache = { metrics: {}, ideas: [], content: [], outputs: [] };
@@ -80,7 +81,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.114-ai-audio-defaults";
+  const BUILD_ID = "item4-0.6.115-pipeline-group-fold";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -7561,6 +7562,11 @@
     return groups;
   }
 
+  function isPipelineGroupExpanded(key, isNewest) {
+    if (pipelineGroupOpen.has(key)) return pipelineGroupOpen.get(key);
+    return Boolean(isNewest);
+  }
+
   function pipelineSortValue(record, key) {
     if (key === "output") return String(record.output_id || "");
     if (key === "platform") return String(record.platform || "");
@@ -7625,15 +7631,18 @@
       return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
-      ? groupedPipelineRecords(source).map((group) => {
-          const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-title">${escapeHtml(pipelineContentGroupLabel(group.records))}</div></td></tr>`;
-          return header + group.records.map(pipelineRow).join("");
+      ? groupedPipelineRecords(source).map((group, index) => {
+          const newest = index === 0;
+          const open = isPipelineGroupExpanded(group.key, newest);
+          const label = pipelineContentGroupLabel(group.records);
+          const header = `<tr class="pipeline-group-row"><td colspan="9"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button></td></tr>`;
+          return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map(pipelineRow).join("")}</tbody>`;
         }).join("")
-      : source.map(pipelineRow).join("");
+      : `<tbody>${source.map(pipelineRow).join("")}</tbody>`;
     const head = isPipeline
       ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
       : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
-    target.innerHTML = `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    target.innerHTML = `<table class="data-table"><thead>${head}</thead>${body}</table>`;
     if (isPipeline) {
       target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
         button.addEventListener("click", (event) => {
@@ -7646,6 +7655,20 @@
             pipelineSort.dir = key === "output" || key === "progress" ? "desc" : "asc";
           }
           renderOutputsTable(target, pipelineOutputs);
+        });
+      });
+      target.querySelectorAll("[data-pipeline-group-toggle]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const key = button.dataset.pipelineGroupToggle;
+          const groupBody = button.closest("tbody");
+          if (!groupBody || !key) return;
+          const open = !groupBody.classList.contains("is-collapsed");
+          pipelineGroupOpen.set(key, !open);
+          groupBody.classList.toggle("is-collapsed", open);
+          button.setAttribute("aria-expanded", open ? "false" : "true");
+          const chevron = button.querySelector(".pipeline-group-chevron");
+          if (chevron) chevron.textContent = open ? "▸" : "▾";
         });
       });
       target.querySelectorAll("[data-creative-output-id]").forEach((button) => {

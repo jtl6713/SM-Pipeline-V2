@@ -187,3 +187,5 @@ Pipeline content groups Pages deploy: 2026-08-22 - Platform Pipeline groups rows
 
 AI audio defaults Pages deploy: 2026-08-22 - Voiceover and Music default to Yes. Home Start over resets those toggles. UI 0.6.114-ai-audio-defaults.
 
+Pipeline group fold Pages deploy: 2026-08-22 - Content groupings on Platform Pipeline collapse by default; only the newest piece stays open. UI 0.6.115-pipeline-group-fold.
+

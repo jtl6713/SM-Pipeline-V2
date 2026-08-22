@@ -946,8 +946,12 @@ input, select, textarea, button {
 #outputsList .pipeline-sort:hover,#outputsList .pipeline-sort:focus-visible{background:var(--teal-soft);color:var(--teal-dark);outline:0}
 #outputsList .pipeline-sort.is-active{color:var(--teal-dark)}
 #outputsList .pipeline-sort span{font-size:.72rem;opacity:.65;font-weight:800}
-#outputsList .pipeline-group-row td{background:#f4f8f8;color:var(--teal-dark);font-weight:800;padding:10px 12px;border-top:1px solid var(--line);letter-spacing:.01em}
+#outputsList .pipeline-group-row td{background:#f4f8f8;color:var(--teal-dark);font-weight:800;padding:6px 8px;border-top:1px solid var(--line);letter-spacing:.01em}
+#outputsList .pipeline-group-toggle{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-align:left;padding:4px;margin:0;cursor:pointer;border-radius:8px}
+#outputsList .pipeline-group-toggle:hover,#outputsList .pipeline-group-toggle:focus-visible{background:var(--teal-soft);outline:0}
+#outputsList .pipeline-group-chevron{display:inline-flex;width:1em;flex:0 0 auto;opacity:.7}
 #outputsList .pipeline-group-title{font-size:.82rem}
+#outputsList .pipeline-output-group.is-collapsed tr:not(.pipeline-group-row){display:none}
 @media(max-width:760px){
   #outputsList .data-table thead{display:block;border-bottom:1px solid var(--line)}
   #outputsList .data-table thead tr{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px}
