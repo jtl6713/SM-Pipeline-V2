@@ -81,7 +81,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.119-youtube-16x9-all";
+  const BUILD_ID = "item4-0.6.120-approve-means-approve";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -4985,9 +4985,9 @@
         promote.disabled = Boolean(item4Uploading);
         promote.textContent = "Approve & Promote";
         promote.title = !planReady
-          ? "Save the platform plan first. Approve will build it if needed."
+          ? "Save the platform plan first."
           : (!variantsReady
-              ? "Prepare the platform crops next. Approve will start that if needed."
+              ? "Wait until platform crops are ready, then approve."
               : "Approve this request and start production.");
       } else {
         promote.disabled = false;
@@ -5495,12 +5495,15 @@
     const promoteButton = $("promoteProductionRequest");
     if (item4PromoteInFlight || promoteButton?.dataset.busy === "true" || promoteButton?.disabled) return;
 
+    if (item4Workspace?.assets?.length) {
+      try { await loadItem4Workspace(activeProductionRequest); } catch {}
+    }
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
-      await buildItem4Plan();
+      setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
       return;
     }
-    if (item4Workspace?.assets?.length && item4Workspace?.plan_status === "Ready" && item4Workspace?.variant_status !== "Ready") {
-      await prepareItem4Variants();
+    if (item4Workspace?.assets?.length && item4Workspace?.variant_status !== "Ready") {
+      setRequestMessage("Platform crops are still finishing. Wait until they show ready, then click Approve again.", "error-text");
       return;
     }
 
@@ -5529,6 +5532,7 @@
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/promote`, {
         method: "POST",
         body: JSON.stringify({}),
+        timeoutMs: 120000,
       });
 
       if (result.production_request) {
@@ -5548,6 +5552,30 @@
 
       Promise.all([loadProductionRequests(), loadContent(), loadIdeas(), loadDashboard()]).catch(() => {});
     } catch (e) {
+      if (isTimeoutError(e) && activeProductionRequest?.id) {
+        try {
+          const latest = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}`);
+          if (latest?.record) {
+            activeProductionRequest = latest.record;
+            populateProductionRequestForm(latest.record);
+            setProductionRequestControlState(latest.record);
+            const latestStatus = String(latest.record.status || "");
+            if (latestStatus === "Promoted") {
+              setRequestMessage("Approved. This request is in production.", "success");
+              item4PromoteInFlight = false;
+              if (promoteButton) delete promoteButton.dataset.busy;
+              return;
+            }
+            if (latestStatus === "Submitted") {
+              setRequestMessage("Promotion is still processing. Click Check promotion status in a moment.", "success");
+              item4PromoteInFlight = false;
+              if (promoteButton) delete promoteButton.dataset.busy;
+              setProductionRequestControlState(activeProductionRequest);
+              return;
+            }
+          }
+        } catch {}
+      }
       item4PromoteInFlight = false;
       if (promoteButton) {
         delete promoteButton.dataset.busy;

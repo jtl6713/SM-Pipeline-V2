@@ -197,3 +197,5 @@ Upload hint Pages deploy: 2026-08-22 - Drop HEIC/HEIF teaser copy; warn only on 
 
 YouTube 16:9 all Pages deploy: 2026-08-22 - Show a 16:9 frame for every photo and keep Prepare counting all six crops. UI 0.6.119-youtube-16x9-all.
 
+Approve means approve Pages deploy: 2026-08-22 - Approve no longer silently starts Prepare; it promotes, with a longer wait and status recovery. UI 0.6.120-approve-means-approve.
+
