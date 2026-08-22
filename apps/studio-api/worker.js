@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.75-ai-masters-audio-yes",
+          version: "0.10.76-ai-thumbnail",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -173,7 +173,7 @@ export default {
           studio_ai_master_fill_v1: true,
           studio_audio_default_yes_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
-          studio_photo_cover_thumbs_v1: true,
+          studio_ai_thumbnail_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -1195,7 +1195,7 @@ function studioPublishHandoffFields(record) {
   const cdnReady = studioNativeClipsArePublicCdn(record);
   const cover = studioPublicJpegCoverUrl(record);
   const fields = {};
-  if (cover && (/drive\.google\.com/i.test(current("Thumbnail_URL")) || !current("Thumbnail_URL") || /\.png(\?|$)/i.test(current("Thumbnail_URL")))) {
+  if (cover && (!current("Thumbnail_URL") || /ITEM4-VARIANT-fill-crop/i.test(current("Thumbnail_URL")))) {
     fields.Thumbnail_URL = cover;
   }
   if (platform === "YouTube" && !current("YouTube_Privacy_Status")) {
@@ -2127,6 +2127,7 @@ const PRO_OUTPUT_TYPES_BY_PLATFORM = Object.freeze({
 });
 
 const PRO_OUTPUT_OVERRIDE_TRISTATE = new Set(["Inherit", "Use Profile Default", "Yes", "No"]);
+const PRO_OUTPUT_THUMBNAIL_OVERRIDE = new Set(["Inherit", "Use Profile Default", "Yes", "No", "Use photo frame"]);
 const PRO_OUTPUT_COUNT_MODES = new Set(["Inherit", "AI decides", "Exact", "Target range"]);
 const PRO_OUTPUT_CAROUSEL_IMAGE_MODES = new Set(["Inherit", "Make AI Generated", "Manual Upload"]);
 const PRO_OUTPUT_TEXT_MODES = new Set(["Inherit", "AI decides", "Force exact", "AI improve", "Leave blank"]);
@@ -2445,7 +2446,7 @@ function cleanProductionRequestOutputPatch(payload) {
   if (payload?.enabled !== undefined) fields.Enabled = Boolean(payload.enabled);
   choiceField("voiceover_mode_override", "Voiceover_Mode_Override", PRO_OUTPUT_OVERRIDE_TRISTATE);
   choiceField("background_music_mode_override", "Background_Music_Mode_Override", PRO_OUTPUT_OVERRIDE_TRISTATE);
-  choiceField("thumbnail_mode_override", "Thumbnail_Mode_Override", PRO_OUTPUT_OVERRIDE_TRISTATE);
+  choiceField("thumbnail_mode_override", "Thumbnail_Mode_Override", PRO_OUTPUT_THUMBNAIL_OVERRIDE);
   intField("video_duration_seconds_override", "Video_Duration_Seconds_Override", 5, 600, "Video duration override");
   choiceField("video_clip_count_mode_override", "Video_Clip_Count_Mode_Override", PRO_OUTPUT_COUNT_MODES);
   intField("video_clip_count_exact_override", "Video_Clip_Count_Exact_Override", 1, 15, "Exact video clip count override");
@@ -3480,6 +3481,43 @@ function item4EffectivePhotoCount(record, assets) {
 
 function item4StudioDirectiveYes(value) {
   return String(value || "").trim() !== "No";
+}
+
+function item4ThumbnailSource(value) {
+  const v = String(value || "").trim();
+  if (v === "No") return "none";
+  if (/^use photo frame$/i.test(v) || /^photo frame$/i.test(v)) return "frame";
+  return "ai";
+}
+
+function item4UrlIsStudioPhotoCrop(url) {
+  return /ITEM4-VARIANT-fill-crop/i.test(String(url || ""));
+}
+
+function item4StudioThumbnailPrompt(requestRecord, parent) {
+  const existing = String(f(parent, "Thumbnail_Prompt") || "").trim();
+  if (existing) return existing;
+  const title = String(
+    f(requestRecord, "Requested_Title")
+    || f(parent, "Content_Title")
+    || f(parent, "Hook")
+    || "Chicago"
+  ).trim();
+  const caption = String(
+    f(requestRecord, "Requested_Caption")
+    || f(parent, "Caption")
+    || f(parent, "Idea_Summary")
+    || ""
+  ).trim();
+  const concept = String(f(parent, "Thumbnail_Concept") || "").trim();
+  return [
+    `Create a ChicagoShining social thumbnail / promo still for: ${title}.`,
+    caption ? `Post context: ${caption.slice(0, 500)}` : "",
+    concept ? `Thumbnail concept: ${concept}` : "",
+    "The thumbnail MUST include bold, colorful 3D block lettering (glossy, dimensional, high-impact) or black-and-gold slightly arched block lettering.",
+    "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%.",
+    "Polished, high-contrast, and dramatic. Do not invent logos, watermarks, platform UI, or distorted letters.",
+  ].filter(Boolean).join("\n");
 }
 
 function item4SlideImageUrl(row) {
@@ -4795,6 +4833,7 @@ const PR_CONTENT_TYPES = new Set([
 ]);
 const PR_PLATFORMS = new Set(["Instagram","Facebook","TikTok","YouTube","Threads","X","Lemon8"]);
 const PR_TRISTATE = new Set(["Use Profile Default","Yes","No"]);
+const PR_THUMBNAIL_MODES = new Set(["Use Profile Default","Yes","No","Use photo frame"]);
 const PR_COUNT_MODES = new Set(["AI decides","Exact","Target range"]);
 const PR_TEXT_MODES = new Set(["AI decides","Force exact","AI improve","Leave blank"]);
 const PR_CAROUSEL_IMAGE_MODES = new Set(["Make AI Generated","Manual Upload"]);
@@ -4953,7 +4992,7 @@ async function cleanProductionRequestPayload(payload, env) {
 
   const voiceoverMode = normalizeChoice(payload?.voiceover_mode, PR_TRISTATE, "Yes", "Voiceover mode");
   const backgroundMusicMode = normalizeChoice(payload?.background_music_mode, PR_TRISTATE, "Yes", "Background music mode");
-  const thumbnailMode = normalizeChoice(payload?.thumbnail_mode, PR_TRISTATE, "Use Profile Default", "Thumbnail mode");
+  const thumbnailMode = normalizeChoice(payload?.thumbnail_mode, PR_THUMBNAIL_MODES, "Yes", "Thumbnail mode");
 
   const videoClipCountMode = normalizeChoice(payload?.video_clip_count_mode, PR_COUNT_MODES, "AI decides", "Video clip count mode");
   const carouselSlideCountMode = normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode");
@@ -5094,7 +5133,7 @@ function productionRequestDefaultsFromIdea(idea) {
     platforms: Array.isArray(f(idea, "Production_Target_Platforms")) ? f(idea, "Production_Target_Platforms") : [],
     voiceover_mode: String(f(idea, "Production_Include_Voiceover") || "Yes").trim() || "Yes",
     background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Yes").trim() || "Yes",
-    thumbnail_mode: String(f(idea, "Production_Include_Thumbnail") || "Use Profile Default").trim() || "Use Profile Default",
+    thumbnail_mode: String(f(idea, "Production_Include_Thumbnail") || "Yes").trim() || "Yes",
     video_duration_seconds: f(idea, "Production_Video_Duration") || 30,
     video_clip_count_mode: f(idea, "Production_Video_Clip_Count") ? "Exact" : "AI decides",
     video_clip_count_exact: f(idea, "Production_Video_Clip_Count") || null,
@@ -5162,7 +5201,7 @@ async function createDraftForIdea(env, idea, authorization, input = null) {
 
   return airtableFetch(env, PRODUCTION_REQUEST_TABLE, "", {
     method: "POST",
-    body: JSON.stringify({ fields, typecast: false }),
+    body: JSON.stringify({ fields, typecast: true }),
   });
 }
 
@@ -5285,7 +5324,7 @@ async function updateProductionRequest(request, env, url, authorization) {
     method: "PATCH",
     body: JSON.stringify({
       fields,
-      typecast: false,
+      typecast: true,
     }),
   });
 
@@ -6014,6 +6053,19 @@ function resolvedOutputTriState(outputRow, overrideField, requestRecord, request
   return profileDefault ? "Yes" : "No";
 }
 
+function resolvedThumbnailMode(outputRow, requestRecord, profileDefault) {
+  const override = String(f(outputRow, "Thumbnail_Mode_Override") || "Inherit").trim() || "Inherit";
+  if (override === "Yes" || override === "No" || item4ThumbnailSource(override) === "frame") {
+    return item4ThumbnailSource(override) === "frame" ? "Use photo frame" : override;
+  }
+  if (override === "Use Profile Default") return profileDefault ? "Yes" : "No";
+  const master = String(f(requestRecord, "Thumbnail_Mode") || "Yes").trim() || "Yes";
+  if (item4ThumbnailSource(master) === "frame") return "Use photo frame";
+  if (master === "Yes" || master === "No") return master;
+  if (master === "Use Profile Default") return profileDefault ? "Yes" : "No";
+  return profileDefault === false ? "No" : "Yes";
+}
+
 async function productionProfileDefaultsForParentContentItem(env, parentContentItem) {
   const profileLinks = arrayOrEmpty(f(parentContentItem, "Content_Profile"));
   if (!profileLinks.length) {
@@ -6227,11 +6279,9 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
       "Background_Music_Mode",
       profileDefaults.include_background_music
     ),
-    thumbnail_mode: resolvedOutputTriState(
+    thumbnail_mode: resolvedThumbnailMode(
       outputRow,
-      "Thumbnail_Mode_Override",
       requestRecord,
-      "Thumbnail_Mode",
       profileDefaults.include_thumbnail
     ),
 
@@ -6850,9 +6900,20 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Output_Status: nativeReady ? "Ready for Review" : (remotionReady ? "In Production" : (nativeMissing ? "In Production" : "Ready for Review")),
     Render_Status: nativeReady ? "Native Photo Route" : null,
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
-    Thumbnail_URL: (nativePhoto || effective.thumbnail_mode === "Yes")
-      ? (item4CoverStillUrl(requestRecord, outputRow) || (nativePhoto ? (studioClipPublicCdnUrl(clips[0]) || String(clips[0]?.url || "").trim() || null) : null))
-      : null,
+    Thumbnail_URL: (function thumbnailUrl() {
+      if (nativePhoto) {
+        return item4CoverStillUrl(requestRecord, outputRow)
+          || studioClipPublicCdnUrl(clips[0])
+          || String(clips[0]?.url || "").trim()
+          || null;
+      }
+      const source = item4ThumbnailSource(effective.thumbnail_mode);
+      if (source === "none") return null;
+      if (source === "frame") return item4CoverStillUrl(requestRecord, outputRow) || null;
+      const parentThumb = String(f(parentContentItem, "Thumbnail_URL") || "").trim();
+      if (parentThumb && !item4UrlIsStudioPhotoCrop(parentThumb)) return parentThumb;
+      return null;
+    }()),
     Asset_Selection_Status: remotionReady ? "Selected" : null,
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
     Output_Caption: effective.requested_caption || String(f(parentContentItem, "Caption") || "").trim() || null,
@@ -7024,8 +7085,11 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     const armed = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
     const needVoiceover = String(f(armed || {}, "Include_Voiceover") || "").trim() === "Yes"
       && !String(f(armed || {}, "Voiceover_URL") || "").trim();
+    const needAiThumb = String(f(armed || {}, "Include_Thumbnail") || "").trim() === "Yes"
+      && String(f(armed || {}, "Thumbnail_Status") || "").trim() === "Ready"
+      && !String(f(armed || {}, "Thumbnail_URL") || "").trim();
     try {
-      if (needVoiceover) await pulseStudioP2Handoff(env, contentItemId, requestRecord);
+      if (needVoiceover || needAiThumb) await pulseStudioP2Handoff(env, contentItemId, requestRecord);
       // P3 is a no-op until voiceover/cover filters pass; always fire it so
       // photo-only promotes and post-P2 retries do not wait for a manual pulse.
       await pulseStudioP3Handoff(env, contentItemId, requestRecord);
@@ -7062,8 +7126,13 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
   const musicMode = String(f(requestRecord, "Background_Music_Mode") || f(parent, "Include_Background_Music") || "Yes").trim();
   const thumbnailMode = String(f(requestRecord, "Thumbnail_Mode") || f(parent, "Include_Thumbnail") || "Yes").trim();
   const voiceoverUrl = String(f(parent, "Voiceover_URL") || "").trim();
-  const coverUrl = String(f(parent, "Thumbnail_URL") || "").trim() || item4CoverStillUrl(requestRecord);
-  const wantThumb = thumbnailMode !== "No";
+  const existingThumb = String(f(parent, "Thumbnail_URL") || "").trim();
+  const existingAiThumb = existingThumb && !item4UrlIsStudioPhotoCrop(existingThumb) ? existingThumb : "";
+  const frameUrl = item4CoverStillUrl(requestRecord);
+  const thumbSource = item4ThumbnailSource(thumbnailMode);
+  const wantThumb = thumbSource !== "none";
+  const wantAiThumb = thumbSource === "ai";
+  const wantFrameThumb = thumbSource === "frame";
   const wantVoiceover = item4StudioDirectiveYes(voiceoverMode);
   const script = String(f(requestRecord, "Requested_Script") || f(parent, "Voiceover_Script") || f(parent, "Requested_Script") || caption || "").trim();
   const waitingForVoiceover = wantVoiceover && !voiceoverUrl;
@@ -7074,21 +7143,32 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     Carousel_Image_Mode: String(f(requestRecord, "Carousel_Image_Mode") || "").trim() || null,
     Carousel_Slide_Count: f(requestRecord, "Carousel_Slide_Count_Exact") ?? null,
     Include_Thumbnail: wantThumb ? "Yes" : "No",
-    Thumbnail_URL: wantThumb ? (coverUrl || null) : null,
   };
+  if (wantAiThumb) {
+    fields.Thumbnail_Prompt = item4StudioThumbnailPrompt(requestRecord, parent);
+    if (existingAiThumb) {
+      fields.Thumbnail_URL = existingAiThumb;
+      fields.Thumbnail_Status = "Generated";
+    } else {
+      fields.Thumbnail_URL = null;
+      fields.Thumbnail_Status = "Ready";
+    }
+  } else if (wantFrameThumb) {
+    fields.Thumbnail_URL = frameUrl || existingThumb || null;
+    fields.Thumbnail_Status = (frameUrl || existingThumb) ? "Not Needed" : "Ready";
+  } else {
+    fields.Thumbnail_URL = null;
+    fields.Thumbnail_Status = "Not Needed";
+  }
   if (waitingForVoiceover) {
     fields.Content_Status = "Ready for Voiceover";
     fields.Voiceover_Status = "Ready";
     fields.Voiceover_Script = script || null;
     if (script) fields.Script_Status = "Generated";
-    // P2's commit branch only accepts Ready or Not Needed. Keep the Studio
-    // cover URL and skip thumbnail regeneration by marking Not Needed.
-    fields.Thumbnail_Status = wantThumb && coverUrl ? "Not Needed" : (wantThumb ? "Ready" : "Not Needed");
   } else {
     fields.Voiceover_Status = wantVoiceover
       ? (String(f(parent, "Voiceover_Status") || "").trim() || "Generated")
       : "Not Needed";
-    fields.Thumbnail_Status = wantThumb ? (coverUrl ? "Generated" : "Not Started") : "Not Needed";
     fields.Content_Status = "Thumbnail Ready";
   }
   return airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
@@ -11636,7 +11716,11 @@ async function studioContinuationStampPackage(env, po, context) {
   const fields = {
     ...studioContinuationClearRetryFields(),
     Output_Caption: seed.Output_Caption || String(f(parent, "Caption") || "").trim() || null,
-    Thumbnail_URL: seed.Thumbnail_URL || f(po, "Thumbnail_URL") || null,
+    Thumbnail_URL: seed.Thumbnail_URL
+      || (!item4UrlIsStudioPhotoCrop(f(po, "Thumbnail_URL")) && String(f(po, "Thumbnail_URL") || "").trim())
+      || (!item4UrlIsStudioPhotoCrop(f(parent, "Thumbnail_URL")) && String(f(parent, "Thumbnail_URL") || "").trim())
+      || f(po, "Thumbnail_URL")
+      || null,
     Aspect_Ratio: seed.Aspect_Ratio || f(po, "Aspect_Ratio") || null,
     Asset_Need_Status: "Not Needed",
     Format: seed.Format || f(po, "Format") || null,

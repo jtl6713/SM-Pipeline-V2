@@ -189,3 +189,5 @@ AI audio defaults Pages deploy: 2026-08-22 - Voiceover and Music default to Yes.
 
 Pipeline group fold Pages deploy: 2026-08-22 - Content groupings on Platform Pipeline collapse by default; only the newest piece stays open. UI 0.6.115-pipeline-group-fold.
 
+AI thumbnail Pages deploy: 2026-08-22 - Cover defaults to AI generated. Use a photo frame is the explicit still-from-uploads option. UI 0.6.116-ai-thumbnail.
+

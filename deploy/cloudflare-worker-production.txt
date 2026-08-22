@@ -73,3 +73,5 @@ Continuation first Worker deploy: 2026-08-22 - Cron stamps exact-source packages
 
 AI masters and audio Yes Worker deploy: 2026-08-22 - Mixed/AI plans wait for the promised photo count, seed C2 AI slides, ingest them as Item 4 masters, and never render a partial crop set. Voiceover and music default to Yes unless the operator chooses No. Worker 0.10.75-ai-masters-audio-yes.
 
+AI thumbnail Worker deploy: 2026-08-22 - Video covers default to AI generated 3D-letter thumbnails. A photo-frame still is used only when that option is chosen. Worker 0.10.76-ai-thumbnail.
+

@@ -81,7 +81,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.115-pipeline-group-fold";
+  const BUILD_ID = "item4-0.6.116-ai-thumbnail";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1924,7 +1924,7 @@
     if ($("ezRequestedCaption")) $("ezRequestedCaption").value = String(record.requested_caption || "").trim();
     if ($("ezScriptMode")) setSelectValue("ezScriptMode", record.script_mode, "AI decides");
     if ($("ezRequestedScript")) $("ezRequestedScript").value = record.requested_script || "";
-    if ($("ezThumbnail")) setSelectValue("ezThumbnail", record.thumbnail_mode, "Use Profile Default");
+    if ($("ezThumbnail")) setSelectValue("ezThumbnail", record.thumbnail_mode, "Yes");
     if ($("ezVoiceoverTail")) $("ezVoiceoverTail").value = record.voiceover_tail_seconds ?? 2;
     if ($("ezVideoDuration")) $("ezVideoDuration").value = record.video_duration_seconds ?? 30;
     if ($("ezVideoClipMode")) setSelectValue("ezVideoClipMode", record.video_clip_count_mode, "AI decides");
@@ -2222,7 +2222,7 @@
       platforms: requestedPlatforms.length ? requestedPlatforms : (recordPlatforms.length ? recordPlatforms : item4SelectedPlatforms()),
       voiceover_mode: ezControlValue("prVoiceover", record.voiceover_mode || "Yes"),
       background_music_mode: ezControlValue("prMusicMode", record.background_music_mode || "Yes"),
-      thumbnail_mode: ezControlValue("prThumbnail", record.thumbnail_mode || "Use Profile Default"),
+      thumbnail_mode: ezControlValue("prThumbnail", record.thumbnail_mode || "Yes"),
       video_duration_seconds: ezControlValue("prVideoDuration", record.video_duration_seconds ?? 30),
       video_clip_count_mode: ezControlValue("prVideoClipMode", record.video_clip_count_mode || "AI decides"),
       video_clip_count_exact: ezControlValue("prVideoClipExact", record.video_clip_count_exact ?? ""),
@@ -2501,8 +2501,10 @@
     ezWizardBusy = false;
     if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
     if ($("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
+    if ($("ezThumbnail")) $("ezThumbnail").value = "Yes";
     if ($("prVoiceover")) $("prVoiceover").value = "Yes";
     if ($("prMusicMode")) $("prMusicMode").value = "Yes";
+    if ($("prThumbnail")) $("prThumbnail").value = "Yes";
     audioUserTouched.clear();
     const log = $("ezWizardLog");
     if (log) log.innerHTML = "";
@@ -5020,7 +5022,7 @@
     });
     setSelectValue("prVoiceover", record.voiceover_mode, "Yes");
     setSelectValue("prMusicMode", record.background_music_mode, "Yes");
-    setSelectValue("prThumbnail", record.thumbnail_mode, "Use Profile Default");
+    setSelectValue("prThumbnail", record.thumbnail_mode, "Yes");
     if (record.voiceover_mode === "Yes") {
       applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
     }
@@ -6311,7 +6313,7 @@
     ezRequestedCaption: "Write the post caption here. Force exact uses this wording. On-photo labels stay on each photo.",
     ezScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     ezRequestedScript: "Paste spoken words here only if you want to control the voiceover. Leave blank to let AI write it.",
-    ezThumbnail: "Whether Studio should generate a thumbnail or cover still for video outputs.",
+    ezThumbnail: "AI generated creates a colorful 3D-letter ChicagoShining cover. Use a photo frame only if you want a still from your uploads instead.",
     ezVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
     ezVideoDuration: "Requested video length in seconds for video outputs.",
     ezVideoClipMode: "How many clips Studio should aim for in a video. AI decides unless you force a count or range.",
@@ -6338,7 +6340,7 @@
     prMusicMode: "Turn background music on or off for video outputs. Native stills ignore this.",
     prVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
     prMusicAsset: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
-    prThumbnail: "Whether Studio should generate a thumbnail or cover still for video outputs.",
+    prThumbnail: "AI generated creates a colorful 3D-letter ChicagoShining cover. Use a photo frame only if you want a still from your uploads instead.",
     prVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
     prTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     prRequestedTitle: "The on-post title. Separate from the idea name.",
@@ -6349,7 +6351,7 @@
     prProductionNotes: "Anything extra for pacing, style, or execution.",
     prOverrideVoiceover: "Override voiceover for this one output, or inherit the master setting.",
     prOverrideMusicMode: "Override background music for this one output, or inherit the master setting.",
-    prOverrideThumbnail: "Override thumbnail / cover for this one output, or inherit the master setting.",
+    prOverrideThumbnail: "Override this output’s cover. Inherit follows the piece. Yes is AI generated. Use photo frame copies a still from the photos.",
     prOverrideMusicAsset: "Override the music track for this one output, or inherit the master track.",
     prOverrideDuration: "Override duration for this one output. Leave blank to inherit.",
     prOverrideVoiceoverTail: "Override extra seconds after narration for this one output.",
