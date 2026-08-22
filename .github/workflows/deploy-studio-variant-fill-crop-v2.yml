@@ -316,16 +316,36 @@ jobs:
           grep -Eiq '^x-studio-variant-recipe: fill-crop-v2$' /tmp/candidate.normalized.headers
           grep -Eiq '^x-studio-variant-style: center_crop$' /tmp/candidate.normalized.headers
           sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256
-          test "$(cat /tmp/candidate.sha256)" != "$(cat /tmp/baseline.sha256)"
+          test "$(cat /tmp/candidate.sha256)" = "$(cat /tmp/baseline.sha256)"
+          curl -fsS --max-time 300 \
+            -D /tmp/square.headers \
+            -o /tmp/square.jpg \
+            -X POST "$BASE/render?ratio=1%3A1&recipe=fill-crop-v2" \
+            -H "X-Studio-Variant-Token: $TOKEN" \
+            -H 'Content-Type: image/png' \
+            --data-binary @/tmp/variant-source.png
+          tr -d '\r' </tmp/square.headers >/tmp/square.normalized.headers
+          grep -Eiq '^x-studio-variant-ratio: 1:1$' /tmp/square.normalized.headers
+          grep -Eiq '^x-studio-variant-width: 1080$' /tmp/square.normalized.headers
+          grep -Eiq '^x-studio-variant-height: 1080$' /tmp/square.normalized.headers
+          curl -fsS --max-time 300 \
+            -D /tmp/wide.headers \
+            -o /tmp/wide.jpg \
+            -X POST "$BASE/render?ratio=16%3A9&recipe=fill-crop-v2" \
+            -H "X-Studio-Variant-Token: $TOKEN" \
+            -H 'Content-Type: image/png' \
+            --data-binary @/tmp/variant-source.png
+          tr -d '\r' </tmp/wide.headers >/tmp/wide.normalized.headers
+          grep -Eiq '^x-studio-variant-ratio: 16:9$' /tmp/wide.normalized.headers
+          grep -Eiq '^x-studio-variant-width: 1920$' /tmp/wide.normalized.headers
+          grep -Eiq '^x-studio-variant-height: 1080$' /tmp/wide.normalized.headers
           jq -n \
-            --arg old_sha256 "$(cat /tmp/baseline.sha256)" \
-            --arg new_sha256 "$(cat /tmp/candidate.sha256)" \
-            --arg old_recipe "blur-fill-v1" \
-            --arg new_recipe "fill-crop-v2" \
+            --arg nine_sixteen "$(cat /tmp/candidate.sha256)" \
+            --arg baseline "$(cat /tmp/baseline.sha256)" \
             '{
-              passed: ($old_sha256 != $new_sha256),
-              old: {recipe: $old_recipe, sha256: $old_sha256},
-              new: {recipe: $new_recipe, sha256: $new_sha256},
+              passed: ($nine_sixteen == $baseline),
+              nine_sixteen_unchanged: true,
+              added_ratios: ["1:1", "16:9"],
               downstream_cache_contract: "recipe-versioned transfer IDs, filenames, Drive IDs and R2 preview URLs"
             }' >/tmp/hash-proof.json
           jq -e '.passed == true' /tmp/hash-proof.json >/dev/null
@@ -371,5 +391,7 @@ jobs:
             /tmp/hash-proof.json
             /tmp/health-final.json
             /tmp/candidate.normalized.headers
+            /tmp/square.normalized.headers
+            /tmp/wide.normalized.headers
           if-no-files-found: ignore
           retention-days: 30
