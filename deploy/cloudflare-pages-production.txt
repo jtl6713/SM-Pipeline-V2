@@ -173,3 +173,5 @@ Publishing wizard Pages deploy: 2026-08-22 - Home is a chip Q&A for idea, photos
 
 Plain-language Home copy Pages deploy: 2026-08-22 - Drop I1?I4 and other scenario codes from wizard, Ideas, Support, and operator messages. UI 0.6.107-plain-copy.
 
+Idea wizard media Pages deploy: 2026-08-22 - After picking an idea, ask single/multiple and upload vs AI vs mix. Fix Add photos crashing on isAudioYes. UI 0.6.108-idea-media.
+
