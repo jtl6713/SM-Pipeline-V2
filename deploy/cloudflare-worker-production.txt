@@ -51,3 +51,5 @@ On-demand A1M/C1/C2M Worker deploy: 2026-08-22 - Oversized compress pulses A1S a
 
 On-demand M1/R2B Worker deploy: 2026-08-22 - M1 resets stale Remotion URLs after R5 is up or from Operations. R2B retries failed asset selection when that view has a row, not Friday 21:10. Worker 0.10.63-ondemand-m1-r2b.
 
+On-demand MAKE-ADMIN-BRIDGE Worker deploy: 2026-08-22 - Bridge 5893243 runs only when a Pending Make Admin Queue row exists, not every 60 seconds. Worker 0.10.64-ondemand-make-admin-bridge.
+

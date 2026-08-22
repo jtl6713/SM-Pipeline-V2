@@ -74,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.99-repair-pulses";
+  const BUILD_ID = "item4-0.6.100-make-admin-bridge";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -224,6 +224,15 @@
       setOperationsMessage(result.message || "R2B started.");
     } catch (error) {
       setOperationsMessage(error.message || "Could not retry asset selection.", "error-text");
+    }
+  });
+  $("operationsMakeAdminBridge")?.addEventListener("click", async () => {
+    try {
+      setOperationsMessage("Checking Make admin queue…");
+      const result = await api("/api/operations/make-admin-bridge", { method: "POST", body: JSON.stringify({}) });
+      setOperationsMessage(result.message || "Make admin bridge started.");
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not run the Make admin queue.", "error-text");
     }
   });
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
@@ -7107,6 +7116,8 @@
       if (resetUrls) resetUrls.hidden = !data.can_edit_profiles;
       const retryAssets = $("operationsRetryAssetSelection");
       if (retryAssets) retryAssets.hidden = !data.can_edit_profiles;
+      const makeAdmin = $("operationsMakeAdminBridge");
+      if (makeAdmin) makeAdmin.hidden = !data.can_edit_profiles;
     } catch (error) {
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
       if (meta) meta.textContent = "Unable to load operations.";

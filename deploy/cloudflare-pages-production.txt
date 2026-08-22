@@ -157,3 +157,5 @@ Intake logs Pages deploy: 2026-08-22 - Empty A2 leaves Starting A2 and shows com
 
 Render repair Pages deploy: 2026-08-22 - Operations buttons for M1 stale Remotion URLs and R2B failed asset selection. UI 0.6.99-repair-pulses.
 
+Make admin Pages deploy: 2026-08-22 - Operations can pulse MAKE-ADMIN-BRIDGE when a Pending command is waiting. UI 0.6.100-make-admin-bridge.
+

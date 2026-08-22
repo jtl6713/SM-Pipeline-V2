@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.99-repair-pulses">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.100-make-admin-bridge">
 </head>
 <body>
  <header class="topbar">
@@ -38,7 +38,7 @@
  <button class="nav-item" data-page="music">Music Library</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.99</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.100</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -937,10 +937,11 @@
  <div id="operationsOversizedList" class="table-wrap"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Render repair</h2><p>Use these when Remotion moved URL or asset selection failed. They do not run on a weekly or 15-minute clock.</p></div></div>
+ <div class="panel-heading"><div><h2>Render repair</h2><p>Use these when Remotion moved URL, asset selection failed, or a Make admin command is waiting. They do not run on a clock.</p></div></div>
  <div class="ops-repair-actions">
  <button type="button" class="secondary-button" id="operationsResetRenderUrls">Reset stale render URLs</button>
  <button type="button" class="secondary-button" id="operationsRetryAssetSelection">Retry failed asset selection</button>
+ <button type="button" class="secondary-button" id="operationsMakeAdminBridge">Run Make admin queue</button>
  </div>
  </section>
  </section>
@@ -1071,7 +1072,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.99-repair-pulses"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.99-repair-pulses"></script>
+ <script src="/assets/ez-plan.js?v=0.6.100-make-admin-bridge"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.100-make-admin-bridge"></script>
 </body>
 </html>

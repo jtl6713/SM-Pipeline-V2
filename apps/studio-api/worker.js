@@ -51,6 +51,7 @@ export default {
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
+      const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -84,6 +85,7 @@ export default {
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
       const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
+      const isOperationsMakeAdminBridgeWrite = isOperationsMakeAdminBridgeRoute && request.method === "POST";
       const isOperationsIntakeWrite = isOperationsIntakeRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
@@ -120,6 +122,7 @@ export default {
         isOperationsCompressWrite ||
         isOperationsResetRenderUrlsWrite ||
         isOperationsRetryAssetSelectionWrite ||
+        isOperationsMakeAdminBridgeWrite ||
         isOperationsIntakeWrite ||
         (isR5DoneHookRoute && request.method === "POST");
       if (!allowedMethod) {
@@ -135,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.63-ondemand-m1-r2b",
+          version: "0.10.64-ondemand-make-admin-bridge",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -145,6 +148,7 @@ export default {
           studio_ondemand_smv1_p0202_v1: true,
           studio_ondemand_a1m_c1_c2m_v1: true,
           studio_ondemand_m1_r2b_v1: true,
+          studio_ondemand_make_admin_bridge_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -396,6 +400,12 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return pulseR2BRetryAssetSelection(request, env, ctx);
+      }
+
+      if (isOperationsMakeAdminBridgeRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return pulseMakeAdminBridgeQueue(request, env, ctx);
       }
 
       if (isOperationsIntakeRoute) {
@@ -8217,7 +8227,12 @@ async function item4QueueP3SingleParentViaAdminBridge(env, sourceBlueprint, reas
   const existingFormula=`AND({Scenario_ID}=${ITEM4_P3_SCENARIO_ID},{Action}="UPDATE_BLUEPRINT",{Correlation_ID}="ITEM4-SINGLE-PARENT-P3",OR({Status}="Pending",{Status}="Queued",{Status}="Processing"))`;
   try {
     const existing=await airtableFetch(env,"Make Admin Queue",`?maxRecords=1&filterByFormula=${encodeURIComponent(existingFormula)}`);
-    if(Array.isArray(existing?.records)&&existing.records.length){return {ok:true,already_ready:false,queued:true,via:"admin-queue",queue_record_id:existing.records[0].id,reason:"existing-command"};}
+    if(Array.isArray(existing?.records)&&existing.records.length){
+      try { await pulseOnDemandMakeAdminBridge(env); } catch (error) {
+        console.warn("MAKE-ADMIN-BRIDGE pulse for existing command failed", error);
+      }
+      return {ok:true,already_ready:false,queued:true,via:"admin-queue",queue_record_id:existing.records[0].id,reason:"existing-command"};
+    }
   } catch {}
   const now=new Date().toISOString();
   const created=await airtableFetch(env,"Make Admin Queue","",{method:"POST",body:JSON.stringify({records:[{fields:{
@@ -8228,7 +8243,11 @@ async function item4QueueP3SingleParentViaAdminBridge(env, sourceBlueprint, reas
     Correlation_ID:"ITEM4-SINGLE-PARENT-P3",
     Notes:`Worker 0.10.5 admin-queue fallback (${reason}). Adds Modules 101-104 for single-parent Studio routing while preserving webhook 2567877 and the complete legacy P3 route.`
   }}],typecast:true})});
-  return {ok:true,already_ready:false,queued:true,via:"admin-queue",queue_record_id:created?.records?.[0]?.id||null,reason};
+  const queueRecordId = created?.records?.[0]?.id || null;
+  try { await pulseOnDemandMakeAdminBridge(env); } catch (error) {
+    console.warn("MAKE-ADMIN-BRIDGE pulse after enqueue failed", error);
+  }
+  return {ok:true,already_ready:false,queued:true,via:"admin-queue",queue_record_id:queueRecordId,reason};
 }
 
 async function item4LatestP3BlueprintFromAdminQueue(env) {
@@ -11080,9 +11099,12 @@ const PRODUCTION_CADENCE_CAROUSEL = Object.freeze([
 const PRODUCTION_CADENCE_REPAIR = Object.freeze([
   { id: 5569896, key: "M1" },
   { id: 5576620, key: "R2B" },
+  { id: 5893243, key: "MAKEADMIN" },
 ]);
 const STUDIO_M1_SCENARIO_ID = 5569896;
 const STUDIO_R2B_SCENARIO_ID = 5576620;
+const STUDIO_MAKE_ADMIN_BRIDGE_SCENARIO_ID = 5893243;
+const STUDIO_MAKE_ADMIN_PENDING_FORMULA = '{Status}="Pending"';
 const STUDIO_R2B_VIEW_NAME = "R2B - Retry Asset Selection";
 const STUDIO_M1_STALE_RENDER_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Remotion_Status_URL}!="",{Render_Server_URL}!="",{Final_File_URL}="")';
 const STUDIO_C1_VIEW_ID = "viwT0B4SmJLL1qPlp";
@@ -11268,6 +11290,17 @@ async function pulseOnDemandM1(env, { force = false } = {}) {
   }
 }
 
+async function pulseOnDemandMakeAdminBridge(env) {
+  const hasWork = await cadenceQueueHasWork(env, REPAIR_LEASE_TABLE_ID, { formula: STUDIO_MAKE_ADMIN_PENDING_FORMULA });
+  if (!hasWork) return [{ key: "MAKEADMIN", skipped: "no_work" }];
+  try {
+    await phase6PulseOnDemandScenario(env, STUDIO_MAKE_ADMIN_BRIDGE_SCENARIO_ID, { waitMs: 45000 });
+    return [{ key: "MAKEADMIN", pulsed: true }];
+  } catch (error) {
+    return [{ key: "MAKEADMIN", error: error instanceof Error ? error.message : String(error) }];
+  }
+}
+
 function timingSafeSecretEqual(left, right) {
   const a = String(left || "");
   const b = String(right || "");
@@ -11373,6 +11406,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
     if (startCarousel || force) pulses.push(...await pulseOnDemandCarouselChain(env));
     if (startRender || force) pulses.push(...await pulseOnDemandR2B(env));
+    if (force) pulses.push(...await pulseOnDemandMakeAdminBridge(env));
     return { ok: true, parked: true, results, pulses };
   }
   if (await cadenceRepairInProgress(env)) {
@@ -15141,6 +15175,19 @@ async function pulseR2BRetryAssetSelection(request, env, ctx) {
     message: skipped
       ? "No failed asset-selection rows are waiting, so R2B did not run."
       : "R2B is retrying asset selection for the waiting output.",
+  }, skipped ? 200 : 202);
+}
+
+async function pulseMakeAdminBridgeQueue(request, env, ctx) {
+  const result = await pulseOnDemandMakeAdminBridge(env);
+  const skipped = result.some((row) => row.skipped);
+  return respond(request, env, {
+    ok: true,
+    triggered: skipped ? "make-admin-skipped" : "make-admin-on-demand",
+    pulses: result,
+    message: skipped
+      ? "No Pending Make admin command is waiting, so the bridge did not run."
+      : "The Make admin bridge is running the oldest Pending command.",
   }, skipped ? 200 : 202);
 }
 
