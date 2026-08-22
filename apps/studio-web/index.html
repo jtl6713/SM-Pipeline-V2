@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.106-wizard">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.107-plain-copy">
 </head>
 <body>
  <header class="topbar">
@@ -39,7 +39,7 @@
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item" data-page="support">Support</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.106</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.107</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -106,7 +106,7 @@
  </form>
  </section>
  <section class="panel idea-create-panel" id="ideaCreatePanel" hidden>
- <div class="panel-heading"><div><h2>Start with an idea</h2><p>Choose an Idea Candidate already in the I1–I4 path, or enter a new one manually. Neither step promotes or starts production by itself.</p></div></div>
+ <div class="panel-heading"><div><h2>Start with an idea</h2><p>Pick an idea that’s already in the queue, or write a new one. This does not start publishing.</p></div></div>
  <form id="ideaCreateForm" class="idea-form">
  <fieldset class="idea-path-mode" id="ideaPathMode">
  <legend>How do you want to start?</legend>
@@ -119,7 +119,7 @@
  <option value="">Loading ideas…</option>
  </select>
  </label>
- <em class="ez-option-hint" id="ideaExistingHint">Shows unpromoted Idea Candidates. Open one to add photos and continue into production.</em>
+ <em class="ez-option-hint" id="ideaExistingHint">Shows ideas that are not in production yet. Open one to add photos and continue.</em>
  </div>
  <div id="ideaManualFields" class="idea-path-pane" hidden>
  <label class="form-field"><span>Idea title</span><input id="ideaTitle" name="title" maxlength="160" placeholder="e.g. Chicago Riverwalk at sunset"></label>
@@ -905,7 +905,7 @@
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
  <section class="panel">
- <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, the Worker runs I1 once per Chicago day around 1:00 a.m. for that profile only.</p></div>
+ <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, Studio generates a daily batch of ideas around 1:00 a.m. Chicago for that profile only.</p></div>
  <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run today now</button>
  </div>
  <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
@@ -998,7 +998,7 @@
  </li>
  <li>
  <strong>Approve &amp; Promote.</strong>
- <span>Production hands the request to the existing pipeline (P3 and render). Companion Stories attach from the same 9:16 stills. YouTube 16:9 covers can finish in the background; 9:16 plan crops are enough to continue.</span>
+ <span>Production hands the request to render. Companion Stories attach from the same 9:16 stills. YouTube 16:9 covers can finish in the background; 9:16 plan crops are enough to continue.</span>
  </li>
  <li>
  <strong>Watch Pipeline until Ready for Review.</strong>
@@ -1072,10 +1072,10 @@
  </figure>
  <p>Ideas holds Idea Candidates before they become Content Items. Nothing here publishes.</p>
  <ul>
- <li><strong>Generate AI ideas</strong> — I1 batch (1–10). Polls until the batch lands in the table.</li>
+ <li><strong>Generate AI ideas</strong> — create 1–10 ideas. Studio waits until they show up in the table.</li>
  <li><strong>New idea</strong> — select an existing unpromoted candidate or enter a title/summary by hand.</li>
  <li><strong>Manage</strong> — edit copy, hold/restore, delete, or <em>Add photos</em> to open Production.</li>
- <li><strong>Promote without photos</strong> — advanced library path (I3 → I4) when footage already lives in the catalog. Requires a summary. Most work should use Add photos instead.</li>
+ <li><strong>Promote without photos</strong> — advanced path when footage already lives in the catalog. Requires a summary. Most work should use Add photos instead.</li>
  </ul>
  <figure class="support-shot">
  <img src="/assets/support/ideas-new.jpg?v=0.6.102" alt="New idea form on the Ideas page" width="1440" height="920">
@@ -1094,7 +1094,7 @@
  <ul>
  <li><strong>Start with content</strong> — title, optional description, photo cards, per-still captions, platform checks, crop pans.</li>
  <li><strong>Draft requests</strong> — unfinished production requests you can reopen.</li>
- <li><strong>Promoted content items</strong> — work that already entered P3 / render. Open Pipeline to review those outputs.</li>
+ <li><strong>Promoted content items</strong> — work that already entered render. Open Pipeline to review those outputs.</li>
  <li><strong>Advanced</strong> — exact titles, voiceover tail, extra output types. Empty EZ defaults do not overwrite saved Pipeline direction.</li>
  </ul>
  <p>Save often while uploading. Approve &amp; Promote is the handoff into render. Music tracks shown here come from the Music Library catalogue.</p>
@@ -1137,7 +1137,7 @@
  </figure>
  <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles.</p>
  <ul>
- <li><strong>Daily ideas</strong> — per-profile I1 around 1:00 a.m. Chicago, or Run today now.</li>
+ <li><strong>Daily ideas</strong> — per-profile daily batch around 1:00 a.m. Chicago, or Run today now.</li>
  <li><strong>Library intake</strong> — Process intake folder starts A2 (and the A0 daisy-chain) instead of a 2-hour clock.</li>
  <li><strong>Ready to schedule / publish</strong> — set a post time or mark a hand-posted package published.</li>
  <li><strong>Oversized library videos</strong> — compress via A1S/A1M for Drive files over 100 MB.</li>
@@ -1199,7 +1199,7 @@
  <div class="promotion-heading">
  <div>
  <strong>Library-asset promote</strong>
- <span>Sends type and platforms to I3 → I4 with no Item 4 photo plan. Requires a summary.</span>
+ <span>Sends type and platforms for approval and creates a content item from library footage. Requires a summary.</span>
  </div>
  </div>
 
@@ -1251,7 +1251,7 @@
  </div>
  </div>
 
- <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction passed through the existing I3 approval flow."></textarea></label>
+ <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction for approval and promotion."></textarea></label>
  <button type="button" class="promote-button" id="promoteIdeaButton">Approve &amp; Promote</button>
  </div>
  </details>
@@ -1276,7 +1276,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.106-wizard"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.106-wizard"></script>
+ <script src="/assets/ez-plan.js?v=0.6.107-plain-copy"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.107-plain-copy"></script>
 </body>
 </html>

@@ -79,7 +79,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.106-wizard";
+  const BUILD_ID = "item4-0.6.107-plain-copy";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -244,7 +244,7 @@
     try {
       setOperationsMessage("Starting daily idea run…");
       const result = await api("/api/operations/ideas/run-daily", { method: "POST", body: JSON.stringify({}) });
-      setOperationsMessage(result.skipped ? `Skipped: ${result.skipped}` : `Started I1 for ${(result.runs || []).length} profile(s).`);
+      setOperationsMessage(result.skipped ? `Skipped: ${result.skipped}` : `Started daily idea generation for ${(result.runs || []).length} profile(s).`);
       loadOperations();
     } catch (error) {
       setOperationsMessage(error.message || "Daily idea run failed.", "error-text");
@@ -635,7 +635,7 @@
     if (!options.length) {
       select.innerHTML = '<option value="">No unpromoted ideas available</option>';
       select.disabled = true;
-      if (hint) hint.textContent = "The Idea Candidates queue has no open ideas right now. Enter a new idea manually, or wait for I1–I4 to produce one.";
+      if (hint) hint.textContent = "There are no open ideas right now. Write a new one, or generate AI ideas.";
       return;
     }
     select.disabled = false;
@@ -649,7 +649,7 @@
       }),
     ].join("");
     if (current && options.some((idea) => idea.id === current)) select.value = current;
-    if (hint) hint.textContent = "Shows unpromoted Idea Candidates from the pipeline. Open one to manage, configure production, or promote.";
+    if (hint) hint.textContent = "Shows ideas that are not in production yet. Open one to add photos or continue.";
   }
 
   // STUDIO_MANUAL_IDEA_GENERATOR_UI_V1
@@ -968,7 +968,7 @@
     } else if (idea?.is_on_hold) {
       setManageMessage("Restore this idea before approving and promoting it.", "");
     } else if (idea?.status === "Approved") {
-      setManageMessage("This idea is Approved but not yet linked to a Content Item. Open Promote without photos to retry the I3 → I4 handoff.", "");
+      setManageMessage("This idea is approved but not yet linked to a content item. Open Promote without photos to retry.", "");
     } else {
       $("promoteIdeaButton").textContent = "Approve & Promote";
       setManageMessage();
@@ -1139,20 +1139,20 @@
       return;
     }
     if (!$('editIdeaSummary').value.trim()) {
-      setManageMessage("Add a summary and save it before promotion. The existing I4 promotion gate requires Idea_Summary.", "error-text");
+      setManageMessage("Add a summary and save it before promotion.", "error-text");
       return;
     }
 
     const label = activeIdea.title || `Candidate ${activeIdea.candidate_id || activeIdea.id}`;
     const confirmed = window.confirm(
-      `Approve and promote "${label}"?\n\nStudio will submit the selected production configuration to the existing I3 approval workflow. I3 will then trigger the existing I4 promotion workflow to create the Content Item.`
+      `Approve and promote "${label}"?\n\nStudio will submit this production setup for approval and create the content item.`
     );
     if (!confirmed) return;
 
     const button = $("promoteIdeaButton");
     button.disabled = true;
     button.textContent = "Promoting…";
-    setManageMessage("Sending approval through I3 → I4…", "");
+    setManageMessage("Sending for approval…", "");
 
     const payload = {
       content_type: contentType,
@@ -1176,7 +1176,7 @@
 
       let record = result.record;
       if (!ideaIsPromoted(record)) {
-        setManageMessage("I3 accepted the approval. Waiting for I4 to finish promotion…", "");
+        setManageMessage("Approved. Waiting for the content item to finish…", "");
         for (let attempt = 0; attempt < 8 && !ideaIsPromoted(record); attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 1250));
           const refreshed = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}`);
@@ -1189,9 +1189,9 @@
 
       if (ideaIsPromoted(record)) {
         const contentRecordId = record.promoted_content_record_id || (record.content_item_links || [])[0] || "created Content Item";
-        setManageMessage(`Approved through I3 and promoted through I4. Content Item: ${contentRecordId}.`, "success");
+        setManageMessage(`Approved and promoted. Content item: ${contentRecordId}.`, "success");
       } else {
-        setManageMessage("I3 accepted the approval and the candidate is Approved. I4 is still processing; use Refresh if the Content Item does not appear shortly.", "success");
+        setManageMessage("Approved. Promotion is still finishing; use Refresh if the content item does not appear shortly.", "success");
       }
     } catch (e) {
       setManageMessage(e.message, "error-text");
@@ -2595,7 +2595,7 @@
         ezWizardLogAdd("bot", "Where do you want to start?");
       }
       renderEzWizardChips([
-        { label: "An idea already in I1–I4, or a new idea", onClick: () => ezWizardPick("An idea", { start: "idea" }, "ideaMode") },
+        { label: "An idea I already have, or a new idea", onClick: () => ezWizardPick("An idea", { start: "idea" }, "ideaMode") },
         { label: "Photos I already have", onClick: () => ezWizardPick("Photos I already have", { start: "photos" }, "photoKind") },
         { label: "AI-generated images", onClick: () => ezWizardPick("AI-generated images", { start: "ai" }, "aiKind") },
         { label: "Mix of my photos and AI images", onClick: () => ezWizardPick("Mix of my photos and AI", { start: "mixed" }, "mixManual") },
@@ -7717,7 +7717,7 @@
     try {
       const data = await api("/api/operations");
       if (meta) {
-        meta.textContent = `Chicago date ${data.chicago_date || "—"}. Last daily I1: ${data.last_daily_idea_date || "not yet"}.`;
+        meta.textContent = `Chicago date ${data.chicago_date || "—"}. Last daily ideas run: ${data.last_daily_idea_date || "not yet"}.`;
       }
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");

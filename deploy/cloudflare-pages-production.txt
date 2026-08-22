@@ -171,3 +171,5 @@ Dashboard 429 Pages deploy: 2026-08-22 - Dashboard uses one profile-scoped reque
 
 Publishing wizard Pages deploy: 2026-08-22 - Home is a chip Q&A for idea, photos, AI images, mixed counts, and platform packages. UI 0.6.106-wizard.
 
+Plain-language Home copy Pages deploy: 2026-08-22 - Drop I1?I4 and other scenario codes from wizard, Ideas, Support, and operator messages. UI 0.6.107-plain-copy.
+

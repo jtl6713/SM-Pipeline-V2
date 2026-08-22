@@ -6,7 +6,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
 // Manual idea-generation progress helper.
 // The main Studio bundle already renders generated_count when it sees it. This
 // lightweight hook starts at 0/N immediately and polls once per second so users
-// can see 1/N, 2/N, etc. as I1 creates and links each Idea Candidate.
+// can see 1/N, 2/N, etc. as each generated idea lands in the table.
 (() => {
   const nativeFetch = window.fetch.bind(window);
   let batchRecordId = null;
