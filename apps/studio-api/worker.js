@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.71-unattended-advance",
+          version: "0.10.72-r2-queue",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -6636,7 +6636,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Format: String(planItem.format || route.content_type || "").trim(),
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
-    Output_Status: nativeReady ? "Ready for Review" : (remotionReady ? "In Production" : "Planned"),
+    Output_Status: nativeReady ? "Ready for Review" : (remotionReady ? "In Production" : "Ready for Review"),
     Render_Status: nativeReady ? "Native Photo Route" : null,
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (nativePhoto || effective.thumbnail_mode === "Yes")
@@ -11111,6 +11111,7 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
   return started?.scenario || started?.response?.scenario || started || scenario;
 }
 
+const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
 const PRODUCTION_CADENCE_RENDER = Object.freeze([
   { id: 5528742, key: "P1" },
   { id: 5569495, key: "R2" },
@@ -11269,7 +11270,7 @@ async function cadenceHasRenderWork(env) {
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const checks = await Promise.all([
     cadenceQueueHasWork(env, contentTable, { view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" }),
-    cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Planned",{Production_Request_Output}!=BLANK())' }),
+    cadenceQueueHasWork(env, outputTable, { formula: STUDIO_R2_WORK_FORMULA }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK())' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))' }),
     cadenceQueueHasWork(env, outputTable, { formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' }),
@@ -11279,13 +11280,43 @@ async function cadenceHasRenderWork(env) {
   return checks.some(Boolean);
 }
 
+async function resetEmptyP3RemotionHandoffForR2(env) {
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 25,
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Asset_Selection_Status}="Selected",{Selected_Assets_JSON}="",{Production_Request_Output}!=BLANK())',
+  }).catch(() => []);
+  let reset = 0;
+  for (const row of rows || []) {
+    if (studioOutputIsNativePhoto(row)) continue;
+    try {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Output_Status: "Ready for Review",
+            Asset_Selection_Status: null,
+          },
+          typecast: true,
+        }),
+      });
+      reset += 1;
+    } catch (error) {
+      console.warn("R2 remotion requeue failed", row.id, error);
+    }
+  }
+  return { key: "R2-requeue", reset };
+}
+
 async function pulseOnDemandRenderChain(env, options = {}) {
   const waitMs = Number(options.waitMs || 15000);
+  try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
+    console.warn("R2 remotion requeue failed", error);
+  }
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const jobs = [
     { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
-    { id: 5569495, key: "R2", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Planned",{Production_Request_Output}!=BLANK())' },
+    { id: 5569495, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA },
     { id: 5557966, key: "R3", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))' },
     { id: 5556716, key: "R4", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' },
     { id: 5576363, key: "RR1", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))' },

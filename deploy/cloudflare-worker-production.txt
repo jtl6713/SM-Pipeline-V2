@@ -67,3 +67,5 @@ Variant Drive-ready Worker deploy: 2026-08-22 - Platform Prepare is Ready when G
 
 Unattended advance Worker deploy: 2026-08-22 - Keep P2/P3 webhooks live while cadence is parked, drain the render chain on cron, and follow up after promote so Remotion rows do not sit Planned. Worker 0.10.71-unattended-advance.
 
+R2 queue Worker deploy: 2026-08-22 - Probe the live Ready-for-Review asset-selection queue, not Planned, and requeue empty P3 remotion handoffs so R2 can run. Worker 0.10.72-r2-queue.
+
