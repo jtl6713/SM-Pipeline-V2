@@ -734,7 +734,7 @@ input, select, textarea, button {
   line-height:1.45;
   color:rgba(226,236,255,.86)
 }
-.ez-wizard-log{display:grid;gap:10px;max-height:28vh;overflow:auto}
+.ez-wizard-log{display:grid;gap:8px;max-height:28vh;overflow:auto}
 .ez-wizard-bubble{
   margin:0;
   max-width:92%;
@@ -744,8 +744,16 @@ input, select, textarea, button {
   line-height:1.4
 }
 .ez-wizard-bubble--bot{
-  background:rgba(1,37,89,.42);
-  border:1px solid rgba(255,255,255,.12)
+  max-width:100%;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  font-size:.78rem;
+  font-weight:750;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:rgba(226,236,255,.78)
 }
 .ez-wizard-bubble--user{
   justify-self:end;
