@@ -159,3 +159,7 @@ Render repair Pages deploy: 2026-08-22 - Operations buttons for M1 stale Remotio
 
 Make admin Pages deploy: 2026-08-22 - Operations can pulse MAKE-ADMIN-BRIDGE when a Pending command is waiting. UI 0.6.100-make-admin-bridge.
 
+Support + AP0 Pages deploy: 2026-08-22 - Support tab with idea-to-publish walkthrough and per-page guides. UI 0.6.101-support-ap0.
+
+Support screen grabs Pages deploy: 2026-08-22 - Support examples include Studio screen grabs of Home, Ideas, Production, Pipeline, Dashboard, Music, and Operations. UI 0.6.102-support-shots.
+

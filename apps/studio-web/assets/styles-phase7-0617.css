@@ -1035,4 +1035,21 @@ html[data-studio-theme="nyc"]{
 html[data-studio-theme="la"] .ez-path-choice--content .ez-path-choice-visual{background-image:url("/assets/home/la-santa-monica-pier.jpg")}
 html[data-studio-theme="nyc"] .ez-path-choice--content .ez-path-choice-visual{background-image:url("/assets/home/nyc-times-square.jpg")}
 
+.support-shot{margin:14px 0 8px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#0b1220}
+.support-shot img{width:100%;height:auto;display:block;vertical-align:middle}
+.support-shot figcaption{padding:8px 12px;font-size:.78rem;line-height:1.4;color:var(--muted);background:#f7fafa}
+.support-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px;align-items:start}
+.support-toc{display:flex;flex-direction:column;gap:6px;position:sticky;top:88px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px}
+.support-toc-link{border:0;background:transparent;text-align:left;padding:10px 12px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer;color:var(--ink)}
+.support-toc-link:hover,.support-toc-link.active{background:var(--teal-soft);color:var(--teal-dark)}
+.support-docs{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 24px}
+.support-article[hidden]{display:none!important}
+.support-article h2{margin:0 0 10px;font-size:1.35rem}
+.support-article p,.support-article li{line-height:1.55;font-size:.92rem}
+.support-article ul,.support-article ol{padding-left:1.2rem}
+.support-steps{display:grid;gap:16px;padding-left:1.2rem}
+.support-steps li{display:grid;gap:6px}
+.support-steps .text-button,.support-article .primary-button{justify-self:start;width:fit-content;margin-top:4px}
+@media(max-width:860px){.support-layout{grid-template-columns:1fr}.support-toc{position:static;flex-direction:row;flex-wrap:wrap}}
+
 

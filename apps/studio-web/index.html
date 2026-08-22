@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.100-make-admin-bridge">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.102-support-shots">
 </head>
 <body>
  <header class="topbar">
@@ -37,8 +37,9 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
+ <button class="nav-item" data-page="support">Support</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.100</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.102</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -945,6 +946,211 @@
  </div>
  </section>
  </section>
+
+ <section id="page-support" class="page">
+ <div class="page-heading">
+ <div><span class="eyebrow">Help</span><h1>Support</h1><p>A full idea-to-publish walkthrough, then a guide for each Studio page.</p></div>
+ </div>
+ <div class="support-layout">
+ <nav class="support-toc" aria-label="Support topics">
+ <button type="button" class="support-toc-link active" data-support-doc="walkthrough">End-to-end walkthrough</button>
+ <button type="button" class="support-toc-link" data-support-doc="home">Home</button>
+ <button type="button" class="support-toc-link" data-support-doc="dashboard">Dashboard</button>
+ <button type="button" class="support-toc-link" data-support-doc="ideas">Ideas</button>
+ <button type="button" class="support-toc-link" data-support-doc="production">Production</button>
+ <button type="button" class="support-toc-link" data-support-doc="pipeline">Pipeline</button>
+ <button type="button" class="support-toc-link" data-support-doc="music">Music Library</button>
+ <button type="button" class="support-toc-link" data-support-doc="operations">Operations</button>
+ </nav>
+ <div class="support-docs">
+ <article class="support-article" data-support-article="walkthrough">
+ <h2>Idea through publish on every platform</h2>
+ <p>This is the photo-based path ChicagoShining Studio uses today: write or pick an idea, attach stills, let Studio plan the packages, review the renders, then approve. Instagram, Facebook, and YouTube publish publicly. TikTok is saved as a draft.</p>
+ <figure class="support-shot">
+ <img src="/assets/support/home.jpg?v=0.6.102" alt="Home page with Start with Idea and Start with Content" width="1440" height="920">
+ <figcaption>Home is the fork. Same pipeline either way.</figcaption>
+ </figure>
+ <ol class="support-steps">
+ <li>
+ <strong>Choose the working profile on Home.</strong>
+ <span>The city profile (Chicago, New York, Los Angeles) stamps branding, defaults, and which library the new work uses. You can change it later in the top bar.</span>
+ <button type="button" class="text-button" data-open-page="home">Open Home</button>
+ </li>
+ <li>
+ <strong>Start with Idea.</strong>
+ <span>On Home, choose <em>Start with Idea</em>. On Ideas, pick an unpromoted candidate from I1–I4, generate a batch, or type a title and optional summary. Do not promote from the type list yet — photos come first.</span>
+ <figure class="support-shot">
+ <img src="/assets/support/ideas.jpg?v=0.6.102" alt="Ideas page with start form and candidate table" width="1440" height="920">
+ <figcaption>Ideas — select an existing candidate or enter one, then continue. Manage opens the drawer to add photos.</figcaption>
+ </figure>
+ <button type="button" class="text-button" data-open-page="ideas">Open Ideas</button>
+ </li>
+ <li>
+ <strong>Add photos from the idea drawer.</strong>
+ <span>Open the idea, then <em>Add photos</em>. That creates a Production request. Drop in the stills. Studio builds a multi-platform plan from the photo count, not from a content-type picker on the idea.</span>
+ </li>
+ <li>
+ <strong>Confirm platforms and crops in Production.</strong>
+ <span>Default multi-photo packages: Instagram Reel, Facebook Slideshow Reel, TikTok Video Draft, YouTube Short. Instagram and Facebook also keep silent 9:16 Story companions. Single-photo work plans feed/still packages instead. Reframe crops, write or AI-fill captions, leave Voiceover and Music on Yes unless you want a silent cut, then Save.</span>
+ <figure class="support-shot">
+ <img src="/assets/support/production.jpg?v=0.6.102" alt="Production start-with-content screen with photo drop zone" width="1440" height="920">
+ <figcaption>Production — name the piece, choose single or multiple photos, drop stills, then set platforms and audio.</figcaption>
+ </figure>
+ <button type="button" class="text-button" data-open-page="content">Open Production</button>
+ </li>
+ <li>
+ <strong>Approve &amp; Promote.</strong>
+ <span>Production hands the request to the existing pipeline (P3 and render). Companion Stories attach from the same 9:16 stills. YouTube 16:9 covers can finish in the background; 9:16 plan crops are enough to continue.</span>
+ </li>
+ <li>
+ <strong>Watch Pipeline until Ready for Review.</strong>
+ <span>Open Platform Pipeline. Rows move through package, asset selection, Remotion render, and review mail. Click a row to open the creative editor: preview, audio mix, per-photo titles, then <em>Save &amp; rerender preview</em> if you change the mix.</span>
+ <figure class="support-shot">
+ <img src="/assets/support/pipeline.jpg?v=0.6.102" alt="Platform pipeline table with Instagram Facebook TikTok and YouTube outputs" width="1440" height="920">
+ <figcaption>Pipeline — one row per platform output. Open review when Ready for Review, then Approve for publishing or Approve All.</figcaption>
+ </figure>
+ <button type="button" class="text-button" data-open-page="outputs">Open Pipeline</button>
+ </li>
+ <li>
+ <strong>Approve for publishing.</strong>
+ <span>When the preview is right, <em>Approve for publishing</em> (or Pipeline <em>Approve All</em>). Confirm the public/draft warning. Studio stages a public R2 URL (AP0) for video, then:</span>
+ <ul>
+ <li>Instagram Reel — auto-publish to the professional account</li>
+ <li>Instagram Story companion — AP1 story webhook</li>
+ <li>Facebook Slideshow Reel — FBS3 / FBS4</li>
+ <li>Facebook Story companion — Graph binary upload</li>
+ <li>TikTok Video Draft — TTD0 (stays a draft in TikTok)</li>
+ <li>YouTube Short — YouTube orchestrator when the row is due</li>
+ </ul>
+ <span>Carousels, Facebook multi-image, and TikTok multi-photo use the native still packages instead of a Remotion reel. Those publish through their own carousel / photo paths after the same Approve.</span>
+ </li>
+ <li>
+ <strong>Confirm in Operations if you need a clock or a manual mark.</strong>
+ <span>Ready to schedule lists approved rows that still need a post time. Ready to publish lists due packages. Use <em>mark published</em> only when you posted by hand. Daily ideas, Drive intake, and render repair live on the same page (admin roles).</span>
+ <figure class="support-shot">
+ <img src="/assets/support/operations.jpg?v=0.6.102" alt="Operations page with daily ideas, intake, and publish queues" width="1440" height="920">
+ <figcaption>Operations — schedule a post time, mark a hand-posted URL, or pulse intake and render repair.</figcaption>
+ </figure>
+ <button type="button" class="text-button" data-open-page="operations">Open Operations</button>
+ </li>
+ </ol>
+ <p>Other entry: Home <em>Start with Content</em> skips the Ideas table. You name the piece on Production, drop photos, and the rest of this walkthrough is the same from step 4.</p>
+ </article>
+ <article class="support-article" data-support-article="home" hidden>
+ <h2>Home</h2>
+ <figure class="support-shot">
+ <img src="/assets/support/home.jpg?v=0.6.102" alt="Home page with two start doors" width="1440" height="920">
+ <figcaption>Home does not run the pipeline. It only chooses how you enter.</figcaption>
+ </figure>
+ <p>Home is the start screen. It does not run the pipeline by itself.</p>
+ <ul>
+ <li><strong>Working profile</strong> — city/brand for new ideas and production.</li>
+ <li><strong>Start with Idea</strong> — jump to Ideas to pick or write a brief before photos.</li>
+ <li><strong>Start with Content</strong> — jump to Production’s photo intake when you already have stills.</li>
+ </ul>
+ <p>Come back here anytime to begin a new piece. The top-bar profile selector stays available on every other page.</p>
+ <button type="button" class="primary-button" data-open-page="home">Go to Home</button>
+ </article>
+ <article class="support-article" data-support-article="dashboard" hidden>
+ <h2>Dashboard</h2>
+ <figure class="support-shot">
+ <img src="/assets/support/dashboard.jpg?v=0.6.102" alt="Dashboard metric cards and recent outputs table" width="1440" height="920">
+ <figcaption>Dashboard cards stay on the page. Click a card to filter the table underneath.</figcaption>
+ </figure>
+ <p>Dashboard is the queue overview. Metric cards stay on the page and filter the table under them.</p>
+ <ul>
+ <li>Cards typically cover ideas waiting, production drafts, ready-for-review outputs, and publish-side states.</li>
+ <li>Click a card to show those records in the list below. It does not leave Dashboard.</li>
+ <li>Use Refresh after a promote or approve if the counts look stale.</li>
+ </ul>
+ <p>Open an idea or output from the filtered list, or switch to Ideas / Production / Pipeline when you need the full workspace.</p>
+ <button type="button" class="primary-button" data-open-page="dashboard">Go to Dashboard</button>
+ </article>
+ <article class="support-article" data-support-article="ideas" hidden>
+ <h2>Ideas</h2>
+ <figure class="support-shot">
+ <img src="/assets/support/ideas.jpg?v=0.6.102" alt="Ideas intake table and start form" width="1440" height="920">
+ <figcaption>The table is the candidate queue. Nothing here publishes.</figcaption>
+ </figure>
+ <p>Ideas holds Idea Candidates before they become Content Items. Nothing here publishes.</p>
+ <ul>
+ <li><strong>Generate AI ideas</strong> — I1 batch (1–10). Polls until the batch lands in the table.</li>
+ <li><strong>New idea</strong> — select an existing unpromoted candidate or enter a title/summary by hand.</li>
+ <li><strong>Manage</strong> — edit copy, hold/restore, delete, or <em>Add photos</em> to open Production.</li>
+ <li><strong>Promote without photos</strong> — advanced library path (I3 → I4) when footage already lives in the catalog. Requires a summary. Most work should use Add photos instead.</li>
+ </ul>
+ <figure class="support-shot">
+ <img src="/assets/support/ideas-new.jpg?v=0.6.102" alt="New idea form on the Ideas page" width="1440" height="920">
+ <figcaption>+ New idea opens the same form in manual mode so you can type a title without picking from the queue.</figcaption>
+ </figure>
+ <p>Status on the table is the candidate’s Airtable state (open, held, promoted). Promoted rows leave this queue.</p>
+ <button type="button" class="primary-button" data-open-page="ideas">Go to Ideas</button>
+ </article>
+ <article class="support-article" data-support-article="production" hidden>
+ <h2>Production</h2>
+ <figure class="support-shot">
+ <img src="/assets/support/production.jpg?v=0.6.102" alt="Production photo intake and platform checks" width="1440" height="920">
+ <figcaption>Start with Content lands here. Home → Ideas → Add photos uses the same workspace after photos are attached.</figcaption>
+ </figure>
+ <p>Production is where photos become a platform plan and a Content Item.</p>
+ <ul>
+ <li><strong>Start with content</strong> — title, optional description, photo cards, per-still captions, platform checks, crop pans.</li>
+ <li><strong>Draft requests</strong> — unfinished production requests you can reopen.</li>
+ <li><strong>Promoted content items</strong> — work that already entered P3 / render. Open Pipeline to review those outputs.</li>
+ <li><strong>Advanced</strong> — exact titles, voiceover tail, extra output types. Empty EZ defaults do not overwrite saved Pipeline direction.</li>
+ </ul>
+ <p>Save often while uploading. Approve &amp; Promote is the handoff into render. Music tracks shown here come from the Music Library catalogue.</p>
+ <button type="button" class="primary-button" data-open-page="content">Go to Production</button>
+ </article>
+ <article class="support-article" data-support-article="pipeline" hidden>
+ <h2>Pipeline</h2>
+ <figure class="support-shot">
+ <img src="/assets/support/pipeline.jpg?v=0.6.102" alt="Platform pipeline with Open review on each output" width="1440" height="920">
+ <figcaption>Each row is one destination. Approve All uses the same live publish path as a single Approve for publishing.</figcaption>
+ </figure>
+ <p>Platform Pipeline is execution plus creative review. It refreshes while the page is open.</p>
+ <ul>
+ <li>Each row is one Platform Output (Reel, Story, Short, carousel, and so on).</li>
+ <li>Columns cover Studio state, render, review, and publish. Click a heading to sort.</li>
+ <li>Click a row for the creative editor: preview player, defaults, audio, ratios, slides, review notes.</li>
+ <li><strong>Approve for publishing</strong> on a ready row starts live dispatch. <strong>Approve All</strong> does the same for every Ready-for-Review output after confirm.</li>
+ </ul>
+ <p>Publishing stays locked until that approve step. Preview-approve (when shown) records review without posting.</p>
+ <button type="button" class="primary-button" data-open-page="outputs">Go to Pipeline</button>
+ </article>
+ <article class="support-article" data-support-article="music" hidden>
+ <h2>Music Library</h2>
+ <figure class="support-shot">
+ <img src="/assets/support/music.jpg?v=0.6.102" alt="Music library track cards" width="1440" height="920">
+ <figcaption>Cleared tracks from the Airtable catalogue. Production still decides Yes/No and the mix in Pipeline review.</figcaption>
+ </figure>
+ <p>Music Library is a read-through of the Airtable background-music catalogue for the active profile.</p>
+ <ul>
+ <li>Browse and preview tracks before or during Production.</li>
+ <li>It does not start a render. Production still decides Include background music Yes/No and the mix in Pipeline review.</li>
+ </ul>
+ <button type="button" class="primary-button" data-open-page="music">Go to Music Library</button>
+ </article>
+ <article class="support-article" data-support-article="operations" hidden>
+ <h2>Operations</h2>
+ <figure class="support-shot">
+ <img src="/assets/support/operations.jpg?v=0.6.102" alt="Operations control page" width="1440" height="920">
+ <figcaption>Admin-only control room. Buttons pulse on-demand work; they do not turn interval scanners back on.</figcaption>
+ </figure>
+ <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles.</p>
+ <ul>
+ <li><strong>Daily ideas</strong> — per-profile I1 around 1:00 a.m. Chicago, or Run today now.</li>
+ <li><strong>Library intake</strong> — Process intake folder starts A2 (and the A0 daisy-chain) instead of a 2-hour clock.</li>
+ <li><strong>Ready to schedule / publish</strong> — set a post time or mark a hand-posted package published.</li>
+ <li><strong>Oversized library videos</strong> — compress via A1S/A1M for Drive files over 100 MB.</li>
+ <li><strong>Render repair</strong> — reset stale Remotion URLs (M1), retry failed asset selection (R2B), run a Pending Make admin queue row.</li>
+ </ul>
+ <p>These buttons do not turn interval scanners back on. They pulse the matching on-demand scenario when work exists.</p>
+ <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
+ </article>
+ </div>
+ </div>
+ </section>
  </main>
  </div>
 
@@ -1072,7 +1278,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.100-make-admin-bridge"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.100-make-admin-bridge"></script>
+ <script src="/assets/ez-plan.js?v=0.6.102-support-shots"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.102-support-shots"></script>
 </body>
 </html>

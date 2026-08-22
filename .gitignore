@@ -61,6 +61,9 @@ public/frames/
 # Studio Home hero photos (Wikimedia Commons)
 !apps/studio-web/assets/home/*.jpg
 
+# Studio Support screen grabs
+!apps/studio-web/assets/support/*.jpg
+
 # OS / IDE
 .DS_Store
 Thumbs.db

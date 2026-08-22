@@ -53,3 +53,5 @@ On-demand M1/R2B Worker deploy: 2026-08-22 - M1 resets stale Remotion URLs after
 
 On-demand MAKE-ADMIN-BRIDGE Worker deploy: 2026-08-22 - Bridge 5893243 runs only when a Pending Make Admin Queue row exists, not every 60 seconds. Worker 0.10.64-ondemand-make-admin-bridge.
 
+AP0 webhook live Worker deploy: 2026-08-22 - AP0/IGS/FBS3/FBS4/TTD0 stay on while cadence is parked. Approve pulses AP0 with a 17-character Platform Output id before publishers. Worker 0.10.65-ap0-webhook-live.
+

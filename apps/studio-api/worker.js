@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.64-ondemand-make-admin-bridge",
+          version: "0.10.65-ap0-webhook-live",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -149,6 +149,7 @@ export default {
           studio_ondemand_a1m_c1_c2m_v1: true,
           studio_ondemand_m1_r2b_v1: true,
           studio_ondemand_make_admin_bridge_v1: true,
+          studio_ap0_webhook_live_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -11066,17 +11067,21 @@ const PRODUCTION_CADENCE_RENDER = Object.freeze([
 ]);
 const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
   { id: 5864632, key: "IG" },
+  { id: 5791537, key: "APCAR" },
+  { id: 5813561, key: "FB" },
+  { id: 5806668, key: "TTD" },
+  { id: 5823581, key: "YT" },
+]);
+const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: 5612096, key: "AP0" },
   { id: 5612664, key: "IGS" },
   { id: 5845193, key: "IGSPOLL" },
-  { id: 5791537, key: "APCAR" },
-  { id: 5813561, key: "FB" },
   { id: 5816502, key: "FBS3" },
   { id: 5816520, key: "FBS4" },
-  { id: 5806668, key: "TTD" },
   { id: 5806658, key: "TTD0" },
-  { id: 5823581, key: "YT" },
 ]);
+const STUDIO_AP0_WEBHOOK_URL = "https://hook.us2.make.com/q1lx2g0gg7khxzgvnkums12wu649pjnw";
+const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
   { id: 5864632, key: "IG" },
   { id: 5813561, key: "FB" },
@@ -11399,7 +11404,10 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_CAROUSEL,
       ...PRODUCTION_CADENCE_REPAIR,
     ];
-    const results = await Promise.all(parked.map((item) => cadenceSetActive(env, item.id, false)));
+    const results = await Promise.all([
+      ...parked.map((item) => cadenceSetActive(env, item.id, false)),
+      ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
+    ]);
     const pulses = [];
     if (startRender) pulses.push(...await pulseOnDemandRenderChain(env));
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
@@ -11423,6 +11431,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
   const wantPublish = startPublish || publishWork || now < productionCadencePublishHoldUntil;
   const actions = [
     ...PRODUCTION_CADENCE_ALWAYS_ON.map((item) => cadenceSetActive(env, item.id, true)),
+    ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
     ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender)),
     ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish)),
   ];
@@ -11779,9 +11788,29 @@ async function studioPublishFacebookPageStory(env, record) {
   return { ok: true, post_id: postId };
 }
 
+async function studioPulseAp0PublicAsset(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP0" };
+  if (studioOutputIsNativePhoto(record) || studioOutputIsNativePhotoRoute(
+    String(f(record, "Platform") || "").trim(),
+    String(f(record, "Studio_Output_Type") || "").trim(),
+    String(f(record, "Platform_Output_Type") || "").trim(),
+  )) {
+    return { ok: true, skipped: "native-photo", target: "AP0" };
+  }
+  if (String(f(record, "Publish_Asset_URL") || "").trim()) {
+    return { ok: true, skipped: "already-has-asset", target: "AP0" };
+  }
+  const hasFile = String(f(record, "Final_File_ID") || "").trim() || String(f(record, "Final_File_URL") || "").trim();
+  if (!hasFile) return { ok: true, skipped: "no-final-file", target: "AP0" };
+  return studioPulseMakeWebhook(env, STUDIO_AP0_WEBHOOK_URL, recordId, "AP0");
+}
+
 async function studioDispatchApprovedPublish(env, record) {
+  const ap0 = await studioPulseAp0PublicAsset(env, record);
+  if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
   const plan = studioPublishDispatchTarget(record);
-  if (!plan) return { ok: true, skipped: "no-dispatch" };
+  if (!plan) return ap0?.ok === false ? ap0 : { ok: true, skipped: "no-dispatch", ap0 };
   if (plan.graphStory) return studioPublishFacebookPageStory(env, record);
   const names = [plan.setting, plan.poll].filter(Boolean);
   const settings = await studioActivePipelineSettings(env, names);
@@ -11791,7 +11820,7 @@ async function studioDispatchApprovedPublish(env, record) {
     const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
     await studioPulseMakeWebhook(env, settings[plan.poll], record.id, pollTarget);
   }
-  return first;
+  return { ...first, ap0 };
 }
 
 function studioSchedulePublishDispatch(ctx, env, record) {

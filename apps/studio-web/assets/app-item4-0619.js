@@ -74,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.100-make-admin-bridge";
+  const BUILD_ID = "item4-0.6.102-support-shots";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -199,6 +199,7 @@
       $(`page-${button.dataset.page}`).classList.add("active");
       if (button.dataset.page === "outputs") pipelineViewFilter = "all";
       if (button.dataset.page !== "outputs") stopPipelinePoll();
+      if (button.dataset.page === "support") showSupportDoc("walkthrough");
       loadPage(button.dataset.page);
     });
   });
@@ -1217,8 +1218,31 @@
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
     $(`page-${page}`).classList.add("active");
     if (page !== "outputs") stopPipelinePoll();
+    if (page === "support") showSupportDoc("walkthrough");
     loadPage(page);
   }
+
+  function showSupportDoc(id) {
+    const doc = String(id || "walkthrough").trim() || "walkthrough";
+    document.querySelectorAll("[data-support-doc]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.supportDoc === doc);
+    });
+    document.querySelectorAll("[data-support-article]").forEach((article) => {
+      article.hidden = article.dataset.supportArticle !== doc;
+    });
+  }
+
+  document.querySelectorAll("[data-support-doc]").forEach((button) => {
+    button.addEventListener("click", () => showSupportDoc(button.dataset.supportDoc));
+  });
+  document.querySelectorAll("[data-open-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const page = button.dataset.openPage;
+      if (!page || !$(`page-${page}`)) return;
+      if (!phase6ConfirmDiscardUnsaved("leave this editor")) return;
+      switchToPage(page);
+    });
+  });
 
   function ezPlanApi() {
     return window.ChicagoShiningEzPlan || null;
@@ -7214,6 +7238,7 @@
     if (page === "outputs") return loadOutputs();
     if (page === "music") return loadMusic();
     if (page === "operations") return loadOperations();
+    if (page === "support") return;
   }
 
 
