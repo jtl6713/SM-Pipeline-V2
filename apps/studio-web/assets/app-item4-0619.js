@@ -81,7 +81,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.120-approve-means-approve";
+  const BUILD_ID = "item4-0.6.121-approve-subrequest-budget";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -5495,9 +5495,6 @@
     const promoteButton = $("promoteProductionRequest");
     if (item4PromoteInFlight || promoteButton?.dataset.busy === "true" || promoteButton?.disabled) return;
 
-    if (item4Workspace?.assets?.length) {
-      try { await loadItem4Workspace(activeProductionRequest); } catch {}
-    }
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
       setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
       return;

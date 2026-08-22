@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.78-item4-queue-owner",
+          version: "0.10.79-promote-subrequest-budget",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -176,6 +176,7 @@ export default {
           studio_ai_thumbnail_v1: true,
           studio_youtube_16x9_all_v1: true,
           studio_item4_queue_owner_v1: true,
+          studio_promote_subrequest_budget_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -4755,19 +4756,9 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
 async function getItem4WorkspaceStatus(request, env, url, authorization) {
   const recordId = item4RequestIdFromPath(url);
 
-  // A normal Production workspace refresh lands on this status route. Keep the
-  // source-to-production bridge self-healing here so deployment + one refresh
-  // is sufficient to harden the live P3/R2 scenarios before any new outputs run.
-  // Hardening failures are surfaced diagnostically but do not make status polling
-  // itself destructive or unavailable.
-  let makeHardening;
-  try {
-    makeHardening = await item4EnsureMakeHardeningFromWorkspaceOpen(env);
-  } catch (error) {
-    makeHardening = { p3: null, r2: { ok: false, deferred: true, error: error instanceof Error ? error.message : String(error) }, stale_recovery: null };
-    console.warn("Item 4 Make hardening deferred from workspace status", error);
-  }
-
+  // Workspace GET is a read of this request. Make blueprint hardening and
+  // SMV1 drain belong on cron / waitUntil, not on every status poll or Approve.
+  let makeHardening = { skipped: "workspace-read" };
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   let assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   let masterAuthorityResume = { attempted: false, reason: "not-needed", execution_ids: [] };
@@ -4806,10 +4797,6 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
     try {
       let reconciled = await item4ReconcileVariants(env, recordId, record, { skipSanitize: true });
       record = reconciled.record;
-      if (reconciled.status === "Preparing" && Array.isArray(reconciled.queue_rows) && reconciled.queue_rows.length) {
-        variantResume = await item4ResumePendingVariants(env, recordId, record);
-        record = variantResume.record || record;
-      }
     } catch (error) {
       variantResume = {
         attempted: false,
@@ -7145,24 +7132,16 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       && !String(f(armed || {}, "Thumbnail_URL") || "").trim();
     try {
       if (needVoiceover || needAiThumb) await pulseStudioP2Handoff(env, contentItemId, requestRecord);
-      // P3 is a no-op until voiceover/cover filters pass; always fire it so
-      // photo-only promotes and post-P2 retries do not wait for a manual pulse.
       await pulseStudioP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
       console.warn("Studio promote media pulse failed", error);
-    }
-    try {
-      await advanceStudioProductionOutputs(env, { contentItemId, requestRecordId: requestRecord.id });
-    } catch (error) {
-      console.warn("Studio continuation after promote failed", error);
     }
     if (String(f(requestRecord, "Master_Content_Type") || "").trim() === "Carousel"
       || item4EffectivePhotoCount(requestRecord) > item4AssetManifest(requestRecord).length) {
       try {
         if (contentItemId) await item4EnsureAiSourceMasters(env, requestRecord, { id: contentItemId });
-        await pulseOnDemandCarouselChain(env, { contentItemIds: [contentItemId] });
       } catch (error) {
-        console.warn("Studio carousel on-demand pulse failed", error);
+        console.warn("Studio AI source seed failed", error);
       }
     }
   }
