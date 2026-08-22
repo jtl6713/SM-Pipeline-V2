@@ -74,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.104-city-home-heroes";
+  const BUILD_ID = "item4-0.6.105-dashboard-429";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -123,7 +123,6 @@
     if (reload) {
       const page = activeNavPage();
       if (page && page !== "home") loadPage(page);
-      loadDashboard(true);
     }
   }
 
@@ -486,31 +485,42 @@
     }
   }
 
+  let dashboardInflight = null;
+  let dashboardInflightKey = "";
+
   async function loadDashboard(force = false) {
+    const key = selectedProfileId || "default";
+    if (dashboardInflight && dashboardInflightKey === key && !force) return dashboardInflight;
     const metrics = $("metrics");
     const list = $("recentOutputs");
-    metrics.innerHTML = '<div class="metric"><div class="metric-label">Loading</div><div class="metric-value">…</div></div>';
-    list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
-    try {
-      const [data, ideas, content, outputs] = await Promise.all([
-        api("/api/dashboard"),
-        api("/api/ideas?limit=100"),
-        api("/api/content?limit=100"),
-        api("/api/outputs?limit=100"),
-      ]);
-      const m = data.metrics || {};
-      dashboardCache = {
-        metrics: m,
-        ideas: Array.isArray(data.ideas) ? data.ideas : (ideas.records || []),
-        content: Array.isArray(data.content) ? data.content : (content.records || []),
-        outputs: Array.isArray(data.outputs) && data.outputs.length ? data.outputs : (outputs.records || data.recent_outputs || []),
-      };
-      renderDashboardMetrics();
-      renderDashboardPanel();
-    } catch (e) {
-      metrics.innerHTML = "";
-      list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
-    }
+    const run = (async () => {
+      metrics.innerHTML = '<div class="metric"><div class="metric-label">Loading</div><div class="metric-value">…</div></div>';
+      list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
+      try {
+        const data = await api("/api/dashboard");
+        if (selectedProfileId && data.profile?.id && data.profile.id !== selectedProfileId) return;
+        const m = data.metrics || {};
+        dashboardCache = {
+          metrics: m,
+          ideas: Array.isArray(data.ideas) ? data.ideas : [],
+          content: Array.isArray(data.content) ? data.content : [],
+          outputs: Array.isArray(data.outputs) && data.outputs.length ? data.outputs : (data.recent_outputs || []),
+        };
+        renderDashboardMetrics();
+        renderDashboardPanel();
+      } catch (e) {
+        metrics.innerHTML = "";
+        list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+      }
+    })();
+    dashboardInflightKey = key;
+    dashboardInflight = run.finally(() => {
+      if (dashboardInflight === run) {
+        dashboardInflight = null;
+        dashboardInflightKey = "";
+      }
+    });
+    return dashboardInflight;
   }
 
   function dashboardViewForCard(page, filter) {

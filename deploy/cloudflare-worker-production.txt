@@ -55,3 +55,5 @@ On-demand MAKE-ADMIN-BRIDGE Worker deploy: 2026-08-22 - Bridge 5893243 runs only
 
 AP0 webhook live Worker deploy: 2026-08-22 - AP0/IGS/FBS3/FBS4/TTD0 stay on while cadence is parked. Approve pulses AP0 with a 17-character Platform Output id before publishers. Worker 0.10.65-ap0-webhook-live.
 
+Dashboard 429 Worker deploy: 2026-08-22 - Dashboard loads Ideas, Content, and Outputs in one sequential Airtable pass and retries 429s. Worker 0.10.66-dashboard-429.
+

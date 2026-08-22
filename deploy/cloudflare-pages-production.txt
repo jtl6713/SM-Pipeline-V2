@@ -167,3 +167,5 @@ City home photos Pages deploy: 2026-08-22 - New York and Los Angeles profiles us
 
 City home heroes Pages deploy: 2026-08-22 - Los Angeles Home uses Rodeo Drive; New York Home uses the downtown skyline. UI 0.6.104-city-home-heroes.
 
+Dashboard 429 Pages deploy: 2026-08-22 - Dashboard uses one profile-scoped request instead of four parallel Airtable loads. UI 0.6.105-dashboard-429.
+

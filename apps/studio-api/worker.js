@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.65-ap0-webhook-live",
+          version: "0.10.66-dashboard-429",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -997,21 +997,41 @@ function requireAnyPermission(authorization, permissions) {
   if (!ok) throw new HttpError(403, `Permission required: ${(permissions || []).join(" or ")}`);
 }
 
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function airtableRetryDelayMs(response, attempt) {
+  const raw = String(response?.headers?.get("Retry-After") || "").trim();
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(2500, seconds < 20 ? seconds * 1000 : seconds);
+  }
+  return Math.min(2500, 200 * attempt);
+}
+
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
   const suffix = pathOrParams ? (pathOrParams.startsWith("?") || pathOrParams.startsWith("/") ? pathOrParams : `/${pathOrParams}`) : "";
   const tableRef = encodeURIComponent(String(tableId));
   const endpoint = `https://api.airtable.com/v0/${env.AIRTABLE_BASE_ID}/${tableRef}${suffix}`;
-  const response = await fetch(endpoint, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${env.AIRTABLE_PAT}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const text = await response.text();
-  let body;
-  try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+  const maxAttempts = 4;
+  let response;
+  let text = "";
+  let body = {};
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    response = await fetch(endpoint, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${env.AIRTABLE_PAT}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    text = await response.text();
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+    if (response.status !== 429 || attempt === maxAttempts) break;
+    await sleepMs(airtableRetryDelayMs(response, attempt));
+  }
   if (!response.ok) {
     const airtableType = body?.error?.type ? String(body.error.type) : "";
     const airtableMessage = body?.error?.message ? String(body.error.message) : "";
@@ -1793,8 +1813,15 @@ function contentProfileFilterFormula(profile) {
   return parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
 }
 
+async function listContentProfileRecords(env) {
+  if (!env.__contentProfilesPromise) {
+    env.__contentProfilesPromise = listRecords(env, "Content Profiles", { limit: 100 });
+  }
+  return env.__contentProfilesPromise;
+}
+
 async function resolveAuthorizedContentProfiles(env, authorization) {
-  const profiles = await listRecords(env, "Content Profiles", { limit: 100 });
+  const profiles = await listContentProfileRecords(env);
   const organizationRecordId = authorization?.organization?.record_id;
 
   return profiles.filter((record) => {
@@ -12127,13 +12154,9 @@ async function getOutputRoute(request, env, url) {
 async function dashboard(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const formula = contentProfileFilterFormula(profile);
-  const [ideas, content, outputs] = await Promise.all([
-    listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date", filterFormula: formula }),
-    listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula }),
-  ]);
-
-  const mappedOutputs = outputs.map(mapOutput);
+  const ideas = (await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date", filterFormula: formula })).map(mapIdea);
+  const content = (await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula })).map(mapContent);
+  const mappedOutputs = (await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula })).map(mapOutput);
   const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
   const published = mappedOutputs.filter((o) => o.studio_state === "Published").length;
   const attention = mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length;
@@ -12149,6 +12172,9 @@ async function dashboard(request, env, url, authorization) {
       attention_outputs: attention,
       published_outputs: published,
     },
+    ideas,
+    content,
+    outputs: mappedOutputs,
     recent_outputs: mappedOutputs.slice(0, 12),
     profile: mapStudioContentProfile(profile),
   });
