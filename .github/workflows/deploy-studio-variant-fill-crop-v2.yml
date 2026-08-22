@@ -289,12 +289,12 @@ jobs:
           BASE=$(cat /tmp/variant-base-url.txt)
           for attempt in $(seq 1 10); do
             if curl -fsS "$BASE/health" -o /tmp/health-final.json &&
-              jq -e '.ok == true and .version == "2.0.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop"' /tmp/health-final.json >/dev/null; then
+              jq -e '.ok == true and .version == "2.1.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop" and .outputs["1:1"].width == 1080 and .outputs["16:9"].width == 1920' /tmp/health-final.json >/dev/null; then
               break
             fi
             sleep 2
           done
-          jq -e '.ok == true and .version == "2.0.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop"' /tmp/health-final.json >/dev/null
+          jq -e '.ok == true and .version == "2.1.0" and .recipe_version == "fill-crop-v2" and .outputs["9:16"].style == "center_crop" and .outputs["1:1"].width == 1080 and .outputs["16:9"].width == 1920' /tmp/health-final.json >/dev/null
           TOKEN=$(cat /tmp/variant-token.txt)
           for attempt in $(seq 1 15); do
             curl -fsS --max-time 300 \
@@ -305,14 +305,14 @@ jobs:
               -H 'Content-Type: image/png' \
               --data-binary @/tmp/variant-source.png
             tr -d '\r' </tmp/candidate.headers >/tmp/candidate.normalized.headers
-            if grep -Eiq '^x-studio-variant-version: 2\.0\.0$' /tmp/candidate.normalized.headers &&
+            if grep -Eiq '^x-studio-variant-version: 2\.1\.0$' /tmp/candidate.normalized.headers &&
               grep -Eiq '^x-studio-variant-recipe: fill-crop-v2$' /tmp/candidate.normalized.headers &&
               grep -Eiq '^x-studio-variant-style: center_crop$' /tmp/candidate.normalized.headers; then
               break
             fi
             sleep 2
           done
-          grep -Eiq '^x-studio-variant-version: 2\.0\.0$' /tmp/candidate.normalized.headers
+          grep -Eiq '^x-studio-variant-version: 2\.1\.0$' /tmp/candidate.normalized.headers
           grep -Eiq '^x-studio-variant-recipe: fill-crop-v2$' /tmp/candidate.normalized.headers
           grep -Eiq '^x-studio-variant-style: center_crop$' /tmp/candidate.normalized.headers
           sha256sum /tmp/candidate.jpg | awk '{print $1}' >/tmp/candidate.sha256

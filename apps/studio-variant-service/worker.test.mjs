@@ -50,10 +50,14 @@ function renderRequest(query, token = "test-secret") {
   });
 }
 
-test("recipe version is explicit and both outputs use center crop", () => {
+test("recipe version is explicit and all four plan ratios use center crop", () => {
   assert.equal(RECIPE.version, "fill-crop-v2");
   assert.equal(RECIPE.ratios["4:5"].style, "center_crop");
   assert.equal(RECIPE.ratios["9:16"].style, "center_crop");
+  assert.equal(RECIPE.ratios["1:1"].width, 1080);
+  assert.equal(RECIPE.ratios["1:1"].height, 1080);
+  assert.equal(RECIPE.ratios["16:9"].width, 1920);
+  assert.equal(RECIPE.ratios["16:9"].height, 1080);
 });
 
 test("9:16 rendering uses one cover transform without blur compositing", async () => {
@@ -104,6 +108,32 @@ test("ratio aliases resolve to the canonical recipe", () => {
   assert.equal(spec.ratio, "9:16");
   assert.equal(spec.recipe, "fill-crop-v2");
   assert.equal(spec.gravity, "center");
+});
+
+test("Facebook 1:1 and YouTube 16:9 fill-crop the same recipe as 4:5 and 9:16", async () => {
+  const square = resolveRecipe(new URL("https://variant.example/render?ratio=1x1&recipe=fill-crop-v2"));
+  assert.equal(square.ratio, "1:1");
+  assert.equal(square.width, 1080);
+  assert.equal(square.height, 1080);
+
+  const landscape = resolveRecipe(new URL("https://variant.example/render?ratio=16:9&recipe=fill-crop-v2"));
+  assert.equal(landscape.ratio, "16:9");
+  assert.equal(landscape.width, 1920);
+  assert.equal(landscape.height, 1080);
+
+  const trace = [];
+  const response = await worker.fetch(
+    renderRequest("ratio=1%3A1&recipe=fill-crop-v2"),
+    environment(trace),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-studio-variant-ratio"), "1:1");
+  assert.deepEqual(trace[1], ["transform", {
+    width: 1080,
+    height: 1080,
+    fit: "cover",
+    gravity: "center",
+  }]);
 });
 
 test("optional gravity keeps the fill-crop-v2 recipe and defaults to center", async () => {

@@ -1,5 +1,6 @@
 const SERVICE = "chicagoshining-studio-variant-service";
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
+const SUPPORTED_RATIOS = "4:5, 9:16, 1:1, or 16:9";
 
 export const RECIPE = Object.freeze({
   version: "fill-crop-v2",
@@ -8,6 +9,8 @@ export const RECIPE = Object.freeze({
   ratios: Object.freeze({
     "4:5": Object.freeze({ width: 1080, height: 1350, style: "center_crop" }),
     "9:16": Object.freeze({ width: 1080, height: 1920, style: "center_crop" }),
+    "1:1": Object.freeze({ width: 1080, height: 1080, style: "center_crop" }),
+    "16:9": Object.freeze({ width: 1920, height: 1080, style: "center_crop" }),
   }),
 });
 
@@ -47,6 +50,8 @@ function normalizeRatio(value) {
   const ratio = String(value || "").trim().toLowerCase();
   if (ratio === "4:5" || ratio === "4x5" || ratio === "4-5") return "4:5";
   if (ratio === "9:16" || ratio === "9x16" || ratio === "9-16") return "9:16";
+  if (ratio === "1:1" || ratio === "1x1" || ratio === "1-1") return "1:1";
+  if (ratio === "16:9" || ratio === "16x9" || ratio === "16-9") return "16:9";
   return null;
 }
 
@@ -74,7 +79,7 @@ export function parseGravity(value) {
 
 export function resolveRecipe(url) {
   const ratio = normalizeRatio(url.searchParams.get("ratio"));
-  if (!ratio) return { error: "ratio must be 4:5 or 9:16", status: 400 };
+  if (!ratio) return { error: `ratio must be ${SUPPORTED_RATIOS}`, status: 400 };
 
   const requestedRecipe = String(url.searchParams.get("recipe") || RECIPE.version);
   if (requestedRecipe !== RECIPE.version) {
