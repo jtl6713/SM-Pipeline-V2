@@ -10,27 +10,27 @@ Story teaser Worker deploy: 2026-08-21 ù Photo-based Instagram and Facebook Stor
 
 Item 4 subrequest-cap Worker deploy: 2026-08-21 ù Production workspace GET no longer force-hardens Make, drains SMV1 previews, or cadence-syncs in the same invocation. Worker 0.10.42-item4-subrequest-cap.
 
-Calm bridge-preflight Worker deploy: 2026-08-21 ó Approve readiness check reads saved plan and variants only. Companion Story copy is a note, not a warning. Worker 0.10.43-calm-bridge-preflight.
+Calm bridge-preflight Worker deploy: 2026-08-21 ù Approve readiness check reads saved plan and variants only. Companion Story copy is a note, not a warning. Worker 0.10.43-calm-bridge-preflight.
 
-Studio cover thumbs Worker deploy: 2026-08-21 ó Photo-video Approve stamps a prepared JPEG cover onto Thumbnail_URL, keeps Include_Thumbnail Yes, and prepares 16:9 for YouTube grid. Worker 0.10.44-studio-cover-thumbs.
+Studio cover thumbs Worker deploy: 2026-08-21 ù Photo-video Approve stamps a prepared JPEG cover onto Thumbnail_URL, keeps Include_Thumbnail Yes, and prepares 16:9 for YouTube grid. Worker 0.10.44-studio-cover-thumbs.
 
-Slide vs post caption Worker deploy: 2026-08-21 ó Per-photo crop labels save on the master asset, not Requested_Caption. Worker 0.10.45-slide-post-caption-split.
+Slide vs post caption Worker deploy: 2026-08-21 ù Per-photo crop labels save on the master asset, not Requested_Caption. Worker 0.10.45-slide-post-caption-split.
 
-Variant plan-ready Worker deploy: 2026-08-21 ó 9:16 platform crops mark Prepare Ready; extra 16:9 YouTube covers keep finishing in the background. Stalled Processing rows requeue. Worker 0.10.46-variant-plan-ready.
+Variant plan-ready Worker deploy: 2026-08-21 ù 9:16 platform crops mark Prepare Ready; extra 16:9 YouTube covers keep finishing in the background. Stalled Processing rows requeue. Worker 0.10.46-variant-plan-ready.
 
-Approve plan-crops Worker deploy: 2026-08-21 ó Approve no longer waits on extra 16:9 YouTube cover stills. 9:16 plan crops are enough. Worker 0.10.47-approve-plan-crops.
+Approve plan-crops Worker deploy: 2026-08-21 ù Approve no longer waits on extra 16:9 YouTube cover stills. 9:16 plan crops are enough. Worker 0.10.47-approve-plan-crops.
 
-Preflight targetCount Worker deploy: 2026-08-21 ó Restore variant counts in the Approve readiness response so the UI does not throw targetCount is not defined. Worker 0.10.48-preflight-targetcount.
+Preflight targetCount Worker deploy: 2026-08-21 ù Restore variant counts in the Approve readiness response so the UI does not throw targetCount is not defined. Worker 0.10.48-preflight-targetcount.
 
-Studio audio/caption handoff Worker deploy: 2026-08-21 ó Promote keeps Voiceover and Music Yes even before the VO file exists, copies Include_Background_Music, and stamps on-photo labels onto Remotion clips. Worker 0.10.49-studio-audio-caption-handoff.
+Studio audio/caption handoff Worker deploy: 2026-08-21 ù Promote keeps Voiceover and Music Yes even before the VO file exists, copies Include_Background_Music, and stamps on-photo labels onto Remotion clips. Worker 0.10.49-studio-audio-caption-handoff.
 
-Approve All Worker deploy: 2026-08-21 ó POST /api/outputs/approve-all approves every Ready-for-Review output for publishing using the same handoff as a single Approve. Worker 0.10.51-approve-all.
+Approve All Worker deploy: 2026-08-21 ù POST /api/outputs/approve-all approves every Ready-for-Review output for publishing using the same handoff as a single Approve. Worker 0.10.51-approve-all.
 
-Publish dispatch Worker deploy: 2026-08-21 ó Approve pulses the exact IG/FB/TikTok publisher webhooks, copies Story CDN URLs and 9:16 aspect onto the output, Graph-publishes Facebook Stories by binary upload, keeps AP0/IGS/FBS3/FBS4/TTD0 on during cadence, and maps encoding to Platform Processing. Worker 0.10.52-publish-dispatch.
+Publish dispatch Worker deploy: 2026-08-21 ù Approve pulses the exact IG/FB/TikTok publisher webhooks, copies Story CDN URLs and 9:16 aspect onto the output, Graph-publishes Facebook Stories by binary upload, keeps AP0/IGS/FBS3/FBS4/TTD0 on during cadence, and maps encoding to Platform Processing. Worker 0.10.52-publish-dispatch.
 
-Cadence park Worker deploy: 2026-08-21 ó Production Make cadence stays OFF so Studio page loads do not reactivate interval orchestrators. Worker 0.10.53-cadence-parked.
+Cadence park Worker deploy: 2026-08-21 ù Production Make cadence stays OFF so Studio page loads do not reactivate interval orchestrators. Worker 0.10.53-cadence-parked.
 
-Operations Worker deploy: 2026-08-22 ó Studio Operations gates daily I1 per Content Profile, exposes PUB1/PUB2 queues and manual published confirmation, and pulses A1S for oversized Drive files instead of interval clocks. Worker 0.10.54-operations.
+Operations Worker deploy: 2026-08-22 ù Studio Operations gates daily I1 per Content Profile, exposes PUB1/PUB2 queues and manual published confirmation, and pulses A1S for oversized Drive files instead of interval clocks. Worker 0.10.54-operations.
 
 
 A0 daisy-chain Worker deploy: 2026-08-22 - Process intake folder pulses A2; A2B/A3/A4 follow when each stage finishes. A0 stays on-demand and off. Worker 0.10.55-a0-daisychain.
@@ -44,4 +44,6 @@ Intake logs Worker deploy: 2026-08-22 - Read A2 status from Make scenario logs s
 On-demand render chain Worker deploy: 2026-08-22 - P1/R2/R3/R4/R5/RR1 stay on-demand. Remotion done POSTs /api/hooks/r5-done so R5 runs only when a job finished. Worker 0.10.59-ondemand-r5.
 
 On-demand publish orch Worker deploy: 2026-08-22 - IG/FB/YT/TTD/AP-CAR orchestrators stay on-demand and run only when Approve or a due scheduled post has work. Worker 0.10.60-ondemand-pub.
+
+On-demand SMV1/P020-2 Worker deploy: 2026-08-22 - Variant transfer and per-slide voiceover stay on-demand. Studio /run on upload or mix; cron only if a queue row already exists. Worker 0.10.61-ondemand-smv1-p0202.
 

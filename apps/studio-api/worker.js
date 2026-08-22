@@ -129,13 +129,14 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.60-ondemand-pub",
+          version: "0.10.61-ondemand-smv1-p0202",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
           studio_intake_progress_v1: true,
           studio_r5_done_callback_v1: true,
           studio_ondemand_publish_orch_v1: true,
+          studio_ondemand_smv1_p0202_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -396,8 +397,12 @@ export default {
         return brandLogo(request, env, authorization);
       }
 
+      if (url.pathname === "/api/profiles") {
+        return listStudioContentProfiles(request, env, authorization);
+      }
+
       if (url.pathname === "/api/dashboard") {
-        return dashboard(request, env);
+        return dashboard(request, env, url, authorization);
       }
 
       if (isIdeaGenerateRoute) {
@@ -417,7 +422,7 @@ export default {
           requirePermission(authorization, "ideas_create");
           return createIdea(request, env, authorization);
         }
-        return listIdeas(request, env, url);
+        return listIdeas(request, env, url, authorization);
       }
 
       if (isIdeaHoldRoute) {
@@ -563,7 +568,7 @@ export default {
       }
 
       if (url.pathname === "/api/content") {
-        const response = await listContent(request, env, url);
+        const response = await listContent(request, env, url, authorization);
         cadenceScheduleSync(ctx, env);
         return response;
       }
@@ -573,7 +578,7 @@ export default {
       }
 
       if (url.pathname === "/api/outputs") {
-        const response = await listOutputs(request, env, url);
+        const response = await listOutputs(request, env, url, authorization);
         cadenceScheduleSync(ctx, env);
         return response;
       }
@@ -868,6 +873,17 @@ async function resolveAuthorization(request, env) {
   base.authorization_error = null;
 
   return base;
+}
+
+function membershipAllowsBrand(authorization, brandLinks) {
+  if (authorization?.permissions?.tenant_admin) return true;
+  const links = Array.isArray(brandLinks) ? brandLinks : [];
+  const allowed = new Set([
+    authorization?.brand?.record_id,
+    ...((authorization?.allowed_brands || []).map((brand) => brand.record_id)),
+  ].filter(Boolean));
+  if (!allowed.size) return false;
+  return links.some((id) => allowed.has(id));
 }
 
 function requireConfig(env) {
@@ -1396,6 +1412,9 @@ function mapContent(record) {
     thumbnail_url: f(record, "Thumbnail_URL"),
     output_links: f(record, "Platform Outputs") || [],
     created_at: f(record, "Created_At"),
+    content_profile_links: f(record, "Content_Profile") || [],
+    brand_name: f(record, "Brand_Name") || [],
+    market_name: f(record, "Market_Name") || [],
   };
 }
 
@@ -1529,6 +1548,7 @@ function mapOutput(record) {
     youtube_upload_progress_percent: f(record, "YouTube_Upload_Progress_Percent"),
     youtube_processing_progress_percent: f(record, "YouTube_Processing_Progress_Percent"),
     content_item_links: f(record, "Content_Item") || [],
+    content_profile_links: f(record, "Content_Profile") || [],
     carousel_slide_links: f(record, "Carousel Slides") || [],
     creative_manifest_present: Boolean(f(record, "Creative_Render_Manifest_JSON")),
     creative_available: outputCreativeAvailable(record),
@@ -1675,43 +1695,117 @@ async function brandLogo(request, env, authorization) {
 }
 
 
-async function listIdeas(request, env, url) {
-  const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: clampLimit(url), sortField: "Create_Date" });
-  return respond(request, env, { ok: true, records: records.map(mapIdea) });
+async function listIdeas(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: clampLimit(url),
+    sortField: "Create_Date",
+    filterFormula: contentProfileFilterFormula(profile),
+  });
+  return respond(request, env, { ok: true, records: records.map(mapIdea), profile: mapStudioContentProfile(profile) });
+}
+
+function airtableFormulaEscape(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function requestedProfileId(url, payload) {
+  const raw = String(payload?.content_profile_id || payload?.profile_id || url?.searchParams?.get("profile") || "").trim();
+  if (!raw) return null;
+  if (!/^rec[A-Za-z0-9]+$/.test(raw)) throw new HttpError(400, "Invalid Content Profile id");
+  return raw;
+}
+
+function studioThemeForProfile(record) {
+  const hay = [
+    f(record, "Profile_Name"),
+    f(record, "Market_Name"),
+    f(record, "Brand_Name"),
+    f(record, "State_Region"),
+  ].map((value) => String(value || "").toLowerCase()).join(" ");
+  if (hay.includes("los angeles") || hay.includes("la -") || /\bla\b/.test(hay) || hay.includes("hollywood")) return "la";
+  if (hay.includes("new york") || hay.includes("nyc") || hay.includes("manhattan")) return "nyc";
+  return "chicago";
+}
+
+function studioCityLabel(theme, record) {
+  if (theme === "la") return "Los Angeles";
+  if (theme === "nyc") return "New York";
+  const market = String(f(record, "Market_Name") || "").trim();
+  if (market) return market;
+  return "Chicago";
+}
+
+function mapStudioContentProfile(record) {
+  const theme = studioThemeForProfile(record);
+  return {
+    id: record.id,
+    name: String(f(record, "Profile_Name") || ""),
+    brand_name: String(f(record, "Brand_Name") || ""),
+    market_name: String(f(record, "Market_Name") || ""),
+    timezone: String(f(record, "Timezone") || ""),
+    brand_links: arrayOrEmpty(f(record, "Brand")),
+    active: Boolean(f(record, "Active")),
+    theme,
+    city_label: studioCityLabel(theme, record),
+  };
+}
+
+function contentProfileFilterFormula(profile) {
+  if (!profile?.id) return null;
+  const id = airtableFormulaEscape(profile.id);
+  const name = airtableFormulaEscape(f(profile, "Profile_Name") || "");
+  const parts = [`FIND("${id}", ARRAYJOIN({Content_Profile})&"")`];
+  if (name) parts.push(`FIND("${name}", ARRAYJOIN({Content_Profile})&"")`);
+  return parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
 }
 
 async function resolveAuthorizedContentProfiles(env, authorization) {
   const profiles = await listRecords(env, "Content Profiles", { limit: 100 });
-  const brandRecordId = authorization?.brand?.record_id;
   const organizationRecordId = authorization?.organization?.record_id;
 
   return profiles.filter((record) => {
     const active = Boolean(f(record, "Active"));
     const brands = Array.isArray(f(record, "Brand")) ? f(record, "Brand") : [];
     const organizations = Array.isArray(f(record, "Organization")) ? f(record, "Organization") : [];
-    const brandMatch = brandRecordId ? brands.includes(brandRecordId) : false;
     const orgMatch = !organizationRecordId || !organizations.length || organizations.includes(organizationRecordId);
-    return active && brandMatch && orgMatch;
+    return active && orgMatch && membershipAllowsBrand(authorization, brands);
   });
 }
 
-async function resolveDefaultContentProfile(env, authorization) {
+async function resolveWorkingContentProfile(env, authorization, profileId) {
   const matches = await resolveAuthorizedContentProfiles(env, authorization);
-
   if (!matches.length) {
     throw new HttpError(409, "No active Content Profile is linked to the authorized Studio brand");
   }
-
-  if (matches.length > 1) {
-    const exactName = matches.filter((record) =>
-      String(f(record, "Brand_Name") || "").trim().toLowerCase() ===
-      String(authorization?.brand?.name || "").trim().toLowerCase()
-    );
-    if (exactName.length === 1) return exactName[0];
-    throw new HttpError(409, "Multiple active Content Profiles are linked to this brand; an explicit profile selector is required");
+  if (profileId) {
+    const found = matches.find((record) => record.id === profileId);
+    if (!found) throw new HttpError(403, "Content Profile is not available for this Studio membership");
+    return found;
   }
-
+  if (matches.length === 1) return matches[0];
+  const exactName = matches.filter((record) =>
+    String(f(record, "Brand_Name") || "").trim().toLowerCase() ===
+    String(authorization?.brand?.name || "").trim().toLowerCase()
+  );
+  if (exactName.length === 1) return exactName[0];
+  const chicago = matches.filter((record) => studioThemeForProfile(record) === "chicago");
+  if (chicago.length === 1) return chicago[0];
   return matches[0];
+}
+
+async function resolveDefaultContentProfile(env, authorization) {
+  return resolveWorkingContentProfile(env, authorization, null);
+}
+
+async function listStudioContentProfiles(request, env, authorization) {
+  const profiles = await resolveAuthorizedContentProfiles(env, authorization);
+  const selected = await resolveWorkingContentProfile(env, authorization, null);
+  return respond(request, env, {
+    ok: true,
+    records: profiles.map(mapStudioContentProfile),
+    default_profile_id: selected.id,
+  });
 }
 
 
@@ -1735,7 +1829,7 @@ async function createIdea(request, env, authorization) {
   }
 
   const input = cleanIdeaCreatePayload(payload);
-  const profile = await resolveDefaultContentProfile(env, authorization);
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
   const fields = {
     Candidate_Title: input.title,
     Candidate_Status: "Generated",
@@ -2101,7 +2195,7 @@ async function loadAuthorizedProductionRequestOutput(env, outputRecordId, author
   const orgLinks = Array.isArray(f(row, "Organization")) ? f(row, "Organization") : [];
   const brandLinks = Array.isArray(f(row, "Brand")) ? f(row, "Brand") : [];
   if (!orgLinks.includes(authorization?.organization?.record_id) ||
-      !brandLinks.includes(authorization?.brand?.record_id)) {
+      !membershipAllowsBrand(authorization, brandLinks)) {
     throw new HttpError(403, "Production Request Output is not part of the authorized Studio tenant/brand");
   }
   return { row, parent };
@@ -2195,7 +2289,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
             Production_Request: [parent.id],
             Test_Run_ID: String(f(parent, "Test_Run_ID") || "").trim() || null,
             Organization: [authorization.organization.record_id],
-            Brand: [authorization.brand.record_id],
+            Brand: [arrayOrEmpty(f(parent, "Brand"))[0] || authorization.brand.record_id],
             Created_By: [authorization.user.record_id],
             Platform: item.platform,
             Output_Type: item.output_type,
@@ -3953,20 +4047,14 @@ async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
       }
 
       if (!originalState.isActive) {
-        // SMV1 Module 1 intentionally reads maxRecords=1. In the production
-        // operating model SMV1 is normally OFF, and starting it has proven to
-        // execute one queue cycle reliably. Pulse ON -> one cycle -> OFF for
-        // each outstanding row instead of depending on repeated /run calls
-        // against a temporarily active interval scenario.
+        // SMV1 Module 1 reads maxRecords=1. After on-demand scheduling, /start
+        // does not consume a queue row; /run does.
         let exactTestSelectorInstalled=false;
         try {
           if(testRunId){await item4SetSmv1SelectorFormula(env,item4Smv1ExactTestFormula(recordId,testRunId));exactTestSelectorInstalled=true;}
-          await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, true);
-          // Crops often need 15–30s. A 2.5s pulse left SMV1 in Processing, then
-          // the same row was retried forever and blocked the rest of the queue.
-          await new Promise((resolve) => setTimeout(resolve, 20000));
+          const run = await phase6PulseOnDemandScenario(env, ITEM4_SMV1_SCENARIO_ID, { waitMs: 45000 });
+          if (run?.executionId) executionIds.push(run.executionId);
         } finally {
-          try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
           if(exactTestSelectorInstalled) await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);
         }
 
@@ -4669,7 +4757,7 @@ async function loadAuthorizedProductionRequest(env, recordId, authorization) {
   const brandLinks = Array.isArray(f(record, "Brand")) ? f(record, "Brand") : [];
 
   if (!orgLinks.includes(authorization?.organization?.record_id) ||
-      !brandLinks.includes(authorization?.brand?.record_id)) {
+      !membershipAllowsBrand(authorization, brandLinks)) {
     throw new HttpError(403, "Production Request is not part of the authorized Studio tenant/brand");
   }
   return record;
@@ -4922,7 +5010,7 @@ async function existingDraftForIdea(env, ideaRecordId, authorization) {
     const status = String(f(record, "Request_Status") || "").trim();
     return ideaLinks.includes(ideaRecordId) &&
       orgLinks.includes(authorization?.organization?.record_id) &&
-      brandLinks.includes(authorization?.brand?.record_id) &&
+      membershipAllowsBrand(authorization, brandLinks) &&
       ["Draft","Ready"].includes(status) &&
       Boolean(f(record, "Active"));
   }) || null;
@@ -4931,12 +5019,20 @@ async function existingDraftForIdea(env, ideaRecordId, authorization) {
 async function createDraftForIdea(env, idea, authorization, input = null) {
   const now = new Date().toISOString();
   const cleaned = input || await cleanProductionRequestPayload(productionRequestDefaultsFromIdea(idea), env);
+  const ideaProfileId = arrayOrEmpty(f(idea, "Content_Profile"))[0];
+  let brandId = authorization.brand.record_id;
+  if (ideaProfileId) {
+    try {
+      const ideaProfile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, ideaProfileId);
+      brandId = arrayOrEmpty(f(ideaProfile, "Brand"))[0] || brandId;
+    } catch {}
+  }
   const fields = {
     Production_Request_ID: makeProductionRequestId(),
     Idea_Candidate: [idea.id],
     Test_Run_ID: String(f(idea, "Test_Run_ID") || "").trim() || null,
     Organization: [authorization.organization.record_id],
-    Brand: [authorization.brand.record_id],
+    Brand: [brandId],
     Created_By: [authorization.user.record_id],
     Created_At: now,
     Studio_Master_Asset_Status: "None",
@@ -7112,14 +7208,23 @@ async function getAuthorizedIdeaRoute(request, env, url, authorization) {
 }
 
 
-async function listContent(request, env, url) {
-  const records = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: clampLimit(url), sortField: "Created_At" });
-  return respond(request, env, { ok: true, records: records.map(mapContent) });
+async function listContent(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const records = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+    limit: clampLimit(url),
+    sortField: "Created_At",
+    filterFormula: contentProfileFilterFormula(profile),
+  });
+  return respond(request, env, { ok: true, records: records.map(mapContent), profile: mapStudioContentProfile(profile) });
 }
 
-async function listOutputs(request, env, url) {
-  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: clampLimit(url, 100, 100) });
-  return respond(request, env, { ok: true, records: records.map(mapOutput) });
+async function listOutputs(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: clampLimit(url, 100, 100),
+    filterFormula: contentProfileFilterFormula(profile),
+  });
+  return respond(request, env, { ok: true, records: records.map(mapOutput), profile: mapStudioContentProfile(profile) });
 }
 
 async function listMusic(request, env, url) {
@@ -8469,15 +8574,10 @@ async function item4DrainPreviewCacheWorker(env, recordId, maxRuns = 30) {
       if (!pending.length) break;
 
       if (!originalState.isActive) {
-        // SMV1 Module 1 intentionally consumes only one queue row per cycle.
-        // The reliable production pattern is therefore one activation pulse per
-        // pending preview row, not one activation followed by repeated /run calls.
         const beforeIds = new Set(pending.map((row) => row.id));
         const beforeCount = pending.length;
-
-        await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, true);
-        await new Promise((resolve) => setTimeout(resolve, 2500));
-        try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
+        const run = await phase6PulseOnDemandScenario(env, ITEM4_SMV1_SCENARIO_ID, { waitMs: 30000 });
+        if (run?.executionId) executionIds.push(run.executionId);
 
         // Allow Make + Airtable to checkpoint Preview_Status/Preview_URL before
         // the next pulse. Continue even if this specific wait window sees no
@@ -10336,14 +10436,15 @@ function phase6RunAlreadyActiveError(error) {
   return /422|already.*running|currently.*running|active execution/i.test(String(error?.message || error || ""));
 }
 
-async function phase6PulseOnDemandScenario(env, scenarioId) {
+async function phase6PulseOnDemandScenario(env, scenarioId, options = {}) {
+  const waitMs = Number(options.waitMs || 15000);
   const before = await phase6ScenarioState(env, scenarioId);
   try {
     if (!before.isActive) await phase6SetScenarioActive(env, scenarioId, true);
     try {
       const run = await phase6RunScenario(env, scenarioId);
       if (run?.executionId) {
-        await phase6WaitForScenarioExecution(env, scenarioId, run.executionId, 15000, 2000);
+        await phase6WaitForScenarioExecution(env, scenarioId, run.executionId, waitMs, 2000);
       }
       return run;
     } catch (error) {
@@ -10937,6 +11038,10 @@ const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
 const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([
   { id: 5531703, key: "P3" },
 ]);
+const PRODUCTION_CADENCE_MEDIA = Object.freeze([
+  { id: 5894885, key: "SMV1" },
+  { id: 5893683, key: "P020-2" },
+]);
 const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
 const PRODUCTION_CADENCE_THROTTLE_MS = 20000;
 const PRODUCTION_CADENCE_PARKED = true;
@@ -11038,6 +11143,28 @@ async function pulseOnDemandPublishChain(env) {
     }
     try {
       await phase6PulseOnDemandScenario(env, job.id);
+      pulses.push({ key: job.key, pulsed: true });
+    } catch (error) {
+      pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return pulses;
+}
+
+async function pulseOnDemandMediaChain(env) {
+  const jobs = [
+    { id: 5894885, key: "SMV1", table: ITEM4_VARIANT_QUEUE_TABLE, formula: ITEM4_SMV1_PRODUCTION_FORMULA },
+    { id: 5893683, key: "P020-2", table: PHASE6_CAROUSEL_SLIDES_TABLE, formula: 'AND({Slide_Voiceover_Status}="Ready",{Deleted From Carousel}=0,{Slide_Voiceover_Text}!="",{Slide_Voice_ID}!="",{Studio_Voice_Prep_Request_ID}!="")' },
+  ];
+  const pulses = [];
+  for (const job of jobs) {
+    const hasWork = await cadenceQueueHasWork(env, job.table, { formula: job.formula });
+    if (!hasWork) {
+      pulses.push({ key: job.key, skipped: "no_work" });
+      continue;
+    }
+    try {
+      await phase6PulseOnDemandScenario(env, job.id, { waitMs: 20000 });
       pulses.push({ key: job.key, pulsed: true });
     } catch (error) {
       pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
@@ -11268,17 +11395,11 @@ async function phase6AdvanceVoicePrepShort(env, outputRecord) {
   }
 
   let started = false;
-  let cleanup = null;
   try {
-    if (scenarioState.isActive) await phase6StopScenarioVerified(env, PHASE6_P0202_SCENARIO_ID, 3);
-    await phase6SetScenarioActive(env, PHASE6_P0202_SCENARIO_ID, true);
+    await phase6PulseOnDemandScenario(env, PHASE6_P0202_SCENARIO_ID, { waitMs: 20000 });
     started = true;
-    // Keep this pulse bounded so browser/Worker requests remain resumable. Activation itself
-    // launches the interval scenario once; no overlapping /run call is issued.
-    await new Promise((resolve) => setTimeout(resolve, 6500));
-  } finally {
-    cleanup = await phase6StopScenarioVerified(env, PHASE6_P0202_SCENARIO_ID, 4);
-    if (!cleanup.inactive) console.error("Phase 6 could not restore P020-2 inactive", cleanup);
+  } catch (error) {
+    console.error("P020-2 on-demand short pulse failed", error);
   }
 
   await phase6MeasureAndPersistMissingVoiceDurations(env, outputRecord);
@@ -11317,37 +11438,18 @@ async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
 
   const priorState = await phase6ScenarioState(env, PHASE6_P0202_SCENARIO_ID);
   const executionIds = [];
-  let activationTriggeredRun = false;
   try {
-    if (!priorState.isActive) {
-      // Make's /start endpoint immediately runs scenarios that use interval scheduling.
-      // Do not POST /run on top of that execution: doing so races the just-started run and returns 422.
-      await phase6SetScenarioActive(env, PHASE6_P0202_SCENARIO_ID, true);
-      activationTriggeredRun = true;
-      const activationWaitStarted = Date.now();
-      while (Date.now() - activationWaitStarted < 45000) {
-        await new Promise((resolve) => setTimeout(resolve, 1800));
-        await phase6MeasureAndPersistMissingVoiceDurations(env, outputRecord);
-        slides = await phase6SlidesForOutput(env, outputRecord);
-        pending = phase6PendingVoicePrepSlides(slides);
-        if (!pending.length) break;
-      }
-    }
     const maxRuns = Math.min(40, Math.max(1, scopedSlideIds.length + 5));
     let lastPendingSignature = "";
     for (let runIndex = 0; runIndex < maxRuns; runIndex += 1) {
-      // P020-2 historically did not persist duration. Probe any already-generated MP3 first;
-      // this can resolve a duration-only pending slide without regenerating its narration.
       await phase6MeasureAndPersistMissingVoiceDurations(env, outputRecord);
       slides = await phase6SlidesForOutput(env, outputRecord);
       pending = phase6PendingVoicePrepSlides(slides);
       if (!pending.length) break;
 
       const signature = pending.map((x) => `${x.id}:${x.reason}`).join("|");
-      const { executionId } = await phase6RunScenario(env, PHASE6_P0202_SCENARIO_ID);
-      executionIds.push(executionId);
-      const execution = await phase6WaitForScenarioExecution(env, PHASE6_P0202_SCENARIO_ID, executionId, 60000, 2000);
-      if (execution.done && !execution.success) throw new HttpError(502, `P020-2 automatic voice prep failed with status ${execution.status}`);
+      const run = await phase6PulseOnDemandScenario(env, PHASE6_P0202_SCENARIO_ID, { waitMs: 60000 });
+      if (run?.executionId) executionIds.push(run.executionId);
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
       await phase6MeasureAndPersistMissingVoiceDurations(env, outputRecord);
@@ -11359,8 +11461,8 @@ async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
       lastPendingSignature = nextSignature;
     }
     return {
-      triggered: activationTriggeredRun || executionIds.length > 0,
-      activation_triggered_run: activationTriggeredRun,
+      triggered: executionIds.length > 0,
+      activation_triggered_run: false,
       completed: pending.length === 0,
       pending_voice_slides: pending,
       scenario_id: PHASE6_P0202_SCENARIO_ID,
@@ -11598,7 +11700,11 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   try { payload = await request.json(); } catch { payload = {}; }
   const note = phase6Text(payload?.notes, 10000);
   const stamp = new Date().toISOString();
-  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100 });
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 100,
+    filterFormula: contentProfileFilterFormula(profile),
+  });
   const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
   const approved = [];
   const failed = [];
@@ -11846,11 +11952,13 @@ async function getOutputRoute(request, env, url) {
   return respond(request, env, { ok: true, record: mapOutput(record) });
 }
 
-async function dashboard(request, env) {
+async function dashboard(request, env, url, authorization) {
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const formula = contentProfileFilterFormula(profile);
   const [ideas, content, outputs] = await Promise.all([
-    listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date" }),
-    listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At" }),
-    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100 }),
+    listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date", filterFormula: formula }),
+    listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula }),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula }),
   ]);
 
   const mappedOutputs = outputs.map(mapOutput);
@@ -11870,6 +11978,7 @@ async function dashboard(request, env) {
       published_outputs: published,
     },
     recent_outputs: mappedOutputs.slice(0, 12),
+    profile: mapStudioContentProfile(profile),
   });
 }
 
@@ -14430,16 +14539,9 @@ function studioIdeaBatchView(record) {
   };
 }
 
-async function studioIdeaEnabledProfile(env) {
-  const formula = 'AND({Active}=1,{Idea_Generation_Enabled}=1)';
-  const query = `?filterByFormula=${encodeURIComponent(formula)}&maxRecords=2`;
-  const body = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, query);
-  const records = Array.isArray(body?.records) ? body.records : [];
-  if (!records.length) throw new HttpError(409, "No active idea-generation profile is configured");
-  if (records.length > 1) {
-    throw new HttpError(409, "More than one idea-generation profile is active. Selectable profiles must be added before manual generation can run safely.");
-  }
-  const profile = records[0];
+async function studioIdeaEnabledProfile(env, authorization, profileId) {
+  const profile = await resolveWorkingContentProfile(env, authorization, profileId);
+  if (!Boolean(f(profile, "Active"))) throw new HttpError(409, "The selected content profile is not active");
   const existingBatch = Array.isArray(f(profile, "Manual_Idea_Batch")) ? f(profile, "Manual_Idea_Batch") : [];
   if (existingBatch.length) throw new HttpError(409, "Another manual idea batch is already starting. Try again after it finishes.");
   return profile;
@@ -14535,7 +14637,7 @@ async function studioIdeaInstallExactProfileSelector(env, profileId) {
     throw new HttpError(409, "I1 Module 2 profile selector contract has drifted");
   }
   module2.mapper = module2.mapper || {};
-  module2.mapper.formula = `AND(RECORD_ID()="${String(profileId).replace(/"/g, "")}",{Active}=1,{Idea_Generation_Enabled}=1)`;
+  module2.mapper.formula = `AND(RECORD_ID()="${String(profileId).replace(/"/g, "")}",{Active}=1)`;
   module2.mapper.maxRecords = "1";
   await studioIdeaWriteI1Blueprint(env, patched);
   const verified = await studioIdeaReadI1Blueprint(env);
@@ -14609,7 +14711,7 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
   if (scenario?.isActive) {
     throw new HttpError(409, "The scheduled idea generator is currently active. Try manual generation after that run finishes.");
   }
-  const profile = await studioIdeaEnabledProfile(env);
+  const profile = await studioIdeaEnabledProfile(env, authorization, requestedProfileId(null, payload));
   const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
   try {
     await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, quality);
