@@ -83,3 +83,5 @@ Promote subrequest budget Worker deploy: 2026-08-22 - Approve writes I3/I4 and f
 
 Queued auto-render Worker deploy: 2026-08-22 - Photo Sets with ready masters package from the uploaded count instead of waiting on a stale Make AI exact count; stop reseeding empty AI carousel slides every tick. Worker 0.10.80-queued-auto-render.
 
+Story caption + voiceover gate Worker deploy: 2026-08-22 - Story teasers keep one photo but burn in slide captions; video outputs wait for parent voiceover before Remotion. Worker 0.10.81-story-caption-voiceover-gate.
+

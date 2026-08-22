@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.80-queued-auto-render",
+          version: "0.10.81-story-caption-voiceover-gate",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -178,6 +178,7 @@ export default {
           studio_item4_queue_owner_v1: true,
           studio_promote_subrequest_budget_v1: true,
           studio_queued_auto_render_v1: true,
+          studio_story_caption_voiceover_gate_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -6686,7 +6687,8 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   for (const { source, variant, url, mediaAssetId } of eligibleSources) {
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
-    const overlay = storyTeaser ? null : item4PhotoOverlayFromCaption(captions.get(String(source?.id || "").trim()), { tiktok916 });
+    // Stories stay first-photo teasers, but on-image slide captions must still burn in.
+    const overlay = item4PhotoOverlayFromCaption(captions.get(String(source?.id || "").trim()), { tiktok916 });
     clips.push({
       id: `studio-source-${clips.length + 1}`,
       order: Number(source?.order || clips.length + 1),
@@ -7054,6 +7056,9 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Selected_Music_URL: effective.music?.url || null,
     Selected_Music_Media_Asset_ID: effective.music?.record_id || null,
     Music_Volume: effective.music?.url ? 0.24 : 0,
+    Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
+      ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
+      : null,
   };
 }
 
@@ -11818,6 +11823,9 @@ async function studioContinuationStampPackage(env, po, context) {
     Selected_Music_URL: seed.Selected_Music_URL,
     Selected_Music_Media_Asset_ID: seed.Selected_Music_Media_Asset_ID,
     Music_Volume: seed.Music_Volume,
+    Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
+      ? (String(f(parent, "Voiceover_URL") || f(po, "Voiceover_URL") || "").trim() || null)
+      : null,
   };
   if (nativePhoto && (sourcePackage?.clips || []).length) {
     fields.Output_Status = "Ready for Review";
@@ -11879,6 +11887,19 @@ async function studioContinuationInspectOutput(env, po, cache) {
     return null;
   });
   if (!context) return { action: "skip", reason: "no_context" };
+
+  const isStoryTeaser = String(context.effective.output_type || "").trim() === "Story";
+  const wantVoiceover = item4StudioDirectiveYes(context.effective.voiceover_mode) && !isStoryTeaser;
+  if (wantVoiceover) {
+    const voiceoverUrl = String(f(context.parent, "Voiceover_URL") || f(po, "Voiceover_URL") || "").trim();
+    if (!voiceoverUrl) {
+      return {
+        action: "wait_voiceover",
+        reason: "missing_voiceover",
+        contentItemId: context.parent?.id || null,
+      };
+    }
+  }
 
   try {
     const filled = await item4EnsureAiSourceMasters(env, context.requestRecord, context.parent);
@@ -12025,8 +12046,22 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   }
   const pulses = await pulseStudioContinuationJobs(env, options);
   const waitingAi = inspected.some((row) => row.action === "wait_ai");
+  const waitingVoiceover = inspected.some((row) => row.action === "wait_voiceover");
   const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
   const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
+  if (waitingVoiceover) {
+    const voParents = [...new Set(
+      inspected.filter((row) => row.action === "wait_voiceover").map((row) => row.contentItemId).filter(Boolean)
+    )];
+    for (const parentId of voParents) {
+      try {
+        await pulseStudioP2Handoff(env, parentId, { fields: {} });
+        pulses.push({ key: "P2", pulsed: true, content_item: parentId });
+      } catch (error) {
+        pulses.push({ key: "P2", error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  }
   if (waitingAi || waitingPackage) {
     try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
       pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
