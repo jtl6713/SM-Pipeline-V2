@@ -61,3 +61,5 @@ Idea I1 view Worker deploy: 2026-08-22 - Manual Generate AI Ideas searches the s
 
 Idea I1 wait Worker deploy: 2026-08-22 - Do not poll Make GET /executions while I1 is running (that 404s). Wait for Idea Candidates on the batch instead. Worker 0.10.68-idea-i1-wait.
 
+Publishing wizard Worker deploy: 2026-08-22 - Platform plan can use exact AI slide count when Make AI Generated and no masters are uploaded yet. Mixed sets keep AI mode instead of resetting to Manual Upload. Worker 0.10.69-wizard-ai-plan.
+

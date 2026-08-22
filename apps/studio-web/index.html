@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.105-dashboard-429">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.106-wizard">
 </head>
 <body>
  <header class="topbar">
@@ -39,7 +39,7 @@
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item" data-page="support">Support</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.105</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.106</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -52,28 +52,26 @@
  <span class="ez-path-brand-shine">Shining</span>
  </p>
  <p class="ez-path-hook">QA Multi-Platform Social Media Publishing</p>
- <h1>How do you want to start?</h1>
- <p>Two doors. Same pipeline underneath. Come back here anytime to start something new.</p>
+ <h1>Publishing wizard</h1>
+ <p>Answer a few questions. Studio fills the production plan. Ideas and Production stay in the sidebar if you already know the path.</p>
  <label class="ez-profile-picker">
  <span>Working profile</span>
  <select id="homeProfileSelect" aria-label="Choose the city profile for new work"></select>
  </label>
  </div>
- <div class="ez-path-fork-grid">
- <button type="button" class="ez-path-choice ez-path-choice--idea" id="ezStartIdea">
- <span class="ez-path-choice-visual" aria-hidden="true"></span>
- <span class="ez-path-choice-body">
- <strong>Start with Idea</strong>
- <span>Pick an idea already in I1–I4, or write a new one when the media still needs to be shot or found.</span>
- </span>
- </button>
- <button type="button" class="ez-path-choice ez-path-choice--content" id="ezStartContent">
- <span class="ez-path-choice-visual" aria-hidden="true"></span>
- <span class="ez-path-choice-body">
- <strong>Start with Content</strong>
- <span>You already have photos. Drop them in and Studio handles the rest.</span>
- </span>
- </button>
+ <div class="ez-wizard" id="ezWizard">
+ <div class="ez-wizard-toolbar">
+ <button type="button" class="ez-wizard-text" id="ezWizardBack" hidden>Back</button>
+ <button type="button" class="ez-wizard-text" id="ezWizardReset">Start over</button>
+ </div>
+ <p class="ez-wizard-summary" id="ezWizardSummary" hidden></p>
+ <div class="ez-wizard-log" id="ezWizardLog" aria-live="polite"></div>
+ <div class="ez-wizard-turn">
+ <p class="ez-wizard-prompt" id="ezWizardPrompt">Where do you want to start?</p>
+ <div class="ez-wizard-chips" id="ezWizardChips"></div>
+ <form class="ez-wizard-form" id="ezWizardForm" hidden></form>
+ </div>
+ <p class="form-message" id="ezWizardMessage" aria-live="polite"></p>
  </div>
  </div>
  </section>
@@ -967,8 +965,8 @@
  <h2>Idea through publish on every platform</h2>
  <p>This is the photo-based path ChicagoShining Studio uses today: write or pick an idea, attach stills, let Studio plan the packages, review the renders, then approve. Instagram, Facebook, and YouTube publish publicly. TikTok is saved as a draft.</p>
  <figure class="support-shot">
- <img src="/assets/support/home.jpg?v=0.6.102" alt="Home page with Start with Idea and Start with Content" width="1440" height="920">
- <figcaption>Home is the fork. Same pipeline either way.</figcaption>
+ <img src="/assets/support/home.jpg?v=0.6.102" alt="Home page with the publishing wizard" width="1440" height="920">
+ <figcaption>Home is the publishing wizard. Same pipeline underneath.</figcaption>
  </figure>
  <ol class="support-steps">
  <li>
@@ -977,8 +975,8 @@
  <button type="button" class="text-button" data-open-page="home">Open Home</button>
  </li>
  <li>
- <strong>Start with Idea.</strong>
- <span>On Home, choose <em>Start with Idea</em>. On Ideas, pick an unpromoted candidate from I1–I4, generate a batch, or type a title and optional summary. Do not promote from the type list yet — photos come first.</span>
+ <strong>Start in the publishing wizard.</strong>
+ <span>On Home, answer where you want to start: an idea, photos you already have, AI images, or a mix. Then pick a platform package. Ideas and Production stay in the sidebar if you already know the path.</span>
  <figure class="support-shot">
  <img src="/assets/support/ideas.jpg?v=0.6.102" alt="Ideas page with start form and candidate table" width="1440" height="920">
  <figcaption>Ideas — select an existing candidate or enter one, then continue. Manage opens the drawer to add photos.</figcaption>
@@ -1034,19 +1032,19 @@
  <button type="button" class="text-button" data-open-page="operations">Open Operations</button>
  </li>
  </ol>
- <p>Other entry: Home <em>Start with Content</em> skips the Ideas table. You name the piece on Production, drop photos, and the rest of this walkthrough is the same from step 4.</p>
+ <p>Other entry: Home can skip the Ideas table when you start with photos or AI images. Name the piece on Production if needed, and the rest of this walkthrough is the same from step 4.</p>
  </article>
  <article class="support-article" data-support-article="home" hidden>
  <h2>Home</h2>
  <figure class="support-shot">
- <img src="/assets/support/home.jpg?v=0.6.102" alt="Home page with two start doors" width="1440" height="920">
- <figcaption>Home does not run the pipeline. It only chooses how you enter.</figcaption>
+ <img src="/assets/support/home.jpg?v=0.6.102" alt="Home page with the publishing wizard" width="1440" height="920">
+ <figcaption>Home does not run the pipeline. It asks a few questions, then opens the right screen.</figcaption>
  </figure>
  <p>Home is the start screen. It does not run the pipeline by itself.</p>
  <ul>
  <li><strong>Working profile</strong> — city/brand for new ideas and production.</li>
- <li><strong>Start with Idea</strong> — jump to Ideas to pick or write a brief before photos.</li>
- <li><strong>Start with Content</strong> — jump to Production’s photo intake when you already have stills.</li>
+ <li><strong>Publishing wizard</strong> — where to start, input type, counts, then a platform package.</li>
+ <li><strong>Sidebar</strong> — Ideas and Production remain available as power-user paths.</li>
  </ul>
  <p>Come back here anytime to begin a new piece. The top-bar profile selector stays available on every other page.</p>
  <button type="button" class="primary-button" data-open-page="home">Go to Home</button>
@@ -1278,7 +1276,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.105-dashboard-429"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.105-dashboard-429"></script>
+ <script src="/assets/ez-plan.js?v=0.6.106-wizard"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.106-wizard"></script>
 </body>
 </html>

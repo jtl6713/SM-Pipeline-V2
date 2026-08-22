@@ -693,15 +693,112 @@ input, select, textarea, button {
   z-index:0;
   pointer-events:none
 }
-.ez-path-fork-inner{position:relative;z-index:1;width:min(880px,100%);display:grid;gap:32px}
+.ez-path-fork-inner{position:relative;z-index:1;width:min(880px,100%);display:grid;gap:28px}
 .ez-path-fork-copy{max-width:720px}
 .ez-path-brand{display:flex;flex-wrap:wrap;align-items:baseline;gap:.22em .28em;margin:0 0 8px;line-height:.88}
 .ez-path-brand-city{font-family:Oswald,Impact,"Arial Narrow",sans-serif;font-weight:500;font-size:clamp(2.4rem,6vw,4.15rem);letter-spacing:.14em;text-transform:uppercase;color:#fff;text-shadow:0 10px 28px rgba(0,0,0,.4)}
 .ez-path-brand-shine{font-family:"Cormorant Garamond",Georgia,"Times New Roman",serif;font-style:italic;font-weight:700;font-size:clamp(2.7rem,6.6vw,4.6rem);color:#f4f8ff;text-shadow:0 0 16px rgba(196,220,255,.75),0 0 38px rgba(51,122,214,.5),0 8px 24px rgba(0,0,0,.35)}
 .ez-path-hook{margin:0 0 22px;font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;font-weight:750;color:rgba(226,236,255,.9);text-shadow:0 2px 12px rgba(0,0,0,.35)}
 .ez-path-fork-copy h1{margin:0 0 10px;font-size:clamp(1.45rem,2.6vw,2rem);color:#fff;text-shadow:0 8px 28px rgba(0,0,0,.35)}
-.ez-path-fork-copy>p:last-child{margin:0;color:rgba(226,236,255,.9);font-size:1.05rem;line-height:1.5;text-shadow:0 2px 12px rgba(0,0,0,.35)}
+.ez-path-fork-copy h1 + p{margin:0;color:rgba(226,236,255,.9);font-size:1.05rem;line-height:1.5;text-shadow:0 2px 12px rgba(0,0,0,.35)}
 .ez-path-fork-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;perspective:1100px}
+.ez-wizard{
+  display:grid;
+  gap:14px;
+  padding:18px 18px 16px;
+  border-radius:22px;
+  background:var(--home-choice-body);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 18px 36px rgba(0,0,0,.32);
+  color:#eef4ff
+}
+.ez-wizard-toolbar{display:flex;justify-content:space-between;gap:12px}
+.ez-wizard-text{
+  border:0;
+  background:transparent;
+  color:rgba(226,236,255,.88);
+  font:inherit;
+  font-size:.82rem;
+  font-weight:750;
+  padding:0;
+  cursor:pointer;
+  width:fit-content
+}
+.ez-wizard-text:hover{text-decoration:underline;color:#fff}
+.ez-wizard-text[hidden]{display:none!important}
+.ez-wizard-summary{
+  margin:0;
+  font-size:.78rem;
+  font-weight:650;
+  line-height:1.45;
+  color:rgba(226,236,255,.86)
+}
+.ez-wizard-log{display:grid;gap:10px;max-height:28vh;overflow:auto}
+.ez-wizard-bubble{
+  margin:0;
+  max-width:92%;
+  padding:10px 12px;
+  border-radius:14px;
+  font-size:.92rem;
+  line-height:1.4
+}
+.ez-wizard-bubble--bot{
+  background:rgba(1,37,89,.42);
+  border:1px solid rgba(255,255,255,.12)
+}
+.ez-wizard-bubble--user{
+  justify-self:end;
+  background:rgba(26,77,140,.55);
+  border:1px solid rgba(255,255,255,.18)
+}
+.ez-wizard-turn{display:grid;gap:12px}
+.ez-wizard-prompt{margin:0;font-size:1.05rem;font-weight:750;color:#fff}
+.ez-wizard-chips{display:flex;flex-wrap:wrap;gap:8px}
+.ez-wizard-chip,.ez-wizard-form button[type="submit"]{
+  border:1px solid rgba(255,255,255,.28);
+  background:rgba(0,0,0,.28);
+  color:#fff;
+  border-radius:999px;
+  padding:8px 14px;
+  font:inherit;
+  font-size:.88rem;
+  font-weight:700;
+  cursor:pointer
+}
+.ez-wizard-chip:hover,.ez-wizard-chip[aria-pressed="true"]{
+  border-color:#f4d27a;
+  background:rgba(244,210,122,.16)
+}
+.ez-wizard-chip:focus-visible,.ez-wizard-text:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.ez-wizard-form{display:grid;gap:10px}
+.ez-wizard-form label{display:grid;gap:6px;font-size:.78rem;font-weight:750;letter-spacing:.04em;text-transform:uppercase}
+.ez-wizard-form input,.ez-wizard-form textarea,.ez-wizard-form select{
+  width:100%;
+  border:1px solid rgba(255,255,255,.28);
+  background:rgba(0,0,0,.28);
+  color:#fff;
+  border-radius:10px;
+  padding:8px 10px;
+  font:inherit;
+  text-transform:none;
+  letter-spacing:0;
+  font-weight:600
+}
+.ez-wizard-form textarea{min-height:72px;resize:vertical}
+.ez-wizard-form .ez-wizard-form-actions{display:flex;flex-wrap:wrap;gap:8px}
+.ez-wizard-custom{display:grid;gap:10px}
+.ez-wizard-custom fieldset{
+  margin:0;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:12px;
+  padding:8px 10px 10px;
+  display:grid;
+  gap:6px
+}
+.ez-wizard-custom legend{font-size:.78rem;font-weight:800}
+.ez-wizard-custom label{display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:.82rem;font-weight:650}
+#ezWizardMessage{color:rgba(255,210,210,.95)}
 .ez-path-choice{
   position:relative;
   border:0;
@@ -805,6 +902,7 @@ input, select, textarea, button {
   .ez-path-fork-grid{grid-template-columns:1fr}
   .ez-path-choice{min-height:240px}
   .ez-path-choice:hover,.ez-path-choice:active{transform:translateY(-6px)}
+  .ez-wizard-log{max-height:22vh}
   .ez-structure-grid,.ez-output-matrix{grid-template-columns:1fr}
 }
 .ez-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 20px 12px}

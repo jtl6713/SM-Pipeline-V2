@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.68-idea-i1-wait",
+          version: "0.10.69-wizard-ai-plan",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -3437,6 +3437,15 @@ function item4PhotoCountKind(count) {
   return Math.max(0, Number(count) || 0) <= 1 ? "single-photo" : "multiple-photos";
 }
 
+function item4EffectivePhotoCount(record, assets) {
+  const n = Array.isArray(assets) ? assets.length : 0;
+  const mode = String(f(record, "Carousel_Image_Mode") || "").trim();
+  const exact = Number(f(record, "Carousel_Slide_Count_Exact") || 0);
+  if (mode === "Make AI Generated" && Number.isFinite(exact) && exact > n) return exact;
+  if (!n && mode === "Make AI Generated" && Number.isFinite(exact) && exact >= 1) return exact;
+  return n;
+}
+
 function item4DefaultOutputType(platform, photoCount) {
   const n = Math.max(0, Number(photoCount) || 0);
   const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Video Draft" });
@@ -3532,7 +3541,7 @@ function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { c
 
 async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
   const assets = item4AssetManifest(record);
-  const photoCount = Math.max(assets.length, 1);
+  const photoCount = item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
   const mappingIndex = await item4MappingIndex(env);
   const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   const items = Array.isArray(existingPlan?.items) ? [...existingPlan.items] : [];
@@ -3562,8 +3571,8 @@ async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
     schema_version: "item4.output-plan.1",
     generated_at: new Date().toISOString(),
     production_request_record_id: record.id,
-    source_asset_count: assets.length,
-    photo_count_kind: item4PhotoCountKind(assets.length),
+    source_asset_count: photoCount,
+    photo_count_kind: item4PhotoCountKind(photoCount),
     items,
   };
   const needsReview = items.some((item) => !item.aspect_ratio);
@@ -3657,7 +3666,8 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   let record=await loadAuthorizedProductionRequest(env,recordId,authorization);
   assertEditableProductionRequest(record);
   const assets=item4AssetManifest(record).sort((a,b)=>Number(a.order||0)-Number(b.order||0));
-  if (!assets.length) throw new HttpError(409,"Upload at least one master photo before building the platform plan");
+  const photoCount=item4EffectivePhotoCount(record, assets);
+  if (!photoCount) throw new HttpError(409,"Upload at least one master photo before building the platform plan, or set an exact AI slide count with Make AI Generated.");
   const requestedPlatforms=Array.isArray(payload.platforms)&&payload.platforms.length?payload.platforms:["Instagram","Facebook","TikTok","YouTube"];
   const platforms=[...new Set(requestedPlatforms.map(x=>String(x||"").trim()).filter(Boolean))];
   const overrides=payload.overrides&&typeof payload.overrides==="object"?payload.overrides:{};
@@ -3667,23 +3677,23 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   for (const platform of platforms) {
     const requestedRaw = item4CanonicalOutputType(platform, overrides[platform] || "");
     const requested = item4IsCompanionOutputType(requestedRaw) ? "" : requestedRaw;
-    const fallback = item4DefaultOutputType(platform, assets.length);
+    const fallback = item4DefaultOutputType(platform, photoCount);
     if (!requested && !fallback) continue;
-    const chosen = item4PlanChoice(platform, requested || fallback, assets.length);
-    items.push(item4PlanItemFromChoice(platform, chosen, assets.length, mappingIndex));
+    const chosen = item4PlanChoice(platform, requested || fallback, photoCount);
+    items.push(item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex));
     if (!items[items.length - 1].aspect_ratio) needsReview = true;
   }
   const extras = item4NormalizePlanExtras(payload.extras, platforms, items);
   for (const extra of extras) {
     try {
-      const chosen = item4PlanChoice(extra.platform, extra.output_type, assets.length);
-      items.push(item4PlanItemFromChoice(extra.platform, chosen, assets.length, mappingIndex, { companion: extra.companion }));
+      const chosen = item4PlanChoice(extra.platform, extra.output_type, photoCount);
+      items.push(item4PlanItemFromChoice(extra.platform, chosen, photoCount, mappingIndex, { companion: extra.companion }));
       if (!items[items.length - 1].aspect_ratio) needsReview = true;
     } catch {
       continue;
     }
   }
-  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:assets.length,photo_count_kind:item4PhotoCountKind(assets.length),items};
+  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items};
 
   if (items.some(item =>
     item.platform === "Facebook" &&
@@ -3693,10 +3703,14 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   }
 
   await item4SyncPlanOutputs(env,record,items);
-  const maxCount=Math.min(15,Math.max(1,assets.length));
+  const keepAiMode = String(f(record, "Carousel_Image_Mode") || "").trim() === "Make AI Generated";
+  const keepExact = keepAiMode && Number(f(record, "Carousel_Slide_Count_Exact") || 0) >= photoCount;
+  const maxCount=Math.min(15,Math.max(1,photoCount));
   record=await item4UpdateRequestState(env,recordId,{
-    Master_Content_Type:assets.length<=1?"Feed Post":"Photo Set", Target_Platforms:items.map(item=>item.platform),
-    Carousel_Image_Mode:"Manual Upload", Carousel_Slide_Count_Mode:"Exact", Carousel_Slide_Count_Exact:assets.length,
+    Master_Content_Type:photoCount<=1?"Feed Post":"Photo Set", Target_Platforms:items.map(item=>item.platform),
+    Carousel_Image_Mode: keepAiMode ? "Make AI Generated" : "Manual Upload",
+    Carousel_Slide_Count_Mode:"Exact",
+    Carousel_Slide_Count_Exact: keepExact ? Number(f(record, "Carousel_Slide_Count_Exact") || photoCount) : photoCount,
     Carousel_Slide_Count_Min:null, Carousel_Slide_Count_Max:null,
     Video_Clip_Count_Mode:"Exact", Video_Clip_Count_Exact:maxCount, Video_Clip_Count_Min:null, Video_Clip_Count_Max:null,
     Studio_Output_Plan_JSON:JSON.stringify(plan), Studio_Output_Plan_Status:needsReview?"Needs Review":"Ready",

@@ -24,6 +24,11 @@
   const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_NAME = "Kate";
   let ezStarting = false;
+  let ezWizardPending = null;
+  let ezWizardStep = "start";
+  let ezWizardAnswers = {};
+  let ezWizardHistory = [];
+  let ezWizardBusy = false;
   let ezAutoPlanAfterUpload = false;
   let ezPlanInFlight = false;
   const ezCaptionDrafts = new Map();
@@ -74,7 +79,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.105-dashboard-429";
+  const BUILD_ID = "item4-0.6.106-wizard";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1338,7 +1343,7 @@
     const count = item4Workspace?.assets?.length || ezStagedFiles.length || 0;
     if (ezIntakeKind === "multiple-photos" || count > 1) return true;
     const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
-    return parsed?.inputKind === "multiple-photos";
+    return ["multiple-photos", "multiple-ai", "mixed"].includes(parsed?.inputKind);
   }
 
   function ezManualCaptionsEnabled() {
@@ -1690,8 +1695,11 @@
     const parsed = ezPlanApi()?.parseEzOriginNotes(text);
     if (!parsed) return text;
     const origin = ezPlanApi()?.ezOriginNotes({
+      origin: parsed.origin,
       inputKind: parsed.inputKind,
       captionMode: parsed.captionMode,
+      manualCount: parsed.manualCount,
+      aiCount: parsed.aiCount,
     }) || "";
     if (origin && text.startsWith(origin)) return text.slice(origin.length).replace(/^\s+/, "");
     const lines = text.split(/\n/);
@@ -1700,9 +1708,13 @@
   }
 
   function mergeEzProductionNotes() {
+    const pending = ezWizardPending || ezWizardAnswers;
     const origin = ezPlanApi()?.ezOriginNotes({
-      inputKind: ezIntakeKind || "single-photo",
+      origin: pending?.start ? ezPlanApi()?.EZ_ORIGIN_WIZARD : undefined,
+      inputKind: pending?.inputKind || ezIntakeKind || "single-photo",
       captionMode: ezCaptionMode(),
+      manualCount: pending?.manualCount,
+      aiCount: pending?.aiCount,
     }) || "";
     const user = String($("ezProductionNotes")?.value || "").trim();
     const combined = user ? `${origin}\n\n${user}` : origin;
@@ -2024,7 +2036,7 @@
   async function maybeAutoEzPlan(force = false) {
     if (!activeProductionRequest?.id) return;
     if (!ezIsOriginRecord() && !ezAutoPlanAfterUpload && !ezStarting) return;
-    if (!item4Workspace?.assets?.length) return;
+    if (!item4Workspace?.assets?.length && !ezWizardAllowsPlanWithoutAssets()) return;
     if (!force && item4Workspace?.plan_status === "Ready" && item4Workspace?.plan?.items?.length) {
       ezAutoPlanAfterUpload = false;
       syncEzPlanChrome();
@@ -2357,51 +2369,586 @@
     }
   }
 
+  function ezWizardAllowsPlanWithoutAssets() {
+    const helpers = ezPlanApi();
+    const pending = ezWizardPending || ezWizardAnswers;
+    const mode = $("ezCarouselImageMode")?.value || helpers?.ezImageModeFromWizard?.(pending?.inputKind);
+    const count = helpers?.ezWizardPhotoCount?.(pending) || Number($("ezCarouselSlideExact")?.value || 0);
+    return mode === "Make AI Generated" && count >= 1;
+  }
+
+  function ezWizardSetMessage(text = "", type = "") {
+    const node = $("ezWizardMessage");
+    if (!node) return;
+    node.textContent = text;
+    node.className = `form-message${type ? ` ${type}` : ""}`;
+  }
+
+  function ezWizardLogAdd(role, text) {
+    const log = $("ezWizardLog");
+    if (!log) return;
+    const p = document.createElement("p");
+    p.className = `ez-wizard-bubble ez-wizard-bubble--${role === "user" ? "user" : "bot"}`;
+    p.textContent = text;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function ezWizardSummaryText(answers = ezWizardAnswers) {
+    const bits = [];
+    if (answers.start === "idea") bits.push(answers.ideaMode === "existing" ? "Existing idea" : "New idea");
+    else if (answers.start === "photos") bits.push("Your photos");
+    else if (answers.start === "ai") bits.push("AI images");
+    else if (answers.start === "mixed") bits.push("Mixed photos + AI");
+    if (answers.inputKind === "single-photo") bits.push("1 photo");
+    if (answers.inputKind === "single-ai") bits.push("1 AI image");
+    if (answers.inputKind === "multiple-photos" && answers.photoCount) bits.push(`${answers.photoCount} photos`);
+    if (answers.inputKind === "multiple-ai" && answers.photoCount) bits.push(`${answers.photoCount} AI images`);
+    if (answers.inputKind === "mixed") bits.push(`${answers.manualCount || 0} yours · ${answers.aiCount || 0} AI`);
+    if (answers.packageId) {
+      const pkg = ezPlanApi()?.ezWizardPackages?.(ezPlanApi()?.ezWizardPhotoCount?.(answers) || 1)
+        ?.find((row) => row.id === answers.packageId);
+      if (pkg) bits.push(pkg.label);
+    }
+    return bits.join(" · ");
+  }
+
+  function resetEzWizard({ silent = false } = {}) {
+    ezWizardStep = "start";
+    ezWizardAnswers = {};
+    ezWizardHistory = [];
+    ezWizardPending = null;
+    ezWizardBusy = false;
+    const log = $("ezWizardLog");
+    if (log) log.innerHTML = "";
+    ezWizardSetMessage();
+    if (!silent) renderEzWizard();
+  }
+
+  function applyEzWizardAnswersToIntake() {
+    const helpers = ezPlanApi();
+    if (!helpers) return null;
+    const answers = { ...ezWizardAnswers };
+    if (answers.start === "idea" && !answers.inputKind) {
+      answers.inputKind = "multiple-ai";
+      answers.photoCount = answers.photoCount || 4;
+    }
+    const planned = helpers.ezWizardResolvePackage(answers);
+    const intake = helpers.ezIntakeKindFromWizard(answers.inputKind);
+    const count = helpers.ezWizardPhotoCount(answers);
+    ezWizardPending = { ...answers, planned };
+    selectEzInput(intake, { resetPlatforms: true });
+    item4PlanOverrides = { ...(planned.overrides || {}) };
+    document.querySelectorAll("[data-ez-platform]").forEach((input) => {
+      input.checked = planned.platforms.includes(input.value);
+    });
+    syncEzYouTubeAvailability(false);
+    if (answers.start !== "idea") {
+      if ($("ezCarouselImageMode")) $("ezCarouselImageMode").value = helpers.ezImageModeFromWizard(answers.inputKind);
+      if ($("ezCarouselSlideMode")) $("ezCarouselSlideMode").value = "Exact";
+      if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = String(count);
+      ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact"].forEach((id) => ezDirty.add(id));
+    }
+    ezPinnedExtraOutputs = planned.extras || [];
+    applyEzExtraOutputs(ezPinnedExtraOutputs);
+    const expected = helpers.ezWizardExpectedUploads(answers);
+    const title = $("ezUploadTitle");
+    const hint = $("ezUploadHint");
+    if (answers.inputKind === "mixed") {
+      if (title) title.textContent = expected === 1 ? "Drop your photo" : `Drop ${expected} of your photos`;
+      if (hint) hint.textContent = `Studio adds ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"} on top of these uploads.`;
+    } else if (answers.inputKind === "single-ai" || answers.inputKind === "multiple-ai") {
+      if (title) title.textContent = "No upload needed for AI images";
+      if (hint) hint.textContent = "Make generates the images from this plan.";
+    }
+    syncEzStructureCounts();
+    applyEzToAdvanced({ force: true });
+    return planned;
+  }
+
+  function ezWizardRequestPayload(planned, { fileCount = 0 } = {}) {
+    const helpers = ezPlanApi();
+    const count = helpers?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || fileCount || 1;
+    const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
+    let captionFields = helpers?.ezCaptionFields(ezCaptionMode(), { captions: joinedManualSlideCaptions() }) || {};
+    if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
+      captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
+    }
+    return {
+      content_type: planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set",
+      platforms: planned?.platforms || ezSelectedPlatforms(),
+      voiceover_mode: $("ezAudioVoiceover")?.value || "Yes",
+      background_music_mode: $("ezAudioMusic")?.value || "Yes",
+      thumbnail_mode: $("ezThumbnail")?.value || "Yes",
+      video_duration_seconds: $("ezVideoDuration")?.value || 30,
+      video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
+      video_clip_count_exact: $("ezVideoClipExact")?.value || "",
+      video_clip_count_min: $("ezVideoClipMin")?.value || "",
+      video_clip_count_max: $("ezVideoClipMax")?.value || "",
+      voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 2,
+      title_mode: ezTitleIsCustomized() ? ($("ezTitleMode")?.value || "AI decides") : (captionFields.title_mode || "AI decides"),
+      requested_title: ezTitleIsCustomized() ? String($("ezRequestedTitle")?.value || "").trim() : (captionFields.requested_title || ""),
+      caption_mode: ezCaptionIsCustomized() ? ($("ezCaptionMode")?.value || "AI decides") : (captionFields.caption_mode || "AI decides"),
+      requested_caption: ezCaptionIsCustomized() ? String($("ezRequestedCaption")?.value || "").trim() : (captionFields.requested_caption || ""),
+      script_mode: ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides"),
+      requested_script: ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || ""),
+      carousel_image_mode: (ezWizardPending || ezWizardAnswers)?.start === "idea"
+        ? "Make AI Generated"
+        : ($("ezCarouselImageMode")?.value || "Manual Upload"),
+      carousel_slide_count_mode: slideMode,
+      carousel_slide_count_exact: $("ezCarouselSlideExact")?.value || (slideMode === "Exact" ? count : ""),
+      carousel_slide_count_min: $("ezCarouselSlideMin")?.value || "",
+      carousel_slide_count_max: $("ezCarouselSlideMax")?.value || "",
+      selected_music_asset_id: $("ezAudioTrack")?.value || "",
+      production_notes: mergeEzProductionNotes(),
+      ...selectedRequestVoice(),
+    };
+  }
+
+  function renderEzWizardChips(chips) {
+    const host = $("ezWizardChips");
+    if (!host) return;
+    host.innerHTML = "";
+    chips.forEach((chip) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ez-wizard-chip";
+      button.textContent = chip.label;
+      if (chip.pressed) button.setAttribute("aria-pressed", "true");
+      button.addEventListener("click", () => chip.onClick(chip));
+      host.appendChild(button);
+    });
+  }
+
+  function ezWizardShowForm(html, onSubmit) {
+    const form = $("ezWizardForm");
+    if (!form) return;
+    form.hidden = false;
+    form.innerHTML = html;
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      onSubmit(new FormData(form));
+    };
+  }
+
+  function ezWizardHideForm() {
+    const form = $("ezWizardForm");
+    if (!form) return;
+    form.hidden = true;
+    form.innerHTML = "";
+    form.onsubmit = null;
+  }
+
+  function ezWizardGo(step, { push = true } = {}) {
+    const prompts = {
+      start: "Where do you want to start?",
+      ideaMode: "Do you want an existing idea, or a new one?",
+      ideaExisting: "Which idea should we open?",
+      ideaWrite: "What’s the idea?",
+      photoKind: "Single photo, or several?",
+      photoCount: "How many photos do you prefer?",
+      aiKind: "Single AI image, or several?",
+      aiCount: "How many AI images do you prefer?",
+      mixManual: "How many of your photos?",
+      mixAi: "How many AI-generated images?",
+      package: "Which platform package do you want?",
+      platforms: "Which platforms?",
+      custom: "Pick the formats you want.",
+      confirm: "Ready to continue with this plan?",
+    };
+    if (push && ezWizardStep && ezWizardStep !== step) {
+      ezWizardHistory.push(ezWizardStep);
+      if (prompts[step]) ezWizardLogAdd("bot", prompts[step]);
+    }
+    ezWizardStep = step;
+    renderEzWizard();
+  }
+
+  function ezWizardPick(label, patch, nextStep) {
+    ezWizardLogAdd("user", label);
+    if (ezWizardStep === "start") ezWizardAnswers = {};
+    Object.assign(ezWizardAnswers, patch);
+    ezWizardGo(nextStep);
+  }
+
+  function renderEzWizard() {
+    const helpers = ezPlanApi();
+    const prompt = $("ezWizardPrompt");
+    const back = $("ezWizardBack");
+    const summary = $("ezWizardSummary");
+    const chipsHost = $("ezWizardChips");
+    if (!prompt || !chipsHost) return;
+    if (back) back.hidden = ezWizardHistory.length === 0;
+    const summaryText = ezWizardSummaryText();
+    if (summary) {
+      summary.hidden = !summaryText;
+      summary.textContent = summaryText;
+    }
+    ezWizardHideForm();
+    ezWizardSetMessage();
+    const answers = ezWizardAnswers;
+    const count = helpers?.ezWizardPhotoCount?.(answers) || 1;
+
+    if (ezWizardStep === "start") {
+      prompt.textContent = "Where do you want to start?";
+      if (!$("ezWizardLog")?.children.length) {
+        ezWizardLogAdd("bot", "Where do you want to start?");
+      }
+      renderEzWizardChips([
+        { label: "An idea already in I1–I4, or a new idea", onClick: () => ezWizardPick("An idea", { start: "idea" }, "ideaMode") },
+        { label: "Photos I already have", onClick: () => ezWizardPick("Photos I already have", { start: "photos" }, "photoKind") },
+        { label: "AI-generated images", onClick: () => ezWizardPick("AI-generated images", { start: "ai" }, "aiKind") },
+        { label: "Mix of my photos and AI images", onClick: () => ezWizardPick("Mix of my photos and AI", { start: "mixed" }, "mixManual") },
+      ]);
+      return;
+    }
+
+    if (ezWizardStep === "ideaMode") {
+      prompt.textContent = "Do you want an existing idea, or a new one?";
+      renderEzWizardChips([
+        { label: "Existing idea", onClick: () => ezWizardPick("Existing idea", { ideaMode: "existing" }, "ideaExisting") },
+        { label: "Write a new idea", onClick: () => ezWizardPick("Write a new idea", { ideaMode: "manual" }, "ideaWrite") },
+      ]);
+      return;
+    }
+
+    if (ezWizardStep === "ideaExisting") {
+      prompt.textContent = "Which idea should we open?";
+      renderEzWizardChips([]);
+      loadIdeas().then(() => {
+        const options = selectableIdeas();
+        if (!options.length) {
+          ezWizardSetMessage("No unpromoted ideas are available. Write a new one instead.", "error-text");
+          ezWizardShowForm(
+            `<div class="ez-wizard-form-actions"><button type="submit">Write a new idea</button></div>`,
+            () => ezWizardPick("Write a new idea", { ideaMode: "manual" }, "ideaWrite")
+          );
+          return;
+        }
+        ezWizardShowForm(
+          `<label>Existing idea<select name="ideaId">${options.map((idea) => {
+            const idLabel = idea.candidate_id ? `#${idea.candidate_id}` : idea.id;
+            return `<option value="${escapeHtml(idea.id)}">${escapeHtml(`${idLabel} · ${idea.title || "Untitled"}`)}</option>`;
+          }).join("")}</select></label><div class="ez-wizard-form-actions"><button type="submit">Use this idea</button></div>`,
+          (data) => {
+            const ideaId = String(data.get("ideaId") || "");
+            const idea = options.find((row) => row.id === ideaId);
+            ezWizardPick(idea?.title || "Selected idea", { ideaId, ideaTitle: idea?.title || "" }, "package");
+          }
+        );
+      }).catch((error) => ezWizardSetMessage(error.message, "error-text"));
+      return;
+    }
+
+    if (ezWizardStep === "ideaWrite") {
+      prompt.textContent = "What’s the idea?";
+      renderEzWizardChips([]);
+      ezWizardShowForm(
+        `<label>Title<input name="title" maxlength="160" required placeholder="e.g. Chicago Theatre marquee at dusk"></label>
+         <label>Summary <span style="text-transform:none;letter-spacing:0;font-weight:600;opacity:.7">(optional)</span>
+         <textarea name="summary" maxlength="5000" placeholder="What should this content be about?"></textarea></label>
+         <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
+        (data) => {
+          const title = String(data.get("title") || "").trim();
+          if (!title) {
+            ezWizardSetMessage("Enter an idea title.", "error-text");
+            return;
+          }
+          ezWizardPick(title, { ideaTitle: title, ideaSummary: String(data.get("summary") || "").trim() }, "package");
+        }
+      );
+      return;
+    }
+
+    if (ezWizardStep === "photoKind") {
+      prompt.textContent = "What type of input content do you want to start with?";
+      renderEzWizardChips([
+        { label: "Single manually created image", onClick: () => ezWizardPick("Single photo", { inputKind: "single-photo", photoCount: 1 }, "package") },
+        { label: "Multiple manually created images", onClick: () => ezWizardPick("Multiple photos", { inputKind: "multiple-photos" }, "photoCount") },
+      ]);
+      return;
+    }
+
+    if (ezWizardStep === "aiKind") {
+      prompt.textContent = "Single AI image, or several?";
+      renderEzWizardChips([
+        { label: "Single AI image", onClick: () => ezWizardPick("Single AI image", { inputKind: "single-ai", photoCount: 1 }, "package") },
+        { label: "Multiple AI images", onClick: () => ezWizardPick("Multiple AI images", { inputKind: "multiple-ai" }, "aiCount") },
+      ]);
+      return;
+    }
+
+    if (ezWizardStep === "photoCount" || ezWizardStep === "aiCount") {
+      const ai = ezWizardStep === "aiCount";
+      prompt.textContent = ai ? "How many AI images do you prefer?" : "How many photos do you prefer?";
+      const next = "package";
+      renderEzWizardChips([2, 3, 4, 5, 6, 8, 10, 12].map((n) => ({
+        label: String(n),
+        onClick: () => ezWizardPick(`${n}`, { photoCount: n }, next),
+      })));
+      ezWizardShowForm(
+        `<label>Other count<input name="count" type="number" min="2" max="20" step="1" required></label>
+         <div class="ez-wizard-form-actions"><button type="submit">Use this count</button></div>`,
+        (data) => {
+          const n = Number(data.get("count"));
+          if (!Number.isFinite(n) || n < 2 || n > 20) {
+            ezWizardSetMessage("Enter a count between 2 and 20.", "error-text");
+            return;
+          }
+          ezWizardPick(String(n), { photoCount: Math.round(n) }, next);
+        }
+      );
+      return;
+    }
+
+    if (ezWizardStep === "mixManual") {
+      prompt.textContent = "How many of your photos?";
+      renderEzWizardChips([1, 2, 3, 4, 5, 6].map((n) => ({
+        label: String(n),
+        onClick: () => ezWizardPick(`${n} of mine`, { manualCount: n, inputKind: "mixed" }, "mixAi"),
+      })));
+      ezWizardShowForm(
+        `<label>Other count<input name="count" type="number" min="1" max="19" step="1" required></label>
+         <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
+        (data) => {
+          const n = Number(data.get("count"));
+          if (!Number.isFinite(n) || n < 1 || n > 19) {
+            ezWizardSetMessage("Enter how many of your photos, from 1 to 19.", "error-text");
+            return;
+          }
+          ezWizardPick(`${n} of mine`, { manualCount: Math.round(n), inputKind: "mixed" }, "mixAi");
+        }
+      );
+      return;
+    }
+
+    if (ezWizardStep === "mixAi") {
+      prompt.textContent = "How many AI-generated images?";
+      const remaining = Math.max(1, 20 - (Number(answers.manualCount) || 1));
+      renderEzWizardChips([1, 2, 3, 4, 5].filter((n) => n <= remaining).map((n) => ({
+        label: String(n),
+        onClick: () => ezWizardPick(`${n} AI`, { aiCount: n }, "package"),
+      })));
+      ezWizardShowForm(
+        `<label>Other count<input name="count" type="number" min="1" max="${remaining}" step="1" required></label>
+         <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
+        (data) => {
+          const n = Number(data.get("count"));
+          if (!Number.isFinite(n) || n < 1 || n > remaining) {
+            ezWizardSetMessage(`Enter 1 to ${remaining} AI images.`, "error-text");
+            return;
+          }
+          ezWizardPick(`${n} AI`, { aiCount: Math.round(n) }, "package");
+        }
+      );
+      return;
+    }
+
+    if (ezWizardStep === "package") {
+      prompt.textContent = "Which platform package do you want?";
+      const packages = helpers?.ezWizardPackages?.(count) || [];
+      renderEzWizardChips(packages.map((pkg) => ({
+        label: pkg.label,
+        onClick: () => {
+          const next = pkg.id === "platforms" ? "platforms" : pkg.id === "custom" ? "custom" : "confirm";
+          ezWizardPick(pkg.label, { packageId: pkg.id }, next);
+        },
+      })));
+      return;
+    }
+
+    if (ezWizardStep === "platforms") {
+      prompt.textContent = "Which platforms?";
+      const selected = new Set(answers.platforms || ["Instagram", "Facebook", "TikTok", "YouTube"]);
+      const redraw = () => {
+        renderEzWizardChips([
+          ...["Instagram", "Facebook", "TikTok", "YouTube"].map((platform) => ({
+            label: platform,
+            pressed: selected.has(platform),
+            onClick: () => {
+              if (selected.has(platform)) selected.delete(platform);
+              else selected.add(platform);
+              redraw();
+            },
+          })),
+          {
+            label: "Continue",
+            onClick: () => {
+              if (!selected.size) {
+                ezWizardSetMessage("Pick at least one platform.", "error-text");
+                return;
+              }
+              ezWizardPick([...selected].join(", "), { platforms: [...selected] }, "confirm");
+            },
+          },
+        ]);
+      };
+      redraw();
+      return;
+    }
+
+    if (ezWizardStep === "custom") {
+      prompt.textContent = "Pick the formats you want.";
+      renderEzWizardChips([]);
+      const options = helpers?.EZ_OUTPUT_OPTIONS || [];
+      ezWizardShowForm(
+        `<div class="ez-wizard-custom">${options.map((group) => `
+          <fieldset><legend>${escapeHtml(group.platform)}</legend>
+          ${group.types.map((type) => `<label><input type="checkbox" name="out" value="${escapeHtml(`${group.platform}::${type}`)}"> ${escapeHtml(type)}</label>`).join("")}
+          </fieldset>`).join("")}</div>
+         <div class="ez-wizard-form-actions"><button type="submit">Use these formats</button></div>`,
+        (data) => {
+          const keys = data.getAll("out").map(String);
+          if (!keys.length) {
+            ezWizardSetMessage("Pick at least one format.", "error-text");
+            return;
+          }
+          const customItems = keys.map((key) => {
+            const [platform, ...rest] = key.split("::");
+            return { platform, output_type: rest.join("::") };
+          });
+          ezWizardPick("Custom formats", { packageId: "custom", customItems, platforms: [...new Set(customItems.map((item) => item.platform))] }, "confirm");
+        }
+      );
+      return;
+    }
+
+    prompt.textContent = "Ready to continue?";
+    renderEzWizardChips([
+      { label: "Continue", onClick: () => finishEzWizard() },
+    ]);
+  }
+
+  async function finishEzWizard() {
+    if (ezWizardBusy) return;
+    const helpers = ezPlanApi();
+    if (!helpers) {
+      ezWizardSetMessage("Studio plan helper did not load.", "error-text");
+      return;
+    }
+    ezWizardBusy = true;
+    ezWizardSetMessage("Saving your answers…");
+    try {
+      const planned = applyEzWizardAnswersToIntake();
+      const answers = ezWizardPending || ezWizardAnswers;
+      if (answers.start === "idea") {
+        if (answers.ideaMode === "existing" && answers.ideaId) {
+          const idea = ideasCache.find((row) => row.id === answers.ideaId) || { id: answers.ideaId, title: answers.ideaTitle };
+          enterEzIdeaPath();
+          setIdeaFormOpen(false);
+          openIdeaDrawer(idea);
+          return;
+        }
+        if (answers.ideaTitle) {
+          const result = await api("/api/ideas", {
+            method: "POST",
+            body: JSON.stringify({ title: answers.ideaTitle, summary: answers.ideaSummary || "" }),
+          });
+          await loadIdeas();
+          enterEzIdeaPath();
+          setIdeaFormOpen(false);
+          if (result.record) openIdeaDrawer(result.record);
+          return;
+        }
+        enterEzIdeaPath();
+        setIdeaFormOpen(true, { mode: "manual" });
+        return;
+      }
+      if (!helpers.ezWizardRequiresUploads(answers)) {
+        if ($("ezIdeaTitle") && !String($("ezIdeaTitle").value || "").trim()) {
+          $("ezIdeaTitle").value = answers.photoCount > 1 ? "AI generated images" : "AI generated image";
+        }
+        await startEzProduction({ files: [] });
+        return;
+      }
+      enterEzContentPath();
+      const expected = helpers.ezWizardExpectedUploads(answers);
+      setEzMessage(answers.inputKind === "mixed"
+        ? `Drop ${expected} of your photo${expected === 1 ? "" : "s"}. Studio will add ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"}.`
+        : expected === 1
+          ? "Drop one photo to continue."
+          : `Drop ${expected} photos, or at least two if you change the set.`);
+    } catch (error) {
+      ezWizardSetMessage(error.message || "Could not continue.", "error-text");
+    } finally {
+      ezWizardBusy = false;
+    }
+  }
+
   async function startEzFromFiles(fileList) {
+    await startEzProduction({ files: fileList });
+  }
+
+  async function startEzProduction({ files = [] } = {}) {
     const apiHelpers = ezPlanApi();
     if (!apiHelpers) throw new Error("EZ plan helper did not load");
-    const supported = Array.from(fileList || []).filter(item4IsSupportedPhotoFile);
-    if (!supported.length) {
+    const pending = ezWizardPending || ezWizardAnswers;
+    const expected = pending?.inputKind ? apiHelpers.ezWizardExpectedUploads(pending) : null;
+    const allowEmpty = expected === 0;
+    const supported = Array.from(files || []).filter(item4IsSupportedPhotoFile);
+    if (!allowEmpty && !supported.length) {
       setEzMessage("Choose one or more photo files. HEIC and HEIF are supported.", "error-text");
       return;
     }
-    if (!ezIntakeKind) {
+    if (!ezIntakeKind && supported.length) {
       selectEzInput(supported.length > 1 ? "multiple-photos" : "single-photo", { resetPlatforms: false });
     }
     if (ezIntakeKind === "single-photo" && supported.length > 1) {
       setEzMessage("Single photo uses the first image. Choose Multiple photos for a set.", "");
     }
-    const files = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
-    if (ezIntakeKind === "multiple-photos" && files.length < 2) {
+    let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
+    if (pending?.inputKind === "mixed") {
+      if (nextFiles.length !== expected) {
+        setEzMessage(`Drop exactly ${expected} of your photo${expected === 1 ? "" : "s"} for this mixed set.`, "error-text");
+        return;
+      }
+    } else if (!allowEmpty && ezIntakeKind === "multiple-photos" && nextFiles.length < 2) {
       setEzMessage("Drop at least two photos, or choose Single photo.", "error-text");
       return;
     }
-    ezStagedFiles = files;
-    stageEzLocalPreviews(files);
-    renderEzPhotoStrip();
+    if (nextFiles.length) {
+      ezStagedFiles = nextFiles;
+      stageEzLocalPreviews(nextFiles);
+      renderEzPhotoStrip();
+    }
     const captionMode = ezCaptionMode();
     const captions = joinedManualSlideCaptions();
     if (ezStarting) return;
     ezStarting = true;
     const continueBtn = $("ezContinue");
     if (continueBtn) continueBtn.disabled = true;
-    setEzMessage("Saving in the background…");
+    setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
     try {
-      item4PlanOverrides = {};
-      const planned = applyEzPlanOverrides(files.length, ezSelectedPlatforms());
+      const wizardPlanned = pending?.planned;
+      const photoCount = allowEmpty
+        ? (apiHelpers.ezWizardPhotoCount(pending) || 1)
+        : nextFiles.length;
+      let planned;
+      if (wizardPlanned) {
+        planned = wizardPlanned;
+        item4PlanOverrides = { ...(wizardPlanned.overrides || {}) };
+      } else {
+        item4PlanOverrides = {};
+        planned = applyEzPlanOverrides(photoCount, ezSelectedPlatforms());
+      }
       syncItem4PlatformsFromEz();
       syncRequestAudioUi({ fromEz: true, userChanged: true });
       applyEzToAdvanced({ force: true });
-      const extras = ezExtraOutputSnapshot();
+      const extras = (wizardPlanned?.extras && wizardPlanned.extras.length)
+        ? wizardPlanned.extras
+        : ezExtraOutputSnapshot();
       let captionFields = apiHelpers.ezCaptionFields(captionMode, { captions });
       if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
         captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
       }
+      const defaultTitle = allowEmpty
+        ? (String($("ezIdeaTitle")?.value || "").trim() || (photoCount > 1 ? "AI generated images" : "AI generated image"))
+        : titleFromFiles(nextFiles);
       const idea = await api("/api/ideas", {
         method: "POST",
         body: JSON.stringify({
-          title: titleFromFiles(files),
-          summary: ezIdeaSummaryValue(ezIntakeKind),
+          title: defaultTitle,
+          summary: ezIdeaSummaryValue(pending?.inputKind || ezIntakeKind),
         }),
       });
       activeIdea = idea.record;
@@ -2413,34 +2960,20 @@
       }
       syncEzIdeaIdentityFields();
       setEzIdeaIdentityHint("Saved. You can keep editing.");
-      const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
-      const requestPayload = {
-        content_type: planned.master_content_type,
-        platforms: planned.platforms,
-        voiceover_mode: $("ezAudioVoiceover")?.value || "Yes",
-        background_music_mode: $("ezAudioMusic")?.value || "Yes",
-        thumbnail_mode: $("ezThumbnail")?.value || "Yes",
-        video_duration_seconds: $("ezVideoDuration")?.value || 30,
-        video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
-        video_clip_count_exact: $("ezVideoClipExact")?.value || "",
-        video_clip_count_min: $("ezVideoClipMin")?.value || "",
-        video_clip_count_max: $("ezVideoClipMax")?.value || "",
-        voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 2,
-        title_mode: ezTitleIsCustomized() ? ($("ezTitleMode")?.value || "AI decides") : (captionFields.title_mode || "AI decides"),
-        requested_title: ezTitleIsCustomized() ? String($("ezRequestedTitle")?.value || "").trim() : (captionFields.requested_title || ""),
-        caption_mode: ezCaptionIsCustomized() ? ($("ezCaptionMode")?.value || "AI decides") : (captionFields.caption_mode || "AI decides"),
-        requested_caption: ezCaptionIsCustomized() ? String($("ezRequestedCaption")?.value || "").trim() : (captionFields.requested_caption || ""),
-        script_mode: ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides"),
-        requested_script: ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || ""),
-        carousel_image_mode: $("ezCarouselImageMode")?.value || "Manual Upload",
-        carousel_slide_count_mode: slideMode,
-        carousel_slide_count_exact: $("ezCarouselSlideExact")?.value || (slideMode === "Exact" ? files.length : ""),
-        carousel_slide_count_min: $("ezCarouselSlideMin")?.value || "",
-        carousel_slide_count_max: $("ezCarouselSlideMax")?.value || "",
-        selected_music_asset_id: $("ezAudioTrack")?.value || "",
-        production_notes: mergeEzProductionNotes(),
-        ...selectedRequestVoice(),
-      };
+      const requestPayload = ezWizardRequestPayload(planned, { fileCount: photoCount });
+      if (allowEmpty) {
+        requestPayload.carousel_image_mode = "Make AI Generated";
+        requestPayload.carousel_slide_count_mode = "Exact";
+        requestPayload.carousel_slide_count_exact = photoCount;
+      } else if (pending?.inputKind === "mixed") {
+        requestPayload.carousel_image_mode = "Make AI Generated";
+        requestPayload.carousel_slide_count_mode = "Exact";
+        requestPayload.carousel_slide_count_exact = apiHelpers.ezWizardPhotoCount(pending);
+      } else if (pending?.inputKind === "single-photo" || pending?.inputKind === "multiple-photos" || nextFiles.length) {
+        requestPayload.carousel_image_mode = "Manual Upload";
+        requestPayload.carousel_slide_count_mode = "Exact";
+        requestPayload.carousel_slide_count_exact = nextFiles.length;
+      }
       await ensureProductionRequestMusic();
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
       setEzAdvancedOpen(false);
@@ -2450,10 +2983,18 @@
       if (extras.length) await saveProductionRequestOutputs(created.record);
       await loadItem4Workspace(created.record);
       await loadProductionRequests();
-      ezAutoPlanAfterUpload = true;
-      setEzMessage("Uploading originals…");
-      await uploadItem4Files(files);
-      renderEzPhotoStrip();
+      if (allowEmpty) {
+        ezAutoPlanAfterUpload = true;
+        showProductionRequestWorkspace();
+        setEzMessage("AI plan saved. Make will generate the images.");
+        setRequestMessage("AI image plan saved. You can still add a title, script, or notes before promote.", "success");
+        await maybeAutoEzPlan(true);
+      } else {
+        ezAutoPlanAfterUpload = true;
+        setEzMessage("Uploading originals…");
+        await uploadItem4Files(nextFiles);
+        renderEzPhotoStrip();
+      }
     } catch (error) {
       const saved = Boolean(activeProductionRequest?.id);
       const message = saved
@@ -2467,10 +3008,21 @@
     }
   }
 
+  function bindEzWizard() {
+    $("ezWizardBack")?.addEventListener("click", () => {
+      const previous = ezWizardHistory.pop();
+      if (!previous) return;
+      ezWizardStep = previous;
+      renderEzWizard();
+    });
+    $("ezWizardReset")?.addEventListener("click", () => resetEzWizard());
+    renderEzWizard();
+  }
+
   function bindEzIntake() {
-    $("ezStartContent")?.addEventListener("click", () => enterEzContentPath());
-    $("ezStartIdea")?.addEventListener("click", () => enterEzIdeaPath());
+    bindEzWizard();
     $("ezStartOver")?.addEventListener("click", () => {
+      resetEzWizard({ silent: true });
       revokeEzLocalPreviews();
       ezStagedFiles = [];
       ezIntakeKind = null;
@@ -2486,6 +3038,7 @@
       renderEzPhotoStrip();
       setEzMessage();
       goHome();
+      renderEzWizard();
     });
     ["ezIdeaTitle", "ezIdeaSummary"].forEach((id) => {
       const el = $(id);
@@ -3723,8 +4276,9 @@
     if (!activeProductionRequest?.id) return;
     syncItem4PlatformsFromEz();
     const selected = ezSelectedPlatforms().length ? ezSelectedPlatforms() : item4SelectedPlatforms();
-    const count = item4Workspace?.assets?.length || 0;
-    const platforms = ezPlanPlatforms(count, selected);
+    const wizardCount = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || 0;
+    const count = item4Workspace?.assets?.length || wizardCount || 0;
+    const platforms = ezPlanPlatforms(count || 1, selected);
     if (!platforms.length) { setRequestMessage("Choose at least one platform.", "error-text"); return; }
     const button = $("item4BuildPlan");
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
@@ -3742,7 +4296,7 @@
     finally {
       if (button) {
         button.textContent = item4Workspace?.plan?.items?.length ? "Update platform plan" : "Recommend platform plan";
-        button.disabled = !(item4Workspace?.assets?.length);
+        button.disabled = !(item4Workspace?.assets?.length || ezWizardAllowsPlanWithoutAssets());
       }
       syncEzPlanChrome();
     }
@@ -4111,7 +4665,8 @@
   }
 
   function recommendedOutputFor(platform) {
-    const count = item4Workspace?.assets?.length || (usingEzPlatforms() ? ezStagedFiles.length : 0);
+    const wizardCount = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || 0;
+    const count = item4Workspace?.assets?.length || (usingEzPlatforms() ? ezStagedFiles.length : 0) || wizardCount;
     if (count > 0 || usingEzPlatforms()) {
       const planned = ezPlanApi()?.ezPlanFromPhotoCount({
         photoCount: count,
@@ -4338,13 +4893,16 @@
     setProductionRequestControlState(record);
     setRequestMessage();
     const parsed = ezPlanApi()?.parseEzOriginNotes(record.production_notes);
-    if (ezEntryPath === "content" && (parsed?.inputKind === "multiple-photos" || parsed?.inputKind === "single-photo")) {
-      selectEzInput(parsed.inputKind, { resetPlatforms: false });
+    const intakeKind = parsed?.inputKind
+      ? (ezPlanApi()?.ezIntakeKindFromWizard?.(parsed.inputKind) || parsed.inputKind)
+      : null;
+    if (ezEntryPath === "content" && (intakeKind === "multiple-photos" || intakeKind === "single-photo")) {
+      selectEzInput(intakeKind, { resetPlatforms: false });
       document.querySelectorAll("[data-ez-platform]").forEach((input) => {
         input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
       });
       syncEzYouTubeAvailability(false);
-      if (parsed.captionMode) {
+      if (parsed?.captionMode) {
         ezCaptionDefault = parsed.captionMode;
         renderEzCaptionUi();
       }
@@ -4366,10 +4924,19 @@
 
     try {
       await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
-      const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
+      let result;
+      if (ezWizardPending) {
+        applyEzWizardAnswersToIntake();
+        const payload = ezWizardRequestPayload(ezWizardPending.planned, {
+          fileCount: ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending) || 1,
+        });
+        result = await createEzProductionRequest(idea.id, payload);
+      } else {
+        result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+      }
       await closeIdeaDrawer({ save: false });
       activeIdea = idea;
       ezEntryPath = "configure";
@@ -4379,11 +4946,26 @@
       await loadProductionRequestOutputs(result.record);
       await loadItem4Workspace(result.record);
       const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
-      if (!assetCount) selectPrMediaKind(null, { quiet: true });
+      if (ezWizardPending) {
+        const extras = ezWizardPending.planned?.extras || [];
+        applyEzExtraOutputs(extras);
+        if (extras.length) await saveProductionRequestOutputs(result.record);
+        const intake = ezPlanApi()?.ezIntakeKindFromWizard?.(ezWizardPending.inputKind);
+        if (intake) selectPrMediaKind(intake, { quiet: true });
+        else if (!assetCount) selectPrMediaKind(null, { quiet: true });
+        if (ezWizardAllowsPlanWithoutAssets()) {
+          ezAutoPlanAfterUpload = true;
+          await maybeAutoEzPlan(true);
+        }
+      } else if (!assetCount) selectPrMediaKind(null, { quiet: true });
       else syncPrMediaKindUi();
       await loadProductionRequests();
       setEzAdvancedOpen(false);
-      setRequestMessage(result.created ? "Production Request draft created. Choose Single or Multiple photos, then upload." : "Existing Production Request draft opened.", "success");
+      if (ezWizardPending) {
+        setRequestMessage(result.created ? "Production request created from the publishing wizard." : "Existing Production Request draft opened.", "success");
+      } else {
+        setRequestMessage(result.created ? "Production Request draft created. Choose Single or Multiple photos, then upload." : "Existing Production Request draft opened.", "success");
+      }
     } catch (e) {
       setManageMessage(e.message, "error-text");
     } finally {

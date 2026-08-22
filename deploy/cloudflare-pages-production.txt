@@ -169,3 +169,5 @@ City home heroes Pages deploy: 2026-08-22 - Los Angeles Home uses Rodeo Drive; N
 
 Dashboard 429 Pages deploy: 2026-08-22 - Dashboard uses one profile-scoped request instead of four parallel Airtable loads. UI 0.6.105-dashboard-429.
 
+Publishing wizard Pages deploy: 2026-08-22 - Home is a chip Q&A for idea, photos, AI images, mixed counts, and platform packages. UI 0.6.106-wizard.
+
