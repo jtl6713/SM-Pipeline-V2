@@ -11259,11 +11259,13 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_ALWAYS_ON,
       ...PRODUCTION_CADENCE_RENDER,
       ...PRODUCTION_CADENCE_PUBLISH,
+      ...PRODUCTION_CADENCE_MEDIA,
     ];
     const results = await Promise.all(parked.map((item) => cadenceSetActive(env, item.id, false)));
     const pulses = [];
     if (startRender) pulses.push(...await pulseOnDemandRenderChain(env));
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
+    if (force) pulses.push(...await pulseOnDemandMediaChain(env));
     return { ok: true, parked: true, results, pulses };
   }
   if (await cadenceRepairInProgress(env)) {
