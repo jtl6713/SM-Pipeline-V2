@@ -75,6 +75,9 @@
   const creativeSlideCollapsed = new Set();
 
   const BUILD_ID = "item4-0.6.94-a0-daisychain";
+  const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
+  const uiBuildLabel = $("uiBuildLabel");
+  if (uiBuildLabel) uiBuildLabel.textContent = `UI build ${uiBuildMatch ? uiBuildMatch[1] : BUILD_ID}`;
   let studioSession = null;
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
