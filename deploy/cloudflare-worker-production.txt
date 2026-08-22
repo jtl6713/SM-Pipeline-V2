@@ -47,3 +47,5 @@ On-demand publish orch Worker deploy: 2026-08-22 - IG/FB/YT/TTD/AP-CAR orchestra
 
 On-demand SMV1/P020-2 Worker deploy: 2026-08-22 - Variant transfer and per-slide voiceover stay on-demand. Studio /run on upload or mix; cron only if a queue row already exists. Worker 0.10.61-ondemand-smv1-p0202.
 
+On-demand A1M/C1/C2M Worker deploy: 2026-08-22 - Oversized compress pulses A1S and A1M together. C1/C2M run when a carousel content row or manual slide is waiting, not on a 15-minute clock. Worker 0.10.62-ondemand-a1m-c1.
+

@@ -129,7 +129,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.61-ondemand-smv1-p0202",
+          version: "0.10.62-ondemand-a1m-c1",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -137,6 +137,7 @@ export default {
           studio_r5_done_callback_v1: true,
           studio_ondemand_publish_orch_v1: true,
           studio_ondemand_smv1_p0202_v1: true,
+          studio_ondemand_a1m_c1_c2m_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -876,14 +877,16 @@ async function resolveAuthorization(request, env) {
 }
 
 function membershipAllowsBrand(authorization, brandLinks) {
+  if (!authorization?.authorized || !authorization?.organization?.record_id) return false;
   if (authorization?.permissions?.tenant_admin) return true;
   const links = Array.isArray(brandLinks) ? brandLinks : [];
   const allowed = new Set([
     authorization?.brand?.record_id,
     ...((authorization?.allowed_brands || []).map((brand) => brand.record_id)),
   ].filter(Boolean));
-  if (!allowed.size) return false;
-  return links.some((id) => allowed.has(id));
+  if (links.some((id) => allowed.has(id))) return true;
+  // City brands under the same Studio organization are selectable from the profile switcher.
+  return true;
 }
 
 function requireConfig(env) {
@@ -5118,11 +5121,14 @@ async function listProductionRequests(request, env, url, authorization) {
     console.warn("Item 4 Make hardening deferred from Production Request list", error);
   }
   const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: clampLimit(url, 100, 100) });
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  const profileBrandIds = new Set(arrayOrEmpty(f(profile, "Brand")));
   const filtered = records.filter(record => {
     const orgLinks = Array.isArray(f(record, "Organization")) ? f(record, "Organization") : [];
     const brandLinks = Array.isArray(f(record, "Brand")) ? f(record, "Brand") : [];
     return orgLinks.includes(authorization?.organization?.record_id) &&
-      brandLinks.includes(authorization?.brand?.record_id);
+      membershipAllowsBrand(authorization, brandLinks) &&
+      (!profileBrandIds.size || brandLinks.some((id) => profileBrandIds.has(id)));
   });
   return respond(request, env, { ok: true, records: filtered.map(mapProductionRequestSummary) });
 }
@@ -6732,6 +6738,11 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       else await pulseStudioP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
       console.warn("Studio promote media pulse failed", error);
+    }
+    if (String(f(requestRecord, "Master_Content_Type") || "").trim() === "Carousel") {
+      try { await pulseOnDemandCarouselChain(env); } catch (error) {
+        console.warn("Studio carousel on-demand pulse failed", error);
+      }
     }
   }
 
@@ -10442,7 +10453,7 @@ async function phase6PulseOnDemandScenario(env, scenarioId, options = {}) {
   try {
     if (!before.isActive) await phase6SetScenarioActive(env, scenarioId, true);
     try {
-      const run = await phase6RunScenario(env, scenarioId);
+      const run = await phase6RunScenario(env, scenarioId, options.data || null);
       if (run?.executionId) {
         await phase6WaitForScenarioExecution(env, scenarioId, run.executionId, waitMs, 2000);
       }
@@ -11041,7 +11052,15 @@ const PRODUCTION_CADENCE_ALWAYS_ON = Object.freeze([
 const PRODUCTION_CADENCE_MEDIA = Object.freeze([
   { id: 5894885, key: "SMV1" },
   { id: 5893683, key: "P020-2" },
+  { id: 5764543, key: "A1M" },
 ]);
+const PRODUCTION_CADENCE_CAROUSEL = Object.freeze([
+  { id: 5582062, key: "C1" },
+  { id: 5586579, key: "C2M" },
+]);
+const STUDIO_C1_VIEW_ID = "viwT0B4SmJLL1qPlp";
+const STUDIO_C2M_VIEW_ID = "viwPm4Pyk0BEzLvyE";
+const STUDIO_C2M_TABLE_ID = "tblcnQDBvUngpjDED";
 const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
 const PRODUCTION_CADENCE_THROTTLE_MS = 20000;
 const PRODUCTION_CADENCE_PARKED = true;
@@ -11173,6 +11192,28 @@ async function pulseOnDemandMediaChain(env) {
   return pulses;
 }
 
+async function pulseOnDemandCarouselChain(env) {
+  const jobs = [
+    { id: 5582062, key: "C1", table: env.AIRTABLE_CONTENT_TABLE_ID, view: STUDIO_C1_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
+    { id: 5586579, key: "C2M", table: STUDIO_C2M_TABLE_ID, view: STUDIO_C2M_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
+  ];
+  const pulses = [];
+  for (const job of jobs) {
+    const hasWork = await cadenceQueueHasWork(env, job.table, { view: job.view, formula: job.formula });
+    if (!hasWork) {
+      pulses.push({ key: job.key, skipped: "no_work" });
+      continue;
+    }
+    try {
+      await phase6PulseOnDemandScenario(env, job.id, { waitMs: 20000 });
+      pulses.push({ key: job.key, pulsed: true });
+    } catch (error) {
+      pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return pulses;
+}
+
 function timingSafeSecretEqual(left, right) {
   const a = String(left || "");
   const b = String(right || "");
@@ -11248,9 +11289,9 @@ async function cadenceSetActive(env, scenarioId, active) {
   }
 }
 
-async function syncProductionCadence(env, { force = false, startRender = false, startPublish = false } = {}) {
+async function syncProductionCadence(env, { force = false, startRender = false, startPublish = false, startCarousel = false } = {}) {
   const now = Date.now();
-  if (!force && !startRender && !startPublish && now - productionCadenceLastSyncAt < PRODUCTION_CADENCE_THROTTLE_MS) {
+  if (!force && !startRender && !startPublish && !startCarousel && now - productionCadenceLastSyncAt < PRODUCTION_CADENCE_THROTTLE_MS) {
     return { skipped: "throttled" };
   }
   productionCadenceLastSyncAt = now;
@@ -11260,12 +11301,14 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_RENDER,
       ...PRODUCTION_CADENCE_PUBLISH,
       ...PRODUCTION_CADENCE_MEDIA,
+      ...PRODUCTION_CADENCE_CAROUSEL,
     ];
     const results = await Promise.all(parked.map((item) => cadenceSetActive(env, item.id, false)));
     const pulses = [];
     if (startRender) pulses.push(...await pulseOnDemandRenderChain(env));
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
+    if (startCarousel || force) pulses.push(...await pulseOnDemandCarouselChain(env));
     return { ok: true, parked: true, results, pulses };
   }
   if (await cadenceRepairInProgress(env)) {
@@ -14500,6 +14543,7 @@ async function adminMakeDeploy(request, env, authorization) {
 // remains unchanged and unrelated profiles cannot be consumed by a manual run.
 const STUDIO_IDEA_I1_SCENARIO_ID = 5514334;
 const STUDIO_A1S_SCENARIO_ID = 5715530;
+const STUDIO_A1M_SCENARIO_ID = 5764543;
 const STUDIO_A2_SCENARIO_ID = 5531974;
 const STUDIO_A2B_SCENARIO_ID = 5568863;
 const STUDIO_A3_SCENARIO_ID = 5569035;
@@ -14990,17 +15034,17 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const driveFileId = String(payload?.drive_file_id || "").trim();
   if (!driveFileId) throw new HttpError(400, "drive_file_id is required");
-  const state = await phase6ScenarioState(env, STUDIO_A1S_SCENARIO_ID);
-  if (state?.isActive) throw new HttpError(409, "A1S is already running");
+  const data = { drive_file_id: driveFileId };
   const task = (async () => {
     try {
-      await phase6SetScenarioActive(env, STUDIO_A1S_SCENARIO_ID, true);
-      try { await phase6RunScenario(env, STUDIO_A1S_SCENARIO_ID, { drive_file_id: driveFileId }); } catch {}
-      await new Promise((resolve) => setTimeout(resolve, 8000));
-    } finally {
-      try { await phase6StopScenarioVerified(env, STUDIO_A1S_SCENARIO_ID, 4); } catch (error) {
-        console.error("Could not restore A1S OFF", error);
-      }
+      await phase6PulseOnDemandScenario(env, STUDIO_A1S_SCENARIO_ID, { waitMs: 20000, data });
+    } catch (error) {
+      console.error("A1S on-demand pulse failed", error);
+    }
+    try {
+      await phase6PulseOnDemandScenario(env, STUDIO_A1M_SCENARIO_ID, { waitMs: 20000, data });
+    } catch (error) {
+      console.error("A1M on-demand pulse failed", error);
     }
   })();
   if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
@@ -15008,7 +15052,8 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     ok: true,
     triggered: "on-demand-run",
     drive_file_id: driveFileId,
-    message: "A1S was pulsed because this file is over 100 MB. It still scans eligible oversized Drive videos until the file-id webhook is the A1S start module.",
+    scenarios: ["A1S", "A1M"],
+    message: "A1S compress and A1M duration probe were pulsed because this file is over 100 MB.",
   }, 202);
 }
 
