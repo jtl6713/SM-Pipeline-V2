@@ -69,5 +69,5 @@ Unattended advance Worker deploy: 2026-08-22 - Keep P2/P3 webhooks live while ca
 
 R2 queue Worker deploy: 2026-08-22 - Probe the live Ready-for-Review asset-selection queue, not Planned, and requeue empty P3 remotion handoffs so R2 can run. Worker 0.10.72-r2-queue.
 
-Continuation controller Worker deploy: 2026-08-22 - After production approval the Worker inspects each platform output, stamps exact-source still packages (skipping photos missing that ratio), and pulses Make only when the live filter already matches. Photo sequences never enter the video asset selector. Worker 0.10.73-continuation.
+Continuation first Worker deploy: 2026-08-22 - Cron stamps exact-source packages before parking Make scenarios, so Retry Pending photo reels are not starved by scenario start/stop. Worker 0.10.74-continuation-first.
 

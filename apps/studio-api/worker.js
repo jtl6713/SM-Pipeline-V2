@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.73-continuation",
+          version: "0.10.74-continuation-first",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -674,9 +674,18 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(syncProductionCadence(env, { force: true }).catch((error) => {
-      console.warn("production cadence cron failed", error);
-    }));
+    ctx.waitUntil((async () => {
+      try {
+        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+      } catch (error) {
+        console.warn("production continuation cron failed", error);
+      }
+      try {
+        await syncProductionCadence(env, { force: true, skipRenderPulse: true });
+      } catch (error) {
+        console.warn("production cadence cron failed", error);
+      }
+    })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
       scheduled: true,
       cron: event?.cron || "",
@@ -10582,7 +10591,7 @@ async function phase6PulseOnDemandScenario(env, scenarioId, options = {}) {
     if (!before.isActive) await phase6SetScenarioActive(env, scenarioId, true);
     try {
       const run = await phase6RunScenario(env, scenarioId, options.data || null);
-      if (run?.executionId) {
+      if (run?.executionId && waitMs > 0) {
         await phase6WaitForScenarioExecution(env, scenarioId, run.executionId, waitMs, 2000);
       }
       return run;
@@ -11633,6 +11642,11 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     console.warn("R2 remotion requeue failed", error);
   }
   const pulses = await pulseStudioContinuationJobs(env, options);
+  console.log("Studio continuation", JSON.stringify({
+    count: inspected.length,
+    inspected: inspected.map((row) => ({ id: row.id, action: row.action, reason: row.reason || row.error || null })),
+    pulses,
+  }));
   return { inspected, pulses };
 }
 
@@ -11835,13 +11849,17 @@ async function cadenceSetActive(env, scenarioId, active) {
   }
 }
 
-async function syncProductionCadence(env, { force = false, startRender = false, startPublish = false, startCarousel = false } = {}) {
+async function syncProductionCadence(env, { force = false, startRender = false, startPublish = false, startCarousel = false, skipRenderPulse = false } = {}) {
   const now = Date.now();
   if (!force && !startRender && !startPublish && !startCarousel && now - productionCadenceLastSyncAt < PRODUCTION_CADENCE_THROTTLE_MS) {
     return { skipped: "throttled" };
   }
   productionCadenceLastSyncAt = now;
   if (PRODUCTION_CADENCE_PARKED) {
+    const pulses = [];
+    if (!skipRenderPulse && (startRender || force)) {
+      pulses.push(...await pulseOnDemandRenderChain(env, { waitMs: 0 }));
+    }
     const parked = [
       ...PRODUCTION_CADENCE_ALWAYS_ON,
       ...PRODUCTION_CADENCE_RENDER,
@@ -11854,8 +11872,6 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...parked.map((item) => cadenceSetActive(env, item.id, false)),
       ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
     ]);
-    const pulses = [];
-    if (startRender || force) pulses.push(...await pulseOnDemandRenderChain(env, { waitMs: force && !startRender ? 4000 : 15000 }));
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
     if (startCarousel || force) pulses.push(...await pulseOnDemandCarouselChain(env));
