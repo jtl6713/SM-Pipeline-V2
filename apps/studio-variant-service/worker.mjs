@@ -1,5 +1,5 @@
 const SERVICE = "chicagoshining-studio-variant-service";
-const VERSION = "2.1.0";
+const VERSION = "2.1.0"; // 1:1 and 16:9 fill-crop, same recipe as 4:5 and 9:16
 const SUPPORTED_RATIOS = "4:5, 9:16, 1:1, or 16:9";
 
 export const RECIPE = Object.freeze({

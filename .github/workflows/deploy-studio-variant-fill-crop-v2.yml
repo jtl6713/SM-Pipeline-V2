@@ -164,20 +164,35 @@ jobs:
           ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --dry-run >/tmp/variant-dry-run.log 2>&1
           ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-before-upload.json
           ./node_modules/.bin/wrangler versions upload --config wrangler.jsonc --keep-vars \
-            --message "Item 8 fill-crop-v2 candidate ${GITHUB_SHA}" >/tmp/variant-upload.log 2>&1
+            --message "Item 8 fill-crop-v2 candidate ${GITHUB_SHA}" >/tmp/variant-upload.log 2>&1 \
+            || { cat /tmp/variant-upload.log; exit 1; }
           ./node_modules/.bin/wrangler versions list --name "$TARGET_WORKER" --json >/tmp/versions-after-upload.json
           python - <<'PY'
-          import json
+          import json, re
           from pathlib import Path
           before = json.loads(Path("/tmp/versions-before-upload.json").read_text())
           after = json.loads(Path("/tmp/versions-after-upload.json").read_text())
+          log = Path("/tmp/variant-upload.log").read_text(errors="replace")
+          previous = Path("/tmp/previous-version.txt").read_text().strip()
           def version_id(row):
               return str(row.get("id") or row.get("version_id") or row.get("versionId") or "")
           old = {version_id(row) for row in before if version_id(row)}
           new = [version_id(row) for row in after if version_id(row) and version_id(row) not in old]
-          if len(new) != 1:
-              raise SystemExit(f"Expected one candidate version, found {new}")
-          Path("/tmp/candidate-version.txt").write_text(new[0])
+          match = re.search(r"(?:Worker Version ID|Version ID)[:\s]+([0-9a-fA-F-]{36})", log)
+          candidate = ""
+          if match:
+              candidate = match.group(1)
+          elif len(new) == 1:
+              candidate = new[0]
+          else:
+              for row in after:
+                  vid = version_id(row)
+                  if vid and vid != previous:
+                      candidate = vid
+                      break
+          if not candidate:
+              raise SystemExit("Could not resolve a candidate version.\n" + log[-4000:])
+          Path("/tmp/candidate-version.txt").write_text(candidate)
           PY
           echo "version_id=$(cat /tmp/candidate-version.txt)" >> "$GITHUB_OUTPUT"
 
