@@ -74,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.96-intake-empty";
+  const BUILD_ID = "item4-0.6.97-intake-logs";
   const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
   const uiBuildLabel = $("uiBuildLabel");
   if (uiBuildLabel) uiBuildLabel.textContent = `UI build ${uiBuildMatch ? uiBuildMatch[1] : BUILD_ID}`;
@@ -152,14 +152,26 @@
   });
   let intakePollTimer = null;
   let intakePollStartedAt = null;
+  let intakePollDeadline = 0;
   function stopIntakePoll() {
     if (intakePollTimer) {
       clearInterval(intakePollTimer);
       intakePollTimer = null;
     }
   }
+  function intakeIsFinished(status) {
+    return Boolean(status?.complete || status?.failed || status?.a2?.result === "empty");
+  }
+  function startIntakePoll() {
+    stopIntakePoll();
+    intakePollDeadline = Date.now() + 90000;
+    intakePollTimer = setInterval(pollIntakeStatus, 400);
+  }
   $("operationsRunIntake")?.addEventListener("click", async () => {
     const button = $("operationsRunIntake");
+    const clientStartedAt = new Date().toISOString();
+    intakePollStartedAt = clientStartedAt;
+    stopIntakePoll();
     try {
       if (button) button.disabled = true;
       setOperationsMessage("Starting A2…");
@@ -169,20 +181,24 @@
         { key: "A3", label: "Classification", detail: "Queued" },
         { key: "A4", label: "Reconciliation", detail: "Queued" },
       ] });
-      const result = await api("/api/operations/intake", { method: "POST", body: JSON.stringify({}) });
-      intakePollStartedAt = result.started_at || new Date().toISOString();
-      showIntakeProgress(result);
-      if (result.library_intake) renderLibraryIntakeNotice(result.library_intake);
-      setOperationsMessage(result.summary || result.message || "A2 finished.");
-      if (result.complete || result.failed || result.a2?.result === "empty") {
+      let result = null;
+      try {
+        result = await api("/api/operations/intake", { method: "POST", body: JSON.stringify({}), timeoutMs: 15000 });
+      } catch (error) {
+        setOperationsMessage("Checking A2…");
+      }
+      if (result) {
+        intakePollStartedAt = result.started_at || clientStartedAt;
+        showIntakeProgress(result);
+        if (result.library_intake) renderLibraryIntakeNotice(result.library_intake);
+        setOperationsMessage(result.summary || result.message || "A2 finished.");
+      }
+      if (intakeIsFinished(result || {})) {
         if (button) button.disabled = false;
         loadOperations();
       } else {
         const done = await pollIntakeStatus();
-        if (!done) {
-          stopIntakePoll();
-          intakePollTimer = setInterval(pollIntakeStatus, 400);
-        }
+        if (!done) startIntakePoll();
       }
     } catch (error) {
       setOperationsMessage(error.message || "Library intake failed.", "error-text");
@@ -7049,12 +7065,19 @@
       const status = await api(`/api/operations/intake?started_at=${encodeURIComponent(intakePollStartedAt)}`);
       showIntakeProgress(status);
       if (status.library_intake) renderLibraryIntakeNotice(status.library_intake);
-      if (status.complete || status.failed) {
+      if (intakeIsFinished(status)) {
         stopIntakePoll();
         const button = $("operationsRunIntake");
         if (button) button.disabled = false;
         setOperationsMessage(status.summary || (status.failed ? "Intake finished with an error." : "Intake finished."));
         loadOperations();
+        return true;
+      }
+      if (intakePollDeadline && Date.now() > intakePollDeadline) {
+        stopIntakePoll();
+        const button = $("operationsRunIntake");
+        if (button) button.disabled = false;
+        setOperationsMessage("A2 is still running in Make. Open Operations again to check status.");
         return true;
       }
       return false;

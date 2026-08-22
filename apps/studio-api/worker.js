@@ -122,7 +122,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.57-intake-empty",
+          version: "0.10.58-intake-logs",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -10823,7 +10823,13 @@ async function phase6MakeApiConfig(env) {
 
 async function phase6MakeApiJson(env, path, init = {}) {
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
-  const response = await fetch(`${makeApiBase}${path}`, { ...init, headers: { ...headers, ...(init.headers || {}) } });
+  const timeoutMs = Number(init.timeoutMs);
+  const fetchInit = { ...init };
+  delete fetchInit.timeoutMs;
+  if (!fetchInit.signal && Number.isFinite(timeoutMs) && timeoutMs > 0 && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    fetchInit.signal = AbortSignal.timeout(timeoutMs);
+  }
+  const response = await fetch(`${makeApiBase}${path}`, { ...fetchInit, headers: { ...headers, ...(init.headers || {}) } });
   const raw = await response.text();
   let body;
   try { body = raw ? JSON.parse(raw) : {}; } catch { body = { raw }; }
@@ -14743,17 +14749,33 @@ async function pulseStudioLibraryIntake(request, env, authorization) {
   url.searchParams.set("make08_owner", "studio-operations");
   url.searchParams.set("make08_stage", "A2");
   url.searchParams.set("make08_cycle_id", `${startedAt.replace(/[-:]/g, "").slice(0, 15)}-studio`);
-  const response = await fetch(url.toString(), { method: "GET", headers: { Accept: "text/plain, application/json" } });
-  const body = await response.text();
-  if (!response.ok) throw new HttpError(502, `A2 webhook returned ${response.status}: ${body.slice(0, 200)}`);
-  const a2Run = await waitForA2IntakeRun(env, startedAt);
-  const status = await buildLibraryIntakeStatus(env, startedAt, a2Run);
+  let hookResponse = "";
+  try {
+    const webhookTimeout =
+      typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(8000)
+        : undefined;
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Accept: "text/plain, application/json" },
+      ...(webhookTimeout ? { signal: webhookTimeout } : {}),
+    });
+    hookResponse = await response.text();
+    if (!response.ok) throw new HttpError(502, `A2 webhook returned ${response.status}: ${hookResponse.slice(0, 200)}`);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (error?.name !== "AbortError" && error?.name !== "TimeoutError") {
+      throw new HttpError(502, `A2 webhook failed: ${error.message || error}`);
+    }
+    hookResponse = "webhook-timeout";
+  }
+  const status = await buildLibraryIntakeStatus(env, startedAt);
   return respond(request, env, {
     ok: true,
     triggered: "a2-webhook",
     scenario_id: STUDIO_A2_SCENARIO_ID,
     daisy_chain: ["A2", "A2B", "A3", "A4"],
-    hook_response: body.slice(0, 200),
+    hook_response: hookResponse.slice(0, 200),
     ...status,
     message: status.summary,
   }, status.complete ? 200 : 202);
@@ -14813,10 +14835,14 @@ function makeExecutionList(body) {
   if (body && typeof body === "object") {
     bags.push(
       body.executions,
+      body.scenarioLogs,
+      body.logs,
       body.scenarioExecutions,
       body.data,
       body.response,
       body.response?.executions,
+      body.response?.scenarioLogs,
+      body.response?.logs,
       body.response?.scenarioExecutions,
       body.response?.data
     );
@@ -14829,7 +14855,7 @@ function makeExecutionList(body) {
 }
 
 async function listMakeIntakeExecutions(env, scenarioId) {
-  const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/executions?pg%5Blimit%5D=12`, { method: "GET" });
+  const body = await phase6MakeApiJson(env, `/scenarios/${scenarioId}/logs?pg%5Blimit%5D=12`, { method: "GET", timeoutMs: 8000 });
   return makeExecutionList(body);
 }
 
@@ -14853,25 +14879,9 @@ function describeA2Run(run) {
   if (!run) return { files_found: null, result: "waiting", detail: "Starting A2…" };
   if (run.state === "error") return { files_found: null, result: "error", detail: "A2 failed. Check Make for the error." };
   if (run.operations <= STUDIO_A2_EMPTY_MAX_OPERATIONS) {
-    return { files_found: false, result: "empty", detail: "No assets to process in the ingestion folder." };
+    return { files_found: false, result: "empty", detail: "A2 completed with no assets to process" };
   }
   return { files_found: true, result: "processed", detail: `A2 found files to intake (${run.operations} Make operations).` };
-}
-
-function sleepMs(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForA2IntakeRun(env, startedAt, timeoutMs = 3500) {
-  const deadline = Date.now() + timeoutMs;
-  let runs = [];
-  while (Date.now() <= deadline) {
-    runs = await listMakeIntakeExecutions(env, STUDIO_A2_SCENARIO_ID).catch(() => []);
-    const run = firstRunSince(runs, startedAt);
-    if (run) return run;
-    await sleepMs(200);
-  }
-  return firstRunSince(runs, startedAt);
 }
 
 async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
@@ -14901,7 +14911,7 @@ async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const complete = failed || empty || processedDone;
   const percent = empty || (complete && !failed) ? 100 : failed ? 40 : a2Result.files_found ? 55 : 12;
   const summary = empty
-    ? "No assets to process in the ingestion folder."
+    ? "A2 completed with no assets to process"
     : failed
       ? a2Result.detail
       : complete

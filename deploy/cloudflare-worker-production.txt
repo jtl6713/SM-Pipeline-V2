@@ -39,3 +39,5 @@ Intake progress Worker deploy: 2026-08-22 - Operations tab checks classification
 
 Intake empty-fast Worker deploy: 2026-08-22 - Empty A2 returns no-assets immediately instead of waiting on later stages. Worker 0.10.57-intake-empty.
 
+Intake logs Worker deploy: 2026-08-22 - Read A2 status from Make scenario logs so empty intake shows "A2 completed with no assets to process" instead of sticking on Starting A2. Worker 0.10.58-intake-logs.
+

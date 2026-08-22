@@ -153,3 +153,5 @@ Intake progress Pages deploy: 2026-08-22 - Library intake notice, Operations bad
 
 Intake empty-fast Pages deploy: 2026-08-22 - Starting A2 then No assets to process when the ingestion folder is empty. UI 0.6.96-intake-empty.
 
+Intake logs Pages deploy: 2026-08-22 - Empty A2 leaves Starting A2 and shows completed with no assets to process. UI 0.6.97-intake-logs.
+
