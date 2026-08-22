@@ -1613,6 +1613,8 @@ function mapOutput(record) {
     youtube_upload_progress_percent: f(record, "YouTube_Upload_Progress_Percent"),
     youtube_processing_progress_percent: f(record, "YouTube_Processing_Progress_Percent"),
     content_item_links: f(record, "Content_Item") || [],
+    content_item_id: Array.isArray(f(record, "Content_Item")) ? (f(record, "Content_Item")[0] || null) : null,
+    content_title: f(record, "Output_Title") || null,
     content_profile_links: f(record, "Content_Profile") || [],
     carousel_slide_links: f(record, "Carousel Slides") || [],
     creative_manifest_present: Boolean(f(record, "Creative_Render_Manifest_JSON")),

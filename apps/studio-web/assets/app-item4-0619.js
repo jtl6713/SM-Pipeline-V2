@@ -62,7 +62,7 @@
   const item4CropDrafts = new Map();
   let item4CropRequestId = null;
   let pipelineOutputs = [];
-  let pipelineSort = { key: "", dir: "asc" };
+  let pipelineSort = { key: "output", dir: "desc" };
   let pipelineViewFilter = "all";
   let pipelineOpenSingleOnLoad = false;
   let dashboardCache = { metrics: {}, ideas: [], content: [], outputs: [] };
@@ -80,7 +80,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.112-approve-open-review";
+  const BUILD_ID = "item4-0.6.113-pipeline-content-groups";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -7518,6 +7518,43 @@
     if (openable.length === 1) openCreativeEditor(openable[0].id);
   }
 
+  function pipelineOutputNumber(record) {
+    const n = Number(String(record?.output_id || "").replace(/\D/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function pipelineContentGroupKey(record) {
+    const links = Array.isArray(record?.content_item_links) ? record.content_item_links : [];
+    return String(links[0] || record?.content_item_id || "").trim() || "unassigned";
+  }
+
+  function pipelineContentGroupLabel(records) {
+    const first = records[0] || {};
+    const title = String(first.output_title || first.content_title || "").trim();
+    const count = records.length;
+    const suffix = `${count} output${count === 1 ? "" : "s"}`;
+    if (title) return `${title} · ${suffix}`;
+    if (pipelineContentGroupKey(first) === "unassigned") return `Unassigned · ${suffix}`;
+    return `Content piece · ${suffix}`;
+  }
+
+  function groupedPipelineRecords(records) {
+    const groups = [];
+    const index = new Map();
+    for (const record of records || []) {
+      const key = pipelineContentGroupKey(record);
+      if (!index.has(key)) {
+        const group = { key, records: [] };
+        index.set(key, group);
+        groups.push(group);
+      }
+      index.get(key).records.push(record);
+    }
+    for (const group of groups) group.records = sortedPipelineRecords(group.records);
+    groups.sort((a, b) => Math.max(...b.records.map(pipelineOutputNumber)) - Math.max(...a.records.map(pipelineOutputNumber)));
+    return groups;
+  }
+
   function pipelineSortValue(record, key) {
     if (key === "output") return String(record.output_id || "");
     if (key === "platform") return String(record.platform || "");
@@ -7535,9 +7572,9 @@
 
   function comparePipelineRows(a, b, key) {
     if (key === "output") {
-      const na = Number(String(a.output_id || "").replace(/\D/g, ""));
-      const nb = Number(String(b.output_id || "").replace(/\D/g, ""));
-      if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+      const na = pipelineOutputNumber(a);
+      const nb = pipelineOutputNumber(b);
+      if (na !== nb) return na - nb;
     }
     if (key === "progress") return pipelineSortValue(a, key) - pipelineSortValue(b, key);
     return String(pipelineSortValue(a, key)).localeCompare(String(pipelineSortValue(b, key)), undefined, {
@@ -7547,10 +7584,10 @@
   }
 
   function sortedPipelineRecords(records) {
-    if (!pipelineSort.key) return records;
     const dir = pipelineSort.dir === "desc" ? -1 : 1;
+    const key = pipelineSort.key || "output";
     return [...records].sort((a, b) => {
-      const primary = comparePipelineRows(a, b, pipelineSort.key);
+      const primary = comparePipelineRows(a, b, key);
       if (primary) return dir * primary;
       return dir * comparePipelineRows(a, b, "output");
     });
@@ -7572,11 +7609,7 @@
         : '<div class="empty">No Platform Output records were returned.</div>';
       return;
     }
-    const rows = isPipeline ? sortedPipelineRecords(source) : source;
-    const head = isPipeline
-      ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
-      : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
-    target.innerHTML = `<table class="data-table"><thead>${head}</thead><tbody>${rows.map((r) => {
+    const pipelineRow = (r) => {
       const pct = pipelineDisplayPercent(r);
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
@@ -7584,7 +7617,17 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"}>${canOpen ? "Open review" : "Not ready yet"}</button></td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
-    }).join("")}</tbody></table>`;
+    };
+    const body = isPipeline
+      ? groupedPipelineRecords(source).map((group) => {
+          const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-title">${escapeHtml(pipelineContentGroupLabel(group.records))}</div></td></tr>`;
+          return header + group.records.map(pipelineRow).join("");
+        }).join("")
+      : source.map(pipelineRow).join("");
+    const head = isPipeline
+      ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
+      : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
+    target.innerHTML = `<table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
     if (isPipeline) {
       target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
         button.addEventListener("click", (event) => {
