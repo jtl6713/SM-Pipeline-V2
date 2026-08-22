@@ -165,3 +165,5 @@ Support screen grabs Pages deploy: 2026-08-22 - Support examples include Studio 
 
 City home photos Pages deploy: 2026-08-22 - New York and Los Angeles profiles use their own landmark Home backgrounds the same way Chicago uses the skyline. UI 0.6.103-city-home-photos.
 
+City home heroes Pages deploy: 2026-08-22 - Los Angeles Home uses Rodeo Drive; New York Home uses the downtown skyline. UI 0.6.104-city-home-heroes.
+

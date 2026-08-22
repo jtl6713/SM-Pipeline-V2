@@ -8,6 +8,7 @@
   --home-hero:url("/assets/home/chicago-skyline-dusk.jpg");
   --home-idea:url("/assets/home/chicago-cloud-gate.jpg");
   --home-content:url("/assets/home/chicago-theatre.jpg");
+  --home-hero-position:center 42%;
   --home-hero-overlay:linear-gradient(180deg,rgba(1,37,89,.22) 0%,rgba(13,54,116,.18) 42%,rgba(1,29,69,.58) 100%);
   --home-hero-fade:linear-gradient(180deg,transparent,rgba(1,29,69,.28));
   --home-choice-bg:#0a1d3f;
@@ -679,7 +680,7 @@ input, select, textarea, button {
   inset:0;
   background-image:var(--home-hero-overlay),var(--home-hero);
   background-size:cover;
-  background-position:center 38%;
+  background-position:var(--home-hero-position);
   transform:scale(1.05);
   z-index:0
 }
@@ -1004,9 +1005,10 @@ html[data-studio-theme="la"]{
   --teal-soft:#fdecea;
   --topbar-bg:#7a1018;
   --home-canvas:#4a0a10;
-  --home-hero:url("/assets/home/la-hollywood-sign.jpg");
+  --home-hero:url("/assets/home/la-rodeo-drive.jpg");
   --home-idea:url("/assets/home/la-disney-concert-hall.jpg");
   --home-content:url("/assets/home/la-santa-monica-pier.jpg");
+  --home-hero-position:center 48%;
   --home-hero-overlay:linear-gradient(180deg,rgba(122,16,24,.28) 0%,rgba(74,10,16,.2) 42%,rgba(48,6,10,.62) 100%);
   --home-hero-fade:linear-gradient(180deg,transparent,rgba(48,6,10,.32));
   --home-choice-bg:#3a0c12;
@@ -1023,10 +1025,11 @@ html[data-studio-theme="nyc"]{
   --teal-soft:#f3e8ff;
   --topbar-bg:#2e1065;
   --home-canvas:#1e0b3b;
-  --home-hero:url("/assets/home/nyc-manhattan-skyline.jpg");
+  --home-hero:url("/assets/home/nyc-downtown-skyline.jpg");
   --home-idea:url("/assets/home/nyc-statue-of-liberty.jpg");
   --home-content:url("/assets/home/nyc-times-square.jpg");
-  --home-hero-overlay:linear-gradient(180deg,rgba(46,16,101,.3) 0%,rgba(76,29,149,.18) 42%,rgba(30,11,59,.64) 100%);
+  --home-hero-position:center 62%;
+  --home-hero-overlay:linear-gradient(180deg,rgba(46,16,101,.22) 0%,rgba(76,29,149,.14) 42%,rgba(30,11,59,.52) 100%);
   --home-hero-fade:linear-gradient(180deg,transparent,rgba(30,11,59,.34));
   --home-choice-bg:#241046;
   --home-choice-step:#4c1d95;
