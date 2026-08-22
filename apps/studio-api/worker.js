@@ -43,6 +43,12 @@ export default {
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
+      const isOperationsRoute = url.pathname === "/api/operations";
+      const isOperationsProfileRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isOperationsDailyIdeasRoute = url.pathname === "/api/operations/ideas/run-daily";
+      const isOperationsOutputScheduleRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/schedule$/.test(url.pathname);
+      const isOperationsOutputPublishedRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/published$/.test(url.pathname);
+      const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
@@ -67,6 +73,11 @@ export default {
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
+      const isOperationsProfileWrite = isOperationsProfileRoute && request.method === "PATCH";
+      const isOperationsDailyIdeasWrite = isOperationsDailyIdeasRoute && request.method === "POST";
+      const isOperationsOutputScheduleWrite = isOperationsOutputScheduleRoute && request.method === "POST";
+      const isOperationsOutputPublishedWrite = isOperationsOutputPublishedRoute && request.method === "POST";
+      const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
@@ -94,7 +105,12 @@ export default {
         (isAdminRepairControlRoute && request.method === "GET") ||
         isVoiceCatalogRoute ||
         isAdminMakeDeployWrite ||
-        isAdminRepairControlWrite;
+        isAdminRepairControlWrite ||
+        isOperationsProfileWrite ||
+        isOperationsDailyIdeasWrite ||
+        isOperationsOutputScheduleWrite ||
+        isOperationsOutputPublishedWrite ||
+        isOperationsCompressWrite;
       if (!allowedMethod) {
         return respond(request, env, { ok: false, error: "Method not allowed in Phase 2A" }, 405);
       }
@@ -103,8 +119,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.53-cadence-parked",
+          version: "0.10.54-operations",
           studio_manual_idea_generation_v1: true,
+          studio_operations_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -309,6 +326,41 @@ export default {
         if (request.method === "GET") return await adminRepairControlStatus(request, env);
         assertWriteRequest(request, env);
         return await adminRepairControl(request, env, authorization);
+      }
+
+      if (isOperationsRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        return getStudioOperations(request, env, authorization);
+      }
+
+      if (isOperationsProfileRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return patchStudioOperationsProfile(request, env, url, authorization);
+      }
+
+      if (isOperationsDailyIdeasRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return runStudioDailyIdeas(request, env, authorization, ctx, { force: true });
+      }
+
+      if (isOperationsOutputScheduleRoute) {
+        requirePermission(authorization, "publishing_control");
+        assertWriteRequest(request, env);
+        return scheduleStudioPublishOutput(request, env, url, authorization);
+      }
+
+      if (isOperationsOutputPublishedRoute) {
+        requirePermission(authorization, "publishing_control");
+        assertWriteRequest(request, env);
+        return markStudioOutputPublished(request, env, url, authorization);
+      }
+
+      if (isOperationsCompressRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return pulseA1SForDriveFile(request, env, authorization, ctx);
       }
 
       if (isVoicePreviewRoute) {
@@ -564,6 +616,12 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(syncProductionCadence(env, { force: true }).catch((error) => {
       console.warn("production cadence cron failed", error);
+    }));
+    ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
+      scheduled: true,
+      cron: event?.cron || "",
+    }).catch((error) => {
+      console.warn("daily idea cadence failed", error);
     }));
   },
 };
@@ -862,6 +920,11 @@ function requirePermission(authorization, permission) {
   if (!authorization?.permissions?.[permission]) {
     throw new HttpError(403, `Permission required: ${permission}`);
   }
+}
+
+function requireAnyPermission(authorization, permissions) {
+  const ok = (permissions || []).some((permission) => authorization?.permissions?.[permission]);
+  if (!ok) throw new HttpError(403, `Permission required: ${(permissions || []).join(" or ")}`);
 }
 
 async function airtableFetch(env, tableId, pathOrParams = "", options = {}) {
@@ -1425,6 +1488,11 @@ function mapOutput(record) {
     auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
     do_not_publish: Boolean(f(record, "Do_Not_Publish")),
     final_file_url: f(record, "Final_File_URL"),
+    output_title: f(record, "Output_Title"),
+    output_caption: f(record, "Output_Caption"),
+    output_hashtags: f(record, "Output_Hashtags"),
+    thumbnail_url: f(record, "Thumbnail_URL"),
+    scheduled_post_date: f(record, "Scheduled_Post_Date"),
     studio_preview_url: f(record, "Studio_Preview_URL") || studioNativeStillPreviewUrl(record) || null,
     native_still_url: studioNativeStillPreviewUrl(record) || null,
     preview_kind: studioPreviewKind(record),
@@ -14136,6 +14204,13 @@ async function adminMakeDeploy(request, env, authorization) {
 // blueprint and OFF state are restored after admission so scheduled operation
 // remains unchanged and unrelated profiles cannot be consumed by a manual run.
 const STUDIO_IDEA_I1_SCENARIO_ID = 5514334;
+const STUDIO_A1S_SCENARIO_ID = 5715530;
+const STUDIO_PIPELINE_SETTINGS_TABLE_ID = "tblpHPWeEkyJaF7ql";
+const STUDIO_PUB1_VIEW_ID = "viwtrn8YmGacQWVzU";
+const STUDIO_PUB2_VIEW_ID = "viwf0hxXl8oYUClim";
+const STUDIO_PUB3_VIEW_ID = "viwz6CxyEBzvMEJU6";
+const STUDIO_A1S_OVERSIZE_BYTES = 100000000;
+const STUDIO_I1_LAST_DAILY_SETTING = "STUDIO_I1_LAST_DAILY_DATE";
 const STUDIO_IDEA_PROFILE_TABLE_ID = "tblNYg2QB0BmmVACy";
 const STUDIO_IDEA_BATCH_TABLE_ID = "tblpCKSqcTpDtyst3";
 const STUDIO_IDEA_MIN_COUNT = 1;
@@ -14394,4 +14469,246 @@ async function studioIdeaGenerationStatus(request, env, url) {
   return respond(request, env, { ok: true, batch: view });
 }
 // STUDIO_MANUAL_IDEA_GENERATOR_V1_END
+
+function chicagoNowParts() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  const date = `${get("year")}-${get("month")}-${get("day")}`;
+  return { date, hour: Number(get("hour")) };
+}
+
+function mapOperationsOutput(record) {
+  return {
+    ...mapOutput(record),
+    output_notes: f(record, "Output_Notes") || "",
+  };
+}
+
+function mapOperationsProfile(record) {
+  const limit = Number(f(record, "Daily_Idea_Limit"));
+  return {
+    id: record.id,
+    name: String(f(record, "Profile_Name") || ""),
+    active: Boolean(f(record, "Active")),
+    idea_generation_enabled: Boolean(f(record, "Idea_Generation_Enabled")),
+    daily_idea_limit: Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : 5,
+  };
+}
+
+async function studioSettingsByName(env, name) {
+  const rows = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
+    limit: 5,
+    filterFormula: `AND({Active}=1,{Setting_Name}="${String(name).replace(/"/g, "")}")`,
+  });
+  return rows[0] || null;
+}
+
+async function studioUpsertSetting(env, name, value, notes) {
+  const existing = await studioSettingsByName(env, name);
+  const fields = {
+    Setting_Name: name,
+    Setting_Value: String(value || ""),
+    Active: true,
+    Notes: notes || null,
+  };
+  if (existing?.id) {
+    return airtableFetch(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, existing.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  }
+  const created = await airtableFetch(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, "", {
+    method: "POST",
+    body: JSON.stringify({ records: [{ fields }], typecast: true }),
+  });
+  return created?.records?.[0] || null;
+}
+
+async function listOversizedMedia(env) {
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: 50,
+    filterFormula: `AND({File_Size_MB}>95.36,FIND("_compressed",{Asset Name}&"")=0)`,
+  });
+  return records.map((record) => ({
+    id: record.id,
+    name: f(record, "Asset Name"),
+    file_size_mb: f(record, "File_Size_MB"),
+    mime_type: f(record, "MIME_Type"),
+    google_drive_file_id: googleDriveFileId(record),
+    google_drive_url: f(record, "Google Drive URL"),
+  })).filter((row) => row.google_drive_file_id);
+}
+
+async function getStudioOperations(request, env, authorization) {
+  const chicago = chicagoNowParts();
+  const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
+  const [profiles, readyToSchedule, readyToPublish, published, oversized] = await Promise.all([
+    listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
+    listOversizedMedia(env).catch(() => []),
+  ]);
+  return respond(request, env, {
+    ok: true,
+    page: "operations",
+    timezone: "America/Chicago",
+    chicago_date: chicago.date,
+    chicago_hour: chicago.hour,
+    last_daily_idea_date: f(lastDaily, "Setting_Value") || null,
+    can_edit_profiles: Boolean(authorization?.permissions?.tenant_admin),
+    can_publish_queue: Boolean(authorization?.permissions?.publishing_control),
+    profiles: profiles.map(mapOperationsProfile),
+    ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
+    ready_to_publish: readyToPublish.map(mapOperationsOutput),
+    recently_published: published.map(mapOperationsOutput),
+    oversized_media: oversized,
+    a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
+  });
+}
+
+async function patchStudioOperationsProfile(request, env, url, authorization) {
+  const match = /^\/api\/operations\/profiles\/(rec[A-Za-z0-9]+)$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid profile path");
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const record = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, match[1]);
+  if (!record?.id) throw new HttpError(404, "Content Profile was not found");
+  const fields = {};
+  if (payload.idea_generation_enabled !== undefined) fields.Idea_Generation_Enabled = Boolean(payload.idea_generation_enabled);
+  if (payload.daily_idea_limit !== undefined) {
+    const limit = Number(payload.daily_idea_limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new HttpError(400, "Daily idea limit must be a whole number from 1 to 10");
+    fields.Daily_Idea_Limit = limit;
+  }
+  if (!Object.keys(fields).length) throw new HttpError(400, "No profile settings to update");
+  const updated = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+  return respond(request, env, { ok: true, profile: mapOperationsProfile(updated) });
+}
+
+async function executeStudioDailyIdeas(env, ctx, options = {}) {
+  const chicago = chicagoNowParts();
+  const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
+  const lastDate = String(f(lastDaily, "Setting_Value") || "").trim();
+  if (!options.force && options.scheduled) {
+    const cron = String(options.cron || "");
+    const inWindow = chicago.hour === 1 || cron === "0 6 * * *";
+    if (!inWindow) return { skipped: "outside_chicago_1am_window", chicago_date: chicago.date, chicago_hour: chicago.hour };
+    if (lastDate === chicago.date) return { skipped: "already_ran_today", chicago_date: chicago.date };
+  }
+  const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {
+    limit: 50,
+    filterFormula: "AND({Active}=1,{Idea_Generation_Enabled}=1)",
+  })).map(mapOperationsProfile);
+  if (!profiles.length) {
+    if (options.scheduled) await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date, "No enabled idea-generation profiles");
+    return { skipped: "no_enabled_profiles", chicago_date: chicago.date, profiles: [] };
+  }
+  const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
+  if (scenario?.isActive) throw new HttpError(409, "I1 is already running");
+
+  const started = [];
+  for (const profile of profiles) {
+    const count = Math.max(1, Math.min(10, Number(profile.daily_idea_limit) || 5));
+    const full = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profile.id);
+    const batch = await studioIdeaCreateBatch(env, full, count, "Balanced", { email: "studio-daily-cadence" });
+    await studioIdeaSetProfileOverrides(env, profile.id, batch.id, count, "Balanced");
+    await studioIdeaExecuteBatch(env, full, batch);
+    started.push({ profile_id: profile.id, name: profile.name, batch_record_id: batch.id, requested_count: count });
+  }
+  await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date, `Daily I1 started for ${started.length} profile(s)`);
+  return { started: true, chicago_date: chicago.date, runs: started };
+}
+
+async function runStudioDailyIdeas(request, env, authorization, ctx, options = {}) {
+  const result = await executeStudioDailyIdeas(env, ctx, options);
+  if (!request) return result;
+  return respond(request, env, { ok: true, ...result }, result.started ? 202 : 200);
+}
+
+async function scheduleStudioPublishOutput(request, env, url, authorization) {
+  const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/schedule$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const value = String(payload?.scheduled_post_date || "").trim();
+  if (!value || Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
+  const iso = new Date(value).toISOString();
+  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Scheduled_Post_Date: iso,
+        Publish_Status: "Ready to Publish",
+      },
+      typecast: true,
+    }),
+  });
+  return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
+}
+
+async function markStudioOutputPublished(request, env, url, authorization) {
+  const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/published$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const postUrl = String(payload?.platform_post_url || "").trim();
+  if (!postUrl) throw new HttpError(400, "Platform post URL is required");
+  const notes = String(payload?.notes || "").trim();
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  const existingNotes = String(f(current, "Output_Notes") || "").trim();
+  const stamp = new Date().toISOString();
+  const appended = [existingNotes, `Studio Operations publish confirmation at ${stamp}.\nPlatform post URL: ${postUrl}${notes ? `\nNotes: ${notes}` : ""}`].filter(Boolean).join("\n\n");
+  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Platform_Post_URL: postUrl,
+        Publish_Status: "Published",
+        Output_Status: "Published",
+        Published_At: stamp,
+        Output_Notes: appended.slice(0, 10000),
+      },
+      typecast: true,
+    }),
+  });
+  return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
+}
+
+async function pulseA1SForDriveFile(request, env, authorization, ctx) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const driveFileId = String(payload?.drive_file_id || "").trim();
+  if (!driveFileId) throw new HttpError(400, "drive_file_id is required");
+  const state = await phase6ScenarioState(env, STUDIO_A1S_SCENARIO_ID);
+  if (state?.isActive) throw new HttpError(409, "A1S is already running");
+  const task = (async () => {
+    try {
+      await phase6SetScenarioActive(env, STUDIO_A1S_SCENARIO_ID, true);
+      try { await phase6RunScenario(env, STUDIO_A1S_SCENARIO_ID, { drive_file_id: driveFileId }); } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 8000));
+    } finally {
+      try { await phase6StopScenarioVerified(env, STUDIO_A1S_SCENARIO_ID, 4); } catch (error) {
+        console.error("Could not restore A1S OFF", error);
+      }
+    }
+  })();
+  if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
+  return respond(request, env, {
+    ok: true,
+    triggered: "on-demand-run",
+    drive_file_id: driveFileId,
+    message: "A1S was pulsed because this file is over 100 MB. It still scans eligible oversized Drive videos until the file-id webhook is the A1S start module.",
+  }, 202);
+}
 

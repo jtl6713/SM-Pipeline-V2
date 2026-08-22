@@ -142,4 +142,6 @@ Dashboard card open Pages deploy: 2026-08-21 - Pipeline dashboard metric cards o
 
 Dashboard keep-cards Pages deploy: 2026-08-21 - Dashboard cards stay on the page and filter the list below instead of switching views. UI 0.6.92-dashboard-keep.
 
+Operations Pages deploy: 2026-08-22 - Add Operations for per-profile daily ideas, ready-to-schedule / ready-to-publish queues, and oversized compression pulses. UI 0.6.93-operations.
+
 

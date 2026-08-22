@@ -74,7 +74,8 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.92-dashboard-keep";
+  const BUILD_ID = "item4-0.6.93-operations";
+  let studioSession = null;
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -136,6 +137,16 @@
   });
 
   $("refreshDashboard").addEventListener("click", () => loadDashboard(true));
+  $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
+    try {
+      setOperationsMessage("Starting daily idea run…");
+      const result = await api("/api/operations/ideas/run-daily", { method: "POST", body: JSON.stringify({}) });
+      setOperationsMessage(result.skipped ? `Skipped: ${result.skipped}` : `Started I1 for ${(result.runs || []).length} profile(s).`);
+      loadOperations();
+    } catch (error) {
+      setOperationsMessage(error.message || "Daily idea run failed.", "error-text");
+    }
+  });
 
   async function api(path, options = {}) {
     const { timeoutMs = 25000, signal: explicitSignal, ...fetchOptions } = options;
@@ -288,6 +299,9 @@
   async function checkHealth() {
     try {
       const [health, session] = await Promise.all([api("/api/health"), api("/api/session")]);
+      studioSession = session;
+      const navOps = $("navOperations");
+      if (navOps) navOps.hidden = !(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
       if (!health.airtable_configured) {
         $("apiStatus").textContent = "API needs Airtable configuration";
       } else if (session.authorized && session.user?.display_name) {
@@ -6784,6 +6798,156 @@
     } catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
   }
 
+  function setOperationsMessage(text, className = "") {
+    const node = $("operationsMessage");
+    if (!node) return;
+    node.textContent = text || "";
+    node.className = `form-message ${className}`.trim();
+  }
+
+  function opsKitText(record) {
+    return [record?.output_title, record?.output_caption, record?.output_hashtags].filter(Boolean).join("\n\n");
+  }
+
+  function renderOperationsProfiles(profiles, canEdit) {
+    const target = $("operationsProfiles");
+    if (!target) return;
+    if (!profiles.length) {
+      target.innerHTML = '<div class="empty">No Content Profiles were returned.</div>';
+      return;
+    }
+    target.innerHTML = profiles.map((profile) => `
+      <article class="ops-profile-card" data-profile-id="${escapeHtml(profile.id)}">
+        <div>
+          <strong>${value(profile.name)}</strong>
+          <div class="subtle">${profile.active ? "Active profile" : "Inactive profile"}</div>
+        </div>
+        <label><input type="checkbox" data-ops-idea-toggle ${profile.idea_generation_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Daily ideas</label>
+        <label>Limit <input type="number" min="1" max="10" step="1" value="${escapeHtml(String(profile.daily_idea_limit || 5))}" data-ops-idea-limit ${canEdit ? "" : "disabled"}></label>
+      </article>
+    `).join("");
+    target.querySelectorAll(".ops-profile-card").forEach((card) => {
+      const save = async () => {
+        if (!canEdit) return;
+        try {
+          await api(`/api/operations/profiles/${encodeURIComponent(card.dataset.profileId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              idea_generation_enabled: Boolean(card.querySelector("[data-ops-idea-toggle]")?.checked),
+              daily_idea_limit: Number(card.querySelector("[data-ops-idea-limit]")?.value || 5),
+            }),
+          });
+          setOperationsMessage("Profile cadence saved.");
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not save profile cadence.", "error-text");
+        }
+      };
+      card.querySelector("[data-ops-idea-toggle]")?.addEventListener("change", save);
+      card.querySelector("[data-ops-idea-limit]")?.addEventListener("change", save);
+    });
+  }
+
+  function renderOperationsQueue(target, records, kind) {
+    if (!target) return;
+    if (!records.length) {
+      target.innerHTML = `<div class="empty">${kind === "schedule" ? "Nothing waiting for a post date." : "Nothing is due to publish."}</div>`;
+      return;
+    }
+    target.innerHTML = `<table class="data-table"><thead><tr><th>Output</th><th>Platform</th><th>Status</th><th>Action</th></tr></thead><tbody>${records.map((record) => {
+      const links = [
+        record.final_file_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.final_file_url)}">Final file</a>` : "",
+        record.thumbnail_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.thumbnail_url)}">Thumbnail</a>` : "",
+      ].filter(Boolean).join(" · ");
+      const action = kind === "schedule"
+        ? `<form class="ops-inline-form" data-ops-schedule="${escapeHtml(record.id)}"><input type="datetime-local" required><button type="submit" class="secondary-button">Set date</button></form>`
+        : `<form class="ops-inline-form" data-ops-published="${escapeHtml(record.id)}"><input type="url" required placeholder="https://… live post URL"><button type="submit" class="secondary-button">Mark published</button></form>`;
+      return `<tr><td><div class="title-cell">Output ${value(record.output_id)} · ${value(record.output_title)}</div><div class="subtle">${links || "No file links"}</div><div class="ops-kit">${escapeHtml(opsKitText(record) || "No caption yet")}</div></td><td>${value(record.platform)}</td><td>${badge(record.studio_state || record.publish_status)}</td><td>${action}</td></tr>`;
+    }).join("")}</tbody></table>`;
+    target.querySelectorAll("[data-ops-schedule]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const input = form.querySelector("input");
+        try {
+          await api(`/api/operations/outputs/${encodeURIComponent(form.dataset.opsSchedule)}/schedule`, {
+            method: "POST",
+            body: JSON.stringify({ scheduled_post_date: input.value }),
+          });
+          setOperationsMessage("Schedule date saved.");
+          loadOperations(true);
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not save schedule.", "error-text");
+        }
+      });
+    });
+    target.querySelectorAll("[data-ops-published]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const input = form.querySelector("input");
+        try {
+          await api(`/api/operations/outputs/${encodeURIComponent(form.dataset.opsPublished)}/published`, {
+            method: "POST",
+            body: JSON.stringify({ platform_post_url: input.value }),
+          });
+          setOperationsMessage("Marked published.");
+          loadOperations(true);
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not mark published.", "error-text");
+        }
+      });
+    });
+  }
+
+  function renderOperationsOversized(records, canCompress) {
+    const target = $("operationsOversizedList");
+    if (!target) return;
+    if (!records.length) {
+      target.innerHTML = '<div class="empty">No oversized Drive videos are waiting.</div>';
+      return;
+    }
+    target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Action</th></tr></thead><tbody>${records.map((record) => `
+      <tr>
+        <td><div class="title-cell">${value(record.name)}</div>${record.google_drive_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.google_drive_url)}">Open in Drive</a>` : ""}</td>
+        <td>${value(record.file_size_mb)} MB</td>
+        <td>${canCompress ? `<button type="button" class="secondary-button" data-ops-compress="${escapeHtml(record.google_drive_file_id)}">Compress</button>` : "Admin only"}</td>
+      </tr>
+    `).join("")}</tbody></table>`;
+    target.querySelectorAll("[data-ops-compress]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await api("/api/operations/compress", {
+            method: "POST",
+            body: JSON.stringify({ drive_file_id: button.dataset.opsCompress }),
+          });
+          setOperationsMessage("Compression pulse started for that Drive file.");
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not start compression.", "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+  async function loadOperations() {
+    const meta = $("operationsIdeaMeta");
+    if (meta) meta.textContent = "Loading operations…";
+    try {
+      const data = await api("/api/operations");
+      if (meta) {
+        meta.textContent = `Chicago date ${data.chicago_date || "—"}. Last daily I1: ${data.last_daily_idea_date || "not yet"}.`;
+      }
+      renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
+      renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
+      renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");
+      renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles));
+      const run = $("operationsRunDailyIdeas");
+      if (run) run.hidden = !data.can_edit_profiles;
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not load operations.", "error-text");
+      if (meta) meta.textContent = "Unable to load operations.";
+    }
+  }
+
   function loadPage(page) {
     if (page === "home") return;
     if (page === "dashboard") return loadDashboard();
@@ -6791,6 +6955,7 @@
     if (page === "content") return loadContent();
     if (page === "outputs") return loadOutputs();
     if (page === "music") return loadMusic();
+    if (page === "operations") return loadOperations();
   }
 
 

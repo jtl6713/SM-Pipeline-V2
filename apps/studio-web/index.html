@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.92-dashboard-keep">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.93-operations">
 </head>
 <body>
  <header class="topbar">
@@ -32,8 +32,9 @@
  <button class="nav-item" data-page="content">Production</button>
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
+ <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.92</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.93</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -889,6 +890,33 @@
  <div class="page-heading"><div><span class="eyebrow">Background audio</span><h1>Music library</h1><p>Browse the current Airtable background-music catalogue and preview available tracks before production.</p></div><button class="secondary-button" data-refresh="music">Refresh</button></div>
  <section class="panel"><div id="musicList" class="music-grid"></div></section>
  </section>
+
+ <section id="page-operations" class="page">
+ <div class="page-heading">
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, manual publish queues, and oversized library compression. This replaces Make clocks for I1, PUB1–PUB3, and A1S.</p></div>
+ <button class="secondary-button" data-refresh="operations">Refresh</button>
+ </div>
+ <div class="form-message" id="operationsMessage" aria-live="polite"></div>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, the Worker runs I1 once per Chicago day around 1:00 a.m. for that profile only.</p></div>
+ <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run today now</button>
+ </div>
+ <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
+ <div id="operationsProfiles" class="ops-profile-list"></div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Ready to schedule</h2><p>Approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</p></div></div>
+ <div id="operationsScheduleList" class="table-wrap"></div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Ready to publish</h2><p>Due packages. Auto-publish still runs from Pipeline review. Use this when you posted by hand and need to mark them published.</p></div></div>
+ <div id="operationsPublishList" class="table-wrap"></div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB. Compress starts A1S for that Drive file instead of a daily folder scan.</p></div></div>
+ <div id="operationsOversizedList" class="table-wrap"></div>
+ </section>
+ </section>
  </main>
  </div>
 
@@ -1016,7 +1044,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.92-dashboard-keep"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.92-dashboard-keep"></script>
+ <script src="/assets/ez-plan.js?v=0.6.93-operations"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.93-operations"></script>
 </body>
 </html>

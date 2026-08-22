@@ -30,3 +30,6 @@ Publish dispatch Worker deploy: 2026-08-21 — Approve pulses the exact IG/FB/TikT
 
 Cadence park Worker deploy: 2026-08-21 — Production Make cadence stays OFF so Studio page loads do not reactivate interval orchestrators. Worker 0.10.53-cadence-parked.
 
+Operations Worker deploy: 2026-08-22 — Studio Operations gates daily I1 per Content Profile, exposes PUB1/PUB2 queues and manual published confirmation, and pulses A1S for oversized Drive files instead of interval clocks. Worker 0.10.54-operations.
+
+

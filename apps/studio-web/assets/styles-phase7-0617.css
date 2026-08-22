@@ -928,4 +928,13 @@ input, select, textarea, button {
 .pipeline-filter-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);background:#f9fbfb;font-size:.82rem;font-weight:700;color:var(--muted)}
 .pipeline-filter-bar[hidden]{display:none!important}
 .pipeline-filter-bar .secondary-button{padding:7px 10px;font-size:.78rem}
+.ops-profile-list{display:grid;gap:12px;padding:16px 20px}
+.ops-profile-card{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fbfdfd}
+.ops-profile-card strong{display:block}
+.ops-profile-card .subtle{margin-top:3px}
+.ops-profile-card label{display:flex;align-items:center;gap:8px;font-size:.82rem;font-weight:700;white-space:nowrap}
+.ops-profile-card input[type="number"]{width:72px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+.ops-inline-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.ops-inline-form input{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;min-width:180px}
+.ops-kit{max-width:720px;white-space:pre-wrap;background:#f9fafb;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:.8rem}
 
