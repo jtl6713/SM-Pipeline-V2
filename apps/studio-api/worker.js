@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.77-youtube-16x9-all",
+          version: "0.10.78-item4-queue-owner",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -175,6 +175,7 @@ export default {
           studio_item4_calm_bridge_preflight_v1: true,
           studio_ai_thumbnail_v1: true,
           studio_youtube_16x9_all_v1: true,
+          studio_item4_queue_owner_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -687,6 +688,11 @@ export default {
         await syncProductionCadence(env, { force: true, skipRenderPulse: true });
       } catch (error) {
         console.warn("production cadence cron failed", error);
+      }
+      try {
+        await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
+      } catch (error) {
+        console.warn("item4 queue drain cron failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -3811,7 +3817,8 @@ const ITEM4_SMV1_SCENARIO_ID = 5894885;
 const ITEM4_VARIANT_RECIPE_VERSION = "fill-crop-v2";
 const ITEM4_DRAIN_POST_BUDGET_MS = 20000;
 const ITEM4_DRAIN_STATUS_BUDGET_MS = 12000;
-const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 25000;
+const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 90000;
+const ITEM4_DRAIN_CRON_BUDGET_MS = 90000;
 const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
 const ITEM4_P3_SCENARIO_ID = 5531703;
@@ -4156,8 +4163,22 @@ function item4Smv1FormulaQuoted(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 function item4Smv1ExactTestFormula(recordId, testRunId) {
-  return `AND({Production_Request_Record_ID}="${item4Smv1FormulaQuoted(recordId)}",{Test_Run_ID}="${item4Smv1FormulaQuoted(testRunId)}",${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
+  return item4Smv1ExactRequestFormula(recordId, testRunId);
 }
+
+function item4Smv1ExactRequestFormula(recordId, testRunId = "") {
+  const testClause = testRunId
+    ? `{Test_Run_ID}="${item4Smv1FormulaQuoted(testRunId)}"`
+    : `{Test_Run_ID}=BLANK()`;
+  return `AND({Production_Request_Record_ID}="${item4Smv1FormulaQuoted(recordId)}",${testClause},${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
+}
+
+function item4QueueRowIsOutstanding(row) {
+  const status = item4QueueStatus(row);
+  if (["Pending", "Drive Uploaded", "Processing"].includes(status)) return true;
+  return status === "Ready" && String(f(row, "Preview_Status") || "").trim() === "Pending";
+}
+
 async function item4SetSmv1SelectorFormula(env, formula) {
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
   const read = async () => {
@@ -4188,49 +4209,40 @@ async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
   const originalState = await phase6ScenarioState(env, ITEM4_SMV1_SCENARIO_ID);
   if (testRunId && originalState.isActive) throw new HttpError(409, "Test Mode refuses to seize an already-active SMV1 scenario");
   const executionIds = [];
+  let selectorPinned = false;
 
   try {
+    await item4SetSmv1SelectorFormula(env, item4Smv1ExactRequestFormula(recordId, testRunId));
+    selectorPinned = true;
+
     for (let attempt = 0; attempt < maxRuns; attempt += 1) {
       if (maxMs > 0 && (Date.now() - started) >= maxMs) break;
       const current = await item4VariantQueueRows(env, recordId);
-      const outstanding = current.filter((row) =>
-        ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
-      );
+      const outstanding = current.filter(item4QueueRowIsOutstanding);
       if (!outstanding.length) break;
       if (testRunId) {
-        const crossBoundary=current.filter((row)=>String(f(row,"Test_Run_ID")||"").trim()!==testRunId);
-        if(crossBoundary.length) throw new HttpError(409,"SMV1 Test Mode queue contains a blank or mismatched Test_Run_ID");
+        const crossBoundary = current.filter((row) => String(f(row, "Test_Run_ID") || "").trim() !== testRunId);
+        if (crossBoundary.length) throw new HttpError(409, "SMV1 Test Mode queue contains a blank or mismatched Test_Run_ID");
       }
 
       if (!originalState.isActive) {
-        // SMV1 Module 1 reads maxRecords=1. After on-demand scheduling, /start
-        // does not consume a queue row; /run does.
-        let exactTestSelectorInstalled=false;
-        try {
-          if(testRunId){await item4SetSmv1SelectorFormula(env,item4Smv1ExactTestFormula(recordId,testRunId));exactTestSelectorInstalled=true;}
-          const run = await phase6PulseOnDemandScenario(env, ITEM4_SMV1_SCENARIO_ID, { waitMs: 45000 });
-          if (run?.executionId) executionIds.push(run.executionId);
-        } finally {
-          if(exactTestSelectorInstalled) await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);
-        }
+        // SMV1 Module 1 reads maxRecords=1. Pinning the selector to this
+        // Production Request is what makes one pulse consume this request's
+        // next row instead of a random pending crop from another piece.
+        const run = await phase6PulseOnDemandScenario(env, ITEM4_SMV1_SCENARIO_ID, { waitMs: 45000 });
+        if (run?.executionId) executionIds.push(run.executionId);
 
-        // Give Make/Airtable a short reconciliation window before deciding
-        // whether another pulse is needed.
         const beforeIds = new Set(outstanding.map((row) => row.id));
         for (let wait = 0; wait < 6; wait += 1) {
           if (maxMs > 0 && (Date.now() - started) >= maxMs) break;
           await new Promise((resolve) => setTimeout(resolve, 1000));
           const after = await item4VariantQueueRows(env, recordId);
-          const stillOutstanding = after.filter((row) =>
-            beforeIds.has(row.id) && ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
-          );
+          const stillOutstanding = after.filter((row) => beforeIds.has(row.id) && item4QueueRowIsOutstanding(row));
           if (stillOutstanding.length < outstanding.length) break;
         }
         continue;
       }
 
-      // If SMV1 was already active before Item 4 touched it, preserve that
-      // operating state and use Make's explicit run endpoint instead.
       const run = await phase6RunScenario(env, ITEM4_SMV1_SCENARIO_ID);
       executionIds.push(run.executionId);
       const remaining = maxMs > 0 ? Math.max(1500, maxMs - (Date.now() - started)) : 60000;
@@ -4246,13 +4258,60 @@ async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
       }
     }
   } finally {
+    if (selectorPinned) {
+      try { await item4SetSmv1SelectorFormula(env, ITEM4_SMV1_PRODUCTION_FORMULA); } catch {}
+    }
     if (!originalState.isActive) {
       try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
     }
-    if(testRunId){try{await item4SetSmv1SelectorFormula(env,ITEM4_SMV1_PRODUCTION_FORMULA);}catch{}}
   }
 
   return executionIds;
+}
+
+async function item4ListPendingQueueRequestIds(env) {
+  const rows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
+    limit: 100,
+    filterFormula: ITEM4_SMV1_PRODUCTION_FORMULA,
+  }).catch((error) => {
+    console.warn("Item 4 pending queue scan failed", error);
+    return [];
+  });
+  return [...new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => String(f(row, "Production_Request_Record_ID") || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id))
+  )];
+}
+
+async function item4DrainAllPendingWork(env, options = {}) {
+  // Worker owns the Item 4 queue. Browser polling and HTTP timeboxes may stop;
+  // cron must keep draining until every pending master/variant row is gone.
+  const maxMs = Number(options.maxMs || ITEM4_DRAIN_CRON_BUDGET_MS);
+  const started = Date.now();
+  const requestIds = await item4ListPendingQueueRequestIds(env);
+  const drained = [];
+  for (const recordId of requestIds) {
+    if (Date.now() - started >= maxMs) break;
+    const remaining = Math.max(4000, maxMs - (Date.now() - started));
+    const rows = await item4VariantQueueRows(env, recordId);
+    const outstanding = rows.filter(item4QueueRowIsOutstanding);
+    if (!outstanding.length) {
+      try { await item4ReconcileMasterAuthority(env, recordId); } catch {}
+      try { await item4ReconcileVariants(env, recordId); } catch {}
+      continue;
+    }
+    const executionIds = await item4DrainVariantWorker(
+      env,
+      recordId,
+      Math.min(20, outstanding.length + 2),
+      { maxMs: remaining }
+    );
+    try { await item4ReconcileMasterAuthority(env, recordId); } catch {}
+    try { await item4ReconcileVariants(env, recordId); } catch {}
+    drained.push({ record_id: recordId, outstanding: outstanding.length, executions: executionIds.length });
+  }
+  return { request_ids: requestIds, drained };
 }
 
 function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios = null) {
@@ -4668,12 +4727,7 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   }
 
   const failed = scoped.filter((row) => item4QueueStatus(row) === "Failed");
-  const outstanding = scoped.filter((row) => {
-    const status = item4QueueStatus(row);
-    const preview = String(f(row, "Preview_Status") || "").trim();
-    if (["Pending", "Drive Uploaded", "Processing"].includes(status)) return true;
-    return status === "Ready" && preview === "Pending";
-  });
+  const outstanding = scoped.filter(item4QueueRowIsOutstanding);
   if (failed.length && !outstanding.length) {
     const reconciled = await item4ReconcileVariants(env, recordId, currentRecord);
     return { attempted: false, reason: "variant-failure-present", record: reconciled.record, execution_ids: [] };
@@ -4684,7 +4738,7 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
     return { attempted: false, reason: "no-pending-variants", record: reconciled.record, execution_ids: [] };
   }
 
-  const maxRuns = Math.min(6, Math.max(1, outstanding.length));
+  const maxRuns = Math.min(20, Math.max(1, outstanding.length + 2));
   const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns, { maxMs: ITEM4_DRAIN_STATUS_BUDGET_MS });
   const reconciled = await item4ReconcileVariants(env, recordId);
   return {
@@ -12009,11 +12063,21 @@ async function pulseOnDemandPublishChain(env) {
 }
 
 async function pulseOnDemandMediaChain(env) {
+  const pulses = [];
+  try {
+    const drain = await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
+    pulses.push({
+      key: "SMV1",
+      drained: true,
+      requests: drain.request_ids.length,
+      completed: drain.drained.length,
+    });
+  } catch (error) {
+    pulses.push({ key: "SMV1", error: error instanceof Error ? error.message : String(error) });
+  }
   const jobs = [
-    { id: 5894885, key: "SMV1", table: ITEM4_VARIANT_QUEUE_TABLE, formula: ITEM4_SMV1_PRODUCTION_FORMULA },
     { id: 5893683, key: "P020-2", table: PHASE6_CAROUSEL_SLIDES_TABLE, formula: 'AND({Slide_Voiceover_Status}="Ready",{Deleted From Carousel}=0,{Slide_Voiceover_Text}!="",{Slide_Voice_ID}!="",{Studio_Voice_Prep_Request_ID}!="")' },
   ];
-  const pulses = [];
   for (const job of jobs) {
     const hasWork = await cadenceQueueHasWork(env, job.table, { formula: job.formula });
     if (!hasWork) {

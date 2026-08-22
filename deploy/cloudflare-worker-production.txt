@@ -77,3 +77,5 @@ AI thumbnail Worker deploy: 2026-08-22 - Video covers default to AI generated 3D
 
 YouTube 16:9 all Worker deploy: 2026-08-22 - Prepare stays open until every YouTube 16:9 crop exists, not only the 9:16 plan set. Worker 0.10.77-youtube-16x9-all.
 
+Item 4 queue owner Worker deploy: 2026-08-22 - Cron drains every pending master/variant row, pinned to that request, until the queue is empty. Browser polling is not the conductor. Worker 0.10.78-item4-queue-owner.
+
