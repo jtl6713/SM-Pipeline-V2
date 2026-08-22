@@ -2,9 +2,21 @@
   --bg:#f3f6fa;--panel:#fff;--ink:#0c1c33;--muted:#5d6b7d;--line:#d8e0ea;
   --teal:#1a4d8c;--teal-dark:#0d3674;--teal-soft:#e8eef7;--gold:#d8aa45;
   --red:#b42318;--red-soft:#fff0ee;--amber:#9a6700;--amber-soft:#fff7db;--blue:#175cd3;--blue-soft:#eff4ff;
-  --shadow:0 10px 28px rgba(16,35,38,.06)
+  --shadow:0 10px 28px rgba(16,35,38,.06);
+  --topbar-bg:#012559;
+  --home-canvas:#012559;
+  --home-hero:url("/assets/home/chicago-skyline-dusk.jpg");
+  --home-idea:url("/assets/home/chicago-cloud-gate.jpg");
+  --home-content:url("/assets/home/chicago-theatre.jpg");
+  --home-hero-overlay:linear-gradient(180deg,rgba(1,37,89,.22) 0%,rgba(13,54,116,.18) 42%,rgba(1,29,69,.58) 100%);
+  --home-choice-bg:#0a1d3f;
+  --home-choice-step:#0d3674;
+  --home-choice-step-alt:#1a4d8c;
+  --home-choice-overlay:linear-gradient(180deg,rgba(13,54,116,.22),rgba(1,29,69,.58));
+  --home-choice-overlay-alt:linear-gradient(180deg,rgba(26,77,140,.22),rgba(1,29,69,.58));
+  --home-choice-body:linear-gradient(180deg,rgba(10,29,63,.32),rgba(1,29,69,.82))
 }
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.topbar{height:72px;background:#012559;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:5}.brand-wrap{display:flex;align-items:center;gap:12px}.brand-mark{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:var(--teal);font-weight:900}.brand-name{font-weight:800}.brand-subtitle{font-size:.78rem;color:#c5d3e8}.topbar-status{font-size:.82rem;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.1)}.shell{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 72px)}.sidebar{background:#fff;border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;gap:7px}.nav-item{border:0;background:transparent;text-align:left;padding:11px 13px;border-radius:11px;font:inherit;color:var(--muted);cursor:pointer}.nav-item:hover,.nav-item.active{background:var(--teal-soft);color:var(--teal-dark);font-weight:750}.nav-divider{height:1px;background:var(--line);margin:12px 5px}.nav-note{font-size:.75rem;color:var(--muted);padding:0 12px}.main{padding:34px;min-width:0}.page{display:none}.page.active{display:block}.page-heading{display:flex;gap:20px;align-items:flex-start;justify-content:space-between;margin-bottom:24px}.eyebrow{text-transform:uppercase;letter-spacing:.1em;font-size:.72rem;font-weight:850;color:var(--teal)}h1{font-size:2rem;margin:5px 0 7px}h2{font-size:1.05rem;margin:0 0 4px}.page-heading p,.panel-heading p{margin:0;color:var(--muted)}.secondary-button{border:1px solid var(--line);background:#fff;color:var(--ink);padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}.secondary-button:hover{border-color:#8aa3c4}.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:13px;margin-bottom:22px}.metric{background:#fff;border:1px solid var(--line);border-radius:16px;padding:17px;box-shadow:var(--shadow)}.metric-label{font-size:.75rem;color:var(--muted);margin-bottom:8px}.metric-value{font-size:1.75rem;font-weight:850}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.panel-heading{padding:18px 20px;border-bottom:1px solid var(--line)}.table-wrap{overflow:auto}.data-table{width:100%;border-collapse:collapse;min-width:780px}.data-table th{font-size:.73rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;padding:12px 14px;background:#f9fbfb;border-bottom:1px solid var(--line)}.data-table td{padding:13px 14px;border-bottom:1px solid #edf2f1;vertical-align:top}.data-table tr:last-child td{border-bottom:0}.title-cell{font-weight:750}.subtle{font-size:.8rem;color:var(--muted);margin-top:3px}.badge{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:#eef3f2;font-size:.75rem;font-weight:800;white-space:nowrap}.badge.published{background:#e8f7ef;color:#067647}.badge.failed{background:var(--red-soft);color:var(--red)}.badge.attention,.badge.retry-pending,.badge.manual-action-required{background:var(--amber-soft);color:var(--amber)}.badge.rendering,.badge.uploading,.badge.platform-processing{background:var(--blue-soft);color:var(--blue)}.badge.ready-for-review,.badge.approved,.badge.draft-delivered{background:var(--teal-soft);color:var(--teal-dark)}.empty,.error{padding:28px;color:var(--muted);text-align:center}.error{color:var(--red)}.music-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:18px}.music-card{border:1px solid var(--line);border-radius:14px;padding:15px;background:#fbfdfd}.music-card h3{font-size:.95rem;margin:0 0 6px}.music-meta{font-size:.78rem;color:var(--muted);margin-bottom:10px}.music-actions{display:flex;gap:8px}.link-button{display:inline-block;border:1px solid var(--line);padding:7px 9px;border-radius:9px;color:var(--teal-dark);text-decoration:none;font-size:.78rem;font-weight:750}.progress{height:8px;border-radius:999px;background:#e8eeee;overflow:hidden;margin-top:5px}.progress>span{display:block;height:100%;background:var(--teal)}@media(max-width:1100px){.metrics{grid-template-columns:repeat(3,1fr)}.music-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.shell{grid-template-columns:1fr}.sidebar{position:sticky;top:72px;z-index:4;flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:10px}.nav-divider,.nav-note{display:none}.nav-item{white-space:nowrap}.main{padding:22px 16px}.metrics{grid-template-columns:repeat(2,1fr)}.music-grid{grid-template-columns:1fr}.page-heading{align-items:stretch;flex-direction:column}.secondary-button{align-self:flex-start}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.topbar{height:72px;background:var(--topbar-bg);color:#fff;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 28px;position:sticky;top:0;z-index:5}.brand-wrap{display:flex;align-items:center;gap:12px}.brand-mark{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:var(--teal);font-weight:900}.brand-name{font-weight:800}.brand-subtitle{font-size:.78rem;color:#c5d3e8}.topbar-status{font-size:.82rem;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.1)}.shell{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 72px)}.sidebar{background:#fff;border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;gap:7px}.nav-item{border:0;background:transparent;text-align:left;padding:11px 13px;border-radius:11px;font:inherit;color:var(--muted);cursor:pointer}.nav-item:hover,.nav-item.active{background:var(--teal-soft);color:var(--teal-dark);font-weight:750}.nav-divider{height:1px;background:var(--line);margin:12px 5px}.nav-note{font-size:.75rem;color:var(--muted);padding:0 12px}.main{padding:34px;min-width:0}.page{display:none}.page.active{display:block}.page-heading{display:flex;gap:20px;align-items:flex-start;justify-content:space-between;margin-bottom:24px}.eyebrow{text-transform:uppercase;letter-spacing:.1em;font-size:.72rem;font-weight:850;color:var(--teal)}h1{font-size:2rem;margin:5px 0 7px}h2{font-size:1.05rem;margin:0 0 4px}.page-heading p,.panel-heading p{margin:0;color:var(--muted)}.secondary-button{border:1px solid var(--line);background:#fff;color:var(--ink);padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}.secondary-button:hover{border-color:#8aa3c4}.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:13px;margin-bottom:22px}.metric{background:#fff;border:1px solid var(--line);border-radius:16px;padding:17px;box-shadow:var(--shadow)}.metric-label{font-size:.75rem;color:var(--muted);margin-bottom:8px}.metric-value{font-size:1.75rem;font-weight:850}.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.panel-heading{padding:18px 20px;border-bottom:1px solid var(--line)}.table-wrap{overflow:auto}.data-table{width:100%;border-collapse:collapse;min-width:780px}.data-table th{font-size:.73rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;padding:12px 14px;background:#f9fbfb;border-bottom:1px solid var(--line)}.data-table td{padding:13px 14px;border-bottom:1px solid #edf2f1;vertical-align:top}.data-table tr:last-child td{border-bottom:0}.title-cell{font-weight:750}.subtle{font-size:.8rem;color:var(--muted);margin-top:3px}.badge{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:#eef3f2;font-size:.75rem;font-weight:800;white-space:nowrap}.badge.published{background:#e8f7ef;color:#067647}.badge.failed{background:var(--red-soft);color:var(--red)}.badge.attention,.badge.retry-pending,.badge.manual-action-required{background:var(--amber-soft);color:var(--amber)}.badge.rendering,.badge.uploading,.badge.platform-processing{background:var(--blue-soft);color:var(--blue)}.badge.ready-for-review,.badge.approved,.badge.draft-delivered{background:var(--teal-soft);color:var(--teal-dark)}.empty,.error{padding:28px;color:var(--muted);text-align:center}.error{color:var(--red)}.music-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:18px}.music-card{border:1px solid var(--line);border-radius:14px;padding:15px;background:#fbfdfd}.music-card h3{font-size:.95rem;margin:0 0 6px}.music-meta{font-size:.78rem;color:var(--muted);margin-bottom:10px}.music-actions{display:flex;gap:8px}.link-button{display:inline-block;border:1px solid var(--line);padding:7px 9px;border-radius:9px;color:var(--teal-dark);text-decoration:none;font-size:.78rem;font-weight:750}.progress{height:8px;border-radius:999px;background:#e8eeee;overflow:hidden;margin-top:5px}.progress>span{display:block;height:100%;background:var(--teal)}@media(max-width:1100px){.metrics{grid-template-columns:repeat(3,1fr)}.music-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.shell{grid-template-columns:1fr}.sidebar{position:sticky;top:72px;z-index:4;flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:10px}.nav-divider,.nav-note{display:none}.nav-item{white-space:nowrap}.main{padding:22px 16px}.metrics{grid-template-columns:repeat(2,1fr)}.music-grid{grid-template-columns:1fr}.page-heading{align-items:stretch;flex-direction:column}.secondary-button{align-self:flex-start}}
 
 .raw-filename{font-size:.7rem;color:#839295;margin:-2px 0 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.music-preview{display:block;width:100%;margin:12px 0 10px;height:36px}.table-link{display:inline-block;margin-top:5px;color:var(--teal-dark);font-size:.76rem;font-weight:750;text-decoration:none}.table-link:hover{text-decoration:underline}.empty strong{color:var(--ink);font-size:.95rem}
 
@@ -644,7 +656,7 @@ input, select, textarea, button {
 .creative-slide-card.title-locked .slide-control-section-title{color:#8a6d1b}
 .creative-editor-shell.title-edit-locked #creativeUnlockTitles{display:inline-flex}
 
-.main:has(#page-home.active){padding:0;background:#012559}
+.main:has(#page-home.active){padding:0;background:var(--home-canvas)}
 #page-home.page.active{min-height:calc(100vh - 72px)}
 .ez-path-fork{
   position:relative;
@@ -656,7 +668,7 @@ input, select, textarea, button {
   overflow:hidden;
   border:0;
   border-radius:0;
-  background:#012559;
+  background:var(--home-canvas);
   box-shadow:none;
   color:#eef4ff
 }
@@ -664,9 +676,7 @@ input, select, textarea, button {
   content:"";
   position:absolute;
   inset:0;
-  background-image:
-    linear-gradient(180deg,rgba(1,37,89,.22) 0%,rgba(13,54,116,.18) 42%,rgba(1,29,69,.58) 100%),
-    url("/assets/home/chicago-skyline-dusk.jpg");
+  background-image:var(--home-hero-overlay),var(--home-hero);
   background-size:cover;
   background-position:center 38%;
   transform:scale(1.05);
@@ -703,7 +713,7 @@ input, select, textarea, button {
   cursor:pointer;
   font:inherit;
   color:#eef4ff;
-  background:#0a1d3f;
+  background:var(--home-choice-bg);
   transform:translateY(0) rotateX(0);
   transform-style:preserve-3d;
   box-shadow:
@@ -723,17 +733,17 @@ input, select, textarea, button {
   content:"";
   position:absolute;
   inset:0;
-  background:linear-gradient(180deg,rgba(13,54,116,.22),rgba(1,29,69,.58))
+  background:var(--home-choice-overlay)
 }
-.ez-path-choice--idea .ez-path-choice-visual{background-image:url("/assets/home/chicago-cloud-gate.jpg")}
-.ez-path-choice--content .ez-path-choice-visual{background-image:url("/assets/home/chicago-theatre.jpg")}
-.ez-path-choice--content .ez-path-choice-visual::after{background:linear-gradient(180deg,rgba(26,77,140,.22),rgba(1,29,69,.58))}
+.ez-path-choice--idea .ez-path-choice-visual{background-image:var(--home-idea)}
+.ez-path-choice--content .ez-path-choice-visual{background-image:var(--home-content)}
+.ez-path-choice--content .ez-path-choice-visual::after{background:var(--home-choice-overlay-alt)}
 .ez-path-choice-body{
   display:flex;
   flex-direction:column;
   gap:8px;
   padding:18px 20px 20px;
-  background:linear-gradient(180deg,rgba(10,29,63,.32),rgba(1,29,69,.82));
+  background:var(--home-choice-body);
   backdrop-filter:blur(10px);
   -webkit-backdrop-filter:blur(10px)
 }
@@ -743,10 +753,10 @@ input, select, textarea, button {
   transform:translateY(-12px) rotateX(4deg);
   box-shadow:
     0 1px 0 rgba(255,255,255,.34) inset,
-    0 18px 0 #0d3674,
+    0 18px 0 var(--home-choice-step),
     0 40px 48px rgba(0,0,0,.48)
 }
-.ez-path-choice--content:hover{box-shadow:0 1px 0 rgba(255,255,255,.34) inset,0 18px 0 #1a4d8c,0 40px 48px rgba(0,0,0,.48)}
+.ez-path-choice--content:hover{box-shadow:0 1px 0 rgba(255,255,255,.34) inset,0 18px 0 var(--home-choice-step-alt),0 40px 48px rgba(0,0,0,.48)}
 .ez-path-choice:active{
   transform:translateY(-3px) rotateX(1deg);
   box-shadow:0 1px 0 rgba(255,255,255,.22) inset,0 8px 0 #041022,0 16px 22px rgba(0,0,0,.4)
@@ -952,4 +962,77 @@ input, select, textarea, button {
 .ops-intake-stages li[data-state="processed"]{border-color:#b7d8d3}
 .ops-intake-stages li[data-state="error"]{border-color:#e3b6b6;background:#fdf6f6}
 .ops-intake-meta{padding:0 20px 16px}
+.ops-repair-actions{padding:0 20px 20px;display:flex;flex-wrap:wrap;gap:10px}
+
+.topbar-profile{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:.78rem;
+  font-weight:750;
+  color:#d7e4f7;
+  white-space:nowrap
+}
+.topbar-profile[hidden]{display:none!important}
+.topbar-profile select,
+.ez-profile-picker select{
+  border:1px solid rgba(255,255,255,.28);
+  background:rgba(0,0,0,.28);
+  color:#fff;
+  border-radius:10px;
+  padding:8px 10px;
+  font:inherit;
+  min-width:190px
+}
+.ez-profile-picker{
+  display:grid;
+  gap:8px;
+  margin-top:22px;
+  max-width:360px;
+  font-size:.82rem;
+  font-weight:750;
+  color:#eef4ff
+}
+.ez-profile-picker span{letter-spacing:.08em;text-transform:uppercase;font-size:.72rem;opacity:.88}
+
+html[data-studio-theme="la"]{
+  --bg:#faf3f2;
+  --teal:#c62828;
+  --teal-dark:#8e1515;
+  --teal-soft:#fdecea;
+  --topbar-bg:#7a1018;
+  --home-canvas:#4a0a10;
+  --home-hero:url("/assets/home/la-hollywood-sign.jpg");
+  --home-idea:url("/assets/home/la-disney-concert-hall.jpg");
+  --home-content:url("/assets/home/la-santa-monica-pier.jpg");
+  --home-hero-overlay:linear-gradient(180deg,rgba(122,16,24,.28) 0%,rgba(74,10,16,.2) 42%,rgba(48,6,10,.62) 100%);
+  --home-choice-bg:#3a0c12;
+  --home-choice-step:#8e1515;
+  --home-choice-step-alt:#c62828;
+  --home-choice-overlay:linear-gradient(180deg,rgba(198,40,40,.22),rgba(48,6,10,.58));
+  --home-choice-overlay-alt:linear-gradient(180deg,rgba(142,21,21,.22),rgba(48,6,10,.58));
+  --home-choice-body:linear-gradient(180deg,rgba(58,12,18,.32),rgba(48,6,10,.82))
+}
+html[data-studio-theme="nyc"]{
+  --bg:#f5f2fa;
+  --teal:#6d28d9;
+  --teal-dark:#4c1d95;
+  --teal-soft:#f3e8ff;
+  --topbar-bg:#2e1065;
+  --home-canvas:#1e0b3b;
+  --home-hero:url("/assets/home/nyc-manhattan-skyline.jpg");
+  --home-idea:url("/assets/home/nyc-statue-of-liberty.jpg");
+  --home-content:url("/assets/home/nyc-brooklyn-bridge.jpg");
+  --home-hero-overlay:linear-gradient(180deg,rgba(46,16,101,.3) 0%,rgba(76,29,149,.18) 42%,rgba(30,11,59,.64) 100%);
+  --home-choice-bg:#241046;
+  --home-choice-step:#4c1d95;
+  --home-choice-step-alt:#6d28d9;
+  --home-choice-overlay:linear-gradient(180deg,rgba(109,40,217,.22),rgba(30,11,59,.58));
+  --home-choice-overlay-alt:linear-gradient(180deg,rgba(76,29,149,.22),rgba(30,11,59,.58));
+  --home-choice-body:linear-gradient(180deg,rgba(36,16,70,.32),rgba(30,11,59,.82))
+}
+html[data-studio-theme="la"] .ez-path-choice--content .ez-path-choice-visual{background-image:url("/assets/home/la-santa-monica-pier.jpg")}
+html[data-studio-theme="nyc"] .ez-path-choice--content .ez-path-choice-visual{background-image:url("/assets/home/nyc-times-square.jpg")}
+
 

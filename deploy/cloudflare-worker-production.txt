@@ -49,3 +49,5 @@ On-demand SMV1/P020-2 Worker deploy: 2026-08-22 - Variant transfer and per-slide
 
 On-demand A1M/C1/C2M Worker deploy: 2026-08-22 - Oversized compress pulses A1S and A1M together. C1/C2M run when a carousel content row or manual slide is waiting, not on a 15-minute clock. Worker 0.10.62-ondemand-a1m-c1.
 
+On-demand M1/R2B Worker deploy: 2026-08-22 - M1 resets stale Remotion URLs after R5 is up or from Operations. R2B retries failed asset selection when that view has a row, not Friday 21:10. Worker 0.10.63-ondemand-m1-r2b.
+

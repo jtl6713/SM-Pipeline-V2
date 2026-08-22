@@ -74,7 +74,10 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.97-intake-logs";
+  const BUILD_ID = "item4-0.6.99-repair-pulses";
+  const PROFILE_STORAGE_KEY = "studio.content_profile_id";
+  let selectedProfileId = "";
+  let studioProfiles = [];
   const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
   const uiBuildLabel = $("uiBuildLabel");
   if (uiBuildLabel) uiBuildLabel.textContent = `UI build ${uiBuildMatch ? uiBuildMatch[1] : BUILD_ID}`;
@@ -85,6 +88,71 @@
   let pipelinePollInFlight = false;
   const PIPELINE_POLL_MS = 8000;
   const pipelineProgressHighWater = new Map();
+
+  function withStudioProfile(path) {
+    if (!selectedProfileId) return path;
+    const qIndex = String(path || "").indexOf("?");
+    const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
+    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests"].includes(pathname)) return path;
+    const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1));
+    params.set("profile", selectedProfileId);
+    return `${pathname}?${params.toString()}`;
+  }
+
+  function activeNavPage() {
+    return document.querySelector(".nav-item.active")?.dataset.page || "home";
+  }
+
+  function applyStudioProfile(profile, { reload = false } = {}) {
+    if (!profile) return;
+    selectedProfileId = profile.id;
+    try { localStorage.setItem(PROFILE_STORAGE_KEY, profile.id); } catch {}
+    document.documentElement.dataset.studioTheme = profile.theme || "chicago";
+    const city = profile.city_label || "Chicago";
+    const cityNode = $("ezPathBrandCity");
+    if (cityNode) cityNode.textContent = city;
+    const brand = $("ezPathBrand");
+    if (brand) brand.setAttribute("aria-label", `${city} Shining`);
+    const subtitle = $("brandSubtitle");
+    if (subtitle) subtitle.textContent = profile.name || "Pipeline administration";
+    document.title = `${city}Shining Studio`;
+    ["studioProfileSelect", "homeProfileSelect"].forEach((id) => {
+      const select = $(id);
+      if (select && select.value !== profile.id) select.value = profile.id;
+    });
+    if (reload) {
+      const page = activeNavPage();
+      if (page && page !== "home") loadPage(page);
+      loadDashboard(true);
+    }
+  }
+
+  function renderStudioProfileSelects() {
+    const options = studioProfiles.map((profile) =>
+      `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name || profile.city_label || profile.id)}</option>`
+    ).join("");
+    ["studioProfileSelect", "homeProfileSelect"].forEach((id) => {
+      const select = $(id);
+      if (!select) return;
+      select.innerHTML = options || '<option value="">No profiles</option>';
+      if (selectedProfileId) select.value = selectedProfileId;
+    });
+    const wrap = $("studioProfileWrap");
+    if (wrap) wrap.hidden = !studioProfiles.length;
+  }
+
+  async function loadStudioProfiles() {
+    const data = await api("/api/profiles");
+    studioProfiles = Array.isArray(data.records) ? data.records : [];
+    let stored = "";
+    try { stored = String(localStorage.getItem(PROFILE_STORAGE_KEY) || ""); } catch {}
+    const next = studioProfiles.find((profile) => profile.id === stored)
+      || studioProfiles.find((profile) => profile.id === data.default_profile_id)
+      || studioProfiles[0]
+      || null;
+    renderStudioProfileSelects();
+    if (next) applyStudioProfile(next);
+  }
 
   function pipelineDisplayPercent(record) {
     const raw = record?.studio_progress_percent ?? record?.youtube_processing_progress_percent ?? record?.youtube_upload_progress_percent;
@@ -140,6 +208,24 @@
   });
 
   $("refreshDashboard").addEventListener("click", () => loadDashboard(true));
+  $("operationsResetRenderUrls")?.addEventListener("click", async () => {
+    try {
+      setOperationsMessage("Resetting stale Remotion URLs…");
+      const result = await api("/api/operations/reset-render-urls", { method: "POST", body: JSON.stringify({}) });
+      setOperationsMessage(result.message || "M1 started.");
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not reset render URLs.", "error-text");
+    }
+  });
+  $("operationsRetryAssetSelection")?.addEventListener("click", async () => {
+    try {
+      setOperationsMessage("Checking failed asset selection…");
+      const result = await api("/api/operations/retry-asset-selection", { method: "POST", body: JSON.stringify({}) });
+      setOperationsMessage(result.message || "R2B started.");
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not retry asset selection.", "error-text");
+    }
+  });
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
     try {
       setOperationsMessage("Starting daily idea run…");
@@ -213,7 +299,20 @@
         ? AbortSignal.timeout(timeoutMs)
         : explicitSignal;
 
-    const response = await fetch(`${apiBase}${path}`, {
+    const pathname = String(path || "").split("?")[0];
+    if (selectedProfileId && fetchOptions.body && typeof fetchOptions.body === "string") {
+      if (pathname === "/api/ideas" || pathname === "/api/ideas/generate" || pathname === "/api/outputs/approve-all") {
+        try {
+          const parsed = JSON.parse(fetchOptions.body);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && !parsed.content_profile_id) {
+            parsed.content_profile_id = selectedProfileId;
+            fetchOptions.body = JSON.stringify(parsed);
+          }
+        } catch {}
+      }
+    }
+
+    const response = await fetch(`${apiBase}${withStudioProfile(path)}`, {
       credentials: "same-origin",
       cache: "no-store",
       ...fetchOptions,
@@ -358,6 +457,7 @@
     try {
       const [health, session] = await Promise.all([api("/api/health"), api("/api/session")]);
       studioSession = session;
+      try { await loadStudioProfiles(); } catch {}
       const navOps = $("navOperations");
       if (navOps) navOps.hidden = !(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
       if (!health.airtable_configured) {
@@ -7003,6 +7103,10 @@
       if (run) run.hidden = !data.can_edit_profiles;
       const intake = $("operationsRunIntake");
       if (intake) intake.hidden = !data.can_edit_profiles;
+      const resetUrls = $("operationsResetRenderUrls");
+      if (resetUrls) resetUrls.hidden = !data.can_edit_profiles;
+      const retryAssets = $("operationsRetryAssetSelection");
+      if (retryAssets) retryAssets.hidden = !data.can_edit_profiles;
     } catch (error) {
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
       if (meta) meta.textContent = "Unable to load operations.";
@@ -7206,8 +7310,13 @@
   window.addEventListener("resize", phase6HideTooltip);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") phase6HideTooltip(); });
 
-  checkHealth();
-  loadDashboard();
+  checkHealth().finally(() => loadDashboard());
+  ["studioProfileSelect", "homeProfileSelect"].forEach((id) => {
+    $(id)?.addEventListener("change", (event) => {
+      const profile = studioProfiles.find((item) => item.id === event.target.value);
+      if (profile) applyStudioProfile(profile, { reload: true });
+    });
+  });
 })();
 
 // v0.6.17 display-text normalization startup

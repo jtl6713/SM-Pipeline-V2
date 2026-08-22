@@ -49,6 +49,8 @@ export default {
       const isOperationsOutputScheduleRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/schedule$/.test(url.pathname);
       const isOperationsOutputPublishedRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/published$/.test(url.pathname);
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
+      const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
+      const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -80,6 +82,8 @@ export default {
       const isOperationsOutputScheduleWrite = isOperationsOutputScheduleRoute && request.method === "POST";
       const isOperationsOutputPublishedWrite = isOperationsOutputPublishedRoute && request.method === "POST";
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
+      const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
+      const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
       const isOperationsIntakeWrite = isOperationsIntakeRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
@@ -114,6 +118,8 @@ export default {
         isOperationsOutputScheduleWrite ||
         isOperationsOutputPublishedWrite ||
         isOperationsCompressWrite ||
+        isOperationsResetRenderUrlsWrite ||
+        isOperationsRetryAssetSelectionWrite ||
         isOperationsIntakeWrite ||
         (isR5DoneHookRoute && request.method === "POST");
       if (!allowedMethod) {
@@ -129,7 +135,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.62-ondemand-a1m-c1",
+          version: "0.10.63-ondemand-m1-r2b",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -138,6 +144,7 @@ export default {
           studio_ondemand_publish_orch_v1: true,
           studio_ondemand_smv1_p0202_v1: true,
           studio_ondemand_a1m_c1_c2m_v1: true,
+          studio_ondemand_m1_r2b_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -377,6 +384,18 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return pulseA1SForDriveFile(request, env, authorization, ctx);
+      }
+
+      if (isOperationsResetRenderUrlsRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return pulseM1ResetRenderUrls(request, env, ctx);
+      }
+
+      if (isOperationsRetryAssetSelectionRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return pulseR2BRetryAssetSelection(request, env, ctx);
       }
 
       if (isOperationsIntakeRoute) {
@@ -11058,6 +11077,14 @@ const PRODUCTION_CADENCE_CAROUSEL = Object.freeze([
   { id: 5582062, key: "C1" },
   { id: 5586579, key: "C2M" },
 ]);
+const PRODUCTION_CADENCE_REPAIR = Object.freeze([
+  { id: 5569896, key: "M1" },
+  { id: 5576620, key: "R2B" },
+]);
+const STUDIO_M1_SCENARIO_ID = 5569896;
+const STUDIO_R2B_SCENARIO_ID = 5576620;
+const STUDIO_R2B_VIEW_NAME = "R2B - Retry Asset Selection";
+const STUDIO_M1_STALE_RENDER_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Remotion_Status_URL}!="",{Render_Server_URL}!="",{Final_File_URL}="")';
 const STUDIO_C1_VIEW_ID = "viwT0B4SmJLL1qPlp";
 const STUDIO_C2M_VIEW_ID = "viwPm4Pyk0BEzLvyE";
 const STUDIO_C2M_TABLE_ID = "tblcnQDBvUngpjDED";
@@ -11214,6 +11241,33 @@ async function pulseOnDemandCarouselChain(env) {
   return pulses;
 }
 
+async function pulseOnDemandR2B(env) {
+  const hasWork = await cadenceQueueHasWork(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    view: STUDIO_R2B_VIEW_NAME,
+    formula: "{Test_Run_ID}=BLANK()",
+  });
+  if (!hasWork) return [{ key: "R2B", skipped: "no_work" }];
+  try {
+    await phase6PulseOnDemandScenario(env, STUDIO_R2B_SCENARIO_ID, { waitMs: 20000 });
+    return [{ key: "R2B", pulsed: true }];
+  } catch (error) {
+    return [{ key: "R2B", error: error instanceof Error ? error.message : String(error) }];
+  }
+}
+
+async function pulseOnDemandM1(env, { force = false } = {}) {
+  if (!force) {
+    const hasWork = await cadenceQueueHasWork(env, env.AIRTABLE_OUTPUT_TABLE_ID, { formula: STUDIO_M1_STALE_RENDER_FORMULA });
+    if (!hasWork) return [{ key: "M1", skipped: "no_work" }];
+  }
+  try {
+    await phase6PulseOnDemandScenario(env, STUDIO_M1_SCENARIO_ID, { waitMs: 20000 });
+    return [{ key: "M1", pulsed: true }];
+  } catch (error) {
+    return [{ key: "M1", error: error instanceof Error ? error.message : String(error) }];
+  }
+}
+
 function timingSafeSecretEqual(left, right) {
   const a = String(left || "");
   const b = String(right || "");
@@ -11243,14 +11297,22 @@ async function handleR5DoneCallback(request, env, ctx) {
     limit: 1,
     view: "R5 - Rendering Jobs to Poll",
   }).catch(() => []);
-  if (!eligible.length) {
-    return respond(request, env, { ok: true, skipped: "no_rendering_jobs" });
-  }
-  const task = phase6PulseOnDemandScenario(env, PHASE6_R5_SCENARIO_ID).catch((error) => {
-    console.error("R5 done callback pulse failed", error);
-  });
+  const task = (async () => {
+    if (eligible.length) {
+      try { await phase6PulseOnDemandScenario(env, PHASE6_R5_SCENARIO_ID); } catch (error) {
+        console.error("R5 done callback pulse failed", error);
+      }
+    }
+    try { await pulseOnDemandM1(env); } catch (error) {
+      console.error("M1 r5-done pulse failed", error);
+    }
+  })();
   if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
-  return respond(request, env, { ok: true, triggered: "r5-on-demand", eligible: eligible.length }, 202);
+  return respond(request, env, {
+    ok: true,
+    triggered: eligible.length ? "r5-on-demand" : "m1-check",
+    eligible: eligible.length,
+  }, 202);
 }
 
 async function cadenceHasPublishWork(env) {
@@ -11302,6 +11364,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_PUBLISH,
       ...PRODUCTION_CADENCE_MEDIA,
       ...PRODUCTION_CADENCE_CAROUSEL,
+      ...PRODUCTION_CADENCE_REPAIR,
     ];
     const results = await Promise.all(parked.map((item) => cadenceSetActive(env, item.id, false)));
     const pulses = [];
@@ -11309,6 +11372,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
     if (startCarousel || force) pulses.push(...await pulseOnDemandCarouselChain(env));
+    if (startRender || force) pulses.push(...await pulseOnDemandR2B(env));
     return { ok: true, parked: true, results, pulses };
   }
   if (await cadenceRepairInProgress(env)) {
@@ -15055,6 +15119,29 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     scenarios: ["A1S", "A1M"],
     message: "A1S compress and A1M duration probe were pulsed because this file is over 100 MB.",
   }, 202);
+}
+
+async function pulseM1ResetRenderUrls(request, env, ctx) {
+  const result = await pulseOnDemandM1(env, { force: true });
+  return respond(request, env, {
+    ok: true,
+    triggered: "m1-on-demand",
+    pulses: result,
+    message: "M1 will reset Rendering jobs that still point at an old Remotion URL, then those jobs can rerun R4.",
+  }, 202);
+}
+
+async function pulseR2BRetryAssetSelection(request, env, ctx) {
+  const result = await pulseOnDemandR2B(env);
+  const skipped = result.some((row) => row.skipped);
+  return respond(request, env, {
+    ok: true,
+    triggered: skipped ? "r2b-skipped" : "r2b-on-demand",
+    pulses: result,
+    message: skipped
+      ? "No failed asset-selection rows are waiting, so R2B did not run."
+      : "R2B is retrying asset selection for the waiting output.",
+  }, skipped ? 200 : 202);
 }
 
 async function pulseStudioLibraryIntake(request, env, authorization) {

@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.97-intake-logs">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.99-repair-pulses">
 </head>
 <body>
  <header class="topbar">
@@ -18,9 +18,13 @@
  </div>
  <div class="brand-studio-copy">
  <div class="brand-name">ChicagoShining Studio</div>
- <div class="brand-subtitle">Pipeline administration</div>
+ <div class="brand-subtitle" id="brandSubtitle">Pipeline administration</div>
  </div>
  </div>
+ <label class="topbar-profile" id="studioProfileWrap" hidden>
+ <span>Profile</span>
+ <select id="studioProfileSelect" aria-label="Working content profile"></select>
+ </label>
  <div class="topbar-status" id="apiStatus">Connecting…</div>
  </header>
 
@@ -34,7 +38,7 @@
  <button class="nav-item" data-page="music">Music Library</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.97</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.99</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -42,13 +46,17 @@
  <section class="panel ez-path-fork" id="ezPathFork">
  <div class="ez-path-fork-inner">
  <div class="ez-path-fork-copy">
- <p class="ez-path-brand" aria-label="Chicago Shining">
- <span class="ez-path-brand-city">Chicago</span>
+ <p class="ez-path-brand" id="ezPathBrand" aria-label="Chicago Shining">
+ <span class="ez-path-brand-city" id="ezPathBrandCity">Chicago</span>
  <span class="ez-path-brand-shine">Shining</span>
  </p>
  <p class="ez-path-hook">QA Multi-Platform Social Media Publishing</p>
  <h1>How do you want to start?</h1>
  <p>Two doors. Same pipeline underneath. Come back here anytime to start something new.</p>
+ <label class="ez-profile-picker">
+ <span>Working profile</span>
+ <select id="homeProfileSelect" aria-label="Choose the city profile for new work"></select>
+ </label>
  </div>
  <div class="ez-path-fork-grid">
  <button type="button" class="ez-path-choice ez-path-choice--idea" id="ezStartIdea">
@@ -893,7 +901,7 @@
 
  <section id="page-operations" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, library intake, manual publish queues, and oversized compression. This replaces Make clocks for I1, A0, PUB1–PUB3, and A1S.</p></div>
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, library intake, publish queues, oversized compression, and render retries.</p></div>
  <button class="secondary-button" data-refresh="operations">Refresh</button>
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
@@ -927,6 +935,13 @@
  <section class="panel">
  <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB. Compress starts A1S for that Drive file instead of a daily folder scan.</p></div></div>
  <div id="operationsOversizedList" class="table-wrap"></div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Render repair</h2><p>Use these when Remotion moved URL or asset selection failed. They do not run on a weekly or 15-minute clock.</p></div></div>
+ <div class="ops-repair-actions">
+ <button type="button" class="secondary-button" id="operationsResetRenderUrls">Reset stale render URLs</button>
+ <button type="button" class="secondary-button" id="operationsRetryAssetSelection">Retry failed asset selection</button>
+ </div>
  </section>
  </section>
  </main>
@@ -1056,7 +1071,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.97-intake-logs"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.97-intake-logs"></script>
+ <script src="/assets/ez-plan.js?v=0.6.99-repair-pulses"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.99-repair-pulses"></script>
 </body>
 </html>
