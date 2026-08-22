@@ -49,6 +49,7 @@ export default {
       const isOperationsOutputScheduleRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/schedule$/.test(url.pathname);
       const isOperationsOutputPublishedRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/published$/.test(url.pathname);
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
+      const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
@@ -78,6 +79,7 @@ export default {
       const isOperationsOutputScheduleWrite = isOperationsOutputScheduleRoute && request.method === "POST";
       const isOperationsOutputPublishedWrite = isOperationsOutputPublishedRoute && request.method === "POST";
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
+      const isOperationsIntakeWrite = isOperationsIntakeRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
@@ -110,7 +112,8 @@ export default {
         isOperationsDailyIdeasWrite ||
         isOperationsOutputScheduleWrite ||
         isOperationsOutputPublishedWrite ||
-        isOperationsCompressWrite;
+        isOperationsCompressWrite ||
+        isOperationsIntakeWrite;
       if (!allowedMethod) {
         return respond(request, env, { ok: false, error: "Method not allowed in Phase 2A" }, 405);
       }
@@ -119,9 +122,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.54-operations",
+          version: "0.10.55-a0-daisychain",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
+          studio_a0_daisychain_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -361,6 +365,12 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return pulseA1SForDriveFile(request, env, authorization, ctx);
+      }
+
+      if (isOperationsIntakeRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return pulseStudioLibraryIntake(request, env, authorization);
       }
 
       if (isVoicePreviewRoute) {
@@ -14205,6 +14215,8 @@ async function adminMakeDeploy(request, env, authorization) {
 // remains unchanged and unrelated profiles cannot be consumed by a manual run.
 const STUDIO_IDEA_I1_SCENARIO_ID = 5514334;
 const STUDIO_A1S_SCENARIO_ID = 5715530;
+const STUDIO_A2_SCENARIO_ID = 5531974;
+const STUDIO_A2_WEBHOOK_URL = "https://hook.us2.make.com/issyeyva2ac2kyn0419w8sie63nv2bpw";
 const STUDIO_PIPELINE_SETTINGS_TABLE_ID = "tblpHPWeEkyJaF7ql";
 const STUDIO_PUB1_VIEW_ID = "viwtrn8YmGacQWVzU";
 const STUDIO_PUB2_VIEW_ID = "viwf0hxXl8oYUClim";
@@ -14571,6 +14583,11 @@ async function getStudioOperations(request, env, authorization) {
     recently_published: published.map(mapOperationsOutput),
     oversized_media: oversized,
     a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
+    library_intake: {
+      a0_parked: true,
+      a2_webhook: true,
+      daisy_chain: ["A2", "A2B", "A3", "A4"],
+    },
   });
 }
 
@@ -14709,6 +14726,27 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     triggered: "on-demand-run",
     drive_file_id: driveFileId,
     message: "A1S was pulsed because this file is over 100 MB. It still scans eligible oversized Drive videos until the file-id webhook is the A1S start module.",
+  }, 202);
+}
+
+async function pulseStudioLibraryIntake(request, env, authorization) {
+  const state = await phase6ScenarioState(env, STUDIO_A2_SCENARIO_ID);
+  if (!state) throw new HttpError(502, "Could not read A2 scenario state");
+  if (!state.isActive) throw new HttpError(409, "A2 is off. The intake webhook only runs while A2 is active.");
+  const url = new URL(STUDIO_A2_WEBHOOK_URL);
+  url.searchParams.set("make08_owner", "studio-operations");
+  url.searchParams.set("make08_stage", "A2");
+  url.searchParams.set("make08_cycle_id", `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}-studio`);
+  const response = await fetch(url.toString(), { method: "GET", headers: { Accept: "text/plain, application/json" } });
+  const body = await response.text();
+  if (!response.ok) throw new HttpError(502, `A2 webhook returned ${response.status}: ${body.slice(0, 200)}`);
+  return respond(request, env, {
+    ok: true,
+    triggered: "a2-webhook",
+    scenario_id: STUDIO_A2_SCENARIO_ID,
+    daisy_chain: ["A2", "A2B", "A3", "A4"],
+    message: "A2 started. A2B, A3, and A4 follow when each stage finishes.",
+    hook_response: body.slice(0, 200),
   }, 202);
 }
 

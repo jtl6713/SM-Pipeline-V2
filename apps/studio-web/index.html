@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.93-operations">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.94-a0-daisychain">
 </head>
 <body>
  <header class="topbar">
@@ -893,7 +893,7 @@
 
  <section id="page-operations" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, manual publish queues, and oversized library compression. This replaces Make clocks for I1, PUB1–PUB3, and A1S.</p></div>
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, library intake, manual publish queues, and oversized compression. This replaces Make clocks for I1, A0, PUB1–PUB3, and A1S.</p></div>
  <button class="secondary-button" data-refresh="operations">Refresh</button>
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
@@ -903,6 +903,11 @@
  </div>
  <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
  <div id="operationsProfiles" class="ops-profile-list"></div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Library intake</h2><p>Starts A2 on the Drive ingestion folder. A2B backfill, A3 classification, and A4 reconciliation run when the previous stage finishes. A0 no longer ticks every 2 hours.</p></div>
+ <button type="button" class="secondary-button" id="operationsRunIntake">Process intake folder</button>
+ </div>
  </section>
  <section class="panel">
  <div class="panel-heading"><div><h2>Ready to schedule</h2><p>Approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</p></div></div>
@@ -1044,7 +1049,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.93-operations"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.93-operations"></script>
+ <script src="/assets/ez-plan.js?v=0.6.94-a0-daisychain"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.94-a0-daisychain"></script>
 </body>
 </html>

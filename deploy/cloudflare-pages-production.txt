@@ -144,4 +144,6 @@ Dashboard keep-cards Pages deploy: 2026-08-21 - Dashboard cards stay on the page
 
 Operations Pages deploy: 2026-08-22 - Add Operations for per-profile daily ideas, ready-to-schedule / ready-to-publish queues, and oversized compression pulses. UI 0.6.93-operations.
 
+A0 daisy-chain Pages deploy: 2026-08-22 - Operations Process intake folder starts A2 so A0 does not need a 2h clock. UI 0.6.94-a0-daisychain.
+
 

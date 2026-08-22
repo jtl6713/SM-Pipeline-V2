@@ -74,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.93-operations";
+  const BUILD_ID = "item4-0.6.94-a0-daisychain";
   let studioSession = null;
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
@@ -145,6 +145,16 @@
       loadOperations();
     } catch (error) {
       setOperationsMessage(error.message || "Daily idea run failed.", "error-text");
+    }
+  });
+  $("operationsRunIntake")?.addEventListener("click", async () => {
+    try {
+      setOperationsMessage("Starting library intake…");
+      const result = await api("/api/operations/intake", { method: "POST", body: JSON.stringify({}) });
+      setOperationsMessage(result.message || "A2 started. A2B, A3, and A4 will follow.");
+      loadOperations();
+    } catch (error) {
+      setOperationsMessage(error.message || "Library intake failed.", "error-text");
     }
   });
 

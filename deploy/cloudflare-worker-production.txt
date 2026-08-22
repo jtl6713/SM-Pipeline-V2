@@ -33,3 +33,5 @@ Cadence park Worker deploy: 2026-08-21 — Production Make cadence stays OFF so St
 Operations Worker deploy: 2026-08-22 — Studio Operations gates daily I1 per Content Profile, exposes PUB1/PUB2 queues and manual published confirmation, and pulses A1S for oversized Drive files instead of interval clocks. Worker 0.10.54-operations.
 
 
+A0 daisy-chain Worker deploy: 2026-08-22 - Process intake folder pulses A2; A2B/A3/A4 follow when each stage finishes. A0 stays on-demand and off. Worker 0.10.55-a0-daisychain.
+
