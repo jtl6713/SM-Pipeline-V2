@@ -59,6 +59,8 @@
   let pipelineSort = { key: "", dir: "asc" };
   let pipelineViewFilter = "all";
   let pipelineOpenSingleOnLoad = false;
+  let dashboardCache = { metrics: {}, ideas: [], content: [], outputs: [] };
+  let dashboardView = "recent";
   const audioUserTouched = new Set();
   let activeCreativeOutputId = null;
   let activeCreativeOutput = null;
@@ -72,7 +74,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.91-dashboard-open";
+  const BUILD_ID = "item4-0.6.92-dashboard-keep";
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
@@ -308,25 +310,100 @@
     metrics.innerHTML = '<div class="metric"><div class="metric-label">Loading</div><div class="metric-value">…</div></div>';
     list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
     try {
-      const data = await api("/api/dashboard");
+      const [data, ideas, content, outputs] = await Promise.all([
+        api("/api/dashboard"),
+        api("/api/ideas?limit=100"),
+        api("/api/content?limit=100"),
+        api("/api/outputs?limit=100"),
+      ]);
       const m = data.metrics || {};
-      const cards = [
-        { label: "Ideas", page: "ideas", number: m.ideas },
-        { label: "Content items", page: "content", number: m.content_items },
-        { label: "Platform outputs", page: "outputs", filter: "all", number: m.platform_outputs },
-        { label: "Active outputs", page: "outputs", filter: "active", number: m.active_outputs },
-        { label: "Needs attention", page: "outputs", filter: "attention", number: m.attention_outputs },
-        { label: "Published", page: "outputs", filter: "published", number: m.published_outputs },
-      ];
-      metrics.innerHTML = cards.map((card) => `<button type="button" class="metric metric-button" data-dash-page="${escapeHtml(card.page)}" data-dash-filter="${escapeHtml(card.filter || "")}" title="Open ${escapeHtml(card.label)}"><div class="metric-label">${escapeHtml(card.label)}</div><div class="metric-value">${card.number ?? 0}</div></button>`).join("");
-      metrics.querySelectorAll("[data-dash-page]").forEach((button) => {
-        button.addEventListener("click", () => openDashboardCard(button.dataset.dashPage, button.dataset.dashFilter));
-      });
-      renderOutputsTable(list, data.recent_outputs || []);
+      dashboardCache = {
+        metrics: m,
+        ideas: Array.isArray(data.ideas) ? data.ideas : (ideas.records || []),
+        content: Array.isArray(data.content) ? data.content : (content.records || []),
+        outputs: Array.isArray(data.outputs) && data.outputs.length ? data.outputs : (outputs.records || data.recent_outputs || []),
+      };
+      renderDashboardMetrics();
+      renderDashboardPanel();
     } catch (e) {
       metrics.innerHTML = "";
       list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
     }
+  }
+
+  function dashboardViewForCard(page, filter) {
+    if (page === "ideas") return "ideas";
+    if (page === "content") return "content";
+    return filter || "all";
+  }
+
+  function dashboardCards() {
+    const m = dashboardCache.metrics || {};
+    return [
+      { view: "ideas", label: "Ideas", page: "ideas", number: m.ideas },
+      { view: "content", label: "Content items", page: "content", number: m.content_items },
+      { view: "all", label: "Platform outputs", page: "outputs", filter: "all", number: m.platform_outputs },
+      { view: "active", label: "Active outputs", page: "outputs", filter: "active", number: m.active_outputs },
+      { view: "attention", label: "Needs attention", page: "outputs", filter: "attention", number: m.attention_outputs },
+      { view: "published", label: "Published", page: "outputs", filter: "published", number: m.published_outputs },
+    ];
+  }
+
+  function renderDashboardMetrics() {
+    const metrics = $("metrics");
+    if (!metrics) return;
+    metrics.innerHTML = dashboardCards().map((card) => {
+      const selected = dashboardView === card.view;
+      return `<button type="button" class="metric metric-button${selected ? " is-selected" : ""}" data-dash-page="${escapeHtml(card.page)}" data-dash-filter="${escapeHtml(card.filter || "")}" aria-pressed="${selected ? "true" : "false"}" title="Show ${escapeHtml(card.label)}"><div class="metric-label">${escapeHtml(card.label)}</div><div class="metric-value">${card.number ?? 0}</div></button>`;
+    }).join("");
+    metrics.querySelectorAll("[data-dash-page]").forEach((button) => {
+      button.addEventListener("click", () => openDashboardCard(button.dataset.dashPage, button.dataset.dashFilter));
+    });
+  }
+
+  function dashboardPanelCopy(view) {
+    if (view === "ideas") return { title: "Ideas", copy: "Idea candidates currently in the intake queue." };
+    if (view === "content") return { title: "Content items", copy: "Promoted production items." };
+    if (view === "all") return { title: "Platform outputs", copy: "Every current platform output." };
+    if (view === "active") return { title: "Active outputs", copy: "Outputs still moving through production or publishing." };
+    if (view === "attention") return { title: "Needs attention", copy: "Failed, retry pending, or manual-action outputs." };
+    if (view === "published") return { title: "Published", copy: "Outputs that have reached a published state." };
+    return { title: "Recent platform outputs", copy: "Normalized states hide scenario implementation details while preserving actionable status." };
+  }
+
+  function renderDashboardPanel() {
+    const heading = dashboardPanelCopy(dashboardView);
+    const title = $("dashboardListTitle");
+    const copy = $("dashboardListCopy");
+    const list = $("recentOutputs");
+    if (title) title.textContent = heading.title;
+    if (copy) copy.textContent = heading.copy;
+    if (!list) return;
+    if (dashboardView === "ideas") {
+      renderIdeasTable(list, dashboardCache.ideas || []);
+      return;
+    }
+    if (dashboardView === "content") {
+      renderContentItemsTable(list, dashboardCache.content || []);
+      return;
+    }
+    const filter = dashboardView === "recent" ? "all" : dashboardView;
+    const records = dashboardView === "recent"
+      ? (dashboardCache.outputs || []).slice(0, 12)
+      : (dashboardCache.outputs || []).filter((record) => pipelineRecordMatchesFilter(record, filter));
+    if (!records.length) {
+      list.innerHTML = `<div class="empty">No ${escapeHtml(heading.title.toLowerCase())} right now.</div>`;
+      return;
+    }
+    renderOutputsTable(list, records);
+  }
+
+  function openDashboardCard(page, filter) {
+    const next = dashboardViewForCard(page, filter);
+    dashboardView = dashboardView === next ? "recent" : next;
+    renderDashboardMetrics();
+    renderDashboardPanel();
+    $("recentOutputs")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function ideaPathMode() {
@@ -960,18 +1037,6 @@
     $(`page-${page}`).classList.add("active");
     if (page !== "outputs") stopPipelinePoll();
     loadPage(page);
-  }
-
-  function openDashboardCard(page, filter) {
-    if (!phase6ConfirmDiscardUnsaved("leave this editor")) return;
-    if (page === "outputs") {
-      pipelineViewFilter = filter || "all";
-      pipelineOpenSingleOnLoad = pipelineViewFilter === "attention";
-    } else {
-      pipelineViewFilter = "all";
-      pipelineOpenSingleOnLoad = false;
-    }
-    switchToPage(page);
   }
 
   function ezPlanApi() {
@@ -4559,6 +4624,31 @@
   }
 
 
+  function renderIdeasTable(target, records) {
+    if (!target) return;
+    if (!records.length) {
+      target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong><br><span class="subtle">Studio is connected; the Idea Candidates table is simply empty after the recent reset/test cycle.</span></div>';
+      return;
+    }
+    target.innerHTML = `<table class="data-table idea-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th>Production</th><th></th></tr></thead><tbody>${records.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${r.carousel_slide_count ? `${value(r.carousel_slide_count)} slides` : r.video_clip_count ? `${value(r.video_clip_count)} clips` : "AI / default"}</td><td><div class="subtle">VO: ${value(r.include_voiceover)} · Music: ${value(r.include_background_music)} · Thumbnail: ${value(r.include_thumbnail)}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
+    const byId = new Map(records.map((record) => [record.id, record]));
+    target.querySelectorAll("[data-idea-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const idea = byId.get(button.dataset.ideaId);
+        if (idea) openIdeaDrawer(idea);
+      });
+    });
+  }
+
+  function renderContentItemsTable(target, records) {
+    if (!target) return;
+    if (!records.length) {
+      target.innerHTML = '<div class="empty"><strong>No content items are currently in production.</strong><br><span class="subtle">Studio is connected; new promoted ideas will appear here as production begins.</span></div>';
+      return;
+    }
+    target.innerHTML = `<table class="data-table"><thead><tr><th>Content</th><th>Studio stage</th><th>Assets</th><th>Render</th><th>Review</th><th>Outputs</th></tr></thead><tbody>${records.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+  }
+
   async function loadIdeas() {
     const target = $("ideasList");
     target.innerHTML = '<div class="empty">Loading ideas…</div>';
@@ -4566,17 +4656,7 @@
       const { records = [] } = await api("/api/ideas?limit=100");
       ideasCache = records;
       populateIdeaExistingSelect(records);
-      if (!records.length) return target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong><br><span class="subtle">Studio is connected; the Idea Candidates table is simply empty after the recent reset/test cycle.</span></div>';
-
-      target.innerHTML = `<table class="data-table idea-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th>Production</th><th></th></tr></thead><tbody>${records.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${r.carousel_slide_count ? `${value(r.carousel_slide_count)} slides` : r.video_clip_count ? `${value(r.video_clip_count)} clips` : "AI / default"}</td><td><div class="subtle">VO: ${value(r.include_voiceover)} · Music: ${value(r.include_background_music)} · Thumbnail: ${value(r.include_thumbnail)}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
-
-      const byId = new Map(records.map((record) => [record.id, record]));
-      target.querySelectorAll("[data-idea-id]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const idea = byId.get(button.dataset.ideaId);
-          if (idea) openIdeaDrawer(idea);
-        });
-      });
+      renderIdeasTable(target, records);
     } catch (e) {
       ideasCache = [];
       populateIdeaExistingSelect([]);
@@ -4598,8 +4678,11 @@
     target.innerHTML = '<div class="empty">Loading content items…</div>';
     try {
       const { records = [] } = await api("/api/content?limit=100");
-      if (!records.length) return target.innerHTML = '<div class="empty"><strong>No content items are currently in production.</strong><br><span class="subtle">Studio is connected; new promoted ideas will appear here as production begins.</span></div>';
-      target.innerHTML = `<table class="data-table"><thead><tr><th>Content</th><th>Studio stage</th><th>Assets</th><th>Render</th><th>Review</th><th>Outputs</th></tr></thead><tbody>${records.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+      if (!records.length) {
+        target.innerHTML = '<div class="empty"><strong>No content items are currently in production.</strong><br><span class="subtle">Studio is connected; new promoted ideas will appear here as production begins.</span></div>';
+        return;
+      }
+      renderContentItemsTable(target, records);
     } catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
   }
 

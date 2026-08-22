@@ -140,4 +140,6 @@ Approve All Pages deploy: 2026-08-21 - Platform Pipeline adds Approve All for Re
 
 Dashboard card open Pages deploy: 2026-08-21 - Pipeline dashboard metric cards open Ideas, Production, or a filtered Platform Pipeline list. UI 0.6.91-dashboard-open.
 
+Dashboard keep-cards Pages deploy: 2026-08-21 - Dashboard cards stay on the page and filter the list below instead of switching views. UI 0.6.92-dashboard-keep.
+
 

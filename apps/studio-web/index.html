@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.91-dashboard-open">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.92-dashboard-keep">
 </head>
 <body>
  <header class="topbar">
@@ -33,7 +33,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.91</span></div>
+ <div class="nav-note">Creative Review<br><span class="subtle">UI build 0.6.92</span></div>
  </nav>
 
  <main class="main" id="main">
@@ -71,12 +71,12 @@
 
  <section id="page-dashboard" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Overview</span><h1>Pipeline dashboard</h1><p>Click a card to open those records. Real-time counts come from the current ChicagoShining pipeline.</p></div>
+ <div><span class="eyebrow">Overview</span><h1>Pipeline dashboard</h1><p>Click a card to show those records below. The cards stay on this page.</p></div>
  <button class="secondary-button" id="refreshDashboard">Refresh</button>
  </div>
  <div class="metrics" id="metrics"></div>
  <section class="panel">
- <div class="panel-heading"><div><h2>Recent platform outputs</h2><p>Normalized states hide scenario implementation details while preserving actionable status.</p></div></div>
+ <div class="panel-heading"><div><h2 id="dashboardListTitle">Recent platform outputs</h2><p id="dashboardListCopy">Normalized states hide scenario implementation details while preserving actionable status.</p></div></div>
  <div id="recentOutputs" class="table-wrap"></div>
  </section>
  </section>
@@ -1016,7 +1016,7 @@
  </aside>
 
  <script src="/assets/config.js"></script>
- <script src="/assets/ez-plan.js?v=0.6.91-dashboard-open"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.91-dashboard-open"></script>
+ <script src="/assets/ez-plan.js?v=0.6.92-dashboard-keep"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.92-dashboard-keep"></script>
 </body>
 </html>
