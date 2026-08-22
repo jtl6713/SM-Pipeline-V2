@@ -80,7 +80,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.113-pipeline-content-groups";
+  const BUILD_ID = "item4-0.6.114-ai-audio-defaults";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1676,8 +1676,9 @@
     if (audioUserTouched.has(ezId) || audioUserTouched.has(prId)) {
       return pr === "Yes" || ez === "Yes" ? "Yes" : "No";
     }
-    if (ez === "Yes" || pr === "Yes" || rec === "Yes") return "Yes";
-    return rec || pr || ez || "No";
+    if (ez === "Yes" || pr === "Yes" || rec === "Yes" || rec === "Use Profile Default" || !rec) return "Yes";
+    if (rec === "No" || pr === "No" || ez === "No") return "No";
+    return "Yes";
   }
 
   function alignAudioSelect(fromEl, toEl) {
@@ -1904,13 +1905,13 @@
       return;
     }
     if ($("ezAudioVoiceover")) {
-      $("ezAudioVoiceover").value = record.voiceover_mode === "Yes" ? "Yes" : "No";
+      $("ezAudioVoiceover").value = record.voiceover_mode === "No" ? "No" : "Yes";
     }
     if (record.voiceover_mode === "Yes") {
       applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
     }
     if ($("ezAudioMusic")) {
-      $("ezAudioMusic").value = record.background_music_mode === "Yes" ? "Yes" : "No";
+      $("ezAudioMusic").value = record.background_music_mode === "No" ? "No" : "Yes";
     }
     const musicId = Array.isArray(record.selected_music_asset_links) ? record.selected_music_asset_links[0] : "";
     if ($("ezAudioTrack") && musicId) $("ezAudioTrack").value = musicId;
@@ -2218,8 +2219,8 @@
     const payload = {
       content_type: syncHiddenMasterContentType() || ezControlValue("prContentType", record.content_type || "Photo Set"),
       platforms: requestedPlatforms.length ? requestedPlatforms : (recordPlatforms.length ? recordPlatforms : item4SelectedPlatforms()),
-      voiceover_mode: ezControlValue("prVoiceover", record.voiceover_mode || "No"),
-      background_music_mode: ezControlValue("prMusicMode", record.background_music_mode || "No"),
+      voiceover_mode: ezControlValue("prVoiceover", record.voiceover_mode || "Yes"),
+      background_music_mode: ezControlValue("prMusicMode", record.background_music_mode || "Yes"),
       thumbnail_mode: ezControlValue("prThumbnail", record.thumbnail_mode || "Use Profile Default"),
       video_duration_seconds: ezControlValue("prVideoDuration", record.video_duration_seconds ?? 30),
       video_clip_count_mode: ezControlValue("prVideoClipMode", record.video_clip_count_mode || "AI decides"),
@@ -2497,6 +2498,11 @@
     ezWizardHistory = [];
     ezWizardPending = null;
     ezWizardBusy = false;
+    if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
+    if ($("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
+    if ($("prVoiceover")) $("prVoiceover").value = "Yes";
+    if ($("prMusicMode")) $("prMusicMode").value = "Yes";
+    audioUserTouched.clear();
     const log = $("ezWizardLog");
     if (log) log.innerHTML = "";
     ezWizardSetMessage();
@@ -5011,8 +5017,8 @@
     document.querySelectorAll('input[name="prPlatform"]').forEach(input => {
       input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
     });
-    setSelectValue("prVoiceover", record.voiceover_mode, "No");
-    setSelectValue("prMusicMode", record.background_music_mode, "No");
+    setSelectValue("prVoiceover", record.voiceover_mode, "Yes");
+    setSelectValue("prMusicMode", record.background_music_mode, "Yes");
     setSelectValue("prThumbnail", record.thumbnail_mode, "Use Profile Default");
     if (record.voiceover_mode === "Yes") {
       applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
@@ -5222,8 +5228,8 @@
       const musicMode = resolvedAudioMode("music");
       if ($("prVoiceover")) $("prVoiceover").value = voiceoverMode;
       if ($("prMusicMode")) $("prMusicMode").value = musicMode;
-      if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = voiceoverMode === "Yes" ? "Yes" : "No";
-      if ($("ezAudioMusic")) $("ezAudioMusic").value = musicMode === "Yes" ? "Yes" : "No";
+      if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = voiceoverMode === "No" ? "No" : "Yes";
+      if ($("ezAudioMusic")) $("ezAudioMusic").value = musicMode === "No" ? "No" : "Yes";
       syncRequestAudioUi({ fromEz: false });
       syncEzConfigFields();
     }

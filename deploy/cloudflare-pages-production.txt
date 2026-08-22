@@ -185,3 +185,5 @@ Approve All count Pages deploy: 2026-08-22 - Approve All only counts outputs tha
 
 Pipeline content groups Pages deploy: 2026-08-22 - Platform Pipeline groups rows by associated content and defaults Output sort to newest first. UI 0.6.113-pipeline-content-groups.
 
+AI audio defaults Pages deploy: 2026-08-22 - Voiceover and Music default to Yes. Home Start over resets those toggles. UI 0.6.114-ai-audio-defaults.
+

@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.74-continuation-first",
+          version: "0.10.75-ai-masters-audio-yes",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -170,6 +170,8 @@ export default {
           studio_variant_drive_ready_v1: true,
           studio_unattended_advance_v1: true,
           studio_continuation_controller_v1: true,
+          studio_ai_master_fill_v1: true,
+          studio_audio_default_yes_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
           studio_photo_cover_thumbs_v1: true,
           studio_slide_post_caption_split_v1: true,
@@ -1909,6 +1911,9 @@ async function createIdea(request, env, authorization) {
     Candidate_Status: "Generated",
     Batch_Date: new Date().toISOString().slice(0, 10),
     Content_Profile: [profile.id],
+    Production_Include_Voiceover: "Yes",
+    Production_Include_Background_Music: "Yes",
+    Production_Include_Thumbnail: "Yes",
   };
   if (input.summary) fields.Idea_Summary = input.summary;
 
@@ -3451,13 +3456,34 @@ function item4PhotoCountKind(count) {
   return Math.max(0, Number(count) || 0) <= 1 ? "single-photo" : "multiple-photos";
 }
 
+function item4ParseEzOrigin(record) {
+  const text = String(f(record, "Production_Notes") || "");
+  const manual = Number(/ez-manual=(\d+)/i.exec(text)?.[1] || "");
+  const ai = Number(/ez-ai=(\d+)/i.exec(text)?.[1] || "");
+  return {
+    inputKind: (/ez-input=([a-z0-9-]+)/i.exec(text)?.[1] || "").toLowerCase(),
+    manualCount: Number.isFinite(manual) && manual > 0 ? Math.round(manual) : null,
+    aiCount: Number.isFinite(ai) && ai > 0 ? Math.round(ai) : null,
+  };
+}
+
 function item4EffectivePhotoCount(record, assets) {
   const n = Array.isArray(assets) ? assets.length : 0;
+  const origin = item4ParseEzOrigin(record);
+  if (origin.manualCount && origin.aiCount) return origin.manualCount + origin.aiCount;
   const mode = String(f(record, "Carousel_Image_Mode") || "").trim();
   const exact = Number(f(record, "Carousel_Slide_Count_Exact") || 0);
   if (mode === "Make AI Generated" && Number.isFinite(exact) && exact > n) return exact;
   if (!n && mode === "Make AI Generated" && Number.isFinite(exact) && exact >= 1) return exact;
   return n;
+}
+
+function item4StudioDirectiveYes(value) {
+  return String(value || "").trim() !== "No";
+}
+
+function item4SlideImageUrl(row) {
+  return String(f(row, "Final Image URL") || f(row, "AI Image URL") || f(row, "Current Image URL") || "").trim();
 }
 
 function item4DefaultOutputType(platform, photoCount) {
@@ -3753,6 +3779,8 @@ const ITEM4_P3_SCENARIO_ID = 5531703;
 const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
 const ITEM4_P2_SCENARIO_ID = 5530955;
 const ITEM4_P2_WEBHOOK_URL = "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt";
+const ITEM4_C2_SCENARIO_ID = 5582071;
+const ITEM4_C2_WEBHOOK_URL = "https://hook.us2.make.com/t1wjrdod0k433jgaz10tf30q2rq0sfpb";
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
@@ -4923,8 +4951,8 @@ async function cleanProductionRequestPayload(payload, env) {
   const invalidPlatforms = platforms.filter(v => !PR_PLATFORMS.has(v));
   if (invalidPlatforms.length) throw new HttpError(400, `Unsupported platform(s): ${invalidPlatforms.join(", ")}`);
 
-  const voiceoverMode = normalizeChoice(payload?.voiceover_mode, PR_TRISTATE, "Use Profile Default", "Voiceover mode");
-  const backgroundMusicMode = normalizeChoice(payload?.background_music_mode, PR_TRISTATE, "Use Profile Default", "Background music mode");
+  const voiceoverMode = normalizeChoice(payload?.voiceover_mode, PR_TRISTATE, "Yes", "Voiceover mode");
+  const backgroundMusicMode = normalizeChoice(payload?.background_music_mode, PR_TRISTATE, "Yes", "Background music mode");
   const thumbnailMode = normalizeChoice(payload?.thumbnail_mode, PR_TRISTATE, "Use Profile Default", "Thumbnail mode");
 
   const videoClipCountMode = normalizeChoice(payload?.video_clip_count_mode, PR_COUNT_MODES, "AI decides", "Video clip count mode");
@@ -5064,8 +5092,8 @@ function productionRequestDefaultsFromIdea(idea) {
   return {
     content_type: String(f(idea, "Production_Content_Type") || "").trim() || null,
     platforms: Array.isArray(f(idea, "Production_Target_Platforms")) ? f(idea, "Production_Target_Platforms") : [],
-    voiceover_mode: String(f(idea, "Production_Include_Voiceover") || "Use Profile Default").trim() || "Use Profile Default",
-    background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Use Profile Default").trim() || "Use Profile Default",
+    voiceover_mode: String(f(idea, "Production_Include_Voiceover") || "Yes").trim() || "Yes",
+    background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Yes").trim() || "Yes",
     thumbnail_mode: String(f(idea, "Production_Include_Thumbnail") || "Use Profile Default").trim() || "Use Profile Default",
     video_duration_seconds: f(idea, "Production_Video_Duration") || 30,
     video_clip_count_mode: f(idea, "Production_Video_Clip_Count") ? "Exact" : "AI decides",
@@ -5801,8 +5829,10 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
     Requested_Title: String(f(requestRecord, "Requested_Title") || "").trim() || null,
     Requested_Caption_Mode: String(f(requestRecord, "Caption_Mode") || "AI decides"),
     Requested_Caption: String(f(requestRecord, "Requested_Caption") || "").trim() || null,
-    Include_Voiceover: String(f(requestRecord, "Voiceover_Mode") || "").trim() === "Yes" ? "Yes" : "No",
-    Include_Background_Music: String(f(requestRecord, "Background_Music_Mode") || "").trim() === "Yes" ? "Yes" : "No",
+    Include_Voiceover: item4StudioDirectiveYes(f(requestRecord, "Voiceover_Mode")) ? "Yes" : "No",
+    Include_Background_Music: item4StudioDirectiveYes(f(requestRecord, "Background_Music_Mode")) ? "Yes" : "No",
+    Carousel_Image_Mode: String(f(requestRecord, "Carousel_Image_Mode") || "").trim() || null,
+    Carousel_Slide_Count: f(requestRecord, "Carousel_Slide_Count_Exact") ?? null,
     Requested_Script_Mode: String(f(requestRecord, "Script_Mode") || "AI decides"),
     Requested_Script: String(f(requestRecord, "Requested_Script") || "").trim() || null,
     Production_Request_Notes: String(f(requestRecord, "Production_Notes") || "").trim() || null,
@@ -6329,6 +6359,147 @@ function copyWritableParentFields(parentContentItem) {
   return fields;
 }
 
+async function item4ListParentCarouselSlides(env, parentId) {
+  if (!/^rec[A-Za-z0-9]+$/.test(String(parentId || ""))) return [];
+  return listRecords(env, "Carousel Slides", {
+    limit: 50,
+    filterFormula: `AND(FIND("${parentId}", ARRAYJOIN({Content Item})),{Deleted From Carousel}=0)`,
+  }).catch(() => []);
+}
+
+async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed) {
+  if (!parentId || needed < 1) return [];
+  const existing = await item4ListParentCarouselSlides(env, parentId);
+  const studioRows = (existing || []).filter((row) => /^Studio AI /i.test(String(f(row, "Slide Name") || "")));
+  const missing = Math.max(0, needed - studioRows.length);
+  if (!missing) return studioRows;
+  const title = String(f(requestRecord, "Requested_Title") || f(requestRecord, "Production_Request_ID") || "Chicago").trim();
+  const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
+  const created = [];
+  for (let i = 0; i < missing; i += 1) {
+    const n = studioRows.length + created.length + 1;
+    const prompt = [
+      `Photorealistic Chicago travel photograph for ChicagoShining, complementary to "${title}".`,
+      caption ? `Context: ${caption.slice(0, 400)}` : "",
+      "No logos, no watermarks, no burned-in text.",
+    ].filter(Boolean).join(" ");
+    const row = await airtableFetch(env, "Carousel Slides", "", {
+      method: "POST",
+      body: JSON.stringify({
+        fields: {
+          "Slide Name": `Studio AI ${n}`,
+          "Slide Number": n,
+          "Current Order": n,
+          "AI Prompt": prompt,
+          "Image Generation Mode": "Make AI Generated",
+          "Image Source": "Make AI Generated",
+          "Content Item": [parentId],
+          "Deleted From Carousel": false,
+        },
+        typecast: true,
+      }),
+    });
+    created.push(row);
+  }
+  return [...studioRows, ...created];
+}
+
+async function item4IngestAiSlideAsMaster(env, requestRecord, slide) {
+  const url = item4SlideImageUrl(slide);
+  if (!url || !env.STUDIO_MEDIA) return null;
+  const slideId = String(slide.id || "").trim();
+  const assets = item4AssetManifest(requestRecord);
+  if (assets.some((asset) => String(asset?.carousel_slide_id || "") === slideId)) return requestRecord;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`AI image download failed (${response.status})`);
+  const buffer = await response.arrayBuffer();
+  const id = `ai${slideId.replace(/^rec/, "").slice(0, 16)}`;
+  const name = `studio-ai-${assets.length + 1}.jpg`;
+  const key = `studio/master-assets/${requestRecord.id}/${id}-${item4SafeFileName(name)}`;
+  const mime = String(response.headers.get("content-type") || "image/jpeg").split(";")[0].trim() || "image/jpeg";
+  await env.STUDIO_MEDIA.put(key, buffer, {
+    httpMetadata: { contentType: mime },
+    customMetadata: { productionRequestId: requestRecord.id, assetId: id, carouselSlideId: slideId },
+  });
+  const nextAssets = [...assets, {
+    id,
+    order: assets.length + 1,
+    name,
+    mime_type: mime,
+    source_format: "JPG",
+    browser_preview_compatible: true,
+    size_bytes: Number(buffer.byteLength || 0),
+    focal_point: "center",
+    r2_key: key,
+    url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`,
+    uploaded_at: new Date().toISOString(),
+    source: "studio_ai",
+    carousel_slide_id: slideId,
+    caption_mode: "ai",
+  }];
+  return item4UpdateRequestState(env, requestRecord.id, {
+    Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
+    Studio_Master_Asset_Count: nextAssets.length,
+    Studio_Master_Asset_Status: "Uploading",
+    Studio_Variant_Status: "None",
+    Studio_Variant_Manifest_JSON: null,
+    Studio_Item4_State: "Assets Ready",
+  });
+}
+
+async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
+  const assets = item4AssetManifest(requestRecord);
+  const expected = item4EffectivePhotoCount(requestRecord, assets);
+  const needed = Math.max(0, expected - assets.length);
+  if (!needed) return { requestRecord, needed: 0, waiting: 0 };
+  const parentId = parent?.id || studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+  if (parentId) {
+    try {
+      await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Carousel_Image_Mode: "Make AI Generated",
+            Carousel_Slide_Count: expected,
+            Requested_Carousel_Slide_Count_Mode: "Exact",
+          },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      console.warn("Studio AI carousel arm failed", error);
+    }
+    await item4SeedAiCarouselSlides(env, parentId, requestRecord, needed);
+  }
+  const slides = parentId ? await item4ListParentCarouselSlides(env, parentId) : [];
+  let current = requestRecord;
+  for (const slide of slides) {
+    if (!item4SlideImageUrl(slide)) continue;
+    if (item4AssetManifest(current).some((asset) => String(asset?.carousel_slide_id || "") === slide.id)) continue;
+    try {
+      current = await item4IngestAiSlideAsMaster(env, current, slide) || current;
+    } catch (error) {
+      console.warn("Studio AI master ingest failed", slide.id, error);
+    }
+  }
+  const after = item4AssetManifest(current);
+  if (after.length > assets.length) {
+    try { await item4UpsertMasterQueue(env, current.id, after); } catch (error) {
+      console.warn("Studio AI master queue failed", error);
+    }
+    try {
+      const plan = item4ParseJson(f(current, "Studio_Output_Plan_JSON"), null);
+      if (plan) {
+        const outputRows = await outputRowsForProductionRequest(env, current.id);
+        await item4UpsertVariantQueue(env, current.id, after, item4RequiredRatios(plan), outputRows, plan);
+      }
+    } catch (error) {
+      console.warn("Studio AI variant queue failed", error);
+    }
+  }
+  return { requestRecord: current, needed, waiting: Math.max(0, expected - item4AssetManifest(current).length) };
+}
+
 function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, parentContentItem = null) {
   if (String(f(requestRecord, "Studio_Variant_Status") || "").trim() !== "Ready") return null;
   const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
@@ -6341,11 +6512,16 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   const ratio = String(planItem?.aspect_ratio || "").trim();
   if (!ratio) return null;
 
+  const masters = item4AssetManifest(requestRecord);
+  const expected = item4EffectivePhotoCount(requestRecord, masters);
+  if (masters.length < expected) return null;
+
   const sourceRowsAll = (Array.isArray(manifest?.assets) ? manifest.assets : [])
     .slice()
     .sort((a,b) => Number(a?.order || 0) - Number(b?.order || 0));
   const storyTeaser = String(outputType || "").trim() === "Story";
   const sourceRows = storyTeaser ? sourceRowsAll.slice(0, 1) : sourceRowsAll;
+  if (!storyTeaser && sourceRows.length < expected) return null;
   const omittedSourceIds = [];
   const eligibleSources = [];
   for (const source of sourceRows) {
@@ -6359,13 +6535,14 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     eligibleSources.push({ source, variant, url, mediaAssetId });
   }
   if (omittedSourceIds.length) {
-    console.warn("Studio source package omitted photos missing ratio", {
+    console.warn("Studio source package waiting on ratio crops", {
       production_request: requestRecord.id,
       platform,
       output_type: outputType,
       ratio,
       omitted: omittedSourceIds,
     });
+    return null;
   }
   if (!eligibleSources.length) return null;
 
@@ -6860,8 +7037,12 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     } catch (error) {
       console.warn("Studio continuation after promote failed", error);
     }
-    if (String(f(requestRecord, "Master_Content_Type") || "").trim() === "Carousel") {
-      try { await pulseOnDemandCarouselChain(env); } catch (error) {
+    if (String(f(requestRecord, "Master_Content_Type") || "").trim() === "Carousel"
+      || item4EffectivePhotoCount(requestRecord) > item4AssetManifest(requestRecord).length) {
+      try {
+        if (contentItemId) await item4EnsureAiSourceMasters(env, requestRecord, { id: contentItemId });
+        await pulseOnDemandCarouselChain(env, { contentItemIds: [contentItemId] });
+      } catch (error) {
         console.warn("Studio carousel on-demand pulse failed", error);
       }
     }
@@ -6877,19 +7058,21 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     || String(f(parent, "Caption") || "").trim()
     || String(f(parent, "Hook") || "").trim()
     || String(f(parent, "Content_Title") || "").trim();
-  const voiceoverMode = String(f(requestRecord, "Voiceover_Mode") || f(parent, "Include_Voiceover") || "No").trim();
-  const musicMode = String(f(requestRecord, "Background_Music_Mode") || f(parent, "Include_Background_Music") || "No").trim();
+  const voiceoverMode = String(f(requestRecord, "Voiceover_Mode") || f(parent, "Include_Voiceover") || "Yes").trim();
+  const musicMode = String(f(requestRecord, "Background_Music_Mode") || f(parent, "Include_Background_Music") || "Yes").trim();
   const thumbnailMode = String(f(requestRecord, "Thumbnail_Mode") || f(parent, "Include_Thumbnail") || "Yes").trim();
   const voiceoverUrl = String(f(parent, "Voiceover_URL") || "").trim();
   const coverUrl = String(f(parent, "Thumbnail_URL") || "").trim() || item4CoverStillUrl(requestRecord);
   const wantThumb = thumbnailMode !== "No";
-  const wantVoiceover = voiceoverMode === "Yes";
+  const wantVoiceover = item4StudioDirectiveYes(voiceoverMode);
   const script = String(f(requestRecord, "Requested_Script") || f(parent, "Voiceover_Script") || f(parent, "Requested_Script") || caption || "").trim();
   const waitingForVoiceover = wantVoiceover && !voiceoverUrl;
   const fields = {
     Caption: caption || null,
     Include_Voiceover: wantVoiceover ? "Yes" : "No",
-    Include_Background_Music: musicMode === "Yes" ? "Yes" : "No",
+    Include_Background_Music: item4StudioDirectiveYes(musicMode) ? "Yes" : "No",
+    Carousel_Image_Mode: String(f(requestRecord, "Carousel_Image_Mode") || "").trim() || null,
+    Carousel_Slide_Count: f(requestRecord, "Carousel_Slide_Count_Exact") ?? null,
     Include_Thumbnail: wantThumb ? "Yes" : "No",
     Thumbnail_URL: wantThumb ? (coverUrl || null) : null,
   };
@@ -6957,6 +7140,31 @@ async function pulseStudioP3Handoff(env, contentItemId, requestRecord) {
   const body = await response.text();
   if (!response.ok) {
     console.warn("P3 studio promote pulse failed", response.status, String(body || "").slice(0, 300));
+    return { ok: false, status: response.status };
+  }
+  return { ok: true, status: response.status };
+}
+
+async function pulseStudioC2Handoff(env, contentItemId, requestRecord = null) {
+  if (!/^rec[A-Za-z0-9]+$/.test(String(contentItemId || ""))) return { ok: false, skipped: "no_parent" };
+  const testRunId = String(f(requestRecord || {}, "Test_Run_ID") || "").trim();
+  try { await phase6EnsureScenarioActive(env, ITEM4_C2_SCENARIO_ID); } catch (error) {
+    console.warn("C2 webhook could not be armed before pulse", error);
+  }
+  const response = await fetch(ITEM4_C2_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
+    body: JSON.stringify({
+      source: "studio-ai-fill",
+      target: "C2",
+      content_record_id: contentItemId,
+      test_run_id: testRunId,
+      requested_at: new Date().toISOString(),
+    }),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    console.warn("C2 studio AI pulse failed", response.status, String(body || "").slice(0, 300));
     return { ok: false, status: response.status };
   }
   return { ok: true, status: response.status };
@@ -11186,6 +11394,7 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: 5806658, key: "TTD0" },
   { id: ITEM4_P2_SCENARIO_ID, key: "P2" },
   { id: ITEM4_P3_SCENARIO_ID, key: "P3" },
+  { id: ITEM4_C2_SCENARIO_ID, key: "C2" },
 ]);
 const STUDIO_AP0_WEBHOOK_URL = "https://hook.us2.make.com/q1lx2g0gg7khxzgvnkums12wu649pjnw";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
@@ -11204,6 +11413,7 @@ const PRODUCTION_CADENCE_MEDIA = Object.freeze([
 ]);
 const PRODUCTION_CADENCE_CAROUSEL = Object.freeze([
   { id: 5582062, key: "C1" },
+  { id: 5582071, key: "C2" },
   { id: 5586579, key: "C2M" },
 ]);
 const PRODUCTION_CADENCE_REPAIR = Object.freeze([
@@ -11218,6 +11428,7 @@ const STUDIO_MAKE_ADMIN_PENDING_FORMULA = '{Status}="Pending"';
 const STUDIO_R2B_VIEW_NAME = "R2B - Retry Asset Selection";
 const STUDIO_M1_STALE_RENDER_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Remotion_Status_URL}!="",{Render_Server_URL}!="",{Final_File_URL}="")';
 const STUDIO_C1_VIEW_ID = "viwT0B4SmJLL1qPlp";
+const STUDIO_C2_VIEW_ID = "viwehZYNL17SAt7Pt";
 const STUDIO_C2M_VIEW_ID = "viwPm4Pyk0BEzLvyE";
 const STUDIO_C2M_TABLE_ID = "tblcnQDBvUngpjDED";
 const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
@@ -11518,6 +11729,23 @@ async function studioContinuationInspectOutput(env, po, cache) {
   });
   if (!context) return { action: "skip", reason: "no_context" };
 
+  try {
+    const filled = await item4EnsureAiSourceMasters(env, context.requestRecord, context.parent);
+    if (filled?.requestRecord) {
+      context.requestRecord = filled.requestRecord;
+      cache.requests.set(filled.requestRecord.id, filled.requestRecord);
+    }
+    if (filled?.waiting > 0) {
+      return {
+        action: "wait_ai",
+        reason: "missing_ai_masters",
+        contentItemId: context.parent?.id || null,
+      };
+    }
+  } catch (error) {
+    console.warn("Studio AI master fill failed", po.id, error);
+  }
+
   const sourcePackage = item4StudioSourcePackageForOutput(
     context.requestRecord,
     context.outputRow,
@@ -11549,12 +11777,13 @@ async function studioContinuationInspectOutput(env, po, cache) {
     return { action: "reviewable", reason: "native_package" };
   }
 
+  if (!hasClips) return { action: "wait_variants", reason: "incomplete_source_package" };
+
   if (hasClips || nativePhoto || studioOutputWrongVideoSelectorPath(po) || studioOutputIsPhotoSequenceRoute(po)) {
     await studioContinuationStampPackage(env, po, context);
     if (nativePhoto && hasClips) return { action: "opened_review", reason: "native_stamp" };
     if (!nativePhoto && hasClips) return { action: "prep_render", reason: "photo_sequence_stamp" };
-    if (nativePhoto && !hasClips) return { action: "blocked", reason: "missing_ratio_crop" };
-    return { action: "asset_select", reason: "no_variants" };
+    return { action: "prep_render", reason: "stamped" };
   }
 
   if (/^ready for review$/i.test(outputStatus) && !String(f(po, "Asset_Selection_Status") || "").trim()) {
@@ -11644,6 +11873,17 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     console.warn("R2 remotion requeue failed", error);
   }
   const pulses = await pulseStudioContinuationJobs(env, options);
+  const waitingAi = inspected.some((row) => row.action === "wait_ai");
+  const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
+  const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
+  if (waitingAi || waitingPackage) {
+    try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
+      pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
+    }
+    try { pulses.push(...await pulseOnDemandMediaChain(env)); } catch (error) {
+      pulses.push({ key: "SMV1", error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   console.log("Studio continuation", JSON.stringify({
     count: inspected.length,
     inspected: inspected.map((row) => ({ id: row.id, action: row.action, reason: row.reason || row.error || null })),
@@ -11705,12 +11945,23 @@ async function pulseOnDemandMediaChain(env) {
   return pulses;
 }
 
-async function pulseOnDemandCarouselChain(env) {
+async function pulseOnDemandCarouselChain(env, options = {}) {
+  const parentIds = [...new Set((Array.isArray(options.contentItemIds) ? options.contentItemIds : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   const jobs = [
     { id: 5582062, key: "C1", table: env.AIRTABLE_CONTENT_TABLE_ID, view: STUDIO_C1_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
     { id: 5586579, key: "C2M", table: STUDIO_C2M_TABLE_ID, view: STUDIO_C2M_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
   ];
   const pulses = [];
+  for (const contentItemId of parentIds) {
+    try {
+      const result = await pulseStudioC2Handoff(env, contentItemId);
+      pulses.push({ key: "C2", parent: contentItemId, pulsed: Boolean(result?.ok), status: result?.status || null });
+    } catch (error) {
+      pulses.push({ key: "C2", parent: contentItemId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   for (const job of jobs) {
     const hasWork = await cadenceQueueHasWork(env, job.table, { view: job.view, formula: job.formula });
     if (!hasWork) {
@@ -11867,7 +12118,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_RENDER,
       ...PRODUCTION_CADENCE_PUBLISH,
       ...PRODUCTION_CADENCE_MEDIA,
-      ...PRODUCTION_CADENCE_CAROUSEL,
+      ...PRODUCTION_CADENCE_CAROUSEL.filter((item) => item.key !== "C2"),
       ...PRODUCTION_CADENCE_REPAIR,
     ];
     const results = await Promise.all([

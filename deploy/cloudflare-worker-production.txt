@@ -71,3 +71,5 @@ R2 queue Worker deploy: 2026-08-22 - Probe the live Ready-for-Review asset-selec
 
 Continuation first Worker deploy: 2026-08-22 - Cron stamps exact-source packages before parking Make scenarios, so Retry Pending photo reels are not starved by scenario start/stop. Worker 0.10.74-continuation-first.
 
+AI masters and audio Yes Worker deploy: 2026-08-22 - Mixed/AI plans wait for the promised photo count, seed C2 AI slides, ingest them as Item 4 masters, and never render a partial crop set. Voiceover and music default to Yes unless the operator chooses No. Worker 0.10.75-ai-masters-audio-yes.
+
