@@ -195,3 +195,5 @@ Wizard question label Pages deploy: 2026-08-22 - Home wizard questions render as
 
 Upload hint Pages deploy: 2026-08-22 - Drop HEIC/HEIF teaser copy; warn only on unsupported files; red saved-so-far count. UI 0.6.118-upload-hint-unsupported.
 
+YouTube 16:9 all Pages deploy: 2026-08-22 - Show a 16:9 frame for every photo and keep Prepare counting all six crops. UI 0.6.119-youtube-16x9-all.
+

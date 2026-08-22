@@ -75,3 +75,5 @@ AI masters and audio Yes Worker deploy: 2026-08-22 - Mixed/AI plans wait for the
 
 AI thumbnail Worker deploy: 2026-08-22 - Video covers default to AI generated 3D-letter thumbnails. A photo-frame still is used only when that option is chosen. Worker 0.10.76-ai-thumbnail.
 
+YouTube 16:9 all Worker deploy: 2026-08-22 - Prepare stays open until every YouTube 16:9 crop exists, not only the 9:16 plan set. Worker 0.10.77-youtube-16x9-all.
+

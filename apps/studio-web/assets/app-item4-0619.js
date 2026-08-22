@@ -81,7 +81,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.118-upload-hint-unsupported";
+  const BUILD_ID = "item4-0.6.119-youtube-16x9-all";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -3740,14 +3740,23 @@
   }
 
   function item4CropRows(status, ratio) {
-    const variantRows = item4VariantRows(status?.variants, ratio);
-    if (variantRows.length) {
-      return variantRows.map((row) => ({
-        asset: item4MasterAsset(row.asset?.id) || row.asset,
-        variant: row.variant,
-      }));
+    const variantById = new Map(
+      item4VariantRows(status?.variants, ratio).map((row) => [String(row.asset?.id || ""), row])
+    );
+    const masters = Array.isArray(status?.assets) ? status.assets : [];
+    if (masters.length) {
+      return masters.map((asset) => {
+        const match = variantById.get(String(asset.id || ""));
+        return {
+          asset: item4MasterAsset(asset.id) || asset,
+          variant: match?.variant || null,
+        };
+      });
     }
-    return (Array.isArray(status?.assets) ? status.assets : []).map((asset) => ({ asset, variant: null }));
+    return item4VariantRows(status?.variants, ratio).map((row) => ({
+      asset: item4MasterAsset(row.asset?.id) || row.asset,
+      variant: row.variant,
+    }));
   }
 
   function item4LiveCrop(frame, img, assetId, ratio) {
@@ -3852,8 +3861,8 @@
     const button = $("item4PrepareVariants");
     const variantStatus = status?.variant_status || "None";
     const manifest = status?.variants || null;
-    const readyCount = Number(manifest?.plan_ready_count || manifest?.ready_count || 0);
-    const targetCount = Number(manifest?.plan_target_count || manifest?.target_count || manifest?.source_asset_count || 0);
+    const readyCount = Number(manifest?.ready_count || 0);
+    const targetCount = Number(manifest?.target_count || manifest?.source_asset_count || 0);
     if (badge) badge.textContent = variantStatus === "Ready"
       ? `${readyCount} variants ready`
       : variantStatus === "Preparing"

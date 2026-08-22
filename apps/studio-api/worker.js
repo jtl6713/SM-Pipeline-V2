@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.76-ai-thumbnail",
+          version: "0.10.77-youtube-16x9-all",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -174,6 +174,7 @@ export default {
           studio_audio_default_yes_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
           studio_ai_thumbnail_v1: true,
+          studio_youtube_16x9_all_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -4329,7 +4330,8 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
     manifest.assets.push(row);
   }
 
-  manifest.complete = manifest.plan_target_count > 0 && manifest.plan_ready_count === manifest.plan_target_count;
+  manifest.plan_complete = manifest.plan_target_count > 0 && manifest.plan_ready_count === manifest.plan_target_count;
+  manifest.complete = manifest.target_count > 0 && manifest.ready_count === manifest.target_count;
   return manifest;
 }
 
@@ -4390,7 +4392,6 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   );
   const planPending = pending.filter((row) => planExpectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
   const manifest = item4BuildDriveManifest(recordId, assets, ratios, scoped, planRatios);
-  const planManifest = item4BuildDriveManifest(recordId, assets, planRatios, scoped, planRatios);
   const mediaAssetIds = [...new Set(
     scoped.filter((row) => item4QueueStatus(row) === "Ready")
       .map(item4QueueMediaAssetId)
@@ -4413,7 +4414,7 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
       .filter(Boolean)
       .join(" | ")
       .slice(0, 10000);
-  } else if (planManifest.complete) {
+  } else if (manifest.complete) {
     status = "Ready";
   }
 
@@ -4806,7 +4807,7 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
     variant_updated_at: f(record, "Studio_Variant_Updated_At") || null,
     variant_error: f(record, "Studio_Variant_Error") || null,
     variants: manifest,
-    variant_progress: manifest ? { ready: Number(manifest.plan_ready_count || manifest.ready_count || 0), target: Number(manifest.plan_target_count || manifest.target_count || 0) } : null,
+    variant_progress: manifest ? { ready: Number(manifest.ready_count || 0), target: Number(manifest.target_count || 0) } : null,
     variant_resume: variantResume,
     make_hardening: makeHardening,
     make_hardening_worker_build: "0.10.42",
