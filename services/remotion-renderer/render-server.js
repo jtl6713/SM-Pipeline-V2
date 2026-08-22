@@ -15,7 +15,7 @@ const DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
 const DEFAULT_MUSIC_BOOST_DELTA = 0.05;
 const DEFAULT_MUSIC_BOOST_FADE_SECONDS = 0.5;
 const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
-const SERVICE_VERSION = '2026-08-17-native-overlap-transitions';
+const SERVICE_VERSION = '2026-08-22-r5-done-callback';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -63,6 +63,39 @@ function appendLog(job, message) {
     if (job.logs.length > 80) {
         job.logs = job.logs.slice(job.logs.length - 80);
     }
+}
+
+const DEFAULT_R5_DONE_CALLBACK_URL = "https://studio.chicagoshining.com/api/hooks/r5-done";
+const DEFAULT_R5_DONE_CALLBACK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
+
+function notifyStudioR5Done(job) {
+    const url = String(process.env.STUDIO_R5_CALLBACK_URL || DEFAULT_R5_DONE_CALLBACK_URL).trim();
+    const secret = String(process.env.STUDIO_R5_CALLBACK_SECRET || DEFAULT_R5_DONE_CALLBACK_TOKEN).trim();
+    const target = `${url}${url.includes("?") ? "&" : "?"}k=${encodeURIComponent(secret)}`;
+
+    const payload = JSON.stringify({
+        source: "remotion-render-server",
+        jobId: job.jobId,
+        status: job.status,
+        renderUrl: job.renderUrl || null,
+        completedAt: job.completedAt || null,
+        error: job.error || null,
+    });
+
+    appendLog(job, `Telling Studio the render finished (${job.status})`);
+    fetch(target, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${secret}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+        },
+        body: payload,
+    }).then((response) => {
+        appendLog(job, `Studio R5 ping HTTP ${response.status}`);
+    }).catch((error) => {
+        appendLog(job, `Studio R5 ping failed: ${error.message}`);
+    });
 }
 
 function getBaseUrl(req) {
@@ -844,6 +877,7 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
             job.updatedAt = nowIso();
 
             appendLog(job, `Render process error: ${error.message}`);
+            notifyStudioR5Done(job);
             reject(error);
         });
 
@@ -855,11 +889,13 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
                 job.status = 'completed';
                 job.completedAt = nowIso();
                 appendLog(job, `Render completed: ${outputRelative}`);
+                notifyStudioR5Done(job);
                 resolve();
             } else {
                 job.status = 'failed';
                 job.error = `Remotion render failed with exit code ${code}`;
                 appendLog(job, job.error);
+                notifyStudioR5Done(job);
                 reject(new Error(job.error));
             }
         });

@@ -41,3 +41,5 @@ Intake empty-fast Worker deploy: 2026-08-22 - Empty A2 returns no-assets immedia
 
 Intake logs Worker deploy: 2026-08-22 - Read A2 status from Make scenario logs so empty intake shows "A2 completed with no assets to process" instead of sticking on Starting A2. Worker 0.10.58-intake-logs.
 
+On-demand render chain Worker deploy: 2026-08-22 - P1/R2/R3/R4/R5/RR1 stay on-demand. Remotion done POSTs /api/hooks/r5-done so R5 runs only when a job finished. Worker 0.10.59-ondemand-r5.
+

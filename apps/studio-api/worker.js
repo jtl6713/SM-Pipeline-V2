@@ -50,6 +50,7 @@ export default {
       const isOperationsOutputPublishedRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/published$/.test(url.pathname);
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
+      const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
@@ -113,20 +114,27 @@ export default {
         isOperationsOutputScheduleWrite ||
         isOperationsOutputPublishedWrite ||
         isOperationsCompressWrite ||
-        isOperationsIntakeWrite;
+        isOperationsIntakeWrite ||
+        (isR5DoneHookRoute && request.method === "POST");
       if (!allowedMethod) {
         return respond(request, env, { ok: false, error: "Method not allowed in Phase 2A" }, 405);
+      }
+
+      if (url.pathname === "/api/hooks/r5-done") {
+        requireConfig(env);
+        return handleR5DoneCallback(request, env, ctx);
       }
 
       if (url.pathname === "/health" || url.pathname === "/api/health") {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.58-intake-logs",
+          version: "0.10.59-ondemand-r5",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
           studio_intake_progress_v1: true,
+          studio_r5_done_callback_v1: true,
           studio_manual_idea_progress_v1: true,
           studio_manual_idea_count_range: "1-10",
           studio_companion_stories_v1: true,
@@ -8836,6 +8844,7 @@ const PHASE6_GEORGE_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 const PHASE6_P0202_SCENARIO_ID = 5893683;
 const PHASE6_R4_SCENARIO_ID = 5556716;
 const PHASE6_R5_SCENARIO_ID = 5565333;
+const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 
 function phase6RecordIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/creative(?:\/review)?$/);
@@ -10322,6 +10331,33 @@ async function phase6SetScenarioActive(env, scenarioId, active) {
   await phase6MakeApiJson(env, `/scenarios/${scenarioId}/${active ? "start" : "stop"}`, { method: "POST" });
 }
 
+function phase6RunAlreadyActiveError(error) {
+  return /422|already.*running|currently.*running|active execution/i.test(String(error?.message || error || ""));
+}
+
+async function phase6PulseOnDemandScenario(env, scenarioId) {
+  const before = await phase6ScenarioState(env, scenarioId);
+  try {
+    if (!before.isActive) await phase6SetScenarioActive(env, scenarioId, true);
+    try {
+      const run = await phase6RunScenario(env, scenarioId);
+      if (run?.executionId) {
+        await phase6WaitForScenarioExecution(env, scenarioId, run.executionId, 15000, 2000);
+      }
+      return run;
+    } catch (error) {
+      if (!phase6RunAlreadyActiveError(error)) throw error;
+      return { executionId: null, body: { skipped: "already-running" } };
+    }
+  } finally {
+    if (!before.isActive) {
+      try { await phase6StopScenarioVerified(env, scenarioId, 4); } catch (error) {
+        console.error(`Could not restore on-demand scenario ${scenarioId} OFF`, error);
+      }
+    }
+  }
+}
+
 async function phase6WaitForOutputStatus(env, outputRecordId, predicate, timeoutMs = 90000, pollMs = 2500) {
   const started = Date.now();
   let record = null;
@@ -10341,43 +10377,29 @@ async function phase6AutoRunRenderPipeline(env, outputRecordId) {
   try {
     let admitted = null;
     if (!r4State.isActive) {
-      // R4 is interval-scheduled while inactive; /start itself launches one run.
       await phase6SetScenarioActive(env, PHASE6_R4_SCENARIO_ID, true);
-      admitted = await phase6WaitForOutputStatus(env, outputRecordId, (record) => {
-        const status = String(f(record, "Render_Status") || "");
-        return ["Rendering", "Rendered", "Failed"].includes(status);
-      }, 30000, 1500);
     }
-    if (!admitted?.matched) {
+    try {
       const r4 = await phase6RunScenario(env, PHASE6_R4_SCENARIO_ID);
       r4Execution = r4.executionId;
+    } catch (error) {
+      if (!phase6RunAlreadyActiveError(error)) throw error;
+    }
+    if (r4Execution) {
       const r4Done = await phase6WaitForScenarioExecution(env, PHASE6_R4_SCENARIO_ID, r4Execution, 60000, 2000);
       if (r4Done.done && !r4Done.success) throw new HttpError(502, `R4 rerender start failed with status ${r4Done.status}`);
-      admitted = await phase6WaitForOutputStatus(env, outputRecordId, (record) => {
-        const status = String(f(record, "Render_Status") || "");
-        return ["Rendering", "Rendered", "Failed"].includes(status);
-      }, 30000, 1500);
     }
+    admitted = await phase6WaitForOutputStatus(env, outputRecordId, (record) => {
+      const status = String(f(record, "Render_Status") || "");
+      return ["Rendering", "Rendered", "Failed"].includes(status);
+    }, 30000, 1500);
 
     if (!admitted.matched) throw new HttpError(504, "R4 did not move the output into Rendering within the expected window");
     if (String(f(admitted.record, "Render_Status") || "") === "Failed") throw new HttpError(502, "R4 marked the output Failed");
     if (String(f(admitted.record, "Render_Status") || "") === "Rendered") return { completed: true, r4_execution_id: r4Execution, r5_execution_ids: [] };
 
     if (!r5State.isActive) {
-      // As with R4/P020-2, activation of an interval scenario launches one run.
       await phase6SetScenarioActive(env, PHASE6_R5_SCENARIO_ID, true);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      const afterActivation = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputRecordId);
-      if (String(f(afterActivation, "Render_Status") || "") === "Rendered" && f(afterActivation, "Studio_Preview_URL")) {
-        return {
-          completed: true,
-          r4_execution_id: r4Execution,
-          r5_execution_ids: r5Executions,
-          final_file_url: f(afterActivation, "Final_File_URL") || null,
-          studio_preview_url: f(afterActivation, "Studio_Preview_URL") || null,
-          preview_updated_at: f(afterActivation, "Studio_Preview_Updated_At") || null,
-        };
-      }
     }
     for (let attempt = 0; attempt < 12; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 2500 : 5000));
@@ -10479,6 +10501,11 @@ async function phase6PulseInactiveScenario(env, scenarioId, outputRecordId, pred
   try {
     await phase6SetScenarioActive(env, scenarioId, true);
     started = true;
+    try {
+      await phase6RunScenario(env, scenarioId);
+    } catch (error) {
+      if (!phase6RunAlreadyActiveError(error)) throw error;
+    }
     observed = await phase6WaitForOutputStatus(env, outputRecordId, predicate, waitMs, 1000);
     return { started, observed, was_active: false, exact_selector_isolation: true, eligible_count: eligible.length };
   } finally {
@@ -10549,6 +10576,26 @@ async function phase6RestoreProductionReviewReady(env, record) {
       typecast: true,
     }),
   });
+}
+
+async function inspectRemotionOrCloudConvertStatus(statusUrl) {
+  const url = String(statusUrl || "").trim();
+  if (!url) return { still_running: false, terminal: false, status: null };
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      ...(typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? { signal: AbortSignal.timeout(5000) } : {}),
+    });
+    if (!response.ok) return { still_running: false, terminal: false, status: `http-${response.status}` };
+    const body = await response.json().catch(() => ({}));
+    const status = String(body.status || body.state || body.data?.status || "").toLowerCase();
+    const still_running = ["preparing", "rendering", "pending", "queued", "accepted", "waiting", "processing", "running"].includes(status);
+    const terminal = ["completed", "complete", "done", "success", "failed", "error", "finished"].includes(status);
+    return { still_running, terminal, status: status || null };
+  } catch {
+    return { still_running: false, terminal: false, status: "unreachable" };
+  }
 }
 
 function phase6RenderHandoffState(record) {
@@ -10689,6 +10736,16 @@ async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
   }
 
   if (state === "rendering") {
+    const statusUrl = String(f(current, "Remotion_Status_URL") || "").trim();
+    const remotion = await inspectRemotionOrCloudConvertStatus(statusUrl);
+    if (remotion.still_running) {
+      return {
+        completed: false,
+        handoff_state: "rendering",
+        record: current,
+        message: "Remotion is still rendering. R5 will run when that job finishes.",
+      };
+    }
     const pulse = await phase6PulseInactiveScenario(
       env,
       PHASE6_R5_SCENARIO_ID,
@@ -10928,6 +10985,72 @@ async function cadenceHasRenderWork(env) {
   return checks.some(Boolean);
 }
 
+async function pulseOnDemandRenderChain(env) {
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
+  const jobs = [
+    { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
+    { id: 5569495, key: "R2", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Planned",{Production_Request_Output}!=BLANK())' },
+    { id: 5557966, key: "R3", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))' },
+    { id: 5556716, key: "R4", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))' },
+    { id: 5576363, key: "RR1", table: outputTable, formula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))' },
+  ];
+  const pulses = [];
+  for (const job of jobs) {
+    const hasWork = await cadenceQueueHasWork(env, job.table, { view: job.view || null, formula: job.formula || null });
+    if (!hasWork) {
+      pulses.push({ key: job.key, skipped: "no_work" });
+      continue;
+    }
+    try {
+      await phase6PulseOnDemandScenario(env, job.id);
+      pulses.push({ key: job.key, pulsed: true });
+    } catch (error) {
+      pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return pulses;
+}
+
+function timingSafeSecretEqual(left, right) {
+  const a = String(left || "");
+  const b = String(right || "");
+  if (!a || a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return mismatch === 0;
+}
+
+async function r5DoneCallbackSecret(env) {
+  const fromEnv = String(env.R5_CALLBACK_SECRET || "").trim();
+  if (fromEnv) return fromEnv;
+  const row = await studioSettingsByName(env, "STUDIO_R5_CALLBACK_SECRET").catch(() => null);
+  const fromSettings = String(f(row, "Setting_Value") || "").trim();
+  return fromSettings || STUDIO_R5_DONE_HOOK_TOKEN;
+}
+
+async function handleR5DoneCallback(request, env, ctx) {
+  if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+  const header = String(request.headers.get("Authorization") || "");
+  const bearer = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const queryToken = String(new URL(request.url).searchParams.get("k") || "").trim();
+  const presented = bearer || queryToken;
+  const expected = await r5DoneCallbackSecret(env);
+  if (!expected || !timingSafeSecretEqual(presented, expected)) throw new HttpError(401, "Invalid R5 callback secret");
+  const eligible = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 1,
+    view: "R5 - Rendering Jobs to Poll",
+  }).catch(() => []);
+  if (!eligible.length) {
+    return respond(request, env, { ok: true, skipped: "no_rendering_jobs" });
+  }
+  const task = phase6PulseOnDemandScenario(env, PHASE6_R5_SCENARIO_ID).catch((error) => {
+    console.error("R5 done callback pulse failed", error);
+  });
+  if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
+  return respond(request, env, { ok: true, triggered: "r5-on-demand", eligible: eligible.length }, 202);
+}
+
 async function cadenceHasPublishWork(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const checks = await Promise.all([
@@ -10977,7 +11100,8 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ...PRODUCTION_CADENCE_PUBLISH,
     ];
     const results = await Promise.all(parked.map((item) => cadenceSetActive(env, item.id, false)));
-    return { ok: true, parked: true, results };
+    const pulses = startRender ? await pulseOnDemandRenderChain(env) : [];
+    return { ok: true, parked: true, results, pulses };
   }
   if (await cadenceRepairInProgress(env)) {
     return { skipped: "repair_lease" };
@@ -12137,8 +12261,8 @@ async function repairPulseP1TestSelector(env, lease, input, action) {
   if (beforeState.isActive) throw new HttpError(409, "P1 must be OFF before Test Mode selector pulse");
   const originalScheduling = JSON.stringify(beforeState?.scenario?.scheduling || {});
   const scheduling = beforeState?.scenario?.scheduling || {};
-  if (String(scheduling.type || "") !== "indefinitely" || Number(scheduling.interval || 0) !== 900) {
-    throw new HttpError(409, `P1 canonical 15-minute schedule is not present: ${originalScheduling}`);
+  if (String(scheduling.type || "") !== "on-demand") {
+    throw new HttpError(409, `P1 canonical on-demand schedule is not present: ${originalScheduling}`);
   }
   if (beforeState?.scenario?.hookId != null) throw new HttpError(409, "P1 unexpectedly has a webhook identity; refusing selector pulse");
 
@@ -12185,6 +12309,9 @@ async function repairPulseP1TestSelector(env, lease, input, action) {
 
     await phase6SetScenarioActive(env, P1_SCENARIO_ID, true);
     started = true;
+    try { await phase6RunScenario(env, P1_SCENARIO_ID); } catch (error) {
+      if (!phase6RunAlreadyActiveError(error)) throw error;
+    }
     observed = await repairWaitForP1Package(env, recordId, lease.test_run_id, 90000);
     if (!observed?.matched) throw new HttpError(502, `P1 did not generate a package for exact Content Item ${recordId} within 90 seconds`);
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -12901,13 +13028,16 @@ async function repairControlAction(env, input) {
     const before = await phase6ScenarioState(env, lease.scenario_id);
     const observedScheduling = repairInspectorClone(before?.scenario?.scheduling || {});
     if (before.isActive) throw new HttpError(409, "R4 must be OFF before scheduled-selector pulse");
-    if (observedScheduling?.type !== "indefinitely" || Number(observedScheduling?.interval || 0) !== 900) {
-      throw new HttpError(409, `R4 canonical 15-minute schedule is not present: ${JSON.stringify(observedScheduling)}`);
+    if (observedScheduling?.type !== "on-demand") {
+      throw new HttpError(409, `R4 canonical on-demand schedule is not present: ${JSON.stringify(observedScheduling)}`);
     }
     let stop = null;
     let failure = null;
     try {
       await phase6SetScenarioActive(env, lease.scenario_id, true);
+      try { await phase6RunScenario(env, lease.scenario_id); } catch (error) {
+        if (!phase6RunAlreadyActiveError(error)) throw error;
+      }
       const observed = await phase6WaitForOutputStatus(env, recordId, (record) => {
         const status = String(f(record, "Render_Status") || "");
         return ["Rendering", "Rendered", "Failed"].includes(status);
