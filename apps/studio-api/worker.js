@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.105-continuation-rearm-p2",
+          version: "0.10.106-continuation-first-p2",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -686,29 +686,25 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    // Publishing goes first. The continuation scan and the queue drain below are both unbounded in
-    // the number of Airtable and Make calls they make, so anything sequenced after them can lose
-    // the whole invocation to a subrequest ceiling. An approved output that never reaches a
-    // publisher is the most visible failure this Worker has, so it gets the budget first.
+    // Continuation must own this isolate's subrequest budget. A parked cadence
+    // force-sync still probed publish/media/admin-bridge every two minutes and
+    // starved MX cover stamps plus P2 pulses. Daily ideas stay on a separate
+    // waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
+      try {
+        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+      } catch (error) {
+        console.warn("production continuation cron failed", error);
+      }
       try {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
       }
       try {
-        await syncProductionCadence(env, { force: true, skipRenderPulse: true });
+        await syncProductionCadence(env, { skipRenderPulse: true });
       } catch (error) {
         console.warn("production cadence cron failed", error);
-      }
-    })());
-    // syncProductionCadence already drains the item 4 queue on a forced run, so draining again
-    // here only doubled the cost of the tick that was already running out of subrequests.
-    ctx.waitUntil((async () => {
-      try {
-        await advanceStudioProductionOutputs(env, { waitMs: 0 });
-      } catch (error) {
-        console.warn("production continuation cron failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -12664,12 +12660,12 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
     console.warn("R2 remotion requeue failed", error);
   }
-  const pulses = await pulseStudioContinuationJobs(env, options);
   const waitingAi = inspected.some((row) => row.action === "wait_ai");
   const waitingVoiceover = inspected.some((row) => row.action === "wait_voiceover");
   const waitingThumbnail = inspected.some((row) => row.action === "wait_thumbnail");
   const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
   const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
+  const pulses = [];
   if (waitingVoiceover || waitingThumbnail) {
     const mediaParents = [...new Set(
       inspected.filter((row) => row.action === "wait_voiceover" || row.action === "wait_thumbnail").map((row) => row.contentItemId).filter(Boolean)
@@ -12692,6 +12688,9 @@ async function advanceStudioProductionOutputs(env, options = {}) {
         pulses.push({ key: "P2", error: error instanceof Error ? error.message : String(error) });
       }
     }
+  }
+  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
+    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
   }
   if (waitingAi || waitingPackage) {
     try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
