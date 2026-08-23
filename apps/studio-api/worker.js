@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.86-ai-slot-cover-count",
+          version: "0.10.87-drive-uploaded-reconcile",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -6657,7 +6657,20 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
   const assets = item4AssetManifest(requestRecord);
   const expected = item4EffectivePhotoCount(requestRecord, assets);
   const needed = Math.max(0, expected - assets.length);
-  if (!needed) return { requestRecord, needed: 0, waiting: 0 };
+  if (!needed) {
+    // Masters are present but may still be Drive Uploaded / not Ready.
+    try {
+      const reconciled = await item4ReconcileMasterAuthority(env, requestRecord.id, requestRecord);
+      return {
+        requestRecord: reconciled.record || requestRecord,
+        needed: 0,
+        waiting: Math.max(0, expected - item4AssetManifest(reconciled.record || requestRecord).length),
+      };
+    } catch (error) {
+      console.warn("Studio AI master reconcile failed", error);
+      return { requestRecord, needed: 0, waiting: 0 };
+    }
+  }
   const parentId = parent?.id || studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
   if (parentId) {
     try {
@@ -6703,6 +6716,14 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
     } catch (error) {
       console.warn("Studio AI variant queue failed", error);
     }
+  }
+  // Drive Uploaded AI masters need Worker reconciliation even when SMV1 has no
+  // Pending rows left — otherwise Master status stays Uploading forever.
+  try {
+    const reconciled = await item4ReconcileMasterAuthority(env, current.id, current);
+    current = reconciled.record || current;
+  } catch (error) {
+    console.warn("Studio AI master reconcile failed", error);
   }
   return { requestRecord: current, needed, waiting: Math.max(0, expected - item4AssetManifest(current).length) };
 }
