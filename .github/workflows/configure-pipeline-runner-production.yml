@@ -91,6 +91,8 @@ jobs:
               'PIPELINE_RUNNER_URL': ('plain_text', os.environ['RUNNER_URL']),
               'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
           }
+              'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
+          }
           for name, (binding_type, text) in updates.items():
               by_name[name] = {'name': name, 'type': binding_type, 'text': text}
           Path('/tmp/settings-patch.json').write_text(json.dumps({'bindings': list(by_name.values())}))
