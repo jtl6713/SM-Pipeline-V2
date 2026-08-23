@@ -89,3 +89,5 @@ Mixed AI exact Worker deploy: 2026-08-22 - Keep waiting for the wizard Exact tot
 
 Stale review state Worker deploy: 2026-08-22 - Do not show Ready for Review from leftover Review Sent / preview URLs while Output_Status is still In Production without a finished Remotion file. Worker 0.10.83-stale-review-state.
 
+AI slide list fix Worker deploy: 2026-08-22 - Fix carousel slide lookup so mixed AI fill sees existing empty slots (checkbox NOT deleted) instead of reseeding 3 empties every cron tick. Skip C1 while wait_ai parents are scoped. Worker 0.10.84-ai-slide-list-fix.
+

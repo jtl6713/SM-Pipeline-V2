@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.83-stale-review-state",
+          version: "0.10.84-ai-slide-list-fix",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -181,6 +181,7 @@ export default {
           studio_story_caption_voiceover_gate_v1: true,
           studio_mixed_ai_exact_v1: true,
           studio_stale_review_state_v1: true,
+          studio_ai_slide_list_fix_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -6477,10 +6478,18 @@ function copyWritableParentFields(parentContentItem) {
 
 async function item4ListParentCarouselSlides(env, parentId) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(parentId || ""))) return [];
-  return listRecords(env, "Carousel Slides", {
-    limit: 200,
-    filterFormula: `AND(FIND("${parentId}", ARRAYJOIN({Content Item})),{Deleted From Carousel}=0)`,
-  }).catch(() => []);
+  // NOT({Deleted From Carousel}) matches unchecked/blank. `{Deleted From Carousel}=0`
+  // returns no rows for checkbox fields, so mixed AI seeding recreated 3 empty
+  // slides every cron tick and never saw the storm already on the parent.
+  try {
+    return await listRecords(env, "Carousel Slides", {
+      limit: 200,
+      filterFormula: `AND(FIND("${parentId}", ARRAYJOIN({Content Item})),NOT({Deleted From Carousel}))`,
+    });
+  } catch (error) {
+    console.warn("Studio list parent carousel slides failed", parentId, error);
+    return [];
+  }
 }
 
 async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, targetTotal = null) {
@@ -6499,7 +6508,7 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
       .slice()
       .sort((a, b) => String(b.createdTime || "").localeCompare(String(a.createdTime || "")));
     const surplus = emptyLive.length - emptyBudget;
-    for (const row of emptyNewestFirst.slice(0, Math.min(surplus, 25))) {
+    for (const row of emptyNewestFirst.slice(0, Math.min(surplus, 100))) {
       try {
         await airtableFetch(env, "Carousel Slides", row.id, {
           method: "PATCH",
@@ -11867,6 +11876,14 @@ async function studioContinuationStampPackage(env, po, context) {
     fields.Render_Status = null;
     fields.Asset_Selection_Status = "Selected";
     fields.Composition_ID = "ChicagoShiningPhotoSequence";
+    // Package rebuild: drop leftover review mail / preview so Pipeline does not
+    // keep showing Ready for Review while Remotion is still running.
+    fields.Review_Status = null;
+    fields.Review_Email_Sent_At = null;
+    fields.Studio_Preview_URL = null;
+    fields.Final_File_URL = null;
+    fields.Final_File_ID = null;
+    fields.Remotion_Job_ID = null;
   } else {
     fields.Output_Status = "Ready for Review";
     fields.Render_Status = null;
@@ -12167,10 +12184,6 @@ async function pulseOnDemandCarouselChain(env, options = {}) {
   const parentIds = [...new Set((Array.isArray(options.contentItemIds) ? options.contentItemIds : [])
     .map((id) => String(id || "").trim())
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  const jobs = [
-    { id: 5582062, key: "C1", table: env.AIRTABLE_CONTENT_TABLE_ID, view: STUDIO_C1_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
-    { id: 5586579, key: "C2M", table: STUDIO_C2M_TABLE_ID, view: STUDIO_C2M_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
-  ];
   const pulses = [];
   for (const contentItemId of parentIds) {
     try {
@@ -12180,6 +12193,13 @@ async function pulseOnDemandCarouselChain(env, options = {}) {
       pulses.push({ key: "C2", parent: contentItemId, error: error instanceof Error ? error.message : String(error) });
     }
   }
+  // When continuation already scoped parents for AI fill, do not pulse C1.
+  // C1 reseeds empty carousel slides every tick and starves C2.
+  if (parentIds.length) return pulses;
+  const jobs = [
+    { id: 5582062, key: "C1", table: env.AIRTABLE_CONTENT_TABLE_ID, view: STUDIO_C1_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
+    { id: 5586579, key: "C2M", table: STUDIO_C2M_TABLE_ID, view: STUDIO_C2M_VIEW_ID, formula: "{Test_Run_ID}=BLANK()" },
+  ];
   for (const job of jobs) {
     const hasWork = await cadenceQueueHasWork(env, job.table, { view: job.view, formula: job.formula });
     if (!hasWork) {
