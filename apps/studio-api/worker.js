@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.91-ai-slide-themer",
+          version: "0.10.92-ai-variant-queue-backfill",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -6751,6 +6751,32 @@ async function item4IngestAiSlideAsMaster(env, requestRecord, slide) {
   });
 }
 
+// An AI master is ingested straight from the carousel slide, before SMV1 has given
+// it a Drive file and Media Asset record, so the variant upsert that runs at ingest
+// time cannot queue its crops yet. Without a re-queue once the master turns Ready
+// the request waits forever on crops nobody ever asked for.
+async function item4EnsureVariantQueueForReadyMasters(env, record) {
+  const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  if (!plan) return record;
+  const assets = item4AssetManifest(record);
+  if (!assets.length) return record;
+  const authoritative = assets.filter((asset) =>
+    String(asset?.google_drive_file_id || "").trim() && String(asset?.media_asset_record_id || "").trim()
+  );
+  if (authoritative.length !== assets.length) return record;
+  const ratios = item4RequiredRatios(plan);
+  const expectedIds = assets.flatMap((asset) =>
+    ratios.map((ratio) => item4QueueTransferId(record.id, asset.id, ratio, asset))
+  );
+  const existing = await item4VariantQueueRows(env, record.id);
+  const present = new Set(existing.map((row) => String(f(row, "Transfer_ID") || "").trim()));
+  if (expectedIds.every((id) => present.has(id))) return record;
+  const outputRows = await outputRowsForProductionRequest(env, record.id);
+  await item4UpsertVariantQueue(env, record.id, assets, ratios, outputRows, plan);
+  const reconciled = await item4ReconcileVariants(env, record.id);
+  return reconciled?.record || record;
+}
+
 async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
   const assets = item4AssetManifest(requestRecord);
   const expected = item4EffectivePhotoCount(requestRecord, assets);
@@ -6759,10 +6785,16 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
     // Masters are present but may still be Drive Uploaded / not Ready.
     try {
       const reconciled = await item4ReconcileMasterAuthority(env, requestRecord.id, requestRecord);
+      let settled = reconciled.record || requestRecord;
+      try {
+        settled = await item4EnsureVariantQueueForReadyMasters(env, settled);
+      } catch (error) {
+        console.warn("Studio AI variant queue backfill failed", error);
+      }
       return {
-        requestRecord: reconciled.record || requestRecord,
+        requestRecord: settled,
         needed: 0,
-        waiting: Math.max(0, expected - item4AssetManifest(reconciled.record || requestRecord).length),
+        waiting: Math.max(0, expected - item4AssetManifest(settled).length),
       };
     } catch (error) {
       console.warn("Studio AI master reconcile failed", error);
@@ -6822,6 +6854,11 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
     current = reconciled.record || current;
   } catch (error) {
     console.warn("Studio AI master reconcile failed", error);
+  }
+  try {
+    current = await item4EnsureVariantQueueForReadyMasters(env, current);
+  } catch (error) {
+    console.warn("Studio AI variant queue backfill failed", error);
   }
   return { requestRecord: current, needed, waiting: Math.max(0, expected - item4AssetManifest(current).length) };
 }
