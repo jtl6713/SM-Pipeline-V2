@@ -7,13 +7,7 @@ from r2.processor import process_one
 
 
 def run(request: StageRequest) -> StageResult:
-    """
-    R2 — auto asset selection for one Platform Output (Make scenario 5569495).
-
-    One POST == one output row (Make Module 1 maxRecords=1).
-    OpenAI canonical selection (Make modules 7–9) remains on Make until ported;
-    zero-candidate fail-fast is implemented in Python.
-    """
+    """R2 auto asset selection — Make scenario 5569495 replacement."""
     output_record_id = (request.output_record_id or request.platform_output_id or "").strip() or None
     test_run_id = (request.test_run_id or "").strip() or None
     dry_run = bool(request.extra.get("dry_run"))
@@ -24,7 +18,6 @@ def run(request: StageRequest) -> StageResult:
         max_runs = max(1, min(int(request.extra["max_runs"]), 5))
 
     runs: list[dict] = []
-    deferred = False
     try:
         for _ in range(max_runs):
             result = process_one(
@@ -33,10 +26,7 @@ def run(request: StageRequest) -> StageResult:
                 dry_run=dry_run,
             )
             runs.append(result)
-            if result.get("status") == "deferred":
-                deferred = True
-                break
-            if not result.get("processed"):
+            if not result.get("processed") and not result.get("dry_run"):
                 break
     except Exception as exc:
         return StageResult(
@@ -62,25 +52,6 @@ def run(request: StageRequest) -> StageResult:
                 "dry_run": True,
                 "runs": runs,
                 "service_version": settings["service_version"],
-            },
-        )
-
-    if deferred:
-        last = runs[-1] if runs else {}
-        return StageResult(
-            stage="r2",
-            status="deferred",
-            message=(
-                "R2 claim/eligibility handled in Python; canonical OpenAI selection "
-                f"still runs on Make scenario {MAKE_SCENARIO_ID} (modules 7–9)."
-            ),
-            details={
-                "make_scenario_id": MAKE_SCENARIO_ID,
-                "make_fallback_required": True,
-                "output_record_id": output_record_id,
-                "test_run_id": test_run_id,
-                "runs": runs,
-                "make_pointer": last.get("make_pointer"),
             },
         )
 

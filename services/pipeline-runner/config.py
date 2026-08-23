@@ -36,9 +36,10 @@ def load_settings() -> dict[str, Any]:
         "google_client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
         "google_refresh_token": os.environ.get("GOOGLE_REFRESH_TOKEN", ""),
         "openai_api_key": os.environ.get("OPENAI_API_KEY", ""),
+        "openai_r2_model": os.environ.get("OPENAI_R2_MODEL", "gpt-4.1"),
         "elevenlabs_api_key": os.environ.get("ELEVENLABS_API_KEY", ""),
         "p4_webhook_url": os.environ.get("P4_WEBHOOK_URL", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-23-r2-scaffold"),
+        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-23-smv1-r2-prod"),
     }
 
 

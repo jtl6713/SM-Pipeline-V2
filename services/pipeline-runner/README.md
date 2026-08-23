@@ -12,10 +12,12 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 
 ## Status
 
-| Stage | Python | Make fallback | Notes |
-| --- | --- | --- | --- |
-| **SMV1** | Implemented | Default until `STAGE_BACKEND_SMV1=python` | Full queue drain |
-| **R2** | Scaffold | Default until `STAGE_BACKEND_R2=python` | Fail-fast + eligibility; OpenAI (modules 7–9) still on Make |
+| Stage | Python | Production |
+| --- | --- | --- |
+| **SMV1** | Full (`5894885` replacement) | `STAGE_BACKEND_SMV1=python` |
+| **R2** | Full (`5569495` replacement, OpenAI module 7 port) | `STAGE_BACKEND_R2=python` |
+
+Make scenarios archived under `ARCHIVE_MOVED_TO_PYTHON/` and deactivated.
 
 Other stages return `501 not_implemented`.
 

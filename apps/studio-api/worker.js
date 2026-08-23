@@ -4278,6 +4278,72 @@ function item4QueueRowIsOutstanding(row) {
   return status === "Ready" && String(f(row, "Preview_Status") || "").trim() === "Pending";
 }
 
+function pipelineStageBackend(env, stageKey) {
+  const configured = String(env[`STAGE_BACKEND_${stageKey}`] || "make").trim().toLowerCase();
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (configured === "python" && runnerUrl) return { mode: "python", runnerUrl };
+  return { mode: "make", runnerUrl: "" };
+}
+
+function cadenceScenarioManagedByPython(env, scenarioId) {
+  const id = Number(scenarioId);
+  if (id === ITEM4_SMV1_SCENARIO_ID && pipelineStageBackend(env, "SMV1").mode === "python") return true;
+  if (id === PHASE6_R2_SCENARIO_ID && pipelineStageBackend(env, "R2").mode === "python") return true;
+  return false;
+}
+
+async function item4PulsePipelineStage(env, stagePath, body = {}, stageKey = null) {
+  const key = stageKey || String(stagePath || "").split("/")[0].trim().toUpperCase();
+  const { runnerUrl } = pipelineStageBackend(env, key);
+  if (!runnerUrl) throw new HttpError(503, `Pipeline runner is not configured for stage ${stagePath}`);
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const response = await fetch(`${runnerUrl}/stages/${stagePath}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  return { response, payload };
+}
+
+async function item4PulseSmv1Python(env, recordId, maxRuns) {
+  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
+  const { response, payload } = await item4PulsePipelineStage(env, "smv1/drain", {
+    production_request_record_id: recordId,
+    ...(testRunId ? { test_run_id: testRunId } : {}),
+    extra: { max_runs: maxRuns },
+  }, "SMV1");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python SMV1 drain failed (${response.status})`
+    );
+  }
+  const processed = Number(payload?.details?.processed_count || 0);
+  return processed > 0 ? [`python:smv1:${recordId}`] : [];
+}
+
+async function item4PulseR2Python(env, options = {}) {
+  const body = {
+    extra: { max_runs: Number(options.maxRuns || 1) },
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "r2", body, "R2");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python R2 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
 async function item4SetSmv1SelectorFormula(env, formula) {
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
   const read = async () => {
@@ -4300,6 +4366,10 @@ async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
   // This keeps variant generation source-locked even when generic filenames
   // (for example images 1.jpg) are reused across different Production Requests.
   await item4EnsureSmv1PreviewCacheWorker(env);
+
+  if (pipelineStageBackend(env, "SMV1").mode === "python") {
+    return item4PulseSmv1Python(env, recordId, maxRuns);
+  }
 
   const maxMs = Number(options.maxMs || 0);
   const started = Date.now();
@@ -8855,6 +8925,9 @@ async function item4EnsureMakeHardeningFromWorkspaceOpen(env, options = {}) {
 }
 
 async function item4EnsureR2StudioExactSourceGuard(env) {
+  if (pipelineStageBackend(env, "R2").mode === "python") {
+    return { skipped: "python_backend" };
+  }
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
   const read = await fetch(`${makeApiBase}/scenarios/${ITEM4_R2_SCENARIO_ID}/blueprint?draft=false`,{method:"GET",headers});
   const raw=await read.text(); let body; try { body=raw?JSON.parse(raw):{}; } catch { body={raw}; }
@@ -9323,6 +9396,9 @@ async function item4EnsureP3SingleParentRoute(env) {
 
 
 async function item4EnsureSmv1PreviewCacheWorker(env) {
+  if (pipelineStageBackend(env, "SMV1").mode === "python") {
+    return { skipped: "python_backend" };
+  }
   const { makeApiBase, headers } = await phase6MakeApiConfig(env);
   const response = await fetch(
     `${makeApiBase}/scenarios/${ITEM4_SMV1_SCENARIO_ID}/blueprint?draft=false`,
@@ -12674,6 +12750,11 @@ async function pulseStudioContinuationJobs(env, options = {}) {
       continue;
     }
     try {
+      if (job.key === "R2" && pipelineStageBackend(env, "R2").mode === "python") {
+        await item4PulseR2Python(env, { maxRuns: 1 });
+        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
+        continue;
+      }
       await phase6PulseOnDemandScenario(env, job.id, { waitMs });
       pulses.push({ key: job.key, pulsed: true, matched: eligible.length });
       if (job.key === "R3" || job.key === "R4") break;
@@ -13103,7 +13184,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
   const actions = [
     ...PRODUCTION_CADENCE_ALWAYS_ON.map((item) => cadenceSetActive(env, item.id, true)),
     ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
-    ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender)),
+    ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender && !cadenceScenarioManagedByPython(env, item.id))),
     ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish)),
   ];
   const results = await Promise.all(actions);

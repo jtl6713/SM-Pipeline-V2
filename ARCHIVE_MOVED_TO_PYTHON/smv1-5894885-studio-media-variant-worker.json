@@ -1,0 +1,1699 @@
+{
+  "scenarioId": 5894885,
+  "name": "SMV1 - Studio Media Authority + Platform Variant Worker v0.6.3 - Media Link Isolation",
+  "archivedAt": "2026-08-23",
+  "replacedBy": "services/pipeline-runner stages/smv1.py",
+  "blueprint": {
+    "flow": [
+      {
+        "id": 1,
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "table": "tblBZLXPd1p2NRWRK",
+          "formula": "AND({Production_Request_Record_ID}=\"recaw9dPB5OMT6SgN\",{Test_Run_ID}=BLANK(),OR(AND({Asset_Kind}=\"Master Original\",{Transfer_Status}=\"Pending\"),AND({Asset_Kind}=\"Platform Variant\",OR({Transfer_Status}=\"Pending\",{Transfer_Status}=\"Drive Uploaded\")),AND(OR({Asset_Kind}=\"Master Original\",{Asset_Kind}=\"Platform Variant\"),{Transfer_Status}=\"Ready\",{Preview_Status}=\"Pending\")))",
+          "maxRecords": "1",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": 0,
+            "y": 0,
+            "name": "1 - Get One Authority or Browser Preview Work Item"
+          },
+          "interface": [
+            {
+              "name": "id",
+              "type": "text",
+              "label": "ID"
+            },
+            {
+              "name": "Transfer_ID",
+              "type": "text",
+              "label": "Transfer_ID"
+            },
+            {
+              "name": "Production_Request_Record_ID",
+              "type": "text",
+              "label": "Production_Request_Record_ID"
+            },
+            {
+              "name": "Asset_Kind",
+              "type": "text",
+              "label": "Asset_Kind"
+            },
+            {
+              "name": "Aspect_Ratio",
+              "type": "text",
+              "label": "Aspect_Ratio"
+            },
+            {
+              "name": "Target_Drive_Folder_ID",
+              "type": "text",
+              "label": "Target_Drive_Folder_ID"
+            },
+            {
+              "name": "Target_File_Name",
+              "type": "text",
+              "label": "Target_File_Name"
+            },
+            {
+              "name": "Transfer_Status",
+              "type": "text",
+              "label": "Transfer_Status"
+            },
+            {
+              "name": "Drive_File_ID",
+              "type": "text",
+              "label": "Drive_File_ID"
+            },
+            {
+              "name": "Drive_URL",
+              "type": "text",
+              "label": "Drive_URL"
+            },
+            {
+              "name": "Media_Asset_Record_ID",
+              "type": "text",
+              "label": "Media_Asset_Record_ID"
+            },
+            {
+              "name": "Attempt_Count",
+              "type": "number",
+              "label": "Attempt_Count"
+            },
+            {
+              "name": "Source_Drive_File_ID",
+              "type": "text",
+              "label": "Source_Drive_File_ID"
+            },
+            {
+              "name": "Target_Production_Request_Outputs",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Target_Production_Request_Outputs"
+            },
+            {
+              "name": "Source_Asset_ID",
+              "type": "text",
+              "label": "Source_Asset_ID"
+            },
+            {
+              "name": "Source_Name",
+              "type": "text",
+              "label": "Source_Name"
+            },
+            {
+              "name": "Source_R2_Key",
+              "type": "text",
+              "label": "Source_R2_Key"
+            },
+            {
+              "name": "Source_URL",
+              "type": "text",
+              "label": "Source_URL"
+            },
+            {
+              "name": "Source_MIME_Type",
+              "type": "text",
+              "label": "Source_MIME_Type"
+            },
+            {
+              "name": "Source_Extension",
+              "type": "text",
+              "label": "Source_Extension"
+            },
+            {
+              "name": "Source_Size_Bytes",
+              "type": "number",
+              "label": "Source_Size_Bytes"
+            },
+            {
+              "name": "Source_Order",
+              "type": "number",
+              "label": "Source_Order"
+            },
+            {
+              "name": "Preview_Status",
+              "type": "text",
+              "label": "Preview_Status"
+            },
+            {
+              "name": "Preview_R2_Key",
+              "type": "text",
+              "label": "Preview_R2_Key"
+            },
+            {
+              "name": "Preview_URL",
+              "type": "text",
+              "label": "Preview_URL"
+            },
+            {
+              "name": "Preview_Error",
+              "type": "text",
+              "label": "Preview_Error"
+            }
+          ]
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 2,
+        "mapper": null,
+        "module": "builtin:BasicRouter",
+        "routes": [
+          {
+            "flow": [
+              {
+                "id": 60,
+                "filter": {
+                  "name": "Ready authority item needs browser preview cache",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.Transfer_Status}}",
+                        "b": "Ready",
+                        "o": "text:equal:ci"
+                      },
+                      {
+                        "a": "{{1.Preview_Status}}",
+                        "b": "Pending",
+                        "o": "text:equal:ci"
+                      },
+                      {
+                        "a": "{{1.Asset_Kind}}",
+                        "b": "Master Original",
+                        "o": "text:equal:ci"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{1.Transfer_Status}}",
+                        "b": "Ready",
+                        "o": "text:equal:ci"
+                      },
+                      {
+                        "a": "{{1.Preview_Status}}",
+                        "b": "Pending",
+                        "o": "text:equal:ci"
+                      },
+                      {
+                        "a": "{{1.Asset_Kind}}",
+                        "b": "Platform Variant",
+                        "o": "text:equal:ci"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblpHPWeEkyJaF7ql",
+                  "formula": "AND({Active}=1,OR({Setting_Name}=\"R2_UPLOAD_WORKER_URL\",{Setting_Name}=\"R2_UPLOAD_WORKER_SECRET\",{Setting_Name}=\"STUDIO_PREVIEW_R2_PREFIX\",{Setting_Name}=\"STUDIO_VARIANT_SERVICE_BASE_URL\",{Setting_Name}=\"STUDIO_VARIANT_SERVICE_TOKEN\"))",
+                  "maxRecords": "5",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 602,
+                    "y": -1109,
+                    "name": "60 - Load Browser Preview Settings"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 61,
+                "mapper": {
+                  "setting_name": "{{60.Setting_Name}}",
+                  "setting_value": "{{60.Setting_Value}}"
+                },
+                "module": "builtin:BasicAggregator",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 884,
+                    "y": -1107,
+                    "name": "61 - Aggregate Browser Preview Settings"
+                  }
+                },
+                "parameters": {
+                  "feeder": 60,
+                  "target": "custom",
+                  "groupBy": "{{1.id}}"
+                }
+              },
+              {
+                "id": 62,
+                "mapper": {
+                  "file": "{{1.Drive_File_ID}}",
+                  "select": "map",
+                  "formatDrawings": "image/jpeg",
+                  "formatDocuments": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                  "formatSpreadsheets": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                  "formatPresentations": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                },
+                "module": "google-drive:getAFile",
+                "version": 4,
+                "metadata": {
+                  "designer": {
+                    "x": 1174,
+                    "y": -1107,
+                    "name": "62 - Download Private Drive Authority for Preview"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9306146
+                }
+              },
+              {
+                "id": 63,
+                "mapper": null,
+                "module": "builtin:BasicRouter",
+                "routes": [
+                  {
+                    "flow": [
+                      {
+                        "id": 64,
+                        "filter": {
+                          "name": "Platform variant preview",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Platform Variant",
+                                "o": "text:equal:ci"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "ca": "",
+                          "qs": [
+                            {
+                              "name": "key",
+                              "value": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}-{{1.Drive_File_ID}}.jpg"
+                            }
+                          ],
+                          "url": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_URL\"); 1)}}",
+                          "data": "{{62.data}}",
+                          "gzip": true,
+                          "method": "put",
+                          "headers": [
+                            {
+                              "name": "x-pipeline-secret",
+                              "value": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_SECRET\"); 1)}}"
+                            }
+                          ],
+                          "timeout": "300",
+                          "useMtls": false,
+                          "authPass": "",
+                          "authUser": "",
+                          "bodyType": "raw",
+                          "contentType": "custom",
+                          "serializeUrl": false,
+                          "shareCookies": false,
+                          "parseResponse": true,
+                          "followRedirect": true,
+                          "useQuerystring": false,
+                          "customContentType": "image/jpeg",
+                          "followAllRedirects": false,
+                          "rejectUnauthorized": true
+                        },
+                        "module": "http:ActionSendData",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 1475,
+                            "y": -1385,
+                            "name": "64 - Cache Versioned Variant JPEG Preview in R2"
+                          }
+                        },
+                        "parameters": {
+                          "handleErrors": true,
+                          "useNewZLibDeCompress": true
+                        }
+                      },
+                      {
+                        "id": 65,
+                        "filter": {
+                          "name": "Preview R2 upload succeeded",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{64.statusCode}}",
+                                "b": "200",
+                                "o": "number:greaterorequal"
+                              },
+                              {
+                                "a": "{{64.statusCode}}",
+                                "b": "299",
+                                "o": "number:lessorequal"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "id": "{{1.id}}",
+                          "base": "appe33zkZn35yirTL",
+                          "table": "tblBZLXPd1p2NRWRK",
+                          "record": {
+                            "fld2I54gEUz2J3TsR": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}-{{1.Drive_File_ID}}.jpg",
+                            "fld2UVhbThqP0dfus": "",
+                            "fldCtpIKdIlfaGvnn": "Ready",
+                            "fldS5ON40ZHaGu8Ar": "https://media.chicagoshining.com/{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}-{{1.Drive_File_ID}}.jpg",
+                            "fldebrZI7ZxNc9IIH": "{{now}}"
+                          },
+                          "typecast": true,
+                          "useColumnId": true
+                        },
+                        "module": "airtable:ActionUpdateRecords",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 1794,
+                            "y": -1368,
+                            "name": "65 - Mark Versioned Variant Browser Preview Ready"
+                          }
+                        },
+                        "parameters": {
+                          "__IMTCONN__": 9293192
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "flow": [
+                      {
+                        "id": 66,
+                        "filter": {
+                          "name": "HEIC or HEIF master preview",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "heic",
+                                "o": "text:equal:ci"
+                              }
+                            ],
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "heif",
+                                "o": "text:equal:ci"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "ca": "",
+                          "qs": [
+                            {
+                              "name": "ratio",
+                              "value": "4:5"
+                            },
+                            {
+                              "name": "recipe",
+                              "value": "fill-crop-v2"
+                            }
+                          ],
+                          "url": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_VARIANT_SERVICE_BASE_URL\"); 1)}}/render",
+                          "data": "{{62.data}}",
+                          "gzip": true,
+                          "method": "post",
+                          "headers": [
+                            {
+                              "name": "X-Studio-Variant-Token",
+                              "value": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_VARIANT_SERVICE_TOKEN\"); 1)}}"
+                            }
+                          ],
+                          "timeout": "300",
+                          "useMtls": false,
+                          "authPass": "",
+                          "authUser": "",
+                          "bodyType": "raw",
+                          "contentType": "custom",
+                          "serializeUrl": false,
+                          "shareCookies": false,
+                          "parseResponse": false,
+                          "followRedirect": true,
+                          "useQuerystring": false,
+                          "customContentType": "application/octet-stream",
+                          "followAllRedirects": false,
+                          "rejectUnauthorized": true
+                        },
+                        "module": "http:ActionSendData",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 1791,
+                            "y": -1107,
+                            "name": "66 - Convert HEIC Master to Browser JPEG Preview"
+                          }
+                        },
+                        "parameters": {
+                          "handleErrors": true,
+                          "useNewZLibDeCompress": true
+                        }
+                      },
+                      {
+                        "id": 67,
+                        "mapper": {
+                          "ca": "",
+                          "qs": [
+                            {
+                              "name": "key",
+                              "value": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}.jpg"
+                            }
+                          ],
+                          "url": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_URL\"); 1)}}",
+                          "data": "{{66.data}}",
+                          "gzip": true,
+                          "method": "put",
+                          "headers": [
+                            {
+                              "name": "x-pipeline-secret",
+                              "value": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_SECRET\"); 1)}}"
+                            }
+                          ],
+                          "timeout": "300",
+                          "useMtls": false,
+                          "authPass": "",
+                          "authUser": "",
+                          "bodyType": "raw",
+                          "contentType": "custom",
+                          "serializeUrl": false,
+                          "shareCookies": false,
+                          "parseResponse": true,
+                          "followRedirect": true,
+                          "useQuerystring": false,
+                          "customContentType": "image/jpeg",
+                          "followAllRedirects": false,
+                          "rejectUnauthorized": true
+                        },
+                        "module": "http:ActionSendData",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 2078,
+                            "y": -1103,
+                            "name": "67 - Cache HEIC Master JPEG Preview in R2"
+                          }
+                        },
+                        "parameters": {
+                          "handleErrors": true,
+                          "useNewZLibDeCompress": true
+                        }
+                      },
+                      {
+                        "id": 68,
+                        "filter": {
+                          "name": "Preview R2 upload succeeded",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{67.statusCode}}",
+                                "b": "200",
+                                "o": "number:greaterorequal"
+                              },
+                              {
+                                "a": "{{67.statusCode}}",
+                                "b": "299",
+                                "o": "number:lessorequal"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "id": "{{1.id}}",
+                          "base": "appe33zkZn35yirTL",
+                          "table": "tblBZLXPd1p2NRWRK",
+                          "record": {
+                            "fld2I54gEUz2J3TsR": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}.jpg",
+                            "fld2UVhbThqP0dfus": "",
+                            "fldCtpIKdIlfaGvnn": "Ready",
+                            "fldS5ON40ZHaGu8Ar": "https://media.chicagoshining.com/{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}.jpg",
+                            "fldebrZI7ZxNc9IIH": "{{now}}"
+                          },
+                          "typecast": true,
+                          "useColumnId": true
+                        },
+                        "module": "airtable:ActionUpdateRecords",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 2387,
+                            "y": -1103,
+                            "name": "68 - Mark HEIC Master Browser Preview Ready"
+                          }
+                        },
+                        "parameters": {
+                          "__IMTCONN__": 9293192
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "flow": [
+                      {
+                        "id": 69,
+                        "filter": {
+                          "name": "Browser-compatible master preview",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "png",
+                                "o": "text:equal:ci"
+                              }
+                            ],
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "jpg",
+                                "o": "text:equal:ci"
+                              }
+                            ],
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "jpeg",
+                                "o": "text:equal:ci"
+                              }
+                            ],
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "webp",
+                                "o": "text:equal:ci"
+                              }
+                            ],
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "gif",
+                                "o": "text:equal:ci"
+                              }
+                            ],
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "avif",
+                                "o": "text:equal:ci"
+                              }
+                            ],
+                            [
+                              {
+                                "a": "{{1.Asset_Kind}}",
+                                "b": "Master Original",
+                                "o": "text:equal:ci"
+                              },
+                              {
+                                "a": "{{1.Source_Extension}}",
+                                "b": "bmp",
+                                "o": "text:equal:ci"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "ca": "",
+                          "qs": [
+                            {
+                              "name": "key",
+                              "value": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}.{{1.Source_Extension}}"
+                            }
+                          ],
+                          "url": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_URL\"); 1)}}",
+                          "data": "{{62.data}}",
+                          "gzip": true,
+                          "method": "put",
+                          "headers": [
+                            {
+                              "name": "x-pipeline-secret",
+                              "value": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_SECRET\"); 1)}}"
+                            }
+                          ],
+                          "timeout": "300",
+                          "useMtls": false,
+                          "authPass": "",
+                          "authUser": "",
+                          "bodyType": "raw",
+                          "contentType": "custom",
+                          "serializeUrl": false,
+                          "shareCookies": false,
+                          "parseResponse": true,
+                          "followRedirect": true,
+                          "useQuerystring": false,
+                          "customContentType": "{{1.Source_MIME_Type}}",
+                          "followAllRedirects": false,
+                          "rejectUnauthorized": true
+                        },
+                        "module": "http:ActionSendData",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 1800,
+                            "y": -821,
+                            "name": "69 - Cache Browser-Compatible Master Preview in R2"
+                          }
+                        },
+                        "parameters": {
+                          "handleErrors": true,
+                          "useNewZLibDeCompress": true
+                        }
+                      },
+                      {
+                        "id": 70,
+                        "filter": {
+                          "name": "Preview R2 upload succeeded",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{69.statusCode}}",
+                                "b": "200",
+                                "o": "number:greaterorequal"
+                              },
+                              {
+                                "a": "{{69.statusCode}}",
+                                "b": "299",
+                                "o": "number:lessorequal"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "id": "{{1.id}}",
+                          "base": "appe33zkZn35yirTL",
+                          "table": "tblBZLXPd1p2NRWRK",
+                          "record": {
+                            "fld2I54gEUz2J3TsR": "{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}.{{1.Source_Extension}}",
+                            "fld2UVhbThqP0dfus": "",
+                            "fldCtpIKdIlfaGvnn": "Ready",
+                            "fldS5ON40ZHaGu8Ar": "https://media.chicagoshining.com/{{get(map(61.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1)}}/item4/{{1.Production_Request_Record_ID}}/{{1.Transfer_ID}}.{{1.Source_Extension}}",
+                            "fldebrZI7ZxNc9IIH": "{{now}}"
+                          },
+                          "typecast": true,
+                          "useColumnId": true
+                        },
+                        "module": "airtable:ActionUpdateRecords",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 2085,
+                            "y": -819,
+                            "name": "70 - Mark Master Browser Preview Ready"
+                          }
+                        },
+                        "parameters": {
+                          "__IMTCONN__": 9293192
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 1476,
+                    "y": -1107,
+                    "name": "63 - Route Preview Conversion"
+                  }
+                },
+                "parameters": {}
+              }
+            ]
+          },
+          {
+            "flow": [
+              {
+                "id": 50,
+                "filter": {
+                  "name": "Pending master original",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.Asset_Kind}}",
+                        "b": "Master Original",
+                        "o": "text:equal:ci"
+                      },
+                      {
+                        "a": "{{1.Transfer_Status}}",
+                        "b": "Pending",
+                        "o": "text:equal:ci"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblpHPWeEkyJaF7ql",
+                  "formula": "AND({Active}=1,OR({Setting_Name}=\"STUDIO_MEDIA_BRIDGE_BASE_URL\",{Setting_Name}=\"STUDIO_MEDIA_BRIDGE_TOKEN\"))",
+                  "maxRecords": "2",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 589,
+                    "y": -555,
+                    "name": "50 - Load Master Bridge Settings"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 51,
+                "mapper": {
+                  "setting_name": "{{50.Setting_Name}}",
+                  "setting_value": "{{50.Setting_Value}}"
+                },
+                "module": "builtin:BasicAggregator",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 906,
+                    "y": -552,
+                    "name": "51 - Aggregate Master Bridge Settings"
+                  }
+                },
+                "parameters": {
+                  "feeder": 50,
+                  "target": "custom",
+                  "groupBy": "{{1.id}}"
+                }
+              },
+              {
+                "id": 52,
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblBZLXPd1p2NRWRK",
+                  "record": {
+                    "fld3YYkhKhrpbSGgW": "Processing",
+                    "fldN9BuQ75py8lGWW": "",
+                    "fldmR51tpMoD7zunW": "{{now}}",
+                    "fldqHlzBzpQWdUalG": "{{sum(ifempty(1.Attempt_Count; 0); 1)}}"
+                  },
+                  "typecast": true,
+                  "useColumnId": true
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1187,
+                    "y": -549,
+                    "name": "52 - Lock Master Original"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 53,
+                "mapper": {
+                  "url": "{{get(map(51.array; \"setting_value\"; \"setting_name\"; \"STUDIO_MEDIA_BRIDGE_BASE_URL\"); 1)}}/transfer?key={{1.Source_R2_Key}}",
+                  "gzip": true,
+                  "method": "get",
+                  "headers": [
+                    {
+                      "name": "X-Studio-Bridge-Token",
+                      "value": "{{get(map(51.array; \"setting_value\"; \"setting_name\"; \"STUDIO_MEDIA_BRIDGE_TOKEN\"); 1)}}"
+                    }
+                  ],
+                  "timeout": "300",
+                  "useMtls": false,
+                  "serializeUrl": false,
+                  "shareCookies": false,
+                  "parseResponse": false,
+                  "followRedirect": true,
+                  "useQuerystring": false,
+                  "followAllRedirects": false,
+                  "rejectUnauthorized": true
+                },
+                "module": "http:ActionSendData",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1469,
+                    "y": -549,
+                    "name": "53 - Fetch Temporary Master Bytes"
+                  }
+                },
+                "parameters": {
+                  "handleErrors": true,
+                  "useNewZLibDeCompress": true
+                }
+              },
+              {
+                "id": 54,
+                "filter": {
+                  "name": "Master bridge returned bytes",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{53.statusCode}}",
+                        "b": "200",
+                        "o": "number:greaterorequal"
+                      },
+                      {
+                        "a": "{{53.statusCode}}",
+                        "b": "299",
+                        "o": "number:lessorequal"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "data": "{{53.data}}",
+                  "title": "{{1.Target_File_Name}}",
+                  "select": "map",
+                  "convert": false,
+                  "filename": "{{1.Source_Name}}",
+                  "folderId": "{{1.Target_Drive_Folder_ID}}"
+                },
+                "module": "google-drive:uploadAFile",
+                "version": 4,
+                "metadata": {
+                  "designer": {
+                    "x": 1782,
+                    "y": -547,
+                    "name": "54 - Upload Authoritative Master to Google Drive"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9306146
+                }
+              },
+              {
+                "id": 55,
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblBZLXPd1p2NRWRK",
+                  "record": {
+                    "fld3YYkhKhrpbSGgW": "Drive Uploaded",
+                    "fldN9BuQ75py8lGWW": "Authoritative master uploaded to Google Drive; awaiting Studio API reconciliation.",
+                    "fldrsJw97Lqp28qYM": "{{54.id}}",
+                    "fldx6OpE16xyIu8xP": "https://drive.google.com/file/d/{{54.id}}/view"
+                  },
+                  "typecast": true,
+                  "useColumnId": true
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 2095,
+                    "y": -547,
+                    "name": "55 - Checkpoint Master Drive Upload"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          },
+          {
+            "flow": [
+              {
+                "id": 3,
+                "filter": {
+                  "name": "Drive Uploaded variant resume",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.Asset_Kind}}",
+                        "b": "Platform Variant",
+                        "o": "text:equal:ci"
+                      },
+                      {
+                        "a": "{{1.Transfer_Status}}",
+                        "b": "Drive Uploaded",
+                        "o": "text:equal:ci"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblSITCujCsJTNcDe",
+                  "formula": "{Studio_Transfer_ID}=\"{{1.Transfer_ID}}\"",
+                  "maxRecords": "1",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 589,
+                    "y": -211,
+                    "name": "3 - Resume Find Variant Media Asset"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 4,
+                "filter": {
+                  "name": "Resume asset found",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{3.id}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblBZLXPd1p2NRWRK",
+                  "record": {
+                    "fld3YYkhKhrpbSGgW": "Ready",
+                    "fldLlG8ALtMztGG0v": [
+                      "{{3.id}}"
+                    ],
+                    "fldN9BuQ75py8lGWW": "Idempotent resume: existing Media Asset reused; no Drive duplicate created.",
+                    "fldPcsdYVoF74hFVH": "{{now}}",
+                    "fldixkPqxLyjdwBvX": "{{3.id}}"
+                  },
+                  "typecast": true,
+                  "useColumnId": true
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 904,
+                    "y": -211,
+                    "name": "4 - Resume Mark Variant Ready"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          },
+          {
+            "flow": [
+              {
+                "id": 10,
+                "filter": {
+                  "name": "Pending variant",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.Asset_Kind}}",
+                        "b": "Platform Variant",
+                        "o": "text:equal:ci"
+                      },
+                      {
+                        "a": "{{1.Transfer_Status}}",
+                        "b": "Pending",
+                        "o": "text:equal:ci"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblSITCujCsJTNcDe",
+                  "formula": "{Studio_Transfer_ID}=\"{{1.Transfer_ID}}\"",
+                  "maxRecords": "1",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 600,
+                    "y": 100,
+                    "name": "10 - Variant Preflight Existing Media Asset"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 11,
+                "mapper": null,
+                "module": "builtin:BasicRouter",
+                "routes": [
+                  {
+                    "flow": [
+                      {
+                        "id": 12,
+                        "filter": {
+                          "name": "Existing transfer asset found",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{10.id}}",
+                                "o": "exist"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "id": "{{1.id}}",
+                          "base": "appe33zkZn35yirTL",
+                          "table": "tblBZLXPd1p2NRWRK",
+                          "record": {
+                            "fld3YYkhKhrpbSGgW": "Ready",
+                            "fldLlG8ALtMztGG0v": [
+                              "{{10.id}}"
+                            ],
+                            "fldN9BuQ75py8lGWW": "Idempotent preflight: existing Media Asset reused; no new variant generated.",
+                            "fldPcsdYVoF74hFVH": "{{now}}",
+                            "fldixkPqxLyjdwBvX": "{{10.id}}"
+                          },
+                          "typecast": true,
+                          "useColumnId": true
+                        },
+                        "module": "airtable:ActionUpdateRecords",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 1293,
+                            "y": -209,
+                            "name": "12 - Reuse Existing Variant Asset"
+                          }
+                        },
+                        "parameters": {
+                          "__IMTCONN__": 9293192
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "flow": [
+                      {
+                        "id": 20,
+                        "filter": {
+                          "name": "No existing asset",
+                          "conditions": [
+                            [
+                              {
+                                "a": "{{10.id}}",
+                                "o": "notexist"
+                              }
+                            ]
+                          ]
+                        },
+                        "mapper": {
+                          "id": "{{1.id}}",
+                          "base": "appe33zkZn35yirTL",
+                          "table": "tblBZLXPd1p2NRWRK",
+                          "record": {
+                            "fld3YYkhKhrpbSGgW": "Processing",
+                            "fldN9BuQ75py8lGWW": "",
+                            "fldmR51tpMoD7zunW": "{{now}}",
+                            "fldqHlzBzpQWdUalG": "{{sum(ifempty(1.Attempt_Count; 0); 1)}}"
+                          },
+                          "typecast": true,
+                          "useColumnId": true
+                        },
+                        "module": "airtable:ActionUpdateRecords",
+                        "version": 3,
+                        "metadata": {
+                          "designer": {
+                            "x": 1200,
+                            "y": 250,
+                            "name": "20 - Lock Variant Job"
+                          }
+                        },
+                        "parameters": {
+                          "__IMTCONN__": 9293192
+                        }
+                      },
+                      {
+                        "id": 21,
+                        "mapper": {
+                          "qs": [
+                            {
+                              "key": "q",
+                              "value": "name = '__STUDIO_VARIANT_FILENAME_REUSE_DISABLED__' and trashed = false"
+                            },
+                            {
+                              "key": "pageSize",
+                              "value": "10"
+                            },
+                            {
+                              "key": "fields",
+                              "value": "files(id,name,mimeType,size,webViewLink,parents)"
+                            }
+                          ],
+                          "url": "v3/files",
+                          "body": "",
+                          "method": "GET",
+                          "headers": []
+                        },
+                        "module": "google-drive:makeApiCall",
+                        "version": 4,
+                        "metadata": {
+                          "designer": {
+                            "x": 1500,
+                            "y": 250,
+                            "name": "21 - Disable Unsafe Filename-Only Variant Reuse"
+                          }
+                        },
+                        "parameters": {
+                          "__IMTCONN__": 9306146
+                        }
+                      },
+                      {
+                        "id": 22,
+                        "mapper": null,
+                        "module": "builtin:BasicRouter",
+                        "routes": [
+                          {
+                            "flow": [
+                              {
+                                "id": 23,
+                                "filter": {
+                                  "name": "Exact Drive file exists",
+                                  "conditions": [
+                                    [
+                                      {
+                                        "a": "{{length(21.body.files)}}",
+                                        "b": "0",
+                                        "o": "number:greater"
+                                      }
+                                    ]
+                                  ]
+                                },
+                                "mapper": {
+                                  "base": "appe33zkZn35yirTL",
+                                  "table": "tblSITCujCsJTNcDe",
+                                  "record": {
+                                    "fld3YvIEH7qVDzbS5": "{{1.Aspect_Ratio}}",
+                                    "fldAWPBh86hsvGaRm": "{{1.Target_File_Name}}",
+                                    "fldAryimNceBG3W0X": "{{get(get(21.body.files; 1); \"id\")}}",
+                                    "fldSAMtSFjysUC36q": "image/jpeg",
+                                    "fldXZJ0tPsyvrJ3HH": "https://drive.google.com/file/d/{{get(get(21.body.files; 1); \"id\")}}/view",
+                                    "fldb3mqGTRXicF7Jk": "{{1.Transfer_ID}}",
+                                    "fldsBoLv4BEe3rbOj": "jpg"
+                                  },
+                                  "typecast": true,
+                                  "useColumnId": true
+                                },
+                                "module": "airtable:ActionCreateRecord",
+                                "version": 3,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 2100,
+                                    "y": 100,
+                                    "name": "23 - Register Existing Drive Variant"
+                                  }
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9293192
+                                }
+                              },
+                              {
+                                "id": 24,
+                                "mapper": {
+                                  "id": "{{1.id}}",
+                                  "base": "appe33zkZn35yirTL",
+                                  "table": "tblBZLXPd1p2NRWRK",
+                                  "record": {
+                                    "fld3YYkhKhrpbSGgW": "Ready",
+                                    "fldLlG8ALtMztGG0v": [
+                                      "{{23.id}}"
+                                    ],
+                                    "fldN9BuQ75py8lGWW": "Existing authoritative Drive file reused and registered; no Drive duplicate created.",
+                                    "fldPcsdYVoF74hFVH": "{{now}}",
+                                    "fldixkPqxLyjdwBvX": "{{23.id}}",
+                                    "fldrsJw97Lqp28qYM": "{{get(get(21.body.files; 1); \"id\")}}",
+                                    "fldx6OpE16xyIu8xP": "https://drive.google.com/file/d/{{get(get(21.body.files; 1); \"id\")}}/view"
+                                  },
+                                  "typecast": true,
+                                  "useColumnId": true
+                                },
+                                "module": "airtable:ActionUpdateRecords",
+                                "version": 3,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 2400,
+                                    "y": 100,
+                                    "name": "24 - Mark Existing Drive Variant Ready"
+                                  }
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9293192
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "flow": [
+                              {
+                                "id": 30,
+                                "filter": {
+                                  "name": "No exact Drive variant",
+                                  "conditions": [
+                                    [
+                                      {
+                                        "a": "{{length(21.body.files)}}",
+                                        "b": "0",
+                                        "o": "number:equal"
+                                      }
+                                    ]
+                                  ]
+                                },
+                                "mapper": {
+                                  "base": "appe33zkZn35yirTL",
+                                  "table": "tblpHPWeEkyJaF7ql",
+                                  "formula": "AND({Active}=1,{Setting_Name}=\"STUDIO_VARIANT_SERVICE_BASE_URL\")",
+                                  "maxRecords": "1",
+                                  "useColumnId": false
+                                },
+                                "module": "airtable:ActionSearchRecords",
+                                "version": 3,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 2100,
+                                    "y": 400,
+                                    "name": "30 - Load Variant Service URL"
+                                  },
+                                  "interface": [
+                                    {
+                                      "name": "id",
+                                      "type": "text",
+                                      "label": "ID"
+                                    },
+                                    {
+                                      "name": "Setting_Name",
+                                      "type": "text",
+                                      "label": "Setting_Name"
+                                    },
+                                    {
+                                      "name": "Setting_Value",
+                                      "type": "text",
+                                      "label": "Setting_Value"
+                                    },
+                                    {
+                                      "name": "Active",
+                                      "type": "boolean",
+                                      "label": "Active"
+                                    }
+                                  ]
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9293192
+                                }
+                              },
+                              {
+                                "id": 31,
+                                "mapper": {
+                                  "base": "appe33zkZn35yirTL",
+                                  "table": "tblpHPWeEkyJaF7ql",
+                                  "formula": "AND({Active}=1,{Setting_Name}=\"STUDIO_VARIANT_SERVICE_TOKEN\")",
+                                  "maxRecords": "1",
+                                  "useColumnId": false
+                                },
+                                "module": "airtable:ActionSearchRecords",
+                                "version": 3,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 2400,
+                                    "y": 400,
+                                    "name": "31 - Load Variant Service Token"
+                                  },
+                                  "interface": [
+                                    {
+                                      "name": "id",
+                                      "type": "text",
+                                      "label": "ID"
+                                    },
+                                    {
+                                      "name": "Setting_Name",
+                                      "type": "text",
+                                      "label": "Setting_Name"
+                                    },
+                                    {
+                                      "name": "Setting_Value",
+                                      "type": "text",
+                                      "label": "Setting_Value"
+                                    },
+                                    {
+                                      "name": "Active",
+                                      "type": "boolean",
+                                      "label": "Active"
+                                    }
+                                  ]
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9293192
+                                }
+                              },
+                              {
+                                "id": 32,
+                                "mapper": {
+                                  "file": "{{1.Source_Drive_File_ID}}",
+                                  "select": "map",
+                                  "formatDrawings": "image/jpeg",
+                                  "formatDocuments": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                  "formatSpreadsheets": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                  "formatPresentations": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                                },
+                                "module": "google-drive:getAFile",
+                                "version": 4,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 2700,
+                                    "y": 400,
+                                    "name": "32 - Download Authoritative Drive Master"
+                                  }
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9306146
+                                }
+                              },
+                              {
+                                "id": 33,
+                                "mapper": {
+                                  "ca": "",
+                                  "qs": [
+                                    {
+                                      "name": "ratio",
+                                      "value": "{{1.Aspect_Ratio}}"
+                                    },
+                                    {
+                                      "name": "recipe",
+                                      "value": "fill-crop-v2"
+                                    },
+                                    {
+                                      "name": "g",
+                                      "value": "{{1.Variant_Style}}"
+                                    }
+                                  ],
+                                  "url": "{{trim(30.Setting_Value)}}/render",
+                                  "data": "{{32.data}}",
+                                  "gzip": true,
+                                  "method": "post",
+                                  "headers": [
+                                    {
+                                      "name": "X-Studio-Variant-Token",
+                                      "value": "{{31.Setting_Value}}"
+                                    }
+                                  ],
+                                  "timeout": "300",
+                                  "useMtls": false,
+                                  "authPass": "",
+                                  "authUser": "",
+                                  "bodyType": "raw",
+                                  "contentType": "custom",
+                                  "serializeUrl": false,
+                                  "shareCookies": false,
+                                  "parseResponse": false,
+                                  "followRedirect": true,
+                                  "useQuerystring": false,
+                                  "customContentType": "application/octet-stream",
+                                  "followAllRedirects": false,
+                                  "rejectUnauthorized": true
+                                },
+                                "module": "http:ActionSendData",
+                                "version": 3,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 3000,
+                                    "y": 400,
+                                    "name": "33 - Render Versioned Fill-Crop Platform Variant"
+                                  }
+                                },
+                                "parameters": {
+                                  "handleErrors": true,
+                                  "useNewZLibDeCompress": true
+                                }
+                              },
+                              {
+                                "id": 34,
+                                "filter": {
+                                  "name": "Render returned image",
+                                  "conditions": [
+                                    [
+                                      {
+                                        "a": "{{33.statusCode}}",
+                                        "b": "200",
+                                        "o": "number:greaterorequal"
+                                      },
+                                      {
+                                        "a": "{{33.statusCode}}",
+                                        "b": "299",
+                                        "o": "number:lessorequal"
+                                      }
+                                    ]
+                                  ]
+                                },
+                                "mapper": {
+                                  "data": "{{33.data}}",
+                                  "title": "{{replace(1.Target_File_Name; \".jpg\"; \"\")}}",
+                                  "select": "map",
+                                  "convert": false,
+                                  "filename": "{{1.Target_File_Name}}",
+                                  "folderId": "{{1.Target_Drive_Folder_ID}}"
+                                },
+                                "module": "google-drive:uploadAFile",
+                                "version": 4,
+                                "metadata": {
+                                  "expect": [
+                                    {
+                                      "name": "select",
+                                      "type": "select",
+                                      "label": "Enter a Folder ID",
+                                      "required": true
+                                    },
+                                    {
+                                      "name": "title",
+                                      "type": "text",
+                                      "label": "New File Name"
+                                    },
+                                    {
+                                      "name": "filename",
+                                      "type": "text",
+                                      "label": "File Name",
+                                      "required": true
+                                    },
+                                    {
+                                      "name": "data",
+                                      "type": "buffer",
+                                      "label": "Data",
+                                      "required": true
+                                    },
+                                    {
+                                      "name": "convert",
+                                      "type": "boolean",
+                                      "label": "Convert a File",
+                                      "required": true
+                                    },
+                                    {
+                                      "name": "folderId",
+                                      "type": "text",
+                                      "label": "Folder ID",
+                                      "required": true
+                                    }
+                                  ],
+                                  "advanced": true,
+                                  "designer": {
+                                    "x": 3300,
+                                    "y": 400,
+                                    "name": "34 - Upload Variant JPEG to Google Drive"
+                                  }
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9306146
+                                }
+                              },
+                              {
+                                "id": 35,
+                                "mapper": {
+                                  "base": "appe33zkZn35yirTL",
+                                  "table": "tblSITCujCsJTNcDe",
+                                  "record": {
+                                    "fld3YvIEH7qVDzbS5": "{{1.Aspect_Ratio}}",
+                                    "fldAWPBh86hsvGaRm": "{{1.Target_File_Name}}",
+                                    "fldAryimNceBG3W0X": "{{34.id}}",
+                                    "fldSAMtSFjysUC36q": "image/jpeg",
+                                    "fldXZJ0tPsyvrJ3HH": "https://drive.google.com/file/d/{{34.id}}/view",
+                                    "fldb3mqGTRXicF7Jk": "{{1.Transfer_ID}}",
+                                    "fldsBoLv4BEe3rbOj": "jpg"
+                                  },
+                                  "typecast": true,
+                                  "useColumnId": true
+                                },
+                                "module": "airtable:ActionCreateRecord",
+                                "version": 3,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 3600,
+                                    "y": 400,
+                                    "name": "35 - Create Derived Media Asset"
+                                  }
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9293192
+                                }
+                              },
+                              {
+                                "id": 36,
+                                "mapper": {
+                                  "id": "{{1.id}}",
+                                  "base": "appe33zkZn35yirTL",
+                                  "table": "tblBZLXPd1p2NRWRK",
+                                  "record": {
+                                    "fld3YYkhKhrpbSGgW": "Ready",
+                                    "fldLlG8ALtMztGG0v": [
+                                      "{{35.id}}"
+                                    ],
+                                    "fldN9BuQ75py8lGWW": "Generated by Studio Variant Service; authoritative copy stored in Google Drive.",
+                                    "fldPcsdYVoF74hFVH": "{{now}}",
+                                    "fldixkPqxLyjdwBvX": "{{35.id}}",
+                                    "fldrsJw97Lqp28qYM": "{{34.id}}",
+                                    "fldx6OpE16xyIu8xP": "https://drive.google.com/file/d/{{34.id}}/view"
+                                  },
+                                  "typecast": true,
+                                  "useColumnId": true
+                                },
+                                "module": "airtable:ActionUpdateRecords",
+                                "version": 3,
+                                "metadata": {
+                                  "designer": {
+                                    "x": 3900,
+                                    "y": 400,
+                                    "name": "36 - Mark Generated Variant Ready"
+                                  }
+                                },
+                                "parameters": {
+                                  "__IMTCONN__": 9293192
+                                }
+                              }
+                            ]
+                          }
+                        ],
+                        "version": 1,
+                        "metadata": {
+                          "designer": {
+                            "x": 1800,
+                            "y": 250,
+                            "name": "22 - Reuse Drive or Generate"
+                          }
+                        },
+                        "parameters": {}
+                      }
+                    ]
+                  }
+                ],
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 900,
+                    "y": 100,
+                    "name": "11 - Variant Reuse or Continue"
+                  }
+                },
+                "parameters": {}
+              }
+            ]
+          }
+        ],
+        "version": 1,
+        "metadata": {
+          "designer": {
+            "x": 300,
+            "y": 0,
+            "name": "2 - Route Master vs Variant"
+          }
+        },
+        "parameters": {}
+      }
+    ],
+    "name": "SMV1 - Studio Media Authority + Platform Variant Worker v0.6.3 - Media Link Isolation",
+    "metadata": {
+      "instant": false,
+      "version": 1,
+      "designer": {
+        "orphans": []
+      },
+      "scenario": {
+        "dlq": false,
+        "slots": null,
+        "dataloss": false,
+        "maxErrors": 2,
+        "autoCommit": true,
+        "roundtrips": 1,
+        "sequential": true,
+        "confidential": false,
+        "freshVariables": false,
+        "autoCommitTriggerLast": true
+      }
+    },
+    "scheduling": {
+      "type": "on-demand"
+    },
+    "interface": {
+      "input": [],
+      "output": []
+    }
+  }
+}

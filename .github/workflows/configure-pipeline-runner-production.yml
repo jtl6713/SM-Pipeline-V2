@@ -71,10 +71,8 @@ jobs:
           set -euo pipefail
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           cat > /tmp/worker-settings.json <<EOF
-          {"settings":{"vars":{"STAGE_BACKEND_SMV1":"python","PIPELINE_RUNNER_URL":"$RUNNER_URL","PIPELINE_RUNNER_SHARED_SECRET":"$PIPELINE_RUNNER_SHARED_SECRET"}}}
+          {"settings":{"vars":{"STAGE_BACKEND_SMV1":"python","STAGE_BACKEND_R2":"python","PIPELINE_RUNNER_URL":"$RUNNER_URL","PIPELINE_RUNNER_SHARED_SECRET":"$PIPELINE_RUNNER_SHARED_SECRET"}}}
           EOF
-          # STAGE_BACKEND_R2=python — set manually after R2 OpenAI modules 7-9 are ported and tested.
-          # Until then, Worker keeps Make scenario 5569495 as the R2 fallback.
           curl -fsS -X PATCH \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings" \
             -H "$AUTH" -H 'Content-Type: application/json' \

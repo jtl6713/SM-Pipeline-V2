@@ -1,0 +1,22 @@
+{
+  "archive_id": "ARCHIVE_MOVED_TO_PYTHON",
+  "archived_at": "2026-08-23",
+  "python_service": "services/pipeline-runner",
+  "public_url": "https://pipeline.chicagoshining.com",
+  "scenarios": [
+    {
+      "stage": "SMV1",
+      "scenario_id": 5894885,
+      "name": "SMV1 - Studio Media Authority + Platform Variant Worker v0.6.3 - Media Link Isolation",
+      "blueprint_file": "smv1-5894885-studio-media-variant-worker.json",
+      "python_endpoint": "/stages/smv1"
+    },
+    {
+      "stage": "R2",
+      "scenario_id": 5569495,
+      "name": "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility",
+      "blueprint_file": "r2-5569495-auto-asset-selection.json",
+      "python_endpoint": "/stages/r2"
+    }
+  ]
+}

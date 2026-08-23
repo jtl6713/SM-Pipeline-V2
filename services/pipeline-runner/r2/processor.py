@@ -1,4 +1,4 @@
-"""R2 processor — one Platform Output per invocation (Make module 1 maxRecords=1)."""
+"""R2 processor — one Platform Output per invocation (Make scenario 5569495)."""
 
 from __future__ import annotations
 
@@ -6,13 +6,12 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
-from r2.candidates import candidate_summary, fetch_music_candidates, fetch_video_candidates
+from r2.candidates import fetch_music_candidates, fetch_video_candidates
 from r2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from r2.formulas import r2_exact_output_formula, r2_production_formula
-from r2.openai_selection import R2OpenAISelectionDeferred, select_canonical_package
+from r2.openai_selection import select_canonical_package
 from r2.p4_webhook import trigger_p4
-from r2.studio_exact_source import requires_openai_for_output
-from r2.updates import fail_fast_zero_candidates, mark_selecting
+from r2.updates import apply_selection, fail_fast_zero_candidates, mark_selecting
 
 
 def _field(record: dict[str, Any], name: str) -> str:
@@ -94,42 +93,30 @@ def process_one(
         client.get_record(CONTENT_ITEMS_TABLE, content_item_id) if content_item_id else None
     )
 
-    if requires_openai_for_output(output, content_item):
-        return {
-            "processed": False,
-            "status": "deferred",
-            "reason": "openai_selection_pending",
-            "make_pointer": {
-                "scenario_id": MAKE_SCENARIO_ID,
-                "scenario_name": MAKE_SCENARIO_NAME,
-                "module_ids": [7, 8, 9],
-                "blueprint_path": "repair/_tmp_make/r2.json",
-            },
-            "candidate_preview": {
-                "video": [candidate_summary(row, kind="video") for row in video_candidates[:3]],
-                "music": [candidate_summary(row, kind="music") for row in music_candidates[:3]],
-            },
-            **preview,
-        }
-
     mark_selecting(client, output)
-    try:
-        selection = select_canonical_package(
-            output=output,
-            content_item=content_item,
-            video_candidates=video_candidates,
-            music_candidates=music_candidates,
-        )
-        return {"processed": True, "route": "openai_selection", "selection": selection, **preview}
-    except R2OpenAISelectionDeferred as exc:
-        return {
-            "processed": False,
-            "status": "deferred",
-            "reason": "openai_selection_pending",
-            "message": str(exc),
-            "make_pointer": {
-                "scenario_id": MAKE_SCENARIO_ID,
-                "module_id": 7,
-            },
-            **preview,
-        }
+    selection = select_canonical_package(
+        output=output,
+        content_item=content_item,
+        video_candidates=video_candidates,
+        music_candidates=music_candidates,
+    )
+    apply_selection(
+        client,
+        output,
+        raw_text=selection["raw_text"],
+        parsed=selection["parsed"],
+        video_candidate_count=len(video_candidates),
+    )
+
+    parsed = selection["parsed"]
+    p4_result = None
+    if str(parsed.get("selection_status") or "") != "Selected":
+        p4_result = trigger_p4(output, reason="asset selection not selected")
+
+    return {
+        "processed": True,
+        "route": "openai_selection",
+        "selection_status": parsed.get("selection_status"),
+        "p4": p4_result,
+        **preview,
+    }
