@@ -97,3 +97,5 @@ AI slot cover count Worker deploy: 2026-08-22 - Do not reseed a new empty AI sli
 
 Drive Uploaded reconcile Worker deploy: 2026-08-22 - Cron drain scan includes Master Original rows stuck at Drive Uploaded so Studio API can finish media-asset registration after SMV1 upload. Worker 0.10.87-drive-uploaded-reconcile.
 
+Variant plan-ready reconcile Worker deploy: 2026-08-22 - Mark Studio variants Ready when plan ratios (9:16) are complete even if YouTube 16:9 covers are still missing, and reconcile Preparing PRs from continuation so Queued outputs do not stall after the last crop finishes. Worker 0.10.88-variant-plan-ready-reconcile.
+

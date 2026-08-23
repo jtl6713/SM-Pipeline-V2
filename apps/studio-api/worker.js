@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.87-drive-uploaded-reconcile",
+          version: "0.10.88-variant-plan-ready-reconcile",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -4503,6 +4503,10 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
       .filter(Boolean)
       .join(" | ")
       .slice(0, 10000);
+  } else if (manifest.plan_complete && !planPending.length) {
+    // Plan ratios (usually 9:16) are enough for packaging / Remotion.
+    // Extra cover ratios such as YouTube 16:9 may keep finishing in the background.
+    status = "Ready";
   } else if (manifest.complete) {
     status = "Ready";
   }
@@ -12031,6 +12035,24 @@ async function studioContinuationInspectOutput(env, po, cache) {
     }
   } catch (error) {
     console.warn("Studio AI master fill failed", po.id, error);
+  }
+
+  // When the last crop row flips Ready, cron drain no longer sees this PR in the
+  // pending-queue scan. Reconcile here so Preparing → Ready (plan ratios) without
+  // waiting for someone to open the Production workspace.
+  try {
+    const variantStatus = String(f(context.requestRecord, "Studio_Variant_Status") || "").trim();
+    if (variantStatus === "Preparing" || variantStatus === "Error") {
+      const reconciled = await item4ReconcileVariants(env, context.requestRecord.id, context.requestRecord, {
+        skipSanitize: true,
+      });
+      if (reconciled?.record) {
+        context.requestRecord = reconciled.record;
+        cache.requests.set(reconciled.record.id, reconciled.record);
+      }
+    }
+  } catch (error) {
+    console.warn("Studio variant reconcile during continuation failed", po.id, error);
   }
 
   const sourcePackage = item4StudioSourcePackageForOutput(
