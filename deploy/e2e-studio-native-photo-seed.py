@@ -390,30 +390,54 @@ def main() -> int:
             raise RuntimeError(f"bridge preflight not ready: {json.dumps(preflight)[:4000]}")
 
         current = must_retry("get-production-request-before-promote", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
-        thumbnail = str((current.get("record") or {}).get("thumbnail_mode") or "")
+        record = current.get("record") or {}
+        thumbnail = str(record.get("thumbnail_mode") or "")
         evidence["thumbnail_mode_before_promote"] = thumbnail
-        if thumbnail == "Use photo frame":
-            # Live promote sanitizer still only accepts Use Profile Default / Yes / No.
-            # "Use photo frame" means include a cover, so Yes is the compatible I3 value
-            # until the Worker mapping ships. Keep the operator intent in evidence.
-            patched = must(
-                "patch-thumbnail-for-live-promote",
-                bridge("PATCH", f"/api/production-requests/{pr_id}", {"thumbnail_mode": "Yes"}),
-            )
-            evidence["thumbnail_mode_patched_for_promote"] = (patched.get("record") or {}).get("thumbnail_mode")
-            evidence["defect"] = {
-                "id": "RC-NATIVE-D1",
-                "title": "Promote rejects Thumbnail_Mode=Use photo frame",
-                "live_error": "Thumbnail must be Use Profile Default, Yes, or No",
-                "workaround": "PATCH thumbnail_mode Yes before promote",
-                "fix": "promotionThumbnailTriState maps Use photo frame -> Yes",
-            }
+        # Live PATCH used to wipe Master_Content_Type / Target_Platforms when only
+        # thumbnail_mode was sent. Send the native photo contract in full.
+        patched = must(
+            "patch-native-promote-fields",
+            bridge(
+                "PATCH",
+                f"/api/production-requests/{pr_id}",
+                {
+                    "content_type": "Photo Set",
+                    "platforms": ["Instagram", "Facebook", "TikTok"],
+                    "voiceover_mode": "No",
+                    "background_music_mode": "No",
+                    "thumbnail_mode": "Yes" if thumbnail == "Use photo frame" else (thumbnail or "Yes"),
+                    "carousel_image_mode": "Manual Upload",
+                    "carousel_slide_count_mode": "Exact",
+                    "carousel_slide_count_exact": 3,
+                },
+            ),
+        )
+        patched_record = patched.get("record") or {}
+        evidence["thumbnail_mode_patched_for_promote"] = patched_record.get("thumbnail_mode")
+        evidence["content_type_patched_for_promote"] = patched_record.get("content_type")
+        evidence["platforms_patched_for_promote"] = patched_record.get("platforms")
+        evidence["defect_rc_native_d1"] = {
+            "id": "RC-NATIVE-D1",
+            "title": "Promote rejects Thumbnail_Mode=Use photo frame",
+            "workaround": "PATCH thumbnail_mode Yes before promote",
+        }
+        evidence["defect_rc_native_d2"] = {
+            "id": "RC-NATIVE-D2",
+            "title": "Partial PATCH of a Production Request nulls Master_Content_Type and Target_Platforms",
+            "seen": "After thumbnail-only PATCH, promote failed: Choose a Master content type. Choose at least one Target platform.",
+            "workaround": "PATCH the full native photo contract before promote",
+            "fix": "updateProductionRequest merges the existing record before sanitize",
+        }
 
         promote = None
         for attempt in range(1, 9):
             result = bridge("POST", f"/api/production-requests/{pr_id}/promote", {}, timeout=180)
             body = result.get("body") if isinstance(result.get("body"), dict) else {}
-            if retryable(result) or (result.get("status") == 409 and "bridge" in json.dumps(body).lower()):
+            waiting = result.get("status") == 409 and any(
+                token in json.dumps(body).lower()
+                for token in ("not ready", "still preparing", "in progress", "try again")
+            )
+            if retryable(result) or waiting:
                 log(f"promote attempt {attempt} waiting: {body.get('error') or body.get('message') or result.get('status')}")
                 time.sleep(15)
                 continue

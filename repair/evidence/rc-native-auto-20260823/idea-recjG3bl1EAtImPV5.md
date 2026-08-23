@@ -24,7 +24,13 @@
 - **Correction (live, this run):** PATCH the draft to `thumbnail_mode=Yes` (include a cover) then Promote through the Studio API. Does not Approve for publishing.
 - **Correction (product):** `promotionThumbnailTriState` maps `Use photo frame` → `Yes` in `apps/studio-api/worker.js`. Not on production Worker yet; this run uses the PATCH workaround so testing does not wait on a Worker deploy.
 
-### Earlier seed defects (already corrected)
+### RC-NATIVE-D2 — Partial Production Request PATCH wipes type and platforms
+
+- **Seen:** GH seed [32639223175](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32639223175) after the thumbnail workaround. Promote: `Source-to-production bridge validation failed: Choose a Master content type. Choose at least one Target platform.`
+- **Why:** Live `PATCH /api/production-requests/:id` with only `thumbnail_mode` writes `Master_Content_Type=null` and `Target_Platforms=[]`.
+- **Correction (this run):** PATCH the full native photo contract (Photo Set, IG/FB/TT, VO No, music No, thumbnail Yes, Manual Upload, 3 slides) before Promote.
+- **Correction (product):** `updateProductionRequest` merges the existing record before sanitize so omitted fields stay. In source; not on production Worker yet.
+
 
 - Cloudflare 1010 on workers.dev from Python urllib → seed calls the bridge with curl
 - GET `/item4` Worker 1101 while SMV1 drains → poll lighter routes; resume existing idea/PR
