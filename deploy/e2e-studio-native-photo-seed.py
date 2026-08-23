@@ -217,7 +217,8 @@ def photo_files() -> list:
 def main() -> int:
     evidence: dict = {"ok": False, "title": TITLE, "steps": []}
     try:
-        session = must("session", bridge("GET", "/api/session"))
+        time.sleep(3)
+        session = must_retry("session", lambda: bridge("GET", "/api/session"), attempts=10, delay_s=5)
         evidence["session"] = {
             "authenticated": session.get("authenticated"),
             "authorized": session.get("authorized"),
