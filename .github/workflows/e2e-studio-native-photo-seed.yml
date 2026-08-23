@@ -1,0 +1,163 @@
+name: E2E Studio Native Photo Seed
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "deploy/e2e-studio-native-photo-seed.txt"
+      - "deploy/e2e-studio-native-photo-seed.py"
+      - ".github/workflows/e2e-studio-native-photo-seed.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-e2e-studio-native-photo-seed
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-e2e-native-photo-bridge
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Capture production version
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
+          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
+
+      - name: Build and upload one-time service bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, secrets
+          from pathlib import Path
+          token = secrets.token_urlsafe(36)
+          Path("/tmp/token").write_text(token)
+          js = r'''export default { async fetch(request, env) {
+            const u = new URL(request.url);
+            if (u.pathname !== ROUTE) return new Response("Not found", { status: 404 });
+            if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+            const spec = await request.json();
+            const m = String(spec.method || "GET").toUpperCase();
+            const path = String(spec.path || "");
+            if (!(path === "/health" || path === "/api/health" || path.startsWith("/api/"))) {
+              return Response.json({ ok: false, error: "path-not-allowed" }, { status: 400 });
+            }
+            const h = new Headers({
+              "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
+              "Accept": "application/json",
+              "Origin": "https://studio.chicagoshining.com",
+            });
+            let body;
+            if (m !== "GET" && m !== "HEAD") {
+              if (Array.isArray(spec.files) && spec.files.length) {
+                const form = new FormData();
+                for (const f of spec.files) {
+                  const bin = atob(String(f.b64 || ""));
+                  const bytes = new Uint8Array(bin.length);
+                  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+                  form.append(String(f.field || "files"), new Blob([bytes], { type: f.content_type || "image/jpeg" }), String(f.filename || "photo.jpg"));
+                }
+                body = form;
+              } else {
+                h.set("Content-Type", "application/json");
+                body = JSON.stringify(spec.body ?? {});
+              }
+            }
+            const r = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path, { method: m, headers: h, body }));
+            const t = await r.text();
+            let parsed;
+            try { parsed = t ? JSON.parse(t) : null; } catch { parsed = { raw: t.slice(0, 20000) }; }
+            return Response.json({ ok: r.ok, status: r.status, path, method: m, body: parsed }, { headers: { "Cache-Control": "no-store" } });
+          } };'''
+          js = js.replace("ROUTE", json.dumps("/" + token))
+          Path("/tmp/worker.js").write_text(js)
+          PY
+          node --check /tmp/worker.js
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/meta.json
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/content" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/meta.json;type=application/json' \
+            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300 && jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/sub.json
+          jq -e '.success==true and .result.enabled==true' /tmp/sub.json >/dev/null
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-sub.json
+          jq -er '.result.subdomain' /tmp/account-sub.json >/tmp/subdomain
+
+      - name: Wait for bridge and seed Studio
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain).workers.dev/$(cat /tmp/token)"
+          export BRIDGE_URL="$URL"
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -sS --max-time 30 -o /tmp/bridge-probe.json -w '%{http_code}' \
+              -H 'Content-Type: application/json' \
+              -d '{"method":"GET","path":"/api/session"}' "$URL" || true)
+            [[ "$code" == "200" ]] && break
+            echo "bridge_not_ready attempt=$i http=$code"
+            sleep 2
+          done
+          echo "bridge_probe_http=$code"
+          test "$code" -eq 200
+          python deploy/e2e-studio-native-photo-seed.py
+        env:
+          SEED_RESULT_PATH: /tmp/seed-result.json
+
+      - name: Upload seed evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-native-photo-seed
+          path: /tmp/seed-result.json
+          if-no-files-found: ignore
+
+      - name: Print sanitized seed result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f /tmp/seed-result.json ]]; then
+            jq '{ok,idea_id,production_request_id,content_item_record_id,plan,promote,test_run_id,error}' /tmp/seed-result.json
+          else
+            echo "no seed-result.json"
+          fi
+
+      - name: Delete temporary bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/delete.json || true
+
+      - name: Verify production unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          BEFORE=$(cat /tmp/active-before.txt)
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
+          AFTER=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)
+          echo "production_unchanged=$([[ "$BEFORE" == "$AFTER" ]] && echo true || echo false)"
+          test "$BEFORE" = "$AFTER"

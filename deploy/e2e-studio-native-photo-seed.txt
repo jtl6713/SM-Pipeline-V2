@@ -1,0 +1,4 @@
+RC-NATIVE-AUTO-20260823-001
+# Bump this line to re-run the native-photo Studio seed on GitHub Actions.
+# The job talks to chicagoshining-studio-api through a temporary service binding.
+# It does not pulse Make, does not Approve, and does not stamp Test_Run_ID.
