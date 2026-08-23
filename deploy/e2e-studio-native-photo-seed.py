@@ -356,9 +356,11 @@ def main() -> int:
         def variants_ready(body: dict) -> bool:
             rec = body.get("record") if isinstance(body.get("record"), dict) else {}
             status = str(body.get("status") or rec.get("studio_variant_status") or "")
-            progress = body.get("progress") if isinstance(body.get("progress"), dict) else rec.get("studio_variant_manifest") or {}
-            target = int(progress.get("target") or progress.get("target_count") or 0)
-            ready = int(progress.get("ready") or progress.get("ready_count") or 0)
+            if body.get("plan_complete") is True:
+                return True
+            progress = body.get("progress") if isinstance(body.get("progress"), dict) else {}
+            target = int(body.get("plan_target_count") or progress.get("plan_target") or progress.get("target") or 0)
+            ready = int(body.get("plan_ready_count") or progress.get("plan_ready") or progress.get("ready") or 0)
             return status == "Ready" and (target == 0 or ready >= target)
 
         current = must_retry("get-production-request-before-variants", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
