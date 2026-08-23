@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.106-continuation-first-p2",
+          version: "0.10.107-p2-before-inspect-budget",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -12642,62 +12642,115 @@ async function pulseStudioContinuationJobs(env, options = {}) {
   return pulses;
 }
 
+async function studioContinuationMediaGate(env, po, cache) {
+  if (studioOutputIsTerminalForContinuation(po)) return { action: "stop", reason: "terminal" };
+  const parentId = studioFirstLinkedId(f(po, "Content_Item"));
+  if (!parentId) return { action: "skip", reason: "no_parent" };
+  if (!cache.parents.has(parentId)) {
+    cache.parents.set(parentId, await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId));
+  }
+  const parent = cache.parents.get(parentId);
+  const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
+  const wantVoiceover = item4StudioDirectiveYes(f(parent, "Include_Voiceover")) && !isStory;
+  if (wantVoiceover && !String(f(parent, "Voiceover_URL") || "").trim()) {
+    return { action: "wait_voiceover", reason: "missing_voiceover", contentItemId: parentId };
+  }
+  if (studioNeedsAiThumbnail(parent, null)) {
+    return { action: "wait_thumbnail", reason: "missing_ai_cover", contentItemId: parentId };
+  }
+  const outputStatus = String(f(po, "Output_Status") || "");
+  const native = studioOutputIsNativePhotoRoute(
+    f(po, "Platform"),
+    f(po, "Studio_Output_Type"),
+    f(po, "Platform_Output_Type")
+  );
+  if (/^ready for review$/i.test(outputStatus) || native) {
+    const stamped = await studioStampParentAiCoverOnOutput(env, po, parent).catch(() => false);
+    if (stamped) return { action: "stamped_cover", reason: "parent_ai_cover", contentItemId: parentId };
+  }
+  return { action: "media_ok", contentItemId: parentId };
+}
+
+async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
+  for (const parentId of parentIds) {
+    try {
+      const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+      const requestId = studioFirstLinkedId(f(parent, "Production Requests"))
+        || studioFirstLinkedId(f(parent, "Production_Requests"));
+      const requestRecord = requestId
+        ? await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId)
+        : { fields: {} };
+      const status = String(f(parent, "Content_Status") || "").trim();
+      const rearm = ["Idea Approved", "Ready for Script"].includes(status);
+      if (rearm) {
+        await armStudioParentForP3Handoff(env, parentId, requestRecord);
+      }
+      await pulseStudioP2Handoff(env, parentId, requestRecord);
+      pulses.push({ key: "P2", pulsed: true, content_item: parentId, rearmed: rearm });
+    } catch (error) {
+      pulses.push({ key: "P2", error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+}
+
 async function advanceStudioProductionOutputs(env, options = {}) {
   const cache = { outputRows: new Map(), requests: new Map(), parents: new Map(), profiles: new Map() };
   const candidates = await listStudioContinuationCandidates(env, options).catch((error) => {
     console.warn("Studio continuation candidate list failed", error);
     return [];
   });
-  const inspected = [];
+  const media = [];
   for (const po of candidates || []) {
     try {
-      const result = await studioContinuationInspectOutput(env, po, cache);
-      inspected.push({ id: po.id, ...result });
+      media.push({ id: po.id, ...await studioContinuationMediaGate(env, po, cache) });
     } catch (error) {
-      inspected.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
+      media.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
     }
   }
-  try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
-    console.warn("R2 remotion requeue failed", error);
-  }
-  const waitingAi = inspected.some((row) => row.action === "wait_ai");
-  const waitingVoiceover = inspected.some((row) => row.action === "wait_voiceover");
-  const waitingThumbnail = inspected.some((row) => row.action === "wait_thumbnail");
-  const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
-  const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
+  const waitingVoiceover = media.some((row) => row.action === "wait_voiceover");
+  const waitingThumbnail = media.some((row) => row.action === "wait_thumbnail");
   const pulses = [];
   if (waitingVoiceover || waitingThumbnail) {
     const mediaParents = [...new Set(
-      inspected.filter((row) => row.action === "wait_voiceover" || row.action === "wait_thumbnail").map((row) => row.contentItemId).filter(Boolean)
+      media.filter((row) => row.action === "wait_voiceover" || row.action === "wait_thumbnail").map((row) => row.contentItemId).filter(Boolean)
     )];
-    for (const parentId of mediaParents) {
+    await pulseStudioP2ForWaitingParents(env, mediaParents, pulses);
+  }
+  const pulsedP2 = pulses.some((row) => row.key === "P2" && row.pulsed);
+  const inspected = media.slice();
+  if (pulsedP2) {
+    pulses.push({ key: "jobs", skipped: "p2_budget" });
+  } else {
+    for (const po of candidates || []) {
+      const gate = media.find((row) => row.id === po.id);
+      if (!gate || gate.action !== "media_ok") continue;
       try {
-        const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
-        const requestId = arrayOrEmpty(f(parent, "Production Requests"))[0];
-        const requestRecord = requestId
-          ? await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId)
-          : { fields: {} };
-        const status = String(f(parent, "Content_Status") || "").trim();
-        const rearm = ["Idea Approved", "Ready for Script"].includes(status);
-        if (rearm) {
-          await armStudioParentForP3Handoff(env, parentId, requestRecord);
-        }
-        await pulseStudioP2Handoff(env, parentId, requestRecord);
-        pulses.push({ key: "P2", pulsed: true, content_item: parentId, rearmed: rearm });
+        const result = await studioContinuationInspectOutput(env, po, cache);
+        const idx = inspected.findIndex((row) => row.id === po.id);
+        if (idx >= 0) inspected[idx] = { id: po.id, ...result };
       } catch (error) {
-        pulses.push({ key: "P2", error: error instanceof Error ? error.message : String(error) });
+        const idx = inspected.findIndex((row) => row.id === po.id);
+        const payload = { id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) };
+        if (idx >= 0) inspected[idx] = payload;
+        else inspected.push(payload);
       }
     }
-  }
-  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
-    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
-  }
-  if (waitingAi || waitingPackage) {
-    try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
-      pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
+    try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
+      console.warn("R2 remotion requeue failed", error);
     }
-    try { pulses.push(...await pulseOnDemandMediaChain(env)); } catch (error) {
-      pulses.push({ key: "SMV1", error: error instanceof Error ? error.message : String(error) });
+    try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
+      pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
+    }
+    const waitingAi = inspected.some((row) => row.action === "wait_ai");
+    const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
+    const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
+    if (waitingAi || waitingPackage) {
+      try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
+        pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
+      }
+      try { pulses.push(...await pulseOnDemandMediaChain(env)); } catch (error) {
+        pulses.push({ key: "SMV1", error: error instanceof Error ? error.message : String(error) });
+      }
     }
   }
   console.log("Studio continuation", JSON.stringify({
