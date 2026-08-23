@@ -23,8 +23,9 @@ For the complete operator and AI-handoff procedure, read:
 | Watermark | `services/watermark` | `Services\Watermark` | 3011 |
 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 |
 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 |
+| Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 |
 
-The numbered operational tab contract is preserved: `1 LOC` through `5 LOC`.
+The numbered operational tab contract is preserved: `1 LOC` through `6 LOC`.
 
 ## Safety contract
 
@@ -56,7 +57,7 @@ On 2026-08-17:
 - Manual rollback passed and health was re-verified.
 - Watermark was redeployed into the Git-managed state.
 - The other four services were PLAN-validated and brought into the managed deployment model.
-- Final production verification confirmed all five local services and all five permanent Cloudflare routes reachable.
+- Final production verification confirmed all six local services and all six permanent Cloudflare routes reachable.
 
 Framework commits:
 
@@ -71,7 +72,7 @@ Installed under `Production Start-Stop-Verify Services`:
 - `DEPLOY Local Service.bat`
 - `ROLLBACK Local Service.bat`
 
-They display a numbered 1-5 service menu.
+They display a numbered 1-6 service menu.
 
 ## Direct PowerShell usage
 

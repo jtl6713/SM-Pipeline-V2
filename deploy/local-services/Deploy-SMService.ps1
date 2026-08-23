@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader')]
+    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','pipeline-runner')]
     [string]$Service,
 
     [string]$Commit = '',
@@ -89,6 +89,18 @@ $ServiceMap = @{
         DependencyKind = 'node'
         RuntimeDirs = @('node_modules','data','tmp','temp','logs','uploads','downloads')
     }
+    'pipeline-runner' = @{
+        DisplayName = 'Pipeline Runner'
+        RepoPath = 'services\pipeline-runner'
+        RuntimePath = 'Services\pipeline-runner\service'
+        Port = 3350
+        PublicUrl = 'https://pipeline.chicagoshining.com'
+        WindowTitle = '6 LOC Pipeline Runner :3350'
+        StartKind = 'batch'
+        StartFile = 'start-pipeline-runner.bat'
+        DependencyKind = 'python'
+        RuntimeDirs = @('.venv','venv','__pycache__','logs','tmp','temp')
+    }
 }
 
 function Write-Step([string]$Text) {
@@ -144,14 +156,16 @@ function Select-Service {
     Write-Host '  3  Watermark'
     Write-Host '  4  Voiceover Normalizer'
     Write-Host '  5  YouTube Uploader'
+    Write-Host '  6  Pipeline Runner'
     Write-Host ''
-    $choice = Read-Host 'Enter 1-5'
+    $choice = Read-Host 'Enter 1-6'
     switch ($choice) {
         '1' { return 'frame-extractor' }
         '2' { return 'remotion-renderer' }
         '3' { return 'watermark' }
         '4' { return 'voiceover-normalizer' }
         '5' { return 'youtube-uploader' }
+        '6' { return 'pipeline-runner' }
         default { throw "Invalid service selection: $choice" }
     }
 }

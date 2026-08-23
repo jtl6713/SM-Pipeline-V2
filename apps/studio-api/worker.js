@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.114-stranded-remotion-ratio-fallback",
+          version: "0.10.115-rfr-video-cover-stamp",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -3557,7 +3557,10 @@ function studioNeedsAiThumbnail(parent, requestRecord) {
 
 async function studioStampParentAiCoverOnOutput(env, po, parent) {
   const ai = studioAiThumbnailUrl(f(parent || {}, "Thumbnail_URL"));
-  if (!ai || !po?.id) return false;
+  const caption = String(f(parent || {}, "Caption") || "").trim();
+  const currentCaption = String(f(po, "Output_Caption") || "").trim();
+  const needsCaption = Boolean(caption && !currentCaption);
+  if (!po?.id) return false;
   const current = String(f(po, "Thumbnail_URL") || "").trim();
   if (current === ai) {
     const native = studioOutputIsNativePhotoRoute(
@@ -3566,18 +3569,22 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
       f(po, "Platform_Output_Type")
     );
     const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
-    if (!(native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || "")))) return false;
+    if (!(native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) && !needsCaption) return false;
   }
+  if (!ai && !needsCaption) return false;
   const native = studioOutputIsNativePhotoRoute(
     f(po, "Platform"),
     f(po, "Studio_Output_Type"),
     f(po, "Platform_Output_Type")
   );
   const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
-  const coverMismatch = current !== ai;
-  if (current && !item4UrlIsStudioPhotoCrop(current) && !native && coverMismatch) return false;
+  const coverMismatch = Boolean(ai && current !== ai);
+  if (ai && current && !item4UrlIsStudioPhotoCrop(current) && !native && coverMismatch && !needsCaption) return false;
   const fields = {};
-  if (coverMismatch) fields.Thumbnail_URL = ai;
+  if (coverMismatch && (native || !current || item4UrlIsStudioPhotoCrop(current) || /^ready for review$/i.test(String(f(po, "Output_Status") || "")))) {
+    fields.Thumbnail_URL = ai;
+  }
+  if (needsCaption) fields.Output_Caption = caption;
   if (native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) {
     fields.Output_Status = "Ready for Review";
   }
@@ -12196,6 +12203,7 @@ const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_S
 const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story"))';
 const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
 const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
+const STUDIO_RFR_MISSING_COVER_FORMULA = `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}="Ready for Review",{Output_ID}>=227,OR({Thumbnail_URL}="",FIND("ITEM4-VARIANT-fill-crop",{Thumbnail_URL}&""),{Output_Caption}=""))`;
 const PRODUCTION_CADENCE_RENDER = Object.freeze([
   { id: 5528742, key: "P1" },
   { id: 5569495, key: "R2" },
@@ -12753,7 +12761,7 @@ async function studioContinuationInspectOutput(env, po, cache) {
 async function listStudioContinuationCandidates(env, options = {}) {
   const contentItemId = String(options.contentItemId || "").trim();
   const requestRecordId = String(options.requestRecordId || "").trim();
-  const limit = Number(options.limit || 8);
+  const limit = Number(options.limit || 20);
   if (contentItemId && /^rec[A-Za-z0-9]+$/.test(contentItemId)) {
     return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
@@ -12771,12 +12779,21 @@ async function listStudioContinuationCandidates(env, options = {}) {
     }
     return records;
   }
-  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+  const newest = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit,
     sortField: "Output_ID",
     sortDirection: "desc",
     filterFormula: STUDIO_CONTINUATION_CANDIDATE_FORMULA,
   });
+  const coverGaps = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 20,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: STUDIO_RFR_MISSING_COVER_FORMULA,
+  }).catch(() => []);
+  const byId = new Map();
+  for (const row of [...coverGaps, ...newest]) byId.set(row.id, row);
+  return [...byId.values()].sort((a, b) => Number(f(b, "Output_ID") || 0) - Number(f(a, "Output_ID") || 0));
 }
 
 async function pulseStudioContinuationJobs(env, options = {}) {
@@ -12891,12 +12908,25 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     console.warn("Studio continuation candidate list failed", error);
     return [];
   });
+  const coverMedia = [];
+  for (const po of (candidates || []).slice(0, 12)) {
+    try {
+      coverMedia.push({ id: po.id, ...await studioContinuationMediaGate(env, po, cache) });
+    } catch (error) {
+      coverMedia.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  }
   if (pulsedRender) {
     const stranded = (candidates || []).filter((po) => studioOutputNeedsRemotionPackage(po)).slice(0, 2);
-    const inspected = [];
+    const inspected = coverMedia.slice();
     for (const po of stranded) {
+      if (inspected.some((row) => row.id === po.id && row.action && row.action !== "media_ok" && row.action !== "stamped_cover")) continue;
       try {
-        inspected.push({ id: po.id, ...await studioContinuationInspectOutput(env, po, cache) });
+        const result = await studioContinuationInspectOutput(env, po, cache);
+        const idx = inspected.findIndex((row) => row.id === po.id);
+        const payload = { id: po.id, ...result };
+        if (idx >= 0) inspected[idx] = payload;
+        else inspected.push(payload);
       } catch (error) {
         inspected.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
       }
@@ -12909,14 +12939,7 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     }));
     return { inspected, pulses };
   }
-  const media = [];
-  for (const po of candidates || []) {
-    try {
-      media.push({ id: po.id, ...await studioContinuationMediaGate(env, po, cache) });
-    } catch (error) {
-      media.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
-    }
-  }
+  const media = coverMedia;
   const waitingVoiceover = media.some((row) => row.action === "wait_voiceover");
   const waitingThumbnail = media.some((row) => row.action === "wait_thumbnail");
   if (waitingVoiceover || waitingThumbnail) {
