@@ -70,13 +70,32 @@ jobs:
         run: |
           set -euo pipefail
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          cat > /tmp/worker-settings.json <<EOF
-          {"settings":{"vars":{"STAGE_BACKEND_SMV1":"python","PIPELINE_RUNNER_URL":"$RUNNER_URL","PIPELINE_RUNNER_SHARED_SECRET":"$PIPELINE_RUNNER_SHARED_SECRET"}}}
-          EOF
+          curl -fsS \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings" \
+            -H "$AUTH" -o /tmp/settings-before.json
+          jq -e '.success == true' /tmp/settings-before.json >/dev/null
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = json.loads(Path('/tmp/settings-before.json').read_text())['result']
+          bindings = list(result.get('bindings') or [])
+          by_name = {str(item.get('name')): item for item in bindings if item.get('name')}
+          updates = {
+              'STAGE_BACKEND_SMV1': ('plain_text', 'python'),
+              'PIPELINE_RUNNER_URL': ('plain_text', os.environ['RUNNER_URL']),
+              'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
+          }
+          for name, (binding_type, text) in updates.items():
+              by_name[name] = {'name': name, 'type': binding_type, 'text': text}
+          Path('/tmp/settings-patch.json').write_text(json.dumps({'bindings': list(by_name.values())}))
+          PY
           curl -fsS -X PATCH \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings" \
-            -H "$AUTH" -H 'Content-Type: application/json' \
-            --data-binary @/tmp/worker-settings.json -o /tmp/worker-settings-result.json
+            -H "$AUTH" \
+            -F 'settings=@/tmp/settings-patch.json;type=application/json' \
+            -o /tmp/worker-settings-result.json
           jq -e '.success == true' /tmp/worker-settings-result.json >/dev/null
 
       - name: Verify public health when origin is reachable
