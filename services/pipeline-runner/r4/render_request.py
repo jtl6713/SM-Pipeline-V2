@@ -46,6 +46,37 @@ def _clip_list_json(output: dict[str, Any]) -> Any:
     return parsed if parsed is not None else raw
 
 
+def voiceover_url(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> str:
+    return field_str(output, "Voiceover_URL") or field_str(content_item or {}, "Voiceover_URL")
+
+
+def duration_is_explicit(output: dict[str, Any]) -> bool:
+    override = field(output, "Video_Duration_Seconds_Override")
+    return override is not None and str(override).strip() != ""
+
+
+def attach_voiceover(
+    payload: dict[str, Any],
+    output: dict[str, Any],
+    content_item: dict[str, Any] | None,
+    *,
+    default_voice: float,
+    url: str | None = None,
+) -> dict[str, Any]:
+    vo = (url or voiceover_url(output, content_item)).strip()
+    if not vo:
+        return payload
+    volume = _num(field(output, "Voiceover_Render_Volume"), default_voice)
+    payload["voiceover"] = {"url": vo, "volume": volume}
+    payload["voiceoverUrl"] = vo
+    payload["durationIsExplicit"] = duration_is_explicit(output)
+    if "voiceoverTailSeconds" not in payload:
+        payload["voiceoverTailSeconds"] = _num(field(output, "Voiceover_Tail_Seconds"), 2)
+    if content_item and not payload.get("voiceoverText"):
+        payload["voiceoverText"] = field_str(content_item, "Voiceover_Script")
+    return payload
+
+
 def _black_frame_guard(output: dict[str, Any]) -> dict[str, Any]:
     cover = _cover_url(output)
     return {
@@ -82,6 +113,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
         "durationInFrames": total_frames,
         "durationSeconds": total_frames / 30,
         "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
+        "durationIsExplicit": duration_is_explicit(output),
         "clips": _clip_list_json(output),
         "music": {
             "enabled": music_enabled,
@@ -99,7 +131,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
 
 def build_voiceover_request(
     output: dict[str, Any],
-    content_item: dict[str, Any],
+    content_item: dict[str, Any] | None,
     *,
     default_music: float,
     default_voice: float,
@@ -121,7 +153,7 @@ def build_voiceover_request(
         "thumbnailUrl": cover,
         "initialFramePolicy": "first_visual_frame",
         "blackFrameGuard": _black_frame_guard(output),
-        "voiceoverText": field_str(content_item, "Voiceover_Script"),
+        "voiceoverText": field_str(content_item or {}, "Voiceover_Script"),
         "spokenCaptionsEnabled": not spoken_disabled,
         "spokenCaptionWordsPerPage": 4,
         "expectedClipCount": int(_num(field(output, "Selected_Clip_Count"), 0)),
@@ -131,12 +163,14 @@ def build_voiceover_request(
         "durationInFrames": total_frames,
         "durationSeconds": round(total_frames / 30),
         "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
+        "durationIsExplicit": duration_is_explicit(output),
         "clips": _clip_list_json(output),
         "music": {"url": music_url, "volume": music_volume},
         "voiceover": {
-            "url": field_str(output, "Voiceover_URL"),
+            "url": voiceover_url(output, content_item),
             "volume": voice_volume,
         },
+        "voiceoverUrl": voiceover_url(output, content_item),
     }
 
 
@@ -173,11 +207,19 @@ def choose_render_request(
     default_music: float,
     default_voice: float,
 ) -> tuple[str, dict[str, Any]]:
+    vo = voiceover_url(output, content_item)
     if field_str(output, "Creative_Render_Manifest_JSON"):
-        return "p020_manifest", build_p020_request(output, default_music=default_music)
-    if field_str(output, "Voiceover_URL"):
-        if not content_item:
-            raise RuntimeError("Voiceover render requires linked Content Item")
+        payload = build_p020_request(output, default_music=default_music)
+        if vo:
+            attach_voiceover(
+                payload,
+                output,
+                content_item,
+                default_voice=default_voice,
+                url=vo,
+            )
+        return "p020_manifest", payload
+    if vo:
         return "voiceover", build_voiceover_request(
             output,
             content_item,

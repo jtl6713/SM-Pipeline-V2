@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.115-rfr-video-cover-stamp",
+          version: "0.10.116-vo-duration-status",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -4301,6 +4301,8 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === PHASE6_R3_SCENARIO_ID && pipelineStageBackend(env, "R3").mode === "python") return true;
   if (id === PHASE6_R4_SCENARIO_ID && pipelineStageBackend(env, "R4").mode === "python") return true;
   if (id === PHASE6_R5_SCENARIO_ID && pipelineStageBackend(env, "R5").mode === "python") return true;
+  if (id === PHASE6_RR1_SCENARIO_ID && pipelineStageBackend(env, "RR1").mode === "python") return true;
+  if (id === ITEM4_P2_SCENARIO_ID && pipelineStageBackend(env, "P2").mode === "python") return true;
   return false;
 }
 
@@ -4400,6 +4402,40 @@ async function item4PulseR5Python(env, options = {}) {
     throw new HttpError(
       response.status,
       payload?.message || payload?.error || `Python R5 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function item4PulseRR1Python(env, options = {}) {
+  const body = {
+    extra: { max_runs: Number(options.maxRuns || 10) },
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "rr1", body, "RR1");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python RR1 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function item4PulseP2Python(env, contentItemId, requestRecord = {}, options = {}) {
+  const testRunId = String(f(requestRecord, "Test_Run_ID") || options.testRunId || "").trim();
+  const body = {
+    content_item_record_id: contentItemId,
+    test_run_id: testRunId || undefined,
+  };
+  if (options.dryRun) body.extra = { dry_run: true };
+  const { response, payload } = await item4PulsePipelineStage(env, "p2", body, "P2");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python P2 failed (${response.status})`
     );
   }
   return payload;
@@ -7976,6 +8012,15 @@ async function pulseStudioP2Handoff(env, contentItemId, requestRecord) {
     }
   } catch (error) {
     console.warn("P2 pulse could not clear superseded media run", error);
+  }
+  if (pipelineStageBackend(env, "P2").mode === "python") {
+    try {
+      const result = await item4PulseP2Python(env, contentItemId, requestRecord);
+      return { ok: true, status: 200, backend: "python", result };
+    } catch (error) {
+      console.warn("P2 python pulse failed", error);
+      return { ok: false, status: error instanceof HttpError ? error.status : 500, backend: "python" };
+    }
   }
   try { await phase6EnsureScenarioActive(env, ITEM4_P2_SCENARIO_ID); } catch (error) {
     console.warn("P2 webhook could not be armed before pulse", error);
@@ -12894,6 +12939,11 @@ async function pulseStudioContinuationJobs(env, options = {}) {
         await item4PulseR3Python(env, { maxRuns: 10 });
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
         break;
+      }
+      if (job.key === "RR1" && pipelineStageBackend(env, "RR1").mode === "python") {
+        await item4PulseRR1Python(env, { maxRuns: 10 });
+        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
+        continue;
       }
       if (job.key === "R2" && pipelineStageBackend(env, "R2").mode === "python") {
         await item4PulseR2Python(env, { maxRuns: 1 });

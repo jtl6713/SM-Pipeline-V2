@@ -6,11 +6,11 @@ import json
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from r3.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, MAX_RECORDS
 from r3.formulas import r3_exact_output_formula, r3_production_formula
 from r3.render_prep import build_update_fields
-from render.fields import field_str, parse_json_field
+from render.fields import field_str, first_linked_id, parse_json_field
 
 
 def select_outputs(
@@ -73,7 +73,12 @@ def process_one(
             "make_scenario_id": MAKE_SCENARIO_ID,
         }
 
-    update_fields = build_update_fields(output, package)
+    content_item = None
+    content_item_id = first_linked_id(output.get("fields", {}).get("Content_Item"))
+    if content_item_id:
+        content_item = client.get_record(CONTENT_ITEMS_TABLE, content_item_id)
+
+    update_fields = build_update_fields(output, package, content_item)
     preview = {
         "output_record_id": output["id"],
         "output_id": field_str(output, "Output_ID"),

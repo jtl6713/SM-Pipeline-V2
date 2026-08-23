@@ -8,7 +8,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 - **Stack:** Flask + requests (same pattern as Frame Extractor)
 - **Local health:** `http://localhost:3350/health`
 - **Public route:** `https://pipeline.chicagoshining.com` (Cloudflare Tunnel)
-- **Make scenarios (migration order):** SMV1 `5894885`, R2 `5569495`, R3 `5557966`, R4 `5556716`, R5 `5565333`
+- **Make scenarios (migration order):** SMV1 `5894885`, R2 `5569495`, R3–R5, RR1 `5576363`, P2 `5530955`, P3 `5531703`, AP0/publish
 
 ## Status
 
@@ -18,11 +18,15 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **R2** | Full (`5569495` replacement, OpenAI module 7 port) | `STAGE_BACKEND_R2=python` |
 | **R3** | Full (`5557966` — render prep from `Selected_Assets_JSON`, batch 10) | Make until `STAGE_BACKEND_R3=python` |
 | **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Make until `STAGE_BACKEND_R4=python` |
-| **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | Make until `STAGE_BACKEND_R5=python` |
+| **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | `STAGE_BACKEND_R5=python` |
+| **RR1** | Full (`5576363` — batched review email, max 10) | Make until `STAGE_BACKEND_RR1=python` |
+| **P2** | Scaffold (deferred → Make webhook) | Make |
+| **P3** | Scaffold (deferred → Make webhook) | Make |
+| **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
-SMV1/R2 Make scenarios archived under `ARCHIVE_MOVED_TO_PYTHON/` and deactivated. R3/R4/R5 blueprints archived; **Make scenarios stay active** until Wave 2 cutover proof.
+Wave 2 render chain (R3–R5) and SMV1/R2 are on Python in production. RR1 ready for cutover after Gmail send scope is confirmed.
 
-Other stages return `501 not_implemented`.
+Other stages return `501 not_implemented` (P2/P3 scaffolds exist but are not registered yet).
 
 ## Quick start (dev)
 
@@ -94,6 +98,12 @@ POST body built in `r4/render_request.py`; Remotion client in `render/remotion_c
 
 One `POST /stages/r5` polls up to **5** outputs in `Rendering` with a `Remotion_Status_URL`. On complete: download MP4, upload to Google Drive final folder, cleanup Remotion job, PUT R2 studio preview cache, set `Studio_Preview_*` fields. Failed jobs write validation errors and reset status.
 
+## RR1 behavior (review email)
+
+One `POST /stages/rr1` finds up to **10** review-eligible Platform Outputs (rendered video or native photo sets), builds one HTML email with decision buttons, sends via Gmail API, then stamps `Review_Status=Review Sent` and `Review_Email_Sent_At`.
+
+Requires Google OAuth refresh token with **Gmail send** scope. Decision webhooks default to the existing Make hook URL.
+
 ## Enable in Studio Worker
 
 ```
@@ -106,6 +116,7 @@ STAGE_BACKEND_R2=python
 STAGE_BACKEND_R3=python
 STAGE_BACKEND_R4=python
 STAGE_BACKEND_R5=python
+STAGE_BACKEND_RR1=python
 ```
 
 Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-demand for the render chain.
@@ -122,6 +133,7 @@ Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-dema
 | `POST` | `/stages/r3` | Render prep batch (max 10) |
 | `POST` | `/stages/r4` | Start one Remotion render |
 | `POST` | `/stages/r5` | Poll/upload batch (max 5) |
+| `POST` | `/stages/rr1` | Review email batch (max 10) |
 
 POST body fields: `output_record_id`, `production_request_record_id`, `test_run_id`, `intended_stage`, `idempotency_key`, `extra.max_runs`, `extra.dry_run`, etc.
 
@@ -131,10 +143,11 @@ Header `X-Pipeline-Secret` required when `PIPELINE_RUNNER_SHARED_SECRET` is set.
 
 1. ~~SMV1~~ (Python live)
 2. ~~R2~~ (Python live)
-3. ~~R3 → R5 render chain~~ (Python ready; cutover after Item 7 proof)
-4. P2, P3, P1
-5. AP0 + publish platforms
-6. RR1, RR2, intake
+3. ~~R3 → R5 render chain~~ (Python live)
+4. ~~RR1~~ (Python ready; cutover when Gmail scope confirmed)
+5. **P2 → P3** (scaffold started)
+6. **AP0 + publish platforms** (constants only)
+7. RR2, intake
 
 ## Source-only rule
 

@@ -23,6 +23,7 @@ ENV_PATH = SERVICE_DIR / ".env"
 SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
     "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/gmail.send",
 ]
 
 

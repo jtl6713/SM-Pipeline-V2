@@ -43,6 +43,14 @@
       "blueprint_file": "r5-5565333-render-poller-final-upload.json",
       "python_endpoint": "/stages/r5",
       "production_backend": "python"
+    },
+    {
+      "stage": "RR1",
+      "scenario_id": 5576363,
+      "name": "RR1 - Render Review Email v1.2 - Native Photo Set Eligible",
+      "blueprint_file": "rr1-5576363-render-review-email.json",
+      "python_endpoint": "/stages/rr1",
+      "production_backend": "make (flip STAGE_BACKEND_RR1=python after Gmail send scope verified)"
     }
   ]
 }

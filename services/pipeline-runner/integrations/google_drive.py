@@ -72,10 +72,48 @@ class GoogleDriveClient:
         }
         response = requests.post(
             "https://www.googleapis.com/upload/drive/v3/files",
-            params={"uploadType": "multipart", "supportsAllDrives": "true", "fields": "id,webViewLink"},
+            params={
+                "uploadType": "multipart",
+                "supportsAllDrives": "true",
+                "fields": "id,webViewLink,webContentLink",
+            },
             headers={"Authorization": f"Bearer {token}"},
             files=files,
             timeout=300,
         )
         response.raise_for_status()
         return response.json()
+
+    def share_anyone_reader(self, file_id: str) -> dict[str, Any]:
+        token = self.access_token()
+        permission_response = requests.post(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}/permissions",
+            params={"supportsAllDrives": "true"},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"type": "anyone", "role": "reader"},
+            timeout=60,
+        )
+        permission_response.raise_for_status()
+        metadata_response = requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            params={"fields": "id,webContentLink,webViewLink", "supportsAllDrives": "true"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        metadata_response.raise_for_status()
+        return metadata_response.json()
+
+    def upload_and_share(
+        self,
+        folder_id: str,
+        filename: str,
+        content: bytes,
+        mime_type: str,
+    ) -> dict[str, Any]:
+        uploaded = self.upload_file(folder_id, filename, content, mime_type)
+        file_id = str(uploaded.get("id") or "")
+        if not file_id:
+            raise RuntimeError("Google Drive upload did not return a file id")
+        shared = self.share_anyone_reader(file_id)
+        link = str(shared.get("webContentLink") or shared.get("webViewLink") or uploaded.get("webViewLink") or "")
+        return {"id": file_id, "webContentLink": link, "webViewLink": shared.get("webViewLink") or link}

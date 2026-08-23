@@ -1,0 +1,7 @@
+{
+  "scenarioId": 5576363,
+  "name": "RR1 - Render Review Email v1.2 - Native Photo Set Eligible",
+  "archivedAt": "2026-08-23",
+  "replacedBy": "services/pipeline-runner/rr1/",
+  "note": "Full blueprint captured from Make MCP during Wave 3 implementation"
+}

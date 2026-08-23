@@ -14,7 +14,11 @@ def resolve_composition_id(existing: str, render_prep: dict[str, Any]) -> str:
     return str(render_prep.get("composition_id") or "").strip()
 
 
-def build_update_fields(output: dict[str, Any], package: dict[str, Any]) -> dict[str, Any] | None:
+def build_update_fields(
+    output: dict[str, Any],
+    package: dict[str, Any],
+    content_item: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if str(package.get("selection_status") or "") != "Selected":
         return None
     render_prep = package.get("render_prep") or {}
@@ -48,4 +52,11 @@ def build_update_fields(output: dict[str, Any], package: dict[str, Any]) -> dict
         "Render_Status": render_prep.get("render_status") or "Ready for Render",
         "Clip_3_Duration_Frames": render_prep.get("compatibility_clip_3_duration_frames"),
     }
+    voiceover_url = (
+        str(render_prep.get("voiceover_url") or "").strip()
+        or field_str(output, "Voiceover_URL")
+        or field_str(content_item or {}, "Voiceover_URL")
+    )
+    if voiceover_url:
+        fields["Voiceover_URL"] = voiceover_url
     return {key: value for key, value in fields.items() if value is not None and value != ""}
