@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.107-p2-before-inspect-budget",
+          version: "0.10.108-native-cover-overwrite-drive-still",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -3560,7 +3560,14 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
   if (!ai || !po?.id) return false;
   const current = String(f(po, "Thumbnail_URL") || "").trim();
   if (current === ai) return false;
-  if (current && !item4UrlIsStudioPhotoCrop(current)) return false;
+  const native = studioOutputIsNativePhotoRoute(
+    f(po, "Platform"),
+    f(po, "Studio_Output_Type"),
+    f(po, "Platform_Output_Type")
+  );
+  // Native feed stills often already hold the source Drive photo. That is not
+  // an AI grid cover; replace it whenever the parent has a designed thumbnail.
+  if (current && !item4UrlIsStudioPhotoCrop(current) && !native) return false;
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
     method: "PATCH",
     body: JSON.stringify({ fields: { Thumbnail_URL: ai }, typecast: true }),
