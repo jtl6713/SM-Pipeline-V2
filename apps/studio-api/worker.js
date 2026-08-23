@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.112-r4-before-r3",
+          version: "0.10.113-r5-before-r4-skip-stories",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -12057,8 +12057,8 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
 }
 
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
-const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
-const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))';
+const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),{Format}!="Story",{Studio_Output_Type}!="Story",OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
+const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story"))';
 const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
 const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
 const PRODUCTION_CADENCE_RENDER = Object.freeze([
@@ -12241,6 +12241,23 @@ function studioOutputIsPhotoSequenceRoute(record) {
     f(record, "Platform_Output_Type")
   )) return true;
   return String(f(record, "Composition_ID") || "").trim() === "ChicagoShiningPhotoSequence";
+}
+
+function studioOutputIsStoryRoute(record) {
+  const format = String(f(record, "Format") || "").trim();
+  const studioType = String(f(record, "Studio_Output_Type") || "").trim();
+  return format === "Story" || studioType === "Story";
+}
+
+function studioOutputNeedsRemotionPackage(record) {
+  if (studioOutputIsNativePhotoRoute(
+    f(record, "Platform"),
+    f(record, "Studio_Output_Type"),
+    f(record, "Platform_Output_Type")
+  )) return false;
+  if (studioOutputIsStoryRoute(record)) return false;
+  if (!/^ready for review$/i.test(String(f(record, "Output_Status") || ""))) return false;
+  return !String(f(record, "Final_File_URL") || "").trim();
 }
 
 function studioOutputIsTerminalForContinuation(record) {
@@ -12632,9 +12649,9 @@ async function pulseStudioContinuationJobs(env, options = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const jobs = [
-    { id: PHASE6_R4_SCENARIO_ID, key: "R4", table: outputTable, formula: STUDIO_R4_WORK_FORMULA },
-    { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA },
     { id: PHASE6_R5_SCENARIO_ID, key: "R5", table: outputTable, view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" },
+    { id: PHASE6_R4_SCENARIO_ID, key: "R4", table: outputTable, formula: STUDIO_R4_WORK_FORMULA, skipStories: true },
+    { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA, skipStories: true },
     { id: PHASE6_RR1_SCENARIO_ID, key: "RR1", table: outputTable, formula: STUDIO_RR1_WORK_FORMULA },
     { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
     { id: PHASE6_R2_SCENARIO_ID, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA, skipPhotoSequence: true },
@@ -12646,9 +12663,12 @@ async function pulseStudioContinuationJobs(env, options = {}) {
       view: job.view || null,
       filterFormula: job.formula || null,
     }).catch(() => []);
-    const eligible = job.skipPhotoSequence
+    let eligible = job.skipPhotoSequence
       ? (rows || []).filter((row) => !studioOutputIsPhotoSequenceRoute(row) && !studioOutputIsNativePhotoRoute(f(row, "Platform"), f(row, "Studio_Output_Type"), f(row, "Platform_Output_Type")))
       : (rows || []);
+    if (job.skipStories) {
+      eligible = eligible.filter((row) => !studioOutputIsStoryRoute(row));
+    }
     if (!eligible.length) {
       pulses.push({ key: job.key, skipped: "no_work" });
       continue;
@@ -12727,14 +12747,28 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
   }
   const pulsedRender = pulses.some((row) => (row.key === "R3" || row.key === "R4") && (row.pulsed || row.error));
-  if (pulsedRender) {
-    console.log("Studio continuation", JSON.stringify({ count: 0, inspected: [], pulses }));
-    return { inspected: [], pulses };
-  }
   const candidates = await listStudioContinuationCandidates(env, options).catch((error) => {
     console.warn("Studio continuation candidate list failed", error);
     return [];
   });
+  if (pulsedRender) {
+    const stranded = (candidates || []).filter((po) => studioOutputNeedsRemotionPackage(po)).slice(0, 2);
+    const inspected = [];
+    for (const po of stranded) {
+      try {
+        inspected.push({ id: po.id, ...await studioContinuationInspectOutput(env, po, cache) });
+      } catch (error) {
+        inspected.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    console.log("Studio continuation", JSON.stringify({
+      count: inspected.length,
+      inspected: inspected.map((row) => ({ id: row.id, action: row.action, reason: row.reason || row.error || null })),
+      pulses,
+      stranded_remotion: true,
+    }));
+    return { inspected, pulses };
+  }
   const media = [];
   for (const po of candidates || []) {
     try {
