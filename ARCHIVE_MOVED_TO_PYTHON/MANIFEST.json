@@ -26,7 +26,7 @@
       "name": "R3 - Deterministic Selected Asset Render Prep v3.1 - Studio Safe + Clean Validation State",
       "blueprint_file": "r3-5557966-deterministic-render-prep.json",
       "python_endpoint": "/stages/r3",
-      "production_backend": "make (flip STAGE_BACKEND_R3=python after Item 7 proof)"
+      "production_backend": "python"
     },
     {
       "stage": "R4",
@@ -34,7 +34,7 @@
       "name": "R4 - Start Remotion Render v2.6.2 - Non-Black Cover Frame Contract",
       "blueprint_file": "r4-5556716-start-remotion-render.json",
       "python_endpoint": "/stages/r4",
-      "production_backend": "make (flip STAGE_BACKEND_R4=python after Item 7 proof)"
+      "production_backend": "python"
     },
     {
       "stage": "R5",
@@ -42,7 +42,7 @@
       "name": "R5 - Render Poller + Final Upload v2.3 - Studio Native Preview R2 Cache",
       "blueprint_file": "r5-5565333-render-poller-final-upload.json",
       "python_endpoint": "/stages/r5",
-      "production_backend": "make (flip STAGE_BACKEND_R5=python after Item 7 proof)"
+      "production_backend": "python"
     }
   ]
 }
