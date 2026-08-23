@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.98-cron-budget-guard",
+          version: "0.10.99-reconcile-no-double-post",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -13327,7 +13327,21 @@ async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
   return primary;
 }
 
-const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Output_Status}="Approved for Publishing",NOT({Publish_Status}="Published"),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
+// Redispatching an output whose publisher already started can post it to the platform twice, so
+// every platform status is matched against an allowlist of states that mean "no publisher has
+// begun". The allowlist is deliberately fail-closed: an unrecognised status is left alone and
+// handled by the orchestrator pollers in pulseOnDemandPublishChain, which only ever read state.
+const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
+  + '{Output_Status}="Approved for Publishing",'
+  + 'OR({Publish_Status}=BLANK(),{Publish_Status}="Not Ready",{Publish_Status}="Ready",{Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish"),'
+  + 'OR({IG_Story_Status}=BLANK(),{IG_Story_Status}="Not Needed",{IG_Story_Status}="Ready"),'
+  + 'OR({IG_Carousel_Status}=BLANK(),{IG_Carousel_Status}="Not Selected",{IG_Carousel_Status}="Ready for Asset Prep"),'
+  + 'OR({TikTok_Draft_Status}=BLANK(),{TikTok_Draft_Status}="Not Selected",{TikTok_Draft_Status}="Ready for Assets"),'
+  + 'OR({FB_Slideshow_Status}=BLANK(),{FB_Slideshow_Status}="Not Required",{FB_Slideshow_Status}="Ready to Render"),'
+  + 'OR({FB_Publish_Status}=BLANK(),{FB_Publish_Status}="Ready for Assets"),'
+  + 'OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),'
+  + 'OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),'
+  + 'OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
 
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
