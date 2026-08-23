@@ -1,0 +1,671 @@
+{
+  "scenarioId": 5556716,
+  "name": "R4 - Start Remotion Render v2.6.2 - Non-Black Cover Frame Contract",
+  "archivedAt": "2026-08-23",
+  "replacedBy": "services/pipeline-runner/r4/",
+  "blueprint": {
+    "flow": [
+      {
+        "id": 10,
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "view": "CFG - Active Render Server URL",
+          "table": "Pipeline Settings",
+          "maxRecords": "1",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": -960,
+            "y": 0,
+            "name": "Get Active Render Server Base URL"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 11,
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "table": "Pipeline Settings",
+          "formula": "AND({Active}=1,{Setting_Name}=\"render_music_volume\")",
+          "maxRecords": "1",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": -640,
+            "y": 0,
+            "name": "Get Active Render Music Volume"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 12,
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "table": "Pipeline Settings",
+          "formula": "AND({Active}=1,{Setting_Name}=\"render_voiceover_volume\")",
+          "maxRecords": "1",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": -320,
+            "y": 0,
+            "name": "Get Active Render Voiceover Volume"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 1,
+        "filter": {
+          "name": "Require render server and both active audio volume settings",
+          "conditions": [
+            [
+              {
+                "a": "{{10.Setting_Value}}",
+                "o": "exist"
+              },
+              {
+                "a": "{{11.Setting_Value}}",
+                "o": "exist"
+              },
+              {
+                "a": "{{12.Setting_Value}}",
+                "o": "exist"
+              },
+              {
+                "a": "{{parseNumber(trim(11.Setting_Value); \".\")}}",
+                "b": "0",
+                "o": "number:greaterorequal"
+              },
+              {
+                "a": "{{parseNumber(trim(12.Setting_Value); \".\")}}",
+                "b": "0",
+                "o": "number:greaterorequal"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "table": "tblrlPeboBthkplH0",
+          "useColumnId": false,
+          "formula": "AND({Test_Run_ID}=BLANK(),AND({Render_Status}=\"Ready for Render\",{Composition_ID}!=\"\",{Output_Filename}!=\"\",{Render_Clip_List_JSON}!=\"\",{Render_Total_Frames}>0))",
+          "maxRecords": "1"
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": 0,
+            "y": 0,
+            "name": "1 - Find One Platform Output Ready for Render"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 17,
+        "filter": {
+          "name": "Require linked Content Item for spoken-caption source",
+          "conditions": [
+            [
+              {
+                "a": "{{1.Content_Item}}",
+                "o": "exist"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "id": "{{get(1.Content_Item; 1)}}",
+          "base": "appe33zkZn35yirTL",
+          "table": "tblwzN9AXWvmKVKPs",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionGetRecord",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": 320,
+            "y": 0,
+            "name": "Load Content Voiceover Script for Spoken Captions"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 2,
+        "filter": {
+          "name": "Ready-for-render query returned a Platform Output",
+          "conditions": [
+            [
+              {
+                "a": "{{1.id}}",
+                "o": "exist"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "id": "{{1.id}}",
+          "base": "appe33zkZn35yirTL",
+          "table": "tblrlPeboBthkplH0",
+          "record": {
+            "fldEADvZ9DsB9nhhd": "",
+            "fldUDa6cnmfKFTAU4": "",
+            "fldWePFtTPPsyreQv": "",
+            "fldY02WY2eRTclVpn": "",
+            "fldblKqQfBucVN85k": "",
+            "fldciHLBrMpdou6Zf": "",
+            "fldenXjFd1HRasCYD": "",
+            "fldgpBV1vc4gQgFaw": "",
+            "fldleMgHqTQctbMdG": "",
+            "fldssVMZv37e2Ij6y": "",
+            "fldt6e8Ov1T4kyKax": ""
+          },
+          "typecast": false,
+          "useColumnId": false
+        },
+        "module": "airtable:ActionUpdateRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": 640,
+            "y": 0,
+            "name": "Clear Previous Render Results and Stale Props"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 20,
+        "mapper": null,
+        "module": "builtin:BasicRouter",
+        "routes": [
+          {
+            "flow": [
+              {
+                "id": 30,
+                "filter": {
+                  "name": "P020 Phase6 manifest exists",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.Creative_Render_Manifest_JSON}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "name": "p020_phase6_render_request_json",
+                  "scope": "roundtrip",
+                  "value": "{\n  \"filename\": \"{{escapeJSON(1.Output_Filename)}}\",\n  \"compositionId\": \"{{escapeJSON(1.Composition_ID)}}\",\n  \"titleText\": \"{{escapeJSON(1.Title_Text)}}\",\n  \"brandText\": \"{{escapeJSON(1.Brand_Text)}}\",\n  \"coverUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\",\n  \"thumbnailUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\",\n  \"initialFramePolicy\": \"first_visual_frame\",\n  \"blackFrameGuard\": {\n    \"enabled\": true,\n    \"fallbackFrameSeconds\": 1,\n    \"fallbackUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\"\n  },\n  \"expectedClipCount\": {{1.Selected_Clip_Count}},\n  \"fps\": 30,\n  \"width\": {{if(1.Aspect_Ratio = \"16:9\"; 1920; 1080)}},\n  \"height\": {{if(1.Aspect_Ratio = \"16:9\"; 1080; if(1.Aspect_Ratio = \"1:1\"; 1080; if(1.Aspect_Ratio = \"4:5\"; 1350; 1920)))}},\n  \"durationInFrames\": {{1.Render_Total_Frames}},\n  \"durationSeconds\": {{1.Render_Total_Frames / 30}},\n  \"voiceoverTailSeconds\": {{parseNumber(ifempty(1.Voiceover_Tail_Seconds; 2))}},\n  \"clips\": {{1.Render_Clip_List_JSON}},\n  \"music\": {\n    \"enabled\": {{if(ifempty(1.Music_URL; \"\") = \"\"; false; true)}},\n    \"url\": \"{{escapeJSON(1.Music_URL)}}\",\n    \"volume\": {{if(1.Music_Volume = 0; 0; ifempty(1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))}},\n    \"duckingEnabled\": {{if(1.Music_Ducking_Enabled = false; false; true)}},\n    \"duckingMultiplier\": {{if((if(1.Music_Volume = 0; 0; ifempty(1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))) > 0; (if(1.Music_Ducked_Volume = 0; 0; ifempty(1.Music_Ducked_Volume; 0.084))) / (if(1.Music_Volume = 0; 0; ifempty(1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))); 0)}},\n    \"duckFadeFrames\": {{if(1.Music_Duck_Fade_Frames = 0; 0; ifempty(1.Music_Duck_Fade_Frames; 6))}},\n    \"fadeInFrames\": 15,\n    \"fadeOutFrames\": 15,\n    \"loop\": true\n  }\n}"
+                },
+                "module": "util:SetVariable2",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 1280,
+                    "y": 300,
+                    "name": "Build P020 Phase6 Render JSON - Per-Output Audio + Ducking + Cover Guard"
+                  }
+                },
+                "parameters": {}
+              },
+              {
+                "id": 31,
+                "mapper": {
+                  "ca": "",
+                  "qs": [],
+                  "url": "{{trim(10.Setting_Value)}}/render",
+                  "data": "{{30.p020_phase6_render_request_json}}",
+                  "gzip": true,
+                  "method": "post",
+                  "headers": [
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "timeout": "300",
+                  "useMtls": false,
+                  "authPass": "",
+                  "authUser": "",
+                  "bodyType": "raw",
+                  "contentType": "application/json",
+                  "serializeUrl": false,
+                  "shareCookies": false,
+                  "parseResponse": true,
+                  "followRedirect": true,
+                  "useQuerystring": false,
+                  "followAllRedirects": false,
+                  "rejectUnauthorized": true
+                },
+                "module": "http:ActionSendData",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1600,
+                    "y": 300,
+                    "name": "POST P020 Phase6 Render - Per-Output Audio + Ducking"
+                  }
+                },
+                "parameters": {
+                  "handleErrors": true,
+                  "useNewZLibDeCompress": true
+                }
+              },
+              {
+                "id": 32,
+                "filter": {
+                  "name": "Only save accepted render job",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{31.data.statusUrl}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{31.data.jobId}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fld15Gv5ytVp3ExZd": "{{if(1.Music_Ducking_Enabled = false; false; true)}}",
+                    "fldEADvZ9DsB9nhhd": "",
+                    "fldGBazRAYCGgONhw": "{{if(1.Music_Volume = 0; 0; ifempty(1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))}}",
+                    "fldUDa6cnmfKFTAU4": "",
+                    "fldYTDt9jUCUm7yDy": "{{if(1.Music_Duck_Fade_Frames = 0; 0; ifempty(1.Music_Duck_Fade_Frames; 6))}}",
+                    "fldblKqQfBucVN85k": "{{30.p020_phase6_render_request_json}}",
+                    "fldds3hfMKCbqXAfN": "{{if(1.Music_Ducked_Volume = 0; 0; ifempty(1.Music_Ducked_Volume; 0.084))}}",
+                    "fldenXjFd1HRasCYD": "{{31.data.renderUrl}}",
+                    "fldleMgHqTQctbMdG": "{{31.data.jobId}}",
+                    "fldt6e8Ov1T4kyKax": "{{31.data.statusUrl}}",
+                    "fldtEZy0rdIVS5LML": "Rendering"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1920,
+                    "y": 300,
+                    "name": "Save P020 Render Job + Exact Request JSON"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          },
+          {
+            "flow": [
+              {
+                "id": 15,
+                "filter": {
+                  "name": "Non-P020 output with Voiceover URL",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.Creative_Render_Manifest_JSON}}",
+                        "o": "notexist"
+                      },
+                      {
+                        "a": "{{1.Voiceover_URL}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "name": "render_request_json_with_voiceover",
+                  "scope": "roundtrip",
+                  "value": "{\n  \"filename\": \"{{escapeJSON(1.Output_Filename)}}\",\n  \"compositionId\": \"{{escapeJSON(1.Composition_ID)}}\",\n  \"titleText\": \"{{escapeJSON(1.Title_Text)}}\",\n  \"brandText\": \"{{escapeJSON(1.Brand_Text)}}\",\n  \"coverUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\",\n  \"thumbnailUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\",\n  \"initialFramePolicy\": \"first_visual_frame\",\n  \"blackFrameGuard\": {\n    \"enabled\": true,\n    \"fallbackFrameSeconds\": 1,\n    \"fallbackUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\"\n  },\n  \"voiceoverText\": \"{{escapeJSON(17.Voiceover_Script)}}\",\n  \"spokenCaptionsEnabled\": {{if(contains(1.Render_Clip_List_JSON; \"overlay\"); false; true)}},\n  \"spokenCaptionWordsPerPage\": 4,\n  \"expectedClipCount\": {{1.Selected_Clip_Count}},\n  \"fps\": 30,\n  \"width\": {{if(1.Aspect_Ratio = \"16:9\"; 1920; 1080)}},\n  \"height\": {{if(1.Aspect_Ratio = \"16:9\"; 1080; if(1.Aspect_Ratio = \"1:1\"; 1080; if(1.Aspect_Ratio = \"4:5\"; 1350; 1920)))}},\n  \"durationInFrames\": {{1.Render_Total_Frames}},\n  \"durationSeconds\": {{round(1.Render_Total_Frames / 30)}},\n  \"voiceoverTailSeconds\": {{parseNumber(ifempty(1.Voiceover_Tail_Seconds; 2))}},\n  \"clips\": {{1.Render_Clip_List_JSON}},\n  \"music\": {\n    \"url\": \"{{escapeJSON(1.Music_URL)}}\",\n    \"volume\": {{if(ifempty(1.Music_URL; \"\") = \"\"; 0; if(1.Music_Volume > 0; 1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))}}\n  },\n  \"voiceover\": {\n    \"url\": \"{{escapeJSON(1.Voiceover_URL)}}\",\n    \"volume\": {{parseNumber(ifempty(1.Voiceover_Render_Volume; trim(12.Setting_Value)); \".\")}}\n  }\n}"
+                },
+                "module": "util:SetVariable2",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 1280,
+                    "y": -300,
+                    "name": "Build Global Voiceover + Spoken Caption Render JSON + Cover Guard"
+                  }
+                },
+                "parameters": {}
+              },
+              {
+                "id": 3,
+                "mapper": {
+                  "ca": "",
+                  "qs": [],
+                  "url": "{{trim(10.Setting_Value)}}/render",
+                  "data": "{{15.render_request_json_with_voiceover}}",
+                  "gzip": true,
+                  "method": "post",
+                  "headers": [
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "timeout": "300",
+                  "useMtls": false,
+                  "authPass": "",
+                  "authUser": "",
+                  "bodyType": "raw",
+                  "contentType": "application/json",
+                  "serializeUrl": false,
+                  "shareCookies": false,
+                  "parseResponse": true,
+                  "followRedirect": true,
+                  "useQuerystring": false,
+                  "followAllRedirects": false,
+                  "rejectUnauthorized": true
+                },
+                "module": "http:ActionSendData",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1600,
+                    "y": -300,
+                    "name": "POST Global Voiceover + Spoken Caption Render"
+                  }
+                },
+                "parameters": {
+                  "handleErrors": true,
+                  "useNewZLibDeCompress": true
+                }
+              },
+              {
+                "id": 4,
+                "filter": {
+                  "name": "Only save accepted render job",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{3.data.statusUrl}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{3.data.jobId}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fldEADvZ9DsB9nhhd": "",
+                    "fldGBazRAYCGgONhw": "{{if(ifempty(1.Music_URL; \"\") = \"\"; 0; if(1.Music_Volume > 0; 1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))}}",
+                    "fldUDa6cnmfKFTAU4": "",
+                    "fldblKqQfBucVN85k": "{{15.render_request_json_with_voiceover}}",
+                    "fldenXjFd1HRasCYD": "{{3.data.renderUrl}}",
+                    "fldleMgHqTQctbMdG": "{{3.data.jobId}}",
+                    "fldt6e8Ov1T4kyKax": "{{3.data.statusUrl}}",
+                    "fldtEZy0rdIVS5LML": "Rendering"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1920,
+                    "y": -300,
+                    "name": "Save Voiceover Render Job + Exact Request JSON"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          },
+          {
+            "flow": [
+              {
+                "id": 16,
+                "filter": {
+                  "name": "Non-P020 output without Voiceover URL",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.Creative_Render_Manifest_JSON}}",
+                        "o": "notexist"
+                      },
+                      {
+                        "a": "{{1.Voiceover_URL}}",
+                        "o": "notexist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "name": "render_request_json_without_voiceover",
+                  "scope": "roundtrip",
+                  "value": "{\n  \"filename\": \"{{escapeJSON(1.Output_Filename)}}\",\n  \"compositionId\": \"{{escapeJSON(1.Composition_ID)}}\",\n  \"titleText\": \"{{escapeJSON(1.Title_Text)}}\",\n  \"brandText\": \"{{escapeJSON(1.Brand_Text)}}\",\n  \"coverUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\",\n  \"thumbnailUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\",\n  \"initialFramePolicy\": \"first_visual_frame\",\n  \"blackFrameGuard\": {\n    \"enabled\": true,\n    \"fallbackFrameSeconds\": 1,\n    \"fallbackUrl\": \"{{escapeJSON(ifempty(1.Thumbnail_URL; 1.Clip_1_URL))}}\"\n  },\n  \"expectedClipCount\": {{1.Selected_Clip_Count}},\n  \"fps\": 30,\n  \"width\": {{if(1.Aspect_Ratio = \"16:9\"; 1920; 1080)}},\n  \"height\": {{if(1.Aspect_Ratio = \"16:9\"; 1080; if(1.Aspect_Ratio = \"1:1\"; 1080; if(1.Aspect_Ratio = \"4:5\"; 1350; 1920)))}},\n  \"durationInFrames\": {{1.Render_Total_Frames}},\n  \"durationSeconds\": {{round(1.Render_Total_Frames / 30)}},\n  \"clips\": {{1.Render_Clip_List_JSON}},\n  \"music\": {\n    \"url\": \"{{escapeJSON(1.Music_URL)}}\",\n    \"volume\": {{if(ifempty(1.Music_URL; \"\") = \"\"; 0; if(1.Music_Volume > 0; 1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))}}\n  }\n}"
+                },
+                "module": "util:SetVariable2",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 1280,
+                    "y": 0,
+                    "name": "Build No-Voiceover Render JSON + Clip Guard + Cover Guard"
+                  }
+                },
+                "parameters": {}
+              },
+              {
+                "id": 13,
+                "mapper": {
+                  "ca": "",
+                  "qs": [],
+                  "url": "{{trim(10.Setting_Value)}}/render",
+                  "data": "{{16.render_request_json_without_voiceover}}",
+                  "gzip": true,
+                  "method": "post",
+                  "headers": [
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "timeout": "300",
+                  "useMtls": false,
+                  "authPass": "",
+                  "authUser": "",
+                  "bodyType": "raw",
+                  "contentType": "application/json",
+                  "serializeUrl": false,
+                  "shareCookies": false,
+                  "parseResponse": true,
+                  "followRedirect": true,
+                  "useQuerystring": false,
+                  "followAllRedirects": false,
+                  "rejectUnauthorized": true
+                },
+                "module": "http:ActionSendData",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1600,
+                    "y": 0,
+                    "name": "POST Render Without Voiceover - Per-Output Music Volume"
+                  }
+                },
+                "parameters": {
+                  "handleErrors": true,
+                  "useNewZLibDeCompress": true
+                }
+              },
+              {
+                "id": 14,
+                "filter": {
+                  "name": "Only save accepted render job",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{13.data.statusUrl}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.data.jobId}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fldEADvZ9DsB9nhhd": "",
+                    "fldGBazRAYCGgONhw": "{{if(ifempty(1.Music_URL; \"\") = \"\"; 0; if(1.Music_Volume > 0; 1.Music_Volume; parseNumber(trim(11.Setting_Value); \".\")))}}",
+                    "fldUDa6cnmfKFTAU4": "",
+                    "fldblKqQfBucVN85k": "{{16.render_request_json_without_voiceover}}",
+                    "fldenXjFd1HRasCYD": "{{13.data.renderUrl}}",
+                    "fldleMgHqTQctbMdG": "{{13.data.jobId}}",
+                    "fldt6e8Ov1T4kyKax": "{{13.data.statusUrl}}",
+                    "fldtEZy0rdIVS5LML": "Rendering"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1920,
+                    "y": 0,
+                    "name": "Save No-Voiceover Render Job + Exact Request JSON"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          }
+        ],
+        "version": 1,
+        "metadata": {
+          "designer": {
+            "x": 960,
+            "y": 0,
+            "name": "Route P020 Phase6 vs Voiceover vs No Voiceover"
+          }
+        },
+        "parameters": {}
+      }
+    ],
+    "name": "R4 - Start Remotion Render v2.6.2 - Non-Black Cover Frame Contract",
+    "metadata": {
+      "instant": false,
+      "version": 1,
+      "designer": {
+        "orphans": []
+      },
+      "scenario": {
+        "dlq": false,
+        "slots": null,
+        "dataloss": false,
+        "maxErrors": 3,
+        "autoCommit": true,
+        "roundtrips": 1,
+        "sequential": true,
+        "confidential": false,
+        "freshVariables": false,
+        "autoCommitTriggerLast": true
+      }
+    },
+    "scheduling": {
+      "type": "indefinitely",
+      "interval": 900
+    },
+    "interface": {
+      "input": [
+        {
+          "name": "test_run_id",
+          "type": "text",
+          "default": null,
+          "required": false,
+          "multiline": false
+        },
+        {
+          "name": "output_record_id",
+          "type": "text",
+          "default": null,
+          "required": false,
+          "multiline": false
+        },
+        {
+          "name": "platform_output_id",
+          "type": "text",
+          "default": null,
+          "required": false,
+          "multiline": false
+        },
+        {
+          "name": "intended_stage",
+          "type": "text",
+          "default": "R4",
+          "required": false,
+          "multiline": false
+        },
+        {
+          "name": "attempt_number",
+          "type": "number",
+          "default": 1,
+          "required": false
+        },
+        {
+          "name": "idempotency_key",
+          "type": "text",
+          "default": null,
+          "required": false,
+          "multiline": false
+        }
+      ],
+      "output": []
+    }
+  }
+}

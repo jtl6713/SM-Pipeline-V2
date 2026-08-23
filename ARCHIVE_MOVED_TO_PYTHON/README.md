@@ -2,10 +2,15 @@
 
 Make.com scenarios replaced by `services/pipeline-runner/` (Python on `pipeline.chicagoshining.com`).
 
-| Stage | Make scenario ID | Python path | Archived blueprint |
-| --- | --- | --- | --- |
-| SMV1 | 5894885 | `POST /stages/smv1` | `smv1-5894885-studio-media-variant-worker.json` |
-| R2 | 5569495 | `POST /stages/r2` | `r2-5569495-auto-asset-selection.json` |
+| Stage | Make scenario ID | Python path | Archived blueprint | Production |
+| --- | --- | --- | --- | --- |
+| SMV1 | 5894885 | `POST /stages/smv1` | `smv1-5894885-studio-media-variant-worker.json` | Python |
+| R2 | 5569495 | `POST /stages/r2` | `r2-5569495-auto-asset-selection.json` | Python |
+| R3 | 5557966 | `POST /stages/r3` | `r3-5557966-deterministic-render-prep.json` | Make until cutover |
+| R4 | 5556716 | `POST /stages/r4` | `r4-5556716-start-remotion-render.json` | Make until cutover |
+| R5 | 5565333 | `POST /stages/r5` | `r5-5565333-render-poller-final-upload.json` | Make until cutover |
+
+Wave 2 cutover guide: `WAVE2_R3_R4_R5.md`
 
 ## Cutover (2026-08-23)
 

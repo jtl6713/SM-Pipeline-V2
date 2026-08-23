@@ -3,4 +3,4 @@
 from stages import r2, smv1
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 
-__all__ = ["STAGE_NAMES", "get_handler", "is_implemented", "r2", "smv1"]
+__all__ = ["STAGE_NAMES", "get_handler", "is_implemented", "r2", "r3", "r4", "r5", "smv1"]

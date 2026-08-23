@@ -1,0 +1,151 @@
+{
+  "scenarioId": 5557966,
+  "name": "R3 - Deterministic Selected Asset Render Prep v3.1 - Studio Safe + Clean Validation State",
+  "archivedAt": "2026-08-23",
+  "replacedBy": "services/pipeline-runner/r3/",
+  "blueprint": {
+    "flow": [
+      {
+        "id": 1,
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "table": "Platform Outputs",
+          "formula": "AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}=\"Selected\",{Selected_Assets_JSON}!=\"\",{Render_Status}=BLANK(),OR({Format}=\"Vertical Short Video\",{Format}=\"Longform Video\",{Format}=\"Feed Post\")))",
+          "maxRecords": "10",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": 0,
+            "y": 0,
+            "name": "Find Up to 10 Video Outputs Needing Deterministic Render Prep"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 2,
+        "filter": {
+          "name": "Only continue if Selected_Assets_JSON exists",
+          "conditions": [
+            [
+              {
+                "a": "{{1.Selected_Assets_JSON}}",
+                "o": "exist"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "json": "{{1.Selected_Assets_JSON}}"
+        },
+        "module": "json:ParseJSON",
+        "version": 1,
+        "metadata": {
+          "designer": {
+            "x": 300,
+            "y": 0,
+            "name": "Parse Selected_Assets_JSON Canonical Package"
+          }
+        },
+        "parameters": {
+          "type": 418279
+        }
+      },
+      {
+        "id": 3,
+        "filter": {
+          "name": "Only prep fully selected canonical packages",
+          "conditions": [
+            [
+              {
+                "a": "{{1.id}}",
+                "o": "exist"
+              },
+              {
+                "a": "{{2.selection_status}}",
+                "b": "Selected",
+                "o": "text:equal"
+              },
+              {
+                "a": "{{2.render_prep.render_status}}",
+                "b": "Ready for Render",
+                "o": "text:equal"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "id": "{{1.id}}",
+          "base": "appe33zkZn35yirTL",
+          "table": "tblrlPeboBthkplH0",
+          "record": {
+            "fld6v8uKouGCyWbqo": "{{2.render_prep.prep_notes}}",
+            "fld9pyFQFHat3ayYr": "{{2.render_prep.title_text}}",
+            "fldEETETZf7uzLd7D": "{{2.render_prep.render_clip_list_json}}",
+            "fldF6WSBlSP1PF2ZM": "{{2.render_prep.music_url}}",
+            "fldRzH8LJOeeGqsPh": "{{2.render_prep.compatibility_clip_1_duration_frames}}",
+            "fldTqqOzC2cECX9EM": "{{2.render_prep.compatibility_clip_2_url}}",
+            "fldTw2sPDvKEHElP9": "{{2.render_prep.compatibility_clip_2_duration_frames}}",
+            "fldUDa6cnmfKFTAU4": "{{if(2.render_prep.validation_passed; \"\"; 2.render_prep.validation_errors_text)}}",
+            "fldXlaROiROoaAgoc": "{{2.render_prep.output_status}}",
+            "fldZRfnQUyvjufq8R": "{{2.render_prep.render_total_frames}}",
+            "fldbQ1pyfyMkO7yhz": "{{2.render_prep.compatibility_clip_3_url}}",
+            "fldcVmpi1yva89dzy": "{{2.render_prep.output_filename}}",
+            "fldlGTytbyovFNJoA": "{{2.render_prep.compatibility_clip_1_url}}",
+            "fldlftCb1r06p6IhB": "{{ifempty(1.Composition_ID; if(contains(lower(2.render_prep.compatibility_clip_1_url); \".jpg\"); \"ChicagoShiningPhotoSequence\"; 2.render_prep.composition_id))}}",
+            "fldrxvDPiPWMfruny": "{{2.render_prep.brand_text}}",
+            "fldtEZy0rdIVS5LML": "{{2.render_prep.render_status}}",
+            "fldyfaEjpmsQm7rA4": "{{2.render_prep.compatibility_clip_3_duration_frames}}"
+          },
+          "typecast": false,
+          "useColumnId": false
+        },
+        "module": "airtable:ActionUpdateRecords",
+        "version": 3,
+        "metadata": {
+          "designer": {
+            "x": 600,
+            "y": 0,
+            "name": "Prepare Render Fields - Preserve Studio Composition + Clean Valid Error State"
+          }
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      }
+    ],
+    "name": "R3 - Deterministic Selected Asset Render Prep v3.1 - Studio Safe + Clean Validation State",
+    "metadata": {
+      "instant": false,
+      "version": 1,
+      "designer": {
+        "orphans": []
+      },
+      "scenario": {
+        "dlq": false,
+        "slots": null,
+        "dataloss": false,
+        "maxErrors": 3,
+        "autoCommit": true,
+        "roundtrips": 1,
+        "sequential": true,
+        "confidential": false,
+        "freshVariables": false,
+        "autoCommitTriggerLast": true
+      }
+    },
+    "scheduling": {
+      "type": "indefinitely",
+      "interval": 900
+    },
+    "interface": {
+      "input": [],
+      "output": []
+    }
+  }
+}

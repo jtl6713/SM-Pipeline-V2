@@ -4298,6 +4298,9 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   const id = Number(scenarioId);
   if (id === ITEM4_SMV1_SCENARIO_ID && pipelineStageBackend(env, "SMV1").mode === "python") return true;
   if (id === PHASE6_R2_SCENARIO_ID && pipelineStageBackend(env, "R2").mode === "python") return true;
+  if (id === PHASE6_R3_SCENARIO_ID && pipelineStageBackend(env, "R3").mode === "python") return true;
+  if (id === PHASE6_R4_SCENARIO_ID && pipelineStageBackend(env, "R4").mode === "python") return true;
+  if (id === PHASE6_R5_SCENARIO_ID && pipelineStageBackend(env, "R5").mode === "python") return true;
   return false;
 }
 
@@ -4348,6 +4351,55 @@ async function item4PulseR2Python(env, options = {}) {
     throw new HttpError(
       response.status,
       payload?.message || payload?.error || `Python R2 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function item4PulseR3Python(env, options = {}) {
+  const body = {
+    extra: { max_runs: Number(options.maxRuns || 10) },
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "r3", body, "R3");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python R3 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function item4PulseR4Python(env, options = {}) {
+  const body = { extra: {} };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "r4", body, "R4");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python R4 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function item4PulseR5Python(env, options = {}) {
+  const body = {
+    extra: { max_runs: Number(options.maxRuns || 5) },
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "r5", body, "R5");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python R5 failed (${response.status})`
     );
   }
   return payload;
@@ -12828,6 +12880,21 @@ async function pulseStudioContinuationJobs(env, options = {}) {
       continue;
     }
     try {
+      if (job.key === "R5" && pipelineStageBackend(env, "R5").mode === "python") {
+        await item4PulseR5Python(env, { maxRuns: 5 });
+        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
+        continue;
+      }
+      if (job.key === "R4" && pipelineStageBackend(env, "R4").mode === "python") {
+        await item4PulseR4Python(env);
+        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
+        break;
+      }
+      if (job.key === "R3" && pipelineStageBackend(env, "R3").mode === "python") {
+        await item4PulseR3Python(env, { maxRuns: 10 });
+        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
+        break;
+      }
       if (job.key === "R2" && pipelineStageBackend(env, "R2").mode === "python") {
         await item4PulseR2Python(env, { maxRuns: 1 });
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });

@@ -39,7 +39,7 @@ def load_settings() -> dict[str, Any]:
         "openai_r2_model": os.environ.get("OPENAI_R2_MODEL", "gpt-4.1"),
         "elevenlabs_api_key": os.environ.get("ELEVENLABS_API_KEY", ""),
         "p4_webhook_url": os.environ.get("P4_WEBHOOK_URL", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-23-smv1-r2-prod"),
+        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-23-r3-r4-r5-wave2"),
     }
 
 

@@ -8,7 +8,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 - **Stack:** Flask + requests (same pattern as Frame Extractor)
 - **Local health:** `http://localhost:3350/health`
 - **Public route:** `https://pipeline.chicagoshining.com` (Cloudflare Tunnel)
-- **Make scenarios (migration order):** SMV1 `5894885`, R2 `5569495`
+- **Make scenarios (migration order):** SMV1 `5894885`, R2 `5569495`, R3 `5557966`, R4 `5556716`, R5 `5565333`
 
 ## Status
 
@@ -16,8 +16,11 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | --- | --- | --- |
 | **SMV1** | Full (`5894885` replacement) | `STAGE_BACKEND_SMV1=python` |
 | **R2** | Full (`5569495` replacement, OpenAI module 7 port) | `STAGE_BACKEND_R2=python` |
+| **R3** | Full (`5557966` — render prep from `Selected_Assets_JSON`, batch 10) | Make until `STAGE_BACKEND_R3=python` |
+| **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Make until `STAGE_BACKEND_R4=python` |
+| **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | Make until `STAGE_BACKEND_R5=python` |
 
-Make scenarios archived under `ARCHIVE_MOVED_TO_PYTHON/` and deactivated.
+SMV1/R2 Make scenarios archived under `ARCHIVE_MOVED_TO_PYTHON/` and deactivated. R3/R4/R5 blueprints archived; **Make scenarios stay active** until Wave 2 cutover proof.
 
 Other stages return `501 not_implemented`.
 
@@ -51,17 +54,14 @@ One `POST /stages/smv1` == one queue row (matches Make Module 1 `maxRecords=1`).
 
 Batch drain: `POST /stages/smv1/drain` with `extra.max_runs` (default 8).
 
-## R2 behavior (scaffold)
+## R2 behavior
 
 One `POST /stages/r2` == one Platform Output (Make module 1 `maxRecords=1`).
 
 | Path | Python | Make pointer |
 | --- | --- | --- |
 | Eligibility + candidate gather | Yes | Module 1 formula in `r2/formulas.py` |
-| Zero video candidates | Yes (fail-fast + P4 webhook) | Modules 14, 21 |
-| Canonical OpenAI selection | **Deferred** | Modules 7, 8, 9 on scenario `5569495` |
-
-When OpenAI is not ported, `/stages/r2` returns HTTP `202` with `status: deferred` and `make_fallback_required: true`. The Studio Worker falls back to Make automatically.
+| Canonical OpenAI selection | Yes | Modules 7–9 on scenario `5569495` |
 
 Dry-run probe (no writes):
 
@@ -72,7 +72,27 @@ curl -X POST http://localhost:3350/stages/r2 `
   -d '{"extra":{"dry_run":true}}'
 ```
 
-Blueprint reference: `repair/_tmp_make/r2.json`
+## R3 behavior (render prep)
+
+One `POST /stages/r3` processes up to **10** Platform Outputs where `Asset_Selection_Status=Selected`, `Selected_Assets_JSON` is set, and `Render_Status` is blank (video formats). Parses the canonical JSON package and writes render fields when `selection_status=Selected` and `render_prep.render_status=Ready for Render`.
+
+Shared helpers: `render/fields.py`, music fallback catalog URL in `r3/render_prep.py`.
+
+## R4 behavior (start Remotion render)
+
+One `POST /stages/r4` claims **1** output with `Render_Status=Ready for Render` and required clip/composition fields. Loads render server URL + music/voice volumes from Pipeline Settings, clears stale render job fields, then routes:
+
+| Route | When |
+| --- | --- |
+| P020 Phase6 manifest | `Creative_Render_Manifest_JSON` present |
+| Voiceover + spoken captions | No manifest, `Voiceover_URL` set |
+| No voiceover | No manifest, no voiceover URL |
+
+POST body built in `r4/render_request.py`; Remotion client in `render/remotion_client.py`.
+
+## R5 behavior (poll + upload)
+
+One `POST /stages/r5` polls up to **5** outputs in `Rendering` with a `Remotion_Status_URL`. On complete: download MP4, upload to Google Drive final folder, cleanup Remotion job, PUT R2 studio preview cache, set `Studio_Preview_*` fields. Failed jobs write validation errors and reset status.
 
 ## Enable in Studio Worker
 
@@ -83,9 +103,12 @@ PIPELINE_RUNNER_SHARED_SECRET=<shared secret>
 # Opt-in per stage (unset or "make" keeps Make.com):
 STAGE_BACKEND_SMV1=python
 STAGE_BACKEND_R2=python
+STAGE_BACKEND_R3=python
+STAGE_BACKEND_R4=python
+STAGE_BACKEND_R5=python
 ```
 
-Until set, Worker continues Make on-demand pulses. R2 deferrals also fall back to Make when Python cannot complete OpenAI selection.
+Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-demand for the render chain.
 
 ## API contract
 
@@ -96,6 +119,9 @@ Until set, Worker continues Make on-demand pulses. R2 deferrals also fall back t
 | `POST` | `/stages/{name}` | Run one stage |
 | `POST` | `/stages/smv1/drain` | Process up to N queue rows for one Production Request |
 | `POST` | `/stages/r2/drain` | Process up to N eligible Platform Outputs |
+| `POST` | `/stages/r3` | Render prep batch (max 10) |
+| `POST` | `/stages/r4` | Start one Remotion render |
+| `POST` | `/stages/r5` | Poll/upload batch (max 5) |
 
 POST body fields: `output_record_id`, `production_request_record_id`, `test_run_id`, `intended_stage`, `idempotency_key`, `extra.max_runs`, `extra.dry_run`, etc.
 
@@ -103,9 +129,9 @@ Header `X-Pipeline-Secret` required when `PIPELINE_RUNNER_SHARED_SECRET` is set.
 
 ## Migration order (remaining)
 
-1. ~~SMV1~~ (Python ready; cutover when tests pass)
-2. **R2** (scaffold; port OpenAI modules 7–9 next)
-3. R3 → R5 render chain
+1. ~~SMV1~~ (Python live)
+2. ~~R2~~ (Python live)
+3. ~~R3 → R5 render chain~~ (Python ready; cutover after Item 7 proof)
 4. P2, P3, P1
 5. AP0 + publish platforms
 6. RR1, RR2, intake

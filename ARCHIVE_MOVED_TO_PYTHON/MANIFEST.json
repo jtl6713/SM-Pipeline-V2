@@ -9,14 +9,40 @@
       "scenario_id": 5894885,
       "name": "SMV1 - Studio Media Authority + Platform Variant Worker v0.6.3 - Media Link Isolation",
       "blueprint_file": "smv1-5894885-studio-media-variant-worker.json",
-      "python_endpoint": "/stages/smv1"
+      "python_endpoint": "/stages/smv1",
+      "production_backend": "python"
     },
     {
       "stage": "R2",
       "scenario_id": 5569495,
       "name": "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility",
       "blueprint_file": "r2-5569495-auto-asset-selection.json",
-      "python_endpoint": "/stages/r2"
+      "python_endpoint": "/stages/r2",
+      "production_backend": "python"
+    },
+    {
+      "stage": "R3",
+      "scenario_id": 5557966,
+      "name": "R3 - Deterministic Selected Asset Render Prep v3.1 - Studio Safe + Clean Validation State",
+      "blueprint_file": "r3-5557966-deterministic-render-prep.json",
+      "python_endpoint": "/stages/r3",
+      "production_backend": "make (flip STAGE_BACKEND_R3=python after Item 7 proof)"
+    },
+    {
+      "stage": "R4",
+      "scenario_id": 5556716,
+      "name": "R4 - Start Remotion Render v2.6.2 - Non-Black Cover Frame Contract",
+      "blueprint_file": "r4-5556716-start-remotion-render.json",
+      "python_endpoint": "/stages/r4",
+      "production_backend": "make (flip STAGE_BACKEND_R4=python after Item 7 proof)"
+    },
+    {
+      "stage": "R5",
+      "scenario_id": 5565333,
+      "name": "R5 - Render Poller + Final Upload v2.3 - Studio Native Preview R2 Cache",
+      "blueprint_file": "r5-5565333-render-poller-final-upload.json",
+      "python_endpoint": "/stages/r5",
+      "production_backend": "make (flip STAGE_BACKEND_R5=python after Item 7 proof)"
     }
   ]
 }

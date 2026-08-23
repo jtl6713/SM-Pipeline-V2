@@ -1,0 +1,4589 @@
+{
+  "scenarioId": 5565333,
+  "name": "R5 - Render Poller + Final Upload v2.3 - Studio Native Preview R2 Cache",
+  "archivedAt": "2026-08-23",
+  "replacedBy": "services/pipeline-runner/r5/",
+  "blueprint": {
+    "flow": [
+      {
+        "id": 1,
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "view": "R5 - Rendering Jobs to Poll",
+          "table": "Platform Outputs",
+          "formula": "{Test_Run_ID}=BLANK()",
+          "maxRecords": "5",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "expect": [
+            {
+              "name": "base",
+              "type": "select",
+              "label": "Base",
+              "required": true
+            },
+            {
+              "name": "useColumnId",
+              "type": "boolean",
+              "label": "Use Column ID",
+              "required": true
+            },
+            {
+              "name": "table",
+              "type": "select",
+              "label": "Table",
+              "required": true
+            },
+            {
+              "name": "formula",
+              "type": "text",
+              "label": "Formula"
+            },
+            {
+              "name": "maxRecords",
+              "type": "integer",
+              "label": "Limit"
+            },
+            {
+              "name": "sort",
+              "spec": [
+                {
+                  "name": "field",
+                  "type": "select",
+                  "label": "Field",
+                  "dynamic": true,
+                  "options": []
+                },
+                {
+                  "name": "direction",
+                  "type": "select",
+                  "label": "Direction",
+                  "options": [
+                    {
+                      "label": "Descending",
+                      "value": "desc"
+                    },
+                    {
+                      "label": "Ascending",
+                      "value": "asc"
+                    }
+                  ]
+                }
+              ],
+              "type": "array",
+              "label": "Sort"
+            },
+            {
+              "name": "view",
+              "type": "select",
+              "label": "View"
+            },
+            {
+              "name": "fields",
+              "type": "select",
+              "label": "Output Fields",
+              "multiple": true
+            }
+          ],
+          "restore": {
+            "expect": {
+              "base": {
+                "mode": "chose",
+                "label": "ChicagoShining AI Content Creator"
+              },
+              "sort": {
+                "mode": "chose"
+              },
+              "view": {
+                "mode": "chose",
+                "label": "R5 - Rendering Jobs to Poll"
+              },
+              "table": {
+                "mode": "chose",
+                "label": "Platform Outputs"
+              },
+              "fields": {
+                "mode": "chose"
+              },
+              "useColumnId": {
+                "mode": "chose"
+              }
+            },
+            "parameters": {
+              "__IMTCONN__": {
+                "data": {
+                  "scoped": "true",
+                  "connection": "airtable3"
+                },
+                "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+              }
+            }
+          },
+          "designer": {
+            "x": 0,
+            "y": 0,
+            "name": "Find One Rendering Platform Output to Poll"
+          },
+          "interface": [
+            {
+              "name": "__IMTLENGTH__",
+              "type": "uinteger",
+              "label": "Total number of bundles"
+            },
+            {
+              "name": "__IMTINDEX__",
+              "type": "uinteger",
+              "label": "Bundle order position"
+            },
+            {
+              "name": "id",
+              "type": "text",
+              "label": "ID"
+            },
+            {
+              "name": "createdTime",
+              "type": "date",
+              "label": "Created Time"
+            },
+            {
+              "name": "Output_ID",
+              "type": "number",
+              "label": "Output_ID"
+            },
+            {
+              "name": "Content_Item",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Content_Item"
+            },
+            {
+              "name": "Content_Profile",
+              "type": "array",
+              "label": "Content_Profile"
+            },
+            {
+              "name": "Market_Name",
+              "type": "array",
+              "label": "Market_Name"
+            },
+            {
+              "name": "Platform",
+              "type": "text",
+              "label": "Platform"
+            },
+            {
+              "name": "Format",
+              "type": "text",
+              "label": "Format"
+            },
+            {
+              "name": "Platform_Output_Type",
+              "type": "text",
+              "label": "Platform_Output_Type"
+            },
+            {
+              "name": "Aspect_Ratio",
+              "type": "text",
+              "label": "Aspect_Ratio"
+            },
+            {
+              "name": "Output_Status",
+              "type": "text",
+              "label": "Output_Status"
+            },
+            {
+              "name": "Output_Title",
+              "type": "text",
+              "label": "Output_Title"
+            },
+            {
+              "name": "Output_Caption",
+              "type": "text",
+              "label": "Output_Caption",
+              "multiline": true
+            },
+            {
+              "name": "Output_Hashtags",
+              "type": "text",
+              "label": "Output_Hashtags",
+              "multiline": true
+            },
+            {
+              "name": "Output_URL",
+              "type": "text",
+              "label": "Output_URL"
+            },
+            {
+              "name": "Thumbnail_URL",
+              "type": "text",
+              "label": "Thumbnail_URL"
+            },
+            {
+              "name": "Voiceover_URL",
+              "type": "text",
+              "label": "Voiceover_URL"
+            },
+            {
+              "name": "Scheduled_Post_Date",
+              "time": true,
+              "type": "date",
+              "label": "Scheduled_Post_Date"
+            },
+            {
+              "name": "Published_At",
+              "time": true,
+              "type": "date",
+              "label": "Published_At"
+            },
+            {
+              "name": "Platform_Post_URL",
+              "type": "text",
+              "label": "Platform_Post_URL"
+            },
+            {
+              "name": "Do_Not_Publish",
+              "type": "boolean",
+              "label": "Do_Not_Publish"
+            },
+            {
+              "name": "Output_Notes",
+              "type": "text",
+              "label": "Output_Notes",
+              "multiline": true
+            },
+            {
+              "name": "Asset Requests",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Asset Requests"
+            },
+            {
+              "name": "Asset Request Shots",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Asset Request Shots"
+            },
+            {
+              "name": "Asset_Need_Status",
+              "type": "text",
+              "label": "Asset_Need_Status"
+            },
+            {
+              "name": "Target_Final_Length",
+              "type": "number",
+              "label": "Target_Final_Length"
+            },
+            {
+              "name": "Recommended_Raw_Capture_Length",
+              "type": "number",
+              "label": "Recommended_Raw_Capture_Length"
+            },
+            {
+              "name": "Missing_Asset_Summary",
+              "type": "text",
+              "label": "Missing_Asset_Summary",
+              "multiline": true
+            },
+            {
+              "name": "Asset_Request_Link",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Asset_Request_Link"
+            },
+            {
+              "name": "Render_Status",
+              "type": "text",
+              "label": "Render_Status"
+            },
+            {
+              "name": "Render_Server_URL",
+              "type": "text",
+              "label": "Render_Server_URL"
+            },
+            {
+              "name": "Final_File_URL",
+              "type": "text",
+              "label": "Final_File_URL"
+            },
+            {
+              "name": "Final_File_ID",
+              "type": "text",
+              "label": "Final_File_ID"
+            },
+            {
+              "name": "Final_File_Name",
+              "type": "text",
+              "label": "Final_File_Name"
+            },
+            {
+              "name": "Final_File_Storage_Status",
+              "type": "text",
+              "label": "Final_File_Storage_Status"
+            },
+            {
+              "name": "Final_File_Error_Message",
+              "type": "text",
+              "label": "Final_File_Error_Message",
+              "multiline": true
+            },
+            {
+              "name": "Remotion_Job_ID",
+              "type": "text",
+              "label": "Remotion_Job_ID"
+            },
+            {
+              "name": "Remotion_Status_URL",
+              "type": "text",
+              "label": "Remotion_Status_URL"
+            },
+            {
+              "name": "Remotion_Props_JSON",
+              "type": "text",
+              "label": "Remotion_Props_JSON",
+              "multiline": true
+            },
+            {
+              "name": "Remotion_Error_Message",
+              "type": "text",
+              "label": "Remotion_Error_Message",
+              "multiline": true
+            },
+            {
+              "name": "Composition_ID",
+              "type": "text",
+              "label": "Composition_ID"
+            },
+            {
+              "name": "Output_Filename",
+              "type": "text",
+              "label": "Output_Filename"
+            },
+            {
+              "name": "Clip_1_URL",
+              "type": "text",
+              "label": "Clip_1_URL"
+            },
+            {
+              "name": "Clip_1_Duration_Frames",
+              "type": "number",
+              "label": "Clip_1_Duration_Frames"
+            },
+            {
+              "name": "Clip_2_URL",
+              "type": "text",
+              "label": "Clip_2_URL"
+            },
+            {
+              "name": "Clip_2_Duration_Frames",
+              "type": "number",
+              "label": "Clip_2_Duration_Frames"
+            },
+            {
+              "name": "Clip_3_URL",
+              "type": "text",
+              "label": "Clip_3_URL"
+            },
+            {
+              "name": "Clip_3_Duration_Frames",
+              "type": "number",
+              "label": "Clip_3_Duration_Frames"
+            },
+            {
+              "name": "Music_URL",
+              "type": "text",
+              "label": "Music_URL"
+            },
+            {
+              "name": "Music_Volume",
+              "type": "number",
+              "label": "Music_Volume"
+            },
+            {
+              "name": "Title_Text",
+              "type": "text",
+              "label": "Title_Text"
+            },
+            {
+              "name": "Brand_Text",
+              "type": "text",
+              "label": "Brand_Text"
+            },
+            {
+              "name": "Selected_Clip_1_URL",
+              "type": "text",
+              "label": "Selected_Clip_1_URL"
+            },
+            {
+              "name": "Selected_Clip_2_URL",
+              "type": "text",
+              "label": "Selected_Clip_2_URL"
+            },
+            {
+              "name": "Selected_Clip_3_URL",
+              "type": "text",
+              "label": "Selected_Clip_3_URL"
+            },
+            {
+              "name": "Selected_Music_URL",
+              "type": "text",
+              "label": "Selected_Music_URL"
+            },
+            {
+              "name": "Selected_Asset_Notes",
+              "type": "text",
+              "label": "Selected_Asset_Notes",
+              "multiline": true
+            },
+            {
+              "name": "Asset_Selection_Status",
+              "type": "text",
+              "label": "Asset_Selection_Status"
+            },
+            {
+              "name": "Asset_Selection_Notes",
+              "type": "text",
+              "label": "Asset_Selection_Notes",
+              "multiline": true
+            },
+            {
+              "name": "Selected_Clip_1_Media_Asset_ID",
+              "type": "text",
+              "label": "Selected_Clip_1_Media_Asset_ID"
+            },
+            {
+              "name": "Selected_Clip_2_Media_Asset_ID",
+              "type": "text",
+              "label": "Selected_Clip_2_Media_Asset_ID"
+            },
+            {
+              "name": "Selected_Clip_3_Media_Asset_ID",
+              "type": "text",
+              "label": "Selected_Clip_3_Media_Asset_ID"
+            },
+            {
+              "name": "Selected_Music_Media_Asset_ID",
+              "type": "text",
+              "label": "Selected_Music_Media_Asset_ID"
+            },
+            {
+              "name": "Selected_Asset_Summary",
+              "type": "text",
+              "label": "Selected_Asset_Summary",
+              "multiline": true
+            },
+            {
+              "name": "Selected_Assets_JSON",
+              "type": "text",
+              "label": "Selected_Assets_JSON",
+              "multiline": true
+            },
+            {
+              "name": "Selected_Clip_Count",
+              "type": "number",
+              "label": "Selected_Clip_Count"
+            },
+            {
+              "name": "Render_Clip_List_JSON",
+              "type": "text",
+              "label": "Render_Clip_List_JSON",
+              "multiline": true
+            },
+            {
+              "name": "Render_Total_Frames",
+              "type": "number",
+              "label": "Render_Total_Frames"
+            }
+          ],
+          "parameters": [
+            {
+              "name": "__IMTCONN__",
+              "type": "account:airtable3,airtable2",
+              "label": "Connection",
+              "required": true
+            }
+          ]
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 2,
+        "filter": {
+          "name": "Only continue if rendering job was found",
+          "conditions": [
+            [
+              {
+                "a": "{{1.id}}",
+                "o": "exist"
+              },
+              {
+                "a": "{{1.Remotion_Status_URL}}",
+                "o": "exist"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "ca": "",
+          "qs": [],
+          "url": "{{1.Remotion_Status_URL}}",
+          "gzip": true,
+          "method": "get",
+          "headers": [],
+          "timeout": "300",
+          "useMtls": false,
+          "authPass": "",
+          "authUser": "",
+          "bodyType": "",
+          "serializeUrl": false,
+          "shareCookies": false,
+          "parseResponse": true,
+          "followRedirect": true,
+          "useQuerystring": false,
+          "followAllRedirects": false,
+          "rejectUnauthorized": true
+        },
+        "module": "http:ActionSendData",
+        "version": 3,
+        "metadata": {
+          "expect": [
+            {
+              "name": "url",
+              "type": "url",
+              "label": "URL",
+              "required": true
+            },
+            {
+              "name": "serializeUrl",
+              "type": "boolean",
+              "label": "Serialize URL",
+              "required": true
+            },
+            {
+              "name": "method",
+              "type": "select",
+              "label": "Method",
+              "required": true,
+              "validate": {
+                "enum": [
+                  "get",
+                  "head",
+                  "post",
+                  "put",
+                  "patch",
+                  "delete",
+                  "options"
+                ]
+              }
+            },
+            {
+              "name": "headers",
+              "spec": [
+                {
+                  "name": "name",
+                  "type": "text",
+                  "label": "Name",
+                  "required": true
+                },
+                {
+                  "name": "value",
+                  "type": "text",
+                  "label": "Value"
+                }
+              ],
+              "type": "array",
+              "label": "Headers"
+            },
+            {
+              "name": "qs",
+              "spec": [
+                {
+                  "name": "name",
+                  "type": "text",
+                  "label": "Name",
+                  "required": true
+                },
+                {
+                  "name": "value",
+                  "type": "text",
+                  "label": "Value"
+                }
+              ],
+              "type": "array",
+              "label": "Query String"
+            },
+            {
+              "name": "bodyType",
+              "type": "select",
+              "label": "Body type",
+              "validate": {
+                "enum": [
+                  "raw",
+                  "x_www_form_urlencoded",
+                  "multipart_form_data"
+                ]
+              }
+            },
+            {
+              "name": "parseResponse",
+              "type": "boolean",
+              "label": "Parse response",
+              "required": true
+            },
+            {
+              "name": "authUser",
+              "type": "text",
+              "label": "User name"
+            },
+            {
+              "name": "authPass",
+              "type": "password",
+              "label": "Password"
+            },
+            {
+              "name": "timeout",
+              "type": "uinteger",
+              "label": "Timeout",
+              "validate": {
+                "max": 300,
+                "min": 1
+              }
+            },
+            {
+              "name": "shareCookies",
+              "type": "boolean",
+              "label": "Share cookies with other HTTP modules",
+              "required": true
+            },
+            {
+              "name": "ca",
+              "type": "cert",
+              "label": "Self-signed certificate"
+            },
+            {
+              "name": "rejectUnauthorized",
+              "type": "boolean",
+              "label": "Reject connections that are using unverified (self-signed) certificates",
+              "required": true
+            },
+            {
+              "name": "followRedirect",
+              "type": "boolean",
+              "label": "Follow redirect",
+              "required": true
+            },
+            {
+              "name": "useQuerystring",
+              "type": "boolean",
+              "label": "Disable serialization of multiple same query string keys as arrays",
+              "required": true
+            },
+            {
+              "name": "gzip",
+              "type": "boolean",
+              "label": "Request compressed content",
+              "required": true
+            },
+            {
+              "name": "useMtls",
+              "type": "boolean",
+              "label": "Use Mutual TLS",
+              "required": true
+            },
+            {
+              "name": "followAllRedirects",
+              "type": "boolean",
+              "label": "Follow all redirect",
+              "required": true
+            }
+          ],
+          "restore": {
+            "expect": {
+              "qs": {
+                "mode": "chose"
+              },
+              "method": {
+                "mode": "chose",
+                "label": "GET"
+              },
+              "headers": {
+                "mode": "chose"
+              },
+              "bodyType": {
+                "label": "Empty"
+              }
+            }
+          },
+          "designer": {
+            "x": 300,
+            "y": 0,
+            "name": "GET Remotion Status URL from Airtable"
+          },
+          "parameters": [
+            {
+              "name": "handleErrors",
+              "type": "boolean",
+              "label": "Evaluate all states as errors (except for 2xx and 3xx )",
+              "required": true
+            },
+            {
+              "name": "useNewZLibDeCompress",
+              "type": "hidden"
+            }
+          ]
+        },
+        "parameters": {
+          "handleErrors": true,
+          "useNewZLibDeCompress": true
+        }
+      },
+      {
+        "id": 3,
+        "mapper": null,
+        "module": "builtin:BasicRouter",
+        "routes": [
+          {
+            "flow": [
+              {
+                "id": 4,
+                "filter": {
+                  "name": "Only if render completed and render URL exists",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "completed",
+                        "o": "text:equal"
+                      },
+                      {
+                        "a": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                        "o": "exist"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "complete",
+                        "o": "text:equal"
+                      },
+                      {
+                        "a": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                        "o": "exist"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "done",
+                        "o": "text:equal"
+                      },
+                      {
+                        "a": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                        "o": "exist"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "rendered",
+                        "o": "text:equal"
+                      },
+                      {
+                        "a": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fldEADvZ9DsB9nhhd": "Render completed, but final Google Drive upload did not complete.",
+                    "fldUDa6cnmfKFTAU4": "",
+                    "fldWePFtTPPsyreQv": "",
+                    "fldXlaROiROoaAgoc": "In Production",
+                    "fldY02WY2eRTclVpn": "{{1.Output_Filename}}",
+                    "fldblKqQfBucVN85k": "{{1.Remotion_Props_JSON}}",
+                    "fldciHLBrMpdou6Zf": "Uploading",
+                    "fldenXjFd1HRasCYD": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                    "fldgpBV1vc4gQgFaw": "",
+                    "fldleMgHqTQctbMdG": "{{ifempty(2.data.jobId; 1.Remotion_Job_ID)}}",
+                    "fldssVMZv37e2Ij6y": "",
+                    "fldt6e8Ov1T4kyKax": "{{1.Remotion_Status_URL}}",
+                    "fldtEZy0rdIVS5LML": "Failed"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "base",
+                      "type": "select",
+                      "label": "Base",
+                      "required": true
+                    },
+                    {
+                      "name": "typecast",
+                      "type": "boolean",
+                      "label": "Smart links",
+                      "required": true
+                    },
+                    {
+                      "name": "useColumnId",
+                      "type": "boolean",
+                      "label": "Use Column ID",
+                      "required": true
+                    },
+                    {
+                      "name": "table",
+                      "type": "select",
+                      "label": "Table",
+                      "required": true
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "Record ID",
+                      "required": true
+                    },
+                    {
+                      "name": "record",
+                      "spec": [
+                        {
+                          "name": "fldgpBV1vc4gQgFaw",
+                          "type": "url",
+                          "label": "Output_URL"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldtEZy0rdIVS5LML",
+                          "type": "select",
+                          "label": "Render_Status"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldlftCb1r06p6IhB",
+                          "type": "select",
+                          "label": "Composition_ID"
+                        },
+                        {
+                          "name": "fldcVmpi1yva89dzy",
+                          "type": "text",
+                          "label": "Output_Filename"
+                        },
+                        {
+                          "name": "fld9pyFQFHat3ayYr",
+                          "type": "text",
+                          "label": "Title_Text"
+                        },
+                        {
+                          "name": "fldrxvDPiPWMfruny",
+                          "type": "text",
+                          "label": "Brand_Text"
+                        },
+                        {
+                          "name": "fldF6WSBlSP1PF2ZM",
+                          "type": "url",
+                          "label": "Music_URL"
+                        },
+                        {
+                          "name": "fldGBazRAYCGgONhw",
+                          "type": "number",
+                          "label": "Music_Volume"
+                        },
+                        {
+                          "name": "fldlGTytbyovFNJoA",
+                          "type": "url",
+                          "label": "Clip_1_URL"
+                        },
+                        {
+                          "name": "fldRzH8LJOeeGqsPh",
+                          "type": "number",
+                          "label": "Clip_1_Duration_Frames"
+                        },
+                        {
+                          "name": "fldTqqOzC2cECX9EM",
+                          "type": "url",
+                          "label": "Clip_2_URL"
+                        },
+                        {
+                          "name": "fldTw2sPDvKEHElP9",
+                          "type": "number",
+                          "label": "Clip_2_Duration_Frames"
+                        },
+                        {
+                          "name": "fldbQ1pyfyMkO7yhz",
+                          "type": "url",
+                          "label": "Clip_3_URL"
+                        },
+                        {
+                          "name": "fldyfaEjpmsQm7rA4",
+                          "type": "number",
+                          "label": "Clip_3_Duration_Frames"
+                        },
+                        {
+                          "name": "fldleMgHqTQctbMdG",
+                          "type": "text",
+                          "label": "Remotion_Job_ID"
+                        },
+                        {
+                          "name": "fldt6e8Ov1T4kyKax",
+                          "type": "url",
+                          "label": "Remotion_Status_URL"
+                        },
+                        {
+                          "name": "fldenXjFd1HRasCYD",
+                          "type": "url",
+                          "label": "Render_Server_URL"
+                        },
+                        {
+                          "name": "fldssVMZv37e2Ij6y",
+                          "type": "url",
+                          "label": "Final_File_URL"
+                        },
+                        {
+                          "name": "fldWePFtTPPsyreQv",
+                          "type": "text",
+                          "label": "Final_File_ID"
+                        },
+                        {
+                          "name": "fldY02WY2eRTclVpn",
+                          "type": "text",
+                          "label": "Final_File_Name"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldciHLBrMpdou6Zf",
+                          "type": "select",
+                          "label": "Final_File_Storage_Status"
+                        },
+                        {
+                          "name": "fldEADvZ9DsB9nhhd",
+                          "type": "text",
+                          "label": "Final_File_Error_Message",
+                          "multiline": true
+                        },
+                        {
+                          "name": "fldblKqQfBucVN85k",
+                          "type": "text",
+                          "label": "Remotion_Props_JSON",
+                          "multiline": true
+                        },
+                        {
+                          "name": "fldUDa6cnmfKFTAU4",
+                          "type": "text",
+                          "label": "Remotion_Error_Message",
+                          "multiline": true
+                        }
+                      ],
+                      "type": "collection",
+                      "label": "Record"
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "base": {
+                        "label": "ChicagoShining AI Content Creator"
+                      },
+                      "table": {
+                        "label": "Platform Outputs"
+                      },
+                      "record": {
+                        "nested": {
+                          "fldciHLBrMpdou6Zf": {
+                            "mode": "edit"
+                          },
+                          "fldlftCb1r06p6IhB": {
+                            "mode": "edit"
+                          },
+                          "fldtEZy0rdIVS5LML": {
+                            "mode": "edit"
+                          }
+                        }
+                      },
+                      "typecast": {
+                        "mode": "chose"
+                      },
+                      "useColumnId": {
+                        "mode": "chose"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "airtable3"
+                        },
+                        "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 900,
+                    "y": -180,
+                    "name": "Pre-mark Failed Until Drive Upload Completes - Preserve Dynamic Props"
+                  },
+                  "interface": [
+                    {
+                      "name": "__IMTLENGTH__",
+                      "type": "uinteger",
+                      "label": "Total number of bundles"
+                    },
+                    {
+                      "name": "__IMTINDEX__",
+                      "type": "uinteger",
+                      "label": "Bundle order position"
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "ID"
+                    },
+                    {
+                      "name": "createdTime",
+                      "type": "date",
+                      "label": "Created Time"
+                    },
+                    {
+                      "name": "Output_ID",
+                      "type": "uinteger",
+                      "label": "Output_ID"
+                    },
+                    {
+                      "name": "Platform",
+                      "type": "text",
+                      "label": "Platform"
+                    },
+                    {
+                      "name": "Format",
+                      "type": "text",
+                      "label": "Format"
+                    },
+                    {
+                      "name": "Platform_Output_Type",
+                      "type": "text",
+                      "label": "Platform_Output_Type"
+                    },
+                    {
+                      "name": "Aspect_Ratio",
+                      "type": "text",
+                      "label": "Aspect_Ratio"
+                    },
+                    {
+                      "name": "Output_Status",
+                      "type": "text",
+                      "label": "Output_Status"
+                    },
+                    {
+                      "name": "Output_Title",
+                      "type": "text",
+                      "label": "Output_Title"
+                    },
+                    {
+                      "name": "Output_Caption",
+                      "type": "text",
+                      "label": "Output_Caption",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_Hashtags",
+                      "type": "text",
+                      "label": "Output_Hashtags",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_URL",
+                      "type": "url",
+                      "label": "Output_URL"
+                    },
+                    {
+                      "name": "Thumbnail_URL",
+                      "type": "url",
+                      "label": "Thumbnail_URL"
+                    },
+                    {
+                      "name": "Voiceover_URL",
+                      "type": "url",
+                      "label": "Voiceover_URL"
+                    },
+                    {
+                      "name": "Do_Not_Publish",
+                      "type": "boolean",
+                      "label": "Do_Not_Publish"
+                    },
+                    {
+                      "name": "Target_Final_Length",
+                      "type": "number",
+                      "label": "Target_Final_Length"
+                    },
+                    {
+                      "name": "Render_Status",
+                      "type": "text",
+                      "label": "Render_Status"
+                    },
+                    {
+                      "name": "Render_Server_URL",
+                      "type": "url",
+                      "label": "Render_Server_URL"
+                    },
+                    {
+                      "name": "Final_File_URL",
+                      "type": "url",
+                      "label": "Final_File_URL"
+                    },
+                    {
+                      "name": "Final_File_ID",
+                      "type": "text",
+                      "label": "Final_File_ID"
+                    },
+                    {
+                      "name": "Final_File_Name",
+                      "type": "text",
+                      "label": "Final_File_Name"
+                    },
+                    {
+                      "name": "Final_File_Storage_Status",
+                      "type": "text",
+                      "label": "Final_File_Storage_Status"
+                    },
+                    {
+                      "name": "Final_File_Error_Message",
+                      "type": "text",
+                      "label": "Final_File_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Job_ID",
+                      "type": "text",
+                      "label": "Remotion_Job_ID"
+                    },
+                    {
+                      "name": "Remotion_Status_URL",
+                      "type": "url",
+                      "label": "Remotion_Status_URL"
+                    },
+                    {
+                      "name": "Remotion_Props_JSON",
+                      "type": "text",
+                      "label": "Remotion_Props_JSON",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Error_Message",
+                      "type": "text",
+                      "label": "Remotion_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Composition_ID",
+                      "type": "text",
+                      "label": "Composition_ID"
+                    },
+                    {
+                      "name": "Output_Filename",
+                      "type": "text",
+                      "label": "Output_Filename"
+                    },
+                    {
+                      "name": "Clip_1_URL",
+                      "type": "url",
+                      "label": "Clip_1_URL"
+                    },
+                    {
+                      "name": "Clip_1_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_1_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_2_URL",
+                      "type": "url",
+                      "label": "Clip_2_URL"
+                    },
+                    {
+                      "name": "Clip_2_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_2_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_3_URL",
+                      "type": "url",
+                      "label": "Clip_3_URL"
+                    },
+                    {
+                      "name": "Clip_3_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_3_Duration_Frames"
+                    },
+                    {
+                      "name": "Music_URL",
+                      "type": "url",
+                      "label": "Music_URL"
+                    },
+                    {
+                      "name": "Music_Volume",
+                      "type": "number",
+                      "label": "Music_Volume"
+                    },
+                    {
+                      "name": "Title_Text",
+                      "type": "text",
+                      "label": "Title_Text"
+                    },
+                    {
+                      "name": "Brand_Text",
+                      "type": "text",
+                      "label": "Brand_Text"
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:airtable3,airtable2",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 5,
+                "mapper": {
+                  "ca": "",
+                  "qs": [],
+                  "url": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                  "gzip": true,
+                  "method": "get",
+                  "headers": [],
+                  "timeout": "300",
+                  "useMtls": false,
+                  "authPass": "",
+                  "authUser": "",
+                  "bodyType": "",
+                  "serializeUrl": false,
+                  "shareCookies": false,
+                  "parseResponse": false,
+                  "followRedirect": true,
+                  "useQuerystring": false,
+                  "followAllRedirects": false,
+                  "rejectUnauthorized": true
+                },
+                "module": "http:ActionSendData",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "url",
+                      "type": "url",
+                      "label": "URL",
+                      "required": true
+                    },
+                    {
+                      "name": "serializeUrl",
+                      "type": "boolean",
+                      "label": "Serialize URL",
+                      "required": true
+                    },
+                    {
+                      "name": "method",
+                      "type": "select",
+                      "label": "Method",
+                      "required": true,
+                      "validate": {
+                        "enum": [
+                          "get",
+                          "head",
+                          "post",
+                          "put",
+                          "patch",
+                          "delete",
+                          "options"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "headers",
+                      "spec": [
+                        {
+                          "name": "name",
+                          "type": "text",
+                          "label": "Name",
+                          "required": true
+                        },
+                        {
+                          "name": "value",
+                          "type": "text",
+                          "label": "Value"
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Headers"
+                    },
+                    {
+                      "name": "qs",
+                      "spec": [
+                        {
+                          "name": "name",
+                          "type": "text",
+                          "label": "Name",
+                          "required": true
+                        },
+                        {
+                          "name": "value",
+                          "type": "text",
+                          "label": "Value"
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Query String"
+                    },
+                    {
+                      "name": "bodyType",
+                      "type": "select",
+                      "label": "Body type",
+                      "validate": {
+                        "enum": [
+                          "raw",
+                          "x_www_form_urlencoded",
+                          "multipart_form_data"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "parseResponse",
+                      "type": "boolean",
+                      "label": "Parse response",
+                      "required": true
+                    },
+                    {
+                      "name": "authUser",
+                      "type": "text",
+                      "label": "User name"
+                    },
+                    {
+                      "name": "authPass",
+                      "type": "password",
+                      "label": "Password"
+                    },
+                    {
+                      "name": "timeout",
+                      "type": "uinteger",
+                      "label": "Timeout",
+                      "validate": {
+                        "max": 300,
+                        "min": 1
+                      }
+                    },
+                    {
+                      "name": "shareCookies",
+                      "type": "boolean",
+                      "label": "Share cookies with other HTTP modules",
+                      "required": true
+                    },
+                    {
+                      "name": "ca",
+                      "type": "cert",
+                      "label": "Self-signed certificate"
+                    },
+                    {
+                      "name": "rejectUnauthorized",
+                      "type": "boolean",
+                      "label": "Reject connections that are using unverified (self-signed) certificates",
+                      "required": true
+                    },
+                    {
+                      "name": "followRedirect",
+                      "type": "boolean",
+                      "label": "Follow redirect",
+                      "required": true
+                    },
+                    {
+                      "name": "useQuerystring",
+                      "type": "boolean",
+                      "label": "Disable serialization of multiple same query string keys as arrays",
+                      "required": true
+                    },
+                    {
+                      "name": "gzip",
+                      "type": "boolean",
+                      "label": "Request compressed content",
+                      "required": true
+                    },
+                    {
+                      "name": "useMtls",
+                      "type": "boolean",
+                      "label": "Use Mutual TLS",
+                      "required": true
+                    },
+                    {
+                      "name": "followAllRedirects",
+                      "type": "boolean",
+                      "label": "Follow all redirect",
+                      "required": true
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "qs": {
+                        "mode": "chose"
+                      },
+                      "method": {
+                        "mode": "chose",
+                        "label": "GET"
+                      },
+                      "headers": {
+                        "mode": "chose"
+                      },
+                      "bodyType": {
+                        "label": "Empty"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 1269,
+                    "y": -180,
+                    "name": "Download and Validate Final Render MP4"
+                  },
+                  "parameters": [
+                    {
+                      "name": "handleErrors",
+                      "type": "boolean",
+                      "label": "Evaluate all states as errors (except for 2xx and 3xx )",
+                      "required": true
+                    },
+                    {
+                      "name": "useNewZLibDeCompress",
+                      "type": "hidden"
+                    }
+                  ]
+                },
+                "parameters": {
+                  "handleErrors": true,
+                  "useNewZLibDeCompress": true
+                }
+              },
+              {
+                "id": 10,
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "view": "CFG - Active Rendered Platform Outputs Folder",
+                  "table": "Pipeline Settings",
+                  "maxRecords": "1",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "base",
+                      "type": "select",
+                      "label": "Base",
+                      "required": true
+                    },
+                    {
+                      "name": "useColumnId",
+                      "type": "boolean",
+                      "label": "Use Column ID",
+                      "required": true
+                    },
+                    {
+                      "name": "table",
+                      "type": "select",
+                      "label": "Table",
+                      "required": true
+                    },
+                    {
+                      "name": "formula",
+                      "type": "text",
+                      "label": "Formula"
+                    },
+                    {
+                      "name": "maxRecords",
+                      "type": "integer",
+                      "label": "Limit"
+                    },
+                    {
+                      "name": "sort",
+                      "spec": [
+                        {
+                          "name": "field",
+                          "type": "select",
+                          "label": "Field",
+                          "dynamic": true,
+                          "options": []
+                        },
+                        {
+                          "name": "direction",
+                          "type": "select",
+                          "label": "Direction",
+                          "options": [
+                            {
+                              "label": "Descending",
+                              "value": "desc"
+                            },
+                            {
+                              "label": "Ascending",
+                              "value": "asc"
+                            }
+                          ]
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Sort"
+                    },
+                    {
+                      "name": "view",
+                      "type": "select",
+                      "label": "View"
+                    },
+                    {
+                      "name": "fields",
+                      "type": "select",
+                      "label": "Output Fields",
+                      "multiple": true
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "base": {
+                        "mode": "chose",
+                        "label": "ChicagoShining AI Content Creator"
+                      },
+                      "sort": {
+                        "mode": "chose"
+                      },
+                      "view": {
+                        "mode": "chose",
+                        "label": "CFG - Active Rendered Platform Outputs Folder"
+                      },
+                      "table": {
+                        "mode": "chose",
+                        "label": "Pipeline Settings"
+                      },
+                      "fields": {
+                        "mode": "chose"
+                      },
+                      "useColumnId": {
+                        "mode": "chose"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "airtable3"
+                        },
+                        "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 1273,
+                    "y": 221,
+                    "name": "Get Final Platform Outputs Folder ID"
+                  },
+                  "interface": [
+                    {
+                      "name": "__IMTLENGTH__",
+                      "type": "uinteger",
+                      "label": "Total number of bundles"
+                    },
+                    {
+                      "name": "__IMTINDEX__",
+                      "type": "uinteger",
+                      "label": "Bundle order position"
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "ID"
+                    },
+                    {
+                      "name": "createdTime",
+                      "type": "date",
+                      "label": "Created Time"
+                    },
+                    {
+                      "name": "Setting_Name",
+                      "type": "text",
+                      "label": "Setting_Name"
+                    },
+                    {
+                      "name": "Setting_Value",
+                      "type": "text",
+                      "label": "Setting_Value"
+                    },
+                    {
+                      "name": "Active",
+                      "type": "boolean",
+                      "label": "Active"
+                    },
+                    {
+                      "name": "Notes",
+                      "type": "text",
+                      "label": "Notes",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Last_Modified",
+                      "type": "date",
+                      "label": "Last_Modified"
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:airtable3,airtable2",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 6,
+                "mapper": {
+                  "data": "{{5.data}}",
+                  "title": "{{replace(replace(1.Output_Filename; \".mp4\"; \"\"); \".MP4\"; \"\")}}",
+                  "select": "map",
+                  "convert": false,
+                  "filename": "{{1.Output_Filename}}",
+                  "folderId": "{{trim(10.Setting_Value)}}"
+                },
+                "module": "google-drive:uploadAFile",
+                "version": 4,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "select",
+                      "type": "select",
+                      "label": "Enter a Folder ID",
+                      "required": true,
+                      "validate": {
+                        "enum": [
+                          "map",
+                          "value"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "title",
+                      "type": "text",
+                      "label": "New File Name"
+                    },
+                    {
+                      "name": "filename",
+                      "type": "text",
+                      "label": "File Name",
+                      "required": true
+                    },
+                    {
+                      "name": "data",
+                      "type": "buffer",
+                      "label": "Data",
+                      "required": true
+                    },
+                    {
+                      "name": "convert",
+                      "type": "boolean",
+                      "label": "Convert a File",
+                      "required": true
+                    },
+                    {
+                      "name": "folderId",
+                      "type": "text",
+                      "label": "Folder ID",
+                      "required": true
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "select": {
+                        "label": "Enter manually"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "google-drive"
+                        },
+                        "label": "My Google Drive connection (joseph.t.logan@gmail.com)"
+                      }
+                    }
+                  },
+                  "advanced": true,
+                  "designer": {
+                    "x": 1573,
+                    "y": 221,
+                    "name": "Upload Final MP4 to Configured Folder - Filename Fix"
+                  },
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:google-restricted,google-drive",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9306146
+                }
+              },
+              {
+                "id": 7,
+                "filter": {
+                  "name": "Only if Google Drive upload succeeded",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{6.id}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fldEADvZ9DsB9nhhd": "{{emptystring}}",
+                    "fldUDa6cnmfKFTAU4": "{{emptystring}}",
+                    "fldWePFtTPPsyreQv": "{{6.id}}",
+                    "fldXlaROiROoaAgoc": "Ready for Review",
+                    "fldY02WY2eRTclVpn": "{{1.Output_Filename}}",
+                    "fldciHLBrMpdou6Zf": "Uploaded",
+                    "fldenXjFd1HRasCYD": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                    "fldgpBV1vc4gQgFaw": "https://drive.google.com/file/d/{{6.id}}/view",
+                    "fldleMgHqTQctbMdG": "{{ifempty(2.data.jobId; 1.Remotion_Job_ID)}}",
+                    "fldssVMZv37e2Ij6y": "https://drive.google.com/file/d/{{6.id}}/view",
+                    "fldt6e8Ov1T4kyKax": "{{1.Remotion_Status_URL}}",
+                    "fldtEZy0rdIVS5LML": "Rendered"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "base",
+                      "type": "select",
+                      "label": "Base",
+                      "required": true
+                    },
+                    {
+                      "name": "typecast",
+                      "type": "boolean",
+                      "label": "Smart links",
+                      "required": true
+                    },
+                    {
+                      "name": "useColumnId",
+                      "type": "boolean",
+                      "label": "Use Column ID",
+                      "required": true
+                    },
+                    {
+                      "name": "table",
+                      "type": "select",
+                      "label": "Table",
+                      "required": true
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "Record ID",
+                      "required": true
+                    },
+                    {
+                      "name": "record",
+                      "spec": [
+                        {
+                          "name": "fldk6GSLmu2VXZa8x",
+                          "spec": {
+                            "name": "value",
+                            "label": "Record ID"
+                          },
+                          "type": "array",
+                          "label": "Content_Item"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldse0PC0P0WewJnH",
+                          "type": "select",
+                          "label": "Platform"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldGNQY7PkNE4QyY8",
+                          "type": "select",
+                          "label": "Format"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldg4jdU4L6r6GnUW",
+                          "type": "select",
+                          "label": "Platform_Output_Type"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldkEHGte8ZlvApJd",
+                          "type": "select",
+                          "label": "Aspect_Ratio"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldXlaROiROoaAgoc",
+                          "type": "select",
+                          "label": "Output_Status"
+                        },
+                        {
+                          "name": "fldU1cHGtlPHOhPO7",
+                          "type": "text",
+                          "label": "Output_Title"
+                        },
+                        {
+                          "name": "fldMt2nPmm7E4b612",
+                          "type": "text",
+                          "label": "Output_Caption"
+                        },
+                        {
+                          "name": "fldfCHoJ1uuD6xuhS",
+                          "type": "text",
+                          "label": "Output_Hashtags"
+                        },
+                        {
+                          "name": "fldgpBV1vc4gQgFaw",
+                          "type": "text",
+                          "label": "Output_URL"
+                        },
+                        {
+                          "name": "fldhhiC4GnhOWMZfV",
+                          "type": "text",
+                          "label": "Thumbnail_URL"
+                        },
+                        {
+                          "name": "fldZPBkxzY7gqiaF9",
+                          "type": "text",
+                          "label": "Voiceover_URL"
+                        },
+                        {
+                          "name": "fldfswSq2xy2rHrUD",
+                          "time": true,
+                          "type": "date",
+                          "label": "Scheduled_Post_Date"
+                        },
+                        {
+                          "name": "fldQPpzUuPMzvqrtj",
+                          "time": true,
+                          "type": "date",
+                          "label": "Published_At"
+                        },
+                        {
+                          "name": "fld3348mDIgQ1kwcN",
+                          "type": "text",
+                          "label": "Platform_Post_URL"
+                        },
+                        {
+                          "name": "fldSaF56wryp4N2et",
+                          "type": "boolean",
+                          "label": "Do_Not_Publish"
+                        },
+                        {
+                          "name": "fldaQ2Wj4Vlh90QrJ",
+                          "type": "text",
+                          "label": "Output_Notes"
+                        },
+                        {
+                          "name": "fldC6GJUhjDXwf3NN",
+                          "spec": {
+                            "name": "value",
+                            "label": "Record ID"
+                          },
+                          "type": "array",
+                          "label": "Asset Requests"
+                        },
+                        {
+                          "name": "fldYHn4oXI3JJia0z",
+                          "spec": {
+                            "name": "value",
+                            "label": "Record ID"
+                          },
+                          "type": "array",
+                          "label": "Asset Request Shots"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldydCKUekL4N4YMZ",
+                          "type": "select",
+                          "label": "Asset_Need_Status"
+                        },
+                        {
+                          "name": "fldia4N041Je4cYwk",
+                          "type": "number",
+                          "label": "Target_Final_Length"
+                        },
+                        {
+                          "name": "fldKvCCTy6i9RmV5O",
+                          "type": "number",
+                          "label": "Recommended_Raw_Capture_Length"
+                        },
+                        {
+                          "name": "fldUkyXP5HlyK6XSm",
+                          "type": "text",
+                          "label": "Missing_Asset_Summary"
+                        },
+                        {
+                          "name": "fldVfga6EE9CmOcCw",
+                          "spec": {
+                            "name": "value",
+                            "label": "Record ID"
+                          },
+                          "type": "array",
+                          "label": "Asset_Request_Link"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldtEZy0rdIVS5LML",
+                          "type": "select",
+                          "label": "Render_Status"
+                        },
+                        {
+                          "name": "fldenXjFd1HRasCYD",
+                          "type": "text",
+                          "label": "Render_Server_URL"
+                        },
+                        {
+                          "name": "fldssVMZv37e2Ij6y",
+                          "type": "text",
+                          "label": "Final_File_URL"
+                        },
+                        {
+                          "name": "fldWePFtTPPsyreQv",
+                          "type": "text",
+                          "label": "Final_File_ID"
+                        },
+                        {
+                          "name": "fldY02WY2eRTclVpn",
+                          "type": "text",
+                          "label": "Final_File_Name"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldciHLBrMpdou6Zf",
+                          "type": "select",
+                          "label": "Final_File_Storage_Status"
+                        },
+                        {
+                          "name": "fldEADvZ9DsB9nhhd",
+                          "type": "text",
+                          "label": "Final_File_Error_Message"
+                        },
+                        {
+                          "name": "fldleMgHqTQctbMdG",
+                          "type": "text",
+                          "label": "Remotion_Job_ID"
+                        },
+                        {
+                          "name": "fldt6e8Ov1T4kyKax",
+                          "type": "text",
+                          "label": "Remotion_Status_URL"
+                        },
+                        {
+                          "name": "fldblKqQfBucVN85k",
+                          "type": "text",
+                          "label": "Remotion_Props_JSON"
+                        },
+                        {
+                          "name": "fldUDa6cnmfKFTAU4",
+                          "type": "text",
+                          "label": "Remotion_Error_Message"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldlftCb1r06p6IhB",
+                          "type": "select",
+                          "label": "Composition_ID"
+                        },
+                        {
+                          "name": "fldcVmpi1yva89dzy",
+                          "type": "text",
+                          "label": "Output_Filename"
+                        },
+                        {
+                          "name": "fldlGTytbyovFNJoA",
+                          "type": "text",
+                          "label": "Clip_1_URL"
+                        },
+                        {
+                          "name": "fldRzH8LJOeeGqsPh",
+                          "type": "number",
+                          "label": "Clip_1_Duration_Frames"
+                        },
+                        {
+                          "name": "fldTqqOzC2cECX9EM",
+                          "type": "text",
+                          "label": "Clip_2_URL"
+                        },
+                        {
+                          "name": "fldTw2sPDvKEHElP9",
+                          "type": "number",
+                          "label": "Clip_2_Duration_Frames"
+                        },
+                        {
+                          "name": "fldbQ1pyfyMkO7yhz",
+                          "type": "text",
+                          "label": "Clip_3_URL"
+                        },
+                        {
+                          "name": "fldyfaEjpmsQm7rA4",
+                          "type": "number",
+                          "label": "Clip_3_Duration_Frames"
+                        },
+                        {
+                          "name": "fldF6WSBlSP1PF2ZM",
+                          "type": "text",
+                          "label": "Music_URL"
+                        },
+                        {
+                          "name": "fldGBazRAYCGgONhw",
+                          "type": "number",
+                          "label": "Music_Volume"
+                        },
+                        {
+                          "name": "fld9pyFQFHat3ayYr",
+                          "type": "text",
+                          "label": "Title_Text"
+                        },
+                        {
+                          "name": "fldrxvDPiPWMfruny",
+                          "type": "text",
+                          "label": "Brand_Text"
+                        },
+                        {
+                          "name": "fldHkzAUzhRS8FatI",
+                          "type": "text",
+                          "label": "Selected_Clip_1_URL"
+                        },
+                        {
+                          "name": "fldGibaVBrY7pev40",
+                          "type": "text",
+                          "label": "Selected_Clip_2_URL"
+                        },
+                        {
+                          "name": "fldZjWueYNQuCmGDw",
+                          "type": "text",
+                          "label": "Selected_Clip_3_URL"
+                        },
+                        {
+                          "name": "fldxJg8V7D7xFD7RZ",
+                          "type": "text",
+                          "label": "Selected_Music_URL"
+                        },
+                        {
+                          "name": "fld6v8uKouGCyWbqo",
+                          "type": "text",
+                          "label": "Selected_Asset_Notes"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldHyTwMYy6LTjmje",
+                          "type": "select",
+                          "label": "Asset_Selection_Status"
+                        },
+                        {
+                          "name": "fldVj6MHZYA70fd01",
+                          "type": "text",
+                          "label": "Asset_Selection_Notes"
+                        },
+                        {
+                          "name": "fldJcmFjwJEliqI8M",
+                          "type": "text",
+                          "label": "Selected_Clip_1_Media_Asset_ID"
+                        },
+                        {
+                          "name": "fldCN4R7v1sx3FziF",
+                          "type": "text",
+                          "label": "Selected_Clip_2_Media_Asset_ID"
+                        },
+                        {
+                          "name": "flddTmnkXgUkopC02",
+                          "type": "text",
+                          "label": "Selected_Clip_3_Media_Asset_ID"
+                        },
+                        {
+                          "name": "fldEeNxBfq3vuf93K",
+                          "type": "text",
+                          "label": "Selected_Music_Media_Asset_ID"
+                        },
+                        {
+                          "name": "fldXwbEbzxObPgxUK",
+                          "type": "text",
+                          "label": "Selected_Asset_Summary"
+                        },
+                        {
+                          "name": "fldP0bFKZ2ZbFydi1",
+                          "type": "text",
+                          "label": "Selected_Assets_JSON"
+                        },
+                        {
+                          "name": "fldi2GtueX95tSYch",
+                          "type": "number",
+                          "label": "Selected_Clip_Count"
+                        },
+                        {
+                          "name": "fldEETETZf7uzLd7D",
+                          "type": "text",
+                          "label": "Render_Clip_List_JSON"
+                        },
+                        {
+                          "name": "fldZRfnQUyvjufq8R",
+                          "type": "number",
+                          "label": "Render_Total_Frames"
+                        }
+                      ],
+                      "type": "collection",
+                      "label": "Record"
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "base": {
+                        "label": "ChicagoShining AI Content Creator"
+                      },
+                      "table": {
+                        "label": "Platform Outputs"
+                      },
+                      "record": {
+                        "nested": {
+                          "fldC6GJUhjDXwf3NN": {
+                            "mode": "chose"
+                          },
+                          "fldGNQY7PkNE4QyY8": {
+                            "mode": "edit"
+                          },
+                          "fldHyTwMYy6LTjmje": {
+                            "mode": "edit"
+                          },
+                          "fldSaF56wryp4N2et": {
+                            "mode": "chose"
+                          },
+                          "fldVfga6EE9CmOcCw": {
+                            "mode": "chose"
+                          },
+                          "fldXlaROiROoaAgoc": {
+                            "mode": "edit"
+                          },
+                          "fldYHn4oXI3JJia0z": {
+                            "mode": "chose"
+                          },
+                          "fldciHLBrMpdou6Zf": {
+                            "mode": "edit"
+                          },
+                          "fldg4jdU4L6r6GnUW": {
+                            "mode": "edit"
+                          },
+                          "fldk6GSLmu2VXZa8x": {
+                            "mode": "chose"
+                          },
+                          "fldkEHGte8ZlvApJd": {
+                            "mode": "edit"
+                          },
+                          "fldlftCb1r06p6IhB": {
+                            "mode": "edit"
+                          },
+                          "fldse0PC0P0WewJnH": {
+                            "mode": "edit"
+                          },
+                          "fldtEZy0rdIVS5LML": {
+                            "mode": "edit"
+                          },
+                          "fldydCKUekL4N4YMZ": {
+                            "mode": "edit"
+                          }
+                        }
+                      },
+                      "typecast": {
+                        "mode": "chose"
+                      },
+                      "useColumnId": {
+                        "mode": "chose"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "airtable3"
+                        },
+                        "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 1873,
+                    "y": 221,
+                    "name": "Mark Platform Output Rendered with Final Storage Fields + Ready for Review"
+                  },
+                  "interface": [
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "ID"
+                    },
+                    {
+                      "name": "createdTime",
+                      "type": "date",
+                      "label": "Created Time"
+                    },
+                    {
+                      "name": "Output_ID",
+                      "type": "number",
+                      "label": "Output_ID"
+                    },
+                    {
+                      "name": "Content_Item",
+                      "spec": {
+                        "label": "Record ID"
+                      },
+                      "type": "array",
+                      "label": "Content_Item"
+                    },
+                    {
+                      "name": "Content_Profile",
+                      "type": "array",
+                      "label": "Content_Profile"
+                    },
+                    {
+                      "name": "Market_Name",
+                      "type": "array",
+                      "label": "Market_Name"
+                    },
+                    {
+                      "name": "Platform",
+                      "type": "text",
+                      "label": "Platform"
+                    },
+                    {
+                      "name": "Format",
+                      "type": "text",
+                      "label": "Format"
+                    },
+                    {
+                      "name": "Platform_Output_Type",
+                      "type": "text",
+                      "label": "Platform_Output_Type"
+                    },
+                    {
+                      "name": "Aspect_Ratio",
+                      "type": "text",
+                      "label": "Aspect_Ratio"
+                    },
+                    {
+                      "name": "Output_Status",
+                      "type": "text",
+                      "label": "Output_Status"
+                    },
+                    {
+                      "name": "Output_Title",
+                      "type": "text",
+                      "label": "Output_Title"
+                    },
+                    {
+                      "name": "Output_Caption",
+                      "type": "text",
+                      "label": "Output_Caption",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_Hashtags",
+                      "type": "text",
+                      "label": "Output_Hashtags",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_URL",
+                      "type": "text",
+                      "label": "Output_URL"
+                    },
+                    {
+                      "name": "Thumbnail_URL",
+                      "type": "text",
+                      "label": "Thumbnail_URL"
+                    },
+                    {
+                      "name": "Voiceover_URL",
+                      "type": "text",
+                      "label": "Voiceover_URL"
+                    },
+                    {
+                      "name": "Scheduled_Post_Date",
+                      "time": true,
+                      "type": "date",
+                      "label": "Scheduled_Post_Date"
+                    },
+                    {
+                      "name": "Published_At",
+                      "time": true,
+                      "type": "date",
+                      "label": "Published_At"
+                    },
+                    {
+                      "name": "Platform_Post_URL",
+                      "type": "text",
+                      "label": "Platform_Post_URL"
+                    },
+                    {
+                      "name": "Do_Not_Publish",
+                      "type": "boolean",
+                      "label": "Do_Not_Publish"
+                    },
+                    {
+                      "name": "Output_Notes",
+                      "type": "text",
+                      "label": "Output_Notes",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Asset Requests",
+                      "spec": {
+                        "label": "Record ID"
+                      },
+                      "type": "array",
+                      "label": "Asset Requests"
+                    },
+                    {
+                      "name": "Asset Request Shots",
+                      "spec": {
+                        "label": "Record ID"
+                      },
+                      "type": "array",
+                      "label": "Asset Request Shots"
+                    },
+                    {
+                      "name": "Asset_Need_Status",
+                      "type": "text",
+                      "label": "Asset_Need_Status"
+                    },
+                    {
+                      "name": "Target_Final_Length",
+                      "type": "number",
+                      "label": "Target_Final_Length"
+                    },
+                    {
+                      "name": "Recommended_Raw_Capture_Length",
+                      "type": "number",
+                      "label": "Recommended_Raw_Capture_Length"
+                    },
+                    {
+                      "name": "Missing_Asset_Summary",
+                      "type": "text",
+                      "label": "Missing_Asset_Summary",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Asset_Request_Link",
+                      "spec": {
+                        "label": "Record ID"
+                      },
+                      "type": "array",
+                      "label": "Asset_Request_Link"
+                    },
+                    {
+                      "name": "Render_Status",
+                      "type": "text",
+                      "label": "Render_Status"
+                    },
+                    {
+                      "name": "Render_Server_URL",
+                      "type": "text",
+                      "label": "Render_Server_URL"
+                    },
+                    {
+                      "name": "Final_File_URL",
+                      "type": "text",
+                      "label": "Final_File_URL"
+                    },
+                    {
+                      "name": "Final_File_ID",
+                      "type": "text",
+                      "label": "Final_File_ID"
+                    },
+                    {
+                      "name": "Final_File_Name",
+                      "type": "text",
+                      "label": "Final_File_Name"
+                    },
+                    {
+                      "name": "Final_File_Storage_Status",
+                      "type": "text",
+                      "label": "Final_File_Storage_Status"
+                    },
+                    {
+                      "name": "Final_File_Error_Message",
+                      "type": "text",
+                      "label": "Final_File_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Job_ID",
+                      "type": "text",
+                      "label": "Remotion_Job_ID"
+                    },
+                    {
+                      "name": "Remotion_Status_URL",
+                      "type": "text",
+                      "label": "Remotion_Status_URL"
+                    },
+                    {
+                      "name": "Remotion_Props_JSON",
+                      "type": "text",
+                      "label": "Remotion_Props_JSON",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Error_Message",
+                      "type": "text",
+                      "label": "Remotion_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Composition_ID",
+                      "type": "text",
+                      "label": "Composition_ID"
+                    },
+                    {
+                      "name": "Output_Filename",
+                      "type": "text",
+                      "label": "Output_Filename"
+                    },
+                    {
+                      "name": "Clip_1_URL",
+                      "type": "text",
+                      "label": "Clip_1_URL"
+                    },
+                    {
+                      "name": "Clip_1_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_1_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_2_URL",
+                      "type": "text",
+                      "label": "Clip_2_URL"
+                    },
+                    {
+                      "name": "Clip_2_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_2_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_3_URL",
+                      "type": "text",
+                      "label": "Clip_3_URL"
+                    },
+                    {
+                      "name": "Clip_3_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_3_Duration_Frames"
+                    },
+                    {
+                      "name": "Music_URL",
+                      "type": "text",
+                      "label": "Music_URL"
+                    },
+                    {
+                      "name": "Music_Volume",
+                      "type": "number",
+                      "label": "Music_Volume"
+                    },
+                    {
+                      "name": "Title_Text",
+                      "type": "text",
+                      "label": "Title_Text"
+                    },
+                    {
+                      "name": "Brand_Text",
+                      "type": "text",
+                      "label": "Brand_Text"
+                    },
+                    {
+                      "name": "Selected_Clip_1_URL",
+                      "type": "text",
+                      "label": "Selected_Clip_1_URL"
+                    },
+                    {
+                      "name": "Selected_Clip_2_URL",
+                      "type": "text",
+                      "label": "Selected_Clip_2_URL"
+                    },
+                    {
+                      "name": "Selected_Clip_3_URL",
+                      "type": "text",
+                      "label": "Selected_Clip_3_URL"
+                    },
+                    {
+                      "name": "Selected_Music_URL",
+                      "type": "text",
+                      "label": "Selected_Music_URL"
+                    },
+                    {
+                      "name": "Selected_Asset_Notes",
+                      "type": "text",
+                      "label": "Selected_Asset_Notes",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Asset_Selection_Status",
+                      "type": "text",
+                      "label": "Asset_Selection_Status"
+                    },
+                    {
+                      "name": "Asset_Selection_Notes",
+                      "type": "text",
+                      "label": "Asset_Selection_Notes",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Selected_Clip_1_Media_Asset_ID",
+                      "type": "text",
+                      "label": "Selected_Clip_1_Media_Asset_ID"
+                    },
+                    {
+                      "name": "Selected_Clip_2_Media_Asset_ID",
+                      "type": "text",
+                      "label": "Selected_Clip_2_Media_Asset_ID"
+                    },
+                    {
+                      "name": "Selected_Clip_3_Media_Asset_ID",
+                      "type": "text",
+                      "label": "Selected_Clip_3_Media_Asset_ID"
+                    },
+                    {
+                      "name": "Selected_Music_Media_Asset_ID",
+                      "type": "text",
+                      "label": "Selected_Music_Media_Asset_ID"
+                    },
+                    {
+                      "name": "Selected_Asset_Summary",
+                      "type": "text",
+                      "label": "Selected_Asset_Summary",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Selected_Assets_JSON",
+                      "type": "text",
+                      "label": "Selected_Assets_JSON",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Selected_Clip_Count",
+                      "type": "number",
+                      "label": "Selected_Clip_Count"
+                    },
+                    {
+                      "name": "Render_Clip_List_JSON",
+                      "type": "text",
+                      "label": "Render_Clip_List_JSON",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Render_Total_Frames",
+                      "type": "number",
+                      "label": "Render_Total_Frames"
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:airtable3,airtable2",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 11,
+                "filter": {
+                  "name": "Only after durable finalization and with Remotion Job ID",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{7.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{ifempty(2.data.jobId; 1.Remotion_Job_ID)}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{1.Output_Filename}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "ca": "",
+                  "qs": [],
+                  "url": "https://render.chicagoshining.com/cleanup/{{ifempty(2.data.jobId; 1.Remotion_Job_ID)}}",
+                  "data": "{\"filename\":\"{{1.Output_Filename}}\"}",
+                  "gzip": true,
+                  "method": "post",
+                  "headers": [
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "timeout": "60",
+                  "useMtls": false,
+                  "authPass": "",
+                  "authUser": "",
+                  "bodyType": "raw",
+                  "contentType": "application/json",
+                  "serializeUrl": false,
+                  "shareCookies": false,
+                  "parseResponse": true,
+                  "followRedirect": true,
+                  "useQuerystring": false,
+                  "followAllRedirects": false,
+                  "rejectUnauthorized": true
+                },
+                "module": "http:ActionSendData",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "url",
+                      "type": "url",
+                      "label": "URL",
+                      "required": true
+                    },
+                    {
+                      "name": "serializeUrl",
+                      "type": "boolean",
+                      "label": "Serialize URL",
+                      "required": true
+                    },
+                    {
+                      "name": "method",
+                      "type": "select",
+                      "label": "Method",
+                      "required": true,
+                      "validate": {
+                        "enum": [
+                          "get",
+                          "head",
+                          "post",
+                          "put",
+                          "patch",
+                          "delete",
+                          "options"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "headers",
+                      "spec": [
+                        {
+                          "name": "name",
+                          "type": "text",
+                          "label": "Name",
+                          "required": true
+                        },
+                        {
+                          "name": "value",
+                          "type": "text",
+                          "label": "Value"
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Headers"
+                    },
+                    {
+                      "name": "qs",
+                      "spec": [
+                        {
+                          "name": "name",
+                          "type": "text",
+                          "label": "Name",
+                          "required": true
+                        },
+                        {
+                          "name": "value",
+                          "type": "text",
+                          "label": "Value"
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Query String"
+                    },
+                    {
+                      "name": "bodyType",
+                      "type": "select",
+                      "label": "Body type",
+                      "validate": {
+                        "enum": [
+                          "raw",
+                          "x_www_form_urlencoded",
+                          "multipart_form_data"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "parseResponse",
+                      "type": "boolean",
+                      "label": "Parse response",
+                      "required": true
+                    },
+                    {
+                      "name": "authUser",
+                      "type": "text",
+                      "label": "User name"
+                    },
+                    {
+                      "name": "authPass",
+                      "type": "password",
+                      "label": "Password"
+                    },
+                    {
+                      "name": "timeout",
+                      "type": "uinteger",
+                      "label": "Timeout",
+                      "validate": {
+                        "max": 300,
+                        "min": 1
+                      }
+                    },
+                    {
+                      "name": "shareCookies",
+                      "type": "boolean",
+                      "label": "Share cookies with other HTTP modules",
+                      "required": true
+                    },
+                    {
+                      "name": "ca",
+                      "type": "cert",
+                      "label": "Self-signed certificate"
+                    },
+                    {
+                      "name": "rejectUnauthorized",
+                      "type": "boolean",
+                      "label": "Reject connections that are using unverified (self-signed) certificates",
+                      "required": true
+                    },
+                    {
+                      "name": "followRedirect",
+                      "type": "boolean",
+                      "label": "Follow redirect",
+                      "required": true
+                    },
+                    {
+                      "name": "useQuerystring",
+                      "type": "boolean",
+                      "label": "Disable serialization of multiple same query string keys as arrays",
+                      "required": true
+                    },
+                    {
+                      "name": "gzip",
+                      "type": "boolean",
+                      "label": "Request compressed content",
+                      "required": true
+                    },
+                    {
+                      "name": "useMtls",
+                      "type": "boolean",
+                      "label": "Use Mutual TLS",
+                      "required": true
+                    },
+                    {
+                      "name": "followAllRedirects",
+                      "type": "boolean",
+                      "label": "Follow all redirect",
+                      "required": true
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "qs": {
+                        "mode": "chose"
+                      },
+                      "method": {
+                        "mode": "chose",
+                        "label": "POST"
+                      },
+                      "headers": {
+                        "mode": "chose"
+                      },
+                      "bodyType": {
+                        "mode": "chose",
+                        "label": "Raw"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 1857,
+                    "y": -144,
+                    "name": "Cleanup Remotion Transient Files After Durable Finalization"
+                  },
+                  "parameters": [
+                    {
+                      "name": "handleErrors",
+                      "type": "boolean",
+                      "label": "Evaluate all states as errors (except for 2xx and 3xx )",
+                      "required": true
+                    },
+                    {
+                      "name": "useNewZLibDeCompress",
+                      "type": "hidden"
+                    }
+                  ]
+                },
+                "parameters": {
+                  "handleErrors": false,
+                  "useNewZLibDeCompress": true
+                }
+              },
+              {
+                "id": 12,
+                "filter": {
+                  "name": "Only after durable finalization and cleanup attempt",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{7.id}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblpHPWeEkyJaF7ql",
+                  "formula": "AND({Active}=1,OR({Setting_Name}=\"R2_UPLOAD_WORKER_URL\",{Setting_Name}=\"R2_UPLOAD_WORKER_SECRET\",{Setting_Name}=\"STUDIO_PREVIEW_PUBLIC_BASE_URL\",{Setting_Name}=\"STUDIO_PREVIEW_R2_PREFIX\"))",
+                  "maxRecords": "10",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "base",
+                      "type": "select",
+                      "label": "Base",
+                      "required": true
+                    },
+                    {
+                      "name": "useColumnId",
+                      "type": "boolean",
+                      "label": "Use Column ID",
+                      "required": true
+                    },
+                    {
+                      "name": "table",
+                      "type": "select",
+                      "label": "Table",
+                      "required": true
+                    },
+                    {
+                      "name": "formula",
+                      "type": "text",
+                      "label": "Formula"
+                    },
+                    {
+                      "name": "maxRecords",
+                      "type": "integer",
+                      "label": "Limit"
+                    },
+                    {
+                      "name": "sort",
+                      "spec": [
+                        {
+                          "name": "field",
+                          "type": "select",
+                          "label": "Field",
+                          "dynamic": true,
+                          "options": []
+                        },
+                        {
+                          "name": "direction",
+                          "type": "select",
+                          "label": "Direction",
+                          "options": [
+                            {
+                              "label": "Descending",
+                              "value": "desc"
+                            },
+                            {
+                              "label": "Ascending",
+                              "value": "asc"
+                            }
+                          ]
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Sort"
+                    },
+                    {
+                      "name": "view",
+                      "type": "select",
+                      "label": "View"
+                    },
+                    {
+                      "name": "fields",
+                      "type": "select",
+                      "label": "Output Fields",
+                      "multiple": true
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "base": {
+                        "mode": "chose",
+                        "label": "ChicagoShining AI Content Creator"
+                      },
+                      "sort": {
+                        "mode": "chose"
+                      },
+                      "table": {
+                        "mode": "chose",
+                        "label": "Pipeline Settings"
+                      },
+                      "fields": {
+                        "mode": "chose"
+                      },
+                      "useColumnId": {
+                        "mode": "chose"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "airtable3"
+                        },
+                        "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 2157,
+                    "y": -144,
+                    "name": "Load Studio Preview R2 Settings"
+                  },
+                  "interface": [
+                    {
+                      "name": "__IMTLENGTH__",
+                      "type": "uinteger",
+                      "label": "Total number of bundles"
+                    },
+                    {
+                      "name": "__IMTINDEX__",
+                      "type": "uinteger",
+                      "label": "Bundle order position"
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "ID"
+                    },
+                    {
+                      "name": "createdTime",
+                      "type": "date",
+                      "label": "Created Time"
+                    },
+                    {
+                      "name": "Setting_Name",
+                      "type": "text",
+                      "label": "Setting_Name"
+                    },
+                    {
+                      "name": "Setting_Value",
+                      "type": "text",
+                      "label": "Setting_Value"
+                    },
+                    {
+                      "name": "Active",
+                      "type": "boolean",
+                      "label": "Active"
+                    },
+                    {
+                      "name": "Notes",
+                      "type": "text",
+                      "label": "Notes",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Last_Modified",
+                      "type": "date",
+                      "label": "Last_Modified"
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:airtable3,airtable2",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 13,
+                "mapper": {
+                  "setting_name": "{{12.Setting_Name}}",
+                  "setting_value": "{{12.Setting_Value}}"
+                },
+                "module": "builtin:BasicAggregator",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 2457,
+                    "y": -144,
+                    "name": "Aggregate Studio Preview R2 Settings"
+                  }
+                },
+                "parameters": {
+                  "feeder": 12,
+                  "target": "custom",
+                  "groupBy": "{{1.id}}"
+                }
+              },
+              {
+                "id": 14,
+                "mapper": {
+                  "name": "studio_preview_r2_key",
+                  "scope": "roundtrip",
+                  "value": "{{trim(ifempty(get(map(13.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_R2_PREFIX\"); 1); \"studio/previews\"))}}/{{1.id}}/current.mp4"
+                },
+                "module": "util:SetVariable2",
+                "version": 1,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "name",
+                      "type": "text",
+                      "label": "Variable name",
+                      "required": true
+                    },
+                    {
+                      "name": "scope",
+                      "type": "select",
+                      "label": "Variable lifetime",
+                      "required": true,
+                      "validate": {
+                        "enum": [
+                          "roundtrip",
+                          "execution"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "value",
+                      "type": "any",
+                      "label": "Variable value"
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "scope": {
+                        "label": "One cycle"
+                      }
+                    }
+                  },
+                  "advanced": true,
+                  "designer": {
+                    "x": 2757,
+                    "y": -144,
+                    "name": "Build Stable Studio Preview R2 Key"
+                  },
+                  "interface": [
+                    {
+                      "name": "studio_preview_r2_key",
+                      "type": "any",
+                      "label": "studio_preview_r2_key"
+                    }
+                  ]
+                },
+                "parameters": {}
+              },
+              {
+                "id": 15,
+                "mapper": {
+                  "name": "studio_preview_public_url",
+                  "scope": "roundtrip",
+                  "value": "{{trim(ifempty(get(map(13.array; \"setting_value\"; \"setting_name\"; \"STUDIO_PREVIEW_PUBLIC_BASE_URL\"); 1); \"https://media.chicagoshining.com\"))}}/{{14.studio_preview_r2_key}}"
+                },
+                "module": "util:SetVariable2",
+                "version": 1,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "name",
+                      "type": "text",
+                      "label": "Variable name",
+                      "required": true
+                    },
+                    {
+                      "name": "scope",
+                      "type": "select",
+                      "label": "Variable lifetime",
+                      "required": true,
+                      "validate": {
+                        "enum": [
+                          "roundtrip",
+                          "execution"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "value",
+                      "type": "any",
+                      "label": "Variable value"
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "scope": {
+                        "label": "One cycle"
+                      }
+                    }
+                  },
+                  "advanced": true,
+                  "designer": {
+                    "x": 3057,
+                    "y": -144,
+                    "name": "Build Studio Preview Public URL"
+                  },
+                  "interface": [
+                    {
+                      "name": "studio_preview_public_url",
+                      "type": "any",
+                      "label": "studio_preview_public_url"
+                    }
+                  ]
+                },
+                "parameters": {}
+              },
+              {
+                "id": 16,
+                "mapper": {
+                  "ca": "",
+                  "qs": [
+                    {
+                      "name": "key",
+                      "value": "{{14.studio_preview_r2_key}}"
+                    }
+                  ],
+                  "url": "{{trim(get(map(13.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_URL\"); 1))}}",
+                  "data": "{{5.data}}",
+                  "gzip": false,
+                  "method": "put",
+                  "headers": [
+                    {
+                      "name": "x-pipeline-secret",
+                      "value": "{{get(map(13.array; \"setting_value\"; \"setting_name\"; \"R2_UPLOAD_WORKER_SECRET\"); 1)}}"
+                    }
+                  ],
+                  "timeout": "300",
+                  "useMtls": false,
+                  "authPass": "",
+                  "authUser": "",
+                  "bodyType": "raw",
+                  "contentType": "custom",
+                  "serializeUrl": false,
+                  "shareCookies": false,
+                  "parseResponse": true,
+                  "followRedirect": true,
+                  "useQuerystring": false,
+                  "customContentType": "video/mp4",
+                  "followAllRedirects": false,
+                  "rejectUnauthorized": true
+                },
+                "module": "http:ActionSendData",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "url",
+                      "type": "url",
+                      "label": "URL",
+                      "required": true
+                    },
+                    {
+                      "name": "serializeUrl",
+                      "type": "boolean",
+                      "label": "Serialize URL",
+                      "required": true
+                    },
+                    {
+                      "name": "method",
+                      "type": "select",
+                      "label": "Method",
+                      "required": true,
+                      "validate": {
+                        "enum": [
+                          "get",
+                          "head",
+                          "post",
+                          "put",
+                          "patch",
+                          "delete",
+                          "options"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "headers",
+                      "spec": [
+                        {
+                          "name": "name",
+                          "type": "text",
+                          "label": "Name",
+                          "required": true
+                        },
+                        {
+                          "name": "value",
+                          "type": "text",
+                          "label": "Value"
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Headers"
+                    },
+                    {
+                      "name": "qs",
+                      "spec": [
+                        {
+                          "name": "name",
+                          "type": "text",
+                          "label": "Name",
+                          "required": true
+                        },
+                        {
+                          "name": "value",
+                          "type": "text",
+                          "label": "Value"
+                        }
+                      ],
+                      "type": "array",
+                      "label": "Query String"
+                    },
+                    {
+                      "name": "bodyType",
+                      "type": "select",
+                      "label": "Body type",
+                      "validate": {
+                        "enum": [
+                          "raw",
+                          "x_www_form_urlencoded",
+                          "multipart_form_data"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "parseResponse",
+                      "type": "boolean",
+                      "label": "Parse response",
+                      "required": true
+                    },
+                    {
+                      "name": "authUser",
+                      "type": "text",
+                      "label": "User name"
+                    },
+                    {
+                      "name": "authPass",
+                      "type": "password",
+                      "label": "Password"
+                    },
+                    {
+                      "name": "timeout",
+                      "type": "uinteger",
+                      "label": "Timeout",
+                      "validate": {
+                        "max": 300,
+                        "min": 1
+                      }
+                    },
+                    {
+                      "name": "shareCookies",
+                      "type": "boolean",
+                      "label": "Share cookies with other HTTP modules",
+                      "required": true
+                    },
+                    {
+                      "name": "ca",
+                      "type": "cert",
+                      "label": "Self-signed certificate"
+                    },
+                    {
+                      "name": "rejectUnauthorized",
+                      "type": "boolean",
+                      "label": "Reject connections that are using unverified (self-signed) certificates",
+                      "required": true
+                    },
+                    {
+                      "name": "followRedirect",
+                      "type": "boolean",
+                      "label": "Follow redirect",
+                      "required": true
+                    },
+                    {
+                      "name": "useQuerystring",
+                      "type": "boolean",
+                      "label": "Disable serialization of multiple same query string keys as arrays",
+                      "required": true
+                    },
+                    {
+                      "name": "gzip",
+                      "type": "boolean",
+                      "label": "Request compressed content",
+                      "required": true
+                    },
+                    {
+                      "name": "useMtls",
+                      "type": "boolean",
+                      "label": "Use Mutual TLS",
+                      "required": true
+                    },
+                    {
+                      "name": "contentType",
+                      "type": "select",
+                      "label": "Content type",
+                      "validate": {
+                        "enum": [
+                          "text/plain",
+                          "application/json",
+                          "application/xml",
+                          "text/xml",
+                          "text/html",
+                          "custom"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "type": "buffer",
+                      "label": "Request content"
+                    },
+                    {
+                      "name": "customContentType",
+                      "type": "text",
+                      "label": "Custom content type"
+                    },
+                    {
+                      "name": "followAllRedirects",
+                      "type": "boolean",
+                      "label": "Follow all redirect",
+                      "required": true
+                    }
+                  ],
+                  "designer": {
+                    "x": 3357,
+                    "y": -144,
+                    "name": "Upload Rendered MP4 to Studio Preview R2 Cache"
+                  }
+                },
+                "parameters": {
+                  "handleErrors": false,
+                  "useNewZLibDeCompress": true
+                }
+              },
+              {
+                "id": 17,
+                "filter": {
+                  "name": "Only save Studio preview cache after successful R2 PUT",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{16.statusCode}}",
+                        "b": "200",
+                        "o": "number:greaterorequal"
+                      },
+                      {
+                        "a": "{{16.statusCode}}",
+                        "b": "299",
+                        "o": "number:lessorequal"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fldSHPKoDysCGScoK": "{{15.studio_preview_public_url}}",
+                    "fldg9LeYirAUST9AW": "{{now}}",
+                    "fldjIi4RY9ACoCdBX": "{{14.studio_preview_r2_key}}"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "base",
+                      "type": "select",
+                      "label": "Base",
+                      "required": true
+                    },
+                    {
+                      "name": "typecast",
+                      "type": "boolean",
+                      "label": "Smart links",
+                      "required": true
+                    },
+                    {
+                      "name": "useColumnId",
+                      "type": "boolean",
+                      "label": "Use Column ID",
+                      "required": true
+                    },
+                    {
+                      "name": "table",
+                      "type": "select",
+                      "label": "Table",
+                      "required": true
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "Record ID",
+                      "required": true
+                    },
+                    {
+                      "name": "record",
+                      "spec": [
+                        {
+                          "name": "fldSHPKoDysCGScoK",
+                          "type": "url",
+                          "label": "Studio_Preview_URL"
+                        },
+                        {
+                          "name": "fldjIi4RY9ACoCdBX",
+                          "type": "text",
+                          "label": "Studio_Preview_R2_Key"
+                        },
+                        {
+                          "name": "fldg9LeYirAUST9AW",
+                          "time": true,
+                          "type": "date",
+                          "label": "Studio_Preview_Updated_At"
+                        }
+                      ],
+                      "type": "collection",
+                      "label": "Record"
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "base": {
+                        "label": "ChicagoShining AI Content Creator"
+                      },
+                      "table": {
+                        "label": "Platform Outputs"
+                      },
+                      "typecast": {
+                        "mode": "chose"
+                      },
+                      "useColumnId": {
+                        "mode": "chose"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "airtable3"
+                        },
+                        "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 3657,
+                    "y": -144,
+                    "name": "Save Studio Native Preview Cache Fields"
+                  },
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:airtable3,airtable2",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          },
+          {
+            "flow": [
+              {
+                "id": 8,
+                "filter": {
+                  "name": "Only if render failed",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "failed",
+                        "o": "text:equal"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "error",
+                        "o": "text:equal"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "errored",
+                        "o": "text:equal"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fldEADvZ9DsB9nhhd": "Render failed before Google Drive upload: {{ifempty(2.data.error; ifempty(2.data.message; \"Renderer reported failed status.\"))}}",
+                    "fldUDa6cnmfKFTAU4": "{{ifempty(2.data.error; ifempty(2.data.message; \"Renderer reported failed status.\"))}}",
+                    "fldWePFtTPPsyreQv": "",
+                    "fldXlaROiROoaAgoc": "Failed",
+                    "fldY02WY2eRTclVpn": "{{1.Output_Filename}}",
+                    "fldblKqQfBucVN85k": "{\n  \"filename\": \"{{1.Output_Filename}}\",\n  \"compositionId\": \"{{1.Composition_ID}}\",\n  \"titleText\": \"{{1.Title_Text}}\",\n  \"brandText\": \"{{1.Brand_Text}}\",\n  \"musicVolume\": {{parseNumber(1.Music_Volume)}},\n  \"clips\": [\n    {\n      \"id\": \"video1\",\n      \"url\": \"{{1.Clip_1_URL}}\",\n      \"durationFrames\": {{parseNumber(1.Clip_1_Duration_Frames)}},\n      \"motionStyle\": \"slowZoom\"\n    },\n    {\n      \"id\": \"video2\",\n      \"url\": \"{{1.Clip_2_URL}}\",\n      \"durationFrames\": {{parseNumber(1.Clip_2_Duration_Frames)}},\n      \"motionStyle\": \"slowZoom\"\n    },\n    {\n      \"id\": \"video3\",\n      \"url\": \"{{1.Clip_3_URL}}\",\n      \"durationFrames\": {{parseNumber(1.Clip_3_Duration_Frames)}},\n      \"motionStyle\": \"slowZoom\"\n    }\n  ],\n  \"music\": {\n    \"url\": \"{{1.Music_URL}}\",\n    \"volume\": {{parseNumber(1.Music_Volume)}}\n  }\n}",
+                    "fldciHLBrMpdou6Zf": "Failed",
+                    "fldenXjFd1HRasCYD": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                    "fldgpBV1vc4gQgFaw": "",
+                    "fldleMgHqTQctbMdG": "{{ifempty(2.data.jobId; 1.Remotion_Job_ID)}}",
+                    "fldssVMZv37e2Ij6y": "",
+                    "fldt6e8Ov1T4kyKax": "{{1.Remotion_Status_URL}}",
+                    "fldtEZy0rdIVS5LML": "Failed"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "base",
+                      "type": "select",
+                      "label": "Base",
+                      "required": true
+                    },
+                    {
+                      "name": "typecast",
+                      "type": "boolean",
+                      "label": "Smart links",
+                      "required": true
+                    },
+                    {
+                      "name": "useColumnId",
+                      "type": "boolean",
+                      "label": "Use Column ID",
+                      "required": true
+                    },
+                    {
+                      "name": "table",
+                      "type": "select",
+                      "label": "Table",
+                      "required": true
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "Record ID",
+                      "required": true
+                    },
+                    {
+                      "name": "record",
+                      "spec": [
+                        {
+                          "name": "fldgpBV1vc4gQgFaw",
+                          "type": "url",
+                          "label": "Output_URL"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldtEZy0rdIVS5LML",
+                          "type": "select",
+                          "label": "Render_Status"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldlftCb1r06p6IhB",
+                          "type": "select",
+                          "label": "Composition_ID"
+                        },
+                        {
+                          "name": "fldcVmpi1yva89dzy",
+                          "type": "text",
+                          "label": "Output_Filename"
+                        },
+                        {
+                          "name": "fld9pyFQFHat3ayYr",
+                          "type": "text",
+                          "label": "Title_Text"
+                        },
+                        {
+                          "name": "fldrxvDPiPWMfruny",
+                          "type": "text",
+                          "label": "Brand_Text"
+                        },
+                        {
+                          "name": "fldF6WSBlSP1PF2ZM",
+                          "type": "url",
+                          "label": "Music_URL"
+                        },
+                        {
+                          "name": "fldGBazRAYCGgONhw",
+                          "type": "number",
+                          "label": "Music_Volume"
+                        },
+                        {
+                          "name": "fldlGTytbyovFNJoA",
+                          "type": "url",
+                          "label": "Clip_1_URL"
+                        },
+                        {
+                          "name": "fldRzH8LJOeeGqsPh",
+                          "type": "number",
+                          "label": "Clip_1_Duration_Frames"
+                        },
+                        {
+                          "name": "fldTqqOzC2cECX9EM",
+                          "type": "url",
+                          "label": "Clip_2_URL"
+                        },
+                        {
+                          "name": "fldTw2sPDvKEHElP9",
+                          "type": "number",
+                          "label": "Clip_2_Duration_Frames"
+                        },
+                        {
+                          "name": "fldbQ1pyfyMkO7yhz",
+                          "type": "url",
+                          "label": "Clip_3_URL"
+                        },
+                        {
+                          "name": "fldyfaEjpmsQm7rA4",
+                          "type": "number",
+                          "label": "Clip_3_Duration_Frames"
+                        },
+                        {
+                          "name": "fldleMgHqTQctbMdG",
+                          "type": "text",
+                          "label": "Remotion_Job_ID"
+                        },
+                        {
+                          "name": "fldt6e8Ov1T4kyKax",
+                          "type": "url",
+                          "label": "Remotion_Status_URL"
+                        },
+                        {
+                          "name": "fldenXjFd1HRasCYD",
+                          "type": "url",
+                          "label": "Render_Server_URL"
+                        },
+                        {
+                          "name": "fldssVMZv37e2Ij6y",
+                          "type": "url",
+                          "label": "Final_File_URL"
+                        },
+                        {
+                          "name": "fldWePFtTPPsyreQv",
+                          "type": "text",
+                          "label": "Final_File_ID"
+                        },
+                        {
+                          "name": "fldY02WY2eRTclVpn",
+                          "type": "text",
+                          "label": "Final_File_Name"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldciHLBrMpdou6Zf",
+                          "type": "select",
+                          "label": "Final_File_Storage_Status"
+                        },
+                        {
+                          "name": "fldEADvZ9DsB9nhhd",
+                          "type": "text",
+                          "label": "Final_File_Error_Message",
+                          "multiline": true
+                        },
+                        {
+                          "name": "fldblKqQfBucVN85k",
+                          "type": "text",
+                          "label": "Remotion_Props_JSON",
+                          "multiline": true
+                        },
+                        {
+                          "name": "fldUDa6cnmfKFTAU4",
+                          "type": "text",
+                          "label": "Remotion_Error_Message",
+                          "multiline": true
+                        }
+                      ],
+                      "type": "collection",
+                      "label": "Record"
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "base": {
+                        "label": "ChicagoShining AI Content Creator"
+                      },
+                      "table": {
+                        "label": "Platform Outputs"
+                      },
+                      "record": {
+                        "nested": {
+                          "fldciHLBrMpdou6Zf": {
+                            "mode": "edit"
+                          },
+                          "fldlftCb1r06p6IhB": {
+                            "mode": "edit"
+                          },
+                          "fldtEZy0rdIVS5LML": {
+                            "mode": "edit"
+                          }
+                        }
+                      },
+                      "typecast": {
+                        "mode": "chose"
+                      },
+                      "useColumnId": {
+                        "mode": "chose"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "airtable3"
+                        },
+                        "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 955,
+                    "y": 224,
+                    "name": "Mark Platform Output Failed with Render Error Fields"
+                  },
+                  "interface": [
+                    {
+                      "name": "__IMTLENGTH__",
+                      "type": "uinteger",
+                      "label": "Total number of bundles"
+                    },
+                    {
+                      "name": "__IMTINDEX__",
+                      "type": "uinteger",
+                      "label": "Bundle order position"
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "ID"
+                    },
+                    {
+                      "name": "createdTime",
+                      "type": "date",
+                      "label": "Created Time"
+                    },
+                    {
+                      "name": "Output_ID",
+                      "type": "uinteger",
+                      "label": "Output_ID"
+                    },
+                    {
+                      "name": "Platform",
+                      "type": "text",
+                      "label": "Platform"
+                    },
+                    {
+                      "name": "Format",
+                      "type": "text",
+                      "label": "Format"
+                    },
+                    {
+                      "name": "Platform_Output_Type",
+                      "type": "text",
+                      "label": "Platform_Output_Type"
+                    },
+                    {
+                      "name": "Aspect_Ratio",
+                      "type": "text",
+                      "label": "Aspect_Ratio"
+                    },
+                    {
+                      "name": "Output_Status",
+                      "type": "text",
+                      "label": "Output_Status"
+                    },
+                    {
+                      "name": "Output_Title",
+                      "type": "text",
+                      "label": "Output_Title"
+                    },
+                    {
+                      "name": "Output_Caption",
+                      "type": "text",
+                      "label": "Output_Caption",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_Hashtags",
+                      "type": "text",
+                      "label": "Output_Hashtags",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_URL",
+                      "type": "url",
+                      "label": "Output_URL"
+                    },
+                    {
+                      "name": "Thumbnail_URL",
+                      "type": "url",
+                      "label": "Thumbnail_URL"
+                    },
+                    {
+                      "name": "Voiceover_URL",
+                      "type": "url",
+                      "label": "Voiceover_URL"
+                    },
+                    {
+                      "name": "Do_Not_Publish",
+                      "type": "boolean",
+                      "label": "Do_Not_Publish"
+                    },
+                    {
+                      "name": "Target_Final_Length",
+                      "type": "number",
+                      "label": "Target_Final_Length"
+                    },
+                    {
+                      "name": "Render_Status",
+                      "type": "text",
+                      "label": "Render_Status"
+                    },
+                    {
+                      "name": "Render_Server_URL",
+                      "type": "url",
+                      "label": "Render_Server_URL"
+                    },
+                    {
+                      "name": "Final_File_URL",
+                      "type": "url",
+                      "label": "Final_File_URL"
+                    },
+                    {
+                      "name": "Final_File_ID",
+                      "type": "text",
+                      "label": "Final_File_ID"
+                    },
+                    {
+                      "name": "Final_File_Name",
+                      "type": "text",
+                      "label": "Final_File_Name"
+                    },
+                    {
+                      "name": "Final_File_Storage_Status",
+                      "type": "text",
+                      "label": "Final_File_Storage_Status"
+                    },
+                    {
+                      "name": "Final_File_Error_Message",
+                      "type": "text",
+                      "label": "Final_File_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Job_ID",
+                      "type": "text",
+                      "label": "Remotion_Job_ID"
+                    },
+                    {
+                      "name": "Remotion_Status_URL",
+                      "type": "url",
+                      "label": "Remotion_Status_URL"
+                    },
+                    {
+                      "name": "Remotion_Props_JSON",
+                      "type": "text",
+                      "label": "Remotion_Props_JSON",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Error_Message",
+                      "type": "text",
+                      "label": "Remotion_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Composition_ID",
+                      "type": "text",
+                      "label": "Composition_ID"
+                    },
+                    {
+                      "name": "Output_Filename",
+                      "type": "text",
+                      "label": "Output_Filename"
+                    },
+                    {
+                      "name": "Clip_1_URL",
+                      "type": "url",
+                      "label": "Clip_1_URL"
+                    },
+                    {
+                      "name": "Clip_1_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_1_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_2_URL",
+                      "type": "url",
+                      "label": "Clip_2_URL"
+                    },
+                    {
+                      "name": "Clip_2_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_2_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_3_URL",
+                      "type": "url",
+                      "label": "Clip_3_URL"
+                    },
+                    {
+                      "name": "Clip_3_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_3_Duration_Frames"
+                    },
+                    {
+                      "name": "Music_URL",
+                      "type": "url",
+                      "label": "Music_URL"
+                    },
+                    {
+                      "name": "Music_Volume",
+                      "type": "number",
+                      "label": "Music_Volume"
+                    },
+                    {
+                      "name": "Title_Text",
+                      "type": "text",
+                      "label": "Title_Text"
+                    },
+                    {
+                      "name": "Brand_Text",
+                      "type": "text",
+                      "label": "Brand_Text"
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:airtable3,airtable2",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          },
+          {
+            "flow": [
+              {
+                "id": 9,
+                "filter": {
+                  "name": "Only if render is still processing",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "rendering",
+                        "o": "text:equal"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "processing",
+                        "o": "text:equal"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "queued",
+                        "o": "text:equal"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "pending",
+                        "o": "text:equal"
+                      }
+                    ],
+                    [
+                      {
+                        "a": "{{2.data.status}}",
+                        "b": "started",
+                        "o": "text:equal"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{1.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblrlPeboBthkplH0",
+                  "record": {
+                    "fldEADvZ9DsB9nhhd": "",
+                    "fldUDa6cnmfKFTAU4": "",
+                    "fldenXjFd1HRasCYD": "{{ifempty(2.data.renderUrl; 1.Render_Server_URL)}}",
+                    "fldleMgHqTQctbMdG": "{{ifempty(2.data.jobId; 1.Remotion_Job_ID)}}",
+                    "fldt6e8Ov1T4kyKax": "{{1.Remotion_Status_URL}}",
+                    "fldtEZy0rdIVS5LML": "Rendering"
+                  },
+                  "typecast": false,
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "expect": [
+                    {
+                      "name": "base",
+                      "type": "select",
+                      "label": "Base",
+                      "required": true
+                    },
+                    {
+                      "name": "typecast",
+                      "type": "boolean",
+                      "label": "Smart links",
+                      "required": true
+                    },
+                    {
+                      "name": "useColumnId",
+                      "type": "boolean",
+                      "label": "Use Column ID",
+                      "required": true
+                    },
+                    {
+                      "name": "table",
+                      "type": "select",
+                      "label": "Table",
+                      "required": true
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "Record ID",
+                      "required": true
+                    },
+                    {
+                      "name": "record",
+                      "spec": [
+                        {
+                          "name": "fldgpBV1vc4gQgFaw",
+                          "type": "url",
+                          "label": "Output_URL"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldtEZy0rdIVS5LML",
+                          "type": "select",
+                          "label": "Render_Status"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldlftCb1r06p6IhB",
+                          "type": "select",
+                          "label": "Composition_ID"
+                        },
+                        {
+                          "name": "fldcVmpi1yva89dzy",
+                          "type": "text",
+                          "label": "Output_Filename"
+                        },
+                        {
+                          "name": "fld9pyFQFHat3ayYr",
+                          "type": "text",
+                          "label": "Title_Text"
+                        },
+                        {
+                          "name": "fldrxvDPiPWMfruny",
+                          "type": "text",
+                          "label": "Brand_Text"
+                        },
+                        {
+                          "name": "fldF6WSBlSP1PF2ZM",
+                          "type": "url",
+                          "label": "Music_URL"
+                        },
+                        {
+                          "name": "fldGBazRAYCGgONhw",
+                          "type": "number",
+                          "label": "Music_Volume"
+                        },
+                        {
+                          "name": "fldlGTytbyovFNJoA",
+                          "type": "url",
+                          "label": "Clip_1_URL"
+                        },
+                        {
+                          "name": "fldRzH8LJOeeGqsPh",
+                          "type": "number",
+                          "label": "Clip_1_Duration_Frames"
+                        },
+                        {
+                          "name": "fldTqqOzC2cECX9EM",
+                          "type": "url",
+                          "label": "Clip_2_URL"
+                        },
+                        {
+                          "name": "fldTw2sPDvKEHElP9",
+                          "type": "number",
+                          "label": "Clip_2_Duration_Frames"
+                        },
+                        {
+                          "name": "fldbQ1pyfyMkO7yhz",
+                          "type": "url",
+                          "label": "Clip_3_URL"
+                        },
+                        {
+                          "name": "fldyfaEjpmsQm7rA4",
+                          "type": "number",
+                          "label": "Clip_3_Duration_Frames"
+                        },
+                        {
+                          "name": "fldleMgHqTQctbMdG",
+                          "type": "text",
+                          "label": "Remotion_Job_ID"
+                        },
+                        {
+                          "name": "fldt6e8Ov1T4kyKax",
+                          "type": "url",
+                          "label": "Remotion_Status_URL"
+                        },
+                        {
+                          "name": "fldenXjFd1HRasCYD",
+                          "type": "url",
+                          "label": "Render_Server_URL"
+                        },
+                        {
+                          "name": "fldssVMZv37e2Ij6y",
+                          "type": "url",
+                          "label": "Final_File_URL"
+                        },
+                        {
+                          "name": "fldWePFtTPPsyreQv",
+                          "type": "text",
+                          "label": "Final_File_ID"
+                        },
+                        {
+                          "name": "fldY02WY2eRTclVpn",
+                          "type": "text",
+                          "label": "Final_File_Name"
+                        },
+                        {
+                          "mode": "edit",
+                          "name": "fldciHLBrMpdou6Zf",
+                          "type": "select",
+                          "label": "Final_File_Storage_Status"
+                        },
+                        {
+                          "name": "fldEADvZ9DsB9nhhd",
+                          "type": "text",
+                          "label": "Final_File_Error_Message",
+                          "multiline": true
+                        },
+                        {
+                          "name": "fldblKqQfBucVN85k",
+                          "type": "text",
+                          "label": "Remotion_Props_JSON",
+                          "multiline": true
+                        },
+                        {
+                          "name": "fldUDa6cnmfKFTAU4",
+                          "type": "text",
+                          "label": "Remotion_Error_Message",
+                          "multiline": true
+                        }
+                      ],
+                      "type": "collection",
+                      "label": "Record"
+                    }
+                  ],
+                  "restore": {
+                    "expect": {
+                      "base": {
+                        "label": "ChicagoShining AI Content Creator"
+                      },
+                      "table": {
+                        "label": "Platform Outputs"
+                      },
+                      "record": {
+                        "nested": {
+                          "fldciHLBrMpdou6Zf": {
+                            "mode": "edit"
+                          },
+                          "fldlftCb1r06p6IhB": {
+                            "mode": "edit"
+                          },
+                          "fldtEZy0rdIVS5LML": {
+                            "mode": "edit"
+                          }
+                        }
+                      },
+                      "typecast": {
+                        "mode": "chose"
+                      },
+                      "useColumnId": {
+                        "mode": "chose"
+                      }
+                    },
+                    "parameters": {
+                      "__IMTCONN__": {
+                        "data": {
+                          "scoped": "true",
+                          "connection": "airtable3"
+                        },
+                        "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+                      }
+                    }
+                  },
+                  "designer": {
+                    "x": 597,
+                    "y": 353,
+                    "name": "Leave Platform Output Rendering for Next Poll"
+                  },
+                  "interface": [
+                    {
+                      "name": "__IMTLENGTH__",
+                      "type": "uinteger",
+                      "label": "Total number of bundles"
+                    },
+                    {
+                      "name": "__IMTINDEX__",
+                      "type": "uinteger",
+                      "label": "Bundle order position"
+                    },
+                    {
+                      "name": "id",
+                      "type": "text",
+                      "label": "ID"
+                    },
+                    {
+                      "name": "createdTime",
+                      "type": "date",
+                      "label": "Created Time"
+                    },
+                    {
+                      "name": "Output_ID",
+                      "type": "uinteger",
+                      "label": "Output_ID"
+                    },
+                    {
+                      "name": "Platform",
+                      "type": "text",
+                      "label": "Platform"
+                    },
+                    {
+                      "name": "Format",
+                      "type": "text",
+                      "label": "Format"
+                    },
+                    {
+                      "name": "Platform_Output_Type",
+                      "type": "text",
+                      "label": "Platform_Output_Type"
+                    },
+                    {
+                      "name": "Aspect_Ratio",
+                      "type": "text",
+                      "label": "Aspect_Ratio"
+                    },
+                    {
+                      "name": "Output_Status",
+                      "type": "text",
+                      "label": "Output_Status"
+                    },
+                    {
+                      "name": "Output_Title",
+                      "type": "text",
+                      "label": "Output_Title"
+                    },
+                    {
+                      "name": "Output_Caption",
+                      "type": "text",
+                      "label": "Output_Caption",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_Hashtags",
+                      "type": "text",
+                      "label": "Output_Hashtags",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Output_URL",
+                      "type": "url",
+                      "label": "Output_URL"
+                    },
+                    {
+                      "name": "Thumbnail_URL",
+                      "type": "url",
+                      "label": "Thumbnail_URL"
+                    },
+                    {
+                      "name": "Voiceover_URL",
+                      "type": "url",
+                      "label": "Voiceover_URL"
+                    },
+                    {
+                      "name": "Do_Not_Publish",
+                      "type": "boolean",
+                      "label": "Do_Not_Publish"
+                    },
+                    {
+                      "name": "Target_Final_Length",
+                      "type": "number",
+                      "label": "Target_Final_Length"
+                    },
+                    {
+                      "name": "Render_Status",
+                      "type": "text",
+                      "label": "Render_Status"
+                    },
+                    {
+                      "name": "Render_Server_URL",
+                      "type": "url",
+                      "label": "Render_Server_URL"
+                    },
+                    {
+                      "name": "Final_File_URL",
+                      "type": "url",
+                      "label": "Final_File_URL"
+                    },
+                    {
+                      "name": "Final_File_ID",
+                      "type": "text",
+                      "label": "Final_File_ID"
+                    },
+                    {
+                      "name": "Final_File_Name",
+                      "type": "text",
+                      "label": "Final_File_Name"
+                    },
+                    {
+                      "name": "Final_File_Storage_Status",
+                      "type": "text",
+                      "label": "Final_File_Storage_Status"
+                    },
+                    {
+                      "name": "Final_File_Error_Message",
+                      "type": "text",
+                      "label": "Final_File_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Job_ID",
+                      "type": "text",
+                      "label": "Remotion_Job_ID"
+                    },
+                    {
+                      "name": "Remotion_Status_URL",
+                      "type": "url",
+                      "label": "Remotion_Status_URL"
+                    },
+                    {
+                      "name": "Remotion_Props_JSON",
+                      "type": "text",
+                      "label": "Remotion_Props_JSON",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Remotion_Error_Message",
+                      "type": "text",
+                      "label": "Remotion_Error_Message",
+                      "multiline": true
+                    },
+                    {
+                      "name": "Composition_ID",
+                      "type": "text",
+                      "label": "Composition_ID"
+                    },
+                    {
+                      "name": "Output_Filename",
+                      "type": "text",
+                      "label": "Output_Filename"
+                    },
+                    {
+                      "name": "Clip_1_URL",
+                      "type": "url",
+                      "label": "Clip_1_URL"
+                    },
+                    {
+                      "name": "Clip_1_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_1_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_2_URL",
+                      "type": "url",
+                      "label": "Clip_2_URL"
+                    },
+                    {
+                      "name": "Clip_2_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_2_Duration_Frames"
+                    },
+                    {
+                      "name": "Clip_3_URL",
+                      "type": "url",
+                      "label": "Clip_3_URL"
+                    },
+                    {
+                      "name": "Clip_3_Duration_Frames",
+                      "type": "number",
+                      "label": "Clip_3_Duration_Frames"
+                    },
+                    {
+                      "name": "Music_URL",
+                      "type": "url",
+                      "label": "Music_URL"
+                    },
+                    {
+                      "name": "Music_Volume",
+                      "type": "number",
+                      "label": "Music_Volume"
+                    },
+                    {
+                      "name": "Title_Text",
+                      "type": "text",
+                      "label": "Title_Text"
+                    },
+                    {
+                      "name": "Brand_Text",
+                      "type": "text",
+                      "label": "Brand_Text"
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "name": "__IMTCONN__",
+                      "type": "account:airtable3,airtable2",
+                      "label": "Connection",
+                      "required": true
+                    }
+                  ]
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              }
+            ]
+          }
+        ],
+        "version": 1,
+        "metadata": {
+          "designer": {
+            "x": 600,
+            "y": 0
+          }
+        }
+      }
+    ],
+    "name": "R5 - Render Poller + Final Upload v2.3 - Studio Native Preview R2 Cache",
+    "metadata": {
+      "instant": false,
+      "version": 1,
+      "designer": {
+        "orphans": []
+      },
+      "scenario": {
+        "dlq": false,
+        "slots": null,
+        "dataloss": false,
+        "maxErrors": 3,
+        "autoCommit": true,
+        "roundtrips": 1,
+        "sequential": true,
+        "confidential": false,
+        "freshVariables": false,
+        "autoCommitTriggerLast": true
+      }
+    },
+    "scheduling": {
+      "type": "on-demand"
+    },
+    "interface": {
+      "input": [],
+      "output": []
+    }
+  }
+}
