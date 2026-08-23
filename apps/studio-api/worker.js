@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.93-variant-manifest-refresh",
+          version: "0.10.94-p2-stale-run-reset",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -7442,6 +7442,29 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
   return { requestRecord, contentItemId, directiveBridge, outputFanout };
 }
 
+// P2 will happily regenerate audio, normalize it and upload it to Drive, but its write-back
+// rechecks require Voiceover_URL, Voiceover_Google_Drive_File_ID and Thumbnail_Google_Drive_File_ID
+// to be blank and Voiceover_Normalization_Status to not be "Normalized". A previous run's leftovers
+// therefore make P2 do all the paid work and then silently commit nothing, so P3 is never chained
+// and the item stalls. A blank URL alongside a populated Drive/normalization footprint is never a
+// steady state, only the residue of a superseded run, so clear it before asking P2 for fresh media.
+function item4StaleMediaRunClears(parent) {
+  const clears = {};
+  const wantVoiceover = String(f(parent, "Include_Voiceover") || "Yes").trim() !== "No";
+  if (wantVoiceover && !String(f(parent, "Voiceover_URL") || "").trim()) {
+    if (String(f(parent, "Voiceover_Google_Drive_File_ID") || "").trim()) clears.Voiceover_Google_Drive_File_ID = null;
+    if (String(f(parent, "Voiceover_Normalization_Status") || "").trim()) clears.Voiceover_Normalization_Status = null;
+    if (String(f(parent, "Voiceover_Normalization_Details") || "").trim()) clears.Voiceover_Normalization_Details = null;
+    if (f(parent, "Voiceover_Normalized_At")) clears.Voiceover_Normalized_At = null;
+  }
+  if (String(f(parent, "Thumbnail_Status") || "").trim() === "Ready"
+    && !String(f(parent, "Thumbnail_URL") || "").trim()
+    && String(f(parent, "Thumbnail_Google_Drive_File_ID") || "").trim()) {
+    clears.Thumbnail_Google_Drive_File_ID = null;
+  }
+  return clears;
+}
+
 async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
   const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId);
   const requestedCaption = String(f(requestRecord, "Requested_Caption") || "").trim();
@@ -7479,6 +7502,7 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     } else {
       fields.Thumbnail_URL = null;
       fields.Thumbnail_Status = "Ready";
+      fields.Thumbnail_Google_Drive_File_ID = null;
     }
   } else if (wantFrameThumb) {
     fields.Thumbnail_URL = frameUrl || existingThumb || null;
@@ -7492,6 +7516,10 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     fields.Voiceover_Status = "Ready";
     fields.Voiceover_Script = script || null;
     if (script) fields.Script_Status = "Generated";
+    fields.Voiceover_Google_Drive_File_ID = null;
+    fields.Voiceover_Normalization_Status = null;
+    fields.Voiceover_Normalization_Details = null;
+    fields.Voiceover_Normalized_At = null;
   } else {
     fields.Voiceover_Status = wantVoiceover
       ? (String(f(parent, "Voiceover_Status") || "").trim() || "Generated")
@@ -7506,6 +7534,21 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
 
 async function pulseStudioP2Handoff(env, contentItemId, requestRecord) {
   const testRunId = String(f(requestRecord, "Test_Run_ID") || "").trim();
+  // Every P2 pulse funnels through here, including continuation retries that never re-arm the
+  // parent, so this is the one place guaranteed to run before P2 does paid work it cannot commit.
+  try {
+    const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId);
+    const clears = item4StaleMediaRunClears(parent);
+    if (Object.keys(clears).length) {
+      await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: clears, typecast: true }),
+      });
+      console.log("P2 pulse cleared superseded media run", contentItemId, Object.keys(clears).join(","));
+    }
+  } catch (error) {
+    console.warn("P2 pulse could not clear superseded media run", error);
+  }
   try { await phase6EnsureScenarioActive(env, ITEM4_P2_SCENARIO_ID); } catch (error) {
     console.warn("P2 webhook could not be armed before pulse", error);
   }
@@ -11499,8 +11542,11 @@ function phase6CreativeHandoffStatus(record, slides = []) {
     { key: "saved", label: "Saved", status: requestStarted ? "complete" : "pending", detail: requestStarted ? "Creative changes are persisted." : "No change request is active." },
     { key: "voice_prep", label: "Voice Prep", status: voiceFailures.length ? "error" : (!requestStarted ? "pending" : pendingVoice.length ? "active" : "complete"), detail: voiceFailures.length ? `${voiceFailures.length} slide voiceover(s) failed.` : (pendingVoice.length ? `Preparing ${pendingVoice.length} slide voiceover(s).` : "Voice assets are ready."), error: voiceFailures.length ? `Voice prep failed for: ${voiceFailures.map((s) => s.name || s.id).join(", ")}` : null },
     { key: "rendering", label: "Rendering", status: renderError ? "error" : (!requestStarted || pendingVoice.length ? "pending" : renderComplete ? "complete" : ["Rendering","Ready for Render"].includes(renderStatus) ? "active" : "pending"), detail: renderError ? renderError : (renderComplete ? "The current requested revision has rendered." : renderStatus === "Rendering" ? "Remotion is rendering the requested revision." : renderStatus === "Ready for Render" ? "The render package is ready for R4." : "Waiting for render package/start."), error: renderError },
-    { key: "final_upload", label: "Final Upload", status: (!finalComplete && finalError) ? "error" : (!renderComplete ? "pending" : finalComplete ? "complete" : "active"), detail: (!finalComplete && finalError) ? finalError : (finalComplete ? "Final Google Drive upload is complete." : renderComplete ? "Render is complete; final upload is being finalized." : "Waiting for render completion."), error: (!finalComplete && finalError) ? finalError : null },
-    { key: "preview_ready", label: "Preview Ready", status: previewReady ? "complete" : (!finalComplete ? "pending" : "active"), detail: previewReady ? "Studio native preview is refreshed for this revision." : finalComplete ? "Final file is ready; Studio preview refresh is pending." : "Waiting for final upload.", error: null },
+    // These two must gate on requestStarted like the stages above them. Without it, a finished
+    // earlier render satisfies them on its own and an idle output shows a half-ticked revision
+    // that never happened.
+    { key: "final_upload", label: "Final Upload", status: !requestStarted ? "pending" : (!finalComplete && finalError) ? "error" : (!renderComplete ? "pending" : finalComplete ? "complete" : "active"), detail: !requestStarted ? "No change request is active." : (!finalComplete && finalError) ? finalError : (finalComplete ? "Final Google Drive upload is complete." : renderComplete ? "Render is complete; final upload is being finalized." : "Waiting for render completion."), error: (requestStarted && !finalComplete && finalError) ? finalError : null },
+    { key: "preview_ready", label: "Preview Ready", status: !requestStarted ? "pending" : previewReady ? "complete" : (!finalComplete ? "pending" : "active"), detail: !requestStarted ? "No change request is active." : previewReady ? "Studio native preview is refreshed for this revision." : finalComplete ? "Final file is ready; Studio preview refresh is pending." : "Waiting for final upload.", error: null },
   ];
 
   const failed = stages.find((stage) => stage.status === "error") || null;
