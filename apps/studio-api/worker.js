@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.89-variant-download-urls",
+          version: "0.10.90-render-cdn-only-clips",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -4480,6 +4480,23 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
     ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
   );
   const planPending = pending.filter((row) => planExpectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
+
+  // A Ready crop with a blank Preview_Status is invisible to the preview drain
+  // scan, so it never gets the public CDN copy that Remotion needs. Claim it.
+  for (const row of scoped) {
+    if (item4QueueStatus(row) !== "Ready") continue;
+    if (String(f(row, "Preview_Status") || "").trim()) continue;
+    try {
+      await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Preview_Status: "Pending" }, typecast: true }),
+      });
+      if (row.fields) row.fields.Preview_Status = "Pending";
+    } catch (error) {
+      console.warn("Item 4 preview backfill failed", row.id, error);
+    }
+  }
+
   const manifest = item4BuildDriveManifest(recordId, assets, ratios, scoped, planRatios);
   const mediaAssetIds = [...new Set(
     scoped.filter((row) => item4QueueStatus(row) === "Ready")
@@ -6763,10 +6780,11 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
       || extractGoogleDriveFileId(variant?.google_drive_url)
       || ""
     ).trim();
+    // Remotion must fetch real image bytes. Google Drive answers large files with
+    // an HTML scan interstitial, so only a public CDN preview may back a clip.
     const url = String(
       variant?.preview_url
       || studioClipPublicCdnUrl(variant?.google_drive_url || variant?.google_drive_file_id)
-      || (driveId ? googleDriveDownloadUrl(driveId) : "")
       || ""
     ).trim();
     const mediaAssetId = String(variant?.media_asset_record_id || "").trim();

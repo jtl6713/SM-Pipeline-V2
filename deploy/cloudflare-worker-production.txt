@@ -101,3 +101,5 @@ Variant plan-ready reconcile Worker deploy: 2026-08-22 - Mark Studio variants Re
 
 Variant download URLs Worker deploy: 2026-08-22 - When CDN previews are missing, stamp Remotion packages with Google Drive download URLs instead of /view pages so AI crops are fetchable. Worker 0.10.89-variant-download-urls.
 
+Render CDN-only clips Worker deploy: 2026-08-22 - Google Drive answers large crops with an HTML scan page, which failed Remotion with exit code 1, so render clips now require a public CDN preview and Ready crops with a blank Preview_Status are claimed as Pending so the preview drain generates that copy. Worker 0.10.90-render-cdn-only-clips.
+
