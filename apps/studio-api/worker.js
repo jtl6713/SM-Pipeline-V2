@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.95-approve-arms-publishers",
+          version: "0.10.96-studio-post-caption",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -6547,8 +6547,10 @@ function item4StudioThemeTitle(requestRecord, parent) {
 // SAI1 decides what each AI slot depicts and writes the narration for the whole
 // video, so a slot's photo, its burned-in caption, and the voiceover all name the
 // same thing to do instead of drifting apart.
+// needed may be 0: SAI1 also authors the post caption, which is required even for an
+// all-manual photo set that has no AI slots to theme.
 async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
-  if (needed < 1) return null;
+  if (needed < 0) return null;
   const title = item4StudioThemeTitle(requestRecord, parent);
   if (!title) return null;
   const covered = item4AssetManifest(requestRecord)
@@ -6577,8 +6579,75 @@ async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
       imagePrompt: String(slide?.image_prompt || "").trim(),
     }))
     .filter((slide) => slide.imagePrompt);
-  if (!slides.length) return null;
-  return { slides, voiceoverScript: String(parsed?.voiceover_script || "").trim() };
+  const themes = {
+    slides,
+    voiceoverScript: String(parsed?.voiceover_script || "").trim(),
+    postCaption: String(parsed?.post_caption || "").trim(),
+    hashtags: String(parsed?.hashtags || "").trim(),
+  };
+  if (needed > 0 && !slides.length) return null;
+  return themes;
+}
+
+// The post caption is what gets published with the video and what the platform handoff
+// emails ask you to copy. Under "AI decides" nothing else in the Studio path authors it:
+// the output seed copies a caption that does not exist yet, so it stays blank all the way
+// to publish unless the caption is written here.
+function item4StudioCaptionIsLocked(requestRecord) {
+  return /force exact/i.test(String(f(requestRecord, "Caption_Mode") || "").trim());
+}
+
+async function item4WriteStudioPostCaption(env, parentId, themes, parentRecord) {
+  const caption = String(themes?.postCaption || "").trim();
+  if (!parentId || !caption) return null;
+  if (String(f(parentRecord || {}, "Caption") || "").trim()) return null;
+  const fields = { Caption: caption };
+  if (themes.hashtags && !String(f(parentRecord || {}, "Hashtags") || "").trim()) {
+    fields.Hashtags = themes.hashtags;
+  }
+  try {
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  } catch (error) {
+    console.warn("Studio post caption write failed", parentId, error);
+    return null;
+  }
+  // Outputs are seeded before the caption exists, so backfill the ones still blank.
+  try {
+    const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 50,
+      filterFormula: `AND(FIND('${parentId}',ARRAYJOIN({Content_Item}))>0,{Output_Caption}="")`,
+    });
+    const updates = outputs.map((row) => ({
+      id: row.id,
+      fields: { Output_Caption: caption, ...(fields.Hashtags ? { Output_Hashtags: fields.Hashtags } : {}) },
+    }));
+    for (let i = 0; i < updates.length; i += 10) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, "", {
+        method: "PATCH",
+        body: JSON.stringify({ records: updates.slice(i, i + 10), typecast: true }),
+      });
+    }
+  } catch (error) {
+    console.warn("Studio post caption output backfill failed", parentId, error);
+  }
+  return caption;
+}
+
+async function item4EnsureStudioPostCaption(env, requestRecord, parentId) {
+  if (!parentId || item4StudioCaptionIsLocked(requestRecord)) return null;
+  const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId).catch(() => null);
+  if (!parent || String(f(parent, "Caption") || "").trim()) return null;
+  let themes = null;
+  try {
+    themes = await item4RequestAiSlideThemes(env, requestRecord, parent, 0);
+  } catch (error) {
+    console.warn("Studio post caption author failed", parentId, error);
+    return null;
+  }
+  return item4WriteStudioPostCaption(env, parentId, themes, parent);
 }
 
 async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, targetTotal = null) {
@@ -6687,6 +6756,9 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
     } catch (error) {
       console.warn("Studio AI narration write failed", parentId, error);
     }
+  }
+  if (!item4StudioCaptionIsLocked(requestRecord)) {
+    await item4WriteStudioPostCaption(env, parentId, themes, parentRecord);
   }
   if (created.length) {
     try {
@@ -7418,6 +7490,14 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       } catch (error) {
         console.warn("Studio AI source seed failed", error);
       }
+    }
+
+    // Seeding authors the caption whenever it themed AI slots. An all-manual photo set
+    // never reaches that path, so it needs its own caption before arming stamps one.
+    try {
+      if (contentItemId) await item4EnsureStudioPostCaption(env, requestRecord, contentItemId);
+    } catch (error) {
+      console.warn("Studio post caption ensure failed", error);
     }
 
     try {
@@ -13118,7 +13198,33 @@ async function studioRunPublishOrchestrator(env, target) {
   }
 }
 
+// The platform handoff emails present the caption as a copy-and-paste block, so a blank
+// Output_Caption reaches you as an empty box with nothing to post. Guarantee one at dispatch.
+async function studioEnsureOutputCaption(env, record) {
+  if (String(f(record, "Output_Caption") || "").trim()) return record;
+  const parentId = (f(record, "Content_Item") || [])[0] || null;
+  const parent = parentId
+    ? await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId).catch(() => null)
+    : null;
+  const caption = String(f(parent || {}, "Caption") || "").trim()
+    || String(f(record, "Output_Title") || "").trim();
+  if (!caption) return record;
+  const fields = { Output_Caption: caption };
+  const hashtags = String(f(parent || {}, "Hashtags") || "").trim();
+  if (hashtags && !String(f(record, "Output_Hashtags") || "").trim()) fields.Output_Hashtags = hashtags;
+  try {
+    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  } catch (error) {
+    console.warn("output caption backfill failed", record.id, error);
+    return record;
+  }
+}
+
 async function studioDispatchApprovedPublish(env, record) {
+  record = await studioEnsureOutputCaption(env, record);
   await studioArmPublishScenarios(env, "AP0");
   const ap0 = await studioPulseAp0PublicAsset(env, record);
   if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
