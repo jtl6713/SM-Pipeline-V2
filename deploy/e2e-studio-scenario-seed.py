@@ -155,10 +155,12 @@ def must(step: str, result: dict) -> dict:
 
 
 def retryable(result: dict) -> bool:
-    body = result.get("body") if isinstance(result.get("body"), dict) else {}
     status = int(result.get("status") or 0)
+    body = result.get("body") if isinstance(result.get("body"), dict) else {}
+    if result.get("ok") and status in {0, 200, 201, 202} and body.get("ok") is not False:
+        return False
     text = json.dumps(body)
-    return bool(body.get("retryable")) or status in {404, 408, 429, 500, 502, 503, 504, 520, 530} or "1101" in text or "1042" in text or "error code" in text.lower() or "429" in text
+    return bool(body.get("retryable")) or status in {404, 408, 429, 500, 502, 503, 504, 520, 530} or "1101" in text or "1042" in text or "error code" in text.lower()
 
 
 def must_retry(step: str, call, attempts: int = 12, delay_s: int = 3) -> dict:
@@ -437,6 +439,10 @@ def main() -> int:
         for attempt in range(1, 9):
             result = bridge("POST", f"/api/production-requests/{pr_id}/promote", {}, timeout=180)
             body = result.get("body") if isinstance(result.get("body"), dict) else {}
+            if body.get("promoted") or str(body.get("promotion_state") or "") == "promoted":
+                promote = body
+                log(f"promote accepted already={body.get('already_promoted')}")
+                break
             waiting = result.get("status") == 409 and any(
                 token in json.dumps(body).lower()
                 for token in ("not ready", "still preparing", "in progress", "try again")
