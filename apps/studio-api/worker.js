@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.108-native-cover-overwrite-drive-still",
+          version: "0.10.109-remotion-r3-formats-budget",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -3568,9 +3568,14 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
   // Native feed stills often already hold the source Drive photo. That is not
   // an AI grid cover; replace it whenever the parent has a designed thumbnail.
   if (current && !item4UrlIsStudioPhotoCrop(current) && !native) return false;
+  const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
+  const fields = { Thumbnail_URL: ai };
+  if (native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) {
+    fields.Output_Status = "Ready for Review";
+  }
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
     method: "PATCH",
-    body: JSON.stringify({ fields: { Thumbnail_URL: ai }, typecast: true }),
+    body: JSON.stringify({ fields, typecast: true }),
   });
   return true;
 }
@@ -12043,7 +12048,7 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
 }
 
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
-const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story")))';
+const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Story",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
 const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0))';
 const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
 const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
@@ -12657,6 +12662,10 @@ async function studioContinuationMediaGate(env, po, cache) {
     cache.parents.set(parentId, await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId));
   }
   const parent = cache.parents.get(parentId);
+  const outputId = Number(f(po, "Output_ID") || 0);
+  if (outputId && outputId < 227) {
+    return { action: "media_ok", reason: "legacy_skip", contentItemId: parentId };
+  }
   const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
   const wantVoiceover = item4StudioDirectiveYes(f(parent, "Include_Voiceover")) && !isStory;
   if (wantVoiceover && !String(f(parent, "Voiceover_URL") || "").trim()) {
@@ -12725,39 +12734,41 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   }
   const pulsedP2 = pulses.some((row) => row.key === "P2" && row.pulsed);
   const inspected = media.slice();
-  if (pulsedP2) {
-    pulses.push({ key: "jobs", skipped: "p2_budget" });
-  } else {
+  if (!pulsedP2) {
+    let inspectedRemotion = 0;
     for (const po of candidates || []) {
       const gate = media.find((row) => row.id === po.id);
       if (!gate || gate.action !== "media_ok") continue;
+      if (inspectedRemotion >= 4) break;
       try {
         const result = await studioContinuationInspectOutput(env, po, cache);
         const idx = inspected.findIndex((row) => row.id === po.id);
         if (idx >= 0) inspected[idx] = { id: po.id, ...result };
+        inspectedRemotion += 1;
       } catch (error) {
         const idx = inspected.findIndex((row) => row.id === po.id);
         const payload = { id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) };
         if (idx >= 0) inspected[idx] = payload;
         else inspected.push(payload);
+        inspectedRemotion += 1;
       }
     }
     try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
       console.warn("R2 remotion requeue failed", error);
     }
-    try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
-      pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
+  }
+  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
+    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
+  }
+  const waitingAi = inspected.some((row) => row.action === "wait_ai");
+  const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
+  const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
+  if (!pulsedP2 && (waitingAi || waitingPackage)) {
+    try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
+      pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
     }
-    const waitingAi = inspected.some((row) => row.action === "wait_ai");
-    const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
-    const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
-    if (waitingAi || waitingPackage) {
-      try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
-        pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
-      }
-      try { pulses.push(...await pulseOnDemandMediaChain(env)); } catch (error) {
-        pulses.push({ key: "SMV1", error: error instanceof Error ? error.message : String(error) });
-      }
+    try { pulses.push(...await pulseOnDemandMediaChain(env)); } catch (error) {
+      pulses.push({ key: "SMV1", error: error instanceof Error ? error.message : String(error) });
     }
   }
   console.log("Studio continuation", JSON.stringify({
