@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.99-reconcile-no-double-post",
+          version: "0.10.101-master-assets-resume",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -3028,14 +3028,20 @@ async function getItem4MasterAssets(request, env, url, authorization) {
   let assets = item4AssetManifest(record).sort((a,b) => Number(a.order||0)-Number(b.order||0));
   const currentStatus = String(f(record, "Studio_Master_Asset_Status") || "").trim();
 
-  // Polling this endpoint is also the resumable reconciliation path.  If Make has
-  // already moved a staged master into Drive, promote that checkpoint into the
-  // Production Request manifest / Media Assets and remove the temporary R2 copy.
+  // Polling this endpoint is also the resumable authority path. Reconciliation
+  // only consumes Drive checkpoints SMV1 already wrote. If cadence is parked,
+  // a Pending master stays Pending forever unless this GET resumes the drain
+  // the same way the Item 4 workspace poller does.
   if (assets.length && currentStatus !== "Ready") {
     try {
       const reconciled = await item4ReconcileMasterAuthority(env, recordId, record);
       record = reconciled.record;
       assets = reconciled.assets.sort((a,b) => Number(a.order||0)-Number(b.order||0));
+      if (String(f(record, "Studio_Master_Asset_Status") || reconciled.status || "") === "Uploading") {
+        const resumed = await item4ResumePendingMasterAuthority(env, recordId, record);
+        record = resumed.record || record;
+        assets = (resumed.assets || assets).slice().sort((a,b) => Number(a.order||0)-Number(b.order||0));
+      }
     } catch (error) {
       console.warn("Item 4 master authority poll reconciliation failed", error);
     }

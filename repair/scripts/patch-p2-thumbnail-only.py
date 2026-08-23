@@ -77,6 +77,25 @@ def already_patched(flow):
     return bool(find(flow, 40) and find(flow, 41) and find(flow, 45))
 
 
+def publish_blueprint(headers, base, bp):
+    send = copy.deepcopy(bp)
+    send.pop("scheduling", None)
+    send.pop("interface", None)
+    payload = {"blueprint": json.dumps(send, separators=(",", ":"))}
+    status, _ = get_json(f"{base}/scenarios/{SID}?confirmed=true", headers, method="PATCH", body=payload)
+    # PATCH can report isinvalid before connections finish. Start relinks the webhook scenario.
+    try:
+        get_json(f"{base}/scenarios/{SID}/start", headers, method="POST", body={})
+    except SystemExit:
+        pass
+    _, meta = get_json(f"{base}/scenarios/{SID}", headers)
+    live = meta.get("scenario") or (meta.get("response") or {}).get("scenario") or meta
+    print("patch", status, "invalid", live.get("isinvalid"), "active", live.get("isActive"), "linked", live.get("islinked"), "name", live.get("name"))
+    if live.get("isinvalid"):
+        raise SystemExit("P2 became invalid after patch")
+    return live
+
+
 def patch_blueprint(bp):
     flow = bp.get("flow") or []
     if already_patched(flow):
@@ -228,30 +247,24 @@ def main():
     _, wrap = get_json(f"{base}/scenarios/{SID}/blueprint?draft=false", headers)
     bp = copy.deepcopy(unwrap_blueprint(wrap))
     patched, changed = patch_blueprint(bp)
-    if not changed:
-        print("already_patched")
+    if changed:
+        publish_blueprint(headers, base, patched)
+    else:
         _, meta = get_json(f"{base}/scenarios/{SID}", headers)
         live = meta.get("scenario") or (meta.get("response") or {}).get("scenario") or meta
-        print("invalid", live.get("isinvalid"), "active", live.get("isActive"))
-        return
-    send = copy.deepcopy(patched)
-    send.pop("scheduling", None)
-    send.pop("interface", None)
-    payload = {"blueprint": json.dumps(send, separators=(",", ":"))}
-    status, _ = get_json(f"{base}/scenarios/{SID}?confirmed=true", headers, method="PATCH", body=payload)
-    _, meta = get_json(f"{base}/scenarios/{SID}", headers)
-    live = meta.get("scenario") or (meta.get("response") or {}).get("scenario") or meta
-    print("patch", status, "invalid", live.get("isinvalid"), "active", live.get("isActive"), "name", live.get("name"))
-    if live.get("isinvalid"):
-        raise SystemExit("P2 became invalid after patch")
-    if not live.get("isActive"):
-        get_json(f"{base}/scenarios/{SID}/start", headers, method="POST", body={})
-        print("started")
+        print("already_patched", "invalid", live.get("isinvalid"), "active", live.get("isActive"), "linked", live.get("islinked"))
+        if not live.get("isActive"):
+            get_json(f"{base}/scenarios/{SID}/start", headers, method="POST", body={})
+            print("started")
     _, wrap2 = get_json(f"{base}/scenarios/{SID}/blueprint?draft=false", headers)
     live_bp = unwrap_blueprint(wrap2)
     if not already_patched(live_bp.get("flow")):
         raise SystemExit("silent thumbnail modules missing after patch")
-    print("verified_modules", 40, 41, 45)
+    _, meta2 = get_json(f"{base}/scenarios/{SID}", headers)
+    live2 = meta2.get("scenario") or (meta2.get("response") or {}).get("scenario") or meta2
+    print("verified_modules", 40, 41, 45, "invalid", live2.get("isinvalid"), "linked", live2.get("islinked"), "active", live2.get("isActive"))
+    if live2.get("isinvalid"):
+        raise SystemExit("P2 is invalid")
 
 
 if __name__ == "__main__":
