@@ -4328,6 +4328,11 @@ async function item4ListPendingQueueRequestIds(env) {
 async function item4DrainAllPendingWork(env, options = {}) {
   // Worker owns the Item 4 queue. Browser polling and HTTP timeboxes may stop;
   // cron must keep draining until every pending master/variant row is gone.
+  try {
+    await item4SetSmv1SelectorFormula(env, ITEM4_SMV1_PRODUCTION_FORMULA);
+  } catch (error) {
+    console.warn("SMV1 production selector restore deferred before queue drain", error);
+  }
   const maxMs = Number(options.maxMs || ITEM4_DRAIN_CRON_BUDGET_MS);
   const started = Date.now();
   const requestIds = await item4ListPendingQueueRequestIds(env);
@@ -4747,11 +4752,23 @@ async function item4ResumePendingMasterAuthority(env, recordId, record = null) {
     };
   }
 
-  // SMV1 Module 1 intentionally processes maxRecords=1. Pulse it enough times
-  // to drain this request's unfinished masters, while keeping a hard bound so a
-  // 3-second browser status poll cannot create an unbounded worker loop.
-  const maxRuns = Math.min(6, Math.max(1, outstanding.length));
-  const executionIds = await item4DrainVariantWorker(env, recordId, maxRuns, { maxMs: ITEM4_DRAIN_STATUS_BUDGET_MS });
+  // Drive Uploaded masters already have the Google Drive file. SMV1's production
+  // selector only matches Pending, so pulsing it here is a no-op that can 1101
+  // the status request and leave Module 1 pinned to this Production Request.
+  // Reconcile those rows in Studio. Only seize SMV1 when a master is still Pending.
+  const needsSmv1 = outstanding.filter((row) =>
+    ["Pending", "Processing"].includes(item4QueueStatus(row))
+  );
+  const executionIds = [];
+  if (needsSmv1.length) {
+    try {
+      const maxRuns = Math.min(6, Math.max(1, needsSmv1.length));
+      const drained = await item4DrainVariantWorker(env, recordId, maxRuns, { maxMs: ITEM4_DRAIN_STATUS_BUDGET_MS });
+      if (Array.isArray(drained)) executionIds.push(...drained);
+    } catch (error) {
+      console.warn("Item 4 master-media drain deferred during resume", error);
+    }
+  }
   const reconciled = await item4ReconcileMasterAuthority(env, recordId);
 
   return {

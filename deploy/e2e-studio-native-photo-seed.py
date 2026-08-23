@@ -179,13 +179,16 @@ def poll_until(step: str, path: str, predicate, timeout_s: int = 480, interval_s
         except Exception:
             pass
         record = body.get("record") if isinstance(body.get("record"), dict) else {}
+        def present(value):
+            text = str(value or "").strip()
+            return text if text and text.lower() != "none" else ""
         status = (
-            body.get("status")
-            or body.get("variant_status")
-            or body.get("assets_status")
-            or record.get("studio_variant_status")
-            or record.get("studio_master_asset_status")
-            or record.get("status")
+            present(body.get("status"))
+            or present(body.get("variant_status"))
+            or present(body.get("assets_status"))
+            or present(record.get("studio_master_asset_status"))
+            or present(record.get("studio_variant_status"))
+            or present(record.get("status"))
             or result.get("status")
         )
         log(f"{step} waiting status={status}")
@@ -301,18 +304,17 @@ def main() -> int:
             rec = body.get("record") or {}
             assets = rec.get("studio_master_assets") or body.get("assets") or []
             status = str(rec.get("studio_master_asset_status") or body.get("status") or "")
-            count = int(rec.get("studio_master_asset_count") or len(assets) or 0)
-            authoritative = sum(
+            count = int(rec.get("studio_master_asset_count") or body.get("count") or len(assets) or 0)
+            authoritative = int(body.get("authoritative_count") or 0) or sum(
                 1
                 for asset in assets
                 if asset.get("google_drive_file_id") and asset.get("media_asset_record_id")
             )
             return count >= 3 and (status == "Ready" or authoritative >= 3)
 
-        # Light GET on the production request; /item4 can 1101 while SMV1 drains.
-        poll_until("master-assets", f"/api/production-requests/{pr_id}", masters_ready, timeout_s=480, interval_s=10)
-        # UI-equivalent self-heal without failing the seed if Studio throws.
-        bridge("GET", f"/api/production-requests/{pr_id}/assets")
+        # Same route the Item 4 UI polls. It reconciles Drive Uploaded masters
+        # into the Production Request; the light GET does not.
+        poll_until("master-assets", f"/api/production-requests/{pr_id}/assets", masters_ready, timeout_s=480, interval_s=10)
 
         current = must_retry("get-production-request-before-plan", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
         plan_status = str((current.get("record") or {}).get("studio_output_plan_status") or "")
