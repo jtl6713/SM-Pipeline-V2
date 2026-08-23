@@ -2,6 +2,19 @@ name: E2E Studio Native Photo Seed
 
 on:
   workflow_dispatch:
+    inputs:
+      scenario_id:
+        description: rainy-native-carousel or a platform-matrix scenario
+        required: false
+        type: choice
+        default: rainy-native-carousel
+        options:
+          - rainy-native-carousel
+          - mx1-single-native
+          - mx2-single-reel
+          - mx3-multi-slideshow
+          - mx4-stories-plus-feed
+          - mx5-youtube-standard
   push:
     paths:
       - "deploy/e2e-studio-native-photo-seed.txt"
@@ -26,6 +39,7 @@ jobs:
       BRIDGE_WORKER: chicagoshining-e2e-native-photo-bridge
       BRIDGE_RETRY_MAX: "12"
       BRIDGE_RETRY_SLEEP_S: "3"
+      SEED_SCENARIO: ${{ inputs.scenario_id }}
     steps:
       - uses: actions/checkout@v6
 
@@ -133,7 +147,11 @@ jobs:
           done
           echo "bridge_probe_http=$code"
           test "$code" -eq 200
-          python deploy/e2e-studio-native-photo-seed.py
+          if [[ -z "${SEED_SCENARIO:-}" || "$SEED_SCENARIO" == "rainy-native-carousel" ]]; then
+            python deploy/e2e-studio-native-photo-seed.py
+          else
+            python deploy/e2e-studio-scenario-seed.py
+          fi
         env:
           SEED_RESULT_PATH: /tmp/seed-result.json
 
