@@ -3847,6 +3847,10 @@ const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 90000;
 const ITEM4_DRAIN_CRON_BUDGET_MS = 90000;
 const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
+// Cron must also see Master Original rows stuck at Drive Uploaded — those need
+// Studio API reconciliation, not another SMV1 upload. SMV1's own selector stays
+// on Pending-only masters so it does not re-upload.
+const ITEM4_QUEUE_DRAIN_SCAN_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR(AND({Asset_Kind}="Master Original",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending")))';
 const ITEM4_P3_SCENARIO_ID = 5531703;
 const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
 const ITEM4_P2_SCENARIO_ID = 5530955;
@@ -4298,7 +4302,7 @@ async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
 async function item4ListPendingQueueRequestIds(env) {
   const rows = await listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
     limit: 100,
-    filterFormula: ITEM4_SMV1_PRODUCTION_FORMULA,
+    filterFormula: ITEM4_QUEUE_DRAIN_SCAN_FORMULA,
   }).catch((error) => {
     console.warn("Item 4 pending queue scan failed", error);
     return [];
