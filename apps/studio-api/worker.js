@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.103-mx4-plan-extras",
+          version: "0.10.104-continuation-newest-first",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -7436,7 +7436,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Format: String(planItem.format || route.content_type || "").trim(),
     Platform_Output_Type: String(planItem.mapping_type || route.proven_mapping || effective.output_type || "").trim(),
     Aspect_Ratio: String(planItem.aspect_ratio || sourcePackage?.ratio || "").trim(),
-    Output_Status: nativeReady ? "Ready for Review" : (remotionReady ? "In Production" : (nativeMissing ? "In Production" : "Ready for Review")),
+    Output_Status: nativeReady ? "Ready for Review" : "In Production",
     Render_Status: nativeReady ? "Native Photo Route" : null,
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (function thumbnailUrl() {
@@ -12378,7 +12378,7 @@ async function studioContinuationStampPackage(env, po, context) {
     fields.Final_File_ID = null;
     fields.Remotion_Job_ID = null;
   } else {
-    fields.Output_Status = "Ready for Review";
+    fields.Output_Status = "In Production";
     fields.Render_Status = null;
     fields.Asset_Selection_Status = null;
     fields.Composition_ID = null;
@@ -12588,6 +12588,8 @@ async function listStudioContinuationCandidates(env, options = {}) {
   if (contentItemId && /^rec[A-Za-z0-9]+$/.test(contentItemId)) {
     return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
+      sortField: "Output_ID",
+      sortDirection: "desc",
       filterFormula: `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},FIND("${contentItemId}", ARRAYJOIN({Content_Item})))`,
     });
   }
@@ -12602,6 +12604,8 @@ async function listStudioContinuationCandidates(env, options = {}) {
   }
   return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit,
+    sortField: "Output_ID",
+    sortDirection: "desc",
     filterFormula: STUDIO_CONTINUATION_CANDIDATE_FORMULA,
   });
 }
