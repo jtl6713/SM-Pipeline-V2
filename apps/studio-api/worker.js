@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.113-r5-before-r4-skip-stories",
+          version: "0.10.114-stranded-remotion-ratio-fallback",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -1125,11 +1125,11 @@ function studioOutputIsNativePhoto(record) {
 }
 
 function studioOutputHasReviewableDeliverable(record) {
+  if (studioOutputIsNativePhoto(record)) return true;
   if (String(f(record, "Final_File_URL") || "").trim()) return true;
-  if (String(f(record, "Studio_Preview_URL") || "").trim()) return true;
-  // Native photo packages can review without an MP4. Remotion video routes
-  // must not look ready just because carousel slides are linked.
-  return studioOutputIsNativePhoto(record);
+  // A stamped AI cover or leftover preview is not a Remotion deliverable.
+  // Video routes stay incomplete until Final_File_URL exists.
+  return false;
 }
 
 function studioClipPublicCdnUrl(clipOrUrl) {
@@ -7147,6 +7147,61 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
   return { requestRecord: current, needed, waiting: Math.max(0, expected - item4AssetManifest(current).length) };
 }
 
+function item4NormalizeAspectRatioKey(ratio) {
+  return String(ratio || "").trim().toLowerCase().replace(/\s+/g, "").replace(/x/g, ":");
+}
+
+function item4VariantLooksRenderable(variant) {
+  if (!variant || typeof variant !== "object") return false;
+  const url = String(
+    variant.preview_url
+    || studioClipPublicCdnUrl(variant.google_drive_url || variant.google_drive_file_id)
+    || ""
+  ).trim();
+  const mediaAssetId = String(variant.media_asset_record_id || variant.media_asset_record_id || "").trim();
+  return Boolean(url) && /^rec[A-Za-z0-9]+$/.test(mediaAssetId);
+}
+
+function item4PickSourceVariantForRatio(source, requestedRatio, options = {}) {
+  const allowFallback = options.allowFallback !== false;
+  const variants = source?.variants && typeof source.variants === "object" ? source.variants : {};
+  const wanted = item4NormalizeAspectRatioKey(requestedRatio);
+  const aliases = {
+    "9:16": ["9:16", "9x16", "9X16"],
+    "16:9": ["16:9", "16x9", "16X9"],
+    "4:5": ["4:5", "4x5", "4X5"],
+    "1:1": ["1:1", "1x1", "1X1"],
+  };
+  const tryKeys = (keys) => {
+    for (const key of keys || []) {
+      if (item4VariantLooksRenderable(variants[key])) {
+        return { variant: variants[key], ratio: key, fallback: item4NormalizeAspectRatioKey(key) !== wanted };
+      }
+      const match = Object.keys(variants).find((existing) => item4NormalizeAspectRatioKey(existing) === item4NormalizeAspectRatioKey(key));
+      if (match && item4VariantLooksRenderable(variants[match])) {
+        return { variant: variants[match], ratio: match, fallback: item4NormalizeAspectRatioKey(match) !== wanted };
+      }
+    }
+    return null;
+  };
+  const exact = tryKeys(aliases[wanted] || [requestedRatio, wanted]);
+  if (exact) return exact;
+  if (!allowFallback) return null;
+  const fallbackOrder = wanted === "9:16"
+    ? ["4:5", "1:1", "16:9"]
+    : wanted === "16:9"
+      ? ["1:1", "4:5", "9:16"]
+      : ["9:16", "16:9", "1:1", "4:5"];
+  for (const next of fallbackOrder) {
+    const hit = tryKeys(aliases[next] || [next]);
+    if (hit) return { ...hit, fallback: true };
+  }
+  for (const [key, variant] of Object.entries(variants)) {
+    if (item4VariantLooksRenderable(variant)) return { variant, ratio: key, fallback: true };
+  }
+  return null;
+}
+
 function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, parentContentItem = null) {
   if (String(f(requestRecord, "Studio_Variant_Status") || "").trim() !== "Ready") return null;
   const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
@@ -7171,8 +7226,12 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   if (!storyTeaser && sourceRows.length < expected) return null;
   const omittedSourceIds = [];
   const eligibleSources = [];
+  const nativePhotoRouteEarly = studioOutputIsNativePhotoRoute(platform, outputType, null);
   for (const source of sourceRows) {
-    const variant = source?.variants?.[ratio];
+    const picked = item4PickSourceVariantForRatio(source, ratio, {
+      allowFallback: !nativePhotoRouteEarly,
+    });
+    const variant = picked?.variant;
     const driveId = String(
       variant?.google_drive_file_id
       || extractGoogleDriveFileId(variant?.google_drive_url)
@@ -12476,7 +12535,7 @@ async function studioContinuationStampPackage(env, po, context) {
       || `Missing ${String(seed.Aspect_Ratio || "plan")} crop for this output.`;
   } else if (sourcePackage?.status === "Ready") {
     fields.Output_Status = "In Production";
-    fields.Render_Status = null;
+    fields.Render_Status = "Ready for Render";
     fields.Asset_Selection_Status = "Selected";
     fields.Composition_ID = "ChicagoShiningPhotoSequence";
     // Package rebuild: drop leftover review mail / preview so Pipeline does not
