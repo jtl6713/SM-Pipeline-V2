@@ -1082,7 +1082,9 @@ function clampLimit(url, fallback = 50, max = 100) {
   return Math.max(1, Math.min(max, Number.isFinite(value) ? Math.trunc(value) : fallback));
 }
 
-async function listRecords(env, tableId, { limit = 50, view = null, sortField = null, sortDirection = "desc", filterFormula = null } = {}) {
+async function listRecords(env, tableId, options = {}) {
+  const { limit = 50, view = null, sortDirection = "desc", filterFormula = null } = options;
+  const sortField = options.sortField || options.sortField || null;
   const params = new URLSearchParams();
   params.set("pageSize", String(Math.min(100, limit)));
   params.set("maxRecords", String(limit));
