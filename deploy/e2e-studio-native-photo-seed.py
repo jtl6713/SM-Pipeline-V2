@@ -169,7 +169,7 @@ def poll_until(step: str, path: str, predicate, timeout_s: int = 480, interval_s
         result = bridge("GET", path, timeout=90)
         body = result.get("body") if isinstance(result.get("body"), dict) else {}
         last = body
-        if retryable(result) or not result.get("ok"):
+        if (not result.get("ok") or retryable(result)) and int(result.get("status") or 0) >= 400:
             log(f"{step} waiting transient={result.get('status')}")
             time.sleep(interval_s)
             continue
@@ -316,7 +316,7 @@ def main() -> int:
 
         # Same route the Item 4 UI polls. It reconciles Drive Uploaded masters
         # into the Production Request; the light GET does not.
-        poll_until("master-assets", f"/api/production-requests/{pr_id}/assets", masters_ready, timeout_s=480, interval_s=10)
+        poll_until("master-assets", f"/api/production-requests/{pr_id}/assets", masters_ready, timeout_s=720, interval_s=10)
 
         current = must_retry("get-production-request-before-plan", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
         plan_status = str((current.get("record") or {}).get("studio_output_plan_status") or "")
