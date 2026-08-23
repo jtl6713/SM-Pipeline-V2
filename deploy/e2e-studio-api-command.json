@@ -1,10 +1,14 @@
 {
-  "correlation_id": "SUNSET-E2E-ITEM4-STATUS-20260816-0159",
+  "correlation_id": "RC-NATIVE-APPROVE-224-20260823",
   "requests": [
     {
-      "name": "item4-status",
-      "method": "GET",
-      "path": "/api/production-requests/recc9H8SXdUnKEMhQ/item4"
+      "name": "approve-224-instagram-carousel",
+      "method": "POST",
+      "path": "/api/outputs/recALRkjWgVg066OA/creative/review",
+      "body": {
+        "action": "approve_for_publishing",
+        "notes": "Joseph authorized live Instagram carousel publish of output 224 for native-photo validation. He will delete the post shortly."
+      }
     }
   ]
 }
