@@ -47,7 +47,7 @@ Hard pass for any grid-eligible post: designed AI cover (bold colorful 3D letter
 
 - **Seen:** MX2 stayed Ready for Voiceover with empty VO/thumb; MX3 never started Remotion; MX1 FB 228 never received the parent 3D stamp; MX4 silent P2 never ran — while cron was healthy.
 - **Why:** `listStudioContinuationCandidates` used Airtable's default order with `limit=40`, so leftover older In-Production rows consumed the window.
-- **Fix:** Worker 0.10.104 sorts `Output_ID` desc so the newest matrix rows are inspected first, then P2 is pulsed for `wait_voiceover` / `wait_thumbnail`.
+- **Fix:** Worker 0.10.104 sorts `Output_ID` desc so the newest matrix rows are inspected first, then P2 is pulsed for `wait_voiceover` / `wait_thumbnail`. Worker 0.10.105 re-arms Idea Approved parents (MX4) to Thumbnail Ready / Ready for Voiceover before that pulse so P2’s filter can see them.
 
 ### RC-MX-D5 — Remotion outputs seeded Ready for Review when the source package is not Ready
 

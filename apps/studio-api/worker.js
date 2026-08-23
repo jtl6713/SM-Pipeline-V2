@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.104-continuation-newest-first",
+          version: "0.10.105-continuation-rearm-p2",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -12676,8 +12676,18 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     )];
     for (const parentId of mediaParents) {
       try {
-        await pulseStudioP2Handoff(env, parentId, { fields: {} });
-        pulses.push({ key: "P2", pulsed: true, content_item: parentId });
+        const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+        const requestId = arrayOrEmpty(f(parent, "Production Requests"))[0];
+        const requestRecord = requestId
+          ? await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId)
+          : { fields: {} };
+        const status = String(f(parent, "Content_Status") || "").trim();
+        const rearm = ["Idea Approved", "Ready for Script"].includes(status);
+        if (rearm) {
+          await armStudioParentForP3Handoff(env, parentId, requestRecord);
+        }
+        await pulseStudioP2Handoff(env, parentId, requestRecord);
+        pulses.push({ key: "P2", pulsed: true, content_item: parentId, rearmed: rearm });
       } catch (error) {
         pulses.push({ key: "P2", error: error instanceof Error ? error.message : String(error) });
       }
