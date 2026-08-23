@@ -32,15 +32,19 @@ def main() -> int:
         return 1
 
     profile = requests.get(
-        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-        headers={"Authorization": f"Bearer {token}"},
+        f"https://oauth2.googleapis.com/tokeninfo?access_token={token}",
         timeout=30,
     )
-    print("gmail_profile_status", profile.status_code)
+    print("tokeninfo_status", profile.status_code)
     if profile.ok:
-        print("email", profile.json().get("emailAddress"))
-        print("gmail_send_scope_ok")
-        return 0
+        payload = profile.json()
+        scopes = str(payload.get("scope") or "")
+        print("scopes", scopes)
+        if "gmail.send" in scopes:
+            print("gmail_send_scope_ok")
+            return 0
+        print("gmail.send missing from token scopes")
+        return 1
 
     print(profile.text[:400])
     if profile.status_code == 403:

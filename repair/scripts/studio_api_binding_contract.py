@@ -2,7 +2,8 @@
 
 Live production uses 10 core bindings. ELEVENLABS_API_KEY is optional secret_text.
 Pipeline-runner vars (PIPELINE_RUNNER_URL, PIPELINE_RUNNER_SHARED_SECRET,
-STAGE_BACKEND_SMV1, STAGE_BACKEND_R2) may already exist on the live Worker; treat them as optional.
+STAGE_BACKEND_SMV1, STAGE_BACKEND_R2, STAGE_BACKEND_R3, STAGE_BACKEND_R4,
+STAGE_BACKEND_R5, STAGE_BACKEND_RR1, STAGE_BACKEND_P2) may already exist on the live Worker; treat them as optional.
 """
 
 from __future__ import annotations
@@ -27,6 +28,11 @@ OPTIONAL_BINDINGS = {
     "PIPELINE_RUNNER_URL": "plain_text",
     "STAGE_BACKEND_SMV1": "plain_text",
     "STAGE_BACKEND_R2": "plain_text",
+    "STAGE_BACKEND_R3": "plain_text",
+    "STAGE_BACKEND_R4": "plain_text",
+    "STAGE_BACKEND_R5": "plain_text",
+    "STAGE_BACKEND_RR1": "plain_text",
+    "STAGE_BACKEND_P2": "plain_text",
 }
 
 CONTRACT_ID = "studio-api-10-core-elevenlabs-optional"
