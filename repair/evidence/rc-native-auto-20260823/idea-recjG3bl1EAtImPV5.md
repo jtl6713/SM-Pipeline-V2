@@ -19,7 +19,7 @@
 | TC4 variants / CDN | Pass | 6/6 platform variants Ready before Promote; no SMV1 pulse |
 | TC5 RR1 | Pass | `Review_Status=Review Sent` on all three without an agent Make pulse |
 | TC6 reviewable | Pass | Package is in Studio review. `Auto_Publish_Enabled` and `Do_Not_Publish` unset. `Publish_Status` blank |
-| TC7 publishing Approve | Hard stop | Not executed |
+| TC7 publishing Approve (224 only) | **Partial pass** | Carousel posted as silent 4:5 stills. **Fail: no Instagram caption. Fail: no AI grid cover** (first crop used instead). 225/226 not approved |
 
 ## Outputs
 
@@ -50,6 +50,20 @@
 - **Seen:** Output 226 `Platform_Output_Type=TikTok Slideshow` with `Render_Status=Native Photo Route`.
 - **Why:** Proven mapping still uses the Slideshow content type name even on the native photo family.
 - **Impact:** Route is native (no Remotion). Label is misleading. Not a publish Approve.
+
+### RC-NATIVE-D4 — Native stills skip the AI grid cover
+
+- **Seen:** Live IG carousel 224 used the first 4:5 `ITEM4-VARIANT-fill-crop` JPEG as the profile-grid tile. Joseph’s grid requires a designed AI title card (bold lettering on a cinematic still), same family as the rest of [ChicagoShining](https://www.instagram.com/chicagoshining/).
+- **Airtable:** CI 89 `Include_Thumbnail=Yes`, `Thumbnail_Status=Ready`, `Thumbnail_URL` blank. Output 224 `Thumbnail_URL` = fill-crop, not an AI still.
+- **Why:** Native Photo Route publishes the cropped masters. P2 did not persist an AI `Thumbnail_URL`, and the carousel children were never prefixed with a cover slide. Promote `needAiThumb` only pulses P2 when status is already `Ready` and URL is blank; even then P2 did not write a public AI cover.
+- **Impact:** Fail for any native still/carousel that should appear on the grid. Remotion Reels/Shorts still generate title cards on a different path.
+
+### RC-NATIVE-D5 — No caption on the live Instagram images
+
+- **Seen:** Joseph: no caption on any image of the 224 carousel.
+- **Airtable:** 224 `Output_Caption` and parent `Caption` were both filled at Approve (`Rainy Chicago — native multi-image test` + follow prompt). Hashtags were filled. `Platform_Post_URL` stayed blank (`IG_Carousel_Status=Publishing`).
+- **Why:** Two gaps. (1) Native route does not burn per-slide overlay text onto JPEGs (`Selected_Assets_JSON` overlay strings are Remotion metadata). (2) AP-CAR did not apply the Airtable caption to the Graph carousel, so Instagram showed untitled slides.
+- **Impact:** Fail for publish quality even when Studio review had a caption.
 
 ### Seed infrastructure (already corrected)
 

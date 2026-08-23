@@ -1,0 +1,121 @@
+{
+  "mx1-single-native": {
+    "title": "Millennium Park — single still native test",
+    "summary": "One Chicago still. Silent native singles: Instagram Single Image, Facebook Single Image, TikTok Single Photo. No voiceover, no music. AI thumbnail required for the grid.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "No",
+    "background_music_mode": "No",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook", "TikTok"],
+    "overrides": {
+      "Instagram": "Single Image",
+      "Facebook": "Single Image",
+      "TikTok": "Single Photo"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "millennium-cloud-gate.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Cloud_Gate_(The_Bean)_Millenium_Park_Chicago.jpg?width=1280"
+      }
+    ]
+  },
+  "mx2-single-reel": {
+    "title": "Chicago Riverwalk — single reel with voice and music",
+    "summary": "One Chicago still rendered as video with voiceover and music: Instagram Reel, Facebook Reel, TikTok Video Draft, YouTube Short. AI thumbnail required for the grid.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "Yes",
+    "background_music_mode": "Yes",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+    "overrides": {
+      "Instagram": "Reel",
+      "Facebook": "Reel",
+      "TikTok": "Video Draft",
+      "YouTube": "Short"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "chicago-riverwalk.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago_Riverwalk.jpg?width=1280"
+      }
+    ]
+  },
+  "mx3-multi-slideshow": {
+    "title": "Downtown Chicago — multi still slideshow with voice",
+    "summary": "Three Chicago stills with voiceover and music: Instagram Reel, Facebook Slideshow Reel, TikTok Video Draft, YouTube Slideshow Video. AI thumbnail required for the grid.",
+    "content_type": "Photo Set",
+    "photo_count": 3,
+    "voiceover_mode": "Yes",
+    "background_music_mode": "Yes",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+    "overrides": {
+      "Instagram": "Reel",
+      "Facebook": "Slideshow Reel",
+      "TikTok": "Video Draft",
+      "YouTube": "Slideshow Video"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "chicago-skyline-day.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago_skyline_from_Lincoln_Park.jpg?width=1280"
+      },
+      {
+        "filename": "chicago-wrigley.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Wrigley_Field_panorama.jpg?width=1280"
+      },
+      {
+        "filename": "chicago-pritzker.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Jay_Pritzker_Pavilion.jpg?width=1280"
+      }
+    ]
+  },
+  "mx4-stories-plus-feed": {
+    "title": "Lakefront — stories plus native feed stills",
+    "summary": "One Chicago still. Silent native feed singles plus Instagram Story and Facebook Story extras. AI thumbnail required on feed posts that appear on the grid. Stories are not grid covers.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "No",
+    "background_music_mode": "No",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook", "TikTok"],
+    "overrides": {
+      "Instagram": "Single Image",
+      "Facebook": "Single Image",
+      "TikTok": "Single Photo"
+    },
+    "extras": ["Instagram::Story", "Facebook::Story"],
+    "photos": [
+      {
+        "filename": "chicago-lakefront.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Lake_Michigan_from_Chicago.jpg?width=1280"
+      }
+    ]
+  },
+  "mx5-youtube-standard": {
+    "title": "Chicago skyline — YouTube standard 16x9 with voice",
+    "summary": "One Chicago still with voiceover and music aimed at YouTube Standard Video 16:9 plus an Instagram Reel. AI thumbnail required for the grid and YouTube.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "Yes",
+    "background_music_mode": "Yes",
+    "thumbnail_mode": "Yes",
+    "platforms": ["YouTube", "Instagram"],
+    "overrides": {
+      "YouTube": "Standard Video",
+      "Instagram": "Reel"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "chicago-skyline-dusk.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago_skyline_ss.jpg?width=1280"
+      }
+    ]
+  }
+}
