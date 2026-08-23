@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.102-variant-poll-resume",
+          version: "0.10.103-mx4-plan-extras",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -2597,6 +2597,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
     options: Object.freeze({
       "Multi-Photo": { mapping_type: "TikTok Slideshow", format: "Photo Set", rationale: "Uses TikTok's photo/slideshow experience with a 9:16 safe presentation." },
       "Video Draft": { mapping_type: "TikTok Video", format: "Vertical Short Video", rationale: "Renders the source photos as a 9:16 TikTok video draft." },
+      "Single Photo": { mapping_type: "TikTok Slideshow", format: "Feed Post", rationale: "Use one hero photo as a TikTok photo post." },
     }),
   }),
   YouTube: Object.freeze({
@@ -3639,8 +3640,16 @@ function item4NormalizePlanExtras(payloadExtras, platforms, existingItems = []) 
   const extras = [];
   const seen = new Set((Array.isArray(existingItems) ? existingItems : []).map((item) => item4BridgePlanKey(item?.platform, item?.output_type)));
   for (const pair of Array.isArray(payloadExtras) ? payloadExtras : []) {
-    const platform = String(pair?.platform || "").trim();
-    const outputType = item4CanonicalOutputType(platform, pair?.output_type);
+    let platform = "";
+    let outputType = "";
+    if (typeof pair === "string" && pair.includes("::")) {
+      const [left, right] = pair.split("::", 2);
+      platform = String(left || "").trim();
+      outputType = item4CanonicalOutputType(platform, right);
+    } else if (pair && typeof pair === "object") {
+      platform = String(pair.platform || "").trim();
+      outputType = item4CanonicalOutputType(platform, pair.output_type);
+    }
     if (!platform || !ITEM4_PLAN_SPECS[platform]?.options?.[outputType] || item4IsUnsupportedCompanion(platform, outputType)) continue;
     if (allowed.size && !allowed.has(platform)) continue;
     const key = item4BridgePlanKey(platform, outputType);
