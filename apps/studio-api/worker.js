@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.109-remotion-r3-formats-budget",
+          version: "0.10.110-remotion-r3-first-native-promote",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -3559,20 +3559,29 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
   const ai = studioAiThumbnailUrl(f(parent || {}, "Thumbnail_URL"));
   if (!ai || !po?.id) return false;
   const current = String(f(po, "Thumbnail_URL") || "").trim();
-  if (current === ai) return false;
+  if (current === ai) {
+    const native = studioOutputIsNativePhotoRoute(
+      f(po, "Platform"),
+      f(po, "Studio_Output_Type"),
+      f(po, "Platform_Output_Type")
+    );
+    const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
+    if (!(native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || "")))) return false;
+  }
   const native = studioOutputIsNativePhotoRoute(
     f(po, "Platform"),
     f(po, "Studio_Output_Type"),
     f(po, "Platform_Output_Type")
   );
-  // Native feed stills often already hold the source Drive photo. That is not
-  // an AI grid cover; replace it whenever the parent has a designed thumbnail.
-  if (current && !item4UrlIsStudioPhotoCrop(current) && !native) return false;
   const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
-  const fields = { Thumbnail_URL: ai };
+  const coverMismatch = current !== ai;
+  if (current && !item4UrlIsStudioPhotoCrop(current) && !native && coverMismatch) return false;
+  const fields = {};
+  if (coverMismatch) fields.Thumbnail_URL = ai;
   if (native && !isStory && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) {
     fields.Output_Status = "Ready for Review";
   }
+  if (!Object.keys(fields).length) return false;
   await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
@@ -12623,12 +12632,12 @@ async function pulseStudioContinuationJobs(env, options = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const jobs = [
-    { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
-    { id: PHASE6_R2_SCENARIO_ID, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA, skipPhotoSequence: true },
     { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA },
     { id: PHASE6_R4_SCENARIO_ID, key: "R4", table: outputTable, formula: STUDIO_R4_WORK_FORMULA },
     { id: PHASE6_R5_SCENARIO_ID, key: "R5", table: outputTable, view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" },
     { id: PHASE6_RR1_SCENARIO_ID, key: "RR1", table: outputTable, formula: STUDIO_RR1_WORK_FORMULA },
+    { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
+    { id: PHASE6_R2_SCENARIO_ID, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA, skipPhotoSequence: true },
   ];
   const pulses = [];
   for (const job of jobs) {
@@ -12647,8 +12656,10 @@ async function pulseStudioContinuationJobs(env, options = {}) {
     try {
       await phase6PulseOnDemandScenario(env, job.id, { waitMs });
       pulses.push({ key: job.key, pulsed: true, matched: eligible.length });
+      if (job.key === "R3" || job.key === "R4") break;
     } catch (error) {
       pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
+      break;
     }
   }
   return pulses;
