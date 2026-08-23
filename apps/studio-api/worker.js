@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.97-publish-dispatch-reconcile",
+          version: "0.10.98-cron-budget-guard",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -701,16 +701,13 @@ export default {
         console.warn("production cadence cron failed", error);
       }
     })());
+    // syncProductionCadence already drains the item 4 queue on a forced run, so draining again
+    // here only doubled the cost of the tick that was already running out of subrequests.
     ctx.waitUntil((async () => {
       try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
       } catch (error) {
         console.warn("production continuation cron failed", error);
-      }
-      try {
-        await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
-      } catch (error) {
-        console.warn("item4 queue drain cron failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -11979,7 +11976,9 @@ const STUDIO_C2M_TABLE_ID = "tblcnQDBvUngpjDED";
 const PRODUCTION_CADENCE_HOLD_MS = 12 * 60 * 1000;
 const PRODUCTION_CADENCE_THROTTLE_MS = 20000;
 const PRODUCTION_CADENCE_PARKED = true;
+const PRODUCTION_CADENCE_PARK_ASSERT_MS = 10 * 60 * 1000;
 let productionCadenceLastSyncAt = 0;
+let productionCadenceParkAssertedAt = 0;
 let productionCadenceRenderHoldUntil = 0;
 let productionCadencePublishHoldUntil = 0;
 
@@ -12755,18 +12754,27 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
     if (!skipRenderPulse && (startRender || force)) {
       pulses.push(...await pulseOnDemandRenderChain(env, { waitMs: 0 }));
     }
-    const parked = [
-      ...PRODUCTION_CADENCE_ALWAYS_ON,
-      ...PRODUCTION_CADENCE_RENDER,
-      ...PRODUCTION_CADENCE_PUBLISH,
-      ...PRODUCTION_CADENCE_MEDIA,
-      ...PRODUCTION_CADENCE_CAROUSEL.filter((item) => item.key !== "C2"),
-      ...PRODUCTION_CADENCE_REPAIR,
-    ];
-    const results = await Promise.all([
-      ...parked.map((item) => cadenceSetActive(env, item.id, false)),
-      ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
-    ]);
+    // Asserting the parked state costs at least one Make call per scenario, and on a two-minute
+    // cron that burst was enough to exhaust the invocation's subrequest budget, after which every
+    // remaining call failed instantly -- including the publish probes below, which is why the
+    // publish orchestrators went unpulsed for a day. The target state here is a constant, so
+    // re-assert it on a slow interval and let on-demand arming cover anything that drifts between.
+    let results = [{ skipped: "park_assert_throttled" }];
+    if (now - productionCadenceParkAssertedAt >= PRODUCTION_CADENCE_PARK_ASSERT_MS) {
+      productionCadenceParkAssertedAt = now;
+      const parked = [
+        ...PRODUCTION_CADENCE_ALWAYS_ON,
+        ...PRODUCTION_CADENCE_RENDER,
+        ...PRODUCTION_CADENCE_PUBLISH,
+        ...PRODUCTION_CADENCE_MEDIA,
+        ...PRODUCTION_CADENCE_CAROUSEL.filter((item) => item.key !== "C2"),
+        ...PRODUCTION_CADENCE_REPAIR,
+      ];
+      results = await Promise.all([
+        ...parked.map((item) => cadenceSetActive(env, item.id, false)),
+        ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
+      ]);
+    }
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
     if (startCarousel || force) pulses.push(...await pulseOnDemandCarouselChain(env));
