@@ -21,6 +21,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
       BRIDGE_WORKER: chicagoshining-e2e-service-bridge-v2
+      BRIDGE_RETRY_MAX: "12"
+      BRIDGE_RETRY_SLEEP_S: "3"
     steps:
       - uses: actions/checkout@v6
 
@@ -46,7 +48,7 @@ jobs:
           token=secrets.token_urlsafe(36)
           Path('/tmp/token').write_text(token)
           c=json.loads(Path('deploy/e2e-studio-api-command-v2.json').read_text())
-          js='''export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname!==ROUTE)return new Response("Not found",{status:404});const specs=SPECS,results=[];for(const s of specs){const m=String(s.method||"GET").toUpperCase(),h=new Headers({"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Accept":"application/json","Origin":"https://studio.chicagoshining.com"});let b;if(m!=="GET"){h.set("Content-Type","application/json");b=JSON.stringify(s.body??{});}const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+s.path,{method:m,headers:h,body:b}));const t=await r.text();let p;try{p=t?JSON.parse(t):null}catch{p={raw:t.slice(0,10000)}}results.push({name:s.name||s.path,path:s.path,method:m,status:r.status,ok:r.ok,body:p});if(!r.ok&&s.continue_on_error!==true)break;}return Response.json({ok:results.every(x=>x.ok),correlation_id:CORR,results},{headers:{"Cache-Control":"no-store"}})}};'''
+          js='''export default {async fetch(request,env){const u=new URL(request.url);if(u.pathname===ROUTE+"/ready")return Response.json({ok:true,ready:true},{headers:{"Cache-Control":"no-store"}});if(u.pathname!==ROUTE)return new Response("Not found",{status:404});const specs=SPECS,results=[];for(const s of specs){const m=String(s.method||"GET").toUpperCase(),h=new Headers({"Cf-Access-Authenticated-User-Email":"joseph.t.logan@gmail.com","Accept":"application/json","Origin":"https://studio.chicagoshining.com"});let b;if(m!=="GET"){h.set("Content-Type","application/json");b=JSON.stringify(s.body??{});}const r=await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com"+s.path,{method:m,headers:h,body:b}));const t=await r.text();let p;try{p=t?JSON.parse(t):null}catch{p={raw:t.slice(0,10000)}}results.push({name:s.name||s.path,path:s.path,method:m,status:r.status,ok:r.ok,body:p});if(!r.ok&&s.continue_on_error!==true)break;}return Response.json({ok:results.every(x=>x.ok),correlation_id:CORR,results},{headers:{"Cache-Control":"no-store"}})}};'''
           js=js.replace('ROUTE',json.dumps('/'+token)).replace('SPECS',json.dumps(c['requests'],separators=(',',':'))).replace('CORR',json.dumps(c['correlation_id']))
           Path('/tmp/worker.js').write_text(js)
           PY
@@ -65,13 +67,22 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain).workers.dev/$(cat /tmp/token)"
-          code=000
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            code=$(curl -sS --max-time 420 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
-            [[ "$code" == "200" ]] && break
-            echo "bridge_not_ready attempt=$i http=$code"
-            sleep 2
+          ready=000
+          for i in $(seq 1 "$BRIDGE_RETRY_MAX"); do
+            ready=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL/ready" || true)
+            echo "bridge_ready_attempt=$i/$BRIDGE_RETRY_MAX http=$ready"
+            [[ "$ready" == "200" ]] && break
+            if [[ "$ready" != "404" && "$ready" != "000" && "$ready" != "502" && "$ready" != "503" && "$ready" != "504" && "$ready" != "530" && "$ready" != "1033" ]]; then
+              echo "bridge gave up (non-retryable) last_http=$ready"
+              exit 1
+            fi
+            if [[ "$i" -eq "$BRIDGE_RETRY_MAX" ]]; then
+              echo "bridge gave up after ${BRIDGE_RETRY_MAX} attempts last_http=$ready"
+              exit 1
+            fi
+            sleep "$BRIDGE_RETRY_SLEEP_S"
           done
+          code=$(curl -sS --max-time 420 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
           echo "bridge_http=$code"
           test "$code" -eq 200
           jq -e '.results|type=="array"' /tmp/result.json >/dev/null

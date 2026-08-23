@@ -139,10 +139,10 @@ def retryable(result: dict) -> bool:
     body = result.get("body") if isinstance(result.get("body"), dict) else {}
     status = int(result.get("status") or 0)
     text = json.dumps(body)
-    return bool(body.get("retryable")) or status in {429, 500, 502, 503, 504} or "1101" in text or "1042" in text or "error code" in text.lower() or "429" in text
+    return bool(body.get("retryable")) or status in {404, 408, 429, 500, 502, 503, 504, 520, 530} or "1101" in text or "1042" in text or "error code" in text.lower() or "429" in text
 
 
-def must_retry(step: str, call, attempts: int = 8, delay_s: int = 8) -> dict:
+def must_retry(step: str, call, attempts: int = 12, delay_s: int = 3) -> dict:
     last_error = None
     for attempt in range(1, attempts + 1):
         try:
@@ -155,7 +155,7 @@ def must_retry(step: str, call, attempts: int = 8, delay_s: int = 8) -> dict:
             return must(step, result)
         except RuntimeError as exc:
             last_error = exc
-            if attempt >= attempts or ("1101" not in str(exc) and "retryable" not in str(exc) and "HTTP 5" not in str(exc)):
+            if attempt >= attempts or ("1101" not in str(exc) and "retryable" not in str(exc) and "HTTP 5" not in str(exc) and "HTTP 404" not in str(exc)):
                 raise
             log(f"{step} retry {attempt}: {exc}")
             time.sleep(delay_s)

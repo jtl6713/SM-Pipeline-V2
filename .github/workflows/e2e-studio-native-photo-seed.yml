@@ -24,6 +24,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TARGET_WORKER: chicagoshining-studio-api
       BRIDGE_WORKER: chicagoshining-e2e-native-photo-bridge
+      BRIDGE_RETRY_MAX: "12"
+      BRIDGE_RETRY_SLEEP_S: "3"
     steps:
       - uses: actions/checkout@v6
 
@@ -113,13 +115,21 @@ jobs:
           URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain).workers.dev/$(cat /tmp/token)"
           export BRIDGE_URL="$URL"
           code=000
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          for i in $(seq 1 "$BRIDGE_RETRY_MAX"); do
             code=$(curl -sS --max-time 30 -o /tmp/bridge-probe.json -w '%{http_code}' \
               -H 'Content-Type: application/json' \
               -d '{"method":"GET","path":"/api/session"}' "$URL" || true)
+            echo "bridge_ready_attempt=$i/$BRIDGE_RETRY_MAX http=$code"
             [[ "$code" == "200" ]] && break
-            echo "bridge_not_ready attempt=$i http=$code"
-            sleep 2
+            if [[ "$code" != "404" && "$code" != "000" && "$code" != "502" && "$code" != "503" && "$code" != "504" && "$code" != "530" && "$code" != "1033" ]]; then
+              echo "bridge gave up (non-retryable) last_http=$code"
+              exit 1
+            fi
+            if [[ "$i" -eq "$BRIDGE_RETRY_MAX" ]]; then
+              echo "bridge gave up after ${BRIDGE_RETRY_MAX} attempts last_http=$code"
+              exit 1
+            fi
+            sleep "$BRIDGE_RETRY_SLEEP_S"
           done
           echo "bridge_probe_http=$code"
           test "$code" -eq 200

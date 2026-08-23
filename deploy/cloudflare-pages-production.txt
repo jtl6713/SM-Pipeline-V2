@@ -205,3 +205,5 @@ Stale review state Pages deploy: 2026-08-22 - Pipeline no longer shows Ready for
 
 Draft idea name Pages deploy: 2026-08-23 - Production request drafts show the idea/content name instead of only the PR-… ID. UI 0.6.123-draft-idea-name.
 
+API edge retry Pages deploy: 2026-08-23 - Studio API client retries Cloudflare HTML/empty 404, 502/503, and failed-to-fetch up to 12 times (3s apart) then quits. Writes are not replayed after a timeout. UI 0.6.124-api-edge-retry.
+
