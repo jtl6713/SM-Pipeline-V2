@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.101-master-assets-resume",
+          version: "0.10.102-variant-poll-resume",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -177,6 +177,7 @@ export default {
           studio_ai_thumbnail_v1: true,
           studio_youtube_16x9_all_v1: true,
           studio_item4_queue_owner_v1: true,
+          studio_variant_poll_resume_v1: true,
           studio_promote_subrequest_budget_v1: true,
           studio_queued_auto_render_v1: true,
           studio_story_caption_voiceover_gate_v1: true,
@@ -534,7 +535,7 @@ export default {
           assertWriteRequest(request, env);
           return prepareItem4Variants(request, env, url, authorization, ctx);
         }
-        return getItem4Variants(request, env, url, authorization);
+        return getItem4Variants(request, env, url, authorization, ctx);
       }
 
       if (isItem4StatusRoute) {
@@ -4727,10 +4728,22 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
   }, failed ? 500 : ready ? 200 : 202);
 }
 
-async function getItem4Variants(request, env, url, authorization) {
+async function getItem4Variants(request, env, url, authorization, ctx = null) {
   const recordId = item4RequestIdFromPath(url);
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const reconciled = await item4ReconcileVariants(env, recordId, record);
+  // Same parked-cadence hole as GET /assets: reconcile cannot create Drive
+  // checkpoints. Seed and Studio poll this route; without a resume, leftover
+  // Pending crops sit forever when cron's media drain loses the subrequest race.
+  if (reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil((async () => {
+      try {
+        await item4ResumePendingVariants(env, recordId, reconciled.record);
+      } catch (error) {
+        console.warn("Item 4 variant poll resume deferred", error);
+      }
+    })());
+  }
   return respond(request, env, {
     ok: true,
     status: reconciled.status,
@@ -12372,6 +12385,17 @@ async function studioContinuationInspectOutput(env, po, cache) {
   const outputStatus = String(f(po, "Output_Status") || "");
   const renderStatus = String(f(po, "Render_Status") || "");
   const finalUrl = String(f(po, "Final_File_URL") || "").trim();
+
+  // Native stills often land Ready for Review with Asset_Selection_Status=
+  // Partial Match. The later reviewable-deliverable gate treats that as a
+  // wrong video path and skips the cover stamp. Stamp first whenever the
+  // parent already has a designed AI thumbnail.
+  if (/^ready for review$/i.test(outputStatus)) {
+    const stampContext = await studioContinuationLoadContext(env, po, cache).catch(() => null);
+    if (stampContext?.parent && !studioNeedsAiThumbnail(stampContext.parent, stampContext.requestRecord)) {
+      await studioStampParentAiCoverOnOutput(env, po, stampContext.parent).catch(() => null);
+    }
+  }
 
   if (finalUrl && /rendered/i.test(renderStatus)) {
     const readyContext = await studioContinuationLoadContext(env, po, cache).catch(() => null);

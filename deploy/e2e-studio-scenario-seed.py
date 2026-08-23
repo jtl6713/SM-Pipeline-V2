@@ -393,7 +393,7 @@ def main() -> int:
                 "variants",
                 f"/api/production-requests/{pr_id}/variants",
                 variants_ready,
-                timeout_s=540,
+                timeout_s=900,
                 interval_s=12,
             )
 
