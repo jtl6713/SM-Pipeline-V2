@@ -91,3 +91,5 @@ Stale review state Worker deploy: 2026-08-22 - Do not show Ready for Review from
 
 AI slide list fix Worker deploy: 2026-08-22 - Fix carousel slide lookup so mixed AI fill sees existing empty slots (checkbox NOT deleted) instead of reseeding 3 empties every cron tick. Skip C1 while wait_ai parents are scoped. Worker 0.10.84-ai-slide-list-fix.
 
+AI slide link pin Worker deploy: 2026-08-22 - List AI carousel slots from the parent Content Item link field (fail closed), soft-delete surplus by unlinking + clearing prompts so C2 cannot iterate a storm, and re-pin the parent after seed. Worker 0.10.85-ai-slide-link-pin.
+

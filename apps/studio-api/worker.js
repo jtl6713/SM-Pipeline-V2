@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.84-ai-slide-list-fix",
+          version: "0.10.85-ai-slide-link-pin",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -6478,17 +6478,31 @@ function copyWritableParentFields(parentContentItem) {
 
 async function item4ListParentCarouselSlides(env, parentId) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(parentId || ""))) return [];
-  // NOT({Deleted From Carousel}) matches unchecked/blank. `{Deleted From Carousel}=0`
-  // returns no rows for checkbox fields, so mixed AI seeding recreated 3 empty
-  // slides every cron tick and never saw the storm already on the parent.
+  // Prefer the parent Content Item's linked Carousel Slides IDs. Formula filters on
+  // Deleted From Carousel were unreliable (`=0` matched nothing; concurrent cron
+  // ticks also raced), which reseeded empty "Studio AI" slides forever and left
+  // hundreds of links for C2 to iterate.
   try {
-    return await listRecords(env, "Carousel Slides", {
-      limit: 200,
-      filterFormula: `AND(FIND("${parentId}", ARRAYJOIN({Content Item})),NOT({Deleted From Carousel}))`,
-    });
+    const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+    const linkedIds = [...new Set((Array.isArray(f(parent, "Carousel Slides")) ? f(parent, "Carousel Slides") : [])
+      .map((id) => String(id || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+    if (!linkedIds.length) return [];
+    const rows = [];
+    for (let i = 0; i < linkedIds.length; i += 40) {
+      const chunk = linkedIds.slice(i, i + 40);
+      const orFind = chunk.map((id) => `RECORD_ID()="${id}"`).join(",");
+      const page = await listRecords(env, "Carousel Slides", {
+        limit: Math.min(100, chunk.length),
+        filterFormula: `OR(${orFind})`,
+      });
+      rows.push(...page);
+    }
+    return rows.filter((row) => !Boolean(f(row, "Deleted From Carousel")));
   } catch (error) {
     console.warn("Studio list parent carousel slides failed", parentId, error);
-    return [];
+    // Fail closed: never treat a list failure as "zero slides" or we reseed a storm.
+    throw error;
   }
 }
 
@@ -6512,11 +6526,32 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
       try {
         await airtableFetch(env, "Carousel Slides", row.id, {
           method: "PATCH",
-          body: JSON.stringify({ fields: { "Deleted From Carousel": true }, typecast: true }),
+          body: JSON.stringify({
+            fields: {
+              "Deleted From Carousel": true,
+              "AI Prompt": "",
+              "Content Item": [],
+            },
+            typecast: true,
+          }),
         });
       } catch (error) {
         console.warn("Studio AI surplus slide cleanup failed", row.id, error);
       }
+    }
+    // Keep the parent link pin tight so C2 cannot iterate soft-deleted leftovers.
+    try {
+      const keepIds = emptyNewestFirst.slice(surplus).map((row) => row.id)
+        .concat(live.filter((row) => item4SlideImageUrl(row)).map((row) => row.id));
+      const uniqueKeep = [...new Set(keepIds.filter(Boolean))];
+      if (uniqueKeep.length) {
+        await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
+          method: "PATCH",
+          body: JSON.stringify({ fields: { "Carousel Slides": uniqueKeep }, typecast: true }),
+        });
+      }
+    } catch (error) {
+      console.warn("Studio AI parent slide pin failed", parentId, error);
     }
   }
   const afterLive = (await item4ListParentCarouselSlides(env, parentId))
@@ -6545,12 +6580,25 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
           "Image Generation Mode": "Make AI Generated",
           "Image Source": "Make AI Generated",
           "Content Item": [parentId],
-          "Deleted From Carousel": false,
         },
         typecast: true,
       }),
     });
     created.push(row);
+  }
+  if (created.length) {
+    try {
+      const pinIds = [...afterLive, ...created]
+        .filter((row) => !Boolean(f(row, "Deleted From Carousel")))
+        .map((row) => row.id)
+        .filter(Boolean);
+      await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { "Carousel Slides": pinIds }, typecast: true }),
+      });
+    } catch (error) {
+      console.warn("Studio AI parent slide pin after seed failed", parentId, error);
+    }
   }
   return [...afterLive, ...created];
 }
