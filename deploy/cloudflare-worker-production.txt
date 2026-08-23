@@ -93,3 +93,5 @@ AI slide list fix Worker deploy: 2026-08-22 - Fix carousel slide lookup so mixed
 
 AI slide link pin Worker deploy: 2026-08-22 - List AI carousel slots from the parent Content Item link field (fail closed), soft-delete surplus by unlinking + clearing prompts so C2 cannot iterate a storm, and re-pin the parent after seed. Worker 0.10.85-ai-slide-link-pin.
 
+AI slot cover count Worker deploy: 2026-08-22 - Do not reseed a new empty AI slide when C2 writes an image URL; slides with pending images still cover the remaining master budget. Worker 0.10.86-ai-slot-cover-count.
+

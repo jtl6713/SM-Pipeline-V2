@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.85-ai-slide-link-pin",
+          version: "0.10.86-ai-slot-cover-count",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -6510,19 +6510,25 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
   if (!parentId || needed < 1) return [];
   const existing = await item4ListParentCarouselSlides(env, parentId);
   const live = (existing || []).filter((row) => !Boolean(f(row, "Deleted From Carousel")));
-  // `needed` = remaining AI masters to create (e.g. mixed 3+3 → 3). Soft-delete
-  // empty surplus against that empty-slot budget — never against live.length alone,
-  // or mixed plans collapse to the uploaded slide count and never seed AI.
-  const emptyLive = live.filter((row) => !item4SlideImageUrl(row));
+  const assets = item4AssetManifest(requestRecord);
+  // A live slide covers an AI slot if it is still empty (waiting on C2) OR it has an
+  // image that has not been ingested as a master yet. Counting only empties made the
+  // Worker reseed a new empty every time C2 wrote the first image URL.
+  const coversAiSlot = (row) => {
+    const url = item4SlideImageUrl(row);
+    if (!url) return true;
+    return !assets.some((asset) => String(asset?.carousel_slide_id || "") === String(row.id || ""));
+  };
+  const covering = live.filter(coversAiSlot);
   const emptyBudget = Math.max(needed, Number.isFinite(targetTotal) && targetTotal > 0
-    ? Math.max(0, targetTotal - (live.length - emptyLive.length))
+    ? Math.max(0, targetTotal - (live.length - covering.length))
     : needed);
-  if (emptyLive.length > emptyBudget) {
-    const emptyNewestFirst = emptyLive
+  if (covering.length > emptyBudget) {
+    const coveringNewestFirst = covering
       .slice()
       .sort((a, b) => String(b.createdTime || "").localeCompare(String(a.createdTime || "")));
-    const surplus = emptyLive.length - emptyBudget;
-    for (const row of emptyNewestFirst.slice(0, Math.min(surplus, 100))) {
+    const surplus = covering.length - emptyBudget;
+    for (const row of coveringNewestFirst.slice(0, Math.min(surplus, 100))) {
       try {
         await airtableFetch(env, "Carousel Slides", row.id, {
           method: "PATCH",
@@ -6539,25 +6545,22 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
         console.warn("Studio AI surplus slide cleanup failed", row.id, error);
       }
     }
-    // Keep the parent link pin tight so C2 cannot iterate soft-deleted leftovers.
     try {
-      const keepIds = emptyNewestFirst.slice(surplus).map((row) => row.id)
-        .concat(live.filter((row) => item4SlideImageUrl(row)).map((row) => row.id));
+      const keepIds = coveringNewestFirst.slice(surplus).map((row) => row.id)
+        .concat(live.filter((row) => !coversAiSlot(row)).map((row) => row.id));
       const uniqueKeep = [...new Set(keepIds.filter(Boolean))];
-      if (uniqueKeep.length) {
-        await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
-          method: "PATCH",
-          body: JSON.stringify({ fields: { "Carousel Slides": uniqueKeep }, typecast: true }),
-        });
-      }
+      await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { "Carousel Slides": uniqueKeep }, typecast: true }),
+      });
     } catch (error) {
       console.warn("Studio AI parent slide pin failed", parentId, error);
     }
   }
   const afterLive = (await item4ListParentCarouselSlides(env, parentId))
     .filter((row) => !Boolean(f(row, "Deleted From Carousel")));
-  const emptyAfter = afterLive.filter((row) => !item4SlideImageUrl(row)).length;
-  const missing = Math.max(0, needed - emptyAfter);
+  const coveringAfter = afterLive.filter(coversAiSlot).length;
+  const missing = Math.max(0, needed - coveringAfter);
   if (!missing) return afterLive;
   const title = String(f(requestRecord, "Requested_Title") || f(requestRecord, "Production_Request_ID") || "Chicago").trim();
   const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
