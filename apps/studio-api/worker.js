@@ -12911,7 +12911,15 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     return [];
   });
   const coverMedia = [];
-  for (const po of (candidates || []).slice(0, 12)) {
+  const missingCover = (candidates || []).filter((po) => {
+    const status = String(f(po, "Output_Status") || "");
+    if (!/^ready for review$/i.test(status)) return false;
+    const thumb = String(f(po, "Thumbnail_URL") || "").trim();
+    const caption = String(f(po, "Output_Caption") || "").trim();
+    return !thumb || item4UrlIsStudioPhotoCrop(thumb) || !caption;
+  });
+  const remainder = (candidates || []).filter((po) => !missingCover.some((row) => row.id === po.id));
+  for (const po of [...missingCover, ...remainder].slice(0, 12)) {
     try {
       coverMedia.push({ id: po.id, ...await studioContinuationMediaGate(env, po, cache) });
     } catch (error) {
