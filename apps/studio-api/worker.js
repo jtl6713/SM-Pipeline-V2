@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.88-variant-plan-ready-reconcile",
+          version: "0.10.89-variant-download-urls",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -6758,10 +6758,15 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   const eligibleSources = [];
   for (const source of sourceRows) {
     const variant = source?.variants?.[ratio];
+    const driveId = String(
+      variant?.google_drive_file_id
+      || extractGoogleDriveFileId(variant?.google_drive_url)
+      || ""
+    ).trim();
     const url = String(
       variant?.preview_url
       || studioClipPublicCdnUrl(variant?.google_drive_url || variant?.google_drive_file_id)
-      || variant?.google_drive_url
+      || (driveId ? googleDriveDownloadUrl(driveId) : "")
       || ""
     ).trim();
     const mediaAssetId = String(variant?.media_asset_record_id || "").trim();
@@ -6769,7 +6774,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
       omittedSourceIds.push(String(source?.id || source?.name || "").trim() || "unknown");
       continue;
     }
-    eligibleSources.push({ source, variant, url, mediaAssetId });
+    eligibleSources.push({ source, variant, url, mediaAssetId, driveId });
   }
   if (omittedSourceIds.length) {
     console.warn("Studio source package waiting on ratio crops", {
@@ -6795,7 +6800,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
 
   const captions = item4OverlayCaptionBySourceId(requestRecord);
   const tiktok916 = platform === "TikTok" && ratio === "9:16";
-  for (const { source, variant, url, mediaAssetId } of eligibleSources) {
+  for (const { source, variant, url, mediaAssetId, driveId } of eligibleSources) {
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
     // Stories stay first-photo teasers, but on-image slide captions must still burn in.
@@ -6814,7 +6819,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
       motionStyle: storyTeaser ? "slowZoom" : "stillPhoto",
       source: "studio_platform_variant",
       aspect_ratio: ratio,
-      google_drive_file_id: String(variant?.google_drive_file_id || "").trim() || null,
+      google_drive_file_id: driveId || String(variant?.google_drive_file_id || "").trim() || null,
       overlay: overlay || undefined,
       caption: overlay?.text || "",
     });
