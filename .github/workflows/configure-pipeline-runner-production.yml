@@ -1,0 +1,96 @@
+name: Configure Pipeline Runner Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      pipeline_runner_shared_secret:
+        description: 'PIPELINE_RUNNER_SHARED_SECRET (from runtime .env)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ACCOUNT_ID: cbb5651c94e9bd2efc4594dc87229acb
+      TUNNEL_ID: f7a22f0f-f760-4e16-a085-3538d22981f1
+      WORKER_NAME: chicagoshining-studio-api
+      HOSTNAME: pipeline.chicagoshining.com
+      LOCAL_SERVICE: http://localhost:3350
+      RUNNER_URL: https://pipeline.chicagoshining.com
+      PIPELINE_RUNNER_SHARED_SECRET: ${{ inputs.pipeline_runner_shared_secret }}
+    steps:
+      - name: Validate secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$PIPELINE_RUNNER_SHARED_SECRET"
+
+      - name: Merge tunnel ingress for pipeline.chicagoshining.com
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "$AUTH" -o /tmp/tunnel-before.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path('/tmp/tunnel-before.json').read_text())
+          ingress = payload.get('result', {}).get('config', {}).get('ingress') or []
+          hostname = 'pipeline.chicagoshining.com'
+          kept = []
+          for rule in ingress:
+              if rule.get('hostname') == hostname:
+                  continue
+              if not rule.get('hostname') and str(rule.get('service', '')).startswith('http_status:'):
+                  continue
+              kept.append(rule)
+          kept.append({'hostname': hostname, 'service': 'http://localhost:3350', 'originRequest': {}})
+          kept.append({'service': 'http_status:404'})
+          Path('/tmp/tunnel-after.json').write_text(json.dumps({'config': {'ingress': kept}}))
+          PY
+          curl -fsS -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "$AUTH" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/tunnel-after.json -o /tmp/tunnel-put.json
+          jq -e '.success == true' /tmp/tunnel-put.json >/dev/null
+
+      - name: Patch studio-api Worker vars for Python SMV1
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          cat > /tmp/worker-settings.json <<EOF
+          {"settings":{"vars":{"STAGE_BACKEND_SMV1":"python","PIPELINE_RUNNER_URL":"$RUNNER_URL","PIPELINE_RUNNER_SHARED_SECRET":"$PIPELINE_RUNNER_SHARED_SECRET"}}}
+          EOF
+          curl -fsS -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$WORKER_NAME/settings" \
+            -H "$AUTH" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/worker-settings.json -o /tmp/worker-settings-result.json
+          jq -e '.success == true' /tmp/worker-settings-result.json >/dev/null
+
+      - name: Verify public health when origin is reachable
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' "$RUNNER_URL/health" || true)
+            if [[ "$code" == "200" ]] && jq -e '.ok == true' /tmp/health.json >/dev/null 2>&1; then
+              jq '{ok,service,version,public_base_url}' /tmp/health.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Public route not reachable yet. Tunnel + Worker vars were applied.' >&2
+          echo 'Ensure pipeline-runner is running locally on :3350, then re-check /health.' >&2
+          exit 2
