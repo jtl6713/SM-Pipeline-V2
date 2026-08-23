@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.92-ai-variant-queue-backfill",
+          version: "0.10.93-variant-manifest-refresh",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -12199,7 +12199,7 @@ async function studioContinuationInspectOutput(env, po, cache) {
     console.warn("Studio variant reconcile during continuation failed", po.id, error);
   }
 
-  const sourcePackage = item4StudioSourcePackageForOutput(
+  let sourcePackage = item4StudioSourcePackageForOutput(
     context.requestRecord,
     context.outputRow,
     context.effective,
@@ -12210,7 +12210,7 @@ async function studioContinuationInspectOutput(env, po, cache) {
     context.effective.output_type,
     context.effective.route?.proven_mapping || f(po, "Platform_Output_Type")
   );
-  const hasClips = Boolean(sourcePackage?.clips?.length);
+  let hasClips = Boolean(sourcePackage?.clips?.length);
   const alreadyExact = /studio_owner_uploaded_exact_source/.test(String(f(po, "Selected_Assets_JSON") || ""))
     && String(f(po, "Asset_Selection_Status") || "") === "Selected"
     && String(f(po, "Composition_ID") || "") === "ChicagoShiningPhotoSequence";
@@ -12230,7 +12230,31 @@ async function studioContinuationInspectOutput(env, po, cache) {
     return { action: "reviewable", reason: "native_package" };
   }
 
-  if (!hasClips) return { action: "wait_variants", reason: "incomplete_source_package" };
+  if (!hasClips) {
+    // A manifest snapshotted while previews were still landing can pin a Ready
+    // crop that carries no preview URL, and the render package requires that URL.
+    // Rebuild from the queue rows before giving up, or the output waits forever on
+    // crops that already finished.
+    try {
+      const refreshed = await item4ReconcileVariants(env, context.requestRecord.id, context.requestRecord, {
+        skipSanitize: true,
+      });
+      if (refreshed?.record) {
+        context.requestRecord = refreshed.record;
+        cache.requests.set(refreshed.record.id, refreshed.record);
+      }
+    } catch (error) {
+      console.warn("Studio variant manifest refresh failed", po.id, error);
+    }
+    sourcePackage = item4StudioSourcePackageForOutput(
+      context.requestRecord,
+      context.outputRow,
+      context.effective,
+      context.parent
+    );
+    hasClips = Boolean(sourcePackage?.clips?.length);
+    if (!hasClips) return { action: "wait_variants", reason: "incomplete_source_package" };
+  }
 
   if (hasClips || nativePhoto || studioOutputWrongVideoSelectorPath(po) || studioOutputIsPhotoSequenceRoute(po)) {
     await studioContinuationStampPackage(env, po, context);
