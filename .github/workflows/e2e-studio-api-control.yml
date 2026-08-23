@@ -127,7 +127,13 @@ jobs:
           SUBDOMAIN=$(cat /tmp/account-subdomain.txt)
           TOKEN=$(cat /tmp/path-token.txt)
           URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
-          code=$(curl -sS --retry 4 --retry-delay 2 --max-time 420 -o /tmp/result.json -w '%{http_code}' "$URL")
+          code=000
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            code=$(curl -sS --max-time 420 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
+            echo "bridge_attempt=$i http=$code"
+            [[ "$code" == "200" ]] && break
+            sleep 3
+          done
           echo "bridge_http=$code"
           test "$code" -eq 200
           jq -e '.results|type=="array"' /tmp/result.json >/dev/null
