@@ -138,7 +138,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.96-studio-post-caption",
+          version: "0.10.97-publish-dispatch-reconcile",
+          studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -684,16 +685,27 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Publishing goes first. The continuation scan and the queue drain below are both unbounded in
+    // the number of Airtable and Make calls they make, so anything sequenced after them can lose
+    // the whole invocation to a subrequest ceiling. An approved output that never reaches a
+    // publisher is the most visible failure this Worker has, so it gets the budget first.
     ctx.waitUntil((async () => {
       try {
-        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+        await studioReconcileApprovedPublishes(env);
       } catch (error) {
-        console.warn("production continuation cron failed", error);
+        console.warn("publish reconcile cron failed", error);
       }
       try {
         await syncProductionCadence(env, { force: true, skipRenderPulse: true });
       } catch (error) {
         console.warn("production cadence cron failed", error);
+      }
+    })());
+    ctx.waitUntil((async () => {
+      try {
+        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+      } catch (error) {
+        console.warn("production continuation cron failed", error);
       }
       try {
         await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
@@ -13223,35 +13235,124 @@ async function studioEnsureOutputCaption(env, record) {
   }
 }
 
-async function studioDispatchApprovedPublish(env, record) {
+// The webhook POST is the only step that actually hands an output to a publisher. Everything
+// after it is recoverable on a later pass, so it is split off: this half runs on the request
+// path where it cannot be dropped by a cancelled background task or an exhausted invocation.
+async function studioDispatchApprovedPublishNow(env, record) {
   record = await studioEnsureOutputCaption(env, record);
+  const plan = studioPublishDispatchTarget(record);
+  if (!plan) return { ok: true, skipped: "no-dispatch", record };
+  if (plan.graphStory) return { ...await studioPublishFacebookPageStory(env, record), plan, record };
   await studioArmPublishScenarios(env, "AP0");
   const ap0 = await studioPulseAp0PublicAsset(env, record);
   if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
-  const plan = studioPublishDispatchTarget(record);
-  if (!plan) return ap0?.ok === false ? ap0 : { ok: true, skipped: "no-dispatch", ap0 };
-  if (plan.graphStory) return studioPublishFacebookPageStory(env, record);
   const armed = await studioArmPublishScenarios(env, plan.target);
-  const names = [plan.setting, plan.poll].filter(Boolean);
-  const settings = await studioActivePipelineSettings(env, names);
-  const first = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target);
+  const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
+  const pulsed = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target);
+  return { ...pulsed, ap0, armed, plan, settings, record };
+}
+
+async function studioDispatchApprovedPublishTail(env, record, primary) {
+  const plan = primary?.plan;
+  if (!plan || plan.graphStory) return null;
   if (plan.poll) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
-    await studioPulseMakeWebhook(env, settings[plan.poll], record.id, pollTarget);
+    await studioPulseMakeWebhook(env, primary.settings?.[plan.poll], record.id, pollTarget);
   }
   // Let the webhook scenario finish staging before the orchestrator looks for its work.
   await new Promise((resolve) => setTimeout(resolve, 10000));
-  const orchestrator = await studioRunPublishOrchestrator(env, plan.target);
-  return { ...first, ap0, armed, orchestrator };
+  return studioRunPublishOrchestrator(env, plan.target);
 }
 
-function studioSchedulePublishDispatch(ctx, env, record) {
-  const run = studioDispatchApprovedPublish(env, record).catch((error) => {
+function studioPublishDispatchNote(result) {
+  if (!result) return "no result";
+  if (result.skipped) return `skipped: ${result.skipped}`;
+  const armed = (result.armed || []).map((row) => `${row.id}${row.ok ? "" : "!"}`).join(",");
+  return [
+    `target=${result.target || result.plan?.target || "?"}`,
+    result.ok ? `webhook=ok ${result.status || ""}`.trim() : `webhook=FAILED ${result.status || ""}`.trim(),
+    armed ? `armed=${armed}` : "",
+    result.ap0 ? `ap0=${result.ap0.skipped || (result.ap0.ok ? "ok" : "failed")}` : "",
+  ].filter(Boolean).join(" | ");
+}
+
+// Without a receipt every dispatch failure is invisible: the output looks approved, no publisher
+// ran, and nothing on the record says an attempt was ever made. The stamp is also the retry clock
+// the reconcile sweep reads, so it has to be written on success and failure alike.
+async function studioStampPublishDispatch(env, record, note) {
+  const id = String(record?.id || "").trim();
+  if (!id) return;
+  const count = Number(f(record, "Studio_Publish_Dispatch_Count") || 0) + 1;
+  try {
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Studio_Publish_Dispatch_At: new Date().toISOString(),
+          Studio_Publish_Dispatch_Count: count,
+          Studio_Publish_Dispatch_Note: String(note || "").slice(0, 900),
+        },
+        typecast: true,
+      }),
+    });
+  } catch (error) {
+    console.warn("publish dispatch receipt write failed", id, error);
+  }
+}
+
+async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
+  let primary;
+  try {
+    primary = await studioDispatchApprovedPublishNow(env, record);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.warn("studio publish dispatch failed", record?.id, error);
+    await studioStampPublishDispatch(env, record, `dispatch failed: ${message}`);
+    return { ok: false, error: message };
+  }
+  await studioStampPublishDispatch(env, record, studioPublishDispatchNote(primary));
+  const tail = studioDispatchApprovedPublishTail(env, record, primary).catch((error) => {
+    console.warn("studio publish dispatch tail failed", record?.id, error);
   });
-  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
-  return run;
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(tail);
+  return primary;
+}
+
+const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Output_Status}="Approved for Publishing",NOT({Publish_Status}="Published"),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
+
+// Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
+// hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
+// guarantees an approved output reaches a publisher, so this sweep runs first on every cron tick.
+async function studioReconcileApprovedPublishes(env, options = {}) {
+  const limit = Number(options.limit || 3);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: STUDIO_PUBLISH_RECONCILE_FORMULA,
+    });
+  } catch (error) {
+    console.warn("publish reconcile scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const primary = await studioDispatchApprovedPublishNow(env, row);
+      await studioStampPublishDispatch(env, row, `reconcile: ${studioPublishDispatchNote(primary)}`);
+      results.push({ id: row.id, target: primary?.target || primary?.skipped || null, ok: primary?.ok !== false });
+      await studioDispatchApprovedPublishTail(env, row, primary).catch((error) => {
+        console.warn("publish reconcile tail failed", row.id, error);
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("publish reconcile dispatch failed", row.id, error);
+      await studioStampPublishDispatch(env, row, `reconcile failed: ${message}`);
+      results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
 }
 
 async function approveOutputRecordForPublishing(env, existing, note, stamp) {
@@ -13307,7 +13408,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     try {
       const updated = await approveOutputRecordForPublishing(env, record, note, stamp);
       approved.push(mapApprovedOutputSummary(updated));
-      studioSchedulePublishDispatch(ctx, env, updated);
+      await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
     } catch (error) {
       failed.push({
         ...mapApprovedOutputSummary(record),
@@ -13315,7 +13416,6 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
       });
     }
   }
-  if (approved.length) cadenceScheduleSync(ctx, env, { startPublish: true });
   const skipped = records.length - eligible.length;
   return respond(request, env, {
     ok: true,
@@ -13344,14 +13444,22 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
   const productionPublishApprove = action === "approve_for_publishing" || ((action === "approve" || action === "approved") && !doNotPublish);
   if (productionPublishApprove) {
     const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
-    cadenceScheduleSync(ctx, env, { startPublish: true });
-    studioSchedulePublishDispatch(ctx, env, updated);
+    // Dispatch arms and pulses its own publisher chain, so a concurrent cadence sync would only
+    // compete for this invocation's budget and can park the scenario the pulse just woke up.
+    const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
     return respond(request, env, {
       ok: true,
       action: "approve_for_publishing",
       record: mapPhase6CreativeOutput(updated),
       handoff_state: "approved_for_publishing",
-      message: "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
+      publish_dispatch: {
+        target: dispatch?.target || dispatch?.skipped || null,
+        ok: dispatch?.ok !== false,
+        detail: studioPublishDispatchNote(dispatch),
+      },
+      message: dispatch?.ok === false
+        ? "Approved for publishing, but the publisher handoff did not go through. Studio will retry it automatically within a few minutes."
+        : "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
     });
   }
   if (!doNotPublish && phase6ProductionMixAction(action)) {

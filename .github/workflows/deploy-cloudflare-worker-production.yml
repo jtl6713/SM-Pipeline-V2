@@ -90,6 +90,7 @@ jobs:
             'workers_dev':False,
             'keep_vars':True,
             'triggers':{'crons':['*/2 * * * *']},
+            'observability':{'enabled':True,'head_sampling_rate':1},
             'r2_buckets':[{'binding':'STUDIO_MEDIA','bucket_name':bucket}],
             'secrets':{'required':['AIRTABLE_PAT']}
           }
