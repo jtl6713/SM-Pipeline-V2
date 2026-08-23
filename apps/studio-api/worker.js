@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.110-remotion-r3-first-native-promote",
+          version: "0.10.111-remotion-pulse-before-inspect",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -12601,7 +12601,7 @@ async function studioContinuationInspectOutput(env, po, cache) {
 async function listStudioContinuationCandidates(env, options = {}) {
   const contentItemId = String(options.contentItemId || "").trim();
   const requestRecordId = String(options.requestRecordId || "").trim();
-  const limit = Number(options.limit || 40);
+  const limit = Number(options.limit || 8);
   if (contentItemId && /^rec[A-Za-z0-9]+$/.test(contentItemId)) {
     return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
@@ -12745,7 +12745,11 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   }
   const pulsedP2 = pulses.some((row) => row.key === "P2" && row.pulsed);
   const inspected = media.slice();
-  if (!pulsedP2) {
+  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
+    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
+  }
+  const pulsedRender = pulses.some((row) => (row.key === "R3" || row.key === "R4") && (row.pulsed || row.error));
+  if (!pulsedP2 && !pulsedRender) {
     let inspectedRemotion = 0;
     for (const po of candidates || []) {
       const gate = media.find((row) => row.id === po.id);
@@ -12764,17 +12768,11 @@ async function advanceStudioProductionOutputs(env, options = {}) {
         inspectedRemotion += 1;
       }
     }
-    try { await resetEmptyP3RemotionHandoffForR2(env); } catch (error) {
-      console.warn("R2 remotion requeue failed", error);
-    }
-  }
-  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
-    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
   }
   const waitingAi = inspected.some((row) => row.action === "wait_ai");
   const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
   const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
-  if (!pulsedP2 && (waitingAi || waitingPackage)) {
+  if (!pulsedP2 && !pulsedRender && (waitingAi || waitingPackage)) {
     try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
       pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
     }
