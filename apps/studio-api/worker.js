@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.94-p2-stale-run-reset",
+          version: "0.10.95-approve-arms-publishers",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -13078,12 +13078,54 @@ async function studioPulseAp0PublicAsset(env, record) {
   return studioPulseMakeWebhook(env, STUDIO_AP0_WEBHOOK_URL, recordId, "AP0");
 }
 
+// Approve pulses these publisher webhooks directly, and a Make webhook aimed at a stopped
+// scenario answers 200 and goes nowhere. Background cadence is supposed to keep the webhook
+// scenarios live and run the on-demand orchestrators, but it parks aggressively and cannot be
+// relied on at the moment a human clicks Approve, which strands the output mid-handoff with a
+// status like "Ready for Assets" and no publisher listening. Approval arms its own chain.
+const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
+  "AP0": { webhooks: [5612096] },
+  "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: 5864632 },
+  "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
+  "FBS3": { webhooks: [5816502, 5816520], orchestrator: 5813561 },
+  "TTD0": { webhooks: [5806658], orchestrator: 5806668 },
+});
+
+async function studioArmPublishScenarios(env, target) {
+  const armed = [];
+  for (const scenarioId of STUDIO_PUBLISH_DISPATCH_SCENARIOS[target]?.webhooks || []) {
+    try {
+      await phase6EnsureScenarioActive(env, scenarioId);
+      armed.push({ id: scenarioId, ok: true });
+    } catch (error) {
+      console.warn("publish webhook scenario could not be armed", target, scenarioId, error);
+      armed.push({ id: scenarioId, ok: false });
+    }
+  }
+  return armed;
+}
+
+// The webhook scenario only stages the platform payload; an on-demand orchestrator carries the
+// record the rest of the way, so approval has to run it too or the output stops at the staging step.
+async function studioRunPublishOrchestrator(env, target) {
+  const scenarioId = STUDIO_PUBLISH_DISPATCH_SCENARIOS[target]?.orchestrator;
+  if (!scenarioId) return null;
+  try {
+    return await phase6PulseOnDemandScenario(env, scenarioId, { waitMs: 0 });
+  } catch (error) {
+    console.warn("publish orchestrator pulse failed", target, scenarioId, error);
+    return { ok: false, id: scenarioId };
+  }
+}
+
 async function studioDispatchApprovedPublish(env, record) {
+  await studioArmPublishScenarios(env, "AP0");
   const ap0 = await studioPulseAp0PublicAsset(env, record);
   if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
   const plan = studioPublishDispatchTarget(record);
   if (!plan) return ap0?.ok === false ? ap0 : { ok: true, skipped: "no-dispatch", ap0 };
   if (plan.graphStory) return studioPublishFacebookPageStory(env, record);
+  const armed = await studioArmPublishScenarios(env, plan.target);
   const names = [plan.setting, plan.poll].filter(Boolean);
   const settings = await studioActivePipelineSettings(env, names);
   const first = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target);
@@ -13092,7 +13134,10 @@ async function studioDispatchApprovedPublish(env, record) {
     const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
     await studioPulseMakeWebhook(env, settings[plan.poll], record.id, pollTarget);
   }
-  return { ...first, ap0 };
+  // Let the webhook scenario finish staging before the orchestrator looks for its work.
+  await new Promise((resolve) => setTimeout(resolve, 10000));
+  const orchestrator = await studioRunPublishOrchestrator(env, plan.target);
+  return { ...first, ap0, armed, orchestrator };
 }
 
 function studioSchedulePublishDispatch(ctx, env, record) {
