@@ -81,7 +81,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.121-approve-subrequest-budget";
+  const BUILD_ID = "item4-0.6.122-stale-review-state";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -6126,7 +6126,13 @@
     if (handoff?.completed || handoff?.overall_status === "complete") return false;
     const render = String(output?.render_status || "").trim();
     const status = String(output?.output_status || "").trim();
-    if (["Ready for Render", "Rendering"].includes(render) || status === "In Production") return true;
+    if (["Ready for Render", "Rendering"].includes(render)) return true;
+    // In Production alone is not enough — package rebuild leaves that status
+    // while Pipeline used to still show Ready for Review from stale Review Sent.
+    if (status === "In Production" && !String(output?.final_file_url || "").trim() && !String(output?.studio_preview_url || "").trim()) {
+      return Boolean(handoff?.active && handoff?.overall_status === "active");
+    }
+    if (status === "In Production" && (["Ready for Render", "Rendering"].includes(render) || (handoff?.active && handoff?.overall_status === "active"))) return true;
     return Boolean(handoff?.active && handoff?.overall_status === "active");
   }
 

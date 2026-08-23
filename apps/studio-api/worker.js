@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.82-mixed-ai-exact",
+          version: "0.10.83-stale-review-state",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -180,6 +180,7 @@ export default {
           studio_queued_auto_render_v1: true,
           studio_story_caption_voiceover_gate_v1: true,
           studio_mixed_ai_exact_v1: true,
+          studio_stale_review_state_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -1119,7 +1120,8 @@ function studioOutputIsNativePhoto(record) {
 function studioOutputHasReviewableDeliverable(record) {
   if (String(f(record, "Final_File_URL") || "").trim()) return true;
   if (String(f(record, "Studio_Preview_URL") || "").trim()) return true;
-  if ((f(record, "Carousel Slides") || []).length) return true;
+  // Native photo packages can review without an MP4. Remotion video routes
+  // must not look ready just because carousel slides are linked.
   return studioOutputIsNativePhoto(record);
 }
 
@@ -1418,9 +1420,19 @@ function normalizedOutputState(record) {
   // Publisher "Ready for Assets" is the start of upload, not a rewind to Studio
   // asset selection. Approved/reviewable work must win or Approve drops 65% → 30%.
   if (has("Review_Status", "approved") || has("Output_Status", "approved")) return "Approved";
-  if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
-  if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  // Stale Review Sent / leftover preview URLs must not win while the output is
+  // still In Production without a finished Remotion file (package rebuild).
+  const inProduction = has("Output_Status", "in production");
+  const hasFinishedFile = Boolean(String(f(record, "Final_File_URL") || "").trim());
+  const remotionFinished = has("Render_Status", "rendered") && (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
+  if (!inProduction || remotionFinished || studioOutputIsNativePhoto(record)) {
+    if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+    if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
+  }
   if (has("Render_Status", "rendering") || has("Render_Status", "ready for render") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
+  if (inProduction && !remotionFinished && !studioOutputIsNativePhoto(record)) {
+    if (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()) || has("Asset_Selection_Status", "selected")) return "Rendering";
+  }
   const studioAssetPrep = has("Asset_Selection_Status", "needs selection") || has("Asset_Selection_Status", "selecting");
   const publisherAssetPrep = has("TikTok_Draft_Status", "ready for assets") || has("TikTok_Draft_Status", "preparing assets") || has("FB_Publish_Status", "ready for assets") || has("FB_Publish_Status", "preparing assets");
   if (studioAssetPrep || (!studioOutputHasReviewableDeliverable(record) && publisherAssetPrep)) return "Preparing Assets";
@@ -1578,11 +1590,12 @@ function selectedVisualClips(record) {
 }
 
 function outputCreativeAvailable(record) {
-  return Boolean(
-    (f(record, "Carousel Slides") || []).length ||
-    f(record, "Creative_Render_Manifest_JSON") ||
-    studioOutputHasReviewableDeliverable(record)
-  );
+  // Creative review opens for native packages with slides, or whenever a
+  // finished/preview file exists. Linked carousel slides alone do not unlock
+  // Remotion video review while the MP4 is still being rebuilt.
+  if (studioOutputIsNativePhoto(record) && (f(record, "Carousel Slides") || []).length) return true;
+  if (f(record, "Creative_Render_Manifest_JSON")) return true;
+  return studioOutputHasReviewableDeliverable(record);
 }
 
 function mapOutput(record) {

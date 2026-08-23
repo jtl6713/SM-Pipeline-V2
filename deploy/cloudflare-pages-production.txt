@@ -201,3 +201,5 @@ Approve means approve Pages deploy: 2026-08-22 - Approve no longer silently star
 
 Approve subrequest budget Pages deploy: 2026-08-22 - Approve does not refresh the heavy workspace route first. UI 0.6.121-approve-subrequest-budget.
 
+Stale review state Pages deploy: 2026-08-22 - Pipeline no longer shows Ready for Review from leftover Review Sent while Remotion is still In Production. UI 0.6.122-stale-review-state.
+

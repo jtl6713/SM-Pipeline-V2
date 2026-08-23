@@ -87,3 +87,5 @@ Story caption + voiceover gate Worker deploy: 2026-08-22 - Story teasers keep on
 
 Mixed AI exact Worker deploy: 2026-08-22 - Keep waiting for the wizard Exact total when Make AI Generated (3 uploaded + 3 AI). Seed empty AI slots by remaining count, not live slide total. Do not collapse mixed plans to uploaded count only. Worker 0.10.82-mixed-ai-exact.
 
+Stale review state Worker deploy: 2026-08-22 - Do not show Ready for Review from leftover Review Sent / preview URLs while Output_Status is still In Production without a finished Remotion file. Worker 0.10.83-stale-review-state.
+
