@@ -139,7 +139,7 @@ def retryable(result: dict) -> bool:
     body = result.get("body") if isinstance(result.get("body"), dict) else {}
     status = int(result.get("status") or 0)
     text = json.dumps(body)
-    return bool(body.get("retryable")) or status in {500, 502, 503, 504} or "1101" in text or "error code" in text.lower()
+    return bool(body.get("retryable")) or status in {500, 502, 503, 504} or "1101" in text or "1042" in text or "error code" in text.lower()
 
 
 def must_retry(step: str, call, attempts: int = 8, delay_s: int = 8) -> dict:
@@ -254,10 +254,11 @@ def main() -> int:
             raise RuntimeError("missing idea id")
         evidence["idea_id"] = idea_id
         log(f"idea {idea_id}")
+        time.sleep(2)
 
-        pr = must(
+        pr = must_retry(
             "create-production-request",
-            bridge(
+            lambda: bridge(
                 "POST",
                 "/api/production-requests",
                 {
@@ -283,7 +284,7 @@ def main() -> int:
         evidence["production_request_id"] = pr_id
         log(f"production request {pr_id}")
 
-        current = must("get-production-request", bridge("GET", f"/api/production-requests/{pr_id}"))
+        current = must_retry("get-production-request", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
         record = current.get("record") or {}
         asset_count = int(record.get("studio_master_asset_count") or len(record.get("studio_master_assets") or []) or 0)
         if asset_count < 3:
@@ -313,7 +314,7 @@ def main() -> int:
         # UI-equivalent self-heal without failing the seed if Studio throws.
         bridge("GET", f"/api/production-requests/{pr_id}/assets")
 
-        current = must("get-production-request-before-plan", bridge("GET", f"/api/production-requests/{pr_id}"))
+        current = must_retry("get-production-request-before-plan", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
         plan_status = str((current.get("record") or {}).get("studio_output_plan_status") or "")
         planned_items = ((current.get("record") or {}).get("studio_output_plan") or {}).get("items") or []
         if plan_status != "Ready" or not planned_items:
@@ -353,7 +354,7 @@ def main() -> int:
             status = str(rec.get("studio_variant_status") or body.get("status") or "")
             return status == "Ready"
 
-        current = must("get-production-request-before-variants", bridge("GET", f"/api/production-requests/{pr_id}"))
+        current = must_retry("get-production-request-before-variants", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
         if str((current.get("record") or {}).get("studio_variant_status") or "") != "Ready":
             must_retry(
                 "prepare-variants",
