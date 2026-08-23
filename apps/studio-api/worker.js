@@ -1118,11 +1118,18 @@ function studioOutputIsNativePhoto(record) {
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
   const composition = String(f(record, "Composition_ID") || "").trim();
   const clips = String(f(record, "Render_Clip_List_JSON") || f(record, "Selected_Assets_JSON") || "").trim();
-  if (!clips || !studioOutputIsNativePhotoRoute(platform, outputType, mapping)) return false;
+  const renderStatus = String(f(record, "Render_Status") || "").trim();
+  const stillUrl = String(
+    f(record, "Thumbnail_URL") || f(record, "Studio_Preview_URL") || f(record, "Publish_Asset_URL") || ""
+  ).trim();
+  if (!studioOutputIsNativePhotoRoute(platform, outputType, mapping)) return false;
   // TikTok Multi-Photo is composition-free by contract. IG/FB native packages may
   // still carry a stale Composition_ID from older promote paths; treat them as
   // reviewable when the photo package JSON is present.
   if (platform === "TikTok" && composition) return false;
+  if (renderStatus === "Native Photo Route") return true;
+  if (stillUrl) return true;
+  if (!clips) return false;
   return true;
 }
 
@@ -1395,6 +1402,20 @@ function normalizedOutputState(record) {
     "IG_Carousel_Status", "TikTok_Draft_Status", "FB_Publish_Status", "FB_Slideshow_Status",
     "YouTube_Package_Status", "YouTube_Upload_Status", "YouTube_Processing_Status",
   ].some((name) => has(name, "failed") || has(name, "error") || has(name, "terminal error"));
+
+  const outputStatusLc = text("Output_Status").toLowerCase();
+  const publishStatusLc = text("Publish_Status").toLowerCase();
+  const outputDeadEarly = outputStatusLc.includes("failed")
+    || outputStatusLc.includes("terminal error")
+    || outputStatusLc.includes("skipped");
+  const publishDeadEarly = publishStatusLc.includes("failed") || publishStatusLc.includes("error");
+  const readyForReviewIntent = has("Output_Status", "ready for review")
+    || has("Review_Status", "pending")
+    || has("Review_Status", "review sent");
+  // Review-ready native stills / finished files beat leftover retry flags and stale error text.
+  if (readyForReviewIntent && studioOutputHasReviewableDeliverable(record) && !outputDeadEarly && !publishDeadEarly) {
+    return "Ready for Review";
+  }
 
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
     const output = text("Output_Status").toLowerCase();
@@ -3648,7 +3669,23 @@ function item4IsUnsupportedCompanion(platform, outputType) {
   return String(platform || "").trim() === "TikTok" && item4IsCompanionOutputType(outputType);
 }
 
-const ITEM4_STORY_TEASER_SECONDS = 15;
+const ITEM4_STORY_TEASER_SECONDS = 5;
+const ITEM4_SINGLE_STILL_SECONDS = 5;
+
+function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, requestRecord }) {
+  const override = Number(f(requestRecord, "Video_Duration_Seconds_Override") || 0);
+  if (Number.isFinite(override) && override > 0) return override;
+  if (storyTeaser) {
+    return clipCount <= 1
+      ? ITEM4_SINGLE_STILL_SECONDS
+      : Math.min(15, clipCount * ITEM4_SINGLE_STILL_SECONDS);
+  }
+  const stored = Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 0);
+  // Profile default 30 is a pad, not an owner override.
+  if (Number.isFinite(stored) && stored > 0 && stored !== 30) return stored;
+  if (clipCount <= 1) return ITEM4_SINGLE_STILL_SECONDS;
+  return Math.min(30, Math.max(clipCount * 3, 9));
+}
 
 function item4CompanionStoryFields(outputType) {
   if (!item4IsCompanionOutputType(outputType)) return {};
@@ -7360,9 +7397,12 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   }
   if (!eligibleSources.length) return null;
 
-  const durationSeconds = storyTeaser
-    ? ITEM4_STORY_TEASER_SECONDS
-    : Math.max(1, Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 30));
+  const durationSeconds = item4ResolvedVideoDurationSeconds({
+    storyTeaser,
+    clipCount: eligibleSources.length,
+    effective,
+    requestRecord,
+  });
   const fps = 30;
   const totalFrames = Math.max(eligibleSources.length, Math.round(durationSeconds * fps));
   const baseFrames = Math.floor(totalFrames / eligibleSources.length);
@@ -7376,7 +7416,10 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
     // Stories stay first-photo teasers, but on-image slide captions must still burn in.
-    const overlay = item4PhotoOverlayFromCaption(captions.get(String(source?.id || "").trim()), { tiktok916 });
+    const overlayText = captions.get(String(source?.id || "").trim())
+      || String(source?.caption || variant?.caption || "").trim()
+      || String(f(parentContentItem, "Content_Title") || "").trim();
+    const overlay = item4PhotoOverlayFromCaption(overlayText, { tiktok916 });
     clips.push({
       id: `studio-source-${clips.length + 1}`,
       order: Number(source?.order || clips.length + 1),
@@ -7440,6 +7483,9 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     brand_text: brandText,
     music_url: String(effective?.music?.url || "").trim(),
     music_volume: String(effective?.music?.url || "").trim() ? 0.24 : 0,
+    voiceover_url: item4StudioDirectiveYes(effective?.voiceover_mode)
+      ? String(f(parentContentItem, "Voiceover_URL") || "").trim()
+      : "",
     render_total_frames: totalFrames,
     render_clip_count: clips.length,
     compatibility_clip_1_url: clips[0]?.url || "",
@@ -13631,7 +13677,7 @@ async function studioActivePipelineSettings(env, names) {
   return map;
 }
 
-async function studioPulseMakeWebhook(env, url, recordId, target) {
+async function studioPulseMakeWebhook(env, url, recordId, target, extra = {}) {
   const hook = String(url || "").trim();
   if (!hook) return { ok: false, skipped: "missing-url", target };
   const response = await fetch(hook, {
@@ -13642,6 +13688,8 @@ async function studioPulseMakeWebhook(env, url, recordId, target) {
       source: "studio-approve",
       target,
       requested_at: new Date().toISOString(),
+      caption: extra.caption || undefined,
+      hashtags: extra.hashtags || undefined,
     }),
   });
   const body = await response.text();
@@ -13852,7 +13900,10 @@ async function studioDispatchApprovedPublishNow(env, record) {
   if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
-  const pulsed = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target);
+  const pulsed = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target, {
+    caption: String(f(record, "Output_Caption") || "").trim(),
+    hashtags: String(f(record, "Output_Hashtags") || "").trim(),
+  });
   return { ...pulsed, ap0, armed, plan, settings, record };
 }
 

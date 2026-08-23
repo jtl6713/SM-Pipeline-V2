@@ -102,3 +102,14 @@ Hard pass for any grid-eligible post: designed AI cover (bold colorful 3D letter
 - **Seen:** After 0.10.114, MX1–MX5 were Ready for Review with Remotion files. Parent CI 91 has the designed Drive AI thumb (`12_7X8uQxJrDXX4Pb-1_1YDm6RR885fKa`). Outputs [229](https://airtable.com/appe33zkZn35yirTL/tblrlPeboBthkplH0/rec20ZHu3xXu6bl87)–[232](https://airtable.com/appe33zkZn35yirTL/tblrlPeboBthkplH0/recWFHJm5Z7TBjXtn) had **blank `Thumbnail_URL` and `Output_Caption`**. Grid tiles would show a Remotion crop, not the 3D title card.
 - **Why:** Cover stamp ran only for native stills in the newest-8 continuation window, and was skipped entirely on ticks that pulsed R3/R4. MX2 videos sat Ready for Review with files, so they were neither stranded-Remotion inspect nor in the newest eight (243–236).
 - **Fix:** Worker 0.10.115 stamps the parent AI cover (and blank caption) onto Ready-for-Review **video** outputs, merges missing-cover rows into the continuation candidate list, and still runs that media gate when R3/R4 pulsed. Deployed [32671038280](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32671038280) then [32671272141](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32671272141) (`c5854d7`) so missing-cover rows are processed before the newest-12 cap. Cron copied `12_7X8uQxJrDXX4Pb-1_1YDm6RR885fKa` + caption onto 229–232. Do not Airtable-patch stage fields. Do not Approve.
+
+### RC-MX-D13 — VO=Yes Remotion files mixed music-only (Python R4)
+
+- **Seen:** MX2 229–232 and MX5 242 had parent `Voiceover_URL` / Studio VO=On, but the MP4 was music-only.
+- **Why:** Python R4 routed `p020_manifest` and `no_voiceover` from the **output** `Voiceover_URL` only. R3 did not copy parent VO. A missing content-item row crashed the voiceover route. Remotion then `Math.max`’d requested 30s over a ~10s VO.
+- **Fix:** Worker 0.10.116 + Python R3/R4: parent or output `Voiceover_URL` is mixed into every VO route, including p020. Duration defaults to VO+tail (or 5s for a single silent still). Pipeline Ready-for-Review native stills beat leftover retry/error flags. Live runner files copied to `Services/pipeline-runner/service`. Do not Make-run R4. Do not Approve.
+
+### RC-NATIVE-D5 — Graph IG caption + on-image lettering (partial)
+
+- **Owned now:** Worker publish webhook body includes `caption` / `hashtags`; Remotion/native clip JSON gets overlay text from slide caption or `Content_Title`.
+- **Paused:** Live IG carousel Graph publish is still Make APCAR (`5791537`). Native JPEGs are posted as-is; burning lettering needs a compositor that is not in the Python runner. No Make APCAR PATCH. No Approve.
