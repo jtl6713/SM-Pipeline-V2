@@ -1107,9 +1107,9 @@ function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
   const p = String(platform || "").trim();
   const type = String(outputType || "").trim();
   const map = String(mapping || "").trim();
-  if (p === "TikTok" && (type === "Multi-Photo" || map === "TikTok Slideshow")) return true;
-  if (p === "Instagram" && type === "Carousel") return true;
-  if (p === "Facebook" && type === "Multi-Image Post") return true;
+  if (p === "TikTok" && (type === "Multi-Photo" || type === "Single Photo" || map === "TikTok Slideshow")) return true;
+  if (p === "Instagram" && (type === "Carousel" || type === "Single Image")) return true;
+  if (p === "Facebook" && (type === "Multi-Image Post" || type === "Single Image")) return true;
   return false;
 }
 
@@ -1217,8 +1217,10 @@ function studioPublishHandoffFields(record) {
   const current = (name) => String(f(record, name) || "").trim();
   const cdnReady = studioNativeClipsArePublicCdn(record);
   const cover = studioPublicJpegCoverUrl(record);
+  const existingThumb = current("Thumbnail_URL");
+  const aiThumb = studioAiThumbnailUrl(existingThumb);
   const fields = {};
-  if (cover && (!current("Thumbnail_URL") || /ITEM4-VARIANT-fill-crop/i.test(current("Thumbnail_URL")))) {
+  if (!aiThumb && cover && (!existingThumb || item4UrlIsStudioPhotoCrop(existingThumb))) {
     fields.Thumbnail_URL = cover;
   }
   if (platform === "YouTube" && !current("YouTube_Privacy_Status")) {
@@ -3536,6 +3538,32 @@ function item4UrlIsStudioPhotoCrop(url) {
   return /ITEM4-VARIANT-fill-crop/i.test(String(url || ""));
 }
 
+function studioAiThumbnailUrl(value) {
+  const url = String(value || "").trim();
+  if (!url || item4UrlIsStudioPhotoCrop(url)) return "";
+  return url;
+}
+
+function studioNeedsAiThumbnail(parent, requestRecord) {
+  const mode = String(f(requestRecord || {}, "Thumbnail_Mode") || f(parent || {}, "Include_Thumbnail") || "Yes").trim();
+  if (item4ThumbnailSource(mode) !== "ai") return false;
+  if (String(f(parent || {}, "Include_Thumbnail") || "").trim() === "No") return false;
+  return !studioAiThumbnailUrl(f(parent || {}, "Thumbnail_URL"));
+}
+
+async function studioStampParentAiCoverOnOutput(env, po, parent) {
+  const ai = studioAiThumbnailUrl(f(parent || {}, "Thumbnail_URL"));
+  if (!ai || !po?.id) return false;
+  const current = String(f(po, "Thumbnail_URL") || "").trim();
+  if (current === ai) return false;
+  if (current && !item4UrlIsStudioPhotoCrop(current)) return false;
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: { Thumbnail_URL: ai }, typecast: true }),
+  });
+  return true;
+}
+
 function item4StudioThumbnailPrompt(requestRecord, parent) {
   const existing = String(f(parent, "Thumbnail_Prompt") || "").trim();
   if (existing) return existing;
@@ -3568,17 +3596,14 @@ function item4SlideImageUrl(row) {
 
 function item4DefaultOutputType(platform, photoCount) {
   const n = Math.max(0, Number(photoCount) || 0);
-  const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Video Draft" });
+  const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" });
   const multiple = Object.freeze({ Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" });
   const map = n <= 1 ? single : multiple;
   return map[platform] || null;
 }
 
 function item4CanonicalOutputType(platform, outputType) {
-  const p = String(platform || "").trim();
-  const o = String(outputType || "").trim();
-  if (p === "TikTok" && o === "Single Photo") return "Video Draft";
-  return o;
+  return String(outputType || "").trim();
 }
 
 function item4IsCompanionOutputType(outputType) {
@@ -4958,13 +4983,37 @@ const PR_COUNT_MODES = new Set(["AI decides","Exact","Target range"]);
 const PR_TEXT_MODES = new Set(["AI decides","Force exact","AI improve","Leave blank"]);
 const PR_CAROUSEL_IMAGE_MODES = new Set(["Make AI Generated","Manual Upload"]);
 
-function mapProductionRequest(record) {
+function ideaRecordIdFromProductionRequest(record) {
+  const links = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
+  return String(links[0] || "").trim() || null;
+}
+
+async function loadIdeaTitlesByRecordId(env, ideaIds) {
+  const unique = [...new Set((Array.isArray(ideaIds) ? ideaIds : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  const titles = new Map();
+  await Promise.all(unique.map(async (id) => {
+    try {
+      const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, id);
+      const title = String(f(idea, "Candidate_Title") || "").trim();
+      if (title) titles.set(id, title);
+    } catch (error) {
+      console.warn("Idea title lookup skipped", id, error);
+    }
+  }));
+  return titles;
+}
+
+function mapProductionRequest(record, ideaTitle = null) {
   const links = (name) => Array.isArray(f(record, name)) ? f(record, name) : [];
   return {
     id: record.id,
     production_request_id: f(record, "Production_Request_ID"),
     test_run_id: f(record, "Test_Run_ID") || null,
     idea_candidate_links: links("Idea_Candidate"),
+    idea_record_id: links("Idea_Candidate")[0] || null,
+    idea_title: ideaTitle || String(f(record, "Idea_Title") || "").trim() || null,
     organization_links: links("Organization"),
     brand_links: links("Brand"),
     created_by_links: links("Created_By"),
@@ -5213,9 +5262,9 @@ async function cleanProductionRequestPayload(payload, env) {
   };
 }
 
-function productionRequestFields(input, nowIso) {
+function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
   return {
-    Request_Status: "Draft",
+    Request_Status: status,
     Master_Content_Type: input.content_type || null,
     Target_Platforms: input.platforms || [],
     Voiceover_Mode: input.voiceover_mode,
@@ -5361,12 +5410,15 @@ async function createProductionRequestFromBody(request, env, authorization) {
 }
 
 
-function mapProductionRequestSummary(record) {
-  const mapped = mapProductionRequest(record);
+function mapProductionRequestSummary(record, ideaTitle = null) {
+  const mapped = mapProductionRequest(record, ideaTitle);
   return {
     id: mapped.id,
     production_request_id: mapped.production_request_id,
     idea_candidate_links: mapped.idea_candidate_links,
+    idea_record_id: mapped.idea_record_id,
+    idea_title: mapped.idea_title,
+    requested_title: mapped.requested_title,
     organization_links: mapped.organization_links,
     brand_links: mapped.brand_links,
     created_by_links: mapped.created_by_links,
@@ -5404,13 +5456,25 @@ async function listProductionRequests(request, env, url, authorization) {
       membershipAllowsBrand(authorization, brandLinks) &&
       (!profileBrandIds.size || brandLinks.some((id) => profileBrandIds.has(id)));
   });
-  return respond(request, env, { ok: true, records: filtered.map(mapProductionRequestSummary) });
+  const ideaTitles = await loadIdeaTitlesByRecordId(env, filtered.map(ideaRecordIdFromProductionRequest));
+  return respond(request, env, {
+    ok: true,
+    records: filtered.map((record) => mapProductionRequestSummary(
+      record,
+      ideaTitles.get(ideaRecordIdFromProductionRequest(record)) || null
+    )),
+  });
 }
 
 async function getProductionRequest(request, env, url, authorization) {
   const recordId = productionRequestRecordIdFromPath(url);
   const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
-  return respond(request, env, { ok: true, record: mapProductionRequest(record) });
+  const ideaId = ideaRecordIdFromProductionRequest(record);
+  const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
+  return respond(request, env, {
+    ok: true,
+    record: mapProductionRequest(record, ideaTitles.get(ideaId) || null),
+  });
 }
 
 async function updateProductionRequest(request, env, url, authorization) {
@@ -5424,9 +5488,9 @@ async function updateProductionRequest(request, env, url, authorization) {
     throw new HttpError(409, `Production Request is ${status || "locked"} and cannot be edited`);
   }
 
-  const input = await cleanProductionRequestPayload(payload, env);
+  const input = await cleanProductionRequestPayload({ ...mapProductionRequest(existing), ...payload }, env);
   const now = new Date().toISOString();
-  const fields = productionRequestFields(input, now);
+  const fields = productionRequestFields(input, now, { status });
   const slideCaptions = item4NormalizeSlideCaptions(payload?.slide_captions);
   if (slideCaptions.length) {
     const nextAssets = item4ApplySlideCaptions(
@@ -5865,6 +5929,13 @@ function productionRequestCompatibilityIssues(record) {
   return issues;
 }
 
+function promotionThumbnailTriState(mode) {
+  const raw = String(mode || "Use Profile Default").trim() || "Use Profile Default";
+  if (raw === "Use Profile Default") return "Use Profile Default";
+  if (item4ThumbnailSource(raw) === "none") return "No";
+  return "Yes";
+}
+
 function promotionInputFromProductionRequest(record) {
   const issues = productionRequestCompatibilityIssues(record);
   if (issues.length) {
@@ -5881,7 +5952,7 @@ function promotionInputFromProductionRequest(record) {
     platforms,
     include_voiceover: String(f(record, "Voiceover_Mode") || "Use Profile Default"),
     include_background_music: String(f(record, "Background_Music_Mode") || "Use Profile Default"),
-    include_thumbnail: String(f(record, "Thumbnail_Mode") || "Use Profile Default"),
+    include_thumbnail: promotionThumbnailTriState(f(record, "Thumbnail_Mode")),
     video_duration: f(record, "Video_Duration_Seconds") ?? 30,
     video_clip_count: videoMode === "Exact" ? f(record, "Video_Clip_Count_Exact") : "Auto",
     voiceover_tail_seconds: f(record, "Voiceover_Tail_Seconds") ?? 2,
@@ -7057,6 +7128,23 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   }
 
   const nativePhotoRoute = studioOutputIsNativePhotoRoute(platform, outputType, null);
+  const aiCover = studioAiThumbnailUrl(f(parentContentItem, "Thumbnail_URL"));
+  if (aiCover && nativePhotoRoute && clips.length) {
+    const already = clips.some((clip) => String(clip.url || clip.src || "").trim() === aiCover);
+    if (!already && (outputType === "Single Image" || outputType === "Single Photo")) {
+      clips[0] = { ...clips[0], url: aiCover, src: aiCover, asset_name: clips[0].asset_name || "ai-grid-cover.jpg" };
+    } else if (!already) {
+      clips.unshift({
+        id: "studio-ai-cover",
+        order: 0,
+        url: aiCover,
+        src: aiCover,
+        asset_name: "ai-grid-cover.jpg",
+        motionStyle: "stillPhoto",
+        source: "studio_ai_grid_cover",
+      });
+    }
+  }
   const compositionId = nativePhotoRoute ? null : "ChicagoShiningPhotoSequence";
   const titleText = storyTeaser
     ? ""
@@ -7324,18 +7412,19 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Render_Status: nativeReady ? "Native Photo Route" : null,
     Studio_Preview_URL: nativeReady ? (String(clips[0]?.url || "").trim() || null) : null,
     Thumbnail_URL: (function thumbnailUrl() {
+      const parentThumb = studioAiThumbnailUrl(f(parentContentItem, "Thumbnail_URL"));
+      const source = item4ThumbnailSource(effective.thumbnail_mode);
+      if (source === "ai" && parentThumb) return parentThumb;
       if (nativePhoto) {
-        return item4CoverStillUrl(requestRecord, outputRow)
+        return parentThumb
+          || item4CoverStillUrl(requestRecord, outputRow)
           || studioClipPublicCdnUrl(clips[0])
           || String(clips[0]?.url || "").trim()
           || null;
       }
-      const source = item4ThumbnailSource(effective.thumbnail_mode);
       if (source === "none") return null;
       if (source === "frame") return item4CoverStillUrl(requestRecord, outputRow) || null;
-      const parentThumb = String(f(parentContentItem, "Thumbnail_URL") || "").trim();
-      if (parentThumb && !item4UrlIsStudioPhotoCrop(parentThumb)) return parentThumb;
-      return null;
+      return parentThumb || null;
     }()),
     Asset_Selection_Status: remotionReady ? "Selected" : null,
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
@@ -7534,9 +7623,7 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     const armed = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
     const needVoiceover = String(f(armed || {}, "Include_Voiceover") || "").trim() === "Yes"
       && !String(f(armed || {}, "Voiceover_URL") || "").trim();
-    const needAiThumb = String(f(armed || {}, "Include_Thumbnail") || "").trim() === "Yes"
-      && String(f(armed || {}, "Thumbnail_Status") || "").trim() === "Ready"
-      && !String(f(armed || {}, "Thumbnail_URL") || "").trim();
+    const needAiThumb = studioNeedsAiThumbnail(armed, requestRecord);
     try {
       if (needVoiceover || needAiThumb) await pulseStudioP2Handoff(env, contentItemId, requestRecord);
       await pulseStudioP3Handoff(env, contentItemId, requestRecord);
@@ -12281,6 +12368,17 @@ async function studioContinuationInspectOutput(env, po, cache) {
   const finalUrl = String(f(po, "Final_File_URL") || "").trim();
 
   if (finalUrl && /rendered/i.test(renderStatus)) {
+    const readyContext = await studioContinuationLoadContext(env, po, cache).catch(() => null);
+    if (readyContext && studioNeedsAiThumbnail(readyContext.parent, readyContext.requestRecord)) {
+      return {
+        action: "wait_thumbnail",
+        reason: "missing_ai_cover",
+        contentItemId: readyContext.parent?.id || null,
+      };
+    }
+    if (readyContext?.parent) {
+      await studioStampParentAiCoverOnOutput(env, po, readyContext.parent).catch(() => null);
+    }
     if (!/^ready for review$/i.test(outputStatus)) {
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
         method: "PATCH",
@@ -12296,6 +12394,17 @@ async function studioContinuationInspectOutput(env, po, cache) {
   }
 
   if (studioOutputHasReviewableDeliverable(po) && /^ready for review$/i.test(outputStatus) && !studioOutputWrongVideoSelectorPath(po)) {
+    const readyContext = await studioContinuationLoadContext(env, po, cache).catch(() => null);
+    if (readyContext && studioNeedsAiThumbnail(readyContext.parent, readyContext.requestRecord)) {
+      return {
+        action: "wait_thumbnail",
+        reason: "missing_ai_cover",
+        contentItemId: readyContext.parent?.id || null,
+      };
+    }
+    if (readyContext?.parent) {
+      await studioStampParentAiCoverOnOutput(env, po, readyContext.parent).catch(() => null);
+    }
     return { action: "reviewable", reason: "deliverable" };
   }
 
@@ -12317,6 +12426,15 @@ async function studioContinuationInspectOutput(env, po, cache) {
       };
     }
   }
+
+  if (studioNeedsAiThumbnail(context.parent, context.requestRecord)) {
+    return {
+      action: "wait_thumbnail",
+      reason: "missing_ai_cover",
+      contentItemId: context.parent?.id || null,
+    };
+  }
+  await studioStampParentAiCoverOnOutput(env, po, context.parent).catch(() => null);
 
   try {
     const filled = await item4EnsureAiSourceMasters(env, context.requestRecord, context.parent);
@@ -12506,13 +12624,14 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   const pulses = await pulseStudioContinuationJobs(env, options);
   const waitingAi = inspected.some((row) => row.action === "wait_ai");
   const waitingVoiceover = inspected.some((row) => row.action === "wait_voiceover");
+  const waitingThumbnail = inspected.some((row) => row.action === "wait_thumbnail");
   const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
   const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
-  if (waitingVoiceover) {
-    const voParents = [...new Set(
-      inspected.filter((row) => row.action === "wait_voiceover").map((row) => row.contentItemId).filter(Boolean)
+  if (waitingVoiceover || waitingThumbnail) {
+    const mediaParents = [...new Set(
+      inspected.filter((row) => row.action === "wait_voiceover" || row.action === "wait_thumbnail").map((row) => row.contentItemId).filter(Boolean)
     )];
-    for (const parentId of voParents) {
+    for (const parentId of mediaParents) {
       try {
         await pulseStudioP2Handoff(env, parentId, { fields: {} });
         pulses.push({ key: "P2", pulsed: true, content_item: parentId });

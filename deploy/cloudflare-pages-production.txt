@@ -207,3 +207,5 @@ Draft idea name Pages deploy: 2026-08-23 - Production request drafts show the id
 
 API edge retry Pages deploy: 2026-08-23 - Studio API client retries Cloudflare HTML/empty 404, 502/503, and failed-to-fetch up to 12 times (3s apart) then quits. Writes are not replayed after a timeout. UI 0.6.124-api-edge-retry.
 
+TikTok Single Photo Pages deploy: 2026-08-23 - Studio no longer rewrites TikTok Single Photo to Video Draft. UI 0.6.125-tiktok-single-photo.
+
