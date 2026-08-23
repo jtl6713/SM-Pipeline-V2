@@ -246,7 +246,7 @@ def main() -> int:
         if not session.get("authenticated") or not session.get("authorized"):
             raise RuntimeError(f"Studio membership failed: {json.dumps(session)[:2000]}")
 
-        listed = must("list-ideas", bridge("GET", "/api/ideas"))
+        listed = must_retry("list-ideas", lambda: bridge("GET", "/api/ideas"), attempts=8, delay_s=4)
         existing_idea = next(
             (
                 row
@@ -260,9 +260,11 @@ def main() -> int:
             idea_id = existing_idea.get("id")
             log(f"resume idea {idea_id}")
         else:
-            idea = must(
+            idea = must_retry(
                 "create-idea",
-                bridge("POST", "/api/ideas", {"title": TITLE, "summary": SUMMARY}),
+                lambda: bridge("POST", "/api/ideas", {"title": TITLE, "summary": SUMMARY}),
+                attempts=8,
+                delay_s=4,
             )
             idea_id = (idea.get("record") or {}).get("id")
         if not idea_id:
