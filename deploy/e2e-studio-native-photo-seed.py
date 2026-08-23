@@ -389,6 +389,26 @@ def main() -> int:
         ):
             raise RuntimeError(f"bridge preflight not ready: {json.dumps(preflight)[:4000]}")
 
+        current = must_retry("get-production-request-before-promote", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
+        thumbnail = str((current.get("record") or {}).get("thumbnail_mode") or "")
+        evidence["thumbnail_mode_before_promote"] = thumbnail
+        if thumbnail == "Use photo frame":
+            # Live promote sanitizer still only accepts Use Profile Default / Yes / No.
+            # "Use photo frame" means include a cover, so Yes is the compatible I3 value
+            # until the Worker mapping ships. Keep the operator intent in evidence.
+            patched = must(
+                "patch-thumbnail-for-live-promote",
+                bridge("PATCH", f"/api/production-requests/{pr_id}", {"thumbnail_mode": "Yes"}),
+            )
+            evidence["thumbnail_mode_patched_for_promote"] = (patched.get("record") or {}).get("thumbnail_mode")
+            evidence["defect"] = {
+                "id": "RC-NATIVE-D1",
+                "title": "Promote rejects Thumbnail_Mode=Use photo frame",
+                "live_error": "Thumbnail must be Use Profile Default, Yes, or No",
+                "workaround": "PATCH thumbnail_mode Yes before promote",
+                "fix": "promotionThumbnailTriState maps Use photo frame -> Yes",
+            }
+
         promote = None
         for attempt in range(1, 9):
             result = bridge("POST", f"/api/production-requests/{pr_id}/promote", {}, timeout=180)
