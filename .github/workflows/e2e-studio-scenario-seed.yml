@@ -127,8 +127,11 @@ jobs:
               -H 'Content-Type: application/json' \
               -d '{"method":"GET","path":"/api/session"}' "$URL" || true)
             echo "bridge_ready_attempt=$i/$BRIDGE_RETRY_MAX http=$code"
+            if [[ -f /tmp/bridge-probe.json ]]; then
+              echo "bridge_probe_body=$(head -c 400 /tmp/bridge-probe.json)"
+            fi
             [[ "$code" == "200" ]] && break
-            if [[ "$code" != "404" && "$code" != "000" && "$code" != "502" && "$code" != "503" && "$code" != "504" && "$code" != "530" && "$code" != "1033" ]]; then
+            if [[ "$code" != "404" && "$code" != "000" && "$code" != "500" && "$code" != "502" && "$code" != "503" && "$code" != "504" && "$code" != "530" && "$code" != "1033" && "$code" != "1101" && "$code" != "1042" ]]; then
               echo "bridge gave up (non-retryable) last_http=$code"
               exit 1
             fi
