@@ -104,10 +104,15 @@ def bridge(method: str, path: str, body=None, files=None, timeout: int = 120) ->
             raise RuntimeError(f"bridge curl failed {path}: {completed.stderr or http_code}")
         try:
             wrapper = json.loads(raw) if raw else {}
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"bridge HTTP {http_code} {path}: {raw[:2000]}") from exc
+        except json.JSONDecodeError:
+            wrapper = {"raw": (raw or "")[:2000], "retryable": True}
         if http_code != "200":
-            raise RuntimeError(f"bridge HTTP {http_code} {path}: {json.dumps(wrapper)[:4000]}")
+            return {
+                "ok": False,
+                "status": int(http_code) if http_code.isdigit() else 500,
+                "body": {"error": (raw or http_code)[:1500], "retryable": True},
+                "wrapper": wrapper if isinstance(wrapper, dict) else {},
+            }
     finally:
         for candidate in (payload_path, out_path):
             try:
@@ -130,6 +135,32 @@ def must(step: str, result: dict) -> dict:
     return body
 
 
+def retryable(result: dict) -> bool:
+    body = result.get("body") if isinstance(result.get("body"), dict) else {}
+    status = int(result.get("status") or 0)
+    text = json.dumps(body)
+    return bool(body.get("retryable")) or status in {500, 502, 503, 504} or "1101" in text or "error code" in text.lower()
+
+
+def must_retry(step: str, call, attempts: int = 8, delay_s: int = 8) -> dict:
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            result = call()
+            if retryable(result) and attempt < attempts:
+                log(f"{step} transient HTTP {result.get('status')} attempt={attempt}")
+                time.sleep(delay_s)
+                continue
+            return must(step, result)
+        except RuntimeError as exc:
+            last_error = exc
+            if attempt >= attempts or ("1101" not in str(exc) and "retryable" not in str(exc) and "HTTP 5" not in str(exc)):
+                raise
+            log(f"{step} retry {attempt}: {exc}")
+            time.sleep(delay_s)
+    raise last_error or RuntimeError(f"{step} failed")
+
+
 def poll_until(step: str, path: str, predicate, timeout_s: int = 480, interval_s: int = 8) -> dict:
     deadline = time.time() + timeout_s
     last = {}
@@ -137,21 +168,46 @@ def poll_until(step: str, path: str, predicate, timeout_s: int = 480, interval_s
         result = bridge("GET", path, timeout=90)
         body = result.get("body") if isinstance(result.get("body"), dict) else {}
         last = body
+        if retryable(result) or not result.get("ok"):
+            log(f"{step} waiting transient={result.get('status')}")
+            time.sleep(interval_s)
+            continue
         try:
-            if result.get("ok") and predicate(body):
+            if predicate(body):
                 log(f"{step} ready")
                 return body
         except Exception:
             pass
+        record = body.get("record") if isinstance(body.get("record"), dict) else {}
         status = (
-            body.get("variant_status")
+            body.get("status")
+            or body.get("variant_status")
             or body.get("assets_status")
-            or (body.get("record") or {}).get("status")
+            or record.get("studio_variant_status")
+            or record.get("studio_master_asset_status")
+            or record.get("status")
             or result.get("status")
         )
         log(f"{step} waiting status={status}")
         time.sleep(interval_s)
     raise RuntimeError(f"{step} timed out: {json.dumps(last)[:4000]}")
+
+
+def photo_files() -> list:
+    files = []
+    log("downloading Wikimedia Chicago rain stills")
+    for name, url in PHOTOS:
+        blob = download(url)
+        log(f"  {name} {len(blob)} bytes")
+        files.append(
+            {
+                "field": "files",
+                "filename": name,
+                "content_type": "image/jpeg",
+                "b64": base64.b64encode(blob).decode("ascii"),
+            }
+        )
+    return files
 
 
 def main() -> int:
@@ -166,27 +222,36 @@ def main() -> int:
         if not session.get("authenticated") or not session.get("authorized"):
             raise RuntimeError(f"Studio membership failed: {json.dumps(session)[:2000]}")
 
-        log("downloading Wikimedia Chicago rain stills")
-        files = []
-        for name, url in PHOTOS:
-            blob = download(url)
-            log(f"  {name} {len(blob)} bytes")
-            files.append(
-                {
-                    "field": "files",
-                    "filename": name,
-                    "content_type": "image/jpeg",
-                    "b64": base64.b64encode(blob).decode("ascii"),
-                }
+        known_idea = os.environ.get("RESUME_IDEA_ID", "recjG3bl1EAtImPV5")
+        known = bridge("GET", f"/api/ideas/{known_idea}")
+        known_record = (known.get("body") or {}).get("record") if isinstance(known.get("body"), dict) else None
+        if not known_record and isinstance(known.get("body"), dict) and known.get("body").get("id"):
+            known_record = known.get("body")
+        if known.get("ok") and known_record and str(known_record.get("title") or "") == TITLE:
+            idea_id = known_record.get("id") or known_idea
+            log(f"resume idea {idea_id}")
+        else:
+            listed = must("list-ideas", bridge("GET", "/api/ideas"))
+            existing_idea = next(
+                (
+                    row
+                    for row in (listed.get("records") or [])
+                    if str(row.get("title") or "") == TITLE
+                    and not (row.get("content_item_links") or row.get("promoted_content_record_id"))
+                ),
+                None,
             )
-
-        idea = must(
-            "create-idea",
-            bridge("POST", "/api/ideas", {"title": TITLE, "summary": SUMMARY}),
-        )
-        idea_id = (idea.get("record") or {}).get("id")
+            if existing_idea:
+                idea_id = existing_idea.get("id")
+                log(f"resume idea {idea_id}")
+            else:
+                idea = must(
+                    "create-idea",
+                    bridge("POST", "/api/ideas", {"title": TITLE, "summary": SUMMARY}),
+                )
+                idea_id = (idea.get("record") or {}).get("id")
         if not idea_id:
-            raise RuntimeError(f"create-idea missing id: {json.dumps(idea)[:2000]}")
+            raise RuntimeError("missing idea id")
         evidence["idea_id"] = idea_id
         log(f"idea {idea_id}")
 
@@ -218,43 +283,60 @@ def main() -> int:
         evidence["production_request_id"] = pr_id
         log(f"production request {pr_id}")
 
-        upload = must(
-            "upload-assets",
-            bridge("POST", f"/api/production-requests/{pr_id}/assets", files=files, timeout=180),
-        )
-        evidence["upload_count"] = upload.get("count") or len((upload.get("assets") or []))
+        current = must("get-production-request", bridge("GET", f"/api/production-requests/{pr_id}"))
+        record = current.get("record") or {}
+        asset_count = int(record.get("studio_master_asset_count") or len(record.get("studio_master_assets") or []) or 0)
+        if asset_count < 3:
+            upload = must(
+                "upload-assets",
+                bridge("POST", f"/api/production-requests/{pr_id}/assets", files=photo_files(), timeout=180),
+            )
+            evidence["upload_count"] = upload.get("count") or len((upload.get("assets") or []))
+        else:
+            evidence["upload_count"] = asset_count
+            log(f"skip upload; {asset_count} masters already present")
 
         def masters_ready(body: dict) -> bool:
-            assets = body.get("assets") or []
-            status = str(body.get("assets_status") or "")
+            rec = body.get("record") or {}
+            assets = rec.get("studio_master_assets") or body.get("assets") or []
+            status = str(rec.get("studio_master_asset_status") or body.get("status") or "")
+            count = int(rec.get("studio_master_asset_count") or len(assets) or 0)
             authoritative = sum(
                 1
                 for asset in assets
                 if asset.get("google_drive_file_id") and asset.get("media_asset_record_id")
             )
-            return status == "Ready" or (len(assets) >= 3 and authoritative >= 3)
+            return count >= 3 and (status == "Ready" or authoritative >= 3)
 
-        poll_until("master-assets", f"/api/production-requests/{pr_id}/item4", masters_ready, timeout_s=360)
+        # Light GET on the production request; /item4 can 1101 while SMV1 drains.
+        poll_until("master-assets", f"/api/production-requests/{pr_id}", masters_ready, timeout_s=480, interval_s=10)
+        # UI-equivalent self-heal without failing the seed if Studio throws.
+        bridge("GET", f"/api/production-requests/{pr_id}/assets")
 
-        plan = must(
-            "build-plan",
-            bridge(
-                "POST",
-                f"/api/production-requests/{pr_id}/plan",
-                {
-                    "platforms": ["Instagram", "Facebook", "TikTok"],
-                    "overrides": {
-                        "Instagram": "Carousel",
-                        "Facebook": "Multi-Image Post",
-                        "TikTok": "Multi-Photo",
+        current = must("get-production-request-before-plan", bridge("GET", f"/api/production-requests/{pr_id}"))
+        plan_status = str((current.get("record") or {}).get("studio_output_plan_status") or "")
+        planned_items = ((current.get("record") or {}).get("studio_output_plan") or {}).get("items") or []
+        if plan_status != "Ready" or not planned_items:
+            plan = must_retry(
+                "build-plan",
+                lambda: bridge(
+                    "POST",
+                    f"/api/production-requests/{pr_id}/plan",
+                    {
+                        "platforms": ["Instagram", "Facebook", "TikTok"],
+                        "overrides": {
+                            "Instagram": "Carousel",
+                            "Facebook": "Multi-Image Post",
+                            "TikTok": "Multi-Photo",
+                        },
+                        "extras": [],
                     },
-                    "extras": [],
-                },
-            ),
-        )
+                ),
+            )
+            planned_items = ((plan.get("plan") or {}).get("items") or [])
         planned = [
             {"platform": item.get("platform"), "output_type": item.get("output_type")}
-            for item in ((plan.get("plan") or {}).get("items") or [])
+            for item in planned_items
         ]
         evidence["plan"] = planned
         expected = {
@@ -266,18 +348,22 @@ def main() -> int:
         if got != expected:
             raise RuntimeError(f"planner did not emit native types: {planned}")
 
-        must(
-            "prepare-variants",
-            bridge("POST", f"/api/production-requests/{pr_id}/variants", {"crops": {}}, timeout=90),
-        )
-
         def variants_ready(body: dict) -> bool:
-            return str(body.get("variant_status") or "") == "Ready"
+            rec = body.get("record") or body
+            status = str(rec.get("studio_variant_status") or body.get("status") or "")
+            return status == "Ready"
 
-        item4 = poll_until("variants", f"/api/production-requests/{pr_id}/item4", variants_ready, timeout_s=540, interval_s=12)
-        evidence["variant_status"] = item4.get("variant_status")
+        current = must("get-production-request-before-variants", bridge("GET", f"/api/production-requests/{pr_id}"))
+        if str((current.get("record") or {}).get("studio_variant_status") or "") != "Ready":
+            must_retry(
+                "prepare-variants",
+                lambda: bridge("POST", f"/api/production-requests/{pr_id}/variants", {"crops": {}}, timeout=90),
+                attempts=6,
+                delay_s=12,
+            )
+            poll_until("variants", f"/api/production-requests/{pr_id}", variants_ready, timeout_s=540, interval_s=12)
 
-        preflight = must("bridge-preflight", bridge("GET", f"/api/production-requests/{pr_id}/bridge-preflight"))
+        preflight = must_retry("bridge-preflight", lambda: bridge("GET", f"/api/production-requests/{pr_id}/bridge-preflight"))
         evidence["bridge_preflight_ready"] = bool(preflight.get("ready") or (preflight.get("preflight") or {}).get("ready"))
         if preflight.get("ready") is False or (
             isinstance(preflight.get("preflight"), dict) and preflight["preflight"].get("ready") is False
@@ -288,8 +374,8 @@ def main() -> int:
         for attempt in range(1, 9):
             result = bridge("POST", f"/api/production-requests/{pr_id}/promote", {}, timeout=180)
             body = result.get("body") if isinstance(result.get("body"), dict) else {}
-            if result.get("status") == 409 and "bridge" in json.dumps(body).lower():
-                log(f"promote attempt {attempt} waiting on bridge: {body.get('error') or body.get('message')}")
+            if retryable(result) or (result.get("status") == 409 and "bridge" in json.dumps(body).lower()):
+                log(f"promote attempt {attempt} waiting: {body.get('error') or body.get('message') or result.get('status')}")
                 time.sleep(15)
                 continue
             promote = must("promote", result)
@@ -305,9 +391,9 @@ def main() -> int:
         }
 
         def promoted(body: dict) -> bool:
-            record = body.get("record") or {}
-            status = str(record.get("status") or "")
-            links = record.get("promoted_content_item_links") or []
+            rec = body.get("record") or {}
+            status = str(rec.get("status") or "")
+            links = rec.get("promoted_content_item_links") or []
             return status == "Promoted" or bool(links) or bool(promote.get("promoted"))
 
         latest = poll_until(
@@ -342,6 +428,7 @@ def main() -> int:
         with open(pathlib_write, "w", encoding="utf-8") as handle:
             json.dump(evidence, handle, indent=2)
             handle.write("\n")
+
 
 
 if __name__ == "__main__":

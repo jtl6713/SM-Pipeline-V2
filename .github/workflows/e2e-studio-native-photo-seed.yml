@@ -48,38 +48,42 @@ jobs:
             const u = new URL(request.url);
             if (u.pathname !== ROUTE) return new Response("Not found", { status: 404 });
             if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
-            const spec = await request.json();
-            const m = String(spec.method || "GET").toUpperCase();
-            const path = String(spec.path || "");
-            if (!(path === "/health" || path === "/api/health" || path.startsWith("/api/"))) {
-              return Response.json({ ok: false, error: "path-not-allowed" }, { status: 400 });
-            }
-            const h = new Headers({
-              "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
-              "Accept": "application/json",
-              "Origin": "https://studio.chicagoshining.com",
-            });
-            let body;
-            if (m !== "GET" && m !== "HEAD") {
-              if (Array.isArray(spec.files) && spec.files.length) {
-                const form = new FormData();
-                for (const f of spec.files) {
-                  const bin = atob(String(f.b64 || ""));
-                  const bytes = new Uint8Array(bin.length);
-                  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-                  form.append(String(f.field || "files"), new Blob([bytes], { type: f.content_type || "image/jpeg" }), String(f.filename || "photo.jpg"));
-                }
-                body = form;
-              } else {
-                h.set("Content-Type", "application/json");
-                body = JSON.stringify(spec.body ?? {});
+            try {
+              const spec = await request.json();
+              const m = String(spec.method || "GET").toUpperCase();
+              const path = String(spec.path || "");
+              if (!(path === "/health" || path === "/api/health" || path.startsWith("/api/"))) {
+                return Response.json({ ok: false, error: "path-not-allowed" }, { status: 400 });
               }
+              const h = new Headers({
+                "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
+                "Accept": "application/json",
+                "Origin": "https://studio.chicagoshining.com",
+              });
+              let body;
+              if (m !== "GET" && m !== "HEAD") {
+                if (Array.isArray(spec.files) && spec.files.length) {
+                  const form = new FormData();
+                  for (const f of spec.files) {
+                    const bin = atob(String(f.b64 || ""));
+                    const bytes = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+                    form.append(String(f.field || "files"), new Blob([bytes], { type: f.content_type || "image/jpeg" }), String(f.filename || "photo.jpg"));
+                  }
+                  body = form;
+                } else {
+                  h.set("Content-Type", "application/json");
+                  body = JSON.stringify(spec.body ?? {});
+                }
+              }
+              const r = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path, { method: m, headers: h, body }));
+              const t = await r.text();
+              let parsed;
+              try { parsed = t ? JSON.parse(t) : null; } catch { parsed = { raw: t.slice(0, 20000) }; }
+              return Response.json({ ok: r.ok, status: r.status, path, method: m, body: parsed }, { headers: { "Cache-Control": "no-store" } });
+            } catch (err) {
+              return Response.json({ ok: false, status: 500, error: String(err && err.message || err), retryable: true }, { status: 200, headers: { "Cache-Control": "no-store" } });
             }
-            const r = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path, { method: m, headers: h, body }));
-            const t = await r.text();
-            let parsed;
-            try { parsed = t ? JSON.parse(t) : null; } catch { parsed = { raw: t.slice(0, 20000) }; }
-            return Response.json({ ok: r.ok, status: r.status, path, method: m, body: parsed }, { headers: { "Cache-Control": "no-store" } });
           } };'''
           js = js.replace("ROUTE", json.dumps("/" + token))
           Path("/tmp/worker.js").write_text(js)
