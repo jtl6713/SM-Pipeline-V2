@@ -352,19 +352,35 @@ def main() -> int:
             raise RuntimeError(f"planner did not emit native types: {planned}")
 
         def variants_ready(body: dict) -> bool:
-            rec = body.get("record") or body
-            status = str(rec.get("studio_variant_status") or body.get("status") or "")
-            return status == "Ready"
+            rec = body.get("record") if isinstance(body.get("record"), dict) else {}
+            status = str(body.get("status") or rec.get("studio_variant_status") or "")
+            progress = body.get("progress") if isinstance(body.get("progress"), dict) else rec.get("studio_variant_manifest") or {}
+            target = int(progress.get("target") or progress.get("target_count") or 0)
+            ready = int(progress.get("ready") or progress.get("ready_count") or 0)
+            return status == "Ready" and (target == 0 or ready >= target)
 
         current = must_retry("get-production-request-before-variants", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
-        if str((current.get("record") or {}).get("studio_variant_status") or "") != "Ready":
-            must_retry(
-                "prepare-variants",
-                lambda: bridge("POST", f"/api/production-requests/{pr_id}/variants", {"crops": {}}, timeout=90),
-                attempts=6,
-                delay_s=12,
+        variant_status = str((current.get("record") or {}).get("studio_variant_status") or "")
+        if variant_status != "Ready":
+            if variant_status != "Preparing":
+                try:
+                    must_retry(
+                        "prepare-variants",
+                        lambda: bridge("POST", f"/api/production-requests/{pr_id}/variants", {"crops": {}}, timeout=90),
+                        attempts=6,
+                        delay_s=12,
+                    )
+                except RuntimeError as exc:
+                    if "409" not in str(exc) and "still" not in str(exc).lower():
+                        raise
+                    log(f"prepare-variants already running: {exc}")
+            poll_until(
+                "variants",
+                f"/api/production-requests/{pr_id}/variants",
+                variants_ready,
+                timeout_s=540,
+                interval_s=12,
             )
-            poll_until("variants", f"/api/production-requests/{pr_id}", variants_ready, timeout_s=540, interval_s=12)
 
         preflight = must_retry("bridge-preflight", lambda: bridge("GET", f"/api/production-requests/{pr_id}/bridge-preflight"))
         evidence["bridge_preflight_ready"] = bool(preflight.get("ready") or (preflight.get("preflight") or {}).get("ready"))
