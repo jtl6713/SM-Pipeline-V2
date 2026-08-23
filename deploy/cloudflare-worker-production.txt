@@ -103,3 +103,5 @@ Variant download URLs Worker deploy: 2026-08-22 - When CDN previews are missing,
 
 Render CDN-only clips Worker deploy: 2026-08-22 - Google Drive answers large crops with an HTML scan page, which failed Remotion with exit code 1, so render clips now require a public CDN preview and Ready crops with a blank Preview_Status are claimed as Pending so the preview drain generates that copy. Worker 0.10.90-render-cdn-only-clips.
 
+AI slide themer Worker deploy: 2026-08-22 - AI photo slots were prompted from the production request title, which is normally blank, so every slot got the same themeless prompt, no caption, and a voiceover written before the slots existed. New SAI1 scenario (6023816) now picks a distinct thing to do per slot from the Content Item title, excluding what the creator's photos already cover, and returns the on-photo caption, the image prompt, and one narration naming every slide. Captions ride Studio_Slide_Caption onto the master asset at ingest so Remotion burns them in, and seeding runs before parent arming so P2 speaks the themed script. Worker 0.10.91-ai-slide-themer.
+

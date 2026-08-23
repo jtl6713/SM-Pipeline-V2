@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.90-render-cdn-only-clips",
+          version: "0.10.91-ai-slide-themer",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -3857,6 +3857,8 @@ const ITEM4_P2_SCENARIO_ID = 5530955;
 const ITEM4_P2_WEBHOOK_URL = "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt";
 const ITEM4_C2_SCENARIO_ID = 5582071;
 const ITEM4_C2_WEBHOOK_URL = "https://hook.us2.make.com/t1wjrdod0k433jgaz10tf30q2rq0sfpb";
+const ITEM4_SAI1_SCENARIO_ID = 6023816;
+const ITEM4_SAI1_WEBHOOK_URL = "https://hook.us2.make.com/duojihfn68fgoz6x438tjfbw9fsb9cwz";
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
@@ -6531,6 +6533,54 @@ async function item4ListParentCarouselSlides(env, parentId) {
   }
 }
 
+// The production request only carries a title when the creator forced one, so the
+// theme normally lives on the promoted Content Item.
+function item4StudioThemeTitle(requestRecord, parent) {
+  return String(
+    f(requestRecord, "Requested_Title")
+    || (parent ? f(parent, "Content_Title") : "")
+    || (parent ? f(parent, "Hook") : "")
+    || ""
+  ).trim();
+}
+
+// SAI1 decides what each AI slot depicts and writes the narration for the whole
+// video, so a slot's photo, its burned-in caption, and the voiceover all name the
+// same thing to do instead of drifting apart.
+async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
+  if (needed < 1) return null;
+  const title = item4StudioThemeTitle(requestRecord, parent);
+  if (!title) return null;
+  const covered = item4AssetManifest(requestRecord)
+    .slice()
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    .map((asset) => String(asset?.caption || "").trim())
+    .filter(Boolean);
+  const response = await fetch(ITEM4_SAI1_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      source: "studio-ai-slide-themer",
+      production_request_record_id: requestRecord.id,
+      content_record_id: parent?.id || null,
+      title,
+      covered_text: covered.map((text, index) => `${index + 1}. ${text}`).join("\n") || "(none)",
+      needed,
+      total: covered.length + needed,
+    }),
+  });
+  if (!response.ok) throw new Error(`SAI1 slide themer failed (${response.status})`);
+  const parsed = item4ParseJson(await response.text(), null);
+  const slides = (Array.isArray(parsed?.slides) ? parsed.slides : [])
+    .map((slide) => ({
+      caption: String(slide?.caption || "").trim().slice(0, 120),
+      imagePrompt: String(slide?.image_prompt || "").trim(),
+    }))
+    .filter((slide) => slide.imagePrompt);
+  if (!slides.length) return null;
+  return { slides, voiceoverScript: String(parsed?.voiceover_script || "").trim() };
+}
+
 async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, targetTotal = null) {
   if (!parentId || needed < 1) return [];
   const existing = await item4ListParentCarouselSlides(env, parentId);
@@ -6587,32 +6637,56 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, t
   const coveringAfter = afterLive.filter(coversAiSlot).length;
   const missing = Math.max(0, needed - coveringAfter);
   if (!missing) return afterLive;
-  const title = String(f(requestRecord, "Requested_Title") || f(requestRecord, "Production_Request_ID") || "Chicago").trim();
+  const parentRecord = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId).catch(() => null);
+  let themes = null;
+  try {
+    themes = await item4RequestAiSlideThemes(env, requestRecord, parentRecord, missing);
+  } catch (error) {
+    console.warn("Studio AI slide themer failed", parentId, error);
+  }
+  const title = item4StudioThemeTitle(requestRecord, parentRecord)
+    || String(f(requestRecord, "Production_Request_ID") || "Chicago").trim();
   const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
   const created = [];
   for (let i = 0; i < missing; i += 1) {
     const n = afterLive.length + created.length + 1;
-    const prompt = [
+    const theme = themes?.slides?.[i] || null;
+    const prompt = theme?.imagePrompt || [
       `Photorealistic Chicago travel photograph for ChicagoShining, complementary to "${title}".`,
       caption ? `Context: ${caption.slice(0, 400)}` : "",
       "No logos, no watermarks, no burned-in text.",
     ].filter(Boolean).join(" ");
+    const fields = {
+      "Slide Name": theme?.caption || `Studio AI ${n}`,
+      "Slide Number": n,
+      "Current Order": n,
+      "AI Prompt": prompt,
+      "Image Generation Mode": "Make AI Generated",
+      "Image Source": "Make AI Generated",
+      "Content Item": [parentId],
+    };
+    if (theme?.caption) fields.Studio_Slide_Caption = theme.caption;
     const row = await airtableFetch(env, "Carousel Slides", "", {
       method: "POST",
-      body: JSON.stringify({
-        fields: {
-          "Slide Name": `Studio AI ${n}`,
-          "Slide Number": n,
-          "Current Order": n,
-          "AI Prompt": prompt,
-          "Image Generation Mode": "Make AI Generated",
-          "Image Source": "Make AI Generated",
-          "Content Item": [parentId],
-        },
-        typecast: true,
-      }),
+      body: JSON.stringify({ fields, typecast: true }),
     });
     created.push(row);
+  }
+
+  // The narration has to name every slide, so it can only be written once the AI
+  // slots are themed. Never overwrite a voiceover that has already been spoken.
+  if (themes?.voiceoverScript && !String(f(parentRecord || {}, "Voiceover_URL") || "").trim()) {
+    try {
+      await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Voiceover_Script: themes.voiceoverScript, Script_Status: "Generated" },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      console.warn("Studio AI narration write failed", parentId, error);
+    }
   }
   if (created.length) {
     try {
@@ -6663,6 +6737,9 @@ async function item4IngestAiSlideAsMaster(env, requestRecord, slide) {
     source: "studio_ai",
     carousel_slide_id: slideId,
     caption_mode: "ai",
+    // Carry the themed caption across so Remotion burns in the thing this photo
+    // actually depicts. Without it the overlay is skipped entirely.
+    caption: String(f(slide, "Studio_Slide_Caption") || "").trim(),
   }];
   return item4UpdateRequestState(env, requestRecord.id, {
     Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
@@ -7273,7 +7350,7 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
   };
   if (contentItemId) fields.Promoted_Content_Item = [contentItemId];
 
-  const requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, fields);
+  let requestRecord = await updateProductionRequestPromotionState(env, requestRecordId, fields);
 
   let directiveBridge = null;
   let outputFanout = null;
@@ -7291,6 +7368,21 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       contentItemId
     );
 
+    // Seed and theme the AI slots first. P2 speaks the script that arming stamps,
+    // so the themed narration has to exist before either of them runs or the
+    // voiceover can only ever describe the creator-supplied photos.
+    if (String(f(requestRecord, "Master_Content_Type") || "").trim() === "Carousel"
+      || item4EffectivePhotoCount(requestRecord) > item4AssetManifest(requestRecord).length) {
+      try {
+        if (contentItemId) {
+          const seeded = await item4EnsureAiSourceMasters(env, requestRecord, { id: contentItemId });
+          if (seeded?.requestRecord) requestRecord = seeded.requestRecord;
+        }
+      } catch (error) {
+        console.warn("Studio AI source seed failed", error);
+      }
+    }
+
     try {
       await armStudioParentForP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
@@ -7307,14 +7399,6 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       await pulseStudioP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
       console.warn("Studio promote media pulse failed", error);
-    }
-    if (String(f(requestRecord, "Master_Content_Type") || "").trim() === "Carousel"
-      || item4EffectivePhotoCount(requestRecord) > item4AssetManifest(requestRecord).length) {
-      try {
-        if (contentItemId) await item4EnsureAiSourceMasters(env, requestRecord, { id: contentItemId });
-      } catch (error) {
-        console.warn("Studio AI source seed failed", error);
-      }
     }
   }
 

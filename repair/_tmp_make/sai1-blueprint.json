@@ -1,0 +1,60 @@
+{
+  "name": "SAI1 - Studio AI Slide Themer v1",
+  "metadata": { "version": 1 },
+  "flow": [
+    {
+      "id": 1,
+      "module": "gateway:CustomWebHook",
+      "version": 1,
+      "parameters": { "hook": 2723212, "maxResults": 1 },
+      "mapper": {},
+      "metadata": {
+        "designer": { "x": 0, "y": 0, "name": "1 - Studio AI Slide Theme Request" },
+        "restore": { "parameters": { "hook": { "label": "SAI1 - Studio AI Slide Themer", "data": { "editable": "true" } } } }
+      }
+    },
+    {
+      "id": 2,
+      "module": "openai-gpt-3:createModelResponse",
+      "version": 1,
+      "parameters": { "__IMTCONN__": 9293407 },
+      "mapper": {
+        "model": "gpt-5",
+        "store": true,
+        "format": { "type": "json_object" },
+        "reasoning": {},
+        "background": false,
+        "truncation": "auto",
+        "inputContentType": "text",
+        "createConversation": false,
+        "parallel_tool_calls": false,
+        "input": "You are the ChicagoShining Studio AI slide themer for SM Pipeline V2.\n\nReturn strict JSON only. No markdown. No explanations.\n\nWHAT THIS DOES\nA short vertical video is being produced from a set of photos. Some photos were supplied by the creator and already have on-screen captions. The remaining slots must be filled with AI-generated photos. Your job is to choose what those remaining slots should depict and to write both the on-screen caption and the image generation prompt for each.\n\nReturn exactly this structure:\n{\n  \"slides\": [\n    {\n      \"caption\": \"Short on-screen label naming the specific thing to do.\",\n      \"image_prompt\": \"Full clean photorealistic image generation prompt for that thing to do.\"\n    }\n  ]\n}\n\nHARD REQUIREMENTS\n- slides array length must be exactly the REQUESTED COUNT below. Not more, not fewer.\n- Each slide must name ONE specific, real, well-known Chicago thing to do, attraction, or experience.\n- Never repeat or paraphrase anything in ALREADY COVERED. Those slots are taken. Choose genuinely different activities in different parts of the city where possible.\n- All slides must fit the VIDEO TITLE theme. If the title is about things to do, every slide must be an actual thing a visitor can go do, not a generic skyline or river view.\n- Slides must be distinct from each other.\n\nCAPTION RULES\n- The caption is burned onto the photo, so it must be short: 42 characters or fewer.\n- Name the place or activity plainly, in title case. Examples of the right shape: \"Art Institute of Chicago\", \"Architecture River Cruise\", \"Deep Dish at Lou Malnati's\", \"Wrigley Field\", \"Millennium Park\".\n- No hashtags, no emoji, no trailing punctuation, no numbering, no quotes.\n\nIMAGE PROMPT RULES\n- Photorealistic travel photograph of that specific thing to do, in Chicago, on-brand for ChicagoShining: polished, bright, cinematic, realistic travel-guide look.\n- The subject must be clearly recognizable as the thing named in the caption.\n- Composed for a vertical 9:16 frame with the key subject inside safe margins and clear headroom, because a caption is overlaid on the photo downstream.\n- Never ask for rendered text, captions, labels, titles, borders, logos, app UI, watermarks, or graphic overlays of any kind. Watermarking happens downstream.\n- Do not mention aspect ratio numerals or camera jargon in a way that would appear as text in the image.\n\nVIDEO TITLE\n{{1.title}}\n\nALREADY COVERED BY CREATOR-SUPPLIED PHOTOS\n{{1.covered_text}}\n\nREQUESTED COUNT\n{{1.needed}}\n\nFINAL SELF-CHECK BEFORE RETURNING\n- slides.length equals REQUESTED COUNT exactly.\n- No slide duplicates or paraphrases an ALREADY COVERED entry.\n- Every caption is 42 characters or fewer.\n- Every image_prompt asks for no text or logos of any kind.\n- Output is valid JSON only."
+      },
+      "metadata": {
+        "designer": { "x": 300, "y": 0, "name": "2 - Choose Things To Do + Write Captions and Prompts" },
+        "restore": {
+          "parameters": {
+            "__IMTCONN__": {
+              "data": { "scoped": "true", "connection": "openai-gpt-3" },
+              "label": "My OpenAI connection"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "module": "gateway:WebhookRespond",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "status": "200",
+        "body": "{{2.result}}",
+        "headers": [{ "key": "Content-Type", "value": "application/json" }]
+      },
+      "metadata": {
+        "designer": { "x": 600, "y": 0, "name": "3 - Return Slide Themes to Studio Worker" }
+      }
+    }
+  ]
+}
