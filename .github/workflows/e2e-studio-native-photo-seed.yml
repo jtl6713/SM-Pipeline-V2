@@ -15,11 +15,6 @@ on:
           - mx3-multi-slideshow
           - mx4-stories-plus-feed
           - mx5-youtube-standard
-  push:
-    paths:
-      - "deploy/e2e-studio-native-photo-seed.txt"
-      - "deploy/e2e-studio-native-photo-seed.py"
-      - ".github/workflows/e2e-studio-native-photo-seed.yml"
 
 permissions:
   contents: read
