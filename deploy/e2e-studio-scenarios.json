@@ -1,17 +1,16 @@
 {
   "mx1-single-native": {
     "title": "Millennium Park — single still native test",
-    "summary": "One Chicago still. Silent native singles: Instagram Single Image, Facebook Single Image, TikTok Single Photo. No voiceover, no music. AI thumbnail required for the grid.",
+    "summary": "One Chicago still. Silent native singles: Instagram Single Image and Facebook Single Image. No voiceover, no music. AI thumbnail required for the grid. TikTok Single Photo is omitted because live Studio rewrites it to Video Draft (RC-MX-D1).",
     "content_type": "Feed Post",
     "photo_count": 1,
     "voiceover_mode": "No",
     "background_music_mode": "No",
     "thumbnail_mode": "Yes",
-    "platforms": ["Instagram", "Facebook", "TikTok"],
+    "platforms": ["Instagram", "Facebook"],
     "overrides": {
       "Instagram": "Single Image",
-      "Facebook": "Single Image",
-      "TikTok": "Single Photo"
+      "Facebook": "Single Image"
     },
     "extras": [],
     "photos": [

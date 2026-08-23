@@ -323,22 +323,19 @@ def main() -> int:
         poll_until("master-assets", f"/api/production-requests/{pr_id}/assets", masters_ready, timeout_s=480, interval_s=10)
 
         current = must_retry("get-production-request-before-plan", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
-        plan_status = str((current.get("record") or {}).get("studio_output_plan_status") or "")
-        planned_items = ((current.get("record") or {}).get("studio_output_plan") or {}).get("items") or []
-        if plan_status != "Ready" or not planned_items:
-            plan = must_retry(
-                "build-plan",
-                lambda: bridge(
-                    "POST",
-                    f"/api/production-requests/{pr_id}/plan",
-                    {
-                        "platforms": PLATFORMS,
-                        "overrides": OVERRIDES,
-                        "extras": EXTRAS,
-                    },
-                ),
-            )
-            planned_items = ((plan.get("plan") or {}).get("items") or [])
+        plan = must_retry(
+            "build-plan",
+            lambda: bridge(
+                "POST",
+                f"/api/production-requests/{pr_id}/plan",
+                {
+                    "platforms": PLATFORMS,
+                    "overrides": OVERRIDES,
+                    "extras": EXTRAS,
+                },
+            ),
+        )
+        planned_items = ((plan.get("plan") or {}).get("items") or [])
         planned = [
             {"platform": item.get("platform"), "output_type": item.get("output_type")}
             for item in planned_items
