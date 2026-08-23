@@ -139,7 +139,7 @@ def retryable(result: dict) -> bool:
     body = result.get("body") if isinstance(result.get("body"), dict) else {}
     status = int(result.get("status") or 0)
     text = json.dumps(body)
-    return bool(body.get("retryable")) or status in {500, 502, 503, 504} or "1101" in text or "1042" in text or "error code" in text.lower()
+    return bool(body.get("retryable")) or status in {429, 500, 502, 503, 504} or "1101" in text or "1042" in text or "error code" in text.lower() or "429" in text
 
 
 def must_retry(step: str, call, attempts: int = 8, delay_s: int = 8) -> dict:
@@ -148,8 +148,9 @@ def must_retry(step: str, call, attempts: int = 8, delay_s: int = 8) -> dict:
         try:
             result = call()
             if retryable(result) and attempt < attempts:
+                wait = 20 if int(result.get("status") or 0) == 429 else delay_s
                 log(f"{step} transient HTTP {result.get('status')} attempt={attempt}")
-                time.sleep(delay_s)
+                time.sleep(wait)
                 continue
             return must(step, result)
         except RuntimeError as exc:
