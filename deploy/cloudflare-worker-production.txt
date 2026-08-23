@@ -85,3 +85,5 @@ Queued auto-render Worker deploy: 2026-08-22 - Photo Sets with ready masters pac
 
 Story caption + voiceover gate Worker deploy: 2026-08-22 - Story teasers keep one photo but burn in slide captions; video outputs wait for parent voiceover before Remotion. Worker 0.10.81-story-caption-voiceover-gate.
 
+Mixed AI exact Worker deploy: 2026-08-22 - Keep waiting for the wizard Exact total when Make AI Generated (3 uploaded + 3 AI). Seed empty AI slots by remaining count, not live slide total. Do not collapse mixed plans to uploaded count only. Worker 0.10.82-mixed-ai-exact.
+

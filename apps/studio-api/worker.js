@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.81-story-caption-voiceover-gate",
+          version: "0.10.82-mixed-ai-exact",
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -179,6 +179,7 @@ export default {
           studio_promote_subrequest_budget_v1: true,
           studio_queued_auto_render_v1: true,
           studio_story_caption_voiceover_gate_v1: true,
+          studio_mixed_ai_exact_v1: true,
           studio_slide_post_caption_split_v1: true,
           studio_audio_caption_handoff_v1: true,
           studio_variant_plan_ready_v1: true,
@@ -3482,15 +3483,17 @@ function item4EffectivePhotoCount(record, assets) {
   const n = Array.isArray(assets) ? assets.length : 0;
   const origin = item4ParseEzOrigin(record);
   if (origin.manualCount && origin.aiCount) return origin.manualCount + origin.aiCount;
+  if (origin.inputKind === "mixed" && (origin.manualCount || origin.aiCount)) {
+    return Math.max(n, (origin.manualCount || 0) + (origin.aiCount || 0));
+  }
   const mode = String(f(record, "Carousel_Image_Mode") || "").trim();
   const exact = Number(f(record, "Carousel_Slide_Count_Exact") || 0);
-  // Wait for Make AI fill only when the wizard/origin asked for AI slides, or
-  // there are no uploaded masters yet. A Photo Set that already has uploaded
-  // masters must not sit Queued forever because Carousel_Slide_Count_Exact was
-  // left on a higher Make AI Generated default.
-  if (mode === "Make AI Generated" && Number.isFinite(exact) && exact > n) {
-    if (origin.aiCount || !n) return exact;
-  }
+  const plan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  const planCount = Number(plan?.source_asset_count || 0);
+  // Mixed / AI plans keep Make AI Generated with an exact total. Wait for that
+  // total even after some masters are uploaded — otherwise 3+3 collapses to 3.
+  if (mode === "Make AI Generated" && Number.isFinite(exact) && exact > n) return exact;
+  if (mode === "Make AI Generated" && Number.isFinite(planCount) && planCount > n) return planCount;
   if (!n && mode === "Make AI Generated" && Number.isFinite(exact) && exact >= 1) return exact;
   return n;
 }
@@ -6467,18 +6470,22 @@ async function item4ListParentCarouselSlides(env, parentId) {
   }).catch(() => []);
 }
 
-async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed) {
+async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, targetTotal = null) {
   if (!parentId || needed < 1) return [];
   const existing = await item4ListParentCarouselSlides(env, parentId);
   const live = (existing || []).filter((row) => !Boolean(f(row, "Deleted From Carousel")));
-  // Every live slide is a reserved generation slot. Do not keep inserting
-  // "Studio AI N" rows on every cron tick when C1 renamed or left slides blank.
-  if (live.length > needed) {
-    const emptyNewestFirst = live
-      .filter((row) => !item4SlideImageUrl(row))
+  // `needed` = remaining AI masters to create (e.g. mixed 3+3 → 3). Soft-delete
+  // empty surplus against that empty-slot budget — never against live.length alone,
+  // or mixed plans collapse to the uploaded slide count and never seed AI.
+  const emptyLive = live.filter((row) => !item4SlideImageUrl(row));
+  const emptyBudget = Math.max(needed, Number.isFinite(targetTotal) && targetTotal > 0
+    ? Math.max(0, targetTotal - (live.length - emptyLive.length))
+    : needed);
+  if (emptyLive.length > emptyBudget) {
+    const emptyNewestFirst = emptyLive
       .slice()
       .sort((a, b) => String(b.createdTime || "").localeCompare(String(a.createdTime || "")));
-    const surplus = live.length - needed;
+    const surplus = emptyLive.length - emptyBudget;
     for (const row of emptyNewestFirst.slice(0, Math.min(surplus, 25))) {
       try {
         await airtableFetch(env, "Carousel Slides", row.id, {
@@ -6492,7 +6499,8 @@ async function item4SeedAiCarouselSlides(env, parentId, requestRecord, needed) {
   }
   const afterLive = (await item4ListParentCarouselSlides(env, parentId))
     .filter((row) => !Boolean(f(row, "Deleted From Carousel")));
-  const missing = Math.max(0, needed - afterLive.length);
+  const emptyAfter = afterLive.filter((row) => !item4SlideImageUrl(row)).length;
+  const missing = Math.max(0, needed - emptyAfter);
   if (!missing) return afterLive;
   const title = String(f(requestRecord, "Requested_Title") || f(requestRecord, "Production_Request_ID") || "Chicago").trim();
   const caption = String(f(requestRecord, "Requested_Caption") || "").trim();
@@ -6590,11 +6598,12 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
     } catch (error) {
       console.warn("Studio AI carousel arm failed", error);
     }
-    await item4SeedAiCarouselSlides(env, parentId, requestRecord, needed);
+    await item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, expected);
   }
   const slides = parentId ? await item4ListParentCarouselSlides(env, parentId) : [];
   let current = requestRecord;
   for (const slide of slides) {
+    if (item4AssetManifest(current).length >= expected) break;
     if (!item4SlideImageUrl(slide)) continue;
     if (item4AssetManifest(current).some((asset) => String(asset?.carousel_slide_id || "") === slide.id)) continue;
     try {
