@@ -1,8 +1,8 @@
 """Canonical Studio API Worker binding contract.
 
 Live production uses 10 core bindings. ELEVENLABS_API_KEY is optional secret_text.
-Pipeline-runner vars (PIPELINE_RUNNER_URL, PIPELINE_RUNNER_SHARED_SECRET, STAGE_BACKEND_SMV1)
-may already exist on the live Worker; treat them as optional so deploys keep them.
+Pipeline-runner vars (PIPELINE_RUNNER_URL, PIPELINE_RUNNER_SHARED_SECRET,
+STAGE_BACKEND_SMV1, STAGE_BACKEND_R2) may already exist on the live Worker; treat them as optional.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ OPTIONAL_BINDINGS = {
     "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
     "PIPELINE_RUNNER_URL": "plain_text",
     "STAGE_BACKEND_SMV1": "plain_text",
+    "STAGE_BACKEND_R2": "plain_text",
 }
 
 CONTRACT_ID = "studio-api-10-core-elevenlabs-optional"
