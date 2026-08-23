@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.111-remotion-pulse-before-inspect",
+          version: "0.10.112-r4-before-r3",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -12632,8 +12632,8 @@ async function pulseStudioContinuationJobs(env, options = {}) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const jobs = [
-    { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA },
     { id: PHASE6_R4_SCENARIO_ID, key: "R4", table: outputTable, formula: STUDIO_R4_WORK_FORMULA },
+    { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA },
     { id: PHASE6_R5_SCENARIO_ID, key: "R5", table: outputTable, view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" },
     { id: PHASE6_RR1_SCENARIO_ID, key: "RR1", table: outputTable, formula: STUDIO_RR1_WORK_FORMULA },
     { id: 5528742, key: "P1", table: contentTable, view: "P1 - Ready for Package Generation", formula: "{Test_Run_ID}=BLANK()" },
@@ -12722,6 +12722,15 @@ async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
 
 async function advanceStudioProductionOutputs(env, options = {}) {
   const cache = { outputRows: new Map(), requests: new Map(), parents: new Map(), profiles: new Map() };
+  const pulses = [];
+  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
+    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
+  }
+  const pulsedRender = pulses.some((row) => (row.key === "R3" || row.key === "R4") && (row.pulsed || row.error));
+  if (pulsedRender) {
+    console.log("Studio continuation", JSON.stringify({ count: 0, inspected: [], pulses }));
+    return { inspected: [], pulses };
+  }
   const candidates = await listStudioContinuationCandidates(env, options).catch((error) => {
     console.warn("Studio continuation candidate list failed", error);
     return [];
@@ -12736,7 +12745,6 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   }
   const waitingVoiceover = media.some((row) => row.action === "wait_voiceover");
   const waitingThumbnail = media.some((row) => row.action === "wait_thumbnail");
-  const pulses = [];
   if (waitingVoiceover || waitingThumbnail) {
     const mediaParents = [...new Set(
       media.filter((row) => row.action === "wait_voiceover" || row.action === "wait_thumbnail").map((row) => row.contentItemId).filter(Boolean)
@@ -12745,10 +12753,6 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   }
   const pulsedP2 = pulses.some((row) => row.key === "P2" && row.pulsed);
   const inspected = media.slice();
-  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
-    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
-  }
-  const pulsedRender = pulses.some((row) => (row.key === "R3" || row.key === "R4") && (row.pulsed || row.error));
   if (!pulsedP2 && !pulsedRender) {
     let inspectedRemotion = 0;
     for (const po of candidates || []) {
