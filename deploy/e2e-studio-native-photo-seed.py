@@ -384,22 +384,13 @@ def main() -> int:
                 interval_s=12,
             )
 
-        preflight = must_retry("bridge-preflight", lambda: bridge("GET", f"/api/production-requests/{pr_id}/bridge-preflight"))
-        evidence["bridge_preflight_ready"] = bool(preflight.get("ready") or (preflight.get("preflight") or {}).get("ready"))
-        if preflight.get("ready") is False or (
-            isinstance(preflight.get("preflight"), dict) and preflight["preflight"].get("ready") is False
-        ):
-            raise RuntimeError(f"bridge preflight not ready: {json.dumps(preflight)[:4000]}")
-
         current = must_retry("get-production-request-before-promote", lambda: bridge("GET", f"/api/production-requests/{pr_id}"))
         record = current.get("record") or {}
         thumbnail = str(record.get("thumbnail_mode") or "")
         evidence["thumbnail_mode_before_promote"] = thumbnail
-        # Live PATCH used to wipe Master_Content_Type / Target_Platforms when only
-        # thumbnail_mode was sent. Send the native photo contract in full.
-        patched = must(
+        patched = must_retry(
             "patch-native-promote-fields",
-            bridge(
+            lambda: bridge(
                 "PATCH",
                 f"/api/production-requests/{pr_id}",
                 {
@@ -430,6 +421,13 @@ def main() -> int:
             "workaround": "PATCH the full native photo contract before promote",
             "fix": "updateProductionRequest merges the existing record before sanitize",
         }
+
+        preflight = must_retry("bridge-preflight", lambda: bridge("GET", f"/api/production-requests/{pr_id}/bridge-preflight"))
+        evidence["bridge_preflight_ready"] = bool(preflight.get("ready") or (preflight.get("preflight") or {}).get("ready"))
+        if preflight.get("ready") is False or (
+            isinstance(preflight.get("preflight"), dict) and preflight["preflight"].get("ready") is False
+        ):
+            raise RuntimeError(f"bridge preflight not ready: {json.dumps(preflight)[:4000]}")
 
         promote = None
         for attempt in range(1, 9):
