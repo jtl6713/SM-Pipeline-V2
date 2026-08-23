@@ -9,9 +9,10 @@ from __future__ import annotations
 import base64
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
-import urllib.error
 import urllib.request
 
 BRIDGE_URL = os.environ["BRIDGE_URL"]
@@ -65,24 +66,54 @@ def bridge(method: str, path: str, body=None, files=None, timeout: int = 120) ->
         payload["body"] = body
     elif method.upper() not in ("GET", "HEAD"):
         payload["body"] = {}
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        BRIDGE_URL,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
-    )
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".json") as handle:
+        json.dump(payload, handle)
+        payload_path = handle.name
+    out_path = payload_path + ".out"
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            wrapper = json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raw = exc.read()
+        completed = subprocess.run(
+            [
+                "curl",
+                "-sS",
+                "--max-time",
+                str(timeout),
+                "-A",
+                "curl/8.5.0",
+                "-H",
+                "Content-Type: application/json",
+                "-H",
+                "Accept: application/json",
+                "--data-binary",
+                f"@{payload_path}",
+                "-o",
+                out_path,
+                "-w",
+                "%{http_code}",
+                BRIDGE_URL,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        http_code = (completed.stdout or "").strip() or "000"
+        raw = ""
+        if os.path.exists(out_path):
+            with open(out_path, "r", encoding="utf-8") as handle:
+                raw = handle.read()
+        if completed.returncode != 0 and not raw:
+            raise RuntimeError(f"bridge curl failed {path}: {completed.stderr or http_code}")
         try:
-            wrapper = json.loads(raw.decode("utf-8"))
-        except Exception as parse_error:
-            raise RuntimeError(f"bridge HTTP {exc.code} {path}: {raw[:2000]!r}") from parse_error
-        raise RuntimeError(f"bridge HTTP {exc.code} {path}: {json.dumps(wrapper)[:4000]}") from exc
+            wrapper = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"bridge HTTP {http_code} {path}: {raw[:2000]}") from exc
+        if http_code != "200":
+            raise RuntimeError(f"bridge HTTP {http_code} {path}: {json.dumps(wrapper)[:4000]}")
+    finally:
+        for candidate in (payload_path, out_path):
+            try:
+                os.unlink(candidate)
+            except OSError:
+                pass
     studio = wrapper.get("body") if isinstance(wrapper, dict) else wrapper
     status = int(wrapper.get("status") or 0)
     ok = bool(wrapper.get("ok"))
