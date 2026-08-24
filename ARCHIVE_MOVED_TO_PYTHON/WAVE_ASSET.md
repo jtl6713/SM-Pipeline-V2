@@ -21,8 +21,8 @@ STAGE_BACKEND_YT0=python
 ```
 
 PR: [#16](https://github.com/jtl6713/SM-Pipeline-V2/pull/16)  
-Configure: [run 32777538468](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32777538468)  
-Worker deploy: [run 32776756403](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32776756403)
+Configure: [run 32779658562](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32779658562)  
+Worker deploy: [run 32779314907](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32779314907)
 
 Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, AP1-IGS-POLL **5845193**, FBS1 **5816409**, FBS2 **5816495**, FBS3 **5816502**, FBS4 **5816520**, YT0 **5823572**, YTP1 **5830810**, YTS1 **5830609**, YTS2 **5830616**, and YTS3 **5830623** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
 
