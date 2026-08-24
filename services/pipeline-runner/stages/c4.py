@@ -20,6 +20,7 @@ def run(request: StageRequest) -> StageResult:
             "slide_record_id": slide_id,
             "test_run_id": test_run_id,
             "dry_run": bool(request.extra.get("dry_run")),
+            "trigger_next_stage": request.extra.get("trigger_next") is not False,
         },
         skip_message="C4 did not apply a review decision",
         ok_message="C4 applied route {route}",

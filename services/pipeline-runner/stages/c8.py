@@ -20,6 +20,7 @@ def run(request: StageRequest) -> StageResult:
             "content_item_record_id": content_id,
             "test_run_id": test_run_id,
             "dry_run": bool(request.extra.get("dry_run")),
+            "trigger_c9": request.extra.get("trigger_c9") is not False,
         },
         skip_message="C8 did not create or update a platform output",
         ok_message="C8 upserted carousel platform output(s)",

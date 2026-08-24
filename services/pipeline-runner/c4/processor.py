@@ -30,6 +30,7 @@ def process_request(
     slide_record_id: str | None,
     test_run_id: str | None = None,
     dry_run: bool = False,
+    trigger_next_stage: bool = True,
 ) -> dict[str, Any]:
     preview = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -82,7 +83,7 @@ def process_request(
 
             return process_c6(content_item_record_id=parent_id, test_run_id=parent_test or None)
 
-        chain = trigger_next("c6", payload, python_call=_python_c6)
+        chain = trigger_next("c6", payload, python_call=_python_c6) if trigger_next_stage else {"backend": "skipped", "stage": "c6"}
 
     elif route == "delete":
         client.update_record(
@@ -121,7 +122,7 @@ def process_request(
 
             return process_c7(content_item_record_id=parent_id, test_run_id=parent_test or None)
 
-        chain = trigger_next("c7", payload, python_call=_python_c7)
+        chain = trigger_next("c7", payload, python_call=_python_c7) if trigger_next_stage else {"backend": "skipped", "stage": "c7"}
 
     else:
         client.update_record(
@@ -160,6 +161,6 @@ def process_request(
 
             return process_c5(content_item_record_id=parent_id, test_run_id=parent_test or None)
 
-        chain = trigger_next("c5", payload, python_call=_python_c5)
+        chain = trigger_next("c5", payload, python_call=_python_c5) if trigger_next_stage else {"backend": "skipped", "stage": "c5"}
 
     return {"processed": True, "next": chain, **preview}

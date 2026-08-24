@@ -20,6 +20,7 @@ def run(request: StageRequest) -> StageResult:
             "content_item_record_id": content_id,
             "test_run_id": test_run_id,
             "dry_run": bool(request.extra.get("dry_run")),
+            "trigger_c7": request.extra.get("trigger_c7") is not False,
         },
         skip_message="C6 did not watermark slides",
         ok_message="C6 watermarked approved carousel slides",

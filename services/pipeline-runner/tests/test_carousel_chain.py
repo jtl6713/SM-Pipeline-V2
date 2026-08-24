@@ -111,6 +111,7 @@ def test_c8_c9_formulas():
     assert "{Test_Run_ID}=BLANK()" in formula
     slides = c9_slides_for_output_formula("recOUT", "WAVE5")
     assert 'FIND("recOUT"' in slides
+    assert "{Platform Output}" in slides
     assert '{Test_Run_ID}="WAVE5"' in slides
 
 

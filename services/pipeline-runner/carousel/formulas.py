@@ -41,7 +41,7 @@ def c9_slides_for_output_formula(output_record_id: str, test_run_id: str = "") -
     oid = (output_record_id or "").replace('"', "")
     return (
         "AND("
-        f'FIND("{oid}", ARRAYJOIN({{Platform_Output}})) > 0,'
+        f'FIND("{oid}", ARRAYJOIN({{Platform Output}})) > 0,'
         f"{test_run_guard(test_run_id)}"
         ")"
     )

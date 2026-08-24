@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from airtable.client import AirtableClient
-from airtable.constants import CAROUSEL_SLIDES_TABLE, PLATFORM_OUTPUTS_TABLE
+from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from c9.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
-from carousel.constants import C9_FINAL_SLIDES_VIEW, C9_READY_OUTPUT_VIEW
-from carousel.formulas import c9_slides_for_output_formula, exact_record_formula
+from carousel.constants import C9_READY_OUTPUT_VIEW
+from carousel.formulas import exact_record_formula
 from carousel.mapping import c8_include_slide
-from render.fields import field, field_str
+from carousel.parent import load_linked_slides, load_parent
+from render.fields import field, field_str, first_linked_id
 
 
 def process_request(
@@ -39,13 +40,19 @@ def process_request(
         return {"processed": False, "reason": "output_not_ready_or_test_mismatch", **preview}
     output = outputs[0]
     output_test = field_str(output, "Test_Run_ID")
-    slides = client.list_records(
-        CAROUSEL_SLIDES_TABLE,
-        formula=c9_slides_for_output_formula(output["id"], output_test),
-        view=C9_FINAL_SLIDES_VIEW,
-        max_records=50,
-    )
-    slides = [slide for slide in slides if c8_include_slide(slide)]
+    parent_id = first_linked_id(field(output, "Content_Item"))
+    parent = load_parent(client, parent_id, test_run_id=output_test or None) if parent_id else None
+    if not parent:
+        return {"processed": False, "reason": "parent_not_found_or_test_mismatch", **preview}
+    slides = []
+    for slide in load_linked_slides(client, parent):
+        linked = field(slide, "Platform Output") or []
+        linked_ids = [
+            item if isinstance(item, str) else str((item or {}).get("id") or "")
+            for item in (linked if isinstance(linked, list) else [linked])
+        ]
+        if output["id"] in linked_ids and c8_include_slide(slide):
+            slides.append(slide)
     slides.sort(
         key=lambda row: (
             int(field(row, "Slide Number") or 0),
