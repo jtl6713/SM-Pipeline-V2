@@ -150,6 +150,24 @@
       "python_endpoint": "/hooks/a1p/<A1P_WEBHOOK_TOKEN>",
       "production_backend": "python",
       "notes": "Make 5715500 inactive. A1S 5715530 still Make on-demand; Airtable A1_POLLER_WEBHOOK_URL recBrmzuORriwmz13 now posts to pipeline.chicagoshining.com/hooks/a1p. Isolated dry-run POST /stages/a1p ok."
+    },
+    {
+      "stage": "AP0",
+      "scenario_id": 5612096,
+      "name": "AP0 - Public R2 Publish Asset Staging",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/ap0",
+      "production_backend": "python",
+      "notes": "Make 5612096 inactive. Python AP0 stages public MP4s on media.chicagoshining.com. Does not pulse IG/FB/TT/YT."
+    },
+    {
+      "stage": "AP1-IG",
+      "scenario_id": 5862882,
+      "name": "AP1-IG - Automated Instagram Reel Publisher v2.4 - Generated Cover URL + Offset Fallback",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/ap1_ig",
+      "production_backend": "python",
+      "notes": "Make 5862882 inactive in ARCHIVE_MOVED_TO_PYTHON 2026-08-24. Worker STAGE_BACKEND_AP1_IG=python. Isolated Graph proof on Output 233 media 18089258381172412. Do not Approve live Reels as a cutover test."
     }
   ]
 }
