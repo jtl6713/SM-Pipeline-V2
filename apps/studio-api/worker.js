@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.123-ig-fb-photo-dispatch",
+          version: "0.10.124-asset-chain-gates",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,

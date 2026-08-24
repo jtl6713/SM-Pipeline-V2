@@ -60,6 +60,17 @@ def load_settings() -> dict[str, Any]:
         "stage_backend_i2": os.environ.get("STAGE_BACKEND_I2", "make").strip().lower(),
         "stage_backend_i3": os.environ.get("STAGE_BACKEND_I3", "make").strip().lower(),
         "stage_backend_i4": os.environ.get("STAGE_BACKEND_I4", "make").strip().lower(),
+        "stage_backend_a2": os.environ.get("STAGE_BACKEND_A2", "make").strip().lower(),
+        "stage_backend_a2b": os.environ.get("STAGE_BACKEND_A2B", "make").strip().lower(),
+        "stage_backend_a3": os.environ.get("STAGE_BACKEND_A3", "make").strip().lower(),
+        "stage_backend_a4": os.environ.get("STAGE_BACKEND_A4", "make").strip().lower(),
+        "stage_backend_a1p": os.environ.get("STAGE_BACKEND_A1P", "make").strip().lower(),
+        "a2b_webhook_url": os.environ.get("A2B_WEBHOOK_URL", ""),
+        "a3_webhook_url": os.environ.get("A3_WEBHOOK_URL", ""),
+        "a4_webhook_url": os.environ.get("A4_WEBHOOK_URL", ""),
+        "a1p_webhook_token": os.environ.get("A1P_WEBHOOK_TOKEN", ""),
+        "a2_email_to": os.environ.get("A2_EMAIL_TO", ""),
+        "openai_a3_model": os.environ.get("OPENAI_A3_MODEL", "gpt-5.5"),
         "openai_i1_model": os.environ.get("OPENAI_I1_MODEL", "gpt-5"),
         "i2_email_to": os.environ.get("I2_EMAIL_TO", ""),
         "i2_webhook_url": os.environ.get("I2_WEBHOOK_URL", ""),
@@ -72,7 +83,7 @@ def load_settings() -> dict[str, Any]:
         "rr1_review_email_to": os.environ.get("RR1_REVIEW_EMAIL_TO", ""),
         "rr1_decision_webhook_url": os.environ.get("RR1_DECISION_WEBHOOK_URL", ""),
         "rr2_webhook_token": os.environ.get("RR2_WEBHOOK_TOKEN", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-24-idea-chain"),
+        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-24-asset-chain"),
     }
 
 

@@ -130,3 +130,6 @@ C2 Python pulse Worker deploy: 2026-08-23 - Studio AI fill pulses /stages/c2 whe
 Native slide C7/C8 stamp Worker deploy: 2026-08-23 - Studio native photo slides write Review Status Final Approved, Approved For Final, and the parent Content Item link so Python C7/C8 can finalize without a C3B pass. Worker native-slide-c7-c8-stamp.
 
 IG/FB native still Approve dispatch Worker deploy: 2026-08-24 - Instagram Single Image / Feed Post Graph-publishes the public JPEG (3D cover) with caption; Facebook Single Image and Multi-Image Post pulse FB0 and arm FB0-FB3. FB-ORCH stays parked. Worker 0.10.123-ig-fb-photo-dispatch.
+
+Asset chain A2-A4 Worker deploy: 2026-08-24 - Studio Operations intake pulses Python A2 when STAGE_BACKEND_A2=python instead of Make 5531974. Worker 0.10.124-asset-chain-gates.
+

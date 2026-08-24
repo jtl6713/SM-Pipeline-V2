@@ -5,7 +5,7 @@ import logging
 from flask import Flask, jsonify, request
 
 from config import StageRequest, load_settings
-from stages import c3b, i3, r2, rr2, smv1
+from stages import a1p, c3b, i3, r2, rr2, smv1
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 
 logger = logging.getLogger("pipeline-runner")
@@ -182,6 +182,23 @@ def i3_email_hook(token: str):
         f"<h1>Idea review</h1><p>{result.message}</p></body></html>"
     )
     return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/hooks/a1p/<token>", methods=["GET", "POST"])
+def a1p_poll_hook(token: str):
+    expected = str(settings.get("a1p_webhook_token") or "").strip()
+    if not expected or token != expected:
+        return jsonify({"error": "not found"}), 404
+
+    extra = {key: value for key, value in request.values.items()}
+    json_body = request.get_json(silent=True) or {}
+    if isinstance(json_body, dict):
+        extra.update(json_body)
+    body = StageRequest.from_dict({"extra": extra})
+    result = a1p.run(body)
+    status_code = 202 if result.status == "deferred" else (422 if result.status == "error" else 200)
+    logger.info("stage=a1p-hook status=%s message=%s", result.status, result.message)
+    return jsonify(result.to_dict()), status_code
 
 
 @app.post("/stages/smv1/drain")

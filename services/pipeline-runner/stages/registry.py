@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 from config import StageRequest, StageResult
-from stages import c2, c3, c3b, c4, c5, c6, c7, c8, c9, i1, i2, i3, i4, p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1
+from stages import a1p, a2, a2b, a3, a4, c2, c3, c3b, c4, c5, c6, c7, c8, c9, i1, i2, i3, i4, p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1
 from stages.letter import run as run_letter
 from stages._stub import run_stub
 
@@ -28,6 +28,11 @@ STAGE_NAMES: tuple[str, ...] = (
     "i2",
     "i3",
     "i4",
+    "a2",
+    "a2b",
+    "a3",
+    "a4",
+    "a1p",
     "c2",
     "c3",
     "c3b",
@@ -64,6 +69,11 @@ _IMPLEMENTED_STAGES = frozenset(
         "i2",
         "i3",
         "i4",
+        "a2",
+        "a2b",
+        "a3",
+        "a4",
+        "a1p",
         "c2",
         "c3",
         "c3b",
@@ -95,6 +105,11 @@ _HANDLERS: dict[str, StageHandler] = {
     "i2": i2.run,
     "i3": i3.run,
     "i4": i4.run,
+    "a2": a2.run,
+    "a2b": a2b.run,
+    "a3": a3.run,
+    "a4": a4.run,
+    "a1p": a1p.run,
     "c2": c2.run,
     "c3": c3.run,
     "c3b": c3b.run,
