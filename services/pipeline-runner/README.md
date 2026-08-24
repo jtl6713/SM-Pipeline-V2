@@ -8,7 +8,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 - **Stack:** Flask + requests (same pattern as Frame Extractor)
 - **Local health:** `http://localhost:3350/health`
 - **Public route:** `https://pipeline.chicagoshining.com` (Cloudflare Tunnel)
-- **Make scenarios (migration order):** SMV1 `5894885`, R2 `5569495`, R3–R5, RR1 `5576363`, P2 `5530955`, P3 `5531703`, AP0/publish
+- **Make scenarios (migration order):** SMV1 `5894885`, R2 `5569495`, R3–R5, RR1 `5576363`, P2 `5530955`, P3 `5531703`, RR2 `5576353`, AP0/publish
 
 ## Status
 
@@ -22,10 +22,11 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | `STAGE_BACKEND_R5=python` |
 | **RR1** | Full (`5576363` — batched review email, max 10) | Make until `STAGE_BACKEND_RR1=python` |
 | **P2** | Full (`5530955` — voiceover + thumbnail, 3 routes) | `STAGE_BACKEND_P2=python` |
-| **P3** | Full (`5531703` — studio parent enrich + legacy create) | Make until `STAGE_BACKEND_P3=python` |
+| **P3** | Full (`5531703` — studio parent enrich + legacy create) | `STAGE_BACKEND_P3=python` |
+| **RR2** | Full (`5576353` — review decision webhook) | `STAGE_BACKEND_RR2=python` |
 | **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
-Wave 2 render chain (R3–R5), SMV1/R2, RR1, and P2 are on Python in production. P3 is implemented and registered; production stays on Make until `STAGE_BACKEND_P3=python`.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, and RR2 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. Make `5576353` is deactivated.
 
 Other stages return `501 not_implemented`.
 
@@ -105,6 +106,19 @@ One `POST /stages/rr1` finds up to **10** review-eligible Platform Outputs (rend
 
 Requires Google OAuth refresh token with **Gmail send** scope. Decision webhooks default to the existing Make hook URL.
 
+## RR2 behavior (review decision)
+
+One `POST /stages/rr2` applies a single email-button decision (`approved`, `changes`, `rejected`, `do_not_publish`) to one Platform Output.
+
+| Decision | Airtable writes | Side effect |
+| --- | --- | --- |
+| `approved` | `Review_Status=Approved`, `Output_Status=Approved for Publishing`, `Publish_Status=Ready to Schedule`, `Auto_Publish_Enabled`, `Publish_Method=Automated` | Start IG/FB/TTD Make orchestrators (errors ignored) |
+| `changes` | `Changes Requested` + `Render_Status=Needs Changes` | None |
+| `rejected` | `Rejected` + `Do_Not_Publish` | None |
+| `do_not_publish` | `Skipped` + `Do_Not_Publish` | None |
+
+Email buttons stay on the Make hook until cutover. Optional public GET `/hooks/rr2/<RR2_WEBHOOK_TOKEN>` matches the Make query shape (`record_id`, `decision`).
+
 ## P3 behavior (platform outputs)
 
 One `POST /stages/p3` takes a Content Item (`content_item_record_id` / `content_record_id`).
@@ -130,7 +144,8 @@ STAGE_BACKEND_R4=python
 STAGE_BACKEND_R5=python
 STAGE_BACKEND_RR1=python
 STAGE_BACKEND_P2=python
-# STAGE_BACKEND_P3=python
+STAGE_BACKEND_P3=python
+STAGE_BACKEND_RR2=python
 ```
 
 Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-demand for the render chain.
@@ -150,6 +165,8 @@ Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-dema
 | `POST` | `/stages/rr1` | Review email batch (max 10) |
 | `POST` | `/stages/p2` | Voiceover + thumbnail for one Content Item |
 | `POST` | `/stages/p3` | Enrich seeded Studio outputs or create legacy mappings |
+| `POST` | `/stages/rr2` | Apply one render-review decision |
+| `GET`/`POST` | `/hooks/rr2/<token>` | Email-button entry (token required; no pipeline secret) |
 
 POST body fields: `output_record_id`, `production_request_record_id`, `test_run_id`, `intended_stage`, `idempotency_key`, `extra.max_runs`, `extra.dry_run`, etc.
 
@@ -162,9 +179,9 @@ Header `X-Pipeline-Secret` required when `PIPELINE_RUNNER_SHARED_SECRET` is set.
 3. ~~R3 → R5 render chain~~ (Python live)
 4. ~~RR1~~ (Python live)
 5. ~~P2~~ (Python live)
-6. **P3** (Python ready; Make until `STAGE_BACKEND_P3=python`)
-7. **AP0 + publish platforms** (constants only)
-8. RR2, intake
+6. ~~P3~~ (Python live)
+7. ~~RR2~~ (Python live; email buttons use `/hooks/rr2/<token>`)
+8. R2B, P4/P5, then AP0 + publish platforms
 
 ## Source-only rule
 

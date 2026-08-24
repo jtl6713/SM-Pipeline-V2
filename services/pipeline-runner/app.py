@@ -5,7 +5,7 @@ import logging
 from flask import Flask, jsonify, request
 
 from config import StageRequest, load_settings
-from stages import r2, smv1
+from stages import r2, rr2, smv1
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 
 logger = logging.getLogger("pipeline-runner")
@@ -91,6 +91,42 @@ def run_r2_drain():
     result = r2.run(body)
     status_code = 202 if result.status == "deferred" else (422 if result.status == "error" else 200)
     logger.info("stage=r2-drain status=%s message=%s", result.status, result.message)
+    return jsonify(result.to_dict()), status_code
+
+
+@app.route("/hooks/rr2/<token>", methods=["GET", "POST"])
+def rr2_email_hook(token: str):
+    expected = str(settings.get("rr2_webhook_token") or "").strip()
+    if not expected or token != expected:
+        return jsonify({"error": "not found"}), 404
+
+    record_id = (
+        request.values.get("record_id")
+        or request.values.get("output_record_id")
+        or ""
+    ).strip()
+    decision = (request.values.get("decision") or "").strip()
+    body = StageRequest.from_dict(
+        {
+            "output_record_id": record_id,
+            "extra": {"decision": decision},
+        }
+    )
+    result = rr2.run(body)
+    status_code = 422 if result.status == "error" else 200
+    logger.info("stage=rr2-hook status=%s message=%s", result.status, result.message)
+    wants_html = "text/html" in (request.headers.get("Accept") or "") or request.method == "GET"
+    if wants_html:
+        run = result.details.get("run") or {}
+        html = (
+            "<!doctype html><html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+            f"<h1>Render review decision</h1>"
+            f"<p>{result.message}</p>"
+            f"<p>Output {run.get('output_id') or record_id}: "
+            f"{run.get('decision_label') or decision or 'no decision'}</p>"
+            "</body></html>"
+        )
+        return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
     return jsonify(result.to_dict()), status_code
 
 

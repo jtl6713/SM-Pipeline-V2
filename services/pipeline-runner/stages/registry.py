@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 from config import StageRequest, StageResult
-from stages import p2, p3, r2, r3, r4, r5, rr1, smv1
+from stages import p2, p3, r2, r3, r4, r5, rr1, rr2, smv1
 from stages.letter import run as run_letter
 from stages._stub import run_stub
 
@@ -28,7 +28,7 @@ STAGE_NAMES: tuple[str, ...] = (
     "publish_yt",
 )
 
-_IMPLEMENTED_STAGES = frozenset({"smv1", "letter", "r2", "r3", "r4", "r5", "rr1", "p2", "p3"})
+_IMPLEMENTED_STAGES = frozenset({"smv1", "letter", "r2", "r3", "r4", "r5", "rr1", "rr2", "p2", "p3"})
 
 _HANDLERS: dict[str, StageHandler] = {
     "smv1": smv1.run,
@@ -38,6 +38,7 @@ _HANDLERS: dict[str, StageHandler] = {
     "r4": r4.run,
     "r5": r5.run,
     "rr1": rr1.run,
+    "rr2": rr2.run,
     "p2": p2.run,
     "p3": p3.run,
 }

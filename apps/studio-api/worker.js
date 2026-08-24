@@ -54,6 +54,7 @@ export default {
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
+      const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
@@ -124,7 +125,8 @@ export default {
         isOperationsRetryAssetSelectionWrite ||
         isOperationsMakeAdminBridgeWrite ||
         isOperationsIntakeWrite ||
-        (isR5DoneHookRoute && request.method === "POST");
+        (isR5DoneHookRoute && request.method === "POST") ||
+        (isRr2HookRoute && (request.method === "GET" || request.method === "POST"));
       if (!allowedMethod) {
         return respond(request, env, { ok: false, error: "Method not allowed in Phase 2A" }, 405);
       }
@@ -134,11 +136,16 @@ export default {
         return handleR5DoneCallback(request, env, ctx);
       }
 
+      if (url.pathname === "/api/hooks/rr2") {
+        requireConfig(env);
+        return handleRr2ReviewDecision(request, env, url);
+      }
+
       if (url.pathname === "/health" || url.pathname === "/api/health") {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.117-native-jpeg-lettering",
+          version: "0.10.118-rr2-python-ready",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -4354,6 +4361,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === PHASE6_R4_SCENARIO_ID && pipelineStageBackend(env, "R4").mode === "python") return true;
   if (id === PHASE6_R5_SCENARIO_ID && pipelineStageBackend(env, "R5").mode === "python") return true;
   if (id === PHASE6_RR1_SCENARIO_ID && pipelineStageBackend(env, "RR1").mode === "python") return true;
+  if (id === PHASE6_RR2_SCENARIO_ID && pipelineStageBackend(env, "RR2").mode === "python") return true;
   if (id === ITEM4_P2_SCENARIO_ID && pipelineStageBackend(env, "P2").mode === "python") return true;
   if (id === ITEM4_P3_SCENARIO_ID && pipelineStageBackend(env, "P3").mode === "python") return true;
   return false;
@@ -4493,6 +4501,52 @@ async function item4RefreshNativeLetteredSlides(env, outputId) {
   const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
   await studioEnsureNativePublishSlides(env, refreshed);
   return refreshed;
+}
+
+async function item4PulseRR2Python(env, options = {}) {
+  const body = {
+    extra: {},
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.decision) body.extra.decision = options.decision;
+  if (options.dryRun) body.extra.dry_run = true;
+  if (options.skipPublisherStart) body.extra.skip_publisher_start = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "rr2", body, "RR2");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python RR2 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function handleRr2ReviewDecision(request, env, url) {
+  if (pipelineStageBackend(env, "RR2").mode !== "python") {
+    return new Response("RR2 is still on Make", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  }
+  let recordId = String(url.searchParams.get("record_id") || url.searchParams.get("output_record_id") || "").trim();
+  let decision = String(url.searchParams.get("decision") || "").trim();
+  if (request.method === "POST" && (!recordId || !decision)) {
+    try {
+      const payload = await request.clone().json();
+      recordId = recordId || String(payload?.record_id || payload?.output_record_id || "").trim();
+      decision = decision || String(payload?.decision || "").trim();
+    } catch {}
+  }
+  try {
+    const payload = await item4PulseRR2Python(env, {
+      outputRecordId: recordId,
+      decision,
+    });
+    const run = payload?.details?.run || {};
+    const message = payload?.message || "Review decision received";
+    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;padding:24px;"><h1>Render review decision</h1><p>${message}</p><p>Output ${run.output_id || recordId}: ${run.decision_label || decision || "no decision"}</p></body></html>`;
+    return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=UTF-8" } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(`RR2 failed: ${message}`, { status: error instanceof HttpError ? error.status : 500, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  }
 }
 
 async function item4PulseRR1Python(env, options = {}) {
@@ -10355,6 +10409,7 @@ const PHASE6_R3_SCENARIO_ID = 5557966;
 const PHASE6_R4_SCENARIO_ID = 5556716;
 const PHASE6_R5_SCENARIO_ID = 5565333;
 const PHASE6_RR1_SCENARIO_ID = 5576363;
+const PHASE6_RR2_SCENARIO_ID = 5576353;
 const STUDIO_R5_DONE_HOOK_TOKEN = "r5done_7kqp2nvm4w8x1c9h3z";
 
 function phase6RecordIdFromPath(url) {
