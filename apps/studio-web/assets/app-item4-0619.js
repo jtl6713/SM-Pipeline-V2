@@ -90,6 +90,7 @@
   let pipelineOutputs = [];
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
+  let contentSort = { key: "content", dir: "desc" };
   const pipelineGroupOpen = new Map();
   let pipelineViewFilter = "all";
   let pipelineOpenSingleOnLoad = false;
@@ -108,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.129-sortable-ideas";
+  const BUILD_ID = "item4-0.6.130-dashboard-sorts";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -762,9 +763,14 @@
       return;
     }
     const filter = dashboardView === "recent" ? "all" : dashboardView;
-    const records = dashboardView === "recent"
-      ? (dashboardCache.outputs || []).slice(0, 12)
-      : (dashboardCache.outputs || []).filter((record) => pipelineRecordMatchesFilter(record, filter));
+    let records = dashboardCache.outputs || [];
+    if (dashboardView !== "recent") {
+      records = records.filter((record) => pipelineRecordMatchesFilter(record, filter));
+    }
+    records = sortedPipelineRecords(records);
+    if (dashboardView === "recent") {
+      records = records.slice(0, 12);
+    }
     if (!records.length) {
       list.innerHTML = `<div class="empty">No ${escapeHtml(heading.title.toLowerCase())} right now.</div>`;
       return;
@@ -5933,13 +5939,71 @@
     });
   }
 
+  function contentSortValue(record, key) {
+    if (key === "content") {
+      const ms = parseStudioDate(record?.created_at)?.getTime();
+      if (Number.isFinite(ms)) return ms;
+      return String(record?.title || record?.content_id || "");
+    }
+    if (key === "stage") return String(record?.studio_stage || "");
+    if (key === "assets") return String(record?.asset_match_status || "");
+    if (key === "render") return String(record?.render_status || "");
+    if (key === "review") return String(record?.review_status || record?.carousel_review_status || "");
+    if (key === "outputs") return Array.isArray(record?.output_links) ? record.output_links.length : 0;
+    return "";
+  }
+
+  function compareContentRows(a, b, key) {
+    if (key === "content") {
+      const ta = parseStudioDate(a?.created_at)?.getTime();
+      const tb = parseStudioDate(b?.created_at)?.getTime();
+      if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+      if (Number.isFinite(ta) && !Number.isFinite(tb)) return 1;
+      if (!Number.isFinite(ta) && Number.isFinite(tb)) return -1;
+    }
+    if (key === "outputs") return contentSortValue(a, key) - contentSortValue(b, key);
+    const av = contentSortValue(a, key);
+    const bv = contentSortValue(b, key);
+    return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function sortedContentRecords(records) {
+    const dir = contentSort.dir === "desc" ? -1 : 1;
+    const key = contentSort.key || "content";
+    return [...records].sort((a, b) => {
+      const primary = compareContentRows(a, b, key);
+      if (primary) return dir * primary;
+      return dir * compareContentRows(a, b, "content");
+    });
+  }
+
+  function contentSortHeader(key, label) {
+    const active = contentSort.key === key;
+    const arrow = !active ? "↕" : contentSort.dir === "asc" ? "↑" : "↓";
+    return `<th><button type="button" class="table-sort${active ? " is-active" : ""}" data-content-sort="${escapeHtml(key)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span aria-hidden="true">${arrow}</span></button></th>`;
+  }
+
   function renderContentItemsTable(target, records) {
     if (!target) return;
     if (!records.length) {
       target.innerHTML = '<div class="empty"><strong>No content items are currently in production.</strong><br><span class="subtle">Studio is connected; new promoted ideas will appear here as production begins.</span></div>';
       return;
     }
-    target.innerHTML = `<table class="data-table"><thead><tr><th>Content</th><th>Studio stage</th><th>Assets</th><th>Render</th><th>Review</th><th>Outputs</th></tr></thead><tbody>${records.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+    const sorted = sortedContentRecords(records);
+    target.innerHTML = `<table class="data-table content-table"><thead><tr>${contentSortHeader("content", "Content")}${contentSortHeader("stage", "Studio stage")}${contentSortHeader("assets", "Assets")}${contentSortHeader("render", "Render")}${contentSortHeader("review", "Review")}${contentSortHeader("outputs", "Outputs")}</tr></thead><tbody>${sorted.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+    target.querySelectorAll("[data-content-sort]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = button.dataset.contentSort;
+        if (contentSort.key === key) {
+          contentSort.dir = contentSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          contentSort.key = key;
+          contentSort.dir = key === "content" || key === "outputs" ? "desc" : "asc";
+        }
+        renderContentItemsTable(target, records);
+      });
+    });
   }
 
   async function loadIdeas() {
@@ -7984,6 +8048,7 @@
 
   function renderOutputsTable(target, records) {
     const isPipeline = target?.id === "outputsList";
+    const isDashboard = target?.id === "recentOutputs";
     const source = isPipeline ? filteredPipelineRecords(records) : records;
     if (isPipeline) updatePipelineFilterBar(source.length);
     if (!source.length) {
@@ -7992,6 +8057,7 @@
         : '<div class="empty">No Platform Output records were returned.</div>';
       return;
     }
+    const sortedSource = isDashboard ? sortedPipelineRecords(source) : source;
     const pipelineRow = (r) => {
       const pct = pipelineDisplayPercent(r);
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
@@ -8011,12 +8077,15 @@
           const header = `<tr class="pipeline-group-row"><td colspan="9"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button></td></tr>`;
           return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map(pipelineRow).join("")}</tbody>`;
         }).join("")
-      : `<tbody>${source.map(pipelineRow).join("")}</tbody>`;
+      : `<tbody>${sortedSource.map(pipelineRow).join("")}</tbody>`;
     const head = isPipeline
       ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
+      : isDashboard
+      ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}</tr>`
       : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
-    target.innerHTML = `<table class="data-table"><thead>${head}</thead>${body}</table>`;
-    if (isPipeline) {
+    const tableClass = isDashboard ? "data-table dashboard-output-table" : "data-table";
+    target.innerHTML = `<table class="${tableClass}"><thead>${head}</thead>${body}</table>`;
+    if (isPipeline || isDashboard) {
       target.querySelectorAll("[data-pipeline-sort]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
@@ -8027,9 +8096,12 @@
             pipelineSort.key = key;
             pipelineSort.dir = key === "output" || key === "progress" ? "desc" : "asc";
           }
-          renderOutputsTable(target, pipelineOutputs);
+          if (isPipeline) renderOutputsTable(target, pipelineOutputs);
+          else renderDashboardPanel();
         });
       });
+    }
+    if (isPipeline) {
       target.querySelectorAll("[data-pipeline-group-toggle]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
