@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.119-smv1-master-bridge",
+          version: "0.10.120-ap0c-carousel-dispatch",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -199,6 +199,7 @@ export default {
           studio_approved_progress_v1: true,
           studio_publish_cadence_carousel_youtube_v1: true,
           studio_publish_dispatch_v1: true,
+          studio_ap0c_carousel_dispatch_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
@@ -12544,6 +12545,18 @@ const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
   { id: 5806668, key: "TTD" },
   { id: 5823581, key: "YT" },
 ]);
+// AP-CAR-ORCH 5791537 stays parked. These webhook workers are the carousel chain
+// Studio Approve starts (AP0C) and each stage then pulses the next.
+const STUDIO_AP0C_CHAIN_WEBHOOKS = Object.freeze([
+  { id: 5786899, key: "AP0C" },
+  { id: 5790745, key: "AP1C" },
+  { id: 5791231, key: "AP2C" },
+  { id: 5791273, key: "AP3C" },
+  { id: 5791336, key: "AP3P" },
+  { id: 5791356, key: "AP4C" },
+  { id: 5791396, key: "AP4R" },
+  { id: 5791424, key: "AP5C" },
+]);
 const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: 5612096, key: "AP0" },
   { id: 5612664, key: "IGS" },
@@ -12551,6 +12564,7 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: 5816502, key: "FBS3" },
   { id: 5816520, key: "FBS4" },
   { id: 5806658, key: "TTD0" },
+  ...STUDIO_AP0C_CHAIN_WEBHOOKS,
   { id: ITEM4_P2_SCENARIO_ID, key: "P2" },
   { id: ITEM4_P3_SCENARIO_ID, key: "P3" },
   { id: ITEM4_C2_SCENARIO_ID, key: "C2" },
@@ -13936,6 +13950,9 @@ function studioPublishDispatchTarget(record) {
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
   const published = /published/i.test(String(f(record, "Publish_Status") || "")) || Boolean(f(record, "Published_At"));
   if (published || Boolean(f(record, "Do_Not_Publish"))) return null;
+  if (platform === "Instagram" && (outputType === "Carousel" || mapping === "Instagram Carousel")) {
+    return { setting: "AP0C_WEBHOOK_URL", target: "AP0C" };
+  }
   if (platform === "Instagram" && (outputType === "Story" || mapping === "Instagram Story")) {
     return { setting: "AP1_IGS_WEBHOOK_URL", poll: "AP1_IGS_POLL_WEBHOOK_URL", target: "AP1-IGS" };
   }
@@ -14059,6 +14076,7 @@ async function studioPulseAp0PublicAsset(env, record) {
 // status like "Ready for Assets" and no publisher listening. Approval arms its own chain.
 const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "AP0": { webhooks: [5612096] },
+  "AP0C": { webhooks: STUDIO_AP0C_CHAIN_WEBHOOKS.map((item) => item.id) },
   "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: 5864632 },
   "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
   "FBS3": { webhooks: [5816502, 5816520], orchestrator: 5813561 },
@@ -14125,9 +14143,12 @@ async function studioDispatchApprovedPublishNow(env, record) {
   const plan = studioPublishDispatchTarget(record);
   if (!plan) return { ok: true, skipped: "no-dispatch", record };
   if (plan.graphStory) return { ...await studioPublishFacebookPageStory(env, record), plan, record };
-  await studioArmPublishScenarios(env, "AP0");
-  const ap0 = await studioPulseAp0PublicAsset(env, record);
-  if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
+  let ap0 = null;
+  if (plan.target !== "AP0C") {
+    await studioArmPublishScenarios(env, "AP0");
+    ap0 = await studioPulseAp0PublicAsset(env, record);
+    if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
+  }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
   const pulsed = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target, {
@@ -14145,6 +14166,7 @@ async function studioDispatchApprovedPublishTail(env, record, primary) {
     const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
     await studioPulseMakeWebhook(env, primary.settings?.[plan.poll], record.id, pollTarget);
   }
+  if (!STUDIO_PUBLISH_DISPATCH_SCENARIOS[plan.target]?.orchestrator) return null;
   // Let the webhook scenario finish staging before the orchestrator looks for its work.
   await new Promise((resolve) => setTimeout(resolve, 10000));
   return studioRunPublishOrchestrator(env, plan.target);
