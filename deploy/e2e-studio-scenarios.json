@@ -116,5 +116,40 @@
         "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Plaza_by_the_Cloud_Gate_on_a_rainy_night_(52036718497).jpg?width=1280"
       }
     ]
+  },
+  "cu-still-body": {
+    "title": "Navy Pier — still-as-body native test",
+    "summary": "One Chicago still. Silent native singles. Graph must post the 4:5 photo still, not the 3D thumb. Caption and hashtags on the post.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "No",
+    "background_music_mode": "No",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook"],
+    "overrides": { "Instagram": "Single Image", "Facebook": "Single Image" },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "navy-pier-still.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Navy_Pier_Chicago.JPG?width=1280"
+      }
+    ]
+  },
+  "cu-cover-first": {
+    "title": "Three Chicago stills — cover-first carousel",
+    "summary": "Silent native carousel. Slide 1 is the AI 3D cover (grid). Remaining slides are lettered 4:5 photos. Graph caption on the album.",
+    "content_type": "Photo Set",
+    "photo_count": 3,
+    "voiceover_mode": "No",
+    "background_music_mode": "No",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook"],
+    "overrides": { "Instagram": "Carousel", "Facebook": "Multi-Image Post" },
+    "extras": [],
+    "photos": [
+      { "filename": "chicago-buckingham.jpg", "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Buckingham_Fountain_Grant_Park_Chicago.jpg?width=1280" },
+      { "filename": "chicago-river.jpg", "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago_Riverwalk.jpg?width=1280" },
+      { "filename": "chicago-el.jpg", "url": "https://commons.wikimedia.org/wiki/Special:FilePath/CTA_Loop_Elevated_-_Madison_&_Wabash_Station.jpg?width=1280" }
+    ]
   }
 }

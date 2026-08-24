@@ -10,6 +10,7 @@ from item4.constants import MEDIA_PUBLIC_BASE
 from lettering.compositor import (
     already_lettered_url,
     is_ai_cover_clip,
+    is_leftover_overlay_text,
     letter_jpeg_bytes,
     overlay_text_for_clip,
 )
@@ -36,6 +37,30 @@ def _set_clip_url(clip: dict[str, Any], url: str) -> None:
     if "src" in clip:
         clip["src"] = url
     clip["lettered"] = True
+
+
+def _clip_has_leftover_overlay(clip: dict[str, Any]) -> bool:
+    overlay = clip.get("overlay") or {}
+    if isinstance(overlay, str):
+        text = overlay.strip()
+    else:
+        text = str(overlay.get("text") or "").strip()
+    caption = str(clip.get("caption") or "").strip()
+    return is_leftover_overlay_text(text) or is_leftover_overlay_text(caption)
+
+
+def _unlettered_source_url(clip: dict[str, Any], output: dict[str, Any], index: int) -> str:
+    current = _clip_url(clip)
+    if current and not already_lettered_url(current):
+        return current
+    parsed = parse_json_field(_raw(output, "Selected_Assets_JSON"))
+    prep = parsed.get("render_prep") if isinstance(parsed, dict) else {}
+    listed = parse_json_field(prep.get("render_clip_list_json")) if isinstance(prep, dict) else None
+    if isinstance(listed, list) and index < len(listed) and isinstance(listed[index], dict):
+        candidate = str(listed[index].get("url") or listed[index].get("src") or "").strip()
+        if candidate and not already_lettered_url(candidate):
+            return candidate
+    return ""
 
 
 def _clips_from_output(output: dict[str, Any]) -> tuple[str | None, list[dict[str, Any]]]:
@@ -135,17 +160,21 @@ def process_one(
         or ""
     )
 
-    work: list[tuple[int, dict[str, Any], str]] = []
+    work: list[tuple[int, dict[str, Any], str, str]] = []
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict) or is_ai_cover_clip(clip):
-            continue
-        url = _clip_url(clip)
-        if not url or already_lettered_url(url):
             continue
         text = overlay_text_for_clip(clip, title)
         if not text:
             continue
-        work.append((index, clip, text))
+        url = _clip_url(clip)
+        leftover = _clip_has_leftover_overlay(clip)
+        if already_lettered_url(url) and not leftover:
+            continue
+        source_url = _unlettered_source_url(clip, output, index)
+        if not source_url:
+            continue
+        work.append((index, clip, text, source_url))
 
     preview = {
         "output_record_id": output["id"],
@@ -167,8 +196,7 @@ def process_one(
     uploader = R2UploadClient()
     url_map: dict[str, str] = {}
     lettered_urls: list[str] = []
-    for index, clip, text in work:
-        source_url = _clip_url(clip)
+    for index, clip, text, source_url in work:
         response = requests.get(source_url, timeout=120)
         response.raise_for_status()
         jpeg = letter_jpeg_bytes(response.content, text)
@@ -176,6 +204,14 @@ def process_one(
         uploader.put_object(key, jpeg, "image/jpeg")
         public_url = f"{MEDIA_PUBLIC_BASE.rstrip('/')}/{key.lstrip('/')}"
         url_map[source_url] = public_url
+        current = _clip_url(clip)
+        if current and current != source_url:
+            url_map[current] = public_url
+        if isinstance(clip.get("overlay"), dict):
+            clip["overlay"] = {**clip["overlay"], "text": text}
+        elif clip.get("overlay") is not None:
+            clip["overlay"] = text
+        clip["caption"] = text
         lettered_urls.append(public_url)
         _set_clip_url(clip, public_url)
 

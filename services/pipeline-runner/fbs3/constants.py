@@ -1,0 +1,29 @@
+from publish.constants import FBS3_SCENARIO_ID, FBS4_SCENARIO_ID
+
+MAKE_SCENARIO_ID = FBS3_SCENARIO_ID
+MAKE_POLL_SCENARIO_ID = FBS4_SCENARIO_ID
+MAKE_SCENARIO_NAME = (
+    "FBS3 - Publish Facebook Slideshow Reel v1.0.8 - Cache-Busted Non-Black Cover Fallback"
+)
+MAKE_POLL_SCENARIO_NAME = "FBS4 - Poll Facebook Slideshow Reel v1.2 - Terminal Finalize Fix"
+
+PUBLISH_LOCKED_BY = "FBS3"
+POLL_LOCKED_BY = "FBS4"
+STATUS_VIDEO_READY = "Video Ready"
+STATUS_RETRY_PENDING = "Retry Pending"
+STATUS_INITIALIZING = "Initializing Reel"
+STATUS_UPLOADING = "Uploading Reel"
+STATUS_PROCESSING = "Reel Processing"
+STATUS_PUBLISHED = "Published"
+STATUS_FAILED = "Failed"
+STATUS_PENDING_FINALIZE = "Published Pending Finalize"
+PUBLISH_STATUS_PUBLISHING = "Publishing"
+PUBLISH_STATUS_PUBLISHED = "Published"
+PUBLISH_STATUS_FAILED = "Failed"
+FB_PUBLISH_PUBLISHING = "Publishing Slideshow Reel"
+FB_PUBLISH_PUBLISHED = "Published"
+FB_PUBLISH_RETRY = "Retry Pending"
+DEFAULT_TITLE = "ChicagoShining"
+RETRY_MINUTES = 5
+POLL_RETRY_MINUTES = 2
+FINISH_RETRY_MINUTES = 1

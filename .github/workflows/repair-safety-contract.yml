@@ -1,0 +1,27 @@
+name: Repair Safety Contract
+
+on:
+  push:
+    branches:
+      - 'repair/**'
+    paths:
+      - 'repair/safety/**'
+      - '.github/workflows/repair-safety-contract.yml'
+  pull_request:
+    paths:
+      - 'repair/safety/**'
+      - '.github/workflows/repair-safety-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Validate safety contract
+        run: node repair/safety/activation-lease.test.mjs

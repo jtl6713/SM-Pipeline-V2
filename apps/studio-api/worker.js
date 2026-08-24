@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.124-asset-chain-gates",
+          version: "0.10.133-ap1-igs-python",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -201,6 +201,7 @@ export default {
           studio_publish_dispatch_v1: true,
           studio_ap0c_carousel_dispatch_v1: true,
           studio_ig_fb_photo_dispatch_v1: true,
+          studio_native_still_no_mix_handoff_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
@@ -702,14 +703,29 @@ export default {
     // waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
       try {
-        await advanceStudioProductionOutputs(env, { waitMs: 0 });
-      } catch (error) {
-        console.warn("production continuation cron failed", error);
-      }
-      try {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
+      }
+      try {
+        await studioReconcilePublishingInstagramStories(env);
+      } catch (error) {
+        console.warn("instagram story poll reconcile cron failed", error);
+      }
+      try {
+        await studioReconcileFacebookSlideshows(env);
+      } catch (error) {
+        console.warn("facebook slideshow reconcile cron failed", error);
+      }
+      try {
+        await studioReconcileFacebookReels(env);
+      } catch (error) {
+        console.warn("facebook reel reconcile cron failed", error);
+      }
+      try {
+        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+      } catch (error) {
+        console.warn("production continuation cron failed", error);
       }
       try {
         await syncProductionCadence(env, { skipRenderPulse: true });
@@ -1117,8 +1133,14 @@ function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
   const type = String(outputType || "").trim();
   const map = String(mapping || "").trim();
   if (p === "TikTok" && (type === "Multi-Photo" || type === "Single Photo" || map === "TikTok Slideshow")) return true;
-  if (p === "Instagram" && (type === "Carousel" || type === "Single Image")) return true;
-  if (p === "Facebook" && (type === "Multi-Image Post" || type === "Single Image")) return true;
+  if (p === "Instagram" && (
+    type === "Carousel" || type === "Single Image" || type === "Instagram Feed Post"
+    || map === "Instagram Carousel" || map === "Instagram Feed Post"
+  )) return true;
+  if (p === "Facebook" && (
+    type === "Multi-Image Post" || type === "Single Image" || type === "Facebook Post"
+    || map === "Facebook Photo Set" || map === "Facebook Post"
+  )) return true;
   return false;
 }
 
@@ -2785,21 +2807,58 @@ function item4RequestedCaptionIsSlideDump(caption, assets) {
   return Boolean(text) && (text === manuals.join("\n\n") || text === manuals.join("\n"));
 }
 
-function item4FillAiOverlayFallbacks(assets, requestRecord) {
+const ITEM4_LEFTOVER_OVERLAYS = new Set([
+  "rainy downtown chicago",
+  "chicago loop",
+  "michigan avenue in the rain",
+  "the chicago riverwalk",
+]);
+
+function item4IsLeftoverOverlayText(text) {
+  return ITEM4_LEFTOVER_OVERLAYS.has(String(text || "").trim().toLowerCase());
+}
+
+function item4PreferredOverlayText(requestRecord, parentContentItem, sourceText) {
+  const raw = String(sourceText || "").trim();
+  if (raw && !item4IsLeftoverOverlayText(raw)) return raw;
+  const caption = String(
+    f(parentContentItem, "Caption")
+    || f(requestRecord, "Requested_Caption")
+    || ""
+  ).trim();
+  const first = caption.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+  const title = String(
+    f(parentContentItem, "Content_Title")
+    || f(requestRecord, "Requested_Title")
+    || ""
+  ).trim().replace(/[👇^\s]+$/g, "").trim();
+  if (first && first.length <= 80 && !item4IsLeftoverOverlayText(first)) return first;
+  if (title && title.length <= 80 && !item4IsLeftoverOverlayText(title)) return title;
+  return "";
+}
+
+function item4UnletteredClipUrl(packageJson, index, clip) {
+  const prep = packageJson && typeof packageJson === "object" ? (packageJson.render_prep || {}) : {};
+  const list = item4ParseJson(prep.render_clip_list_json, []);
+  const fromList = String(list?.[index]?.url || list?.[index]?.src || "").trim();
+  if (fromList && !/\/lettered\//i.test(fromList)) return fromList;
+  const compat = String(prep[`compatibility_clip_${index + 1}_url`] || "").trim();
+  if (compat && !/\/lettered\//i.test(compat)) return compat;
+  const current = String(clip?.url || clip?.src || "").trim();
+  if (current && !/\/lettered\//i.test(current)) return current;
+  return fromList || current;
+}
+
+function item4FillAiOverlayFallbacks(assets, requestRecord, parentContentItem) {
   const rows = Array.isArray(assets) ? assets.slice() : [];
   const used = new Set(rows.map((asset) => String(asset?.caption || "").trim().toLowerCase()).filter(Boolean));
-  const title = String(f(requestRecord, "Requested_Title") || "").trim();
-  const pool = [
-    "Rainy downtown Chicago",
-    "Chicago Loop",
-    "Michigan Avenue in the rain",
-    "The Chicago Riverwalk",
-    title && title.length <= 80 ? title.replace(/[👇^\s]+$/g, "").trim() : "",
-  ].filter(Boolean);
+  const pool = [item4PreferredOverlayText(requestRecord, parentContentItem, "")].filter(Boolean);
   let cursor = 0;
   return rows.map((asset) => {
     const mode = String(asset?.caption_mode || "ai").trim().toLowerCase();
-    if (mode !== "ai" || String(asset?.caption || "").trim()) return asset;
+    const existing = String(asset?.caption || "").trim();
+    if (mode !== "ai") return asset;
+    if (existing && !item4IsLeftoverOverlayText(existing)) return asset;
     let text = "";
     for (let i = 0; i < pool.length; i += 1) {
       const candidate = pool[(cursor + i) % pool.length];
@@ -2809,7 +2868,7 @@ function item4FillAiOverlayFallbacks(assets, requestRecord) {
         break;
       }
     }
-    if (!text) text = pool[0] || "Chicago";
+    if (!text) return existing && item4IsLeftoverOverlayText(existing) ? { ...asset, caption: "" } : asset;
     used.add(text.toLowerCase());
     return { ...asset, caption: text };
   });
@@ -2826,6 +2885,53 @@ function item4OverlayCaptionBySourceId(requestRecord) {
     map.set(id, text);
   }
   return map;
+}
+
+async function studioRepairLeftoverNativeLettering(env, po, context) {
+  const parsed = item4ParseJson(f(po, "Selected_Assets_JSON"), {});
+  if (!parsed || typeof parsed !== "object") return po;
+  const clips = Array.isArray(parsed.selected_clips)
+    ? parsed.selected_clips
+    : (Array.isArray(parsed.clips) ? parsed.clips : []);
+  if (!clips.length) return po;
+  const preferred = item4PreferredOverlayText(
+    context?.requestRecord,
+    context?.parent,
+    String(f(po, "Output_Caption") || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean) || ""
+  );
+  let changed = false;
+  const nextClips = clips.map((clip, index) => {
+    const text = String(clip?.overlay?.text || clip?.caption || "").trim();
+    if (!item4IsLeftoverOverlayText(text)) return clip;
+    changed = true;
+    const rawUrl = item4UnletteredClipUrl(parsed, index, clip);
+    const overlay = item4PhotoOverlayFromCaption(preferred);
+    return {
+      ...clip,
+      url: rawUrl || clip.url,
+      src: rawUrl || clip.src,
+      lettered: false,
+      overlay: overlay || undefined,
+      caption: overlay?.text || "",
+    };
+  });
+  if (!changed) return po;
+  const next = {
+    ...parsed,
+    selected_clips: Array.isArray(parsed.selected_clips) ? nextClips : parsed.selected_clips,
+  };
+  if (Array.isArray(parsed.clips)) next.clips = nextClips;
+  if (next.render_prep && typeof next.render_prep === "object") {
+    const first = String(nextClips[0]?.url || "").trim();
+    if (first) next.render_prep.compatibility_clip_1_url = first;
+  }
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: { Selected_Assets_JSON: JSON.stringify(next) },
+      typecast: false,
+    }),
+  });
 }
 
 function item4PhotoOverlayFromCaption(text, { tiktok916 = false } = {}) {
@@ -4029,6 +4135,14 @@ const ITEM4_SAI1_WEBHOOK_URL = "https://hook.us2.make.com/duojihfn68fgoz6x438tjf
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
+const STUDIO_AP0_SCENARIO_ID = 5612096;
+const STUDIO_AP1_IG_SCENARIO_ID = 5862882;
+const STUDIO_AP1_IGS_SCENARIO_ID = 5612664;
+const STUDIO_AP1_IGS_POLL_SCENARIO_ID = 5845193;
+const STUDIO_FBS1_SCENARIO_ID = 5816409;
+const STUDIO_FBS2_SCENARIO_ID = 5816495;
+const STUDIO_FBS3_SCENARIO_ID = 5816502;
+const STUDIO_FBS4_SCENARIO_ID = 5816520;
 
 
 
@@ -4400,6 +4514,14 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === ITEM4_C2_SCENARIO_ID && pipelineStageBackend(env, "C2").mode === "python") return true;
   if (id === ITEM4_SAI1_SCENARIO_ID && pipelineStageBackend(env, "SAI1").mode === "python") return true;
   if (id === STUDIO_IDEA_I1_SCENARIO_ID && pipelineStageBackend(env, "I1").mode === "python") return true;
+  if (id === STUDIO_AP0_SCENARIO_ID && pipelineStageBackend(env, "AP0").mode === "python") return true;
+  if (id === STUDIO_AP1_IG_SCENARIO_ID && pipelineStageBackend(env, "AP1_IG").mode === "python") return true;
+  if (id === STUDIO_AP1_IGS_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
+  if (id === STUDIO_AP1_IGS_POLL_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
+  if (id === STUDIO_FBS1_SCENARIO_ID && pipelineStageBackend(env, "FBS1").mode === "python") return true;
+  if (id === STUDIO_FBS2_SCENARIO_ID && pipelineStageBackend(env, "FBS1").mode === "python") return true;
+  if (id === STUDIO_FBS3_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
+  if (id === STUDIO_FBS4_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
   return false;
 }
 
@@ -7599,9 +7721,13 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
     // Stories stay first-photo teasers, but on-image slide captions must still burn in.
-    const overlayText = captions.get(String(source?.id || "").trim())
-      || String(source?.caption || variant?.caption || "").trim()
-      || String(f(parentContentItem, "Content_Title") || "").trim();
+    const overlayText = item4PreferredOverlayText(
+      requestRecord,
+      parentContentItem,
+      captions.get(String(source?.id || "").trim())
+        || String(source?.caption || variant?.caption || "").trim()
+        || String(f(parentContentItem, "Content_Title") || "").trim()
+    );
     const overlay = item4PhotoOverlayFromCaption(overlayText, { tiktok916 });
     clips.push({
       id: `studio-source-${clips.length + 1}`,
@@ -8024,14 +8150,14 @@ async function markParentContentItemAsStudioUmbrella(env, parentContentItem, out
 async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId) {
   const outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,work_items:[],single_parent_mode:true};
-  const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord);
+  let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
+  const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord, parent);
   if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
       method: "PATCH",
       body: JSON.stringify({ fields: { Studio_Master_Assets_JSON: JSON.stringify(filledAssets) }, typecast: false }),
     });
   }
-  let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
   parent=await restoreParentContentItemFromStudioUmbrella(env,parent);
   const profileDefaults=await productionProfileDefaultsForParentContentItem(env,parent);
   const workItems=[]; let routed=0,blocked=0;
@@ -12258,6 +12384,17 @@ function phase6RenderHandoffState(record) {
   return "render_prep_needed";
 }
 
+function phase6CreativeMixRevisionInFlight(record) {
+  const renderStatus = String(f(record, "Render_Status") || "").trim();
+  if (studioOutputIsNativePhoto(record) || renderStatus === "Native Photo Route") return false;
+  const reviewStatus = String(f(record, "Review_Status") || "").trim();
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  // Publish Approve stamps Review_Decision_At. That is not a mix rerender.
+  if (reviewStatus === "Changes Requested") return true;
+  if (outputStatus === "In Production") return true;
+  return false;
+}
+
 function phase6CreativeHandoffStatus(record, slides = []) {
   const reviewStatus = String(f(record, "Review_Status") || "");
   const outputStatus = String(f(record, "Output_Status") || "");
@@ -12266,7 +12403,7 @@ function phase6CreativeHandoffStatus(record, slides = []) {
   const requestedAt = phase6TimeMs(f(record, "Review_Decision_At"));
   const previewAt = phase6TimeMs(f(record, "Studio_Preview_Updated_At"));
   const previewReady = phase6PreviewFulfillsCurrentReview(record);
-  const requestStarted = reviewStatus === "Changes Requested" || outputStatus === "In Production" || requestedAt !== null;
+  const requestStarted = phase6CreativeMixRevisionInFlight(record);
   const pendingVoice = phase6PendingVoicePrepSlides(slides);
   const voiceFailures = (Array.isArray(slides) ? slides : []).filter((slide) => /fail|error/i.test(String(slide?.voiceover?.status || "")));
   const renderError = renderStatus === "Failed" ? String(f(record, "Remotion_Error_Message") || "Render failed") : null;
@@ -12464,6 +12601,17 @@ async function continueOutputCreativeHandoff(request, env, url, authorization) {
   if (!match) throw new HttpError(400, "Invalid Phase 6 continuation route");
   const id = match[1];
   let current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  if (studioOutputIsNativePhoto(current) || String(f(current, "Render_Status") || "").trim() === "Native Photo Route") {
+    const slides = await phase6SlidesForOutput(env, current);
+    const handoff = phase6CreativeHandoffStatus(current, slides);
+    return respond(request, env, {
+      ok: true,
+      completed: true,
+      handoff_state: "idle",
+      handoff,
+      message: "Native stills do not use a video mix.",
+    });
+  }
   if (!Boolean(f(current, "Do_Not_Publish")) && !phase6AllowsProductionMixContinuation(current)) {
     throw new HttpError(409, "No mix rerender is in progress for this output");
   }
@@ -12599,11 +12747,14 @@ const STUDIO_FB0_CHAIN_WEBHOOKS = Object.freeze([
   { id: 5813534, key: "FB3" },
 ]);
 const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
-  { id: 5612096, key: "AP0" },
+  { id: STUDIO_AP0_SCENARIO_ID, key: "AP0" },
+  { id: STUDIO_AP1_IG_SCENARIO_ID, key: "AP1-IG" },
   { id: 5612664, key: "IGS" },
   { id: 5845193, key: "IGSPOLL" },
-  { id: 5816502, key: "FBS3" },
-  { id: 5816520, key: "FBS4" },
+  { id: STUDIO_FBS1_SCENARIO_ID, key: "FBS1" },
+  { id: STUDIO_FBS2_SCENARIO_ID, key: "FBS2" },
+  { id: STUDIO_FBS3_SCENARIO_ID, key: "FBS3" },
+  { id: STUDIO_FBS4_SCENARIO_ID, key: "FBS4" },
   { id: 5806658, key: "TTD0" },
   ...STUDIO_AP0C_CHAIN_WEBHOOKS,
   ...STUDIO_FB0_CHAIN_WEBHOOKS,
@@ -13114,6 +13265,7 @@ async function studioContinuationInspectOutput(env, po, cache) {
   }
 
   if (nativePhoto && hasClips && studioOutputIsNativePhoto(po) && /^ready for review$/i.test(outputStatus)) {
+    po = await studioRepairLeftoverNativeLettering(env, po, context).catch(() => po);
     const lettering = await item4PulseLetterPython(env, { outputRecordId: po.id }).catch((error) => ({
       error: error instanceof Error ? error.message : String(error),
     }));
@@ -13700,7 +13852,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ];
       results = await Promise.all([
         ...parked.map((item) => cadenceSetActive(env, item.id, false)),
-        ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
+        ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, !cadenceScenarioManagedByPython(env, item.id))),
       ]);
     }
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
@@ -13724,7 +13876,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
   const wantPublish = startPublish || publishWork || now < productionCadencePublishHoldUntil;
   const actions = [
     ...PRODUCTION_CADENCE_ALWAYS_ON.map((item) => cadenceSetActive(env, item.id, true)),
-    ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
+    ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, !cadenceScenarioManagedByPython(env, item.id))),
     ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender && !cadenceScenarioManagedByPython(env, item.id))),
     ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish)),
   ];
@@ -14040,55 +14192,137 @@ async function studioFetchImageBytes(source) {
   if (fileId) candidates.push(googleDriveDownloadUrl(fileId));
   if (/^https?:\/\//i.test(url) && !candidates.includes(url)) candidates.push(url);
   for (const href of candidates) {
-    const response = await fetch(href, {
-      redirect: "follow",
-      headers: {
-        Accept: "image/jpeg,image/png,image/webp,image/*;q=0.9,*/*;q=0.4",
-        "User-Agent": "chicagoshining-studio-api/publish-dispatch",
-      },
-    });
-    const type = String(response.headers.get("Content-Type") || "").toLowerCase();
-    if (!response.ok || type.includes("text/html")) {
-      try { await response.body?.cancel(); } catch {}
-      continue;
+    try {
+      const response = await fetch(href, {
+        redirect: "follow",
+        headers: {
+          Accept: "image/jpeg,image/png,image/webp,image/*;q=0.9,*/*;q=0.4",
+          "User-Agent": "chicagoshining-studio-api/publish-dispatch",
+        },
+      });
+      const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+      if (!response.ok || type.includes("text/html")) {
+        try { await response.body?.cancel(); } catch {}
+        continue;
+      }
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > 1000 && buffer.byteLength <= 12 * 1024 * 1024) return buffer;
+    } catch (error) {
+      console.warn("image fetch failed", href.slice(0, 120), error);
     }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > 1000) return buffer;
   }
   return null;
+}
+
+async function studioPublicJpegIsReachable(url) {
+  const href = String(url || "").trim();
+  if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+  try {
+    const response = await fetch(href, {
+      method: "GET",
+      headers: { Range: "bytes=0-15", "User-Agent": "chicagoshining-studio-api/publish-dispatch" },
+    });
+    const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+    try { await response.body?.cancel(); } catch {}
+    return response.ok && type.startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
+function studioImageContentType(buffer) {
+  const bytes = new Uint8Array(buffer.slice(0, 12));
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57) return "image/webp";
+  return "image/jpeg";
+}
+
+const R2_UPLOAD_WORKER_PUBLIC = "https://chicagoshining-r2-upload.joseph-t-logan.workers.dev";
+
+async function studioPutPublicJpegViaUploadWorker(env, record, buffer) {
+  const settings = await studioActivePipelineSettings(env, [
+    "R2_UPLOAD_WORKER_URL",
+    "R2_UPLOAD_WORKER_SECRET",
+  ]);
+  const secret = String(settings.R2_UPLOAD_WORKER_SECRET || "").trim();
+  if (!secret) return { url: "", skip: "missing-upload-secret" };
+  const contentType = studioImageContentType(buffer);
+  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const key = `studio/previews/platform-output/${record.id}/cover.${ext}`;
+  const endpoints = [...new Set([
+    String(settings.R2_UPLOAD_WORKER_URL || "").trim().replace(/\/+$/, ""),
+    R2_UPLOAD_WORKER_PUBLIC,
+  ].filter(Boolean))];
+  let lastStatus = 0;
+  for (const workerUrl of endpoints) {
+    try {
+      const response = await fetch(`${workerUrl}?key=${encodeURIComponent(key)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": contentType,
+          "Content-Length": String(buffer.byteLength),
+          "x-pipeline-secret": secret,
+          "x-output-id": record.id,
+          "x-retain-class": "preview",
+        },
+        body: new Uint8Array(buffer),
+      });
+      lastStatus = response.status;
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        console.warn("public jpeg upload worker failed", record.id, response.status);
+        continue;
+      }
+      return { url: String(payload.public_url || `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`).trim(), skip: "" };
+    } catch (error) {
+      console.warn("public jpeg upload worker threw", record.id, error);
+    }
+  }
+  return { url: "", skip: lastStatus ? `upload-http-${lastStatus}` : "upload-worker-failed" };
 }
 
 async function studioEnsurePublicJpegForPublish(env, record) {
   const existing = studioClipPublicCdnUrl(f(record, "Publish_Asset_URL"))
     || studioPublicJpegCoverUrl(record)
     || studioClipPublicCdnUrl(f(record, "Studio_Preview_URL"));
-  if (existing) return { record, url: existing };
-  if (!env.STUDIO_MEDIA) return { record, url: "" };
-  const source = String(
-    f(record, "Thumbnail_URL")
-    || f(record, "Studio_Preview_URL")
-    || f(record, "Publish_Asset_URL")
-    || ""
-  ).trim();
+  if (existing && await studioPublicJpegIsReachable(existing)) return { record, url: existing };
+  const thumbnail = String(f(record, "Thumbnail_URL") || "").trim();
+  const source = /^https:\/\/(drive\.google\.com|drive\.usercontent\.google\.com)\//i.test(thumbnail)
+    ? thumbnail
+    : String(thumbnail || f(record, "Studio_Preview_URL") || f(record, "Publish_Asset_URL") || "").trim();
   const buffer = await studioFetchImageBytes(source);
-  if (!buffer) return { record, url: "" };
-  const key = `publish/platform-output/${record.id}/cover.jpg`;
-  await env.STUDIO_MEDIA.put(key, buffer, {
-    httpMetadata: { contentType: "image/jpeg" },
-    customMetadata: { platformOutputId: record.id, purpose: "ig-feed-photo" },
-  });
-  const url = `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
+  if (!buffer) return { record, url: "", skip: "missing-source-bytes" };
+  let uploaded = await studioPutPublicJpegViaUploadWorker(env, record, buffer);
+  if (!uploaded.url && env.STUDIO_MEDIA) {
+    const contentType = studioImageContentType(buffer);
+    const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+    const key = `studio/previews/platform-output/${record.id}/cover.${ext}`;
+    try {
+      await env.STUDIO_MEDIA.put(key, buffer, {
+        httpMetadata: { contentType, cacheControl: "public, max-age=300" },
+        customMetadata: { platformOutputId: String(record.id), purpose: "ig-feed-photo" },
+      });
+      uploaded = { url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`, skip: "" };
+      if (!(await studioPublicJpegIsReachable(uploaded.url))) {
+        uploaded = { url: "", skip: "studio-media-not-public" };
+      }
+    } catch (error) {
+      console.warn("studio media public jpeg put failed", record.id, error);
+    }
+  }
+  if (!uploaded.url) return { record, url: "", skip: uploaded.skip || "upload-worker-failed" };
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
     method: "PATCH",
     body: JSON.stringify({
       typecast: true,
       fields: {
-        Publish_Asset_URL: url,
-        Studio_Preview_URL: url,
+        Publish_Asset_URL: uploaded.url,
+        Studio_Preview_URL: uploaded.url,
       },
     }),
   });
-  return { record: updated || record, url };
+  return { record: updated || record, url: uploaded.url };
 }
 
 async function studioPublishInstagramFeedPhoto(env, record) {
@@ -14109,7 +14343,7 @@ async function studioPublishInstagramFeedPhotoInner(env, record) {
   record = prepared.record;
   const imageUrl = prepared.url;
   if (!imageUrl.startsWith("https://media.chicagoshining.com/")) {
-    return { ok: false, skipped: "missing-cdn-preview", target: "IG-FEED-GRAPH" };
+    return { ok: false, skipped: prepared.skip || "missing-cdn-preview", target: "IG-FEED-GRAPH" };
   }
   const settings = await studioActivePipelineSettings(env, [
     "INSTAGRAM_BUSINESS_ACCOUNT_ID",
@@ -14282,12 +14516,233 @@ async function studioPulseAp0PublicAsset(env, record) {
   )) {
     return { ok: true, skipped: "native-photo", target: "AP0" };
   }
+  const hasFile = String(f(record, "Final_File_ID") || "").trim() || String(f(record, "Final_File_URL") || "").trim();
+  if (!hasFile) return { ok: true, skipped: "no-final-file", target: "AP0" };
+  if (pipelineStageBackend(env, "AP0").mode === "python") {
+    const { response, payload } = await item4PulsePipelineStage(env, "ap0", {
+      output_record_id: recordId,
+    }, "AP0");
+    if (!response.ok || payload?.status === "error") {
+      return {
+        ok: false,
+        target: "AP0",
+        backend: "python",
+        status: response.status,
+        message: payload?.message || `Python AP0 returned HTTP ${response.status}`,
+      };
+    }
+    const skipped = payload?.status === "skipped";
+    return {
+      ok: true,
+      skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+      target: "AP0",
+      backend: "python",
+    };
+  }
   if (String(f(record, "Publish_Asset_URL") || "").trim()) {
     return { ok: true, skipped: "already-has-asset", target: "AP0" };
   }
-  const hasFile = String(f(record, "Final_File_ID") || "").trim() || String(f(record, "Final_File_URL") || "").trim();
-  if (!hasFile) return { ok: true, skipped: "no-final-file", target: "AP0" };
   return studioPulseMakeWebhook(env, STUDIO_AP0_WEBHOOK_URL, recordId, "AP0");
+}
+
+async function studioPulseAp1IgReel(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IG" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ap1_ig", {
+    output_record_id: recordId,
+  }, "AP1_IG");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "AP1-IG",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python AP1-IG returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "AP1-IG",
+    backend: "python",
+    post_id: payload?.details?.run?.media_id,
+    permalink: payload?.details?.run?.permalink,
+  };
+}
+
+async function studioPulseAp1Igs(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IGS" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ap1_igs", {
+    output_record_id: recordId,
+  }, "AP1_IGS");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "AP1-IGS",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python AP1-IGS returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "AP1-IGS",
+    backend: "python",
+    needs_poll: Boolean(payload?.details?.run?.needs_poll),
+    container_id: payload?.details?.run?.container_id,
+  };
+}
+
+async function studioPulseFbs1(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS1" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs1", {
+    output_record_id: recordId,
+  }, "FBS1");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS1",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS1 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS1",
+    backend: "python",
+    needs_poll: Boolean(payload?.details?.run?.needs_poll),
+    job_id: payload?.details?.run?.job_id,
+  };
+}
+
+async function studioPulseFbs2(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS2" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs2", {
+    output_record_id: recordId,
+  }, "FBS1");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS2",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS2 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS2",
+    backend: "python",
+    still_processing: Boolean(payload?.details?.run?.still_processing),
+    public_url: payload?.details?.run?.public_url,
+  };
+}
+
+async function studioEnsureFacebookSlideshowAsset(env, record) {
+  const status = String(f(record, "FB_Slideshow_Status") || "");
+  const publicUrl = String(f(record, "FB_Slideshow_Public_URL") || "").trim();
+  if (/^video ready$/i.test(status) && publicUrl) {
+    return { ok: true, skipped: "already-ready", target: "FBS1" };
+  }
+  const created = await studioPulseFbs1(env, record);
+  if (!created.ok) return created;
+  if (!created.skipped && created.needs_poll) {
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    return studioPulseFbs2(env, record);
+  }
+  if (!created.skipped) return created;
+  return studioPulseFbs2(env, record);
+}
+
+async function studioPulseFbs3(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs3", {
+    output_record_id: recordId,
+  }, "FBS3");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS3",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS3 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS3",
+    backend: "python",
+    needs_poll: Boolean(payload?.details?.run?.needs_poll),
+    video_id: payload?.details?.run?.video_id,
+  };
+}
+
+async function studioPulseFbs4(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS4" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs4", {
+    output_record_id: recordId,
+  }, "FBS3");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS4",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS4 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS4",
+    backend: "python",
+    still_processing: Boolean(payload?.details?.run?.still_processing),
+    video_id: payload?.details?.run?.video_id,
+    permalink: payload?.details?.run?.permalink,
+  };
+}
+
+async function studioPulseAp1IgsPoll(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IGS-POLL" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ap1_igs_poll", {
+    output_record_id: recordId,
+  }, "AP1_IGS");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "AP1-IGS-POLL",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python AP1-IGS-POLL returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "AP1-IGS-POLL",
+    backend: "python",
+    still_processing: Boolean(payload?.details?.run?.still_processing),
+    post_id: payload?.details?.run?.post_id,
+    container_id: payload?.details?.run?.container_id,
+  };
 }
 
 // Approve pulses these publisher webhooks directly, and a Make webhook aimed at a stopped
@@ -14301,7 +14756,7 @@ const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "FB0": { webhooks: STUDIO_FB0_CHAIN_WEBHOOKS.map((item) => item.id) },
   "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: 5864632 },
   "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
-  "FBS3": { webhooks: [5816502, 5816520], orchestrator: 5813561 },
+  "FBS3": { webhooks: [STUDIO_FBS3_SCENARIO_ID, STUDIO_FBS4_SCENARIO_ID], orchestrator: 5813561 },
   "TTD0": { webhooks: [5806658], orchestrator: 5806668 },
 });
 
@@ -14368,9 +14823,40 @@ async function studioDispatchApprovedPublishNow(env, record) {
   if (plan.graphFeedPhoto) return { ...await studioPublishInstagramFeedPhoto(env, record), plan, record };
   let ap0 = null;
   if (plan.target !== "AP0C" && plan.target !== "FB0") {
-    await studioArmPublishScenarios(env, "AP0");
+    const ap0Python = pipelineStageBackend(env, "AP0").mode === "python";
+    if (!ap0Python) await studioArmPublishScenarios(env, "AP0");
     ap0 = await studioPulseAp0PublicAsset(env, record);
-    if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
+    if (ap0?.ok && !ap0.skipped && ap0.backend !== "python") {
+      await new Promise((resolve) => setTimeout(resolve, 8000));
+    }
+  }
+  if (plan.target === "AP1-IG" && pipelineStageBackend(env, "AP1_IG").mode === "python") {
+    const pulsed = await studioPulseAp1IgReel(env, record);
+    return { ...pulsed, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "AP1-IGS" && pipelineStageBackend(env, "AP1_IGS").mode === "python") {
+    const created = await studioPulseAp1Igs(env, record);
+    if (!created.ok || created.skipped || !created.needs_poll) {
+      return { ...created, ap0, armed: [], plan, record };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const polled = await studioPulseAp1IgsPoll(env, record);
+    return { ...polled, create: created, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "FBS3" && pipelineStageBackend(env, "FBS1").mode === "python") {
+    const prepared = await studioEnsureFacebookSlideshowAsset(env, record);
+    if (!prepared.ok || prepared.still_processing) {
+      return { ...prepared, ap0, armed: [], plan, record };
+    }
+  }
+  if (plan.target === "FBS3" && pipelineStageBackend(env, "FBS3").mode === "python") {
+    const created = await studioPulseFbs3(env, record);
+    if (!created.ok || created.skipped || !created.needs_poll) {
+      return { ...created, ap0, armed: [], plan, record };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const polled = await studioPulseFbs4(env, record);
+    return { ...polled, create: created, ap0, armed: [], plan, record };
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
@@ -14383,7 +14869,7 @@ async function studioDispatchApprovedPublishNow(env, record) {
 
 async function studioDispatchApprovedPublishTail(env, record, primary) {
   const plan = primary?.plan;
-  if (!plan || plan.graphStory || plan.graphFeedPhoto) return null;
+  if (!plan || plan.graphStory || plan.graphFeedPhoto || primary?.backend === "python") return null;
   if (plan.poll) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
@@ -14397,6 +14883,7 @@ async function studioDispatchApprovedPublishTail(env, record, primary) {
 
 function studioPublishDispatchNote(result) {
   if (!result) return "no result";
+  if (result.accepted) return `accepted: ${result.target || result.plan?.target || "graph"}`;
   if (result.skipped) return `skipped: ${result.skipped}`;
   const armed = (result.armed || []).map((row) => `${row.id}${row.ok ? "" : "!"}`).join(",");
   return [
@@ -14432,6 +14919,22 @@ async function studioStampPublishDispatch(env, record, note) {
 }
 
 async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
+  const plan = studioPublishDispatchTarget(record);
+  // Graph stills (Drive → R2 → Instagram) can OOM or abort the isolate. Finish
+  // the Approve HTTP response first so Studio/E2E are not killed with the publish.
+  if (plan?.graphFeedPhoto && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil((async () => {
+      try {
+        const primary = await studioDispatchApprovedPublishNow(env, record);
+        await studioStampPublishDispatch(env, record, studioPublishDispatchNote(primary));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn("studio publish dispatch failed", record?.id, error);
+        await studioStampPublishDispatch(env, record, `dispatch failed: ${message}`);
+      }
+    })());
+    return { ok: true, accepted: true, target: plan.target, plan };
+  }
   let primary;
   try {
     primary = await studioDispatchApprovedPublishNow(env, record);
@@ -14494,6 +14997,123 @@ async function studioReconcileApprovedPublishes(env, options = {}) {
       console.warn("publish reconcile dispatch failed", row.id, error);
       await studioStampPublishDispatch(env, row, `reconcile failed: ${message}`);
       results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcilePublishingInstagramStories(env, options = {}) {
+  if (pipelineStageBackend(env, "AP1_IGS").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{IG_Story_Status}="Publishing",{IG_Story_Container_ID}!="",{IG_Story_Post_ID}=BLANK())',
+    });
+  } catch (error) {
+    console.warn("instagram story poll reconcile scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const pulsed = await studioPulseAp1IgsPoll(env, row);
+      results.push({ id: row.id, ok: pulsed?.ok !== false, still_processing: pulsed?.still_processing || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("instagram story poll reconcile failed", row.id, error);
+      results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcileFacebookSlideshows(env, options = {}) {
+  if (pipelineStageBackend(env, "FBS1").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  let ready = [];
+  let processing = [];
+  try {
+    ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Ready to Render",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS1",UPPER({Publish_Error_Stage}&""))>0)))',
+    });
+  } catch (error) {
+    console.warn("facebook slideshow create reconcile scan failed", error);
+  }
+  try {
+    processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0),AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Final_File_ID}!="",{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="")))',
+    });
+  } catch (error) {
+    console.warn("facebook slideshow poll reconcile scan failed", error);
+  }
+  for (const row of ready) {
+    try {
+      const pulsed = await studioPulseFbs1(env, row);
+      results.push({ id: row.id, stage: "fbs1", ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook slideshow create reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs1", error: message });
+    }
+  }
+  for (const row of processing) {
+    try {
+      const pulsed = await studioPulseFbs2(env, row);
+      results.push({ id: row.id, stage: "fbs2", ok: pulsed?.ok !== false, still_processing: pulsed?.still_processing || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook slideshow poll reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs2", error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcileFacebookReels(env, options = {}) {
+  if (pipelineStageBackend(env, "FBS3").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  let ready = [];
+  let processing = [];
+  try {
+    ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0)))',
+    });
+  } catch (error) {
+    console.warn("facebook reel create reconcile scan failed", error);
+  }
+  try {
+    processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({FB_Slideshow_Status}="Reel Processing",{FB_Slideshow_Status}="Published Pending Finalize"),OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""))',
+    });
+  } catch (error) {
+    console.warn("facebook reel poll reconcile scan failed", error);
+  }
+  for (const row of ready) {
+    try {
+      const pulsed = await studioPulseFbs3(env, row);
+      results.push({ id: row.id, stage: "fbs3", ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook reel create reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs3", error: message });
+    }
+  }
+  for (const row of processing) {
+    try {
+      const pulsed = await studioPulseFbs4(env, row);
+      results.push({ id: row.id, stage: "fbs4", ok: pulsed?.ok !== false, still_processing: pulsed?.still_processing || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook reel poll reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs4", error: message });
     }
   }
   return results;
@@ -14587,24 +15207,34 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
   const doNotPublish = Boolean(f(existing, "Do_Not_Publish"));
   const productionPublishApprove = action === "approve_for_publishing" || ((action === "approve" || action === "approved") && !doNotPublish);
   if (productionPublishApprove) {
-    const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
-    // Dispatch arms and pulses its own publisher chain, so a concurrent cadence sync would only
-    // compete for this invocation's budget and can park the scenario the pulse just woke up.
-    const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
-    return respond(request, env, {
-      ok: true,
-      action: "approve_for_publishing",
-      record: mapPhase6CreativeOutput(updated),
-      handoff_state: "approved_for_publishing",
-      publish_dispatch: {
-        target: dispatch?.target || dispatch?.skipped || null,
-        ok: dispatch?.ok !== false,
-        detail: studioPublishDispatchNote(dispatch),
-      },
-      message: dispatch?.ok === false
-        ? "Approved for publishing, but the publisher handoff did not go through. Studio will retry it automatically within a few minutes."
-        : "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
-    });
+    try {
+      const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
+      // Dispatch arms and pulses its own publisher chain, so a concurrent cadence sync would only
+      // compete for this invocation's budget and can park the scenario the pulse just woke up.
+      const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
+      return respond(request, env, {
+        ok: true,
+        action: "approve_for_publishing",
+        record: mapPhase6CreativeOutput(updated),
+        handoff_state: "approved_for_publishing",
+        publish_dispatch: {
+          target: dispatch?.target || dispatch?.skipped || null,
+          ok: dispatch?.ok !== false,
+          detail: studioPublishDispatchNote(dispatch),
+        },
+        message: dispatch?.ok === false
+          ? "Approved for publishing, but the publisher handoff did not go through. Studio will retry it automatically within a few minutes."
+          : "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
+      });
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      console.error("approve_for_publishing failed", existing?.id, error);
+      return respond(request, env, {
+        ok: false,
+        action: "approve_for_publishing",
+        error: error instanceof Error ? error.message : String(error),
+      }, 500);
+    }
   }
   if (!doNotPublish && phase6ProductionMixAction(action)) {
     phase6AssertProductionAudioMixAllowed(existing);
@@ -14879,7 +15509,7 @@ const REPAIR_CONTROL_SCENARIOS = new Set([
   5557966, // R3 exact Test Mode selector pulse only
   5565333, // R5 exact Test Mode selector pulse only
   5576363, // RR1 exact Test Mode selector pulse only
-  5612096, // AP0 public asset preparation
+  STUDIO_AP0_SCENARIO_ID, // AP0 public asset preparation
 ]);
 const REPAIR_LEASE_MAX_MS = 30 * 60 * 1000;
 const REPAIR_LEASE_MIN_MS = 60 * 1000;

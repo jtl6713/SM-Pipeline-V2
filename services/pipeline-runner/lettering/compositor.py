@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from lettering.constants import MAX_OVERLAY_CHARS
+from lettering.constants import LEFTOVER_OVERLAY_TEXTS, MAX_OVERLAY_CHARS
 
 _FONT_CANDIDATES = (
     Path(r"C:\Windows\Fonts\arialbd.ttf"),
@@ -13,6 +13,10 @@ _FONT_CANDIDATES = (
     Path(r"C:\Windows\Fonts\arial.ttf"),
     Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
 )
+
+
+def is_leftover_overlay_text(text: str) -> bool:
+    return str(text or "").strip().lower() in LEFTOVER_OVERLAY_TEXTS
 
 
 def overlay_text_for_clip(clip: dict, fallback_title: str = "") -> str:
@@ -23,7 +27,11 @@ def overlay_text_for_clip(clip: dict, fallback_title: str = "") -> str:
         text = str(overlay.get("text") or "").strip()
     caption = str(clip.get("caption") or "").strip()
     text = text or caption
+    if is_leftover_overlay_text(text):
+        text = ""
     title = str(fallback_title or "").strip()
+    if is_leftover_overlay_text(title):
+        title = ""
     if len(text) > MAX_OVERLAY_CHARS:
         text = title or text[:MAX_OVERLAY_CHARS].rstrip()
     return (text or title).strip()

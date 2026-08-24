@@ -13,6 +13,8 @@ on:
           - mx3-multi-slideshow
           - mx4-stories-plus-feed
           - mx5-youtube-standard
+          - cu-still-body
+          - cu-cover-first
 
 permissions:
   contents: read

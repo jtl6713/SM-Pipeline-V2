@@ -17,6 +17,14 @@ Make.com scenarios replaced by `services/pipeline-runner/` (Python on `pipeline.
 | A3 | 5569035 | `POST /stages/a3` | Make blueprint retained (inactive) | Python |
 | A4 | 5578180 | `POST /stages/a4` | Make blueprint retained (inactive) | Python |
 | A1P | 5715500 | `POST /hooks/a1p/<token>` | Make blueprint retained (inactive) | Python |
+| AP0 | 5612096 | `POST /stages/ap0` | Make blueprint retained (inactive) | Python |
+| AP1-IG | 5862882 | `POST /stages/ap1_ig` | Make blueprint retained (inactive) | Python |
+| AP1-IGS | 5612664 | `POST /stages/ap1_igs` | Make blueprint retained (inactive) | Python |
+| AP1-IGS-POLL | 5845193 | `POST /stages/ap1_igs_poll` | Make blueprint retained (inactive) | Python |
+| FBS1 | 5816409 | `POST /stages/fbs1` | Make blueprint retained (inactive) | Python |
+| FBS2 | 5816495 | `POST /stages/fbs2` | Make blueprint retained (inactive) | Python |
+| FBS3 | 5816502 | `POST /stages/fbs3` | Make blueprint retained (inactive) | Python |
+| FBS4 | 5816520 | `POST /stages/fbs4` | Make blueprint retained (inactive) | Python |
 
 Wave 2 cutover guide: `WAVE2_R3_R4_R5.md`  
 Wave 3: `WAVE3_RR1.md`, `WAVE3_P2.md`  
@@ -39,11 +47,16 @@ STAGE_BACKEND_A2B=python
 STAGE_BACKEND_A3=python
 STAGE_BACKEND_A4=python
 STAGE_BACKEND_A1P=python
+STAGE_BACKEND_AP0=python
+STAGE_BACKEND_AP1_IG=python
+STAGE_BACKEND_AP1_IGS=python
+STAGE_BACKEND_FBS1=python
+STAGE_BACKEND_FBS3=python
 PIPELINE_RUNNER_URL=https://pipeline.chicagoshining.com
 PIPELINE_RUNNER_SHARED_SECRET=<secret>
 ```
 
-Make scenarios **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, and **5715500** are **inactive**. Reactivate only for emergency rollback. A1S **5715530** stays Make on-demand and posts `poller_url` at `/hooks/a1p/<token>`.
+Make scenarios **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, **5612096**, **5862882**, **5612664**, **5845193**, **5816409**, **5816495**, **5816502**, and **5816520** are **inactive**. Reactivate only for emergency rollback. A1S **5715530** stays Make on-demand and posts `poller_url` at `/hooks/a1p/<token>`. Facebook photos, TikTok, and YouTube publishers stay Make.
 
 ## Rollback
 
