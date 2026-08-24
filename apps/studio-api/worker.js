@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.120-ap0c-carousel-dispatch",
+          version: "0.10.121-idea-chain-gates",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -200,6 +200,7 @@ export default {
           studio_publish_cadence_carousel_youtube_v1: true,
           studio_publish_dispatch_v1: true,
           studio_ap0c_carousel_dispatch_v1: true,
+          studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
