@@ -36,12 +36,12 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **C6** | Full (`5589218` — watermark approved slides) | `STAGE_BACKEND_C6=python` |
 | **C7** | Full (`5589819` — finalize gate) | `STAGE_BACKEND_C7=python` |
 | **C8** | Full (`5589822` — create/update platform outputs) | `STAGE_BACKEND_C8=python` |
-| **C9** | Full (`5589932` — Ready to Publish) | Make until live proof |
+| **C9** | Full (`5589932` — Ready to Publish) | `STAGE_BACKEND_C9=python` |
 | **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
-Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, and C2–C8 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, and `5589822` are deactivated.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, and C2–C9 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, `5589822`, and `5589932` are deactivated.
 
-C2–C8 and SAI1 are on Python in production. C9 stays on Make until flagged. Do not set `STAGE_BACKEND_C9` to `python` or archive Make 5589932 yet.
+SAI1 and C2–C9 are on Python in production. C1 and C2M stay parked. Do not start AP0 from C9 Ready to Publish.
 
 Other stages return `501 not_implemented`.
 
