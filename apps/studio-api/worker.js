@@ -713,6 +713,11 @@ export default {
         console.warn("instagram story poll reconcile cron failed", error);
       }
       try {
+        await studioReconcileFacebookReels(env);
+      } catch (error) {
+        console.warn("facebook reel reconcile cron failed", error);
+      }
+      try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
       } catch (error) {
         console.warn("production continuation cron failed", error);
@@ -4129,6 +4134,8 @@ const STUDIO_AP0_SCENARIO_ID = 5612096;
 const STUDIO_AP1_IG_SCENARIO_ID = 5862882;
 const STUDIO_AP1_IGS_SCENARIO_ID = 5612664;
 const STUDIO_AP1_IGS_POLL_SCENARIO_ID = 5845193;
+const STUDIO_FBS3_SCENARIO_ID = 5816502;
+const STUDIO_FBS4_SCENARIO_ID = 5816520;
 
 
 
@@ -4504,6 +4511,8 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_AP1_IG_SCENARIO_ID && pipelineStageBackend(env, "AP1_IG").mode === "python") return true;
   if (id === STUDIO_AP1_IGS_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
   if (id === STUDIO_AP1_IGS_POLL_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
+  if (id === STUDIO_FBS3_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
+  if (id === STUDIO_FBS4_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
   return false;
 }
 
@@ -12733,8 +12742,8 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: STUDIO_AP1_IG_SCENARIO_ID, key: "AP1-IG" },
   { id: 5612664, key: "IGS" },
   { id: 5845193, key: "IGSPOLL" },
-  { id: 5816502, key: "FBS3" },
-  { id: 5816520, key: "FBS4" },
+  { id: STUDIO_FBS3_SCENARIO_ID, key: "FBS3" },
+  { id: STUDIO_FBS4_SCENARIO_ID, key: "FBS4" },
   { id: 5806658, key: "TTD0" },
   ...STUDIO_AP0C_CHAIN_WEBHOOKS,
   ...STUDIO_FB0_CHAIN_WEBHOOKS,
@@ -14577,6 +14586,59 @@ async function studioPulseAp1Igs(env, record) {
   };
 }
 
+async function studioPulseFbs3(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs3", {
+    output_record_id: recordId,
+  }, "FBS3");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS3",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS3 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS3",
+    backend: "python",
+    needs_poll: Boolean(payload?.details?.run?.needs_poll),
+    video_id: payload?.details?.run?.video_id,
+  };
+}
+
+async function studioPulseFbs4(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS4" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs4", {
+    output_record_id: recordId,
+  }, "FBS3");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS4",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS4 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS4",
+    backend: "python",
+    still_processing: Boolean(payload?.details?.run?.still_processing),
+    video_id: payload?.details?.run?.video_id,
+    permalink: payload?.details?.run?.permalink,
+  };
+}
+
 async function studioPulseAp1IgsPoll(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IGS-POLL" };
@@ -14615,7 +14677,7 @@ const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "FB0": { webhooks: STUDIO_FB0_CHAIN_WEBHOOKS.map((item) => item.id) },
   "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: 5864632 },
   "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
-  "FBS3": { webhooks: [5816502, 5816520], orchestrator: 5813561 },
+  "FBS3": { webhooks: [STUDIO_FBS3_SCENARIO_ID, STUDIO_FBS4_SCENARIO_ID], orchestrator: 5813561 },
   "TTD0": { webhooks: [5806658], orchestrator: 5806668 },
 });
 
@@ -14700,6 +14762,15 @@ async function studioDispatchApprovedPublishNow(env, record) {
     }
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const polled = await studioPulseAp1IgsPoll(env, record);
+    return { ...polled, create: created, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "FBS3" && pipelineStageBackend(env, "FBS3").mode === "python") {
+    const created = await studioPulseFbs3(env, record);
+    if (!created.ok || created.skipped || !created.needs_poll) {
+      return { ...created, ap0, armed: [], plan, record };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const polled = await studioPulseFbs4(env, record);
     return { ...polled, create: created, ap0, armed: [], plan, record };
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
@@ -14868,6 +14939,51 @@ async function studioReconcilePublishingInstagramStories(env, options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("instagram story poll reconcile failed", row.id, error);
       results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcileFacebookReels(env, options = {}) {
+  if (pipelineStageBackend(env, "FBS3").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  let ready = [];
+  let processing = [];
+  try {
+    ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0)))',
+    });
+  } catch (error) {
+    console.warn("facebook reel create reconcile scan failed", error);
+  }
+  try {
+    processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({FB_Slideshow_Status}="Reel Processing",{FB_Slideshow_Status}="Published Pending Finalize"),OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""))',
+    });
+  } catch (error) {
+    console.warn("facebook reel poll reconcile scan failed", error);
+  }
+  for (const row of ready) {
+    try {
+      const pulsed = await studioPulseFbs3(env, row);
+      results.push({ id: row.id, stage: "fbs3", ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook reel create reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs3", error: message });
+    }
+  }
+  for (const row of processing) {
+    try {
+      const pulsed = await studioPulseFbs4(env, row);
+      results.push({ id: row.id, stage: "fbs4", ok: pulsed?.ok !== false, still_processing: pulsed?.still_processing || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook reel poll reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs4", error: message });
     }
   }
   return results;

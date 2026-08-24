@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+from typing import Any
+
+import requests
+
+from item4.settings import PipelineSettings
+
+
+class FacebookReelError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | str = "",
+        payload: Any = None,
+        stage: str = "FBS3",
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.payload = payload if isinstance(payload, dict) else {"raw": payload}
+        self.stage = stage
+
+
+def load_facebook_reel_settings(settings: PipelineSettings) -> dict[str, str]:
+    page_id = settings.get("FACEBOOK_PAGE_ID")
+    token = settings.get("FACEBOOK_PAGE_ACCESS_TOKEN")
+    version = (settings.get("FACEBOOK_GRAPH_API_VERSION") or "v25.0").strip().strip("/")
+    if not page_id or not token:
+        raise FacebookReelError("missing-facebook-settings")
+    return {"page_id": page_id, "token": token, "version": version}
+
+
+class FacebookReelClient:
+    def __init__(self, *, page_id: str, token: str, version: str = "v25.0") -> None:
+        self.page_id = page_id
+        self.version = version.strip().strip("/")
+        self._token = token
+
+    def _url(self, path: str) -> str:
+        return f"https://graph.facebook.com/{self.version}/{path.lstrip('/')}"
+
+    def start_session(self) -> dict[str, Any]:
+        response = requests.post(
+            self._url(f"{self.page_id}/video_reels"),
+            params={"upload_phase": "start"},
+            headers={"Authorization": f"Bearer {self._token}"},
+            timeout=60,
+        )
+        data = response.json() if response.content else {}
+        if not response.ok or not data.get("video_id") or not data.get("upload_url"):
+            raise FacebookReelError(
+                data.get("error", {}).get("message") or f"start {response.status_code}",
+                status_code=response.status_code,
+                payload=data,
+                stage="FBS3_INIT",
+            )
+        return data
+
+    def download_mp4(self, url: str) -> bytes:
+        response = requests.get(url, timeout=120)
+        if not response.ok or not response.content:
+            raise FacebookReelError(
+                f"cdn {response.status_code}",
+                status_code=response.status_code,
+                payload={"error": {"message": f"Could not download staged MP4 ({response.status_code})"}},
+                stage="FBS3_UPLOAD",
+            )
+        return response.content
+
+    def upload_mp4(self, upload_url: str, payload: bytes) -> dict[str, Any]:
+        response = requests.post(
+            upload_url,
+            data=payload,
+            headers={
+                "Authorization": f"OAuth {self._token}",
+                "offset": "0",
+                "file_size": str(len(payload)),
+                "Content-Type": "application/octet-stream",
+            },
+            timeout=180,
+        )
+        data = response.json() if response.content else {}
+        if not response.ok or data.get("success") is False:
+            raise FacebookReelError(
+                data.get("error", {}).get("message") or data.get("debug_info", {}).get("message") or f"upload {response.status_code}",
+                status_code=response.status_code,
+                payload=data,
+                stage="FBS3_UPLOAD",
+            )
+        return data
+
+    def finish(self, *, video_id: str, description: str, title: str) -> dict[str, Any]:
+        response = requests.post(
+            self._url(f"{self.page_id}/video_reels"),
+            params={
+                "upload_phase": "finish",
+                "video_id": video_id,
+                "video_state": "PUBLISHED",
+                "description": description,
+                "title": title,
+            },
+            headers={"Authorization": f"Bearer {self._token}"},
+            timeout=60,
+        )
+        data = response.json() if response.content else {}
+        if not response.ok:
+            raise FacebookReelError(
+                data.get("error", {}).get("message") or f"finish {response.status_code}",
+                status_code=response.status_code,
+                payload=data,
+                stage="FBS3_FINISH",
+            )
+        return data
+
+    def video_status(self, video_id: str) -> tuple[int, dict[str, Any]]:
+        response = requests.get(
+            self._url(video_id),
+            params={"fields": "id,status,permalink_url,created_time"},
+            headers={"Authorization": f"Bearer {self._token}"},
+            timeout=60,
+        )
+        data = response.json() if response.content else {}
+        return response.status_code, data
+
+    def attach_thumbnail(self, video_id: str, thumbnail_url: str) -> dict[str, Any]:
+        response = requests.post(
+            self._url(f"{video_id}/thumbnails"),
+            params={"is_preferred": "true", "url": thumbnail_url},
+            headers={"Authorization": f"Bearer {self._token}"},
+            timeout=60,
+        )
+        return response.json() if response.content else {}

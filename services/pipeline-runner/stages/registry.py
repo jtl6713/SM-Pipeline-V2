@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 from config import StageRequest, StageResult
-from stages import a1p, a2, a2b, a3, a4, ap0, ap1_ig, ap1_igs, ap1_igs_poll, c2, c3, c3b, c4, c5, c6, c7, c8, c9, i1, i2, i3, i4, p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1
+from stages import a1p, a2, a2b, a3, a4, ap0, ap1_ig, ap1_igs, ap1_igs_poll, c2, c3, c3b, c4, c5, c6, c7, c8, c9, fbs3, fbs4, i1, i2, i3, i4, p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1
 from stages.letter import run as run_letter
 from stages._stub import run_stub
 
@@ -46,6 +46,8 @@ STAGE_NAMES: tuple[str, ...] = (
     "ap1_ig",
     "ap1_igs",
     "ap1_igs_poll",
+    "fbs3",
+    "fbs4",
     "publish_ig",
     "publish_fb",
     "publish_tt",
@@ -90,6 +92,8 @@ _IMPLEMENTED_STAGES = frozenset(
         "ap1_ig",
         "ap1_igs",
         "ap1_igs_poll",
+        "fbs3",
+        "fbs4",
     }
 )
 
@@ -130,6 +134,8 @@ _HANDLERS: dict[str, StageHandler] = {
     "ap1_ig": ap1_ig.run,
     "ap1_igs": ap1_igs.run,
     "ap1_igs_poll": ap1_igs_poll.run,
+    "fbs3": fbs3.run,
+    "fbs4": fbs4.run,
 }
 
 
