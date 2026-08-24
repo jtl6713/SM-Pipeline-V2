@@ -60,6 +60,42 @@
       "python_endpoint": "/stages/p2",
       "production_backend": "python",
       "notes": "Make 5530955 inactive. Silent-thumbnail dry-run and live proof on CI 95 (Drive 1BtXwbOG2K-YPdbcHQfU72sFhpGdEj225, P3 200). Do not Approve."
+    },
+    {
+      "stage": "I1",
+      "scenario_id": 5514334,
+      "name": "I1 - Daily Idea Candidate Generator - Balanced Format Slate v4",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/i1",
+      "production_backend": "python",
+      "notes": "Make 5514334 inactive. Isolated Python I1 created Tribune Tower Stone Hunt recXHWZMpFCmeRqTv with trigger_i2 false."
+    },
+    {
+      "stage": "I2",
+      "scenario_id": 5516968,
+      "name": "I2 - Idea Candidate Review Email - Canonical Content Types v30",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/i2",
+      "production_backend": "python",
+      "notes": "Make 5516968 inactive. Python I2 emailed Tribune Tower to chicagoshining@gmail.com with buttons on /hooks/i3."
+    },
+    {
+      "stage": "I3",
+      "scenario_id": 5517182,
+      "name": "I3 - Idea Candidate Review Decision Handler - Canonical Content Types v29 - Voiceover Tail",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/i3",
+      "production_backend": "python",
+      "notes": "Make 5517182 inactive. Python I3 carousel_submit on Chicago itinerary recvRPgMaSbeV0u74 daisy-chained Python I4."
+    },
+    {
+      "stage": "I4",
+      "scenario_id": 5524092,
+      "name": "I4 - Approved Candidate Promotion - Resolve Production Profile Defaults v32 - Voiceover Tail",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/i4",
+      "production_backend": "python",
+      "notes": "Make 5524092 inactive. Python I4 created Content Item 98 recUZKJPtrlorseZ6. Make I3/I4 last runs stayed 2026-08-24T03:46Z."
     }
   ]
 }

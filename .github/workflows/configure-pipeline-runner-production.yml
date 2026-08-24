@@ -105,6 +105,10 @@ jobs:
               'STAGE_BACKEND_C7': ('plain_text', 'python'),
               'STAGE_BACKEND_C8': ('plain_text', 'python'),
               'STAGE_BACKEND_C9': ('plain_text', 'python'),
+              'STAGE_BACKEND_I1': ('plain_text', 'python'),
+              'STAGE_BACKEND_I2': ('plain_text', 'python'),
+              'STAGE_BACKEND_I3': ('plain_text', 'python'),
+              'STAGE_BACKEND_I4': ('plain_text', 'python'),
               'PIPELINE_RUNNER_URL': ('plain_text', os.environ['RUNNER_URL']),
               'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
           }
