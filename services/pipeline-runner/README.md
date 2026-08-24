@@ -33,15 +33,15 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **C3B** | Full (`5592384` — review buttons) | `STAGE_BACKEND_C3B=python`. Hook: `/hooks/c3b/<C3B_WEBHOOK_TOKEN>` |
 | **C4** | Full (`5587860` — decision router → C5/C6/C7) | `STAGE_BACKEND_C4=python` |
 | **C5** | Full (`5582074` — regenerate rejected slides) | `STAGE_BACKEND_C5=python` |
-| **C6** | Full (`5589218` — watermark approved slides) | Make until live proof |
+| **C6** | Full (`5589218` — watermark approved slides) | `STAGE_BACKEND_C6=python` |
 | **C7** | Full (`5589819` — finalize gate) | Make until live proof |
 | **C8** | Full (`5589822` — create/update platform outputs) | Make until live proof |
 | **C9** | Full (`5589932` — Ready to Publish) | Make until live proof |
 | **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
-Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, C2, C3, C3B, C4, and C5 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, and `5582074` are deactivated.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, and C2–C6 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, and `5589218` are deactivated.
 
-C2–C5 and SAI1 are on Python in production. C6–C9 stay on Make until each is flagged. Do not set those remaining `STAGE_BACKEND_*` vars to `python` or archive those Make scenarios yet.
+C2–C6 and SAI1 are on Python in production. C7–C9 stay on Make until each is flagged. Do not set those remaining `STAGE_BACKEND_*` vars to `python` or archive those Make scenarios yet.
 
 Other stages return `501 not_implemented`.
 
