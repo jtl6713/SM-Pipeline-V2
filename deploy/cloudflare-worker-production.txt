@@ -126,3 +126,5 @@ AI grid cover Worker deploy: 2026-08-23 - Native stills and silent packages were
 Wave 2 render chain Worker deploy: 2026-08-23 - Continuation cron can pulse Python for R3/R4/R5 when STAGE_BACKEND_R3|R4|R5=python (Make remains default until those vars are set). Worker wave2-r3-r4-r5-python-pulse.
 
 C2 Python pulse Worker deploy: 2026-08-23 - Studio AI fill pulses /stages/c2 when STAGE_BACKEND_C2=python instead of Make 5582071. Worker c2-python-pulse.
+
+Native slide C7/C8 stamp Worker deploy: 2026-08-23 - Studio native photo slides write Review Status Final Approved, Approved For Final, and the parent Content Item link so Python C7/C8 can finalize without a C3B pass. Worker native-slide-c7-c8-stamp.

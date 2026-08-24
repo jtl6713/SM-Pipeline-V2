@@ -1327,6 +1327,7 @@ function studioPublishHandoffFields(record) {
 
 async function studioPatchExistingNativeSlides(env, record, slideIds, clips) {
   const platform = String(f(record, "Platform") || "").trim();
+  const contentItemId = studioFirstLinkedId(f(record, "Content_Item"));
   if (!slideIds.length) return;
   const params = new URLSearchParams({
     filterByFormula: `OR(${slideIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`,
@@ -1345,7 +1346,12 @@ async function studioPatchExistingNativeSlides(env, record, slideIds, clips) {
     if (!url) return null;
     return {
       id: row.id,
-      fields: studioNativeSlidePublicFields({ url }, platform),
+      fields: {
+        ...studioNativeSlidePublicFields({ url }, platform),
+        "Review Status": "Final Approved",
+        "Approved For Final": true,
+        ...(contentItemId ? { "Content Item": [contentItemId] } : {}),
+      },
     };
   }).filter(Boolean);
   if (!updates.length) return;
@@ -1382,12 +1388,16 @@ async function studioEnsureNativePublishSlides(env, record) {
         "Google Drive File ID": driveId || null,
         "Final Google Drive File ID": driveId || null,
         "Platform Output": [record.id],
+        ...(studioFirstLinkedId(f(record, "Content_Item"))
+          ? { "Content Item": [studioFirstLinkedId(f(record, "Content_Item"))] }
+          : {}),
         "Platform": platform,
         "Aspect Ratio": String(clip.aspect_ratio || f(record, "Aspect_Ratio") || "").trim() || null,
         "Asset_4x5_File_ID": driveId || null,
         "Asset_4x5_File_URL": driveUrl || url || null,
         "Asset_Family_Key": String(clip.media_asset_record_id || clip.id || `${record.id}-${order}`).trim(),
         "Approved For Final": true,
+        "Review Status": "Final Approved",
         ...studioNativeSlidePublicFields(clip, platform),
       },
     };
