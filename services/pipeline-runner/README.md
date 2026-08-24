@@ -49,11 +49,12 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **AP0** | Full (`5612096` — Drive final MP4 → public R2) | `STAGE_BACKEND_AP0=python` |
 | **AP1-IG** | Full (`5862882` — Instagram Reel Graph publish) | `STAGE_BACKEND_AP1_IG=python` |
 | **AP1-IGS** | Full (`5612664` create + `5845193` poll — Instagram Story Graph) | `STAGE_BACKEND_AP1_IGS=python` |
+| **FBS1 / FBS2** | Full (`5816409` render + `5816495` poll/stage — Facebook slideshow MP4) | `STAGE_BACKEND_FBS1=python` |
 | **FBS3 / FBS4** | Full (`5816502` create + `5816520` poll — Facebook Reel Graph) | `STAGE_BACKEND_FBS3=python` |
 
-Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, C2–C9, I1–I4, A2–A4, A1P, AP0, AP1-IG, AP1-IGS, and FBS3/FBS4 are on Python in production. A1S stays Make and posts `poller_url` at `/hooks/a1p/<A1P_WEBHOOK_TOKEN>`. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. I2 review buttons call `/hooks/i3/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, `5589822`, `5589932`, `5514334`, `5516968`, `5517182`, `5524092`, `5602193`, `5531974`, `5568863`, `5569035`, `5578180`, `5715500`, `5612096`, `5862882`, `5612664`, `5845193`, `5816502`, and `5816520` are deactivated.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, C2–C9, I1–I4, A2–A4, A1P, AP0, AP1-IG, AP1-IGS, FBS1/FBS2, and FBS3/FBS4 are on Python in production. A1S stays Make and posts `poller_url` at `/hooks/a1p/<A1P_WEBHOOK_TOKEN>`. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. I2 review buttons call `/hooks/i3/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, `5589822`, `5589932`, `5514334`, `5516968`, `5517182`, `5524092`, `5602193`, `5531974`, `5568863`, `5569035`, `5578180`, `5715500`, `5612096`, `5862882`, `5612664`, `5845193`, `5816409`, `5816495`, `5816502`, and `5816520` are deactivated.
 
-SAI1, C2–C9, and I1–I4 are on Python in production. C1 and C2M stay parked. Do not Approve live social posts. Python AP0 does not pulse IG/FB/TT/YT. Python AP1-IG publishes Instagram Reels. Python AP1-IGS publishes Instagram Stories. Python FBS3/FBS4 publish Facebook Reels. FBS1/FBS2 stay Make.
+SAI1, C2–C9, and I1–I4 are on Python in production. C1 and C2M stay parked. Do not Approve live social posts. Python AP0 does not pulse IG/FB/TT/YT. Python AP1-IG publishes Instagram Reels. Python AP1-IGS publishes Instagram Stories. Python FBS1/FBS2 render or stage Facebook slideshow MP4s. Python FBS3/FBS4 publish Facebook Reels.
 
 Other stages return `501 not_implemented`.
 

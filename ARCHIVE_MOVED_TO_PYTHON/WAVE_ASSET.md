@@ -15,6 +15,7 @@ STAGE_BACKEND_A1P=python
 STAGE_BACKEND_AP0=python
 STAGE_BACKEND_AP1_IG=python
 STAGE_BACKEND_AP1_IGS=python
+STAGE_BACKEND_FBS1=python
 STAGE_BACKEND_FBS3=python
 ```
 
@@ -22,7 +23,7 @@ PR: [#16](https://github.com/jtl6713/SM-Pipeline-V2/pull/16)
 Configure: [run 32775299402](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32775299402)  
 Worker deploy: [run 32774828439](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32774828439)
 
-Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, AP1-IGS-POLL **5845193**, FBS3 **5816502**, and FBS4 **5816520** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
+Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, AP1-IGS-POLL **5845193**, FBS1 **5816409**, FBS2 **5816495**, FBS3 **5816502**, and FBS4 **5816520** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
 
 ## Proof (2026-08-24)
 
@@ -45,4 +46,4 @@ Studio intake should return `triggered: "a2-python"` and must not 409 because Ma
 | A1S | 5715530 | On-demand oversized scan. Posts `poller_url` to Python A1P |
 | A1M | 5764543 | On-demand duration probe in Backups |
 
-AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664** / **5845193**, and FBS3 **5816502** / FBS4 **5816520** are Python live. Do not Approve live social posts as a cutover test. Facebook slideshow render (FBS1/FBS2), Facebook photos, TikTok, and YouTube publishers stay Make.
+AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664** / **5845193**, FBS1 **5816409** / FBS2 **5816495**, and FBS3 **5816502** / FBS4 **5816520** are Python live. Do not Approve live social posts as a cutover test. Facebook photos, TikTok, and YouTube publishers stay Make.

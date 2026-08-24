@@ -713,6 +713,11 @@ export default {
         console.warn("instagram story poll reconcile cron failed", error);
       }
       try {
+        await studioReconcileFacebookSlideshows(env);
+      } catch (error) {
+        console.warn("facebook slideshow reconcile cron failed", error);
+      }
+      try {
         await studioReconcileFacebookReels(env);
       } catch (error) {
         console.warn("facebook reel reconcile cron failed", error);
@@ -4134,6 +4139,8 @@ const STUDIO_AP0_SCENARIO_ID = 5612096;
 const STUDIO_AP1_IG_SCENARIO_ID = 5862882;
 const STUDIO_AP1_IGS_SCENARIO_ID = 5612664;
 const STUDIO_AP1_IGS_POLL_SCENARIO_ID = 5845193;
+const STUDIO_FBS1_SCENARIO_ID = 5816409;
+const STUDIO_FBS2_SCENARIO_ID = 5816495;
 const STUDIO_FBS3_SCENARIO_ID = 5816502;
 const STUDIO_FBS4_SCENARIO_ID = 5816520;
 
@@ -4511,6 +4518,8 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_AP1_IG_SCENARIO_ID && pipelineStageBackend(env, "AP1_IG").mode === "python") return true;
   if (id === STUDIO_AP1_IGS_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
   if (id === STUDIO_AP1_IGS_POLL_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
+  if (id === STUDIO_FBS1_SCENARIO_ID && pipelineStageBackend(env, "FBS1").mode === "python") return true;
+  if (id === STUDIO_FBS2_SCENARIO_ID && pipelineStageBackend(env, "FBS1").mode === "python") return true;
   if (id === STUDIO_FBS3_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
   if (id === STUDIO_FBS4_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
   return false;
@@ -12742,6 +12751,8 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: STUDIO_AP1_IG_SCENARIO_ID, key: "AP1-IG" },
   { id: 5612664, key: "IGS" },
   { id: 5845193, key: "IGSPOLL" },
+  { id: STUDIO_FBS1_SCENARIO_ID, key: "FBS1" },
+  { id: STUDIO_FBS2_SCENARIO_ID, key: "FBS2" },
   { id: STUDIO_FBS3_SCENARIO_ID, key: "FBS3" },
   { id: STUDIO_FBS4_SCENARIO_ID, key: "FBS4" },
   { id: 5806658, key: "TTD0" },
@@ -14586,6 +14597,74 @@ async function studioPulseAp1Igs(env, record) {
   };
 }
 
+async function studioPulseFbs1(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS1" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs1", {
+    output_record_id: recordId,
+  }, "FBS1");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS1",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS1 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS1",
+    backend: "python",
+    needs_poll: Boolean(payload?.details?.run?.needs_poll),
+    job_id: payload?.details?.run?.job_id,
+  };
+}
+
+async function studioPulseFbs2(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS2" };
+  const { response, payload } = await item4PulsePipelineStage(env, "fbs2", {
+    output_record_id: recordId,
+  }, "FBS1");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "FBS2",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python FBS2 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "FBS2",
+    backend: "python",
+    still_processing: Boolean(payload?.details?.run?.still_processing),
+    public_url: payload?.details?.run?.public_url,
+  };
+}
+
+async function studioEnsureFacebookSlideshowAsset(env, record) {
+  const status = String(f(record, "FB_Slideshow_Status") || "");
+  const publicUrl = String(f(record, "FB_Slideshow_Public_URL") || "").trim();
+  if (/^video ready$/i.test(status) && publicUrl) {
+    return { ok: true, skipped: "already-ready", target: "FBS1" };
+  }
+  const created = await studioPulseFbs1(env, record);
+  if (!created.ok) return created;
+  if (!created.skipped && created.needs_poll) {
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    return studioPulseFbs2(env, record);
+  }
+  if (!created.skipped) return created;
+  return studioPulseFbs2(env, record);
+}
+
 async function studioPulseFbs3(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3" };
@@ -14764,6 +14843,12 @@ async function studioDispatchApprovedPublishNow(env, record) {
     const polled = await studioPulseAp1IgsPoll(env, record);
     return { ...polled, create: created, ap0, armed: [], plan, record };
   }
+  if (plan.target === "FBS3" && pipelineStageBackend(env, "FBS1").mode === "python") {
+    const prepared = await studioEnsureFacebookSlideshowAsset(env, record);
+    if (!prepared.ok || prepared.still_processing) {
+      return { ...prepared, ap0, armed: [], plan, record };
+    }
+  }
   if (plan.target === "FBS3" && pipelineStageBackend(env, "FBS3").mode === "python") {
     const created = await studioPulseFbs3(env, record);
     if (!created.ok || created.skipped || !created.needs_poll) {
@@ -14939,6 +15024,51 @@ async function studioReconcilePublishingInstagramStories(env, options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("instagram story poll reconcile failed", row.id, error);
       results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcileFacebookSlideshows(env, options = {}) {
+  if (pipelineStageBackend(env, "FBS1").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  let ready = [];
+  let processing = [];
+  try {
+    ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Ready to Render",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS1",UPPER({Publish_Error_Stage}&""))>0)))',
+    });
+  } catch (error) {
+    console.warn("facebook slideshow create reconcile scan failed", error);
+  }
+  try {
+    processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0),AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Final_File_ID}!="",{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="")))',
+    });
+  } catch (error) {
+    console.warn("facebook slideshow poll reconcile scan failed", error);
+  }
+  for (const row of ready) {
+    try {
+      const pulsed = await studioPulseFbs1(env, row);
+      results.push({ id: row.id, stage: "fbs1", ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook slideshow create reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs1", error: message });
+    }
+  }
+  for (const row of processing) {
+    try {
+      const pulsed = await studioPulseFbs2(env, row);
+      results.push({ id: row.id, stage: "fbs2", ok: pulsed?.ok !== false, still_processing: pulsed?.still_processing || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook slideshow poll reconcile failed", row.id, error);
+      results.push({ id: row.id, stage: "fbs2", error: message });
     }
   }
   return results;
