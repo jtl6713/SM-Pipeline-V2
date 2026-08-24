@@ -122,6 +122,7 @@ jobs:
               'STAGE_BACKEND_YT0': ('plain_text', 'python'),
               'STAGE_BACKEND_TTD0': ('plain_text', 'python'),
               'STAGE_BACKEND_FB0': ('plain_text', 'python'),
+              'STAGE_BACKEND_AP0C': ('plain_text', 'python'),
               'PIPELINE_RUNNER_URL': ('plain_text', os.environ['RUNNER_URL']),
               'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
           }

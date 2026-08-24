@@ -20,13 +20,14 @@ STAGE_BACKEND_FBS3=python
 STAGE_BACKEND_YT0=python
 STAGE_BACKEND_TTD0=python
 STAGE_BACKEND_FB0=python
+STAGE_BACKEND_AP0C=python
 ```
 
 PR: [#16](https://github.com/jtl6713/SM-Pipeline-V2/pull/16)  
 Configure: [run 32779658562](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32779658562)  
 Worker deploy: [run 32779314907](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32779314907)
 
-Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, AP1-IGS-POLL **5845193**, FBS1 **5816409**, FBS2 **5816495**, FBS3 **5816502**, FBS4 **5816520**, YT0 **5823572**, YTP1 **5830810**, YTS1 **5830609**, YTS2 **5830616**, YTS3 **5830623**, TTD0 **5806658**, TTD1 **5806644**, TTD2 **5806597**, TTD3 **5806570**, TTD4 **5806518**, FB0 **5813436**, FB1 **5813463**, FB2 **5813487**, FB2R **5813511**, and FB3 **5813534** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
+Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, AP1-IGS-POLL **5845193**, FBS1 **5816409**, FBS2 **5816495**, FBS3 **5816502**, FBS4 **5816520**, YT0 **5823572**, YTP1 **5830810**, YTS1 **5830609**, YTS2 **5830616**, YTS3 **5830623**, TTD0 **5806658**, TTD1 **5806644**, TTD2 **5806597**, TTD3 **5806570**, TTD4 **5806518**, FB0 **5813436**, FB1 **5813463**, FB2 **5813487**, FB2R **5813511**, FB3 **5813534**, AP0C **5786899**, AP1C **5790745**, AP2C **5791231**, AP3C **5791273**, AP3P **5791336**, AP4C **5791356**, AP4R **5791396**, and AP5C **5791424** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
 
 ## Proof (2026-08-24)
 
@@ -49,4 +50,4 @@ Studio intake should return `triggered: "a2-python"` and must not 409 because Ma
 | A1S | 5715530 | On-demand oversized scan. Posts `poller_url` to Python A1P |
 | A1M | 5764543 | On-demand duration probe in Backups |
 
-AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664** / **5845193**, FBS1 **5816409** / FBS2 **5816495**, FBS3 **5816502** / FBS4 **5816520**, YT0–YTS3, TTD0–TTD4, and FB0–FB3 are Python live. Do not Approve live social posts as a cutover test. Instagram carousel stays Make. TTD-ORCH **5806668**, YT-ORCH **5823581**, and FB-ORCH **5813561** stay parked.
+AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664** / **5845193**, FBS1 **5816409** / FBS2 **5816495**, FBS3 **5816502** / FBS4 **5816520**, YT0–YTS3, TTD0–TTD4, FB0–FB3, and AP0C–AP5C are Python live. Do not Approve live social posts as a cutover test. TTD-ORCH **5806668**, YT-ORCH **5823581**, FB-ORCH **5813561**, and AP-CAR-ORCH **5791537** stay parked.

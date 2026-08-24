@@ -743,6 +743,11 @@ export default {
         console.warn("facebook photo reconcile cron failed", error);
       }
       try {
+        await studioReconcileInstagramCarousels(env);
+      } catch (error) {
+        console.warn("instagram carousel reconcile cron failed", error);
+      }
+      try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
       } catch (error) {
         console.warn("production continuation cron failed", error);
@@ -4189,6 +4194,15 @@ const STUDIO_FB2_SCENARIO_ID = 5813487;
 const STUDIO_FB2R_SCENARIO_ID = 5813511;
 const STUDIO_FB3_SCENARIO_ID = 5813534;
 const STUDIO_FB_ORCH_SCENARIO_ID = 5813561;
+const STUDIO_AP0C_SCENARIO_ID = 5786899;
+const STUDIO_AP1C_SCENARIO_ID = 5790745;
+const STUDIO_AP2C_SCENARIO_ID = 5791231;
+const STUDIO_AP3C_SCENARIO_ID = 5791273;
+const STUDIO_AP3P_SCENARIO_ID = 5791336;
+const STUDIO_AP4C_SCENARIO_ID = 5791356;
+const STUDIO_AP4R_SCENARIO_ID = 5791396;
+const STUDIO_AP5C_SCENARIO_ID = 5791424;
+const STUDIO_AP_CAR_ORCH_SCENARIO_ID = 5791537;
 
 
 
@@ -4583,6 +4597,14 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_FB2_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
   if (id === STUDIO_FB2R_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
   if (id === STUDIO_FB3_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
+  if (id === STUDIO_AP0C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_AP1C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_AP2C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_AP3C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_AP3P_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_AP4C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_AP4R_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_AP5C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
   return false;
 }
 
@@ -15115,6 +15137,115 @@ async function studioEnsureFacebookPhotoPublish(env, record) {
   return prepared;
 }
 
+async function studioPulseApcRecord(env, stagePath, target, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target };
+  const { response, payload } = await item4PulsePipelineStage(env, stagePath, {
+    output_record_id: recordId,
+    extra: {
+      replace_transaction_id: String(f(record, "Replace_Transaction_ID") || ""),
+      replace_fingerprint: String(f(record, "Replace_Fingerprint") || ""),
+    },
+  }, "AP0C");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target,
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python ${target} returned HTTP ${response.status}`,
+    };
+  }
+  const run = payload?.details?.run || {};
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (run.reason || "python-skip") : undefined,
+    target,
+    backend: "python",
+    needs_assets: Boolean(run.needs_assets),
+    assets_ready: Boolean(run.assets_ready),
+    needs_children: Boolean(run.needs_children),
+    needs_child_poll: Boolean(run.needs_child_poll),
+    children_ready: Boolean(run.children_ready),
+    needs_parent: Boolean(run.needs_parent),
+    needs_parent_poll: Boolean(run.needs_parent_poll),
+    parent_ready: Boolean(run.parent_ready),
+    needs_publish: Boolean(run.needs_publish),
+    needs_reconcile: Boolean(run.needs_reconcile),
+    needs_finalize: Boolean(run.needs_finalize),
+    still_processing: Boolean(run.still_processing),
+    published: Boolean(run.published),
+    media_id: run.media_id,
+    permalink: run.permalink,
+  };
+}
+
+async function studioPulseAp0c(env, record) {
+  return studioPulseApcRecord(env, "ap0c", "AP0C", record);
+}
+
+async function studioPulseAp1c(env, record) {
+  return studioPulseApcRecord(env, "ap1c", "AP1C", record);
+}
+
+async function studioPulseAp2c(env, record) {
+  return studioPulseApcRecord(env, "ap2c", "AP2C", record);
+}
+
+async function studioPulseAp3c(env, record) {
+  return studioPulseApcRecord(env, "ap3c", "AP3C", record);
+}
+
+async function studioPulseAp3p(env, record) {
+  return studioPulseApcRecord(env, "ap3p", "AP3P", record);
+}
+
+async function studioPulseAp4c(env, record) {
+  return studioPulseApcRecord(env, "ap4c", "AP4C", record);
+}
+
+async function studioPulseAp4r(env, record) {
+  return studioPulseApcRecord(env, "ap4r", "AP4R", record);
+}
+
+async function studioPulseAp5c(env, record) {
+  return studioPulseApcRecord(env, "ap5c", "AP5C", record);
+}
+
+async function studioEnsureInstagramCarouselPublish(env, record) {
+  const status = String(f(record, "IG_Carousel_Status") || "");
+  const mediaId = String(f(record, "IG_Carousel_Published_Media_ID") || f(record, "Platform_Post_ID") || "").trim();
+  const permalink = String(f(record, "Platform_Post_URL") || "").trim();
+  if (/^assets ready$/i.test(status) && !mediaId) return studioPulseAp1c(env, record);
+  if (/^children processing$/i.test(status) && !mediaId) return studioPulseAp2c(env, record);
+  if (/^children ready$/i.test(status) && !mediaId) return studioPulseAp3c(env, record);
+  if (/^parent processing$/i.test(status) && !mediaId) return studioPulseAp3p(env, record);
+  if (/^parent ready$/i.test(status) && !mediaId) return studioPulseAp4c(env, record);
+  if (/^publishing$/i.test(status) && !mediaId && /AP4C Parent Publishing/i.test(String(f(record, "IG_Carousel_Error_Stage") || ""))) {
+    return studioPulseAp4r(env, record);
+  }
+  if (/^publishing$/i.test(status) && mediaId && !permalink) return studioPulseAp5c(env, record);
+  const prepared = await studioPulseAp0c(env, record);
+  if (!prepared.ok || prepared.skipped || !prepared.assets_ready) return prepared;
+  const children = await studioPulseAp1c(env, record);
+  if (!children.ok || children.skipped || !children.needs_child_poll) return { ...children, prepare: prepared };
+  const polled = await studioPulseAp2c(env, record);
+  if (!polled.ok || polled.skipped || polled.still_processing || !polled.children_ready) return { ...polled, children, prepare: prepared };
+  const parent = await studioPulseAp3c(env, record);
+  if (!parent.ok || parent.skipped || !parent.needs_parent_poll) return { ...parent, poll: polled, children, prepare: prepared };
+  const parentPoll = await studioPulseAp3p(env, record);
+  if (!parentPoll.ok || parentPoll.skipped || parentPoll.still_processing || !parentPoll.parent_ready) {
+    return { ...parentPoll, parent, poll: polled, children, prepare: prepared };
+  }
+  const published = await studioPulseAp4c(env, record);
+  if (!published.ok || published.skipped || published.needs_reconcile) return { ...published, parentPoll, parent, poll: polled, children, prepare: prepared };
+  if (published.needs_finalize) {
+    return { ...await studioPulseAp5c(env, record), publish: published, parentPoll, parent, poll: polled, children, prepare: prepared };
+  }
+  return { ...published, parentPoll, parent, poll: polled, children, prepare: prepared };
+}
+
 async function studioTiktokComplete(request, env) {
   const incoming = new URL(request.url);
   const { runnerUrl } = pipelineStageBackend(env, "TTD0");
@@ -15302,6 +15433,10 @@ async function studioDispatchApprovedPublishNow(env, record) {
   }
   if (plan.target === "FB0" && pipelineStageBackend(env, "FB0").mode === "python") {
     const pulsed = await studioEnsureFacebookPhotoPublish(env, record);
+    return { ...pulsed, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "AP0C" && pipelineStageBackend(env, "AP0C").mode === "python") {
+    const pulsed = await studioEnsureInstagramCarouselPublish(env, record);
     return { ...pulsed, ap0, armed: [], plan, record };
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
@@ -15567,6 +15702,74 @@ async function studioReconcileFacebookPhotos(env, options = {}) {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`facebook photo ${scan.stage} reconcile failed`, row.id, error);
+        results.push({ id: row.id, stage: scan.stage, error: message });
+      }
+    }
+  }
+  return results;
+}
+
+async function studioReconcileInstagramCarousels(env, options = {}) {
+  if (pipelineStageBackend(env, "AP0C").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  const scans = [
+    {
+      stage: "ap0c",
+      pulse: studioPulseAp0c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Carousel",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",OR({IG_Carousel_Status}="Ready for Asset Prep",AND({IG_Carousel_Status}="Retry Pending",{Publish_Retry_Eligible}=1)))',
+    },
+    {
+      stage: "ap1c",
+      pulse: studioPulseAp1c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{Platform_Post_ID}="",{IG_Carousel_Status}="Assets Ready")',
+    },
+    {
+      stage: "ap2c",
+      pulse: studioPulseAp2c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Children Processing",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+    },
+    {
+      stage: "ap3c",
+      pulse: studioPulseAp3c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Children Ready",{IG_Carousel_Parent_Container_ID}="")',
+    },
+    {
+      stage: "ap3p",
+      pulse: studioPulseAp3p,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Parent Processing",{IG_Carousel_Parent_Container_ID}!="",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+    },
+    {
+      stage: "ap4c",
+      pulse: studioPulseAp4c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Parent_Container_ID}!="")',
+    },
+    {
+      stage: "ap4r",
+      pulse: studioPulseAp4r,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}="",{IG_Carousel_Error_Stage}="AP4C Parent Publishing",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+    },
+    {
+      stage: "ap5c",
+      pulse: studioPulseAp5c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}!="",{Platform_Post_URL}="",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+    },
+  ];
+  for (const scan of scans) {
+    let rows = [];
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: scan.formula });
+    } catch (error) {
+      console.warn(`instagram carousel ${scan.stage} reconcile scan failed`, error);
+      continue;
+    }
+    for (const row of rows) {
+      try {
+        const pulsed = await scan.pulse(env, row);
+        results.push({ id: row.id, stage: scan.stage, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`instagram carousel ${scan.stage} reconcile failed`, row.id, error);
         results.push({ id: row.id, stage: scan.stage, error: message });
       }
     }
