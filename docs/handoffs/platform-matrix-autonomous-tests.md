@@ -112,4 +112,4 @@ Hard pass for any grid-eligible post: designed AI cover (bold colorful 3D letter
 ### RC-NATIVE-D5 — Graph IG caption + on-image lettering (partial)
 
 - **Owned now:** Python `POST /stages/letter` burns a lower-third onto native still JPEGs, rewrites clip JSON / `Clip_*_URL` / `Studio_Preview_URL`, and Worker 0.10.117 pulses that stage then refreshes Carousel Slide CDN URLs. AI grid covers are skipped. Overlay text is clip overlay/caption, or the title when that caption is longer than 90 characters.
-- **Paused:** Live IG carousel Graph publish is still Make APCAR (`5791537`). Map Graph `caption`/`hashtags` from Airtable `Output_Caption` / `Output_Hashtags`, and post the current lettered slide/CDN URLs. No Make APCAR PATCH from the agent. No Approve until that mapping is in.
+- **Make mapping in:** AP3C `5791273` Graph `caption` is Airtable caption + hashtags. AP0C `5786899` v1.8.5 downloads the lettered JPEG (not Drive) and keeps `/lettered/` on `IG_Public_Asset_URL`. Do not Approve 224/225/226. Live Graph proof needs a **new** native IG carousel.

@@ -34,11 +34,12 @@ PHOTOS = [
     ),
 ]
 
-TITLE = "Rainy Chicago — native multi-image test"
+TITLE = "Rainy Chicago — lettered carousel proof"
 SUMMARY = (
     "It is raining in Chicago. Produce a silent native three-photo set: "
     "Instagram Carousel, Facebook Multi-Image Post, and TikTok Multi-Photo. "
-    "No voiceover, no music, no Story, no Reel, no YouTube."
+    "No voiceover, no music, no Story, no Reel, no YouTube. "
+    "Second proof run for on-image lettering plus Graph caption. Do not reuse CI 89."
 )
 
 
@@ -229,12 +230,23 @@ def main() -> int:
         if not session.get("authenticated") or not session.get("authorized"):
             raise RuntimeError(f"Studio membership failed: {json.dumps(session)[:2000]}")
 
-        known_idea = os.environ.get("RESUME_IDEA_ID", "recjG3bl1EAtImPV5")
-        known = bridge("GET", f"/api/ideas/{known_idea}")
-        known_record = (known.get("body") or {}).get("record") if isinstance(known.get("body"), dict) else None
-        if not known_record and isinstance(known.get("body"), dict) and known.get("body").get("id"):
-            known_record = known.get("body")
-        if known.get("ok") and known_record and str(known_record.get("title") or "") == TITLE:
+        known_idea = str(os.environ.get("RESUME_IDEA_ID") or "").strip()
+        known_record = None
+        if known_idea:
+            known = bridge("GET", f"/api/ideas/{known_idea}")
+            known_record = (known.get("body") or {}).get("record") if isinstance(known.get("body"), dict) else None
+            if not known_record and isinstance(known.get("body"), dict) and known.get("body").get("id"):
+                known_record = known.get("body")
+        already_promoted = bool(
+            known_record
+            and (known_record.get("content_item_links") or known_record.get("promoted_content_record_id"))
+        )
+        if (
+            known_idea
+            and known_record
+            and str(known_record.get("title") or "") == TITLE
+            and not already_promoted
+        ):
             idea_id = known_record.get("id") or known_idea
             log(f"resume idea {idea_id}")
         else:
