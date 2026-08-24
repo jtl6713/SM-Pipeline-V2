@@ -73,6 +73,14 @@ class AirtableClient:
 
         return records[:max_records]
 
+    def delete_record(self, table_id: str, record_id: str) -> dict[str, Any]:
+        import requests
+
+        url = f"{self._api_root}/{self._base_id}/{table_id}/{record_id}"
+        response = requests.delete(url, headers=self._headers, timeout=60)
+        response.raise_for_status()
+        return response.json()
+
     def create_records(self, table_id: str, records: list[dict[str, Any]], *, typecast: bool = True) -> list[dict[str, Any]]:
         import requests
 

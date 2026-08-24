@@ -4378,6 +4378,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === ITEM4_P3_SCENARIO_ID && pipelineStageBackend(env, "P3").mode === "python") return true;
   if (id === ITEM4_C2_SCENARIO_ID && pipelineStageBackend(env, "C2").mode === "python") return true;
   if (id === ITEM4_SAI1_SCENARIO_ID && pipelineStageBackend(env, "SAI1").mode === "python") return true;
+  if (id === STUDIO_IDEA_I1_SCENARIO_ID && pipelineStageBackend(env, "I1").mode === "python") return true;
   return false;
 }
 
@@ -8612,6 +8613,16 @@ function promotionWebhookUrl(env, recordId, input) {
 }
 
 async function fetchPromotionHandoff(env, webhook) {
+  if (pipelineStageBackend(env, "I3").mode === "python") {
+    const extra = Object.fromEntries(webhook.searchParams.entries());
+    extra.trigger_i4 = true;
+    const { response, payload } = await item4PulsePipelineStage(env, "i3", { extra }, "I3");
+    if (!response.ok || payload?.status === "error") {
+      throw new HttpError(502, payload?.message || `Python I3 returned HTTP ${response.status}`);
+    }
+    return;
+  }
+
   let response;
   try {
     response = await fetch(webhook.toString(), {
@@ -17285,6 +17296,26 @@ async function studioIdeaExecuteBatch(env, profile, batchRecord) {
   const startedAt = new Date().toISOString();
   try {
     await studioIdeaUpdateBatch(env, batchRecord.id, { Status: "Running", Started_At: startedAt, Error: null });
+    if (pipelineStageBackend(env, "I1").mode === "python") {
+      const requested = Math.max(0, Number(f(batchRecord, "Requested_Count")) || 0);
+      const quality = String(f(profile, "Manual_Idea_Quality_Override") || f(batchRecord, "Quality") || "Balanced").trim();
+      const { response, payload } = await item4PulsePipelineStage(env, "i1", {
+        extra: {
+          profile_record_id: profile.id,
+          batch_record_id: batchRecord.id,
+          requested_count: requested,
+          quality,
+        },
+      }, "I1");
+      if (!response.ok || payload?.status === "error") {
+        throw new HttpError(502, payload?.message || `Python I1 returned HTTP ${response.status}`);
+      }
+      const created = Number(payload?.details?.run?.created_count || 0);
+      if (requested > 0 && created < requested) {
+        throw new HttpError(504, `I1 finished without creating all requested ideas (${created} of ${requested}).`);
+      }
+      return;
+    }
     originalBlueprint = await studioIdeaInstallExactProfileSelector(env, profile.id);
     await phase6SetScenarioActive(env, STUDIO_IDEA_I1_SCENARIO_ID, true);
     started = true;
@@ -17347,9 +17378,11 @@ async function startStudioIdeaGeneration(request, env, authorization, ctx = null
   if (!Number.isInteger(count) || count < STUDIO_IDEA_MIN_COUNT || count > STUDIO_IDEA_MAX_COUNT) throw new HttpError(400, "Idea count must be a whole number from 1 to 10");
   if (!STUDIO_IDEA_ALLOWED_QUALITIES.has(quality)) throw new HttpError(400, "Quality must be Highest Quality, Balanced, or Quantity");
 
-  const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
-  if (scenario?.isActive) {
-    throw new HttpError(409, "The scheduled idea generator is currently active. Try manual generation after that run finishes.");
+  if (pipelineStageBackend(env, "I1").mode !== "python") {
+    const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
+    if (scenario?.isActive) {
+      throw new HttpError(409, "The scheduled idea generator is currently active. Try manual generation after that run finishes.");
+    }
   }
   const profile = await studioIdeaEnabledProfile(env, authorization, requestedProfileId(null, payload));
   const batch = await studioIdeaCreateBatch(env, profile, count, quality, authorization);
@@ -17550,8 +17583,10 @@ async function executeStudioDailyIdeas(env, ctx, options = {}) {
     if (options.scheduled) await studioUpsertSetting(env, STUDIO_I1_LAST_DAILY_SETTING, chicago.date, "No enabled idea-generation profiles");
     return { skipped: "no_enabled_profiles", chicago_date: chicago.date, profiles: [] };
   }
-  const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
-  if (scenario?.isActive) throw new HttpError(409, "I1 is already running");
+  if (pipelineStageBackend(env, "I1").mode !== "python") {
+    const scenario = await phase6ScenarioState(env, STUDIO_IDEA_I1_SCENARIO_ID);
+    if (scenario?.isActive) throw new HttpError(409, "I1 is already running");
+  }
 
   const started = [];
   for (const profile of profiles) {

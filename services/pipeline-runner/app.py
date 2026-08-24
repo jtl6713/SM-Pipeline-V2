@@ -5,7 +5,7 @@ import logging
 from flask import Flask, jsonify, request
 
 from config import StageRequest, load_settings
-from stages import c3b, r2, rr2, smv1
+from stages import c3b, i3, r2, rr2, smv1
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 
 logger = logging.getLogger("pipeline-runner")
@@ -162,6 +162,24 @@ def c3b_email_hook(token: str):
     html = (result.details.get("run") or {}).get("html") or (
         "<!doctype html><html><body style='font-family:Arial,sans-serif;padding:24px;'>"
         f"<h1>Carousel review</h1><p>{result.message}</p></body></html>"
+    )
+    return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/hooks/i3/<token>", methods=["GET", "POST"])
+def i3_email_hook(token: str):
+    expected = str(settings.get("i3_webhook_token") or "").strip()
+    if not expected or token != expected:
+        return jsonify({"error": "not found"}), 404
+
+    extra = {key: value for key, value in request.values.items()}
+    body = StageRequest.from_dict({"extra": extra})
+    result = i3.run(body)
+    status_code = 422 if result.status == "error" else 200
+    logger.info("stage=i3-hook status=%s message=%s", result.status, result.message)
+    html = (result.details.get("run") or {}).get("html") or (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+        f"<h1>Idea review</h1><p>{result.message}</p></body></html>"
     )
     return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
 
