@@ -25,9 +25,11 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **P3** | Full (`5531703` — studio parent enrich + legacy create) | `STAGE_BACKEND_P3=python` |
 | **RR2** | Full (`5576353` — review decision webhook) | `STAGE_BACKEND_RR2=python` |
 | **R2B** | Full (`5576620` — retry asset selection, max 10) | `STAGE_BACKEND_R2B=python` |
+| **P4** | Full (`5533802` — asset-need coverage) | `STAGE_BACKEND_P4=python`; R2 calls Python in-process |
+| **P5** | Full (`5536624` — open-shot reminder email) | `STAGE_BACKEND_P5=python`; P4 daisy-chains Python P5 |
 | **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
-Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, and R2B are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. Make `5576353` and `5576620` are deactivated.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, and P5 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, and `5536624` are deactivated.
 
 Other stages return `501 not_implemented`.
 
@@ -168,6 +170,8 @@ Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-dema
 | `POST` | `/stages/p3` | Enrich seeded Studio outputs or create legacy mappings |
 | `POST` | `/stages/rr2` | Apply one render-review decision |
 | `POST` | `/stages/r2b` | Retry asset selection batch (max 10) |
+| `POST` | `/stages/p4` | Asset-need coverage for one Output_ID / record |
+| `POST` | `/stages/p5` | Open-shot reminder email (max 200) |
 | `GET`/`POST` | `/hooks/rr2/<token>` | Email-button entry (token required; no pipeline secret) |
 
 POST body fields: `output_record_id`, `production_request_record_id`, `test_run_id`, `intended_stage`, `idempotency_key`, `extra.max_runs`, `extra.dry_run`, etc.
@@ -183,7 +187,9 @@ Header `X-Pipeline-Secret` required when `PIPELINE_RUNNER_SHARED_SECRET` is set.
 5. ~~P2~~ (Python live)
 6. ~~P3~~ (Python live)
 7. ~~RR2~~ (Python live; email buttons use `/hooks/rr2/<token>`)
-8. R2B, P4/P5, then AP0 + publish platforms
+8. ~~R2B~~ (Python live)
+9. ~~P4/P5~~ (Python live)
+10. AP0 + publish platforms
 
 ## Source-only rule
 
