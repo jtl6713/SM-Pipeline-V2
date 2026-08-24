@@ -46,11 +46,11 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **A3** | Full (`5569035` — classify Media Assets) | `STAGE_BACKEND_A3=python`; A2B daisy-chains A3 |
 | **A4** | Full (`5578180` — deleted Drive reconciliation) | `STAGE_BACKEND_A4=python`; A3 daisy-chains A4 |
 | **A1P** | Full (`5715500` — CloudConvert poll/finalize) | `STAGE_BACKEND_A1P=python`. Hook: `/hooks/a1p/<A1P_WEBHOOK_TOKEN>` |
-| **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
+| **AP0** | Full (`5612096` — Drive final MP4 → public R2) | Make until `STAGE_BACKEND_AP0=python` |
 
-Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, C2–C9, I1–I4, A2–A4, and A1P are on Python in production. A1S stays Make and posts `poller_url` at `/hooks/a1p/<A1P_WEBHOOK_TOKEN>`. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. I2 review buttons call `/hooks/i3/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, `5589822`, `5589932`, `5514334`, `5516968`, `5517182`, `5524092`, `5602193`, `5531974`, `5568863`, `5569035`, `5578180`, and `5715500` are deactivated.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, P5, SAI1, C2–C9, I1–I4, A2–A4, and A1P are on Python in production. A1S stays Make and posts `poller_url` at `/hooks/a1p/<A1P_WEBHOOK_TOKEN>`. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. I2 review buttons call `/hooks/i3/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, `5589822`, `5589932`, `5514334`, `5516968`, `5517182`, `5524092`, `5602193`, `5531974`, `5568863`, `5569035`, `5578180`, and `5715500` are deactivated. AP0 `5612096` stays Make until an isolated Python R2 proof.
 
-SAI1, C2–C9, and I1–I4 are on Python in production. C1 and C2M stay parked. Do not start AP0 from C9 Ready to Publish.
+SAI1, C2–C9, and I1–I4 are on Python in production. C1 and C2M stay parked. Do not Approve live social posts. Python AP0 does not pulse IG/FB/TT/YT.
 
 Other stages return `501 not_implemented`.
 

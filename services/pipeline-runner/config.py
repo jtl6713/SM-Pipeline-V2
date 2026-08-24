@@ -65,6 +65,7 @@ def load_settings() -> dict[str, Any]:
         "stage_backend_a3": os.environ.get("STAGE_BACKEND_A3", "make").strip().lower(),
         "stage_backend_a4": os.environ.get("STAGE_BACKEND_A4", "make").strip().lower(),
         "stage_backend_a1p": os.environ.get("STAGE_BACKEND_A1P", "make").strip().lower(),
+        "stage_backend_ap0": os.environ.get("STAGE_BACKEND_AP0", "make").strip().lower(),
         "a2b_webhook_url": os.environ.get("A2B_WEBHOOK_URL", ""),
         "a3_webhook_url": os.environ.get("A3_WEBHOOK_URL", ""),
         "a4_webhook_url": os.environ.get("A4_WEBHOOK_URL", ""),
@@ -83,7 +84,7 @@ def load_settings() -> dict[str, Any]:
         "rr1_review_email_to": os.environ.get("RR1_REVIEW_EMAIL_TO", ""),
         "rr1_decision_webhook_url": os.environ.get("RR1_DECISION_WEBHOOK_URL", ""),
         "rr2_webhook_token": os.environ.get("RR2_WEBHOOK_TOKEN", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-24-asset-chain"),
+        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-24-ap0"),
     }
 
 

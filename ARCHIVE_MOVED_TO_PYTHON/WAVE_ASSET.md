@@ -41,4 +41,4 @@ Studio intake should return `triggered: "a2-python"` and must not 409 because Ma
 | A1S | 5715530 | On-demand oversized scan. Posts `poller_url` to Python A1P |
 | A1M | 5764543 | On-demand duration probe in Backups |
 
-Do **not** start AP0 **5612096**.
+AP0 **5612096** Python code is on `POST /stages/ap0`. Production still uses Make until `STAGE_BACKEND_AP0=python` is proven. Do not Approve live social posts.
