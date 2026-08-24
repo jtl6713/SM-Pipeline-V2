@@ -14,13 +14,14 @@ STAGE_BACKEND_A4=python
 STAGE_BACKEND_A1P=python
 STAGE_BACKEND_AP0=python
 STAGE_BACKEND_AP1_IG=python
+STAGE_BACKEND_AP1_IGS=python
 ```
 
 PR: [#13](https://github.com/jtl6713/SM-Pipeline-V2/pull/13)  
 Configure: [run 32743287446](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32743287446)  
 Worker deploy: [run 32743183839](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32743183839)
 
-Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, and AP1-IG **5862882** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
+Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, and AP1-IGS-POLL **5845193** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
 
 ## Proof (2026-08-24)
 
@@ -43,4 +44,4 @@ Studio intake should return `triggered: "a2-python"` and must not 409 because Ma
 | A1S | 5715530 | On-demand oversized scan. Posts `poller_url` to Python A1P |
 | A1M | 5764543 | On-demand duration probe in Backups |
 
-AP0 **5612096** is Python live (`POST /stages/ap0`, `STAGE_BACKEND_AP0=python`). AP1-IG **5862882** is Python live (`POST /stages/ap1_ig`, `STAGE_BACKEND_AP1_IG=python`). Both Make scenarios are inactive in `ARCHIVE_MOVED_TO_PYTHON`. Do not Approve live social posts as a cutover test. Instagram Story publishers stay Make.
+AP0 **5612096**, AP1-IG **5862882**, and AP1-IGS **5612664** / **5845193** are Python live. Do not Approve live social posts as a cutover test. Facebook, TikTok, and YouTube publishers stay Make.

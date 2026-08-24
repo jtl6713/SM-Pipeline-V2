@@ -168,6 +168,24 @@
       "python_endpoint": "/stages/ap1_ig",
       "production_backend": "python",
       "notes": "Make 5862882 inactive in ARCHIVE_MOVED_TO_PYTHON 2026-08-24. Worker STAGE_BACKEND_AP1_IG=python. Isolated Graph proof on Output 233 media 18089258381172412. Do not Approve live Reels as a cutover test."
+    },
+    {
+      "stage": "AP1-IGS",
+      "scenario_id": 5612664,
+      "name": "AP1-IGS - Instagram Story Container Creator v5.2 - Exact Output Webhook",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/ap1_igs",
+      "production_backend": "python",
+      "notes": "Make 5612664 inactive in ARCHIVE_MOVED_TO_PYTHON 2026-08-24. Worker STAGE_BACKEND_AP1_IGS=python. Create-only; poll is AP1-IGS-POLL."
+    },
+    {
+      "stage": "AP1-IGS-POLL",
+      "scenario_id": 5845193,
+      "name": "AP1-IGS-POLL - Instagram Story Container Poll + Publish v1.3 - Exact Output Webhook",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/ap1_igs_poll",
+      "production_backend": "python",
+      "notes": "Make 5845193 inactive in ARCHIVE_MOVED_TO_PYTHON 2026-08-24. Worker Approve waits 8s then pulses Python poll; cron also polls Publishing stories."
     }
   ]
 }
