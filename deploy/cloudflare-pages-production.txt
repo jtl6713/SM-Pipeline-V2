@@ -213,3 +213,5 @@ Friendly dates Pages deploy: 2026-08-24 - Studio timestamps show profile timezon
 
 Sortable Ideas Pages deploy: 2026-08-24 - Ideas table column headers sort Idea, Status, Type, Platforms, Structure, and Production. UI 0.6.129-sortable-ideas.
 
+Dashboard sorts Pages deploy: 2026-08-24 - Dashboard Content items and output lists (platform, active, attention, published) use sortable column headers. UI 0.6.130-dashboard-sorts.
+
