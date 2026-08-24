@@ -141,6 +141,11 @@ export default {
         return handleRr2ReviewDecision(request, env, url);
       }
 
+      if (url.pathname === "/api/hooks/ttd4" || url.pathname === "/studio/tiktok/complete") {
+        requireConfig(env);
+        return studioTiktokComplete(request, env);
+      }
+
       if (url.pathname === "/health" || url.pathname === "/api/health") {
         return respond(request, env, {
           ok: true,
@@ -726,6 +731,11 @@ export default {
         await studioReconcileYoutubePublishes(env);
       } catch (error) {
         console.warn("youtube publish reconcile cron failed", error);
+      }
+      try {
+        await studioReconcileTiktokDrafts(env);
+      } catch (error) {
+        console.warn("tiktok draft reconcile cron failed", error);
       }
       try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
@@ -2823,6 +2833,14 @@ function item4IsLeftoverOverlayText(text) {
   return ITEM4_LEFTOVER_OVERLAYS.has(String(text || "").trim().toLowerCase());
 }
 
+function item4OutputHasLeftoverOverlay(po) {
+  const blobs = [f(po, "Selected_Assets_JSON"), f(po, "Render_Clip_List_JSON")];
+  return blobs.some((raw) => {
+    const text = String(raw || "").toLowerCase();
+    return [...ITEM4_LEFTOVER_OVERLAYS].some((phrase) => text.includes(phrase));
+  });
+}
+
 function item4PreferredOverlayText(requestRecord, parentContentItem, sourceText) {
   const raw = String(sourceText || "").trim();
   if (raw && !item4IsLeftoverOverlayText(raw)) return raw;
@@ -4154,6 +4172,12 @@ const STUDIO_YTS1_SCENARIO_ID = 5830609;
 const STUDIO_YTS2_SCENARIO_ID = 5830616;
 const STUDIO_YTS3_SCENARIO_ID = 5830623;
 const STUDIO_YT_ORCH_SCENARIO_ID = 5823581;
+const STUDIO_TTD0_SCENARIO_ID = 5806658;
+const STUDIO_TTD1_SCENARIO_ID = 5806644;
+const STUDIO_TTD2_SCENARIO_ID = 5806597;
+const STUDIO_TTD3_SCENARIO_ID = 5806570;
+const STUDIO_TTD4_SCENARIO_ID = 5806518;
+const STUDIO_TTD_ORCH_SCENARIO_ID = 5806668;
 
 
 
@@ -4538,7 +4562,11 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_YTS1_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
   if (id === STUDIO_YTS2_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
   if (id === STUDIO_YTS3_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
-  if (id === STUDIO_YT_ORCH_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
+  if (id === STUDIO_TTD0_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
+  if (id === STUDIO_TTD1_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
+  if (id === STUDIO_TTD2_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
+  if (id === STUDIO_TTD3_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
+  if (id === STUDIO_TTD4_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
   return false;
 }
 
@@ -12777,7 +12805,11 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: STUDIO_YTS1_SCENARIO_ID, key: "YTS1" },
   { id: STUDIO_YTS2_SCENARIO_ID, key: "YTS2" },
   { id: STUDIO_YTS3_SCENARIO_ID, key: "YTS3" },
-  { id: 5806658, key: "TTD0" },
+  { id: STUDIO_TTD0_SCENARIO_ID, key: "TTD0" },
+  { id: STUDIO_TTD1_SCENARIO_ID, key: "TTD1" },
+  { id: STUDIO_TTD2_SCENARIO_ID, key: "TTD2" },
+  { id: STUDIO_TTD3_SCENARIO_ID, key: "TTD3" },
+  { id: STUDIO_TTD4_SCENARIO_ID, key: "TTD4" },
   ...STUDIO_AP0C_CHAIN_WEBHOOKS,
   ...STUDIO_FB0_CHAIN_WEBHOOKS,
   { id: ITEM4_P2_SCENARIO_ID, key: "P2" },
@@ -13397,6 +13429,34 @@ async function pulseStudioContinuationJobs(env, options = {}) {
   ];
   const pulses = [];
   try {
+    const leftoverNatives = await listRecords(env, outputTable, {
+      limit: 8,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Native Photo Route",OR({Output_Status}="Ready for Review",{Output_Status}="In Production"))',
+    }).catch(() => []);
+    const leftoverHits = [];
+    for (const po of leftoverNatives || []) {
+      if (!item4OutputHasLeftoverOverlay(po)) continue;
+      const captionFirst = String(f(po, "Output_Caption") || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+      const repaired = await studioRepairLeftoverNativeLettering(env, po, {
+        requestRecord: { fields: {} },
+        parent: { fields: {} },
+        preferredCaption: captionFirst,
+      }).catch(() => po);
+      const lettering = await item4PulseLetterPython(env, { outputRecordId: repaired?.id || po.id }).catch((error) => ({
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      leftoverHits.push({ id: po.id, lettering });
+      if (lettering && !lettering.error) {
+        await item4RefreshNativeLetteredSlides(env, repaired?.id || po.id).catch((error) => {
+          console.warn("native lettered slide refresh failed", po.id, error);
+        });
+      }
+    }
+    if (leftoverHits.length) {
+      pulses.push({ key: "LETTER_LEFTOVER", pulsed: true, backend: "python", hits: leftoverHits.map((row) => row.id) });
+    }
     const lettering = await item4PulseLetterPython(env, { maxRuns: 8 });
     pulses.push({ key: "LETTER", pulsed: true, backend: "python", lettering });
     const runs = Array.isArray(lettering?.details?.runs) ? lettering.details.runs : [];
@@ -14819,6 +14879,157 @@ async function studioEnsureYoutubePublish(env, record) {
   return { ...uploaded, prepare: prepared, start: started };
 }
 
+async function studioPulseTtd0(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "TTD0" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ttd0", {
+    output_record_id: recordId,
+  }, "TTD0");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "TTD0",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python TTD0 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "TTD0",
+    backend: "python",
+    needs_init: Boolean(payload?.details?.run?.needs_init),
+  };
+}
+
+async function studioPulseTtd1(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "TTD1" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ttd1", {
+    output_record_id: recordId,
+    extra: {
+      replace_transaction_id: String(f(record, "Replace_Transaction_ID") || ""),
+      replace_fingerprint: String(f(record, "Replace_Fingerprint") || ""),
+    },
+  }, "TTD0");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "TTD1",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python TTD1 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "TTD1",
+    backend: "python",
+    needs_poll: Boolean(payload?.details?.run?.needs_poll),
+    publish_id: payload?.details?.run?.publish_id,
+  };
+}
+
+async function studioPulseTtd2(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "TTD2" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ttd2", {
+    output_record_id: recordId,
+    extra: {
+      replace_transaction_id: String(f(record, "Replace_Transaction_ID") || ""),
+      replace_fingerprint: String(f(record, "Replace_Fingerprint") || ""),
+    },
+  }, "TTD0");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "TTD2",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python TTD2 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "TTD2",
+    backend: "python",
+    still_processing: Boolean(payload?.details?.run?.still_processing),
+    needs_email: Boolean(payload?.details?.run?.needs_email),
+    publish_id: payload?.details?.run?.publish_id,
+  };
+}
+
+async function studioPulseTtd3(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "TTD3" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ttd3", {
+    output_record_id: recordId,
+  }, "TTD0");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "TTD3",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python TTD3 returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "TTD3",
+    backend: "python",
+    email_sent: Boolean(payload?.details?.run?.email_sent),
+  };
+}
+
+async function studioEnsureTiktokDraft(env, record) {
+  const status = String(f(record, "TikTok_Draft_Status") || "");
+  const publishId = String(f(record, "TikTok_Draft_Publish_ID") || "").trim();
+  if (/^ready for delivery$/i.test(status) && !publishId) {
+    return studioPulseTtd1(env, record);
+  }
+  if ((/^processing$/i.test(status) || (/retry pending/i.test(status) && /TTD2/i.test(String(f(record, "Publish_Error_Stage") || "")))) && publishId) {
+    return studioPulseTtd2(env, record);
+  }
+  if (!String(f(record, "TikTok_Draft_Email_Sent_At") || "").trim() && String(f(record, "Manual_Completion_Status") || "") === "Required" && (
+    /draft delivered/i.test(status) || /manual completion received/i.test(status) || (/retry pending/i.test(status) && /TTD3/i.test(String(f(record, "Publish_Error_Stage") || "")))
+  )) {
+    return studioPulseTtd3(env, record);
+  }
+  const prepared = await studioPulseTtd0(env, record);
+  if (!prepared.ok) return prepared;
+  if (!prepared.skipped && prepared.needs_init) return studioPulseTtd1(env, record);
+  if (!prepared.skipped) return prepared;
+  return studioPulseTtd1(env, record);
+}
+
+async function studioTiktokComplete(request, env) {
+  const incoming = new URL(request.url);
+  const { runnerUrl } = pipelineStageBackend(env, "TTD0");
+  if (!runnerUrl) return new Response("TikTok completion is not configured.", { status: 503, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  const target = new URL(`${runnerUrl}/hooks/ttd4`);
+  incoming.searchParams.forEach((value, key) => target.searchParams.set(key, value));
+  const headers = { Accept: "text/html" };
+  const init = { method: request.method, headers };
+  if (request.method === "POST") {
+    init.body = await request.text();
+    headers["Content-Type"] = request.headers.get("Content-Type") || "application/x-www-form-urlencoded";
+  }
+  const response = await fetch(target.toString(), init);
+  return new Response(await response.text(), {
+    status: response.status,
+    headers: { "Content-Type": response.headers.get("Content-Type") || "text/html; charset=UTF-8" },
+  });
+}
+
 async function studioPulseAp1IgsPoll(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IGS-POLL" };
@@ -14859,7 +15070,7 @@ const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
   "FBS3": { webhooks: [STUDIO_FBS3_SCENARIO_ID, STUDIO_FBS4_SCENARIO_ID], orchestrator: 5813561 },
   "YT0": { webhooks: [STUDIO_YT0_SCENARIO_ID, STUDIO_YTP1_SCENARIO_ID, STUDIO_YTS1_SCENARIO_ID, STUDIO_YTS2_SCENARIO_ID, STUDIO_YTS3_SCENARIO_ID] },
-  "TTD0": { webhooks: [5806658], orchestrator: 5806668 },
+  "TTD0": { webhooks: [STUDIO_TTD0_SCENARIO_ID, STUDIO_TTD1_SCENARIO_ID, STUDIO_TTD2_SCENARIO_ID, STUDIO_TTD3_SCENARIO_ID, STUDIO_TTD4_SCENARIO_ID], orchestrator: STUDIO_TTD_ORCH_SCENARIO_ID },
 });
 
 async function studioArmPublishScenarios(env, target) {
@@ -14963,6 +15174,27 @@ async function studioDispatchApprovedPublishNow(env, record) {
   if (plan.target === "YT0" && pipelineStageBackend(env, "YT0").mode === "python") {
     const pulsed = await studioEnsureYoutubePublish(env, record);
     return { ...pulsed, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "TTD0" && pipelineStageBackend(env, "TTD0").mode === "python") {
+    const prepared = await studioPulseTtd0(env, record);
+    if (!prepared.ok || prepared.skipped || !prepared.needs_init) {
+      if (prepared.ok && prepared.skipped) {
+        const next = await studioEnsureTiktokDraft(env, record);
+        return { ...next, prepare: prepared, ap0, armed: [], plan, record };
+      }
+      return { ...prepared, ap0, armed: [], plan, record };
+    }
+    const inited = await studioPulseTtd1(env, record);
+    if (!inited.ok || inited.skipped || !inited.needs_poll) {
+      return { ...inited, prepare: prepared, ap0, armed: [], plan, record };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const polled = await studioPulseTtd2(env, record);
+    if (!polled.ok || polled.skipped || !polled.needs_email) {
+      return { ...polled, init: inited, prepare: prepared, ap0, armed: [], plan, record };
+    }
+    const emailed = await studioPulseTtd3(env, record);
+    return { ...emailed, poll: polled, init: inited, prepare: prepared, ap0, armed: [], plan, record };
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
@@ -15073,6 +15305,113 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
   + 'OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),'
   + 'OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),'
   + 'OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
+
+async function studioReconcileYoutubePublishes(env, options = {}) {
+  if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  const scans = [
+    {
+      stage: "yt0",
+      target: "YT0",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Platform_Post_ID}="",OR({YouTube_Stage}="",{YouTube_Stage}="YT0",AND({Publish_Retry_Eligible}=1,FIND("YT0",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+    {
+      stage: "ytp1",
+      target: "YTP1",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Stage}="YT1",{YouTube_Upload_Job_ID}="",{YouTube_Video_ID}="")',
+    },
+    {
+      stage: "yts1",
+      target: "YTS1",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="")',
+    },
+    {
+      stage: "yts2",
+      target: "YTS2",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Video_ID}!="")',
+    },
+    {
+      stage: "yts3",
+      target: "YTS3",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT4",{YouTube_Video_ID}!="",{YouTube_Processing_Status}="Succeeded")',
+    },
+  ];
+  for (const scan of scans) {
+    let rows = [];
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: scan.formula });
+    } catch (error) {
+      console.warn(`youtube ${scan.stage} reconcile scan failed`, error);
+      continue;
+    }
+    for (const row of rows) {
+      try {
+        const pulsed = await studioPulseYtRecord(env, scan.stage, scan.target, row);
+        results.push({
+          id: row.id,
+          stage: scan.stage,
+          ok: pulsed?.ok !== false,
+          skipped: pulsed?.skipped || false,
+          still_processing: pulsed?.still_processing || false,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`youtube ${scan.stage} reconcile failed`, row.id, error);
+        results.push({ id: row.id, stage: scan.stage, error: message });
+      }
+    }
+  }
+  return results;
+}
+
+async function studioReconcileTiktokDrafts(env, options = {}) {
+  if (pipelineStageBackend(env, "TTD0").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  const scans = [
+    {
+      stage: "ttd0",
+      pulse: studioPulseTtd0,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({TikTok_Draft_Status}="Ready for Assets",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+    {
+      stage: "ttd1",
+      pulse: studioPulseTtd1,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({TikTok_Draft_Status}="Ready for Delivery",AND({TikTok_Draft_Status}="Retry Pending",OR(FIND("TTD1",UPPER({Publish_Error_Stage}&""))>0,{Publish_Error_Stage}="TTD_CAPACITY"))))',
+    },
+    {
+      stage: "ttd2",
+      pulse: studioPulseTtd2,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Publish_ID}!="",OR({TikTok_Draft_Status}="Processing",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD2",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+    {
+      stage: "ttd3",
+      pulse: studioPulseTtd3,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{TikTok_Draft_Delivered_At}!="",{TikTok_Draft_Email_Sent_At}="",{Manual_Completion_Status}="Required",OR({TikTok_Draft_Status}="Draft Delivered — Manual Action Required",{TikTok_Draft_Status}="Manual Completion Received",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD3",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+  ];
+  for (const scan of scans) {
+    let rows = [];
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: scan.formula });
+    } catch (error) {
+      console.warn(`tiktok ${scan.stage} reconcile scan failed`, error);
+      continue;
+    }
+    for (const row of rows) {
+      try {
+        const pulsed = await scan.pulse(env, row);
+        results.push({ id: row.id, stage: scan.stage, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`tiktok ${scan.stage} reconcile failed`, row.id, error);
+        results.push({ id: row.id, stage: scan.stage, error: message });
+      }
+    }
+  }
+  return results;
+}
 
 // Approval is one click, and it has to survive a publisher scenario that drifted off, a Make API
 // hiccup, and a Worker invocation that ran out of budget before reaching the webhook. Nothing else
@@ -15220,68 +15559,6 @@ async function studioReconcileFacebookReels(env, options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("facebook reel poll reconcile failed", row.id, error);
       results.push({ id: row.id, stage: "fbs4", error: message });
-    }
-  }
-  return results;
-}
-
-async function studioReconcileYoutubePublishes(env, options = {}) {
-  if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
-  const limit = Number(options.limit || 3);
-  const results = [];
-  const scans = [
-    {
-      stage: "yt0",
-      target: "YT0",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Platform_Post_ID}="",OR({YouTube_Stage}="",{YouTube_Stage}="YT0",AND({Publish_Retry_Eligible}=1,FIND("YT0",UPPER({Publish_Error_Stage}&""))>0)))',
-    },
-    {
-      stage: "ytp1",
-      target: "YTP1",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Stage}="YT1",{YouTube_Upload_Job_ID}="",{YouTube_Video_ID}="")',
-    },
-    {
-      stage: "yts1",
-      target: "YTS1",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="")',
-    },
-    {
-      stage: "yts2",
-      target: "YTS2",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Video_ID}!="")',
-    },
-    {
-      stage: "yts3",
-      target: "YTS3",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT4",{YouTube_Video_ID}!="",{YouTube_Processing_Status}="Succeeded")',
-    },
-  ];
-  for (const scan of scans) {
-    let rows = [];
-    try {
-      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-        limit,
-        filterFormula: scan.formula,
-      });
-    } catch (error) {
-      console.warn(`youtube ${scan.stage} reconcile scan failed`, error);
-      continue;
-    }
-    for (const row of rows) {
-      try {
-        const pulsed = await studioPulseYtRecord(env, scan.stage, scan.target, row);
-        results.push({
-          id: row.id,
-          stage: scan.stage,
-          ok: pulsed?.ok !== false,
-          skipped: pulsed?.skipped || false,
-          still_processing: pulsed?.still_processing || false,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`youtube ${scan.stage} reconcile failed`, row.id, error);
-        results.push({ id: row.id, stage: scan.stage, error: message });
-      }
     }
   }
   return results;

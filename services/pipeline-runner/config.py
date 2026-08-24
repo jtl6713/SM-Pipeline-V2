@@ -71,6 +71,9 @@ def load_settings() -> dict[str, Any]:
         "stage_backend_fbs1": os.environ.get("STAGE_BACKEND_FBS1", "make").strip().lower(),
         "stage_backend_fbs3": os.environ.get("STAGE_BACKEND_FBS3", "make").strip().lower(),
         "stage_backend_yt0": os.environ.get("STAGE_BACKEND_YT0", "make").strip().lower(),
+        "stage_backend_ttd0": os.environ.get("STAGE_BACKEND_TTD0", "make").strip().lower(),
+        "tiktok_worker_base_url": os.environ.get("TIKTOK_WORKER_BASE_URL", "https://auth.chicagoshining.com").rstrip("/"),
+        "tiktok_pipeline_secret": os.environ.get("TIKTOK_PIPELINE_SECRET", ""),
         "a2b_webhook_url": os.environ.get("A2B_WEBHOOK_URL", ""),
         "a3_webhook_url": os.environ.get("A3_WEBHOOK_URL", ""),
         "a4_webhook_url": os.environ.get("A4_WEBHOOK_URL", ""),
@@ -89,7 +92,7 @@ def load_settings() -> dict[str, Any]:
         "rr1_review_email_to": os.environ.get("RR1_REVIEW_EMAIL_TO", ""),
         "rr1_decision_webhook_url": os.environ.get("RR1_DECISION_WEBHOOK_URL", ""),
         "rr2_webhook_token": os.environ.get("RR2_WEBHOOK_TOKEN", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-24-ap0"),
+        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-24-ttd"),
     }
 
 

@@ -5,7 +5,7 @@ import logging
 from flask import Flask, jsonify, request
 
 from config import StageRequest, load_settings
-from stages import a1p, c3b, i3, r2, rr2, smv1
+from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 
 logger = logging.getLogger("pipeline-runner")
@@ -199,6 +199,41 @@ def a1p_poll_hook(token: str):
     status_code = 202 if result.status == "deferred" else (422 if result.status == "error" else 200)
     logger.info("stage=a1p-hook status=%s message=%s", result.status, result.message)
     return jsonify(result.to_dict()), status_code
+
+
+@app.route("/hooks/ttd4", methods=["GET", "POST"])
+def ttd4_completion_hook():
+    record_id = (
+        request.values.get("record_id")
+        or request.values.get("output_record_id")
+        or ""
+    ).strip()
+    action = (request.values.get("action") or "form").strip()
+    token = (request.values.get("token") or "").strip()
+    platform_post_url = (request.values.get("platform_post_url") or "").strip()
+    music_completed = (request.values.get("music_completed") or "").strip()
+    form_url = request.url.split("?")[0]
+    body = StageRequest.from_dict(
+        {
+            "output_record_id": record_id or None,
+            "extra": {
+                "action": action,
+                "token": token,
+                "platform_post_url": platform_post_url,
+                "music_completed": music_completed,
+                "form_url": form_url,
+            },
+        }
+    )
+    result = ttd4.run(body)
+    run = result.details.get("run") or {}
+    status_code = int(run.get("http_status") or (422 if result.status == "error" else 200))
+    logger.info("stage=ttd4-hook status=%s message=%s", result.status, result.message)
+    html = run.get("html") or (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+        f"<h1>TikTok completion</h1><p>{result.message}</p></body></html>"
+    )
+    return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
 
 
 @app.post("/stages/smv1/drain")

@@ -18,13 +18,14 @@ STAGE_BACKEND_AP1_IGS=python
 STAGE_BACKEND_FBS1=python
 STAGE_BACKEND_FBS3=python
 STAGE_BACKEND_YT0=python
+STAGE_BACKEND_TTD0=python
 ```
 
 PR: [#16](https://github.com/jtl6713/SM-Pipeline-V2/pull/16)  
 Configure: [run 32779658562](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32779658562)  
 Worker deploy: [run 32779314907](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32779314907)
 
-Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, AP1-IGS-POLL **5845193**, FBS1 **5816409**, FBS2 **5816495**, FBS3 **5816502**, FBS4 **5816520**, YT0 **5823572**, YTP1 **5830810**, YTS1 **5830609**, YTS2 **5830616**, and YTS3 **5830623** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
+Make **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, parked **5602193**, AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664**, AP1-IGS-POLL **5845193**, FBS1 **5816409**, FBS2 **5816495**, FBS3 **5816502**, FBS4 **5816520**, YT0 **5823572**, YTP1 **5830810**, YTS1 **5830609**, YTS2 **5830616**, YTS3 **5830623**, TTD0 **5806658**, TTD1 **5806644**, TTD2 **5806597**, TTD3 **5806570**, and TTD4 **5806518** are **inactive** in `ARCHIVE_MOVED_TO_PYTHON`. Reactivate only for emergency rollback.
 
 ## Proof (2026-08-24)
 
@@ -47,4 +48,4 @@ Studio intake should return `triggered: "a2-python"` and must not 409 because Ma
 | A1S | 5715530 | On-demand oversized scan. Posts `poller_url` to Python A1P |
 | A1M | 5764543 | On-demand duration probe in Backups |
 
-AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664** / **5845193**, FBS1 **5816409** / FBS2 **5816495**, FBS3 **5816502** / FBS4 **5816520**, and YT0–YTS3 are Python live. Do not Approve live social posts as a cutover test. Facebook photos, Instagram carousel, and TikTok publishers stay Make. YT-ORCH **5823581** stays parked.
+AP0 **5612096**, AP1-IG **5862882**, AP1-IGS **5612664** / **5845193**, FBS1 **5816409** / FBS2 **5816495**, FBS3 **5816502** / FBS4 **5816520**, YT0–YTS3, and TTD0–TTD4 are Python live. Do not Approve live social posts as a cutover test. Facebook photos and Instagram carousel stay Make. TTD-ORCH **5806668** and YT-ORCH **5823581** stay parked.
