@@ -203,3 +203,9 @@ Approve subrequest budget Pages deploy: 2026-08-22 - Approve does not refresh th
 
 Stale review state Pages deploy: 2026-08-22 - Pipeline no longer shows Ready for Review from leftover Review Sent while Remotion is still In Production. Cache-bust index to 0.6.122. UI 0.6.122-stale-review-state.
 
+Draft idea name Pages deploy: 2026-08-23 - Production request drafts show the idea/content name instead of only the PR-… ID. UI 0.6.123-draft-idea-name.
+
+API edge retry Pages deploy: 2026-08-23 - Studio API client retries Cloudflare HTML/empty 404, 502/503, and failed-to-fetch up to 12 times (3s apart) then quits. Writes are not replayed after a timeout. UI 0.6.124-api-edge-retry.
+
+TikTok Single Photo Pages deploy: 2026-08-23 - Studio no longer rewrites TikTok Single Photo to Video Draft. UI 0.6.125-tiktok-single-photo.
+

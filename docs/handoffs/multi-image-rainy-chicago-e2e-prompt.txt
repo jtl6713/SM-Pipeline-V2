@@ -1,0 +1,42 @@
+New multi-image end-to-end test. Topic: raining in Chicago. I will create a new idea with three or more images.
+
+You are continuing ChicagoShining SM-Pipeline-V2 production work. The previous single-image CI82 run finished and the operational Airtable slate was wiped. Do not reuse CI82 records. Do not republish leftover CI82 Instagram/Facebook posts.
+
+Base: appe33zkZn35yirTL (ChicagoShining AI Content Creator)
+Content Items: tblwzN9AXWvmKVKPs
+Platform Outputs: tblrlPeboBthkplH0
+Pipeline Settings: tblpHPWeEkyJaF7ql
+Make Admin Queue: tbltuSt9UibYzxpah
+
+What is already clean:
+- Idea Candidates, Content Items, Production Requests, Production Request Outputs, Platform Outputs, Carousel Slides, Asset Requests, Make Admin Queue, and Studio Media Transfer Queue are empty
+- Music, logo, watermarks, brands, profiles, pipeline settings, voices, and platform mappings were kept
+- Test photos Rain.jpg / 4:5 / 9:16 variants and CI82 renders/voiceover were moved to Google Drive trash
+
+Goal:
+Get three or more platform outputs through production for this new rainy-Chicago idea. Native photo/carousel paths should be used for multi-image Instagram and Facebook. Do not force Remotion video unless voiceover or a video format actually requires it. Ask before live social publish.
+
+Isolation rules that still apply:
+- Isolate to this new idea / Test_Run_ID / its outputs only
+- Do not redo unrelated records
+- Do not enable cadenced R / RR / publisher scenarios globally
+- Do not leave MAKE-ADMIN-BRIDGE running (scenario 5893243 stays OFF)
+- Do not use Make generic /run for P2; P2 is webhook-only
+- Production R3, R4, R5, RR1, and publisher selectors all include {Test_Run_ID}=BLANK(), so Test Mode records are invisible to cadence
+- Isolated pulses must temporarily patch the exact selector (Test_Run_ID and/or RECORD_ID), run, then restore formula / maxRecords / view and leave the scenario OFF
+- Do not use Item-7 worker actions pulse_item7_exact_stage or pulse_r4_exact_output; those are allowlist-locked to Item 7
+
+Known live IDs from the last run, still valid:
+- P2 webhook scenario 5530955, hook 2567880, URL https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt
+- P3 webhook scenario 5531703, hook 2567877
+- R3 5557966, R4 5556716, R5 5565333, RR1 5576363, RR2 5576353
+- IG-PUB-ORCH 5864632, AP1-IG 5862882, AP-CAR-ORCH 5791537
+- FB-ORCH 5813561, FBS3 5816502, FBS4 5816520
+- TTD-ORCH 5806668, TTD0 5806658, TTD1 5806644, TTD2 5806597, TTD3 5806570
+- AP0 5612096 is currently invalid/OFF; skip unless repaired. Studio CDN preview URLs can stand in for Publish_Asset_URL when already public.
+- AP1-IG eligibility currently requires Platform_Output_Type = Instagram Reel. Instagram Feed Post / carousel should use the native photo/carousel publishers, not a temporary Reel type change.
+- TikTok production path is draft-to-inbox (SEND_TO_USER_INBOX), not a public auto-post. TTD3 emails the handoff.
+
+After I create the idea, I will send the Airtable record link. Start from that idea. Do not invent a new idea unless I ask.
+
+When a stage succeeds, continue only the next due stage for this test. After each cadenced pulse, restore selectors and verify the scenario is OFF.

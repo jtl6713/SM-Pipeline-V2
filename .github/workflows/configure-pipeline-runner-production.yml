@@ -65,7 +65,7 @@ jobs:
             --data-binary @/tmp/tunnel-after.json -o /tmp/tunnel-put.json
           jq -e '.success == true' /tmp/tunnel-put.json >/dev/null
 
-      - name: Patch studio-api Worker vars for Python SMV1
+      - name: Patch studio-api Worker vars for Python pipeline-runner
         shell: bash
         run: |
           set -euo pipefail
@@ -84,6 +84,27 @@ jobs:
           by_name = {str(item.get('name')): item for item in bindings if item.get('name')}
           updates = {
               'STAGE_BACKEND_SMV1': ('plain_text', 'python'),
+              'STAGE_BACKEND_R2': ('plain_text', 'python'),
+              'STAGE_BACKEND_R3': ('plain_text', 'python'),
+              'STAGE_BACKEND_R4': ('plain_text', 'python'),
+              'STAGE_BACKEND_R5': ('plain_text', 'python'),
+              'STAGE_BACKEND_RR1': ('plain_text', 'python'),
+              'STAGE_BACKEND_RR2': ('plain_text', 'python'),
+              'STAGE_BACKEND_R2B': ('plain_text', 'python'),
+              'STAGE_BACKEND_P2': ('plain_text', 'python'),
+              'STAGE_BACKEND_P3': ('plain_text', 'python'),
+              'STAGE_BACKEND_P4': ('plain_text', 'python'),
+              'STAGE_BACKEND_P5': ('plain_text', 'python'),
+              'STAGE_BACKEND_C2': ('plain_text', 'python'),
+              'STAGE_BACKEND_C3': ('plain_text', 'python'),
+              'STAGE_BACKEND_C3B': ('plain_text', 'python'),
+              'STAGE_BACKEND_SAI1': ('plain_text', 'python'),
+              'STAGE_BACKEND_C4': ('plain_text', 'python'),
+              'STAGE_BACKEND_C5': ('plain_text', 'python'),
+              'STAGE_BACKEND_C6': ('plain_text', 'python'),
+              'STAGE_BACKEND_C7': ('plain_text', 'python'),
+              'STAGE_BACKEND_C8': ('plain_text', 'python'),
+              'STAGE_BACKEND_C9': ('plain_text', 'python'),
               'PIPELINE_RUNNER_URL': ('plain_text', os.environ['RUNNER_URL']),
               'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
           }

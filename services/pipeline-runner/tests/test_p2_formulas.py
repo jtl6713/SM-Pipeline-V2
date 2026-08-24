@@ -1,0 +1,83 @@
+from p2.elevenlabs_client import voice_id_for_name
+from p2.processor import _trigger_p3
+from p2.formulas import (
+    p2_exact_content_formula,
+    recheck_silent_thumbnail,
+    recheck_voiceover_and_thumbnail,
+    recheck_voiceover_only,
+)
+from p2.stale_clears import stale_media_run_clears
+from p2.thumbnail_client import build_thumbnail_prompt
+
+
+def test_p2_exact_content_formula_blank_test_run():
+    formula = p2_exact_content_formula("recABC123", "")
+    assert 'RECORD_ID()="recABC123"' in formula
+    assert "{Test_Run_ID}=BLANK()," in formula
+
+
+def test_p2_exact_content_formula_with_test_run():
+    formula = p2_exact_content_formula("recABC123", "test-42")
+    assert '{Test_Run_ID}="test-42",' in formula
+
+
+def test_recheck_formulas_include_record_id():
+    record_id = "recXYZ789"
+    assert record_id in recheck_voiceover_and_thumbnail(record_id)
+    assert record_id in recheck_voiceover_only(record_id)
+    assert record_id in recheck_silent_thumbnail(record_id)
+
+
+def test_stale_media_run_clears_voiceover_residue():
+    parent = {
+        "fields": {
+            "Include_Voiceover": "Yes",
+            "Voiceover_URL": "",
+            "Voiceover_Google_Drive_File_ID": "drive123",
+            "Voiceover_Normalization_Status": "Normalized",
+            "Voiceover_Normalization_Details": "details",
+            "Voiceover_Normalized_At": "2026-01-01T00:00:00Z",
+        }
+    }
+    clears = stale_media_run_clears(parent)
+    assert clears["Voiceover_Google_Drive_File_ID"] is None
+    assert clears["Voiceover_Normalization_Status"] is None
+
+
+def test_stale_media_run_clears_thumbnail_residue():
+    parent = {
+        "fields": {
+            "Thumbnail_Status": "Ready",
+            "Thumbnail_URL": "",
+            "Thumbnail_Google_Drive_File_ID": "thumb123",
+        }
+    }
+    clears = stale_media_run_clears(parent)
+    assert clears == {"Thumbnail_Google_Drive_File_ID": None}
+
+
+def test_voice_id_mapping():
+    assert voice_id_for_name("George") == "JBFqnCBsd6RMkjVDRZzb"
+    assert voice_id_for_name("other") == "xVQH621DS3eyBYrseRt5"
+
+
+def test_thumbnail_prompt_suffix():
+    prompt = build_thumbnail_prompt("Rainy Chicago skyline")
+    assert "Rainy Chicago skyline" in prompt
+    assert "IMPORTANT BRANDING RULE" in prompt
+
+
+def test_p2_trigger_p3_uses_local_python_when_flagged(monkeypatch):
+    from config import load_settings
+
+    monkeypatch.setenv("STAGE_BACKEND_P3", "python")
+    load_settings.cache_clear()
+
+    def fake_process(**kwargs):
+        return {"processed": True, "route": "studio_parent", **kwargs}
+
+    monkeypatch.setattr("p3.processor.process_request", fake_process)
+    result = _trigger_p3(content_record_id="recP3TEST", test_run_id="t1", source="unit")
+    assert result["backend"] == "python"
+    assert result["content_item_record_id"] == "recP3TEST"
+    load_settings.cache_clear()

@@ -5,6 +5,30 @@
   const $ = (id) => document.getElementById(id);
   let activeIdea = null;
   let ideasCache = [];
+
+  function ideaIdFromRequest(record) {
+    return record?.idea_record_id
+      || (Array.isArray(record?.idea_candidate_links) ? record.idea_candidate_links[0] : null)
+      || (Array.isArray(record?.idea_candidate_links) ? record.idea_candidate_links[0] : null)
+      || null;
+  }
+
+  function ideaTitleForRequest(record) {
+    const ideaId = ideaIdFromRequest(record);
+    const cached = ideaId ? ideasCache.find((idea) => idea.id === ideaId) : null;
+    return String(record?.idea_title || cached?.title || record?.requested_title || "").trim();
+  }
+
+  async function ensureIdeasCache() {
+    if (ideasCache.length) return ideasCache;
+    try {
+      const { records = [] } = await api("/api/ideas?limit=100");
+      if (records.length) ideasCache = records;
+    } catch (_error) {
+      /* Drafts can still render with the production request ID. */
+    }
+    return ideasCache;
+  }
   let activeIdeaGenerationBatchId = null;
   let ideaGenerationPollTimer = null;
   let ideaGenerationInFlight = false;
@@ -54,6 +78,8 @@
   const ITEM4_MASTER_POLL_TIMEOUT_MS = 180000;
   const ITEM4_PREVIEW_RETRY_MAX = 3;
   const ITEM4_PREVIEW_RETRY_MS = 1200;
+  const API_TRANSIENT_RETRY_MAX = 12;
+  const API_TRANSIENT_RETRY_MS = 3000;
   const ITEM4_POLL_EXTRA_WINDOWS = 2;
   const ITEM4_POLL_EXTRA_MS = 15000;
   let item4MasterExtraWindows = 0;
@@ -81,7 +107,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.122-stale-review-state";
+  const BUILD_ID = "item4-0.6.124-api-edge-retry";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -308,12 +334,40 @@
     }
   });
 
+  function isTimeoutError(error) {
+    const name = String(error?.name || "").toLowerCase();
+    const message = String(error?.message || error || "").toLowerCase();
+    return name.includes("timeout") || name.includes("abort") || message.includes("signal timed out") || message.includes("timed out");
+  }
+
+  function sleepMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function isTransientApiFailure({ status = 0, text = "", error = null, method = "GET" } = {}) {
+    const write = !["GET", "HEAD"].includes(String(method || "GET").toUpperCase());
+    if (error) {
+      if (error.transient) return true;
+      if (isTimeoutError(error)) return !write;
+      const name = String(error.name || "");
+      const message = String(error.message || "");
+      return name === "TypeError" || /failed to fetch|networkerror|load failed/i.test(message);
+    }
+    const code = Number(status || 0);
+    let parsed = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
+    const cf = /cloudflare|error code:\s*\d+|worker threw|1010|1042|1101/i.test(String(text || ""));
+    const edge = !parsed || cf;
+    if (code === 429) return true;
+    if ([502, 503, 504, 520, 521, 522, 523, 524, 530].includes(code)) return write ? edge : true;
+    if (code === 404) return edge;
+    return Boolean(cf && code >= 500);
+  }
+
   async function api(path, options = {}) {
-    const { timeoutMs = 25000, signal: explicitSignal, ...fetchOptions } = options;
-    const timeoutSignal =
-      !explicitSignal && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-        ? AbortSignal.timeout(timeoutMs)
-        : explicitSignal;
+    const { timeoutMs = 25000, signal: explicitSignal, retries, ...fetchOptions } = options;
+    const method = String(fetchOptions.method || "GET").toUpperCase();
+    const maxAttempts = Math.max(1, Number(retries ?? API_TRANSIENT_RETRY_MAX) || 1);
 
     const pathname = String(path || "").split("?")[0];
     if (selectedProfileId && fetchOptions.body && typeof fetchOptions.body === "string") {
@@ -328,32 +382,52 @@
       }
     }
 
-    const response = await fetch(`${apiBase}${withStudioProfile(path)}`, {
-      credentials: "same-origin",
-      cache: "no-store",
-      ...fetchOptions,
-      ...(timeoutSignal ? { signal: timeoutSignal } : {}),
-      headers: {
-        ...(fetchOptions.body && !(typeof FormData !== "undefined" && fetchOptions.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
-        ...(fetchOptions.headers || {}),
-      },
-    });
-    const text = await response.text();
-    let body = {};
-    try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
-    if (!response.ok || body.ok === false) {
-      const preparing = String(body.status || "") === "Preparing"
-        || /still running/i.test(String(body.message || body.error || ""));
-      if (preparing && (response.status === 200 || response.status === 202)) return body;
-      throw new Error(body.error || body.message || `Request failed (${response.status})`);
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const timeoutSignal =
+        !explicitSignal && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+          ? AbortSignal.timeout(timeoutMs)
+          : explicitSignal;
+      try {
+        const response = await fetch(`${apiBase}${withStudioProfile(path)}`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          ...fetchOptions,
+          ...(timeoutSignal ? { signal: timeoutSignal } : {}),
+          headers: {
+            ...(fetchOptions.body && !(typeof FormData !== "undefined" && fetchOptions.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
+            ...(fetchOptions.headers || {}),
+          },
+        });
+        const text = await response.text();
+        let body = {};
+        try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
+        if (!response.ok || body.ok === false) {
+          const preparing = String(body.status || "") === "Preparing"
+            || /still running/i.test(String(body.message || body.error || ""));
+          if (preparing && (response.status === 200 || response.status === 202)) return body;
+          const failure = new Error(body.error || body.message || `Request failed (${response.status})`);
+          failure.status = response.status;
+          failure.transient = isTransientApiFailure({ status: response.status, text, method });
+          if (failure.transient && attempt < maxAttempts) {
+            lastError = failure;
+            await sleepMs(API_TRANSIENT_RETRY_MS);
+            continue;
+          }
+          throw failure;
+        }
+        return body;
+      } catch (error) {
+        if (error && error.transient === false) throw error;
+        if (error && !("transient" in (error || {}))) {
+          error.transient = isTransientApiFailure({ error, method });
+        }
+        lastError = error;
+        if (!error?.transient || attempt >= maxAttempts) throw error;
+        await sleepMs(API_TRANSIENT_RETRY_MS);
+      }
     }
-    return body;
-  }
-
-  function isTimeoutError(error) {
-    const name = String(error?.name || "").toLowerCase();
-    const message = String(error?.message || error || "").toLowerCase();
-    return name.includes("timeout") || name.includes("abort") || message.includes("signal timed out") || message.includes("timed out");
+    throw lastError || new Error("Request failed");
   }
 
   function stateClass(value) {
@@ -5051,7 +5125,7 @@
     } else {
       $("productionRequestWorkspace").hidden = true;
     }
-    $("productionRequestTitle").textContent = activeIdea?.title || record.production_request_id || "Production request";
+    $("productionRequestTitle").textContent = activeIdea?.title || ideaTitleForRequest(record) || record.production_request_id || "Production request";
     $("productionRequestSubtitle").textContent = `${record.production_request_id || "Draft"} · Creative configuration remains editable until submission.`;
     $("productionRequestStatus").textContent = record.status || "Draft";
     $("productionRequestStatus").className = `badge ${stateClass(record.status || "Draft")}`;
@@ -5598,13 +5672,15 @@
         target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Start from Home, or open an Idea Candidate and choose Add photos.</span></div>';
         return;
       }
-      target.innerHTML = `<table class="data-table"><thead><tr><th>Request</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th></th></tr></thead><tbody>${records.map(r => {
+      await ensureIdeasCache();
+      target.innerHTML = `<table class="data-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th></th></tr></thead><tbody>${records.map(r => {
         let structure = "AI decides";
         if (r.video_clip_count_mode === "Exact") structure = `${value(r.video_clip_count_exact)} clips`;
         if (r.video_clip_count_mode === "Target range") structure = `${value(r.video_clip_count_min)}–${value(r.video_clip_count_max)} clips`;
         if (r.carousel_slide_count_mode === "Exact") structure = `${value(r.carousel_slide_count_exact)} slides`;
         if (r.carousel_slide_count_mode === "Target range") structure = `${value(r.carousel_slide_count_min)}–${value(r.carousel_slide_count_max)} slides`;
-        return `<tr><td><div class="title-cell">${value(r.production_request_id)}</div><div class="subtle">Updated ${value(r.updated_at)}</div></td><td>${badge(r.status)}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${structure}</td><td><button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">Open</button></td></tr>`;
+        const ideaName = ideaTitleForRequest(r) || "Untitled idea";
+        return `<tr><td><div class="title-cell">${value(ideaName)}</div><div class="subtle">${value(r.production_request_id)} · Updated ${value(r.updated_at)}</div></td><td>${badge(r.status)}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${structure}</td><td><button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">Open</button></td></tr>`;
       }).join("")}</tbody></table>`;
 
       const byId = new Map(records.map(record => [record.id, record]));
@@ -5619,7 +5695,8 @@
 
           // Open immediately from the Production Request record already loaded
           // into the drafts table. Do not block opening on a second API call.
-          activeIdea = null;
+          const ideaId = ideaIdFromRequest(record);
+          activeIdea = ideaId ? ideasCache.find((idea) => idea.id === ideaId) || null : null;
           populateProductionRequestForm(record);
           await loadProductionRequestOutputs(record);
           await loadItem4Workspace(record);

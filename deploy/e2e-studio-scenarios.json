@@ -1,0 +1,120 @@
+{
+  "mx1-single-native": {
+    "title": "Millennium Park — single still native test",
+    "summary": "One Chicago still. Silent native singles: Instagram Single Image and Facebook Single Image. No voiceover, no music. AI thumbnail required for the grid.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "No",
+    "background_music_mode": "No",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook"],
+    "overrides": {
+      "Instagram": "Single Image",
+      "Facebook": "Single Image"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "millennium-cloud-gate.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Plaza_by_the_Cloud_Gate_on_a_rainy_night_(52036718497).jpg?width=1280"
+      }
+    ]
+  },
+  "mx2-single-reel": {
+    "title": "Chicago Riverwalk — single reel with voice and music",
+    "summary": "One Chicago still rendered as video with voiceover and music: Instagram Reel, Facebook Reel, TikTok Video Draft, YouTube Short. AI thumbnail required for the grid.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "Yes",
+    "background_music_mode": "Yes",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+    "overrides": {
+      "Instagram": "Reel",
+      "Facebook": "Reel",
+      "TikTok": "Video Draft",
+      "YouTube": "Short"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "chicago-riverwalk.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Historic_Chicago_Water_Tower_and_Water_Tower_Place_on_a_rainy_night_(52039872491).jpg?width=1280"
+      }
+    ]
+  },
+  "mx3-multi-slideshow": {
+    "title": "Downtown Chicago — multi still slideshow with voice",
+    "summary": "Three Chicago stills with voiceover and music: Instagram Reel, Facebook Slideshow Reel, TikTok Video Draft, YouTube Slideshow Video. AI thumbnail required for the grid.",
+    "content_type": "Photo Set",
+    "photo_count": 3,
+    "voiceover_mode": "Yes",
+    "background_music_mode": "Yes",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+    "overrides": {
+      "Instagram": "Reel",
+      "Facebook": "Slideshow Reel",
+      "TikTok": "Video Draft",
+      "YouTube": "Slideshow Video"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "chicago-skyline-day.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago,_Illinois_-_city_at_night_in_the_rain-.jpg?width=1280"
+      },
+      {
+        "filename": "chicago-wrigley.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Historic_Chicago_Water_Tower_and_Water_Tower_Place_on_a_rainy_night_(52039872491).jpg?width=1280"
+      },
+      {
+        "filename": "chicago-pritzker.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Plaza_by_the_Cloud_Gate_on_a_rainy_night_(52036718497).jpg?width=1280"
+      }
+    ]
+  },
+  "mx4-stories-plus-feed": {
+    "title": "Lakefront — stories plus native feed stills",
+    "summary": "One Chicago still. Silent native feed singles plus Instagram Story and Facebook Story extras. AI thumbnail required on feed posts that appear on the grid. Stories are not grid covers.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "No",
+    "background_music_mode": "No",
+    "thumbnail_mode": "Yes",
+    "platforms": ["Instagram", "Facebook", "TikTok"],
+    "overrides": {
+      "Instagram": "Single Image",
+      "Facebook": "Single Image",
+      "TikTok": "Single Photo"
+    },
+    "extras": ["Instagram::Story", "Facebook::Story"],
+    "photos": [
+      {
+        "filename": "chicago-lakefront.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago,_Illinois_-_city_at_night_in_the_rain-.jpg?width=1280"
+      }
+    ]
+  },
+  "mx5-youtube-standard": {
+    "title": "Chicago skyline — YouTube standard 16x9 with voice",
+    "summary": "One Chicago still with voiceover and music aimed at YouTube Standard Video 16:9 plus an Instagram Reel. AI thumbnail required for the grid and YouTube.",
+    "content_type": "Feed Post",
+    "photo_count": 1,
+    "voiceover_mode": "Yes",
+    "background_music_mode": "Yes",
+    "thumbnail_mode": "Yes",
+    "platforms": ["YouTube", "Instagram"],
+    "overrides": {
+      "YouTube": "Standard Video",
+      "Instagram": "Reel"
+    },
+    "extras": [],
+    "photos": [
+      {
+        "filename": "chicago-skyline-dusk.jpg",
+        "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Plaza_by_the_Cloud_Gate_on_a_rainy_night_(52036718497).jpg?width=1280"
+      }
+    ]
+  }
+}

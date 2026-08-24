@@ -78,3 +78,14 @@ Thumbs.db
 *.backup
 *backup-*
 *_backups/
+
+# Local repair session scratch (not durable repo evidence)
+repair/_tmp_make/
+repair/evidence/*/
+repair/SM_PIPELINE_21_ITEM_LEDGER.xlsx
+repair/scripts/export-ledger-xlsx.py
+repair/scripts/patch-auto-publish-make.py
+evidence-*/
+p3-body.txt
+p3-payload.json
+apps/studio-web/scripts/

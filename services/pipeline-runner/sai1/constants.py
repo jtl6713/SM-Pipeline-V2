@@ -1,0 +1,3 @@
+MAKE_SCENARIO_ID = 6023816
+MAKE_SCENARIO_NAME = "SAI1 - Studio AI Slide Themer v1.3 - Post Caption"
+OPENAI_MODEL = "gpt-5"

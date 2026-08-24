@@ -24,6 +24,8 @@ jobs:
       TARGET_WORKER: chicagoshining-studio-api
       BRIDGE_WORKER: chicagoshining-e2e-service-bridge
       OWNER_EMAIL: joseph.t.logan@gmail.com
+      BRIDGE_RETRY_MAX: "12"
+      BRIDGE_RETRY_SLEEP_S: "3"
     steps:
       - uses: actions/checkout@v6
 
@@ -65,6 +67,9 @@ jobs:
           js=f'''export default {{
             async fetch(request, env) {{
               const incoming = new URL(request.url);
+              if (incoming.pathname === {route} + "/ready") {{
+                return new Response(JSON.stringify({{ok:true,ready:true}}), {{status:200,headers:{{"Content-Type":"application/json","Cache-Control":"no-store"}}}});
+              }}
               if (incoming.pathname !== {route}) return new Response("Not found", {{status:404}});
               const requests = {requests};
               const results = [];
@@ -127,7 +132,22 @@ jobs:
           SUBDOMAIN=$(cat /tmp/account-subdomain.txt)
           TOKEN=$(cat /tmp/path-token.txt)
           URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
-          code=$(curl -sS --retry 4 --retry-delay 2 --max-time 420 -o /tmp/result.json -w '%{http_code}' "$URL")
+          ready=000
+          for i in $(seq 1 "$BRIDGE_RETRY_MAX"); do
+            ready=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL/ready" || true)
+            echo "bridge_ready_attempt=$i/$BRIDGE_RETRY_MAX http=$ready"
+            [[ "$ready" == "200" ]] && break
+            if [[ "$ready" != "404" && "$ready" != "000" && "$ready" != "502" && "$ready" != "503" && "$ready" != "504" && "$ready" != "530" && "$ready" != "1033" ]]; then
+              echo "bridge gave up (non-retryable) last_http=$ready"
+              exit 1
+            fi
+            if [[ "$i" -eq "$BRIDGE_RETRY_MAX" ]]; then
+              echo "bridge gave up after ${BRIDGE_RETRY_MAX} attempts last_http=$ready"
+              exit 1
+            fi
+            sleep "$BRIDGE_RETRY_SLEEP_S"
+          done
+          code=$(curl -sS --max-time 420 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
           echo "bridge_http=$code"
           test "$code" -eq 200
           jq -e '.results|type=="array"' /tmp/result.json >/dev/null

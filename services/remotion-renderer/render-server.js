@@ -711,16 +711,16 @@ async function buildRewrittenProps({ body, jobId, job }) {
             (voiceoverDurationSeconds + effectiveTailSeconds) * fps
         );
 
-        finalDurationFrames = Math.max(
-            requestedDurationFrames,
-            voiceoverRequiredFrames
-        );
+        const durationIsExplicit = body.durationIsExplicit === true || body.durationIsExplicit === true;
+        finalDurationFrames = durationIsExplicit
+            ? Math.max(requestedDurationFrames, voiceoverRequiredFrames)
+            : voiceoverRequiredFrames;
 
         appendLog(
             job,
             `Voiceover-aware duration: requested=${requestedDurationFrames} frames, ` +
             `voiceover=${voiceoverEndFrame} frames, tail=${effectiveTailSeconds}s, ` +
-            `final=${finalDurationFrames} frames`
+            `explicit=${durationIsExplicit}, final=${finalDurationFrames} frames`
         );
     } else {
         appendLog(

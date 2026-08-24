@@ -71,10 +71,7 @@
   }
 
   function ezCanonicalOutputType(platform, outputType) {
-    const p = String(platform || "").trim();
-    const o = String(outputType || "").trim();
-    if (p === "TikTok" && o === "Single Photo") return "Video Draft";
-    return o;
+    return String(outputType || "").trim();
   }
 
   function ezCaptionFields(mode, { caption = "", captions = [] } = {}) {

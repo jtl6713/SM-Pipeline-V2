@@ -1,10 +1,14 @@
 {
-  "correlation_id": "SUNSET-E2E-ITEM4-STATUS-20260816-0159",
+  "correlation_id": "RC-NATIVE-APPROVE-244-20260824",
   "requests": [
     {
-      "name": "item4-status",
-      "method": "GET",
-      "path": "/api/production-requests/recc9H8SXdUnKEMhQ/item4"
+      "name": "approve-244-instagram-carousel",
+      "method": "POST",
+      "path": "/api/outputs/recvamHrm0WIofSPV/creative/review",
+      "body": {
+        "action": "approve_for_publishing",
+        "notes": "Joseph authorized live Instagram carousel publish of output 244 for lettered Graph-caption proof. Do not approve 224-226 or Facebook/TikTok siblings."
+      }
     }
   ]
 }

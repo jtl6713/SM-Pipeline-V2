@@ -1,7 +1,9 @@
 """Canonical Studio API Worker binding contract.
 
 Live production uses 10 core bindings. ELEVENLABS_API_KEY is optional secret_text.
-Requiring it as an 11th binding blocked deploys while the live Worker had no such secret.
+Pipeline-runner vars (PIPELINE_RUNNER_URL, PIPELINE_RUNNER_SHARED_SECRET,
+STAGE_BACKEND_SMV1, STAGE_BACKEND_R2, STAGE_BACKEND_R3, STAGE_BACKEND_R4,
+STAGE_BACKEND_R5, STAGE_BACKEND_RR1, STAGE_BACKEND_RR2, STAGE_BACKEND_R2B, STAGE_BACKEND_P2, STAGE_BACKEND_P3, STAGE_BACKEND_P4, STAGE_BACKEND_P5, STAGE_BACKEND_C2, STAGE_BACKEND_C3, STAGE_BACKEND_C3B, STAGE_BACKEND_SAI1, STAGE_BACKEND_C4, STAGE_BACKEND_C5, STAGE_BACKEND_C6, STAGE_BACKEND_C7, STAGE_BACKEND_C8, STAGE_BACKEND_C9) may already exist on the live Worker; treat them as optional.
 """
 
 from __future__ import annotations
@@ -22,6 +24,30 @@ CORE_BINDINGS = {
 
 OPTIONAL_BINDINGS = {
     "ELEVENLABS_API_KEY": "secret_text",
+    "PIPELINE_RUNNER_SHARED_SECRET": "secret_text",
+    "PIPELINE_RUNNER_URL": "plain_text",
+    "STAGE_BACKEND_SMV1": "plain_text",
+    "STAGE_BACKEND_R2": "plain_text",
+    "STAGE_BACKEND_R3": "plain_text",
+    "STAGE_BACKEND_R4": "plain_text",
+    "STAGE_BACKEND_R5": "plain_text",
+    "STAGE_BACKEND_RR1": "plain_text",
+    "STAGE_BACKEND_RR2": "plain_text",
+    "STAGE_BACKEND_R2B": "plain_text",
+    "STAGE_BACKEND_P2": "plain_text",
+    "STAGE_BACKEND_P3": "plain_text",
+    "STAGE_BACKEND_P4": "plain_text",
+    "STAGE_BACKEND_P5": "plain_text",
+    "STAGE_BACKEND_C2": "plain_text",
+    "STAGE_BACKEND_C3": "plain_text",
+    "STAGE_BACKEND_C3B": "plain_text",
+    "STAGE_BACKEND_SAI1": "plain_text",
+    "STAGE_BACKEND_C4": "plain_text",
+    "STAGE_BACKEND_C5": "plain_text",
+    "STAGE_BACKEND_C6": "plain_text",
+    "STAGE_BACKEND_C7": "plain_text",
+    "STAGE_BACKEND_C8": "plain_text",
+    "STAGE_BACKEND_C9": "plain_text",
 }
 
 CONTRACT_ID = "studio-api-10-core-elevenlabs-optional"
