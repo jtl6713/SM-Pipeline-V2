@@ -84,13 +84,103 @@ class GoogleDriveClient:
         response.raise_for_status()
         return response.json()
 
+    def list_files(
+        self,
+        *,
+        query: str,
+        page_size: int = 10,
+        order_by: str = "createdTime desc",
+        fields: str = "files(id,name,mimeType,size,fileExtension,webContentLink,webViewLink,createdTime,modifiedTime,parents)",
+    ) -> list[dict[str, Any]]:
+        token = self.access_token()
+        response = requests.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params={
+                "q": query,
+                "pageSize": page_size,
+                "orderBy": order_by,
+                "fields": fields,
+                "supportsAllDrives": "true",
+                "includeItemsFromAllDrives": "true",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return list(response.json().get("files") or [])
+
+    def get_file(self, file_id: str, *, fields: str = "id,name,mimeType,size,fileExtension,webContentLink,webViewLink,createdTime,modifiedTime,parents,trashed") -> dict[str, Any]:
+        token = self.access_token()
+        response = requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            params={"fields": fields, "supportsAllDrives": "true"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def move_file(self, file_id: str, dest_folder_id: str, *, remove_parent_id: str | None = None) -> dict[str, Any]:
+        token = self.access_token()
+        current_parent = remove_parent_id
+        if not current_parent:
+            meta = self.get_file(file_id, fields="id,parents")
+            parents = meta.get("parents") or []
+            current_parent = str(parents[0]) if parents else None
+        params: dict[str, str] = {
+            "addParents": dest_folder_id,
+            "supportsAllDrives": "true",
+            "fields": "id,name,mimeType,size,webContentLink,webViewLink,parents",
+        }
+        if current_parent:
+            params["removeParents"] = current_parent
+        response = requests.patch(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            params=params,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def delete_file(self, file_id: str) -> None:
+        token = self.access_token()
+        response = requests.delete(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            params={"supportsAllDrives": "true"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+
+    def trash_file(self, file_id: str) -> dict[str, Any]:
+        token = self.access_token()
+        response = requests.patch(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            params={"supportsAllDrives": "true", "fields": "id,trashed"},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"trashed": True},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def search_trash_by_name(self, name: str) -> list[dict[str, Any]]:
+        escaped = (name or "").replace("\\", "\\\\").replace("'", "\\'")
+        return self.list_files(
+            query=f"name = '{escaped}' and trashed = true",
+            page_size=20,
+            order_by="modifiedTime desc",
+            fields="files(id,name,trashed,mimeType,size,modifiedTime)",
+        )
+
     def share_anyone_reader(self, file_id: str) -> dict[str, Any]:
         token = self.access_token()
         permission_response = requests.post(
             f"https://www.googleapis.com/drive/v3/files/{file_id}/permissions",
             params={"supportsAllDrives": "true"},
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"type": "anyone", "role": "reader"},
+            json={"type": "anyone", "role": "reader", "allowFileDiscovery": False},
             timeout=60,
         )
         permission_response.raise_for_status()

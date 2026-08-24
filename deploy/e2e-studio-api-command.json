@@ -1,13 +1,13 @@
 {
-  "correlation_id": "RC-NATIVE-APPROVE-244-20260824",
+  "correlation_id": "MX1-APPROVE-227-20260824",
   "requests": [
     {
-      "name": "approve-244-instagram-carousel",
+      "name": "approve-227-instagram-single-image",
       "method": "POST",
-      "path": "/api/outputs/recvamHrm0WIofSPV/creative/review",
+      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative/review",
       "body": {
         "action": "approve_for_publishing",
-        "notes": "Joseph authorized live Instagram carousel publish of output 244 for lettered Graph-caption proof. Do not approve 224-226 or Facebook/TikTok siblings."
+        "notes": "Joseph authorized live Instagram Single Image publish of output 227 for 3D-cover Graph-caption proof. Do not approve 228, 224-226, 245, or 246."
       }
     }
   ]

@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.121-idea-chain-gates",
+          version: "0.10.124-asset-chain-gates",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -200,6 +200,7 @@ export default {
           studio_publish_cadence_carousel_youtube_v1: true,
           studio_publish_dispatch_v1: true,
           studio_ap0c_carousel_dispatch_v1: true,
+          studio_ig_fb_photo_dispatch_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
@@ -1290,6 +1291,25 @@ function studioPublishHandoffFields(record) {
       fields.Image_Count = clipCount;
       fields.IG_Carousel_Child_Count = clipCount;
     }
+  }
+  if (platform === "Instagram" && (outputType === "Single Image" || mapping === "Instagram Feed Post") && outputType !== "Carousel" && mapping !== "Instagram Carousel") {
+    const cover = studioPublicJpegCoverUrl(record) || (preview.startsWith("https://media.chicagoshining.com/") ? preview : "");
+    if (cover) {
+      fields.Publish_Asset_URL = cover;
+      if (!preview.startsWith("https://media.chicagoshining.com/")) fields.Studio_Preview_URL = cover;
+    }
+    fields.Publish_Status = "Ready to Publish";
+    fields.Image_Output_Selected = true;
+    fields.Image_Count = clipCount || 1;
+  }
+  if (platform === "Facebook" && (outputType === "Single Image" || mapping === "Facebook Post") && outputType !== "Multi-Image Post" && mapping !== "Facebook Photo Set" && outputType !== "Slideshow Reel" && mapping !== "Facebook Reel") {
+    fields.Image_Output_Selected = true;
+    if (!current("FB_Publish_Status") || current("FB_Publish_Status") === "Retry Pending") {
+      fields.FB_Publish_Status = "Ready for Assets";
+    }
+    fields.FB_Image_Publish_Mode = "Single Photo";
+    fields.Publish_Status = "Ready to Publish";
+    fields.Image_Count = clipCount || 1;
   }
   if (platform === "Facebook" && (outputType === "Multi-Image Post" || mapping === "Facebook Photo Set")) {
     fields.Image_Output_Selected = true;
@@ -12569,6 +12589,15 @@ const STUDIO_AP0C_CHAIN_WEBHOOKS = Object.freeze([
   { id: 5791396, key: "AP4R" },
   { id: 5791424, key: "AP5C" },
 ]);
+// FB-ORCH 5813561 stays parked. These webhook workers are the photo chain
+// Studio Approve starts (FB0) and each stage then pulses the next.
+const STUDIO_FB0_CHAIN_WEBHOOKS = Object.freeze([
+  { id: 5813436, key: "FB0" },
+  { id: 5813463, key: "FB1" },
+  { id: 5813487, key: "FB2" },
+  { id: 5813511, key: "FB2R" },
+  { id: 5813534, key: "FB3" },
+]);
 const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: 5612096, key: "AP0" },
   { id: 5612664, key: "IGS" },
@@ -12577,6 +12606,7 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: 5816520, key: "FBS4" },
   { id: 5806658, key: "TTD0" },
   ...STUDIO_AP0C_CHAIN_WEBHOOKS,
+  ...STUDIO_FB0_CHAIN_WEBHOOKS,
   { id: ITEM4_P2_SCENARIO_ID, key: "P2" },
   { id: ITEM4_P3_SCENARIO_ID, key: "P3" },
   { id: ITEM4_C2_SCENARIO_ID, key: "C2" },
@@ -13968,11 +13998,22 @@ function studioPublishDispatchTarget(record) {
   if (platform === "Instagram" && (outputType === "Story" || mapping === "Instagram Story")) {
     return { setting: "AP1_IGS_WEBHOOK_URL", poll: "AP1_IGS_POLL_WEBHOOK_URL", target: "AP1-IGS" };
   }
+  if (platform === "Instagram" && (outputType === "Single Image" || mapping === "Instagram Feed Post") && outputType !== "Carousel" && mapping !== "Instagram Carousel") {
+    return { graphFeedPhoto: true, target: "IG-FEED-GRAPH" };
+  }
   if (platform === "Instagram" && (outputType === "Reel" || mapping === "Instagram Reel") && outputType !== "Carousel") {
     return { setting: "AP1_IG_WEBHOOK_URL", target: "AP1-IG" };
   }
   if (platform === "Facebook" && (outputType === "Story" || mapping === "Facebook Story")) {
     return { graphStory: true, target: "FB-STORY-GRAPH" };
+  }
+  if (platform === "Facebook" && (
+    outputType === "Single Image"
+    || outputType === "Multi-Image Post"
+    || mapping === "Facebook Post"
+    || mapping === "Facebook Photo Set"
+  ) && outputType !== "Slideshow Reel" && mapping !== "Facebook Reel") {
+    return { setting: "FB0_WEBHOOK_URL", target: "FB0" };
   }
   if (platform === "Facebook" && (outputType === "Slideshow Reel" || mapping === "Facebook Reel") && outputType !== "Multi-Image Post") {
     return { setting: "FBS3_WEBHOOK_URL", poll: "FBS4_WEBHOOK_URL", target: "FBS3" };
@@ -13981,6 +14022,174 @@ function studioPublishDispatchTarget(record) {
     return { setting: "TTD0_WEBHOOK_URL", target: "TTD0" };
   }
   return null;
+}
+
+function studioGraphCaption(record) {
+  const caption = String(f(record, "Output_Caption") || "").trim();
+  const hashtags = String(f(record, "Output_Hashtags") || "").trim();
+  if (!hashtags || caption.includes(hashtags)) return caption;
+  return `${caption}\n\n${hashtags}`.trim();
+}
+
+async function studioFetchImageBytes(source) {
+  const url = String(source || "").trim();
+  if (!url) return null;
+  const fileId = extractGoogleDriveFileId(url);
+  const candidates = [];
+  if (url.startsWith("https://media.chicagoshining.com/")) candidates.push(url);
+  if (fileId) candidates.push(googleDriveDownloadUrl(fileId));
+  if (/^https?:\/\//i.test(url) && !candidates.includes(url)) candidates.push(url);
+  for (const href of candidates) {
+    const response = await fetch(href, {
+      redirect: "follow",
+      headers: {
+        Accept: "image/jpeg,image/png,image/webp,image/*;q=0.9,*/*;q=0.4",
+        "User-Agent": "chicagoshining-studio-api/publish-dispatch",
+      },
+    });
+    const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+    if (!response.ok || type.includes("text/html")) {
+      try { await response.body?.cancel(); } catch {}
+      continue;
+    }
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > 1000) return buffer;
+  }
+  return null;
+}
+
+async function studioEnsurePublicJpegForPublish(env, record) {
+  const existing = studioClipPublicCdnUrl(f(record, "Publish_Asset_URL"))
+    || studioPublicJpegCoverUrl(record)
+    || studioClipPublicCdnUrl(f(record, "Studio_Preview_URL"));
+  if (existing) return { record, url: existing };
+  if (!env.STUDIO_MEDIA) return { record, url: "" };
+  const source = String(
+    f(record, "Thumbnail_URL")
+    || f(record, "Studio_Preview_URL")
+    || f(record, "Publish_Asset_URL")
+    || ""
+  ).trim();
+  const buffer = await studioFetchImageBytes(source);
+  if (!buffer) return { record, url: "" };
+  const key = `publish/platform-output/${record.id}/cover.jpg`;
+  await env.STUDIO_MEDIA.put(key, buffer, {
+    httpMetadata: { contentType: "image/jpeg" },
+    customMetadata: { platformOutputId: record.id, purpose: "ig-feed-photo" },
+  });
+  const url = `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
+  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      typecast: true,
+      fields: {
+        Publish_Asset_URL: url,
+        Studio_Preview_URL: url,
+      },
+    }),
+  });
+  return { record: updated || record, url };
+}
+
+async function studioPublishInstagramFeedPhoto(env, record) {
+  try {
+    return await studioPublishInstagramFeedPhotoInner(env, record);
+  } catch (error) {
+    console.warn("instagram feed photo publish failed", record?.id, error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      target: "IG-FEED-GRAPH",
+    };
+  }
+}
+
+async function studioPublishInstagramFeedPhotoInner(env, record) {
+  const prepared = await studioEnsurePublicJpegForPublish(env, record);
+  record = prepared.record;
+  const imageUrl = prepared.url;
+  if (!imageUrl.startsWith("https://media.chicagoshining.com/")) {
+    return { ok: false, skipped: "missing-cdn-preview", target: "IG-FEED-GRAPH" };
+  }
+  const settings = await studioActivePipelineSettings(env, [
+    "INSTAGRAM_BUSINESS_ACCOUNT_ID",
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+  ]);
+  const igUserId = settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
+  const token = settings.FACEBOOK_PAGE_ACCESS_TOKEN;
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+  if (!igUserId || !token) return { ok: false, skipped: "missing-instagram-settings", target: "IG-FEED-GRAPH" };
+
+  const caption = studioGraphCaption(record);
+  const createResponse = await fetch(`https://graph.facebook.com/${version}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      image_url: imageUrl,
+      caption,
+      access_token: token,
+    }),
+  });
+  const created = await createResponse.json().catch(() => ({}));
+  const creationId = String(created.id || "").trim();
+  if (!createResponse.ok || !creationId) {
+    console.warn("instagram feed photo create failed", createResponse.status, created?.error?.message || "");
+    return { ok: false, error: created?.error?.message || `create ${createResponse.status}`, target: "IG-FEED-GRAPH" };
+  }
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const statusResponse = await fetch(
+      `https://graph.facebook.com/${version}/${creationId}?fields=status_code,status&access_token=${encodeURIComponent(token)}`
+    );
+    const status = await statusResponse.json().catch(() => ({}));
+    const code = String(status.status_code || "").toUpperCase();
+    if (code === "ERROR") {
+      return { ok: false, error: status.status || "container error", target: "IG-FEED-GRAPH" };
+    }
+    if (!code || code === "FINISHED") break;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+
+  const publishResponse = await fetch(`https://graph.facebook.com/${version}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ creation_id: creationId, access_token: token }),
+  });
+  const published = await publishResponse.json().catch(() => ({}));
+  const mediaId = String(published.id || "").trim();
+  if (!publishResponse.ok || !mediaId) {
+    console.warn("instagram feed photo publish failed", publishResponse.status, published?.error?.message || "");
+    return { ok: false, error: published?.error?.message || `publish ${publishResponse.status}`, target: "IG-FEED-GRAPH" };
+  }
+
+  const metaResponse = await fetch(
+    `https://graph.facebook.com/${version}/${mediaId}?fields=permalink,shortcode,media_type&access_token=${encodeURIComponent(token)}`
+  );
+  const meta = await metaResponse.json().catch(() => ({}));
+  const permalink = String(meta.permalink || "").trim()
+    || (meta.shortcode ? `https://www.instagram.com/p/${meta.shortcode}/` : "");
+
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      typecast: true,
+      fields: {
+        Publish_Status: "Published",
+        Output_Status: "Published",
+        Published_At: new Date().toISOString(),
+        Platform_Post_ID: mediaId,
+        Platform_Media_ID: mediaId,
+        Platform_Post_URL: permalink || null,
+        Publish_Asset_URL: imageUrl,
+        Publish_Error_Message: "",
+        Publish_Error_Stage: "",
+        Publish_Retry_Eligible: false,
+        Publish_Locked_By: "",
+      },
+    }),
+  });
+  return { ok: true, target: "IG-FEED-GRAPH", post_id: mediaId, permalink };
 }
 
 async function studioPublishFacebookPageStory(env, record) {
@@ -14089,6 +14298,7 @@ async function studioPulseAp0PublicAsset(env, record) {
 const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "AP0": { webhooks: [5612096] },
   "AP0C": { webhooks: STUDIO_AP0C_CHAIN_WEBHOOKS.map((item) => item.id) },
+  "FB0": { webhooks: STUDIO_FB0_CHAIN_WEBHOOKS.map((item) => item.id) },
   "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: 5864632 },
   "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
   "FBS3": { webhooks: [5816502, 5816520], orchestrator: 5813561 },
@@ -14155,8 +14365,9 @@ async function studioDispatchApprovedPublishNow(env, record) {
   const plan = studioPublishDispatchTarget(record);
   if (!plan) return { ok: true, skipped: "no-dispatch", record };
   if (plan.graphStory) return { ...await studioPublishFacebookPageStory(env, record), plan, record };
+  if (plan.graphFeedPhoto) return { ...await studioPublishInstagramFeedPhoto(env, record), plan, record };
   let ap0 = null;
-  if (plan.target !== "AP0C") {
+  if (plan.target !== "AP0C" && plan.target !== "FB0") {
     await studioArmPublishScenarios(env, "AP0");
     ap0 = await studioPulseAp0PublicAsset(env, record);
     if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
@@ -14172,7 +14383,7 @@ async function studioDispatchApprovedPublishNow(env, record) {
 
 async function studioDispatchApprovedPublishTail(env, record, primary) {
   const plan = primary?.plan;
-  if (!plan || plan.graphStory) return null;
+  if (!plan || plan.graphStory || plan.graphFeedPhoto) return null;
   if (plan.poll) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
@@ -14190,7 +14401,7 @@ function studioPublishDispatchNote(result) {
   const armed = (result.armed || []).map((row) => `${row.id}${row.ok ? "" : "!"}`).join(",");
   return [
     `target=${result.target || result.plan?.target || "?"}`,
-    result.ok ? `webhook=ok ${result.status || ""}`.trim() : `webhook=FAILED ${result.status || ""}`.trim(),
+    result.ok ? `webhook=ok ${result.status || result.permalink || ""}`.trim() : `webhook=FAILED ${result.status || result.error || ""}`.trim(),
     armed ? `armed=${armed}` : "",
     result.ap0 ? `ap0=${result.ap0.skipped || (result.ap0.ok ? "ok" : "failed")}` : "",
   ].filter(Boolean).join(" | ");
@@ -17724,6 +17935,35 @@ async function pulseMakeAdminBridgeQueue(request, env, ctx) {
 }
 
 async function pulseStudioLibraryIntake(request, env, authorization) {
+  const python = pipelineStageBackend(env, "A2");
+  if (python.mode === "python") {
+    const startedAt = new Date().toISOString();
+    const { response, payload } = await item4PulsePipelineStage(env, "a2", {
+      extra: { trigger_a2b: true, wait_for_next: false },
+    }, "A2");
+    if (!response.ok || payload?.status === "error") {
+      throw new HttpError(502, payload?.message || `Python A2 returned HTTP ${response.status}`);
+    }
+    const run = payload?.details?.run || {};
+    const filesFound = Boolean(run.files_found);
+    const knownA2 = {
+      id: "python-a2",
+      timestamp: startedAt,
+      operations: filesFound ? 20 : 2,
+      state: "success",
+      status_code: 1,
+    };
+    const status = await buildLibraryIntakeStatus(env, startedAt, knownA2);
+    return respond(request, env, {
+      ok: true,
+      triggered: "a2-python",
+      scenario_id: STUDIO_A2_SCENARIO_ID,
+      daisy_chain: ["A2", "A2B", "A3", "A4"],
+      hook_response: String(payload?.message || "python-a2").slice(0, 200),
+      ...status,
+      message: status.summary,
+    }, status.complete ? 200 : 202);
+  }
   const state = await phase6ScenarioState(env, STUDIO_A2_SCENARIO_ID);
   if (!state) throw new HttpError(502, "Could not read A2 scenario state");
   if (!state.isActive) throw new HttpError(409, "A2 is off. The intake webhook only runs while A2 is active.");

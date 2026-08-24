@@ -45,6 +45,8 @@ class AirtableClient:
         view: str | None = None,
         max_records: int = 10,
         fields: list[str] | None = None,
+        sort_field: str | None = None,
+        sort_direction: str = "asc",
     ) -> list[dict[str, Any]]:
         import requests
 
@@ -55,6 +57,9 @@ class AirtableClient:
             params["view"] = view
         if fields:
             params["fields[]"] = fields
+        if sort_field:
+            params["sort[0][field]"] = sort_field
+            params["sort[0][direction]"] = sort_direction
 
         url = f"{self._api_root}/{self._base_id}/{table_id}"
         records: list[dict] = []
