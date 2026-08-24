@@ -1,0 +1,23 @@
+{
+  "correlation_id": "NYC-IDEA-SMOKE-20260824",
+  "nyc_profile_id": "recgtK8Z7eNADNtVy",
+  "title": "NYC profile smoke test – Brooklyn Bridge at golden hour",
+  "summary": "Automated Studio API smoke test confirming Idea Candidates attach to the NYC Content Profile.",
+  "requests": [
+    {
+      "name": "create-nyc-idea",
+      "method": "POST",
+      "path": "/api/ideas",
+      "body": {
+        "title": "NYC profile smoke test – Brooklyn Bridge at golden hour",
+        "summary": "Automated Studio API smoke test confirming Idea Candidates attach to the NYC Content Profile.",
+        "content_profile_id": "recgtK8Z7eNADNtVy"
+      }
+    },
+    {
+      "name": "list-nyc-ideas",
+      "method": "GET",
+      "path": "/api/ideas?profile=recgtK8Z7eNADNtVy&limit=25"
+    }
+  ]
+}
