@@ -201,6 +201,7 @@ export default {
           studio_publish_dispatch_v1: true,
           studio_ap0c_carousel_dispatch_v1: true,
           studio_ig_fb_photo_dispatch_v1: true,
+          studio_native_still_no_mix_handoff_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
@@ -1117,8 +1118,14 @@ function studioOutputIsNativePhotoRoute(platform, outputType, mapping) {
   const type = String(outputType || "").trim();
   const map = String(mapping || "").trim();
   if (p === "TikTok" && (type === "Multi-Photo" || type === "Single Photo" || map === "TikTok Slideshow")) return true;
-  if (p === "Instagram" && (type === "Carousel" || type === "Single Image")) return true;
-  if (p === "Facebook" && (type === "Multi-Image Post" || type === "Single Image")) return true;
+  if (p === "Instagram" && (
+    type === "Carousel" || type === "Single Image" || type === "Instagram Feed Post"
+    || map === "Instagram Carousel" || map === "Instagram Feed Post"
+  )) return true;
+  if (p === "Facebook" && (
+    type === "Multi-Image Post" || type === "Single Image" || type === "Facebook Post"
+    || map === "Facebook Photo Set" || map === "Facebook Post"
+  )) return true;
   return false;
 }
 
@@ -12260,6 +12267,17 @@ function phase6RenderHandoffState(record) {
   return "render_prep_needed";
 }
 
+function phase6CreativeMixRevisionInFlight(record) {
+  const renderStatus = String(f(record, "Render_Status") || "").trim();
+  if (studioOutputIsNativePhoto(record) || renderStatus === "Native Photo Route") return false;
+  const reviewStatus = String(f(record, "Review_Status") || "").trim();
+  const outputStatus = String(f(record, "Output_Status") || "").trim();
+  // Publish Approve stamps Review_Decision_At. That is not a mix rerender.
+  if (reviewStatus === "Changes Requested") return true;
+  if (outputStatus === "In Production") return true;
+  return false;
+}
+
 function phase6CreativeHandoffStatus(record, slides = []) {
   const reviewStatus = String(f(record, "Review_Status") || "");
   const outputStatus = String(f(record, "Output_Status") || "");
@@ -12268,7 +12286,7 @@ function phase6CreativeHandoffStatus(record, slides = []) {
   const requestedAt = phase6TimeMs(f(record, "Review_Decision_At"));
   const previewAt = phase6TimeMs(f(record, "Studio_Preview_Updated_At"));
   const previewReady = phase6PreviewFulfillsCurrentReview(record);
-  const requestStarted = reviewStatus === "Changes Requested" || outputStatus === "In Production" || requestedAt !== null;
+  const requestStarted = phase6CreativeMixRevisionInFlight(record);
   const pendingVoice = phase6PendingVoicePrepSlides(slides);
   const voiceFailures = (Array.isArray(slides) ? slides : []).filter((slide) => /fail|error/i.test(String(slide?.voiceover?.status || "")));
   const renderError = renderStatus === "Failed" ? String(f(record, "Remotion_Error_Message") || "Render failed") : null;
@@ -12466,6 +12484,17 @@ async function continueOutputCreativeHandoff(request, env, url, authorization) {
   if (!match) throw new HttpError(400, "Invalid Phase 6 continuation route");
   const id = match[1];
   let current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  if (studioOutputIsNativePhoto(current) || String(f(current, "Render_Status") || "").trim() === "Native Photo Route") {
+    const slides = await phase6SlidesForOutput(env, current);
+    const handoff = phase6CreativeHandoffStatus(current, slides);
+    return respond(request, env, {
+      ok: true,
+      completed: true,
+      handoff_state: "idle",
+      handoff,
+      message: "Native stills do not use a video mix.",
+    });
+  }
   if (!Boolean(f(current, "Do_Not_Publish")) && !phase6AllowsProductionMixContinuation(current)) {
     throw new HttpError(409, "No mix rerender is in progress for this output");
   }

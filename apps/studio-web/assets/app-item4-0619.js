@@ -107,7 +107,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.124-api-edge-retry";
+  const BUILD_ID = "item4-0.6.126-native-still-handoff";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -6200,7 +6200,8 @@
   }
 
   function creativeMixInProgress(handoff = creativeHandoffStatus, output = activeCreativeOutput) {
-    if (handoff?.completed || handoff?.overall_status === "complete") return false;
+    if (creativeSimpleVideoKind(output) === "still") return false;
+    if (handoff?.completed || handoff?.overall_status === "complete" || handoff?.overall_status === "idle") return false;
     const render = String(output?.render_status || "").trim();
     const status = String(output?.output_status || "").trim();
     if (["Ready for Render", "Rendering"].includes(render)) return true;
@@ -6217,7 +6218,10 @@
     const badge = $("creativeSaveState");
     const reset = $("reloadCreativeEditor");
     if (badge) {
-      if (creativeWatchOnly() && !creativeEditorDirty && !creativeMixInProgress()) {
+      if (creativeSimpleVideoKind() === "still") {
+        badge.textContent = creativePublishSettled() ? "Published" : "Saved";
+        badge.className = "creative-save-state saved";
+      } else if (creativeWatchOnly() && !creativeEditorDirty && !creativeMixInProgress()) {
         badge.textContent = "Mix ready";
         badge.className = "creative-save-state saved";
       } else {
@@ -6273,7 +6277,8 @@
     const overlay = $("creativeRenderBusy");
     const title = $("creativeRenderBusyTitle");
     const detail = $("creativeRenderBusyDetail");
-    const busy = Boolean(
+    const still = creativeSimpleVideoKind() === "still";
+    const busy = !still && Boolean(
       (handoff?.active && !handoff?.completed && handoff?.overall_status === "active")
       || creativeMixInProgress(handoff)
     );
@@ -6287,6 +6292,16 @@
   }
 
   function renderCreativeChangeProgress(handoff = null) {
+    if (creativeSimpleVideoKind() === "still") {
+      handoff = {
+        ...(handoff || {}),
+        active: false,
+        completed: false,
+        overall_status: "idle",
+        current_stage_label: null,
+        message: "Native stills do not use a video mix.",
+      };
+    }
     creativeHandoffStatus = handoff || null;
     const panel = $("creativeChangeProgress");
     const stepsTarget = $("creativeChangeProgressSteps");
@@ -7245,10 +7260,18 @@
     $("creativeEditorSubtitle").textContent = `${output.platform_output_type || output.format || "Photo sequence"}${output.aspect_ratio ? ` · ${output.aspect_ratio}` : ""} · creative review`;
     $("creativeSafetyBadge").textContent = output.do_not_publish
       ? (titleLocked ? "Titles locked" : "Publishing locked")
-      : (creativeCanApproveForPublishing(output) ? "Ready to approve" : "Watch-only review");
+      : (creativePublishSettled(output)
+        ? "Published"
+        : (creativeCanApproveForPublishing(output) ? "Ready to approve" : "Watch-only review"));
     $("creativeSafetyBadge").className = "badge ready-for-review";
     $("creativeSafetyBanner").innerHTML = !output.do_not_publish
-      ? (creativeMixInProgress(data.handoff || creativeHandoffStatus, output)
+      ? (creativeSimpleVideoKind(output) === "still"
+        ? (creativePublishSettled(output)
+          ? "<strong>Photo post.</strong> This still has no video mix. Studio is not rendering."
+          : (creativeCanApproveForPublishing(output)
+            ? "<strong>Final publish approval.</strong> Review the still, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."
+            : "<strong>Photo post.</strong> These photos publish as stills. There is no video mix to edit."))
+        : (creativeMixInProgress(data.handoff || creativeHandoffStatus, output)
         ? "<strong>Rendering a new mix.</strong> This page will show Processing, then Ready when the new preview is available. Approve stays locked until then."
         : (creativeCanApproveForPublishing(output)
         ? (phase6IsNativeStillPreview(output)
@@ -7256,7 +7279,7 @@
           : (creativeSimpleVideoKind(output)
             ? "<strong>Final publish approval.</strong> Play the render, change music volume under Audio if you want, then Approve for publishing."
             : "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."))
-        : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving."))
+        : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving.")))
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
         : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
@@ -7311,9 +7334,10 @@
     try {
       const data = await api(`/api/outputs/${encodeURIComponent(recordId)}/creative`);
       populateCreativeEditor(data);
-      const handoff = data?.handoff || await refreshCreativeChangeProgress();
-      const resumable = Boolean(handoff?.active && !handoff?.completed && handoff?.overall_status !== "error")
-        || creativeMixInProgress(handoff, data?.output);
+      const still = creativeSimpleVideoKind(data?.output) === "still";
+      const handoff = still ? data?.handoff : (data?.handoff || await refreshCreativeChangeProgress());
+      const resumable = !still && (Boolean(handoff?.active && !handoff?.completed && handoff?.overall_status !== "error")
+        || creativeMixInProgress(handoff, data?.output));
       if (resumable) {
         continueCreativeHandoff({ handoff_state: handoff?.handoff_state || "render_prep_needed", handoff, message: handoff?.message || "Resuming the automatic voice/render handoff…" })
           .catch((e) => phase6Message(e.message, "error-text"));
@@ -7424,6 +7448,7 @@
 
   async function continueCreativeHandoff(initialResult = null) {
     if (!activeCreativeOutputId) return;
+    if (creativeSimpleVideoKind() === "still") return;
     const outputId = activeCreativeOutputId;
     const token = ++creativeHandoffPollToken;
     let state = initialResult?.handoff_state || "rendering";
@@ -7520,10 +7545,16 @@
     const type = String(output?.studio_output_type || output?.platform_output_type || output?.format || "").trim();
     const render = String(output?.render_status || "").toLowerCase();
     if (render.includes("native photo")) return true;
-    if (platform === "TikTok" && /multi-photo|slideshow/i.test(type)) return true;
-    if (platform === "Instagram" && /carousel/i.test(type) && !/story/i.test(type)) return true;
-    if (platform === "Facebook" && /multi-image\s*post|photo\s*set/i.test(type) && !/story/i.test(type)) return true;
+    if (platform === "TikTok" && /multi-photo|slideshow|single photo/i.test(type)) return true;
+    if (platform === "Instagram" && /carousel|single image|feed post/i.test(type) && !/story|reel/i.test(type)) return true;
+    if (platform === "Facebook" && /multi-image\s*post|photo\s*set|single image|facebook post/i.test(type) && !/story|reel/i.test(type)) return true;
     return false;
+  }
+
+  function creativePublishSettled(output = activeCreativeOutput) {
+    const status = String(output?.output_status || "").trim();
+    const pub = String(output?.publish_status || "").trim();
+    return status === "Published" || pub === "Published";
   }
 
   function creativeCanApproveForPublishing(output = activeCreativeOutput) {
