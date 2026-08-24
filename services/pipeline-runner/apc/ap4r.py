@@ -127,7 +127,7 @@ def process_request(
                 "IG_Carousel_Error_Stage": "",
                 "IG_Carousel_Published_At": iso_utc(),
                 "IG_Carousel_Error_Message": "",
-                "IG_Carousel_Next_Retry_At": iso_utc(),
+                "IG_Carousel_Next_Retry_At": None,
                 "IG_Carousel_Published_Media_ID": media_id,
                 "IG_Carousel_Reconcile_Response_JSON": response_json(payload),
             },

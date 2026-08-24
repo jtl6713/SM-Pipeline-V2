@@ -1,5 +1,8 @@
+from datetime import timedelta
+
 from apc.assets import public_asset_url, r2_object_key, saved_public_url, source_image_url
-from apc.common import expected_child_count, publish_caption, reconcile_caption
+from apc.common import expected_child_count, is_due, publish_caption, reconcile_caption
+from carousel.timeutil import iso_utc, utc_now
 from apc.eligibility import (
     ap0c_eligibility_reason,
     ap1c_eligibility_reason,
@@ -45,8 +48,10 @@ def test_ap0c_gates():
 def test_later_stage_gates():
     assert ap1c_eligibility_reason(_record(IG_Carousel_Status="Assets Ready", Publish_Method="Automated", Auto_Publish_Enabled=True)) is None
     assert ap1c_eligibility_reason(_record(IG_Carousel_Status="Ready for Asset Prep", Publish_Method="Automated", Auto_Publish_Enabled=True)) == "carousel_assets_not_ready"
-    assert ap2c_eligibility_reason(_record(IG_Carousel_Status="Children Processing", IG_Carousel_Due_Now=1)) is None
-    assert ap2c_eligibility_reason(_record(IG_Carousel_Status="Children Processing", IG_Carousel_Due_Now=0)) == "not_due"
+    assert ap2c_eligibility_reason(_record(IG_Carousel_Status="Children Processing")) is None
+    assert ap2c_eligibility_reason(_record(IG_Carousel_Status="Children Processing", IG_Carousel_Due_Now=0)) is None
+    future = iso_utc(utc_now() + timedelta(minutes=10))
+    assert ap2c_eligibility_reason(_record(IG_Carousel_Status="Children Processing", IG_Carousel_Next_Retry_At=future)) == "not_due"
     assert ap3c_eligibility_reason(_record(IG_Carousel_Status="Children Ready", IG_Carousel_All_Children_Ready=1)) is None
     assert ap3c_eligibility_reason(_record(IG_Carousel_Status="Children Ready", IG_Carousel_Parent_Container_ID="1")) == "parent_already_created"
     assert ap3p_eligibility_reason(_record(IG_Carousel_Status="Parent Processing", IG_Carousel_Parent_Container_ID="1")) is None
@@ -56,6 +61,17 @@ def test_later_stage_gates():
     assert ap4r_eligibility_reason(_record(IG_Carousel_Status="Publishing", IG_Carousel_Published_Media_ID="1", IG_Carousel_Error_Stage="AP4C Parent Publishing")) == "already_has_published_media"
     assert ap5c_eligibility_reason(_record(IG_Carousel_Status="Publishing", IG_Carousel_Published_Media_ID="1")) is None
     assert ap5c_eligibility_reason(_record(IG_Carousel_Status="Publishing", IG_Carousel_Published_Media_ID="1", Platform_Post_URL="https://instagram.com/p/x/")) == "already_finalized"
+
+
+def test_is_due_ignores_stale_due_now_formula():
+    now = iso_utc()
+    future = iso_utc(utc_now() + timedelta(minutes=10))
+    past = iso_utc(utc_now() - timedelta(minutes=10))
+    assert is_due(_record(IG_Carousel_Due_Now=0)) is True
+    assert is_due(_record(IG_Carousel_Due_Now=0, IG_Carousel_Next_Retry_At=now)) is True
+    assert is_due(_record(IG_Carousel_Due_Now=0, IG_Carousel_Next_Retry_At=past)) is True
+    assert is_due(_record(IG_Carousel_Due_Now=0, IG_Carousel_Next_Retry_At=future)) is False
+    assert is_due(_record(IG_Carousel_Due_Now=1, IG_Carousel_Next_Retry_At=future)) is False
 
 
 def test_asset_and_caption_helpers():

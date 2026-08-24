@@ -129,7 +129,7 @@ def process_request(
                 "Publish_Retry_Eligible": False,
                 "IG_Carousel_Error_Stage": "",
                 "IG_Carousel_Error_Message": "",
-                "IG_Carousel_Next_Retry_At": iso_utc(),
+                "IG_Carousel_Next_Retry_At": None,
                 "IG_Carousel_Parent_Status": PARENT_IN_PROGRESS,
                 "IG_Carousel_Parent_Created_At": iso_utc(),
                 "IG_Carousel_Parent_Container_ID": parent_id,

@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import Any
 
 from asset.helpers import parse_int
-from carousel.timeutil import iso_utc, utc_now
+from carousel.timeutil import iso_utc, parse_utc, utc_now
 from render.fields import field, field_str, json_text
 
 RECORD_ID_PREFIX = "rec"
@@ -56,10 +56,12 @@ def setting_int(settings: Any, name: str, default: int) -> int:
 
 
 def is_due(record: dict[str, Any]) -> bool:
-    raw = field(record, "IG_Carousel_Due_Now")
-    if raw in (None, ""):
+    # IG_Carousel_Due_Now is a client-timezone formula. An ISO-Z "now" write can
+    # leave it at 0 for hours. Trust the retry stamp instead; blank means due.
+    stamp = parse_utc(field(record, "IG_Carousel_Next_Retry_At"))
+    if stamp is None:
         return True
-    return str(raw).strip() not in {"0", "false", "False"}
+    return stamp <= utc_now()
 
 
 def expected_child_count(record: dict[str, Any], ready_count: int = 0) -> int:

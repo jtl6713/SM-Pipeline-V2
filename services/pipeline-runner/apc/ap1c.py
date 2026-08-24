@@ -182,7 +182,7 @@ def process_request(
             "IG_Carousel_Error_Stage": "",
             "IG_Carousel_Children_JSON": f'{{"created_count":{created_count},"verified_at":"{iso_utc()}"}}',
             "IG_Carousel_Error_Message": "",
-            "IG_Carousel_Next_Retry_At": iso_utc(),
+            "IG_Carousel_Next_Retry_At": None,
             "IG_Carousel_Children_Ready_Count": 0,
             "IG_Carousel_Last_Completed_Stage": STAGE_AP1C,
         },

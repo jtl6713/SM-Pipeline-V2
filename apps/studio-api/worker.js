@@ -15727,7 +15727,7 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
     {
       stage: "ap2c",
       pulse: studioPulseAp2c,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Children Processing",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Children Processing")',
     },
     {
       stage: "ap3c",
@@ -15737,7 +15737,7 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
     {
       stage: "ap3p",
       pulse: studioPulseAp3p,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Parent Processing",{IG_Carousel_Parent_Container_ID}!="",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Parent Processing",{IG_Carousel_Parent_Container_ID}!="")',
     },
     {
       stage: "ap4c",
@@ -15747,12 +15747,12 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
     {
       stage: "ap4r",
       pulse: studioPulseAp4r,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}="",{IG_Carousel_Error_Stage}="AP4C Parent Publishing",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}="",{IG_Carousel_Error_Stage}="AP4C Parent Publishing")',
     },
     {
       stage: "ap5c",
       pulse: studioPulseAp5c,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}!="",{Platform_Post_URL}="",OR({IG_Carousel_Due_Now}=1,{IG_Carousel_Due_Now}=BLANK()))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}!="",{Platform_Post_URL}="")',
     },
   ];
   for (const scan of scans) {
