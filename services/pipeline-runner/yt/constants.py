@@ -1,0 +1,61 @@
+from publish.constants import (
+    YT0_SCENARIO_ID,
+    YTP1_SCENARIO_ID,
+    YTS1_SCENARIO_ID,
+    YTS2_SCENARIO_ID,
+    YTS3_SCENARIO_ID,
+)
+
+MAKE_YT0_ID = YT0_SCENARIO_ID
+MAKE_YTP1_ID = YTP1_SCENARIO_ID
+MAKE_YTS1_ID = YTS1_SCENARIO_ID
+MAKE_YTS2_ID = YTS2_SCENARIO_ID
+MAKE_YTS3_ID = YTS3_SCENARIO_ID
+
+MAKE_YT0_NAME = "YT0 - Validate and Prepare YouTube Package v1.4 - YTP1 Handoff"
+MAKE_YTP1_NAME = "YTP1 - Start YouTube Upload v1.4 - Public Publish Asset First"
+MAKE_YTS1_NAME = "YTS1 - Poll YouTube Upload Job v1.2 - Retryable Poll Errors + Terminal Job Failure"
+MAKE_YTS2_NAME = "YTS2 - Poll YouTube Processing and Optional Thumbnail v1.4 - Auto JPEG Under 2MB"
+MAKE_YTS3_NAME = "YTS3 - Finalize YouTube Publish v1.1 - Existing Setting Alignment"
+
+PUBLISH_LOCKED_BY = "YT0"
+DEFAULT_CATEGORY_ID = "22"
+DEFAULT_PRIVACY = "private"
+RETRY_MINUTES = 5
+POLL_RETRY_MINUTES = 1
+PROCESSING_RETRY_MINUTES = 5
+THUMBNAIL_MAX_BYTES = 1_900_000
+THUMBNAIL_QUALITY_FLOOR = 72
+
+STAGE_YT0 = "YT0"
+STAGE_YT1 = "YT1"
+STAGE_YT2 = "YT2"
+STAGE_YT4 = "YT4"
+STAGE_COMPLETE = "Complete"
+STAGE_TERMINAL = "Terminal Error"
+
+PACKAGE_VALIDATING = "Validating"
+PACKAGE_READY = "Ready"
+PACKAGE_UPLOADING = "Uploading"
+PACKAGE_COMPLETE = "Complete"
+PACKAGE_FAILED = "Failed"
+
+UPLOAD_READY = "Ready"
+UPLOAD_UPLOADING = "Uploading"
+UPLOAD_UPLOADED = "Uploaded"
+UPLOAD_FAILED = "Failed"
+
+PROCESSING_NOT_STARTED = "Not Started"
+PROCESSING_PROCESSING = "Processing"
+PROCESSING_SUCCEEDED = "Succeeded"
+PROCESSING_FAILED = "Failed"
+
+THUMB_PENDING = "Pending"
+THUMB_UPLOADED = "Uploaded"
+THUMB_NOT_NEEDED = "Not Needed"
+
+PUBLISH_STATUS_PUBLISHING = "Publishing"
+PUBLISH_STATUS_PUBLISHED = "Published"
+PUBLISH_STATUS_PUBLISHED_PRIVATELY = "Published Privately"
+PUBLISH_STATUS_FAILED = "Failed"
+OUTPUT_STATUS_PUBLISHED = "Published"

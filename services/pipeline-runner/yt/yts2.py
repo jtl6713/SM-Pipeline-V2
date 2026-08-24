@@ -1,0 +1,266 @@
+"""YTS2 — poll YouTube processing and optional thumbnail (Make 5830616)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from airtable.client import AirtableClient
+from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from carousel.timeutil import iso_utc
+from item4.settings import PipelineSettings
+from render.fields import field_str
+from yt.client import (
+    YouTubeUploaderClient,
+    contains_invalid_grant,
+    load_uploader_settings,
+    processing_failure_reason,
+    processing_status,
+)
+from yt.common import preview, response_json, retry_at, valid_record_id
+from yt.constants import (
+    MAKE_YTS2_ID,
+    MAKE_YTS2_NAME,
+    PROCESSING_FAILED,
+    PROCESSING_PROCESSING,
+    PROCESSING_RETRY_MINUTES,
+    PROCESSING_SUCCEEDED,
+    PUBLISH_STATUS_FAILED,
+    RETRY_MINUTES,
+    STAGE_TERMINAL,
+    STAGE_YT2,
+    STAGE_YT4,
+    THUMB_PENDING,
+    THUMB_UPLOADED,
+)
+from yt.eligibility import yts2_eligibility_reason
+
+
+def process_request(
+    *,
+    output_record_id: str | None,
+    test_run_id: str | None = None,
+    replace_transaction_id: str | None = None,
+    replace_fingerprint: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    result = preview(
+        stage="yts2",
+        make_id=MAKE_YTS2_ID,
+        make_name=MAKE_YTS2_NAME,
+        output_record_id=output_record_id,
+        test_run_id=test_run_id,
+    )
+    record_id = str(output_record_id or "").strip()
+    if not valid_record_id(record_id):
+        return {"processed": False, "reason": "missing_output_record_id", **result}
+
+    client = AirtableClient()
+    output = client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
+    if test_run_id and field_str(output, "Test_Run_ID") != test_run_id:
+        return {"processed": False, "reason": "test_run_mismatch", **result}
+
+    reason = yts2_eligibility_reason(
+        output,
+        replace_transaction_id=replace_transaction_id,
+        replace_fingerprint=replace_fingerprint,
+    )
+    video_id = field_str(output, "YouTube_Video_ID")
+    result["eligibility_reason"] = reason
+    result["video_id"] = video_id
+    if reason:
+        return {"processed": False, "reason": reason, **result}
+    if dry_run:
+        return {"processed": False, "dry_run": True, **result}
+
+    settings = load_uploader_settings(PipelineSettings(client))
+    uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
+    status_code, body = uploader.video_status(video_id)
+    status = processing_status(body).casefold()
+    result["http_status"] = status_code
+    result["processing_status"] = status
+    now = iso_utc()
+    thumb_status = field_str(output, "YouTube_Thumbnail_Status")
+    thumb_url = field_str(output, "Thumbnail_URL")
+
+    if 200 <= status_code <= 299 and status == "succeeded" and thumb_url and thumb_status.casefold() != "uploaded":
+        thumb_code, thumb_body = uploader.set_thumbnail(
+            video_id=video_id,
+            source_url=thumb_url,
+            fallback_source_url=field_str(output, "Clip_1_URL") or field_str(output, "Selected_Clip_1_URL"),
+        )
+        result["thumbnail_http_status"] = thumb_code
+        if 200 <= thumb_code <= 299:
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                {
+                    "YouTube_Stage": STAGE_YT4,
+                    "Publish_Error_Stage": "",
+                    "Publish_Error_Message": "",
+                    "Publish_Next_Retry_At": None,
+                    "YouTube_Error_Message": "",
+                    "YouTube_Response_JSON": response_json(thumb_body),
+                    "Publish_Retry_Eligible": False,
+                    "YouTube_Last_Checked_At": now,
+                    "YouTube_Thumbnail_Status": THUMB_UPLOADED,
+                    "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+                    "YouTube_Processing_Progress_Percent": 100,
+                },
+            )
+            result["needs_finalize"] = True
+            result["youtube_stage"] = STAGE_YT4
+            return {"processed": True, **result}
+        if contains_invalid_grant(thumb_body):
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                _auth_failure(
+                    now,
+                    stage="YTS2_AUTH",
+                    publish_message="YouTube authentication failed while uploading the thumbnail. Reauthorize the YouTube uploader service before retrying.",
+                    youtube_message=f"YTS2 thumbnail OAuth invalid_grant. Reauthorize the YouTube uploader service. HTTP {thumb_code}: {thumb_body}",
+                    body=thumb_body,
+                    extra={
+                        "YouTube_Thumbnail_Status": THUMB_PENDING,
+                        "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+                    },
+                ),
+            )
+            return {"processed": True, "terminal": True, **result}
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                "YouTube_Stage": STAGE_YT2,
+                "Publish_Locked_At": None,
+                "Publish_Locked_By": "",
+                "Publish_Error_Stage": "YTS2_THUMBNAIL",
+                "Publish_Error_Message": "Temporary error uploading YouTube thumbnail.",
+                "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+                "YouTube_Error_Message": f"YTS2 thumbnail upload/compression failed. HTTP {thumb_code}: {thumb_body}",
+                "YouTube_Response_JSON": response_json(thumb_body),
+                "Publish_Retry_Eligible": True,
+                "YouTube_Last_Checked_At": now,
+                "YouTube_Thumbnail_Status": THUMB_PENDING,
+                "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+            },
+        )
+        result["still_processing"] = True
+        return {"processed": True, "retry": True, **result}
+
+    if 200 <= status_code <= 299 and status == "succeeded" and (
+        thumb_status.casefold() == "uploaded" or not thumb_url
+    ):
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                "YouTube_Stage": STAGE_YT4,
+                "Publish_Next_Retry_At": None,
+                "YouTube_Error_Message": "",
+                "YouTube_Response_JSON": response_json(body),
+                "YouTube_Last_Checked_At": now,
+                "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+                "YouTube_Processing_Progress_Percent": 100,
+            },
+        )
+        result["needs_finalize"] = True
+        result["youtube_stage"] = STAGE_YT4
+        return {"processed": True, **result}
+
+    if 200 <= status_code <= 299 and status == "processing":
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                "Publish_Next_Retry_At": retry_at(PROCESSING_RETRY_MINUTES),
+                "YouTube_Response_JSON": response_json(body),
+                "YouTube_Last_Checked_At": now,
+                "YouTube_Processing_Status": PROCESSING_PROCESSING,
+            },
+        )
+        result["still_processing"] = True
+        return {"processed": True, **result}
+
+    if status in {"failed", "terminated"}:
+        failure, rejection = processing_failure_reason(body)
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                "YouTube_Stage": STAGE_TERMINAL,
+                "Publish_Status": PUBLISH_STATUS_FAILED,
+                "Publish_Locked_At": None,
+                "Publish_Locked_By": "",
+                "Publish_Error_Stage": "YTS2_PROCESSING",
+                "Publish_Error_Message": "YouTube processing failed or was terminated.",
+                "Publish_Next_Retry_At": None,
+                "YouTube_Error_Message": "YTS2 YouTube processing failed or was terminated.",
+                "YouTube_Response_JSON": response_json(body),
+                "Publish_Retry_Eligible": False,
+                "YouTube_Last_Checked_At": now,
+                "YouTube_Rejection_Reason": rejection,
+                "YouTube_Processing_Status": PROCESSING_FAILED,
+                "YouTube_Processing_Failure_Reason": failure,
+            },
+        )
+        return {"processed": True, "terminal": True, **result}
+
+    if contains_invalid_grant(body):
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            _auth_failure(
+                now,
+                stage="YTS2_AUTH",
+                publish_message="YouTube authentication failed. Reauthorize the YouTube uploader service before retrying.",
+                youtube_message=f"YTS2 OAuth invalid_grant. Reauthorize the YouTube uploader service. HTTP {status_code}: {body}",
+                body=body,
+            ),
+        )
+        return {"processed": True, "terminal": True, **result}
+
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        record_id,
+        {
+            "Publish_Locked_At": None,
+            "Publish_Locked_By": "",
+            "Publish_Error_Stage": "YTS2_POLL",
+            "Publish_Error_Message": "Temporary error polling YouTube processing status.",
+            "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+            "YouTube_Error_Message": f"YTS2 poll failed. HTTP {status_code}: {body}",
+            "YouTube_Response_JSON": response_json(body),
+            "Publish_Retry_Eligible": True,
+            "YouTube_Last_Checked_At": now,
+        },
+    )
+    result["still_processing"] = True
+    return {"processed": True, "retry": True, **result}
+
+
+def _auth_failure(
+    now: str,
+    *,
+    stage: str,
+    publish_message: str,
+    youtube_message: str,
+    body: Any,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    fields = {
+        "YouTube_Stage": STAGE_TERMINAL,
+        "Publish_Status": PUBLISH_STATUS_FAILED,
+        "Publish_Locked_At": None,
+        "Publish_Locked_By": "",
+        "Publish_Error_Stage": stage,
+        "Publish_Error_Message": publish_message,
+        "Publish_Next_Retry_At": None,
+        "YouTube_Error_Message": youtube_message,
+        "YouTube_Response_JSON": response_json(body),
+        "Publish_Retry_Eligible": False,
+        "YouTube_Last_Checked_At": now,
+    }
+    if extra:
+        fields.update(extra)
+    return fields

@@ -25,6 +25,11 @@ Make.com scenarios replaced by `services/pipeline-runner/` (Python on `pipeline.
 | FBS2 | 5816495 | `POST /stages/fbs2` | Make blueprint retained (inactive) | Python |
 | FBS3 | 5816502 | `POST /stages/fbs3` | Make blueprint retained (inactive) | Python |
 | FBS4 | 5816520 | `POST /stages/fbs4` | Make blueprint retained (inactive) | Python |
+| YT0 | 5823572 | `POST /stages/yt0` | Make blueprint retained (inactive) | Python |
+| YTP1 | 5830810 | `POST /stages/ytp1` | Make blueprint retained (inactive) | Python |
+| YTS1 | 5830609 | `POST /stages/yts1` | Make blueprint retained (inactive) | Python |
+| YTS2 | 5830616 | `POST /stages/yts2` | Make blueprint retained (inactive) | Python |
+| YTS3 | 5830623 | `POST /stages/yts3` | Make blueprint retained (inactive) | Python |
 
 Wave 2 cutover guide: `WAVE2_R3_R4_R5.md`  
 Wave 3: `WAVE3_RR1.md`, `WAVE3_P2.md`  
@@ -52,11 +57,12 @@ STAGE_BACKEND_AP1_IG=python
 STAGE_BACKEND_AP1_IGS=python
 STAGE_BACKEND_FBS1=python
 STAGE_BACKEND_FBS3=python
+STAGE_BACKEND_YT0=python
 PIPELINE_RUNNER_URL=https://pipeline.chicagoshining.com
 PIPELINE_RUNNER_SHARED_SECRET=<secret>
 ```
 
-Make scenarios **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, **5612096**, **5862882**, **5612664**, **5845193**, **5816409**, **5816495**, **5816502**, and **5816520** are **inactive**. Reactivate only for emergency rollback. A1S **5715530** stays Make on-demand and posts `poller_url` at `/hooks/a1p/<token>`. Facebook photos, TikTok, and YouTube publishers stay Make.
+Make scenarios **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, **5612096**, **5862882**, **5612664**, **5845193**, **5816409**, **5816495**, **5816502**, **5816520**, **5823572**, **5830810**, **5830609**, **5830616**, and **5830623** are **inactive**. Reactivate only for emergency rollback. A1S **5715530** stays Make on-demand and posts `poller_url` at `/hooks/a1p/<token>`. Facebook photos, Instagram carousel, and TikTok publishers stay Make. YT-ORCH **5823581** stays parked.
 
 ## Rollback
 

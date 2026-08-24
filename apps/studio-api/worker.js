@@ -723,6 +723,11 @@ export default {
         console.warn("facebook reel reconcile cron failed", error);
       }
       try {
+        await studioReconcileYoutubePublishes(env);
+      } catch (error) {
+        console.warn("youtube publish reconcile cron failed", error);
+      }
+      try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
       } catch (error) {
         console.warn("production continuation cron failed", error);
@@ -4143,6 +4148,12 @@ const STUDIO_FBS1_SCENARIO_ID = 5816409;
 const STUDIO_FBS2_SCENARIO_ID = 5816495;
 const STUDIO_FBS3_SCENARIO_ID = 5816502;
 const STUDIO_FBS4_SCENARIO_ID = 5816520;
+const STUDIO_YT0_SCENARIO_ID = 5823572;
+const STUDIO_YTP1_SCENARIO_ID = 5830810;
+const STUDIO_YTS1_SCENARIO_ID = 5830609;
+const STUDIO_YTS2_SCENARIO_ID = 5830616;
+const STUDIO_YTS3_SCENARIO_ID = 5830623;
+const STUDIO_YT_ORCH_SCENARIO_ID = 5823581;
 
 
 
@@ -4522,6 +4533,12 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_FBS2_SCENARIO_ID && pipelineStageBackend(env, "FBS1").mode === "python") return true;
   if (id === STUDIO_FBS3_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
   if (id === STUDIO_FBS4_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
+  if (id === STUDIO_YT0_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
+  if (id === STUDIO_YTP1_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
+  if (id === STUDIO_YTS1_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
+  if (id === STUDIO_YTS2_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
+  if (id === STUDIO_YTS3_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
+  if (id === STUDIO_YT_ORCH_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
   return false;
 }
 
@@ -12755,6 +12772,11 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: STUDIO_FBS2_SCENARIO_ID, key: "FBS2" },
   { id: STUDIO_FBS3_SCENARIO_ID, key: "FBS3" },
   { id: STUDIO_FBS4_SCENARIO_ID, key: "FBS4" },
+  { id: STUDIO_YT0_SCENARIO_ID, key: "YT0" },
+  { id: STUDIO_YTP1_SCENARIO_ID, key: "YTP1" },
+  { id: STUDIO_YTS1_SCENARIO_ID, key: "YTS1" },
+  { id: STUDIO_YTS2_SCENARIO_ID, key: "YTS2" },
+  { id: STUDIO_YTS3_SCENARIO_ID, key: "YTS3" },
   { id: 5806658, key: "TTD0" },
   ...STUDIO_AP0C_CHAIN_WEBHOOKS,
   ...STUDIO_FB0_CHAIN_WEBHOOKS,
@@ -14173,6 +14195,9 @@ function studioPublishDispatchTarget(record) {
   if (platform === "TikTok") {
     return { setting: "TTD0_WEBHOOK_URL", target: "TTD0" };
   }
+  if (platform === "YouTube") {
+    return { setting: "YT0_WEBHOOK_URL", target: "YT0" };
+  }
   return null;
 }
 
@@ -14718,6 +14743,82 @@ async function studioPulseFbs4(env, record) {
   };
 }
 
+async function studioPulseYtRecord(env, stagePath, target, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target };
+  const { response, payload } = await item4PulsePipelineStage(env, stagePath, {
+    output_record_id: recordId,
+  }, "YT0");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target,
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python ${target} returned HTTP ${response.status}`,
+    };
+  }
+  const run = payload?.details?.run || {};
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (run.reason || "python-skip") : undefined,
+    target,
+    backend: "python",
+    still_processing: Boolean(run.still_processing),
+    needs_upload: Boolean(run.needs_upload),
+    needs_poll: Boolean(run.needs_poll),
+    needs_processing_poll: Boolean(run.needs_processing_poll),
+    needs_finalize: Boolean(run.needs_finalize),
+    terminal: Boolean(run.terminal),
+    video_id: run.video_id,
+    job_id: run.job_id,
+    permalink: run.permalink,
+    youtube_stage: run.youtube_stage,
+  };
+}
+
+async function studioEnsureYoutubePublish(env, record) {
+  const stage = String(f(record, "YouTube_Stage") || "").trim();
+  const videoId = String(f(record, "YouTube_Video_ID") || "").trim();
+  if (/^complete$/i.test(stage) && videoId) {
+    return { ok: true, skipped: "already-complete", target: "YT0", backend: "python", video_id: videoId };
+  }
+  if (/^yt4$/i.test(stage)) return studioPulseYtRecord(env, "yts3", "YTS3", record);
+  if (/^yt2$/i.test(stage) && videoId) {
+    const processed = await studioPulseYtRecord(env, "yts2", "YTS2", record);
+    if (!processed.ok || processed.still_processing || !processed.needs_finalize) return processed;
+    return { ...await studioPulseYtRecord(env, "yts3", "YTS3", record), process: processed };
+  }
+  if (/^yt2$/i.test(stage)) {
+    const uploaded = await studioPulseYtRecord(env, "yts1", "YTS1", record);
+    if (!uploaded.ok || uploaded.still_processing || !uploaded.needs_processing_poll) return uploaded;
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const processed = await studioPulseYtRecord(env, "yts2", "YTS2", record);
+    if (!processed.ok || processed.still_processing || !processed.needs_finalize) {
+      return { ...processed, upload: uploaded };
+    }
+    return { ...await studioPulseYtRecord(env, "yts3", "YTS3", record), upload: uploaded, process: processed };
+  }
+  if (/^yt1$/i.test(stage)) {
+    const started = await studioPulseYtRecord(env, "ytp1", "YTP1", record);
+    if (!started.ok || started.skipped || !started.needs_poll) return started;
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const uploaded = await studioPulseYtRecord(env, "yts1", "YTS1", record);
+    if (!uploaded.ok || uploaded.still_processing || !uploaded.needs_processing_poll) {
+      return { ...uploaded, start: started };
+    }
+    return { ...uploaded, start: started };
+  }
+  const prepared = await studioPulseYtRecord(env, "yt0", "YT0", record);
+  if (!prepared.ok || prepared.skipped || prepared.terminal || !prepared.needs_upload) return prepared;
+  const started = await studioPulseYtRecord(env, "ytp1", "YTP1", record);
+  if (!started.ok || started.skipped || !started.needs_poll) return { ...started, prepare: prepared };
+  await new Promise((resolve) => setTimeout(resolve, 8000));
+  const uploaded = await studioPulseYtRecord(env, "yts1", "YTS1", record);
+  return { ...uploaded, prepare: prepared, start: started };
+}
+
 async function studioPulseAp1IgsPoll(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IGS-POLL" };
@@ -14757,6 +14858,7 @@ const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: 5864632 },
   "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
   "FBS3": { webhooks: [STUDIO_FBS3_SCENARIO_ID, STUDIO_FBS4_SCENARIO_ID], orchestrator: 5813561 },
+  "YT0": { webhooks: [STUDIO_YT0_SCENARIO_ID, STUDIO_YTP1_SCENARIO_ID, STUDIO_YTS1_SCENARIO_ID, STUDIO_YTS2_SCENARIO_ID, STUDIO_YTS3_SCENARIO_ID] },
   "TTD0": { webhooks: [5806658], orchestrator: 5806668 },
 });
 
@@ -14857,6 +14959,10 @@ async function studioDispatchApprovedPublishNow(env, record) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const polled = await studioPulseFbs4(env, record);
     return { ...polled, create: created, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "YT0" && pipelineStageBackend(env, "YT0").mode === "python") {
+    const pulsed = await studioEnsureYoutubePublish(env, record);
+    return { ...pulsed, ap0, armed: [], plan, record };
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
@@ -15114,6 +15220,68 @@ async function studioReconcileFacebookReels(env, options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("facebook reel poll reconcile failed", row.id, error);
       results.push({ id: row.id, stage: "fbs4", error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcileYoutubePublishes(env, options = {}) {
+  if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  const scans = [
+    {
+      stage: "yt0",
+      target: "YT0",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Platform_Post_ID}="",OR({YouTube_Stage}="",{YouTube_Stage}="YT0",AND({Publish_Retry_Eligible}=1,FIND("YT0",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+    {
+      stage: "ytp1",
+      target: "YTP1",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Stage}="YT1",{YouTube_Upload_Job_ID}="",{YouTube_Video_ID}="")',
+    },
+    {
+      stage: "yts1",
+      target: "YTS1",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="")',
+    },
+    {
+      stage: "yts2",
+      target: "YTS2",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Video_ID}!="")',
+    },
+    {
+      stage: "yts3",
+      target: "YTS3",
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT4",{YouTube_Video_ID}!="",{YouTube_Processing_Status}="Succeeded")',
+    },
+  ];
+  for (const scan of scans) {
+    let rows = [];
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit,
+        filterFormula: scan.formula,
+      });
+    } catch (error) {
+      console.warn(`youtube ${scan.stage} reconcile scan failed`, error);
+      continue;
+    }
+    for (const row of rows) {
+      try {
+        const pulsed = await studioPulseYtRecord(env, scan.stage, scan.target, row);
+        results.push({
+          id: row.id,
+          stage: scan.stage,
+          ok: pulsed?.ok !== false,
+          skipped: pulsed?.skipped || false,
+          still_processing: pulsed?.still_processing || false,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`youtube ${scan.stage} reconcile failed`, row.id, error);
+        results.push({ id: row.id, stage: scan.stage, error: message });
+      }
     }
   }
   return results;

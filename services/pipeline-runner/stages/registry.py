@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 from config import StageRequest, StageResult
-from stages import a1p, a2, a2b, a3, a4, ap0, ap1_ig, ap1_igs, ap1_igs_poll, c2, c3, c3b, c4, c5, c6, c7, c8, c9, fbs1, fbs2, fbs3, fbs4, i1, i2, i3, i4, p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1
+from stages import a1p, a2, a2b, a3, a4, ap0, ap1_ig, ap1_igs, ap1_igs_poll, c2, c3, c3b, c4, c5, c6, c7, c8, c9, fbs1, fbs2, fbs3, fbs4, i1, i2, i3, i4, p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1, yt0, ytp1, yts1, yts2, yts3
 from stages.letter import run as run_letter
 from stages._stub import run_stub
 
@@ -50,6 +50,11 @@ STAGE_NAMES: tuple[str, ...] = (
     "fbs2",
     "fbs3",
     "fbs4",
+    "yt0",
+    "ytp1",
+    "yts1",
+    "yts2",
+    "yts3",
     "publish_ig",
     "publish_fb",
     "publish_tt",
@@ -98,6 +103,11 @@ _IMPLEMENTED_STAGES = frozenset(
         "fbs2",
         "fbs3",
         "fbs4",
+        "yt0",
+        "ytp1",
+        "yts1",
+        "yts2",
+        "yts3",
     }
 )
 
@@ -142,6 +152,11 @@ _HANDLERS: dict[str, StageHandler] = {
     "fbs2": fbs2.run,
     "fbs3": fbs3.run,
     "fbs4": fbs4.run,
+    "yt0": yt0.run,
+    "ytp1": ytp1.run,
+    "yts1": yts1.run,
+    "yts2": yts2.run,
+    "yts3": yts3.run,
 }
 
 

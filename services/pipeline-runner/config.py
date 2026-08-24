@@ -70,6 +70,7 @@ def load_settings() -> dict[str, Any]:
         "stage_backend_ap1_igs": os.environ.get("STAGE_BACKEND_AP1_IGS", "make").strip().lower(),
         "stage_backend_fbs1": os.environ.get("STAGE_BACKEND_FBS1", "make").strip().lower(),
         "stage_backend_fbs3": os.environ.get("STAGE_BACKEND_FBS3", "make").strip().lower(),
+        "stage_backend_yt0": os.environ.get("STAGE_BACKEND_YT0", "make").strip().lower(),
         "a2b_webhook_url": os.environ.get("A2B_WEBHOOK_URL", ""),
         "a3_webhook_url": os.environ.get("A3_WEBHOOK_URL", ""),
         "a4_webhook_url": os.environ.get("A4_WEBHOOK_URL", ""),
