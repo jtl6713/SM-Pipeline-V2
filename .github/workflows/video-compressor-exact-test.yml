@@ -11,12 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Install FFmpeg validation tools
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
       - name: Submit exact Output 242 compression test
         id: submit
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE_URL='https://media.chicagoshining.com/studio/previews/recUFUsOZjtFpD9ea/current.mp4'
           API='https://compress.chicagoshining.com'
           PAYLOAD=$(cat <<'JSON'
           {
@@ -58,7 +63,7 @@ jobs:
             sleep 10
           done
           python - <<'PY'
-          import json, sys
+          import json
           d=json.load(open('status.json'))
           assert d.get('status')=='complete', d
           assert d.get('ok') is True, d
@@ -74,15 +79,25 @@ jobs:
           OUTPUT_URL=$(python -c "import json; print(json.load(open('status.json'))['output_url'])")
           curl --fail-with-body --location --silent --show-error "$OUTPUT_URL" -o compressed.mp4
           python - <<'PY'
-          import os, json
+          import os
           size=os.path.getsize('compressed.mp4')
           print('Downloaded bytes:', size)
           assert size > 100000, size
           assert size <= 20*1024*1024, size
           PY
-          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json compressed.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json compressed.mp4 | tee ffprobe.json
+          python - <<'PY'
+          import json
+          d=json.load(open('ffprobe.json'))
+          streams=d.get('streams') or []
+          assert any(s.get('codec_type')=='video' and s.get('codec_name')=='h264' for s in streams), d
+          fmt=d.get('format') or {}
+          assert float(fmt.get('duration') or 0) > 0, d
+          print('PASS independent ffprobe validation')
+          PY
 
       - name: Save evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: video-compressor-output-242-test
@@ -90,3 +105,5 @@ jobs:
             submit.json
             status.json
             compressed.mp4
+            ffprobe.json
+          if-no-files-found: ignore
