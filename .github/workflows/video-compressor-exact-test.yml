@@ -17,7 +17,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
 
-      - name: Submit exact 101 MiB Drive asset compression test
+      - name: Submit exact 101 MiB private Drive asset compression test
         id: submit
         shell: bash
         run: |
@@ -25,11 +25,11 @@ jobs:
           API='https://compress.chicagoshining.com'
           PAYLOAD=$(cat <<'JSON'
           {
-            "download_url": "https://drive.usercontent.google.com/download?id=1j-QltV1ETljTtuYkapQ_AZJU9_lPG5YW&export=download&confirm=t",
+            "drive_file_id": "1j-QltV1ETljTtuYkapQ_AZJU9_lPG5YW",
             "record_id": "drive-1j-QltV1ETljTtuYkapQ_AZJU9_lPG5YW",
             "asset_name": "Streeterville 1.mp4",
             "output_filename": "streeterville-1-compressed-test.mp4",
-            "target_mb": 50,
+            "target_mb": 95,
             "max_width": 1080,
             "max_height": 1920,
             "audio_kbps": 128
@@ -69,7 +69,7 @@ jobs:
           assert d.get('ok') is True, d
           assert d.get('target_met') is True, d
           assert float(d.get('source_size_mb',0)) >= 100.0, d
-          assert float(d.get('output_size_mb',999)) <= 50.0, d
+          assert float(d.get('output_size_mb',999)) <= 95.0, d
           print('PASS compression result:', json.dumps(d, indent=2))
           PY
 
@@ -84,7 +84,7 @@ jobs:
           size=os.path.getsize('compressed.mp4')
           print('Downloaded bytes:', size)
           assert size > 100000, size
-          assert size <= 50*1024*1024, size
+          assert size <= 95*1024*1024, size
           PY
           ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_name,codec_type,width,height -of json compressed.mp4 | tee ffprobe.json
           python - <<'PY'

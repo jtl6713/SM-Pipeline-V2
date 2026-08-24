@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 
 import requests
 from flask import Flask, jsonify, request, send_from_directory
+from google.auth.transport.requests import AuthorizedSession
+from google.oauth2 import service_account
 
 APP_PORT = int(os.environ.get("PORT", "3335"))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
@@ -21,6 +24,14 @@ DEFAULT_MAX_HEIGHT = int(os.environ.get("DEFAULT_MAX_HEIGHT", "1920"))
 DEFAULT_AUDIO_KBPS = int(os.environ.get("DEFAULT_AUDIO_KBPS", "128"))
 MAX_CONCURRENT_JOBS = max(1, int(os.environ.get("MAX_CONCURRENT_JOBS", "1")))
 DOWNLOAD_TIMEOUT_SECONDS = int(os.environ.get("DOWNLOAD_TIMEOUT_SECONDS", "900"))
+GOOGLE_DRIVE_CREDENTIALS_FILE = os.environ.get("GOOGLE_DRIVE_CREDENTIALS_FILE", "").strip()
+GOOGLE_DRIVE_CREDENTIALS_PATH = (
+    Path(GOOGLE_DRIVE_CREDENTIALS_FILE).expanduser().resolve()
+    if GOOGLE_DRIVE_CREDENTIALS_FILE
+    else None
+)
+GOOGLE_DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+GOOGLE_DRIVE_FILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
 
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -70,13 +81,53 @@ def validate_download_url(url):
         return False
 
 
-def download_file(url, dest):
+def validate_drive_file_id(file_id):
+    return bool(GOOGLE_DRIVE_FILE_ID_PATTERN.fullmatch(file_id or ""))
+
+
+def google_drive_configured():
+    return bool(GOOGLE_DRIVE_CREDENTIALS_PATH and GOOGLE_DRIVE_CREDENTIALS_PATH.is_file())
+
+
+def write_response_body(response, dest):
+    with open(dest, "wb") as handle:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                handle.write(chunk)
+
+
+def download_url_file(url, dest):
     with requests.get(url, stream=True, timeout=(30, DOWNLOAD_TIMEOUT_SECONDS), allow_redirects=True) as response:
         response.raise_for_status()
-        with open(dest, "wb") as handle:
-            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    handle.write(chunk)
+        write_response_body(response, dest)
+
+
+def download_google_drive_file(file_id, dest):
+    if not google_drive_configured():
+        raise RuntimeError("Google Drive credentials are not configured")
+
+    try:
+        credentials = service_account.Credentials.from_service_account_file(
+            str(GOOGLE_DRIVE_CREDENTIALS_PATH),
+            scopes=[GOOGLE_DRIVE_READ_SCOPE],
+        )
+    except Exception as exc:
+        raise RuntimeError("Google Drive authentication failed") from exc
+
+    session = AuthorizedSession(credentials)
+    try:
+        response = session.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            params={"alt": "media", "supportsAllDrives": "true"},
+            stream=True,
+            timeout=(30, DOWNLOAD_TIMEOUT_SECONDS),
+        )
+        with response:
+            if not response.ok:
+                raise RuntimeError(f"Google Drive download failed (HTTP {response.status_code})")
+            write_response_body(response, dest)
+    finally:
+        session.close()
 
 
 def ffprobe_json(path):
@@ -176,7 +227,6 @@ def cleanup_passlogs(passlog_path):
 
 def process_job(job_id, payload):
     with worker_slots:
-        download_url = payload["download_url"]
         target_mb = payload["target_mb"]
         max_width = payload["max_width"]
         max_height = payload["max_height"]
@@ -194,13 +244,17 @@ def process_job(job_id, payload):
 
         try:
             set_job(job_id, status="downloading", progress=5)
-            download_file(download_url, input_path)
+            if payload["source_type"] == "google_drive":
+                download_google_drive_file(payload["drive_file_id"], input_path)
+            else:
+                download_url_file(payload["download_url"], input_path)
             source = probe_media(input_path)
             source_mb = round(source["size_bytes"] / 1024 / 1024, 2)
             set_job(
                 job_id,
                 status="compressing",
                 progress=20,
+                source_size_bytes=source["size_bytes"],
                 source_size_mb=source_mb,
                 duration_seconds=round(source["duration_seconds"], 2),
                 source_width=source["width"],
@@ -283,7 +337,7 @@ def health():
     return jsonify({
         "ok": True,
         "service": "chicagoshining-local-video-compressor",
-        "version": "1.0.1",
+        "version": "1.1.0",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffprobe": shutil.which("ffprobe") is not None,
         "port": APP_PORT,
@@ -291,6 +345,7 @@ def health():
         "max_concurrent_jobs": MAX_CONCURRENT_JOBS,
         "api_key_required": bool(API_KEY),
         "async_jobs": True,
+        "google_drive_private_downloads": google_drive_configured(),
     })
 
 
@@ -298,8 +353,20 @@ def health():
 def compress():
     payload = request.get_json(force=True, silent=True) or {}
     download_url = str(payload.get("download_url") or "").strip()
-    if not validate_download_url(download_url):
-        return jsonify({"ok": False, "error": "Missing or invalid download_url"}), 400
+    drive_file_id = str(payload.get("drive_file_id") or "").strip()
+
+    if download_url and drive_file_id:
+        return jsonify({"ok": False, "error": "Provide exactly one of download_url or drive_file_id"}), 400
+    if download_url and not validate_download_url(download_url):
+        return jsonify({"ok": False, "error": "Invalid download_url"}), 400
+    if drive_file_id and not validate_drive_file_id(drive_file_id):
+        return jsonify({"ok": False, "error": "Invalid drive_file_id"}), 400
+    if not download_url and not drive_file_id:
+        return jsonify({"ok": False, "error": "Missing download_url or drive_file_id"}), 400
+    if drive_file_id and not google_drive_configured():
+        return jsonify({"ok": False, "error": "Private Google Drive downloads are not configured"}), 503
+
+    source_type = "google_drive" if drive_file_id else "download_url"
 
     target_mb = clamp(payload.get("target_mb"), DEFAULT_TARGET_MB, 10, 99, float)
     max_width = clamp(payload.get("max_width"), DEFAULT_MAX_WIDTH, 320, 3840, int)
@@ -323,10 +390,13 @@ def compress():
             "created_at": now,
             "updated_at": now,
             "target_mb": target_mb,
+            "source_type": source_type,
         }
 
     worker_payload = {
         "download_url": download_url,
+        "drive_file_id": drive_file_id,
+        "source_type": source_type,
         "target_mb": target_mb,
         "max_width": max_width,
         "max_height": max_height,

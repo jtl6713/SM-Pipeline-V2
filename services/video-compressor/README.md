@@ -4,15 +4,15 @@ Free local FFmpeg replacement for the CloudConvert step used by A1 oversized-vid
 
 ## Status
 
-Source-controlled implementation only. Do **not** retire or disable the current CloudConvert A1 path until this service is deployed locally and the exact A1 submit/poll replacement is validated on a disposable/test-only asset.
+The service is deployed locally and exposed through its permanent Cloudflare route. Do **not** retire or disable the current CloudConvert A1 path until the exact A1 submit/poll replacement is validated on a disposable/test-only asset.
 
 ## Runtime
 
 - Runtime path: `D:\Content Creation\ChicagoShining Pipeline\Services\Video_Compressor`
 - Port: `3335`
-- Proposed public hostname: `https://compress.chicagoshining.com`
+- Public hostname: `https://compress.chicagoshining.com`
 - Requires: Python 3, FFmpeg, FFprobe
-- Python dependencies: Flask, requests
+- Python dependencies: Flask, requests, google-auth
 
 ## Contract
 
@@ -22,7 +22,7 @@ Returns service readiness including FFmpeg/FFprobe availability.
 
 ### `POST /compress`
 
-Small JSON control request only. The original oversized file is downloaded by the local service from the supplied URL; it is **not** uploaded through Cloudflare.
+Small JSON control request only. The original oversized file is downloaded by the local service from either an HTTPS URL or an authenticated private Google Drive file ID; it is **not** uploaded through Cloudflare.
 
 Example:
 
@@ -37,6 +37,19 @@ Example:
   "audio_kbps": 128
 }
 ```
+
+For a private Google Drive original, provide `drive_file_id` instead of `download_url`:
+
+```json
+{
+  "drive_file_id": "1j-QltV1ETljTtuYkapQ_AZJU9_lPG5YW",
+  "record_id": "recXXXXXXXXXXXXXX",
+  "asset_name": "Streeterville 1.mp4",
+  "target_mb": 95
+}
+```
+
+Exactly one source field is required. Existing `download_url` submissions remain supported.
 
 Returns HTTP 202:
 
@@ -83,6 +96,19 @@ Deletes the local completed output after Google Drive replacement has been verif
 - if the first output is still above target, a bounded second encode corrects the bitrate
 - the original downloaded source is always removed from local work storage after the job finishes
 - completed output remains until A1 verifies Drive upload and calls cleanup
+- private Drive downloads use the read-only Drive API scope and never make the original public
+
+## Private Google Drive credential
+
+Store the service-account JSON only in the live runtime at:
+
+```text
+D:\Content Creation\ChicagoShining Pipeline\Services\Video_Compressor\credentials\google-drive-service-account.json
+```
+
+Do not copy it into the Git checkout. The repository ignores the credentials directory and the deployment installer preserves it in place without copying it into deployment backups. `start-video-compressor.bat` points `GOOGLE_DRIVE_CREDENTIALS_FILE` at this local file and sets the public response base to `https://compress.chicagoshining.com` by default; explicit environment values can override either setting.
+
+Share only the private ingestion folder/files needed by the compressor with the service account. Writer access is sufficient, while the application itself requests only read-only Drive API access for downloads.
 
 ## Local install
 
@@ -105,7 +131,7 @@ Verify:
 Invoke-RestMethod http://localhost:3335/health
 ```
 
-Expected: `ok=true`, `ffmpeg=true`, `ffprobe=true`.
+Expected for the private-Drive-ready runtime: `ok=true`, `ffmpeg=true`, `ffprobe=true`, and `google_drive_private_downloads=true`. Public health remains available even when the credential is absent.
 
 ## A1 cutover plan
 
@@ -115,7 +141,7 @@ Keep CloudConvert live while validating the new path.
 2. Add the stable Cloudflare hostname `compress.chicagoshining.com -> http://localhost:3335`.
 3. Verify local and public `/health`.
 4. Clone/repair the existing A1 submit stage so its input/output state contract remains exact-record-addressable.
-5. Replace CloudConvert submit with `POST /compress` using the same oversized asset's download URL and exact Airtable record ID.
+5. Replace CloudConvert submit with `POST /compress` using the same oversized asset's private Drive file ID and exact Airtable record ID.
 6. Store the local `job_id` in the same bounded test record/state used for polling.
 7. Replace CloudConvert polling with `GET /jobs/<job_id>`.
 8. On `complete`, upload `output_url` to the existing Google Drive ingestion destination.

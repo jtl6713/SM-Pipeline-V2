@@ -72,14 +72,20 @@ if (Test-Path -LiteralPath $RuntimeRoot -PathType Container) {
     New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $backup = Join-Path $BackupRoot $stamp
-    Copy-Item -LiteralPath $RuntimeRoot -Destination $backup -Recurse -Force
+    New-Item -ItemType Directory -Force -Path $backup | Out-Null
+    Get-ChildItem -LiteralPath $RuntimeRoot -Force | ForEach-Object {
+        if ($_.Name -ne 'credentials') {
+            Copy-Item -LiteralPath $_.FullName -Destination $backup -Recurse -Force
+        }
+    }
     Write-Host "Backup: $backup" -ForegroundColor Green
+    Write-Host 'Local credentials were intentionally not copied into the deployment backup.' -ForegroundColor DarkGray
 }
 
 Write-Step 'Install source without runtime artifacts'
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 
-$runtimePreserve = @('.venv','venv','work','public')
+$runtimePreserve = @('.venv','venv','work','public','credentials')
 Get-ChildItem -LiteralPath $RuntimeRoot -Force -ErrorAction SilentlyContinue | ForEach-Object {
     if ($runtimePreserve -notcontains $_.Name) {
         Remove-Item -LiteralPath $_.FullName -Recurse -Force
@@ -89,6 +95,14 @@ Get-ChildItem -LiteralPath $RuntimeRoot -Force -ErrorAction SilentlyContinue | F
 Get-ChildItem -LiteralPath $SourceRoot -Force | ForEach-Object {
     if ($_.Name -in @('README.md','.env.example')) { return }
     Copy-Item -LiteralPath $_.FullName -Destination $RuntimeRoot -Recurse -Force
+}
+
+$DriveCredential = Join-Path $RuntimeRoot 'credentials\google-drive-service-account.json'
+if (Test-Path -LiteralPath $DriveCredential -PathType Leaf) {
+    Write-Host 'PASS - Preserved private Google Drive service-account credential.' -ForegroundColor Green
+}
+else {
+    Write-Warning 'Private Google Drive downloads will remain unavailable until the service-account JSON is installed under runtime credentials.'
 }
 
 Write-Step 'Create/update Python virtual environment'
