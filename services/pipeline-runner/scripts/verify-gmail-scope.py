@@ -15,8 +15,7 @@ SERVICE_DIR = Path(
         r"D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service",
     )
 )
-load_dotenv(SERVICE_DIR / ".env")
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+load_dotenv(SERVICE_DIR / ".env", override=True)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
