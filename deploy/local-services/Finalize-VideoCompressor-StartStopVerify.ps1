@@ -30,7 +30,6 @@ if (-not (Test-Path -LiteralPath $VerifyPs1 -PathType Leaf)) { throw "Live verif
 if (-not (Test-Path -LiteralPath (Join-Path $RuntimeRoot 'start-video-compressor.bat') -PathType Leaf)) { throw 'Video Compressor runtime startup BAT is missing.' }
 New-Item -ItemType Directory -Force -Path $HelperRoot | Out-Null
 
-# Managed helpers. START does not kill an already-healthy compressor; it only starts one if 3335 is absent.
 $startHelper = Join-Path $HelperRoot '90-video-compressor-local.ps1'
 $stopHelper = Join-Path $HelperRoot '90-stop-video-compressor.ps1'
 $startText = @'
@@ -102,7 +101,13 @@ $startBat = $startCandidates | Sort-Object @{Expression={ if ($_.Name -match '(?
 Backup-File $startBat.FullName
 $start = Read-All $startBat.FullName
 if ($start -notmatch '90-video-compressor-local\.ps1|3335') {
-    $block = "`r`nREM ============================================================`r`nREM $Marker`r`nREM ============================================================`r`nstart \"\" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File \"%~dp0_startup_helpers\90-video-compressor-local.ps1\"`r`n"
+    $block = @'
+
+REM ============================================================
+REM SMV2 VIDEO COMPRESSOR MANAGED EXTENSION
+REM ============================================================
+start "" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0_startup_helpers\90-video-compressor-local.ps1"
+'@
     $pausePattern = '(?im)^\s*pause\s*$'
     if ($start -match $pausePattern) {
         $start = [regex]::Replace($start,$pausePattern,($block + "`r`npause"),1)
@@ -121,7 +126,13 @@ $stopBat = $stopCandidates | Sort-Object @{Expression={ if ($_.Name -match '(?i)
 Backup-File $stopBat.FullName
 $stop = Read-All $stopBat.FullName
 if ($stop -notmatch '90-stop-video-compressor\.ps1|3335') {
-    $block = "`r`nREM ============================================================`r`nREM $Marker`r`nREM ============================================================`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0_startup_helpers\90-stop-video-compressor.ps1\"`r`n"
+    $block = @'
+
+REM ============================================================
+REM SMV2 VIDEO COMPRESSOR MANAGED EXTENSION
+REM ============================================================
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0_startup_helpers\90-stop-video-compressor.ps1"
+'@
     $pausePattern = '(?im)^\s*pause\s*$'
     if ($stop -match $pausePattern) {
         $stop = [regex]::Replace($stop,$pausePattern,($block + "`r`npause"),1)
