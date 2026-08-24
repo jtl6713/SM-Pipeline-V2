@@ -1,0 +1,126 @@
+name: Test Local Video Compressor
+
+on:
+  push:
+    paths:
+      - 'services/video-compressor/**'
+      - '.github/workflows/test-video-compressor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install FFmpeg and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install -r services/video-compressor/requirements.txt
+
+      - name: Static Python validation
+        run: |
+          python -m py_compile services/video-compressor/app.py
+
+      - name: Generate synthetic source video
+        run: |
+          mkdir -p /tmp/compressor-source
+          ffmpeg -y \
+            -f lavfi -i testsrc2=size=1920x1080:rate=30 \
+            -f lavfi -i sine=frequency=1000:sample_rate=48000 \
+            -t 24 \
+            -c:v libx264 -preset ultrafast -b:v 8M \
+            -c:a aac -b:a 192k \
+            /tmp/compressor-source/source.mp4
+          ls -lh /tmp/compressor-source/source.mp4
+
+      - name: Start source HTTP server and compressor
+        working-directory: services/video-compressor
+        env:
+          PORT: '3335'
+          PUBLIC_BASE_URL: 'http://127.0.0.1:3335'
+          DEFAULT_TARGET_MB: '10'
+          MAX_CONCURRENT_JOBS: '1'
+        run: |
+          python -m http.server 8000 --directory /tmp/compressor-source >/tmp/source-http.log 2>&1 &
+          echo $! >/tmp/source-http.pid
+          python app.py >/tmp/video-compressor.log 2>&1 &
+          echo $! >/tmp/video-compressor.pid
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3335/health >/tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/video-compressor.log
+          exit 1
+
+      - name: Submit and validate compression job
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+
+          payload = json.dumps({
+              'download_url': 'http://127.0.0.1:8000/source.mp4',
+              'record_id': 'ci-local-compressor',
+              'asset_name': 'source.mp4',
+              'target_mb': 10,
+              'max_width': 1080,
+              'max_height': 1920,
+              'audio_kbps': 96,
+          }).encode()
+
+          req = urllib.request.Request(
+              'http://127.0.0.1:3335/compress',
+              data=payload,
+              headers={'Content-Type': 'application/json'},
+              method='POST',
+          )
+          with urllib.request.urlopen(req, timeout=10) as response:
+              created = json.load(response)
+
+          job_id = created['job_id']
+          terminal = None
+          for _ in range(240):
+              with urllib.request.urlopen(f'http://127.0.0.1:3335/jobs/{job_id}', timeout=10) as response:
+                  state = json.load(response)
+              if state['status'] in {'complete', 'failed'}:
+                  terminal = state
+                  break
+              time.sleep(1)
+
+          if terminal is None:
+              raise SystemExit('Compression job did not reach terminal state')
+          print(json.dumps(terminal, indent=2))
+          if terminal['status'] != 'complete':
+              raise SystemExit('Compression failed: ' + terminal.get('error', 'unknown'))
+          if not terminal.get('target_met'):
+              raise SystemExit('Compression completed but target size was not met')
+          if terminal.get('output_size_mb', 999) > 10:
+              raise SystemExit('Output exceeded 10 MB test target')
+
+          with urllib.request.urlopen(terminal['output_url'], timeout=30) as response:
+              data = response.read()
+          if len(data) < 100000:
+              raise SystemExit('Output file is unexpectedly small')
+          print(f'PASS: compressed output bytes={len(data)}')
+          PY
+
+      - name: Show compressor log on failure
+        if: failure()
+        run: |
+          cat /tmp/video-compressor.log || true
+          cat /tmp/source-http.log || true
