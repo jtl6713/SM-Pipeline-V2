@@ -209,3 +209,7 @@ API edge retry Pages deploy: 2026-08-23 - Studio API client retries Cloudflare H
 
 TikTok Single Photo Pages deploy: 2026-08-23 - Studio no longer rewrites TikTok Single Photo to Video Draft. UI 0.6.125-tiktok-single-photo.
 
+Friendly dates Pages deploy: 2026-08-24 - Studio timestamps show profile timezone (e.g. Aug-24-2026 17:29 EDT). UI 0.6.128-cst-dates.
+
+Sortable Ideas Pages deploy: 2026-08-24 - Ideas table column headers sort Idea, Status, Type, Platforms, Structure, and Production. UI 0.6.129-sortable-ideas.
+

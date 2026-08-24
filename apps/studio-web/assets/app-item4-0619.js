@@ -89,6 +89,7 @@
   let item4CropRequestId = null;
   let pipelineOutputs = [];
   let pipelineSort = { key: "output", dir: "desc" };
+  let ideasSort = { key: "idea", dir: "desc" };
   const pipelineGroupOpen = new Map();
   let pipelineViewFilter = "all";
   let pipelineOpenSingleOnLoad = false;
@@ -107,7 +108,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.128-cst-dates";
+  const BUILD_ID = "item4-0.6.129-sortable-ideas";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -5848,14 +5849,82 @@
   }
 
 
+  function ideaStructureLabel(record) {
+    if (record?.carousel_slide_count) return `${record.carousel_slide_count} slides`;
+    if (record?.video_clip_count) return `${record.video_clip_count} clips`;
+    return "AI / default";
+  }
+
+  function ideaProductionLabel(record) {
+    return `VO: ${record?.include_voiceover || "—"} · Music: ${record?.include_background_music || "—"} · Thumbnail: ${record?.include_thumbnail || "—"}`;
+  }
+
+  function ideaSortValue(record, key) {
+    if (key === "idea") {
+      const ms = parseStudioDate(record?.created_at)?.getTime();
+      if (Number.isFinite(ms)) return ms;
+      return String(record?.title || record?.candidate_id || "");
+    }
+    if (key === "status") return String(ideaStatusLabel(record));
+    if (key === "type") return String(record?.content_type || "");
+    if (key === "platforms") return Array.isArray(record?.platforms) ? record.platforms.join(", ") : "";
+    if (key === "structure") return ideaStructureLabel(record);
+    if (key === "production") return ideaProductionLabel(record);
+    return "";
+  }
+
+  function compareIdeaRows(a, b, key) {
+    if (key === "idea") {
+      const ta = parseStudioDate(a?.created_at)?.getTime();
+      const tb = parseStudioDate(b?.created_at)?.getTime();
+      if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+      if (Number.isFinite(ta) && !Number.isFinite(tb)) return 1;
+      if (!Number.isFinite(ta) && Number.isFinite(tb)) return -1;
+    }
+    const av = ideaSortValue(a, key);
+    const bv = ideaSortValue(b, key);
+    if (typeof av === "number" && typeof bv === "number") return av - bv;
+    return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function sortedIdeaRecords(records) {
+    const dir = ideasSort.dir === "desc" ? -1 : 1;
+    const key = ideasSort.key || "idea";
+    return [...records].sort((a, b) => {
+      const primary = compareIdeaRows(a, b, key);
+      if (primary) return dir * primary;
+      return dir * compareIdeaRows(a, b, "idea");
+    });
+  }
+
+  function ideaSortHeader(key, label) {
+    const active = ideasSort.key === key;
+    const arrow = !active ? "↕" : ideasSort.dir === "asc" ? "↑" : "↓";
+    return `<th><button type="button" class="table-sort${active ? " is-active" : ""}" data-idea-sort="${escapeHtml(key)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span aria-hidden="true">${arrow}</span></button></th>`;
+  }
+
   function renderIdeasTable(target, records) {
     if (!target) return;
     if (!records.length) {
       target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong><br><span class="subtle">Studio is connected; the Idea Candidates table is simply empty after the recent reset/test cycle.</span></div>';
       return;
     }
-    target.innerHTML = `<table class="data-table idea-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th>Production</th><th></th></tr></thead><tbody>${records.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${r.carousel_slide_count ? `${value(r.carousel_slide_count)} slides` : r.video_clip_count ? `${value(r.video_clip_count)} clips` : "AI / default"}</td><td><div class="subtle">VO: ${value(r.include_voiceover)} · Music: ${value(r.include_background_music)} · Thumbnail: ${value(r.include_thumbnail)}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
-    const byId = new Map(records.map((record) => [record.id, record]));
+    const sorted = sortedIdeaRecords(records);
+    target.innerHTML = `<table class="data-table idea-table"><thead><tr>${ideaSortHeader("idea", "Idea")}${ideaSortHeader("status", "Status")}${ideaSortHeader("type", "Type")}${ideaSortHeader("platforms", "Platforms")}${ideaSortHeader("structure", "Structure")}${ideaSortHeader("production", "Production")}<th></th></tr></thead><tbody>${sorted.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
+    target.querySelectorAll("[data-idea-sort]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const key = button.dataset.ideaSort;
+        if (ideasSort.key === key) {
+          ideasSort.dir = ideasSort.dir === "asc" ? "desc" : "asc";
+        } else {
+          ideasSort.key = key;
+          ideasSort.dir = key === "idea" ? "desc" : "asc";
+        }
+        renderIdeasTable(target, records);
+      });
+    });
+    const byId = new Map(sorted.map((record) => [record.id, record]));
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
       button.addEventListener("click", () => {
         const idea = byId.get(button.dataset.ideaId);
