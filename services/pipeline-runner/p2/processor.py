@@ -55,6 +55,15 @@ def _recheck(client: AirtableClient, formula: str) -> dict[str, Any] | None:
 
 def _trigger_p3(*, content_record_id: str, test_run_id: str, source: str) -> dict[str, Any]:
     settings = load_settings()
+    if str(settings.get("stage_backend_p3") or "make") == "python":
+        from p3.processor import process_request as process_p3
+
+        result = process_p3(
+            content_item_record_id=content_record_id,
+            test_run_id=test_run_id or None,
+        )
+        return {"backend": "python", "source": source, **result}
+
     webhook_url = str(settings.get("p3_webhook_url") or P3_WEBHOOK_URL).strip()
     response = requests.post(
         webhook_url,
@@ -68,7 +77,7 @@ def _trigger_p3(*, content_record_id: str, test_run_id: str, source: str) -> dic
         },
         timeout=40,
     )
-    return {"status_code": response.status_code, "body": response.text[:300]}
+    return {"backend": "make", "status_code": response.status_code, "body": response.text[:300]}
 
 
 def _voiceover_fields_ready(item: dict[str, Any]) -> bool:

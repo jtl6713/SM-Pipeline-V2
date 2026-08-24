@@ -4355,6 +4355,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === PHASE6_R5_SCENARIO_ID && pipelineStageBackend(env, "R5").mode === "python") return true;
   if (id === PHASE6_RR1_SCENARIO_ID && pipelineStageBackend(env, "RR1").mode === "python") return true;
   if (id === ITEM4_P2_SCENARIO_ID && pipelineStageBackend(env, "P2").mode === "python") return true;
+  if (id === ITEM4_P3_SCENARIO_ID && pipelineStageBackend(env, "P3").mode === "python") return true;
   return false;
 }
 
@@ -4523,6 +4524,23 @@ async function item4PulseP2Python(env, contentItemId, requestRecord = {}, option
     throw new HttpError(
       response.status,
       payload?.message || payload?.error || `Python P2 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function item4PulseP3Python(env, contentItemId, requestRecord = {}, options = {}) {
+  const testRunId = String(f(requestRecord, "Test_Run_ID") || options.testRunId || "").trim();
+  const body = {
+    content_item_record_id: contentItemId,
+    test_run_id: testRunId || undefined,
+  };
+  if (options.dryRun) body.extra = { dry_run: true };
+  const { response, payload } = await item4PulsePipelineStage(env, "p3", body, "P3");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python P3 failed (${response.status})`
     );
   }
   return payload;
@@ -8142,6 +8160,15 @@ async function pulseStudioP2Handoff(env, contentItemId, requestRecord) {
 
 async function pulseStudioP3Handoff(env, contentItemId, requestRecord) {
   const testRunId = String(f(requestRecord, "Test_Run_ID") || "").trim();
+  if (pipelineStageBackend(env, "P3").mode === "python") {
+    try {
+      const result = await item4PulseP3Python(env, contentItemId, requestRecord);
+      return { ok: true, status: 200, backend: "python", result };
+    } catch (error) {
+      console.warn("P3 python pulse failed", error);
+      return { ok: false, status: error instanceof HttpError ? error.status : 500, backend: "python" };
+    }
+  }
   try { await phase6EnsureScenarioActive(env, ITEM4_P3_SCENARIO_ID); } catch (error) {
     console.warn("P3 webhook could not be armed before pulse", error);
   }
@@ -12530,6 +12557,24 @@ async function pulseStudioP3ForPlannedOutputs(env) {
     return Array.isArray(linked) ? linked.filter(Boolean) : [];
   }))].slice(0, 8);
   if (!parentIds.length) return [{ key: "P3", skipped: "no_work" }];
+  if (pipelineStageBackend(env, "P3").mode === "python") {
+    const pulses = [];
+    for (const contentItemId of parentIds) {
+      try {
+        const result = await item4PulseP3Python(env, contentItemId);
+        pulses.push({ key: "P3", parent: contentItemId, ok: true, backend: "python", result });
+      } catch (error) {
+        pulses.push({
+          key: "P3",
+          parent: contentItemId,
+          ok: false,
+          backend: "python",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return pulses;
+  }
   try { await phase6EnsureScenarioActive(env, ITEM4_P3_SCENARIO_ID); } catch (error) {
     console.warn("P3 planned-output arm failed", error);
   }

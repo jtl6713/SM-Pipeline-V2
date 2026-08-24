@@ -1,4 +1,5 @@
 from p2.elevenlabs_client import voice_id_for_name
+from p2.processor import _trigger_p3
 from p2.formulas import (
     p2_exact_content_formula,
     recheck_silent_thumbnail,
@@ -64,3 +65,19 @@ def test_thumbnail_prompt_suffix():
     prompt = build_thumbnail_prompt("Rainy Chicago skyline")
     assert "Rainy Chicago skyline" in prompt
     assert "IMPORTANT BRANDING RULE" in prompt
+
+
+def test_p2_trigger_p3_uses_local_python_when_flagged(monkeypatch):
+    from config import load_settings
+
+    monkeypatch.setenv("STAGE_BACKEND_P3", "python")
+    load_settings.cache_clear()
+
+    def fake_process(**kwargs):
+        return {"processed": True, "route": "studio_parent", **kwargs}
+
+    monkeypatch.setattr("p3.processor.process_request", fake_process)
+    result = _trigger_p3(content_record_id="recP3TEST", test_run_id="t1", source="unit")
+    assert result["backend"] == "python"
+    assert result["content_item_record_id"] == "recP3TEST"
+    load_settings.cache_clear()

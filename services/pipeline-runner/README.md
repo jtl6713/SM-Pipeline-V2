@@ -21,13 +21,13 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Make until `STAGE_BACKEND_R4=python` |
 | **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | `STAGE_BACKEND_R5=python` |
 | **RR1** | Full (`5576363` — batched review email, max 10) | Make until `STAGE_BACKEND_RR1=python` |
-| **P2** | Scaffold (deferred → Make webhook) | Make |
-| **P3** | Scaffold (deferred → Make webhook) | Make |
+| **P2** | Full (`5530955` — voiceover + thumbnail, 3 routes) | `STAGE_BACKEND_P2=python` |
+| **P3** | Full (`5531703` — studio parent enrich + legacy create) | Make until `STAGE_BACKEND_P3=python` |
 | **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
-Wave 2 render chain (R3–R5) and SMV1/R2 are on Python in production. RR1 ready for cutover after Gmail send scope is confirmed.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, and P2 are on Python in production. P3 is implemented and registered; production stays on Make until `STAGE_BACKEND_P3=python`.
 
-Other stages return `501 not_implemented` (P2/P3 scaffolds exist but are not registered yet).
+Other stages return `501 not_implemented`.
 
 ## Quick start (dev)
 
@@ -105,6 +105,17 @@ One `POST /stages/rr1` finds up to **10** review-eligible Platform Outputs (rend
 
 Requires Google OAuth refresh token with **Gmail send** scope. Decision webhooks default to the existing Make hook URL.
 
+## P3 behavior (platform outputs)
+
+One `POST /stages/p3` takes a Content Item (`content_item_record_id` / `content_record_id`).
+
+| Route | When | Action |
+| --- | --- | --- |
+| Studio parent | `Production_Request` set, not a child work item, caption + required media, status Thumbnail Ready / Ready for Thumbnail / Script Generated | Enrich up to 25 seeded `Planned` Platform Outputs, then mark the parent `Review_Status=Ready for Review`, `Render_Status=Not Ready`, `Content_Status=Assets Matched` |
+| Legacy / child | `Production_Request` blank or `Studio_Is_Output_Work_Item` | Resolve platforms/formats, create missing mapping rows, skip duplicates |
+
+Native photo types (Multi-Photo / Carousel / Multi-Image Post) stay `Ready for Review` with blank `Asset_Selection_Status`. Remotion Studio outputs go `In Production` with `Asset_Selection_Status=Selected`. When `STAGE_BACKEND_P3=python`, P2 success calls local P3 instead of the Make webhook. Production stays on Make `5531703` until that var is set on both the runner and the Worker.
+
 ## Enable in Studio Worker
 
 ```
@@ -118,6 +129,8 @@ STAGE_BACKEND_R3=python
 STAGE_BACKEND_R4=python
 STAGE_BACKEND_R5=python
 STAGE_BACKEND_RR1=python
+STAGE_BACKEND_P2=python
+# STAGE_BACKEND_P3=python
 ```
 
 Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-demand for the render chain.
@@ -135,6 +148,8 @@ Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-dema
 | `POST` | `/stages/r4` | Start one Remotion render |
 | `POST` | `/stages/r5` | Poll/upload batch (max 5) |
 | `POST` | `/stages/rr1` | Review email batch (max 10) |
+| `POST` | `/stages/p2` | Voiceover + thumbnail for one Content Item |
+| `POST` | `/stages/p3` | Enrich seeded Studio outputs or create legacy mappings |
 
 POST body fields: `output_record_id`, `production_request_record_id`, `test_run_id`, `intended_stage`, `idempotency_key`, `extra.max_runs`, `extra.dry_run`, etc.
 
@@ -145,10 +160,11 @@ Header `X-Pipeline-Secret` required when `PIPELINE_RUNNER_SHARED_SECRET` is set.
 1. ~~SMV1~~ (Python live)
 2. ~~R2~~ (Python live)
 3. ~~R3 → R5 render chain~~ (Python live)
-4. ~~RR1~~ (Python ready; cutover when Gmail scope confirmed)
-5. **P2 → P3** (scaffold started)
-6. **AP0 + publish platforms** (constants only)
-7. RR2, intake
+4. ~~RR1~~ (Python live)
+5. ~~P2~~ (Python live)
+6. **P3** (Python ready; Make until `STAGE_BACKEND_P3=python`)
+7. **AP0 + publish platforms** (constants only)
+8. RR2, intake
 
 ## Source-only rule
 
