@@ -86,12 +86,17 @@ jobs:
                   body = JSON.stringify(spec.body ?? {{}});
                 }}
                 const internal = new Request("https://studio.chicagoshining.com" + spec.path, {{method,headers,body}});
-                const response = await env.STUDIO_API.fetch(internal);
-                const text = await response.text();
-                let parsed;
-                try {{ parsed = text ? JSON.parse(text) : null; }} catch {{ parsed = {{raw:text.slice(0,10000)}}; }}
-                results.push({{name:spec.name || spec.path,path:spec.path,method,status:response.status,ok:response.ok,body:parsed}});
-                if (!response.ok && spec.continue_on_error !== true) break;
+                try {{
+                  const response = await env.STUDIO_API.fetch(internal);
+                  const text = await response.text();
+                  let parsed;
+                  try {{ parsed = text ? JSON.parse(text) : null; }} catch {{ parsed = {{raw:text.slice(0,10000)}}; }}
+                  results.push({{name:spec.name || spec.path,path:spec.path,method,status:response.status,ok:response.ok,body:parsed}});
+                  if (!response.ok && spec.continue_on_error !== true) break;
+                }} catch (error) {{
+                  results.push({{name:spec.name || spec.path,path:spec.path,method,status:0,ok:false,body:{{error:error instanceof Error ? error.message : String(error)}}}});
+                  if (spec.continue_on_error !== true) break;
+                }}
               }}
               return new Response(JSON.stringify({{ok:results.every(r=>r.ok),correlation_id:{json.dumps(command['correlation_id'])},results}}), {{status:200,headers:{{"Content-Type":"application/json","Cache-Control":"no-store"}}}});
             }}

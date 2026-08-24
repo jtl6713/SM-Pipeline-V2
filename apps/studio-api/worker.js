@@ -14092,6 +14092,19 @@ async function studioEnsurePublicJpegForPublish(env, record) {
 }
 
 async function studioPublishInstagramFeedPhoto(env, record) {
+  try {
+    return await studioPublishInstagramFeedPhotoInner(env, record);
+  } catch (error) {
+    console.warn("instagram feed photo publish failed", record?.id, error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      target: "IG-FEED-GRAPH",
+    };
+  }
+}
+
+async function studioPublishInstagramFeedPhotoInner(env, record) {
   const prepared = await studioEnsurePublicJpegForPublish(env, record);
   record = prepared.record;
   const imageUrl = prepared.url;
