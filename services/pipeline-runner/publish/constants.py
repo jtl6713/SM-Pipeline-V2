@@ -5,7 +5,7 @@ from __future__ import annotations
 P1_SCENARIO_ID = 5528742
 
 AP0_SCENARIO_ID = 5612096
-AP0_WEBHOOK_URL = "https://hook.us2.make.com/2653029-placeholder"
+AP0_WEBHOOK_URL = "https://hook.us2.make.com/q1lx2g0gg7khxzgvnkums12wu649pjnw"
 
 PUBLISH_IG_ORCH_ID = 5864632
 PUBLISH_FB_ORCH_ID = 5813561

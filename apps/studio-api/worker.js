@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.128-native-still-handoff",
+          version: "0.10.129-ap0-python",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -4036,6 +4036,7 @@ const ITEM4_SAI1_WEBHOOK_URL = "https://hook.us2.make.com/duojihfn68fgoz6x438tjf
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
+const STUDIO_AP0_SCENARIO_ID = 5612096;
 
 
 
@@ -4407,6 +4408,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === ITEM4_C2_SCENARIO_ID && pipelineStageBackend(env, "C2").mode === "python") return true;
   if (id === ITEM4_SAI1_SCENARIO_ID && pipelineStageBackend(env, "SAI1").mode === "python") return true;
   if (id === STUDIO_IDEA_I1_SCENARIO_ID && pipelineStageBackend(env, "I1").mode === "python") return true;
+  if (id === STUDIO_AP0_SCENARIO_ID && pipelineStageBackend(env, "AP0").mode === "python") return true;
   return false;
 }
 
@@ -12628,7 +12630,7 @@ const STUDIO_FB0_CHAIN_WEBHOOKS = Object.freeze([
   { id: 5813534, key: "FB3" },
 ]);
 const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
-  { id: 5612096, key: "AP0" },
+  { id: STUDIO_AP0_SCENARIO_ID, key: "AP0" },
   { id: 5612664, key: "IGS" },
   { id: 5845193, key: "IGSPOLL" },
   { id: 5816502, key: "FBS3" },
@@ -13729,7 +13731,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
       ];
       results = await Promise.all([
         ...parked.map((item) => cadenceSetActive(env, item.id, false)),
-        ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
+        ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, !cadenceScenarioManagedByPython(env, item.id))),
       ]);
     }
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
@@ -13753,7 +13755,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
   const wantPublish = startPublish || publishWork || now < productionCadencePublishHoldUntil;
   const actions = [
     ...PRODUCTION_CADENCE_ALWAYS_ON.map((item) => cadenceSetActive(env, item.id, true)),
-    ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, true)),
+    ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, !cadenceScenarioManagedByPython(env, item.id))),
     ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender && !cadenceScenarioManagedByPython(env, item.id))),
     ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish)),
   ];
@@ -14393,11 +14395,32 @@ async function studioPulseAp0PublicAsset(env, record) {
   )) {
     return { ok: true, skipped: "native-photo", target: "AP0" };
   }
+  const hasFile = String(f(record, "Final_File_ID") || "").trim() || String(f(record, "Final_File_URL") || "").trim();
+  if (!hasFile) return { ok: true, skipped: "no-final-file", target: "AP0" };
+  if (pipelineStageBackend(env, "AP0").mode === "python") {
+    const { response, payload } = await item4PulsePipelineStage(env, "ap0", {
+      output_record_id: recordId,
+    }, "AP0");
+    if (!response.ok || payload?.status === "error") {
+      return {
+        ok: false,
+        target: "AP0",
+        backend: "python",
+        status: response.status,
+        message: payload?.message || `Python AP0 returned HTTP ${response.status}`,
+      };
+    }
+    const skipped = payload?.status === "skipped";
+    return {
+      ok: true,
+      skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+      target: "AP0",
+      backend: "python",
+    };
+  }
   if (String(f(record, "Publish_Asset_URL") || "").trim()) {
     return { ok: true, skipped: "already-has-asset", target: "AP0" };
   }
-  const hasFile = String(f(record, "Final_File_ID") || "").trim() || String(f(record, "Final_File_URL") || "").trim();
-  if (!hasFile) return { ok: true, skipped: "no-final-file", target: "AP0" };
   return studioPulseMakeWebhook(env, STUDIO_AP0_WEBHOOK_URL, recordId, "AP0");
 }
 
@@ -14479,9 +14502,12 @@ async function studioDispatchApprovedPublishNow(env, record) {
   if (plan.graphFeedPhoto) return { ...await studioPublishInstagramFeedPhoto(env, record), plan, record };
   let ap0 = null;
   if (plan.target !== "AP0C" && plan.target !== "FB0") {
-    await studioArmPublishScenarios(env, "AP0");
+    const ap0Python = pipelineStageBackend(env, "AP0").mode === "python";
+    if (!ap0Python) await studioArmPublishScenarios(env, "AP0");
     ap0 = await studioPulseAp0PublicAsset(env, record);
-    if (ap0?.ok && !ap0.skipped) await new Promise((resolve) => setTimeout(resolve, 8000));
+    if (ap0?.ok && !ap0.skipped && ap0.backend !== "python") {
+      await new Promise((resolve) => setTimeout(resolve, 8000));
+    }
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
@@ -15017,7 +15043,7 @@ const REPAIR_CONTROL_SCENARIOS = new Set([
   5557966, // R3 exact Test Mode selector pulse only
   5565333, // R5 exact Test Mode selector pulse only
   5576363, // RR1 exact Test Mode selector pulse only
-  5612096, // AP0 public asset preparation
+  STUDIO_AP0_SCENARIO_ID, // AP0 public asset preparation
 ]);
 const REPAIR_LEASE_MAX_MS = 30 * 60 * 1000;
 const REPAIR_LEASE_MIN_MS = 60 * 1000;
