@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 from config import StageRequest, StageResult
-from stages import p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, smv1
+from stages import c2, c3, c3b, c4, c5, c6, c7, c8, c9, p2, p3, p4, p5, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1
 from stages.letter import run as run_letter
 from stages._stub import run_stub
 
@@ -23,6 +23,16 @@ STAGE_NAMES: tuple[str, ...] = (
     "p3",
     "p4",
     "p5",
+    "sai1",
+    "c2",
+    "c3",
+    "c3b",
+    "c4",
+    "c5",
+    "c6",
+    "c7",
+    "c8",
+    "c9",
     "ap0",
     "publish_ig",
     "publish_fb",
@@ -30,7 +40,33 @@ STAGE_NAMES: tuple[str, ...] = (
     "publish_yt",
 )
 
-_IMPLEMENTED_STAGES = frozenset({"smv1", "letter", "r2", "r2b", "r3", "r4", "r5", "rr1", "rr2", "p2", "p3", "p4", "p5"})
+_IMPLEMENTED_STAGES = frozenset(
+    {
+        "smv1",
+        "letter",
+        "r2",
+        "r2b",
+        "r3",
+        "r4",
+        "r5",
+        "rr1",
+        "rr2",
+        "p2",
+        "p3",
+        "p4",
+        "p5",
+        "sai1",
+        "c2",
+        "c3",
+        "c3b",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+        "c8",
+        "c9",
+    }
+)
 
 _HANDLERS: dict[str, StageHandler] = {
     "smv1": smv1.run,
@@ -46,6 +82,16 @@ _HANDLERS: dict[str, StageHandler] = {
     "p3": p3.run,
     "p4": p4.run,
     "p5": p5.run,
+    "sai1": sai1.run,
+    "c2": c2.run,
+    "c3": c3.run,
+    "c3b": c3b.run,
+    "c4": c4.run,
+    "c5": c5.run,
+    "c6": c6.run,
+    "c7": c7.run,
+    "c8": c8.run,
+    "c9": c9.run,
 }
 
 

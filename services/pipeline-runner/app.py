@@ -5,7 +5,7 @@ import logging
 from flask import Flask, jsonify, request
 
 from config import StageRequest, load_settings
-from stages import r2, rr2, smv1
+from stages import c3b, r2, rr2, smv1
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 
 logger = logging.getLogger("pipeline-runner")
@@ -128,6 +128,42 @@ def rr2_email_hook(token: str):
         )
         return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
     return jsonify(result.to_dict()), status_code
+
+
+@app.route("/hooks/c3b/<token>", methods=["GET", "POST"])
+def c3b_email_hook(token: str):
+    expected = str(settings.get("c3b_webhook_token") or "").strip()
+    if not expected or token != expected:
+        return jsonify({"error": "not found"}), 404
+
+    action = (request.values.get("action") or "").strip()
+    slide_id = (request.values.get("slide_id") or request.values.get("slide_record_id") or "").strip()
+    content_item_id = (
+        request.values.get("content_item_id") or request.values.get("content_record_id") or ""
+    ).strip()
+    notes = request.values.get("notes") or ""
+    test_run_id = (request.values.get("test_run_id") or "").strip()
+    body = StageRequest.from_dict(
+        {
+            "content_item_record_id": content_item_id or None,
+            "test_run_id": test_run_id or None,
+            "extra": {
+                "action": action,
+                "slide_id": slide_id,
+                "notes": notes,
+            },
+        }
+    )
+    result = c3b.run(body)
+    status_code = 400 if result.status == "skipped" and (result.details.get("run") or {}).get("reason") == "unsupported_action" else (
+        422 if result.status == "error" else 200
+    )
+    logger.info("stage=c3b-hook status=%s message=%s", result.status, result.message)
+    html = (result.details.get("run") or {}).get("html") or (
+        "<!doctype html><html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+        f"<h1>Carousel review</h1><p>{result.message}</p></body></html>"
+    )
+    return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
 
 
 @app.post("/stages/smv1/drain")

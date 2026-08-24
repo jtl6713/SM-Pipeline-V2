@@ -1,0 +1,66 @@
+"""SAI1 processor — request/response slide themer (Make 6023816)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sai1.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
+from sai1.openai_themes import generate_themes
+from sai1.prompt import build_themer_prompt
+
+
+def _normalize_themes(parsed: dict[str, Any], *, needed: int) -> dict[str, Any]:
+    slides_in = parsed.get("slides") if isinstance(parsed.get("slides"), list) else []
+    slides: list[dict[str, str]] = []
+    for item in slides_in:
+        if not isinstance(item, dict):
+            continue
+        caption = str(item.get("caption") or "").strip()[:120]
+        image_prompt = str(item.get("image_prompt") or "").strip()
+        if needed > 0 and not image_prompt:
+            continue
+        slides.append({"caption": caption, "image_prompt": image_prompt})
+    if needed > 0:
+        slides = slides[:needed]
+    return {
+        "slides": slides,
+        "voiceover_script": str(parsed.get("voiceover_script") or "").strip(),
+        "post_caption": str(parsed.get("post_caption") or "").strip(),
+        "hashtags": str(parsed.get("hashtags") or "").strip(),
+    }
+
+
+def process_request(
+    *,
+    title: str,
+    covered_text: str = "(none)",
+    needed: int = 0,
+    total: int | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    needed_count = max(0, int(needed))
+    total_count = int(total) if total is not None else needed_count
+    prompt = build_themer_prompt(
+        title=title,
+        covered_text=covered_text or "(none)",
+        needed=needed_count,
+        total=total_count,
+    )
+    preview = {
+        "make_scenario_id": MAKE_SCENARIO_ID,
+        "make_scenario_name": MAKE_SCENARIO_NAME,
+        "title": title,
+        "needed": needed_count,
+        "total": total_count,
+        "prompt_chars": len(prompt),
+    }
+    if dry_run:
+        return {"processed": False, "dry_run": True, "themes": None, **preview}
+    if not str(title or "").strip():
+        return {"processed": False, "reason": "missing_title", "themes": None, **preview}
+
+    generated = generate_themes(prompt)
+    themes = _normalize_themes(generated["parsed"], needed=needed_count)
+    if needed_count > 0 and not themes["slides"]:
+        return {"processed": False, "reason": "empty_slides", "themes": themes, **preview}
+    return {"processed": True, "themes": themes, **preview}

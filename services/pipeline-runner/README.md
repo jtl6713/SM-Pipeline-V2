@@ -27,9 +27,21 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **R2B** | Full (`5576620` — retry asset selection, max 10) | `STAGE_BACKEND_R2B=python` |
 | **P4** | Full (`5533802` — asset-need coverage) | `STAGE_BACKEND_P4=python`; R2 calls Python in-process |
 | **P5** | Full (`5536624` — open-shot reminder email) | `STAGE_BACKEND_P5=python`; P4 daisy-chains Python P5 |
+| **SAI1** | Full (`6023816` — Studio AI slide themer, request/response) | Make until live proof. Worker uses `STAGE_BACKEND_SAI1` |
+| **C2** | Full (`5582071` — exact-parent AI slide images) | `STAGE_BACKEND_C2=python` |
+| **C3** | Full (`5587853` — one-parent review email) | Make until live proof |
+| **C3B** | Full (`5592384` — review buttons) | Make until live proof. Python hook: `/hooks/c3b/<C3B_WEBHOOK_TOKEN>` |
+| **C4** | Full (`5587860` — decision router → C5/C6/C7) | Make until live proof |
+| **C5** | Full (`5582074` — regenerate rejected slides) | Make until live proof |
+| **C6** | Full (`5589218` — watermark approved slides) | Make until live proof |
+| **C7** | Full (`5589819` — finalize gate) | Make until live proof |
+| **C8** | Full (`5589822` — create/update platform outputs) | Make until live proof |
+| **C9** | Full (`5589932` — Ready to Publish) | Make until live proof |
 | **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
 Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, and P5 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, and `5536624` are deactivated.
+
+C2 is on Python in production. SAI1 and C3–C9 stay on Make until each is live-proven and flagged. Do not set those remaining `STAGE_BACKEND_*` vars to `python` or archive those Make scenarios yet.
 
 Other stages return `501 not_implemented`.
 
@@ -56,7 +68,7 @@ One `POST /stages/smv1` == one queue row (matches Make Module 1 `maxRecords=1`).
 
 | Queue state | Action |
 | --- | --- |
-| Master Original + Pending | CDN staging → Google Drive → Media Asset |
+| Master Original + Pending | Private media bridge (`studio/master-assets/`) → Google Drive → Media Asset |
 | Platform Variant + Pending | Drive source → `fill-crop-v2` → Drive → Media Asset |
 | Platform Variant + Drive Uploaded | Media Asset registration |
 | Ready + Preview Pending | Drive → R2 preview cache |
