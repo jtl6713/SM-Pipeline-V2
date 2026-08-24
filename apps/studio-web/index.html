@@ -624,8 +624,9 @@
  <option>Do Not Publish</option>
  </select>
  </label>
- <label>Scheduled at
+ <label>Scheduled post time
  <input id="prOverrideScheduledAt" type="datetime-local">
+ <span class="subtle" id="prOverrideScheduledHint"></span>
  </label>
  </div>
  <label class="full-width-label">Output-specific notes
@@ -1163,6 +1164,8 @@
  <div class="idea-detail-meta">
  <div><span>Status</span><strong id="ideaDetailStatus">—</strong></div>
  <div><span>Candidate</span><strong id="ideaDetailCandidate">—</strong></div>
+ <div><span>Created</span><strong id="ideaDetailCreated">—</strong></div>
+ <div id="ideaDetailHoldWrap" hidden><span>On hold since</span><strong id="ideaDetailHold">—</strong></div>
  </div>
 
  <form id="ideaEditForm" class="idea-form drawer-form">
@@ -1273,6 +1276,6 @@
 
  <script src="/assets/config.js"></script>
  <script src="/assets/ez-plan.js?v=0.6.125-tiktok-single-photo"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.126-native-still-handoff"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.128-cst-dates"></script>
 </body>
 </html>

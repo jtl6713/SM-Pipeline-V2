@@ -107,7 +107,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.126-native-still-handoff";
+  const BUILD_ID = "item4-0.6.128-cst-dates";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -119,6 +119,7 @@
   let pipelineCountdownTimer = null;
   let pipelineNextRefreshAt = 0;
   let pipelinePollInFlight = false;
+  let operationsTimezone = null;
   const PIPELINE_POLL_MS = 8000;
   const pipelineProgressHighWater = new Map();
 
@@ -510,6 +511,105 @@
 
   function value(v, fallback = "—") { return v === null || v === undefined || v === "" ? fallback : escapeHtml(v); }
   function join(v) { return Array.isArray(v) && v.length ? v.map(escapeHtml).join(", ") : "—"; }
+
+  const STUDIO_DEFAULT_TIMEZONE = "America/Chicago";
+
+  function studioTimezone() {
+    if (operationsTimezone) return operationsTimezone;
+    const profile = studioProfiles.find((item) => item.id === selectedProfileId);
+    return profile?.timezone || STUDIO_DEFAULT_TIMEZONE;
+  }
+
+  function studioTimezoneLabel(timeZone = studioTimezone()) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" }).formatToParts(new Date());
+      return parts.find((part) => part.type === "timeZoneName")?.value || timeZone;
+    } catch {
+      return timeZone;
+    }
+  }
+
+  function parseStudioDate(raw) {
+    if (raw === null || raw === undefined || raw === "") return null;
+    const text = String(raw).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      const ms = Date.parse(`${text}T12:00:00`);
+      return Number.isFinite(ms) ? new Date(ms) : null;
+    }
+    const ms = Date.parse(text);
+    return Number.isFinite(ms) ? new Date(ms) : null;
+  }
+
+  function formatStudioDateTime(raw, { timeZone = studioTimezone(), fallback = "—" } = {}) {
+    const date = parseStudioDate(raw);
+    if (!date) return fallback;
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+        timeZoneName: "short",
+      }).formatToParts(date);
+      const get = (type) => parts.find((part) => part.type === type)?.value || "";
+      const month = get("month").replace(/\./g, "");
+      const day = String(get("day")).padStart(2, "0");
+      const year = get("year");
+      const hour = String(get("hour")).padStart(2, "0");
+      const minute = String(get("minute")).padStart(2, "0");
+      const zone = get("timeZoneName") || studioTimezoneLabel(timeZone);
+      return `${month}-${day}-${year} ${hour}:${minute} ${zone}`;
+    } catch {
+      return String(raw);
+    }
+  }
+
+  function formatStudioDate(raw, { timeZone = studioTimezone(), fallback = "—", weekday = false } = {}) {
+    const date = parseStudioDate(raw);
+    if (!date) return fallback;
+    try {
+      return new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        weekday: weekday ? "long" : undefined,
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).format(date);
+    } catch {
+      return String(raw);
+    }
+  }
+
+  function dateValue(raw, fallback = "—") {
+    if (raw === null || raw === undefined || raw === "") return fallback;
+    return escapeHtml(formatStudioDateTime(raw));
+  }
+
+  function formatDateTimeLocalInput(raw) {
+    const date = parseStudioDate(raw);
+    if (!date) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function studioOutputTimingLabel(record) {
+    const parts = [];
+    if (record?.scheduled_post_date) parts.push(`Scheduled ${formatStudioDateTime(record.scheduled_post_date)}`);
+    if (record?.published_at) parts.push(`Published ${formatStudioDateTime(record.published_at)}`);
+    return parts.join(" · ");
+  }
+
+  function studioRecordTimingLabel(record, { createdKey = "created_at", updatedKey = "updated_at" } = {}) {
+    const parts = [];
+    if (record?.[createdKey]) parts.push(`Created ${formatStudioDateTime(record[createdKey])}`);
+    if (record?.[updatedKey] && record[updatedKey] !== record[createdKey]) {
+      parts.push(`Updated ${formatStudioDateTime(record[updatedKey])}`);
+    }
+    return parts.join(" · ");
+  }
 
   function repairRenderedText(root = document.body) {
     if (!root) return;
@@ -974,6 +1074,15 @@
     $("ideaDrawerHeading").textContent = idea?.title || "Manage idea";
     $("ideaDetailStatus").innerHTML = badge(ideaStatusLabel(idea));
     $("ideaDetailCandidate").textContent = idea?.candidate_id ? `#${idea.candidate_id}` : idea?.id || "—";
+    const ideaCreated = $("ideaDetailCreated");
+    if (ideaCreated) ideaCreated.textContent = idea?.created_at ? formatStudioDateTime(idea.created_at) : "—";
+    const ideaHoldWrap = $("ideaDetailHoldWrap");
+    const ideaHold = $("ideaDetailHold");
+    if (ideaHoldWrap && ideaHold) {
+      const onHold = Boolean(idea?.is_on_hold && idea?.studio_hold_at);
+      ideaHoldWrap.hidden = !onHold;
+      ideaHold.textContent = onHold ? formatStudioDateTime(idea.studio_hold_at) : "—";
+    }
     $("editIdeaTitle").value = idea?.title || "";
     $("editIdeaSummary").value = idea?.summary || "";
 
@@ -4841,7 +4950,13 @@
     setOverrideValue("prOverrideScript", row.requested_script_override);
     setOverrideValue("prOverrideNotes", row.output_notes);
     setOverrideSelect("prOverridePublishMode", row.publish_mode);
-    setOverrideValue("prOverrideScheduledAt", row.scheduled_at ? new Date(row.scheduled_at).toISOString().slice(0,16) : "");
+    setOverrideValue("prOverrideScheduledAt", row.scheduled_at ? formatDateTimeLocalInput(row.scheduled_at) : "");
+    const scheduleHint = $("prOverrideScheduledHint");
+    if (scheduleHint) {
+      scheduleHint.textContent = row.scheduled_at
+        ? `Saved as ${formatStudioDateTime(row.scheduled_at)}. Picker uses your browser local time.`
+        : `Times display in ${studioTimezoneLabel()}. Picker uses your browser local time.`;
+    }
 
     fillOverrideMusicChoices(row);
     $("prOverrideClipSection").hidden = !isVideoClipOutput(row.output_type);
@@ -5680,7 +5795,8 @@
         if (r.carousel_slide_count_mode === "Exact") structure = `${value(r.carousel_slide_count_exact)} slides`;
         if (r.carousel_slide_count_mode === "Target range") structure = `${value(r.carousel_slide_count_min)}–${value(r.carousel_slide_count_max)} slides`;
         const ideaName = ideaTitleForRequest(r) || "Untitled idea";
-        return `<tr><td><div class="title-cell">${value(ideaName)}</div><div class="subtle">${value(r.production_request_id)} · Updated ${value(r.updated_at)}</div></td><td>${badge(r.status)}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${structure}</td><td><button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">Open</button></td></tr>`;
+        const timing = studioRecordTimingLabel(r);
+        return `<tr><td><div class="title-cell">${value(ideaName)}</div><div class="subtle">${value(r.production_request_id)}${timing ? ` · ${escapeHtml(timing)}` : ""}</div></td><td>${badge(r.status)}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${structure}</td><td><button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">Open</button></td></tr>`;
       }).join("")}</tbody></table>`;
 
       const byId = new Map(records.map(record => [record.id, record]));
@@ -5738,7 +5854,7 @@
       target.innerHTML = '<div class="empty"><strong>No ideas are currently in the intake queue.</strong><br><span class="subtle">Studio is connected; the Idea Candidates table is simply empty after the recent reset/test cycle.</span></div>';
       return;
     }
-    target.innerHTML = `<table class="data-table idea-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th>Production</th><th></th></tr></thead><tbody>${records.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${r.carousel_slide_count ? `${value(r.carousel_slide_count)} slides` : r.video_clip_count ? `${value(r.video_clip_count)} clips` : "AI / default"}</td><td><div class="subtle">VO: ${value(r.include_voiceover)} · Music: ${value(r.include_background_music)} · Thumbnail: ${value(r.include_thumbnail)}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
+    target.innerHTML = `<table class="data-table idea-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th>Production</th><th></th></tr></thead><tbody>${records.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${r.carousel_slide_count ? `${value(r.carousel_slide_count)} slides` : r.video_clip_count ? `${value(r.video_clip_count)} clips` : "AI / default"}</td><td><div class="subtle">VO: ${value(r.include_voiceover)} · Music: ${value(r.include_background_music)} · Thumbnail: ${value(r.include_thumbnail)}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
     const byId = new Map(records.map((record) => [record.id, record]));
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -5754,7 +5870,7 @@
       target.innerHTML = '<div class="empty"><strong>No content items are currently in production.</strong><br><span class="subtle">Studio is connected; new promoted ideas will appear here as production begins.</span></div>';
       return;
     }
-    target.innerHTML = `<table class="data-table"><thead><tr><th>Content</th><th>Studio stage</th><th>Assets</th><th>Render</th><th>Review</th><th>Outputs</th></tr></thead><tbody>${records.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+    target.innerHTML = `<table class="data-table"><thead><tr><th>Content</th><th>Studio stage</th><th>Assets</th><th>Render</th><th>Review</th><th>Outputs</th></tr></thead><tbody>${records.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
   }
 
   async function loadIdeas() {
@@ -6766,6 +6882,10 @@
       ["Review", output.review_status || "—"],
       ["Publish safety", output.do_not_publish ? "Do Not Publish" : "Publishing enabled"],
     ];
+    if (output.scheduled_post_date) rows.push(["Scheduled", formatStudioDateTime(output.scheduled_post_date)]);
+    if (output.published_at) rows.push(["Published", formatStudioDateTime(output.published_at)]);
+    if (output.review_decision_at) rows.push(["Review decision", formatStudioDateTime(output.review_decision_at)]);
+    if (output.studio_preview_updated_at) rows.push(["Preview updated", formatStudioDateTime(output.studio_preview_updated_at)]);
     if (output.output_caption) rows.push(["Caption", output.output_caption]);
     if (output.output_hashtags) rows.push(["Hashtags", output.output_hashtags]);
     target.innerHTML = rows.map(([label, v]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(v)}</b></div>`).join("")
@@ -7806,11 +7926,13 @@
     const pipelineRow = (r) => {
       const pct = pipelineDisplayPercent(r);
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
+      const timing = studioOutputTimingLabel(r);
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
       const canOpen = Boolean(r.creative_available);
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"}>${canOpen ? "Open review" : "Not ready yet"}</button></td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
-      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${value(r.publish_method)}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
+      const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
+      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? groupedPipelineRecords(source).map((group, index) => {
@@ -8055,8 +8177,12 @@
         record.final_file_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.final_file_url)}">Final file</a>` : "",
         record.thumbnail_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.thumbnail_url)}">Thumbnail</a>` : "",
       ].filter(Boolean).join(" · ");
+      const scheduledHint = record.scheduled_post_date
+        ? `<div class="subtle">Current schedule: ${dateValue(record.scheduled_post_date)}</div>`
+        : "";
+      const inputValue = formatDateTimeLocalInput(record.scheduled_post_date);
       const action = kind === "schedule"
-        ? `<form class="ops-inline-form" data-ops-schedule="${escapeHtml(record.id)}"><input type="datetime-local" required><button type="submit" class="secondary-button">Set date</button></form>`
+        ? `${scheduledHint}<form class="ops-inline-form" data-ops-schedule="${escapeHtml(record.id)}"><input type="datetime-local" required value="${escapeHtml(inputValue)}"><button type="submit" class="secondary-button">${record.scheduled_post_date ? "Update date" : "Set date"}</button></form>`
         : `<form class="ops-inline-form" data-ops-published="${escapeHtml(record.id)}"><input type="url" required placeholder="https://… live post URL"><button type="submit" class="secondary-button">Mark published</button></form>`;
       return `<tr><td><div class="title-cell">Output ${value(record.output_id)} · ${value(record.output_title)}</div><div class="subtle">${links || "No file links"}</div><div class="ops-kit">${escapeHtml(opsKitText(record) || "No caption yet")}</div></td><td>${value(record.platform)}</td><td>${badge(record.studio_state || record.publish_status)}</td><td>${action}</td></tr>`;
     }).join("")}</tbody></table>`;
@@ -8130,8 +8256,14 @@
     if (meta) meta.textContent = "Loading operations…";
     try {
       const data = await api("/api/operations");
+      operationsTimezone = data.timezone || null;
       if (meta) {
-        meta.textContent = `Chicago date ${data.chicago_date || "—"}. Last daily ideas run: ${data.last_daily_idea_date || "not yet"}.`;
+        const tz = data.timezone || studioTimezone();
+        const today = data.chicago_date ? formatStudioDate(data.chicago_date, { timeZone: tz, weekday: true }) : "—";
+        const lastRun = data.last_daily_idea_date
+          ? formatStudioDate(data.last_daily_idea_date, { timeZone: tz, weekday: true })
+          : "not yet";
+        meta.textContent = `Today: ${today}. Last daily ideas run: ${lastRun}. Times shown in ${studioTimezoneLabel(tz)}.`;
       }
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
