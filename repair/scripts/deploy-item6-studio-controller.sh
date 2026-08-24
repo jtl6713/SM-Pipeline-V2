@@ -76,14 +76,15 @@ Path('/tmp/item6-bindings-before.json').write_text(json.dumps(sorted([{'name':k,
 print('predeploy_binding_contract=PASS')
 PY
 
-mkdir -p /tmp/item6-wrangler
-cp "$SOURCE" /tmp/item6-wrangler/worker.js
-cd /tmp/item6-wrangler
+mkdir -p /tmp/item6-wrangler-tool /tmp/item6-worker-deploy
+cd /tmp/item6-wrangler-tool
 npm init -y >/dev/null 2>&1
 npm install --no-save "wrangler@$WRANGLER_VERSION" >/dev/null
 test "$(./node_modules/.bin/wrangler --version | tr -d '\r\n')" = "$WRANGLER_VERSION"
+cp "$GITHUB_WORKSPACE/$SOURCE" /tmp/item6-worker-deploy/worker.js
+cd /tmp/item6-worker-deploy
 python - <<'PY'
-import json,os
+import json
 from pathlib import Path
 bucket=Path('/tmp/item6-studio-media-bucket.txt').read_text().strip()
 cfg={
@@ -93,10 +94,12 @@ cfg={
 }
 Path('wrangler.jsonc').write_text(json.dumps(cfg,indent=2))
 PY
-./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --dry-run >/tmp/item6-wrangler-dry-run.log 2>&1
-echo 'wrangler_no_bundle_dry_run=PASS'
-./node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/item6-wrangler-deploy.log 2>&1
-echo 'wrangler_no_bundle_deploy=PASS'
+/tmp/item6-wrangler-tool/node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars --dry-run >/tmp/item6-wrangler-dry-run.log 2>&1
+grep -q 'Total Upload:' /tmp/item6-wrangler-dry-run.log
+! grep -q 'sharp-wasm32' /tmp/item6-wrangler-dry-run.log
+echo 'wrangler_clean_no_bundle_dry_run=PASS'
+/tmp/item6-wrangler-tool/node_modules/.bin/wrangler deploy --config wrangler.jsonc --keep-vars >/tmp/item6-wrangler-deploy.log 2>&1
+echo 'wrangler_clean_no_bundle_deploy=PASS'
 cd "$GITHUB_WORKSPACE"
 
 ACTIVE=''

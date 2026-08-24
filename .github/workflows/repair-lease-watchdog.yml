@@ -1,8 +1,7 @@
 name: Repair Lease Watchdog
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # V2 handles scheduled lease sweeps; keep v1 manual-only to avoid duplicate 5-minute failures.
   workflow_dispatch:
 
 permissions:

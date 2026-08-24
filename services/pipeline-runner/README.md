@@ -210,8 +210,10 @@ Header `X-Pipeline-Secret` required when `PIPELINE_RUNNER_SHARED_SECRET` is set.
 7. ~~RR2~~ (Python live; email buttons use `/hooks/rr2/<token>`)
 8. ~~R2B~~ (Python live)
 9. ~~P4/P5~~ (Python live)
-10. ~~I1–I4 idea chain~~ (Python implemented; Make until live-proven)
-11. AP0 + publish platforms
+10. ~~I1–I4 idea chain~~ (Python live)
+11. ~~A2–A4 asset chain~~ (Python live; A0 parked)
+12. ~~A1P~~ (Python live; A1S still Make on-demand)
+13. AP0 + publish platforms
 
 ## Source-only rule
 

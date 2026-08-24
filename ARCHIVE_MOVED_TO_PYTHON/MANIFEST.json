@@ -96,6 +96,60 @@
       "python_endpoint": "/stages/i4",
       "production_backend": "python",
       "notes": "Make 5524092 inactive. Python I4 created Content Item 98 recUZKJPtrlorseZ6. Make I3/I4 last runs stayed 2026-08-24T03:46Z."
+    },
+    {
+      "stage": "A0",
+      "scenario_id": 5602193,
+      "name": "A0 - Asset Processing Chain Orchestrator - Single Owner v2 - MAKE08",
+      "blueprint_file": null,
+      "python_endpoint": null,
+      "production_backend": "python",
+      "notes": "Parked 2h conductor. Replaced by Python A2→A2B→A3→A4 daisy-chain. Inactive; moved to ARCHIVE_MOVED_TO_PYTHON 2026-08-24."
+    },
+    {
+      "stage": "A2",
+      "scenario_id": 5531974,
+      "name": "A2 - Asset Intake + Routing - New Media Schema v3",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/a2",
+      "production_backend": "python",
+      "notes": "Make 5531974 inactive. Isolated live intake recGU30bCnJBN7YIr. After runner restart, live daisy-chain returned a2b/a3/a4 backend=python with 0 files intaken."
+    },
+    {
+      "stage": "A2B",
+      "scenario_id": 5568863,
+      "name": "A2B - Backfill Existing Drive Videos - New Media Schema v10.1 - A0 Owns A3 - No UDT",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/a2b",
+      "production_backend": "python",
+      "notes": "Make 5568863 inactive. Live empty last-day Video folder; 117 existing Drive IDs on 2026-08-24 daisy-chain."
+    },
+    {
+      "stage": "A3",
+      "scenario_id": 5569035,
+      "name": "A3 - Asset Classification v5 - Advisory Eligibility + Voiceover-Aware Exclusive MIME Routing",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/a3",
+      "production_backend": "python",
+      "notes": "Make 5569035 inactive. Isolated live classified recGU30bCnJBN7YIr. Post-restart daisy-chain classified_count=0."
+    },
+    {
+      "stage": "A4",
+      "scenario_id": 5578180,
+      "name": "A4 - Deleted Drive Asset Reconciliation R2B READY v20",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/a4",
+      "production_backend": "python",
+      "notes": "Make 5578180 inactive. Isolated healthy checkpoint recFQ5QoZnAy8MtGU. Post-restart daisy-chain checked 20, healthy_count=20, deleted_count=0."
+    },
+    {
+      "stage": "A1P",
+      "scenario_id": 5715500,
+      "name": "A1P - Poll and Finalize Upload Import Compression - MAKE09 v10 Terminal State Cleanup",
+      "blueprint_file": null,
+      "python_endpoint": "/hooks/a1p/<A1P_WEBHOOK_TOKEN>",
+      "production_backend": "python",
+      "notes": "Make 5715500 inactive. A1S 5715530 still Make on-demand; Airtable A1_POLLER_WEBHOOK_URL recBrmzuORriwmz13 now posts to pipeline.chicagoshining.com/hooks/a1p. Isolated dry-run POST /stages/a1p ok."
     }
   ]
 }
