@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.129-ap0-python",
+          version: "0.10.131-stale-letter-fix",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -2792,21 +2792,58 @@ function item4RequestedCaptionIsSlideDump(caption, assets) {
   return Boolean(text) && (text === manuals.join("\n\n") || text === manuals.join("\n"));
 }
 
-function item4FillAiOverlayFallbacks(assets, requestRecord) {
+const ITEM4_LEFTOVER_OVERLAYS = new Set([
+  "rainy downtown chicago",
+  "chicago loop",
+  "michigan avenue in the rain",
+  "the chicago riverwalk",
+]);
+
+function item4IsLeftoverOverlayText(text) {
+  return ITEM4_LEFTOVER_OVERLAYS.has(String(text || "").trim().toLowerCase());
+}
+
+function item4PreferredOverlayText(requestRecord, parentContentItem, sourceText) {
+  const raw = String(sourceText || "").trim();
+  if (raw && !item4IsLeftoverOverlayText(raw)) return raw;
+  const caption = String(
+    f(parentContentItem, "Caption")
+    || f(requestRecord, "Requested_Caption")
+    || ""
+  ).trim();
+  const first = caption.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
+  const title = String(
+    f(parentContentItem, "Content_Title")
+    || f(requestRecord, "Requested_Title")
+    || ""
+  ).trim().replace(/[👇^\s]+$/g, "").trim();
+  if (first && first.length <= 80 && !item4IsLeftoverOverlayText(first)) return first;
+  if (title && title.length <= 80 && !item4IsLeftoverOverlayText(title)) return title;
+  return "";
+}
+
+function item4UnletteredClipUrl(packageJson, index, clip) {
+  const prep = packageJson && typeof packageJson === "object" ? (packageJson.render_prep || {}) : {};
+  const list = item4ParseJson(prep.render_clip_list_json, []);
+  const fromList = String(list?.[index]?.url || list?.[index]?.src || "").trim();
+  if (fromList && !/\/lettered\//i.test(fromList)) return fromList;
+  const compat = String(prep[`compatibility_clip_${index + 1}_url`] || "").trim();
+  if (compat && !/\/lettered\//i.test(compat)) return compat;
+  const current = String(clip?.url || clip?.src || "").trim();
+  if (current && !/\/lettered\//i.test(current)) return current;
+  return fromList || current;
+}
+
+function item4FillAiOverlayFallbacks(assets, requestRecord, parentContentItem) {
   const rows = Array.isArray(assets) ? assets.slice() : [];
   const used = new Set(rows.map((asset) => String(asset?.caption || "").trim().toLowerCase()).filter(Boolean));
-  const title = String(f(requestRecord, "Requested_Title") || "").trim();
-  const pool = [
-    "Rainy downtown Chicago",
-    "Chicago Loop",
-    "Michigan Avenue in the rain",
-    "The Chicago Riverwalk",
-    title && title.length <= 80 ? title.replace(/[👇^\s]+$/g, "").trim() : "",
-  ].filter(Boolean);
+  const pool = [item4PreferredOverlayText(requestRecord, parentContentItem, "")].filter(Boolean);
   let cursor = 0;
   return rows.map((asset) => {
     const mode = String(asset?.caption_mode || "ai").trim().toLowerCase();
-    if (mode !== "ai" || String(asset?.caption || "").trim()) return asset;
+    const existing = String(asset?.caption || "").trim();
+    if (mode !== "ai") return asset;
+    if (existing && !item4IsLeftoverOverlayText(existing)) return asset;
     let text = "";
     for (let i = 0; i < pool.length; i += 1) {
       const candidate = pool[(cursor + i) % pool.length];
@@ -2816,7 +2853,7 @@ function item4FillAiOverlayFallbacks(assets, requestRecord) {
         break;
       }
     }
-    if (!text) text = pool[0] || "Chicago";
+    if (!text) return existing && item4IsLeftoverOverlayText(existing) ? { ...asset, caption: "" } : asset;
     used.add(text.toLowerCase());
     return { ...asset, caption: text };
   });
@@ -2833,6 +2870,53 @@ function item4OverlayCaptionBySourceId(requestRecord) {
     map.set(id, text);
   }
   return map;
+}
+
+async function studioRepairLeftoverNativeLettering(env, po, context) {
+  const parsed = item4ParseJson(f(po, "Selected_Assets_JSON"), {});
+  if (!parsed || typeof parsed !== "object") return po;
+  const clips = Array.isArray(parsed.selected_clips)
+    ? parsed.selected_clips
+    : (Array.isArray(parsed.clips) ? parsed.clips : []);
+  if (!clips.length) return po;
+  const preferred = item4PreferredOverlayText(
+    context?.requestRecord,
+    context?.parent,
+    String(f(po, "Output_Caption") || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean) || ""
+  );
+  let changed = false;
+  const nextClips = clips.map((clip, index) => {
+    const text = String(clip?.overlay?.text || clip?.caption || "").trim();
+    if (!item4IsLeftoverOverlayText(text)) return clip;
+    changed = true;
+    const rawUrl = item4UnletteredClipUrl(parsed, index, clip);
+    const overlay = item4PhotoOverlayFromCaption(preferred);
+    return {
+      ...clip,
+      url: rawUrl || clip.url,
+      src: rawUrl || clip.src,
+      lettered: false,
+      overlay: overlay || undefined,
+      caption: overlay?.text || "",
+    };
+  });
+  if (!changed) return po;
+  const next = {
+    ...parsed,
+    selected_clips: Array.isArray(parsed.selected_clips) ? nextClips : parsed.selected_clips,
+  };
+  if (Array.isArray(parsed.clips)) next.clips = nextClips;
+  if (next.render_prep && typeof next.render_prep === "object") {
+    const first = String(nextClips[0]?.url || "").trim();
+    if (first) next.render_prep.compatibility_clip_1_url = first;
+  }
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: { Selected_Assets_JSON: JSON.stringify(next) },
+      typecast: false,
+    }),
+  });
 }
 
 function item4PhotoOverlayFromCaption(text, { tiktok916 = false } = {}) {
@@ -4037,6 +4121,7 @@ const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
 const STUDIO_AP0_SCENARIO_ID = 5612096;
+const STUDIO_AP1_IG_SCENARIO_ID = 5862882;
 
 
 
@@ -4409,6 +4494,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === ITEM4_SAI1_SCENARIO_ID && pipelineStageBackend(env, "SAI1").mode === "python") return true;
   if (id === STUDIO_IDEA_I1_SCENARIO_ID && pipelineStageBackend(env, "I1").mode === "python") return true;
   if (id === STUDIO_AP0_SCENARIO_ID && pipelineStageBackend(env, "AP0").mode === "python") return true;
+  if (id === STUDIO_AP1_IG_SCENARIO_ID && pipelineStageBackend(env, "AP1_IG").mode === "python") return true;
   return false;
 }
 
@@ -7608,9 +7694,13 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
     // Stories stay first-photo teasers, but on-image slide captions must still burn in.
-    const overlayText = captions.get(String(source?.id || "").trim())
-      || String(source?.caption || variant?.caption || "").trim()
-      || String(f(parentContentItem, "Content_Title") || "").trim();
+    const overlayText = item4PreferredOverlayText(
+      requestRecord,
+      parentContentItem,
+      captions.get(String(source?.id || "").trim())
+        || String(source?.caption || variant?.caption || "").trim()
+        || String(f(parentContentItem, "Content_Title") || "").trim()
+    );
     const overlay = item4PhotoOverlayFromCaption(overlayText, { tiktok916 });
     clips.push({
       id: `studio-source-${clips.length + 1}`,
@@ -8033,14 +8123,14 @@ async function markParentContentItemAsStudioUmbrella(env, parentContentItem, out
 async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId) {
   const outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,work_items:[],single_parent_mode:true};
-  const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord);
+  let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
+  const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord, parent);
   if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
     requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
       method: "PATCH",
       body: JSON.stringify({ fields: { Studio_Master_Assets_JSON: JSON.stringify(filledAssets) }, typecast: false }),
     });
   }
-  let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
   parent=await restoreParentContentItemFromStudioUmbrella(env,parent);
   const profileDefaults=await productionProfileDefaultsForParentContentItem(env,parent);
   const workItems=[]; let routed=0,blocked=0;
@@ -12631,6 +12721,7 @@ const STUDIO_FB0_CHAIN_WEBHOOKS = Object.freeze([
 ]);
 const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: STUDIO_AP0_SCENARIO_ID, key: "AP0" },
+  { id: STUDIO_AP1_IG_SCENARIO_ID, key: "AP1-IG" },
   { id: 5612664, key: "IGS" },
   { id: 5845193, key: "IGSPOLL" },
   { id: 5816502, key: "FBS3" },
@@ -13145,6 +13236,7 @@ async function studioContinuationInspectOutput(env, po, cache) {
   }
 
   if (nativePhoto && hasClips && studioOutputIsNativePhoto(po) && /^ready for review$/i.test(outputStatus)) {
+    po = await studioRepairLeftoverNativeLettering(env, po, context).catch(() => po);
     const lettering = await item4PulseLetterPython(env, { outputRecordId: po.id }).catch((error) => ({
       error: error instanceof Error ? error.message : String(error),
     }));
@@ -14424,6 +14516,32 @@ async function studioPulseAp0PublicAsset(env, record) {
   return studioPulseMakeWebhook(env, STUDIO_AP0_WEBHOOK_URL, recordId, "AP0");
 }
 
+async function studioPulseAp1IgReel(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IG" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ap1_ig", {
+    output_record_id: recordId,
+  }, "AP1_IG");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "AP1-IG",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python AP1-IG returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "AP1-IG",
+    backend: "python",
+    post_id: payload?.details?.run?.media_id,
+    permalink: payload?.details?.run?.permalink,
+  };
+}
+
 // Approve pulses these publisher webhooks directly, and a Make webhook aimed at a stopped
 // scenario answers 200 and goes nowhere. Background cadence is supposed to keep the webhook
 // scenarios live and run the on-demand orchestrators, but it parks aggressively and cannot be
@@ -14509,6 +14627,10 @@ async function studioDispatchApprovedPublishNow(env, record) {
       await new Promise((resolve) => setTimeout(resolve, 8000));
     }
   }
+  if (plan.target === "AP1-IG" && pipelineStageBackend(env, "AP1_IG").mode === "python") {
+    const pulsed = await studioPulseAp1IgReel(env, record);
+    return { ...pulsed, ap0, armed: [], plan, record };
+  }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
   const pulsed = await studioPulseMakeWebhook(env, settings[plan.setting], record.id, plan.target, {
@@ -14520,7 +14642,7 @@ async function studioDispatchApprovedPublishNow(env, record) {
 
 async function studioDispatchApprovedPublishTail(env, record, primary) {
   const plan = primary?.plan;
-  if (!plan || plan.graphStory || plan.graphFeedPhoto) return null;
+  if (!plan || plan.graphStory || plan.graphFeedPhoto || primary?.backend === "python") return null;
   if (plan.poll) {
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const pollTarget = plan.poll.replace(/_WEBHOOK_URL$/, "").replace(/_/g, "-");
