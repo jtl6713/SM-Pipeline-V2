@@ -131,7 +131,7 @@ Native slide C7/C8 stamp Worker deploy: 2026-08-23 - Studio native photo slides 
 
 IG/FB native still Approve dispatch Worker deploy: 2026-08-24 - Instagram Single Image / Feed Post Graph-publishes the public JPEG (3D cover) with caption; Facebook Single Image and Multi-Image Post pulse FB0 and arm FB0-FB3. FB-ORCH stays parked. Worker 0.10.123-ig-fb-photo-dispatch.
 
-IG feed public JPEG Worker deploy: 2026-08-24 - Feed stills upload the 3D cover through the R2 upload worker under studio/previews so Graph can fetch a real image/jpeg. A 404 media URL is no longer treated as publish-ready. Worker 0.10.125-ig-fb-photo-dispatch.
+IG feed public JPEG Worker deploy: 2026-08-24 - Feed stills upload the 3D cover through the R2 upload worker under studio/previews so Graph can fetch a real image. A 404 media URL is no longer treated as publish-ready. Worker 0.10.126-ig-fb-photo-dispatch.
 
 Asset chain A2-A4 Worker deploy: 2026-08-24 - Studio Operations intake pulses Python A2 when STAGE_BACKEND_A2=python instead of Make 5531974. Worker 0.10.124-asset-chain-gates.
 

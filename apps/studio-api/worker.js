@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.125-ig-fb-photo-dispatch",
+          version: "0.10.126-ig-fb-photo-dispatch",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -14086,38 +14086,48 @@ function studioImageContentType(buffer) {
   return "image/jpeg";
 }
 
+const R2_UPLOAD_WORKER_PUBLIC = "https://chicagoshining-r2-upload.joseph-t-logan.workers.dev";
+
 async function studioPutPublicJpegViaUploadWorker(env, record, buffer) {
   const settings = await studioActivePipelineSettings(env, [
     "R2_UPLOAD_WORKER_URL",
     "R2_UPLOAD_WORKER_SECRET",
   ]);
-  const workerUrl = String(settings.R2_UPLOAD_WORKER_URL || "").trim().replace(/\/+$/, "");
   const secret = String(settings.R2_UPLOAD_WORKER_SECRET || "").trim();
-  if (!workerUrl || !secret) return "";
+  if (!secret) return { url: "", skip: "missing-upload-secret" };
   const contentType = studioImageContentType(buffer);
   const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
   const key = `studio/previews/platform-output/${record.id}/cover.${ext}`;
-  const response = await fetch(`${workerUrl}?key=${encodeURIComponent(key)}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": contentType,
-      "x-pipeline-secret": secret,
-      "x-output-id": record.id,
-      "x-retain-class": "preview",
-    },
-    body: buffer,
-  });
-  const payload = await response.json().catch(() => ({}));
-  const url = String(payload.public_url || `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`).trim();
-  if (!response.ok || payload.ok === false) {
-    console.warn("public jpeg upload worker failed", record.id, response.status);
-    return "";
+  const endpoints = [...new Set([
+    String(settings.R2_UPLOAD_WORKER_URL || "").trim().replace(/\/+$/, ""),
+    R2_UPLOAD_WORKER_PUBLIC,
+  ].filter(Boolean))];
+  let lastStatus = 0;
+  for (const workerUrl of endpoints) {
+    try {
+      const response = await fetch(`${workerUrl}?key=${encodeURIComponent(key)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": contentType,
+          "Content-Length": String(buffer.byteLength),
+          "x-pipeline-secret": secret,
+          "x-output-id": record.id,
+          "x-retain-class": "preview",
+        },
+        body: new Uint8Array(buffer),
+      });
+      lastStatus = response.status;
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        console.warn("public jpeg upload worker failed", record.id, response.status);
+        continue;
+      }
+      return { url: String(payload.public_url || `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`).trim(), skip: "" };
+    } catch (error) {
+      console.warn("public jpeg upload worker threw", record.id, error);
+    }
   }
-  if (!(await studioPublicJpegIsReachable(url))) {
-    console.warn("public jpeg upload not reachable", record.id);
-    return "";
-  }
-  return url;
+  return { url: "", skip: lastStatus ? `upload-http-${lastStatus}` : "upload-worker-failed" };
 }
 
 async function studioEnsurePublicJpegForPublish(env, record) {
@@ -14125,27 +14135,25 @@ async function studioEnsurePublicJpegForPublish(env, record) {
     || studioPublicJpegCoverUrl(record)
     || studioClipPublicCdnUrl(f(record, "Studio_Preview_URL"));
   if (existing && await studioPublicJpegIsReachable(existing)) return { record, url: existing };
-  const source = String(
-    f(record, "Thumbnail_URL")
-    || f(record, "Studio_Preview_URL")
-    || f(record, "Publish_Asset_URL")
-    || ""
-  ).trim();
+  const thumbnail = String(f(record, "Thumbnail_URL") || "").trim();
+  const source = /^https:\/\/(drive\.google\.com|drive\.usercontent\.google\.com)\//i.test(thumbnail)
+    ? thumbnail
+    : String(thumbnail || f(record, "Studio_Preview_URL") || f(record, "Publish_Asset_URL") || "").trim();
   const buffer = await studioFetchImageBytes(source);
-  if (!buffer) return { record, url: "" };
-  const url = await studioPutPublicJpegViaUploadWorker(env, record, buffer);
-  if (!url) return { record, url: "" };
+  if (!buffer) return { record, url: "", skip: "missing-source-bytes" };
+  const uploaded = await studioPutPublicJpegViaUploadWorker(env, record, buffer);
+  if (!uploaded.url) return { record, url: "", skip: uploaded.skip || "upload-worker-failed" };
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
     method: "PATCH",
     body: JSON.stringify({
       typecast: true,
       fields: {
-        Publish_Asset_URL: url,
-        Studio_Preview_URL: url,
+        Publish_Asset_URL: uploaded.url,
+        Studio_Preview_URL: uploaded.url,
       },
     }),
   });
-  return { record: updated || record, url };
+  return { record: updated || record, url: uploaded.url };
 }
 
 async function studioPublishInstagramFeedPhoto(env, record) {
@@ -14166,7 +14174,7 @@ async function studioPublishInstagramFeedPhotoInner(env, record) {
   record = prepared.record;
   const imageUrl = prepared.url;
   if (!imageUrl.startsWith("https://media.chicagoshining.com/")) {
-    return { ok: false, skipped: "missing-cdn-preview", target: "IG-FEED-GRAPH" };
+    return { ok: false, skipped: prepared.skip || "missing-cdn-preview", target: "IG-FEED-GRAPH" };
   }
   const settings = await studioActivePipelineSettings(env, [
     "INSTAGRAM_BUSINESS_ACCOUNT_ID",
