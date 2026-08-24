@@ -4605,6 +4605,8 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_AP4C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
   if (id === STUDIO_AP4R_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
   if (id === STUDIO_AP5C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
+  if (id === STUDIO_A1S_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
+  if (id === STUDIO_A1M_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
   return false;
 }
 
@@ -19315,7 +19317,21 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
   const driveFileId = String(payload?.drive_file_id || "").trim();
   if (!driveFileId) throw new HttpError(400, "drive_file_id is required");
   const data = { drive_file_id: driveFileId };
+  const python = pipelineStageBackend(env, "A1S");
   const task = (async () => {
+    if (python.mode === "python") {
+      try {
+        await item4PulsePipelineStage(env, "a1s", { extra: data }, "A1S");
+      } catch (error) {
+        console.error("A1S python pulse failed", error);
+      }
+      try {
+        await item4PulsePipelineStage(env, "a1m", { extra: data }, "A1S");
+      } catch (error) {
+        console.error("A1M python pulse failed", error);
+      }
+      return;
+    }
     try {
       await phase6PulseOnDemandScenario(env, STUDIO_A1S_SCENARIO_ID, { waitMs: 20000, data });
     } catch (error) {
@@ -19330,7 +19346,8 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
   if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
   return respond(request, env, {
     ok: true,
-    triggered: "on-demand-run",
+    triggered: python.mode === "python" ? "a1s-python" : "on-demand-run",
+    backend: python.mode,
     drive_file_id: driveFileId,
     scenarios: ["A1S", "A1M"],
     message: "A1S compress and A1M duration probe were pulsed because this file is over 100 MB.",

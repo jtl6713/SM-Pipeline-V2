@@ -14,7 +14,7 @@ from stages.registry import STAGE_NAMES, is_implemented
 
 
 def test_asset_stages_are_registered():
-    for name in ("a2", "a2b", "a3", "a4", "a1p"):
+    for name in ("a2", "a2b", "a3", "a4", "a1p", "a1s", "a1m"):
         assert name in STAGE_NAMES
         assert is_implemented(name)
 

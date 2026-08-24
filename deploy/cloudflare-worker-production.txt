@@ -139,3 +139,5 @@ Asset chain A2-A4 Worker deploy: 2026-08-24 - Studio Operations intake pulses Py
 
 IG carousel Due_Now Worker deploy: 2026-08-24 - Cron no longer filters AP2C/AP3P/AP4R/AP5C on IG_Carousel_Due_Now, so a client-timezone retry stamp cannot hide a due poll. Python is_due uses Next_Retry_At. Worker ig-carousel-due-now.
 
+A1S/A1M Python Worker deploy: 2026-08-24 - Oversized Drive files pulse Python A1S/A1M when STAGE_BACKEND_A1S=python instead of Make 5715530/5764543. Worker a1s-a1m-python.
+

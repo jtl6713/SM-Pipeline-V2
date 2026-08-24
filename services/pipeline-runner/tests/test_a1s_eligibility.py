@@ -1,0 +1,87 @@
+from a1s.cloudconvert import coerce_duration_seconds, parse_duration_seconds, target_video_kbps
+from a1s.eligibility import eligibility_reason
+from a1s.processor import process_request
+from stages.registry import STAGE_NAMES, is_implemented
+
+
+def _file(**fields):
+    return {
+        "id": "drive-file",
+        "name": "clip.mp4",
+        "mimeType": "video/mp4",
+        "size": "150000000",
+        **fields,
+    }
+
+
+def test_a1s_and_a1m_are_registered():
+    for name in ("a1s", "a1m"):
+        assert name in STAGE_NAMES
+        assert is_implemented(name)
+
+
+def test_a1s_eligibility_gates():
+    ready = _file()
+    assert eligibility_reason(ready, threshold_bytes=100000000) is None
+    assert eligibility_reason(_file(mimeType="image/jpeg"), threshold_bytes=100000000) == "not_video"
+    assert eligibility_reason(_file(size="100000000"), threshold_bytes=100000000) == "not_oversize"
+    assert eligibility_reason(_file(size="99999999"), threshold_bytes=100000000) == "not_oversize"
+    assert eligibility_reason(_file(name="clip_compressed.mp4"), threshold_bytes=100000000) == "already_compressed"
+    assert eligibility_reason(ready, threshold_bytes=100000000, has_active_job=True) == "active_job"
+    assert eligibility_reason(ready, threshold_bytes=100000000, has_active_job=True, check_job=False) is None
+
+
+def test_duration_and_bitrate_match_make():
+    assert coerce_duration_seconds("24.0 s") == 24.0
+    assert coerce_duration_seconds("12.5s") == 12.5
+    assert coerce_duration_seconds(30) == 30.0
+    assert coerce_duration_seconds("") == 0.0
+    job = {
+        "tasks": [
+            {"name": "import-source"},
+            {"name": "metadata-source", "result": {"metadata": {"Duration": "24 s"}}},
+        ]
+    }
+    assert parse_duration_seconds(job) == 24.0
+    assert target_video_kbps(24) == max(350, int((84000000 * 8 / 24 / 1000) - 160))
+    assert target_video_kbps(1) >= 350
+
+
+class _FakeDrive:
+    def get_file(self, file_id, *, fields=""):
+        return _file(id=file_id)
+
+    def list_files(self, **_kwargs):
+        return [_file()]
+
+
+class _FakeSettings:
+    def get(self, name):
+        values = {
+            "A1_COMPRESSION_THRESHOLD_BYTES": "100000000",
+            "A1_POLLER_WEBHOOK_URL": "https://pipeline.example/hooks/a1p/token",
+        }
+        return values.get(name, "")
+
+
+class _FakeAirtable:
+    def __init__(self, jobs=None):
+        self.jobs = jobs or []
+
+    def list_records(self, *_args, **_kwargs):
+        return self.jobs
+
+
+def test_a1s_dry_run_and_active_job_skip(monkeypatch):
+    import a1s.processor as a1s_processor
+
+    monkeypatch.setattr(a1s_processor, "GoogleDriveClient", _FakeDrive)
+    monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable())
+    monkeypatch.setattr(a1s_processor, "pipeline_settings", lambda _client=None: _FakeSettings())
+    preview = process_request(drive_file_id="drive-file", dry_run=True)
+    assert preview["dry_run"] is True
+    assert preview["eligible"][0]["id"] == "drive-file"
+
+    monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable(jobs=[{"id": "recJOB"}]))
+    skipped = process_request(drive_file_id="drive-file", dry_run=True)
+    assert skipped["skipped"][0]["reason"] == "active_job"

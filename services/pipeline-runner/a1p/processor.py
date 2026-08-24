@@ -77,7 +77,7 @@ def _delete_state(client: AirtableClient, record_id: str) -> None:
     client.delete_record(PIPELINE_SETTINGS_TABLE, record_id)
 
 
-def _schedule_next(payload: dict[str, Any]) -> None:
+def schedule_next(payload: dict[str, Any]) -> None:
     poller_url = str(payload.get("poller_url") or "").strip()
 
     def _run() -> None:
@@ -97,6 +97,9 @@ def _schedule_next(payload: dict[str, Any]) -> None:
         )})
 
     threading.Thread(target=_run, daemon=True, name="a1p-poll").start()
+
+
+_schedule_next = schedule_next
 
 
 def process_request(

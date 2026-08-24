@@ -1,0 +1,236 @@
+"""A1S processor — scan oversized Drive videos and start CloudConvert compression (Make 5715530)."""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
+
+from a1p.processor import schedule_next
+from a1s.cloudconvert import api_token, compress_job_body, create_job, import_form, probe_duration, target_video_kbps, upload_source
+from a1s.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
+from a1s.eligibility import eligibility_reason
+from airtable.client import AirtableClient
+from airtable.constants import PIPELINE_SETTINGS_TABLE
+from asset.constants import (
+    A1S_DRIVE_PAGE_SIZE,
+    A1S_JOB_NOTES,
+    A1S_OVERSIZE_BYTES,
+    GDRIVE_INGESTION_FOLDER,
+)
+from asset.helpers import parse_bytes, parse_int
+from carousel.timeutil import iso_ms
+from integrations.google_drive import GoogleDriveClient
+from item4.settings import pipeline_settings
+
+logger = logging.getLogger(__name__)
+
+SCAN_QUERY = f"'{GDRIVE_INGESTION_FOLDER}' in parents and trashed = false and mimeType contains 'video/'"
+SCAN_FIELDS = "files(id,name,mimeType,size,fileExtension,createdTime,videoMediaMetadata)"
+FILE_FIELDS = "id,name,mimeType,size,fileExtension,createdTime,videoMediaMetadata,parents,trashed"
+
+
+def _threshold(client: AirtableClient) -> int:
+    raw = pipeline_settings(client).get("A1_COMPRESSION_THRESHOLD_BYTES")
+    return parse_int(raw, A1S_OVERSIZE_BYTES) or A1S_OVERSIZE_BYTES
+
+
+def _poller_url(client: AirtableClient) -> str:
+    return pipeline_settings(client).get("A1_POLLER_WEBHOOK_URL").strip()
+
+
+def _active_job(client: AirtableClient, file_id: str) -> dict[str, Any] | None:
+    name = f"A1_JOB_{file_id}"
+    formula = f"AND({{Active}}=1,{{Setting_Name}}='{name}')"
+    rows = client.list_records(PIPELINE_SETTINGS_TABLE, formula=formula, max_records=1)
+    return rows[0] if rows else None
+
+
+def _resolve_files(drive: GoogleDriveClient, drive_file_id: str | None) -> list[dict[str, Any]]:
+    if drive_file_id:
+        return [drive.get_file(drive_file_id, fields=FILE_FIELDS)]
+    return drive.list_files(
+        query=SCAN_QUERY,
+        page_size=A1S_DRIVE_PAGE_SIZE,
+        order_by="createdTime desc",
+        fields=SCAN_FIELDS,
+    )
+
+
+def _write_state(client: AirtableClient, record_id: str, *, active: bool, value: str, notes: str) -> None:
+    client.update_record(
+        PIPELINE_SETTINGS_TABLE,
+        record_id,
+        {"Active": active, "Setting_Value": value, "Notes": notes},
+    )
+
+
+def _create_state(client: AirtableClient, *, file_id: str, name: str, size: int, value: str) -> str:
+    created = client.create_records(
+        PIPELINE_SETTINGS_TABLE,
+        [
+            {
+                "Setting_Name": f"A1_JOB_{file_id}",
+                "Active": True,
+                "Setting_Value": value,
+                "Notes": A1S_JOB_NOTES,
+            }
+        ],
+        typecast=True,
+    )
+    return str(created[0]["id"]) if created else ""
+
+
+def _clear_state(client: AirtableClient, record_id: str, *, value: str, notes: str) -> None:
+    if not record_id:
+        return
+    try:
+        _write_state(client, record_id, active=False, value=value, notes=notes)
+        client.delete_record(PIPELINE_SETTINGS_TABLE, record_id)
+    except Exception:
+        logger.exception("A1S failed to clear job state %s", record_id)
+
+
+def _compress_one(
+    file: dict[str, Any],
+    *,
+    state_record_id: str,
+    poller_url: str,
+    sleep: Callable[[float], None],
+) -> dict[str, Any]:
+    file_id = str(file.get("id") or "")
+    name = str(file.get("name") or "")
+    size = parse_bytes(file.get("size"))
+    client = AirtableClient()
+    drive = GoogleDriveClient()
+    token = api_token()
+    try:
+        content, _mime = drive.download_file(file_id)
+        duration, _meta_job_id = probe_duration(token, file_id, content, sleep=sleep)
+        kbps = target_video_kbps(duration)
+        job = create_job(token, compress_job_body(file_id, kbps))
+        job_id = str(job.get("id") or "")
+        if not job_id:
+            raise RuntimeError("CloudConvert compress job did not return an id")
+        form_url, parameters = import_form(job)
+        upload_source(form_url, parameters, content)
+        now = iso_ms()
+        value = f"processing|{job_id}|0|{file_id}||{name}|{size}|{now}"
+        _write_state(client, state_record_id, active=True, value=value, notes=A1S_JOB_NOTES)
+        schedule_next(
+            {
+                "job_id": job_id,
+                "state_record_id": state_record_id,
+                "source_file_id": file_id,
+                "source_name": name,
+                "source_size": size,
+                "permission_id": "",
+                "attempt": "1",
+                "poller_url": poller_url,
+            }
+        )
+        return {
+            "file_id": file_id,
+            "name": name,
+            "job_id": job_id,
+            "state_record_id": state_record_id,
+            "duration_seconds": duration,
+            "target_video_kbps": kbps,
+            "status": "started",
+        }
+    except Exception:
+        now = iso_ms()
+        _clear_state(
+            client,
+            state_record_id,
+            value=f"failed_start||0|{file_id}||{name}|{size}|{now}",
+            notes="A1S failed before CloudConvert compression started. Original preserved.",
+        )
+        raise
+
+
+def process_request(
+    *,
+    drive_file_id: str | None = None,
+    dry_run: bool = False,
+    inline: bool = False,
+    sleep: Callable[[float], None] | None = None,
+) -> dict[str, Any]:
+    sleeper = sleep or ((lambda _seconds: None) if inline else time.sleep)
+    preview: dict[str, Any] = {
+        "make_scenario_id": MAKE_SCENARIO_ID,
+        "make_scenario_name": MAKE_SCENARIO_NAME,
+        "drive_file_id": drive_file_id,
+    }
+    drive = GoogleDriveClient()
+    files = _resolve_files(drive, (drive_file_id or "").strip() or None)
+    preview["file_ids"] = [str(item.get("id") or "") for item in files]
+    preview["files_found"] = bool(files)
+    client = AirtableClient()
+    threshold = _threshold(client)
+    preview["threshold_bytes"] = threshold
+    poller_url = _poller_url(client)
+    skipped: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+    for item in files:
+        file_id = str(item.get("id") or "")
+        has_job = bool(_active_job(client, file_id)) if file_id else False
+        reason = eligibility_reason(item, threshold_bytes=threshold, has_active_job=has_job)
+        row = {"id": file_id, "name": item.get("name"), "size": parse_bytes(item.get("size"))}
+        if reason:
+            skipped.append({**row, "reason": reason})
+            continue
+        candidates.append(item)
+    preview["skipped"] = skipped
+    preview["skipped_count"] = len(skipped)
+    if dry_run:
+        preview["eligible"] = [
+            {"id": item.get("id"), "name": item.get("name"), "size": parse_bytes(item.get("size"))}
+            for item in candidates
+        ]
+        return {"processed": False, "dry_run": True, **preview}
+    if not candidates:
+        return {"processed": False, "reason": "no_eligible_files", "started_count": 0, **preview}
+
+    started: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for item in candidates:
+        file_id = str(item.get("id") or "")
+        name = str(item.get("name") or "")
+        size = parse_bytes(item.get("size"))
+        now = iso_ms()
+        state_id = _create_state(
+            client,
+            file_id=file_id,
+            name=name,
+            size=size,
+            value=f"starting||0|{file_id}||{name}|{size}|{now}",
+        )
+        if not state_id:
+            errors.append({"id": file_id, "reason": "state_create_failed"})
+            continue
+        if inline:
+            try:
+                started.append(_compress_one(item, state_record_id=state_id, poller_url=poller_url, sleep=sleeper))
+            except Exception as exc:
+                logger.exception("A1S inline compression failed for %s", file_id)
+                errors.append({"id": file_id, "reason": str(exc)})
+            continue
+
+        def _run(current: dict[str, Any] = item, record_id: str = state_id) -> None:
+            try:
+                _compress_one(current, state_record_id=record_id, poller_url=poller_url, sleep=sleeper)
+            except Exception:
+                logger.exception("A1S background compression failed for %s", current.get("id"))
+
+        threading.Thread(target=_run, daemon=True, name=f"a1s-{file_id}").start()
+        started.append({"file_id": file_id, "name": name, "state_record_id": state_id, "status": "starting"})
+
+    preview["started"] = started
+    preview["started_count"] = len(started)
+    preview["errors"] = errors
+    if not started:
+        return {"processed": False, "reason": "start_failed", **preview}
+    return {"processed": True, **preview}

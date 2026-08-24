@@ -65,6 +65,7 @@ def load_settings() -> dict[str, Any]:
         "stage_backend_a3": os.environ.get("STAGE_BACKEND_A3", "make").strip().lower(),
         "stage_backend_a4": os.environ.get("STAGE_BACKEND_A4", "make").strip().lower(),
         "stage_backend_a1p": os.environ.get("STAGE_BACKEND_A1P", "make").strip().lower(),
+        "stage_backend_a1s": os.environ.get("STAGE_BACKEND_A1S", "make").strip().lower(),
         "stage_backend_ap0": os.environ.get("STAGE_BACKEND_AP0", "make").strip().lower(),
         "stage_backend_ap1_ig": os.environ.get("STAGE_BACKEND_AP1_IG", "make").strip().lower(),
         "stage_backend_ap1_igs": os.environ.get("STAGE_BACKEND_AP1_IGS", "make").strip().lower(),

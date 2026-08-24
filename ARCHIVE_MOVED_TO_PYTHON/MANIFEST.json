@@ -149,7 +149,25 @@
       "blueprint_file": null,
       "python_endpoint": "/hooks/a1p/<A1P_WEBHOOK_TOKEN>",
       "production_backend": "python",
-      "notes": "Make 5715500 inactive. A1S 5715530 still Make on-demand; Airtable A1_POLLER_WEBHOOK_URL recBrmzuORriwmz13 now posts to pipeline.chicagoshining.com/hooks/a1p. Isolated dry-run POST /stages/a1p ok."
+      "notes": "Make 5715500 inactive. Airtable A1_POLLER_WEBHOOK_URL recBrmzuORriwmz13 posts to pipeline.chicagoshining.com/hooks/a1p. Isolated dry-run POST /stages/a1p ok."
+    },
+    {
+      "stage": "A1S",
+      "scenario_id": 5715530,
+      "name": "A1S - Scan Upload and Start Async Oversized Compression - MAKE09 v12 FIRST AUDIO STREAM FIX",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/a1s",
+      "production_backend": "python",
+      "notes": "Make 5715530 inactive. Studio pulses Python A1S for Drive files over 100 MB. CloudConvert compress job + A1_JOB settings row, then A1P poller_url."
+    },
+    {
+      "stage": "A1M",
+      "scenario_id": 5764543,
+      "name": "A1M - Probe Oversized Video Duration Metadata v1",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/a1m",
+      "production_backend": "python",
+      "notes": "Make 5764543 inactive. Studio pulses Python A1M alongside A1S. CloudConvert metadata probe only; no Airtable duration write."
     },
     {
       "stage": "AP0",
