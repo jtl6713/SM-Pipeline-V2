@@ -8,8 +8,8 @@ from airtable.constants import MEDIA_TRANSFER_QUEUE_TABLE
 from integrations.google_drive import GoogleDriveClient
 from integrations.r2_upload import R2UploadClient
 from integrations.variant_service import VariantServiceClient
-from item4.constants import BROWSER_MASTER_EXTENSIONS, VARIANT_RECIPE_VERSION
-from item4.formulas import smv1_exact_request_formula
+from item4.constants import BROWSER_MASTER_EXTENSIONS, STALE_PROCESSING_MS, VARIANT_RECIPE_VERSION
+from item4.formulas import airtable_quote, smv1_exact_request_formula
 from item4.media_assets import ensure_media_asset
 from item4.settings import PipelineSettings, field, pipeline_settings
 from item4.sources import resolve_master_source
@@ -19,7 +19,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _fail_row(client: AirtableClient, record_id: str, message: str, *, preview: bool = False) -> None:
+def _fail_row(
+    client: AirtableClient,
+    record_id: str,
+    message: str,
+    *,
+    preview: bool = False,
+    retryable: bool = False,
+) -> None:
     if preview:
         client.update_record(
             MEDIA_TRANSFER_QUEUE_TABLE,
@@ -29,15 +36,100 @@ def _fail_row(client: AirtableClient, record_id: str, message: str, *, preview: 
                 "Preview_Error": message[:10000],
             },
         )
-    else:
-        client.update_record(
-            MEDIA_TRANSFER_QUEUE_TABLE,
-            record_id,
-            {
-                "Transfer_Status": "Failed",
-                "Error_Message": message[:10000],
-            },
+        return
+    # Transfer_Status choices are Pending / Processing / Drive Uploaded / Ready / Error.
+    # "Failed" is not a choice; Airtable silently drops it and the row stays Processing.
+    client.update_record(
+        MEDIA_TRANSFER_QUEUE_TABLE,
+        record_id,
+        {
+            "Transfer_Status": "Pending" if retryable else "Error",
+            "Error_Message": message[:10000],
+        },
+    )
+
+
+def _parse_stamp_ms(value: Any) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        return int(datetime.fromisoformat(text).timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+def _row_stamp_ms(row: dict) -> int:
+    fields = row.get("fields") or {}
+    for key in ("Last_Attempt_At", "Updated_At", "Started_At", "Created_At"):
+        stamp = _parse_stamp_ms(fields.get(key))
+        if stamp:
+            return stamp
+    return _parse_stamp_ms(row.get("createdTime"))
+
+
+def requeue_stale_processing(
+    client: AirtableClient,
+    *,
+    production_request_record_id: str | None = None,
+    test_run_id: str | None = None,
+) -> int:
+    """Return Processing rows older than 90s to Pending so the SMV1 selector can see them."""
+    clauses = ['{Transfer_Status}="Processing"']
+    if production_request_record_id:
+        clauses.append(
+            f'{{Production_Request_Record_ID}}="{airtable_quote(production_request_record_id)}"'
         )
+    if test_run_id:
+        clauses.append(f'{{Test_Run_ID}}="{airtable_quote(test_run_id)}"')
+    else:
+        clauses.append("{Test_Run_ID}=BLANK()")
+    formula = f"AND({','.join(clauses)})" if len(clauses) > 1 else clauses[0]
+    rows = client.list_records(MEDIA_TRANSFER_QUEUE_TABLE, formula=formula, max_records=20)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    requeued = 0
+    for row in rows:
+        fields = row.get("fields") or {}
+        stamp = _row_stamp_ms(row)
+        if stamp and (now_ms - stamp) < STALE_PROCESSING_MS:
+            continue
+        attempts = int(fields.get("Attempt_Count") or 0)
+        if attempts >= 6:
+            client.update_record(
+                MEDIA_TRANSFER_QUEUE_TABLE,
+                row["id"],
+                {
+                    "Transfer_Status": "Error",
+                    "Error_Message": (
+                        f"Parked after {attempts} stalled Processing claims so SMV1 can "
+                        "drain other crops."
+                    ),
+                },
+            )
+        else:
+            client.update_record(
+                MEDIA_TRANSFER_QUEUE_TABLE,
+                row["id"],
+                {
+                    "Transfer_Status": "Pending",
+                    "Error_Message": (
+                        "Requeued after a stalled Processing claim so SMV1 can pick the row up again."
+                    ),
+                },
+            )
+        requeued += 1
+    return requeued
+
+
+def is_retryable_master_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    if "404" in message or "not found" in message or "timed out" in message or "timeout" in message:
+        return True
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status in {404, 408, 429, 500, 502, 503, 504}
 
 
 def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -> None:
@@ -76,6 +168,7 @@ def _process_master_pending(
     client: AirtableClient,
     drive: GoogleDriveClient,
     row: dict,
+    settings: PipelineSettings,
 ) -> dict[str, Any]:
     record_id = row["id"]
     fields = row.get("fields", {})
@@ -86,7 +179,7 @@ def _process_master_pending(
         raise RuntimeError("Master queue row is missing Target_Drive_Folder_ID")
 
     _claim_row(client, record_id, fields)
-    content, mime = resolve_master_source(fields)
+    content, mime = resolve_master_source(fields, settings)
     uploaded = drive.upload_file(folder_id, filename, content, mime)
     drive_id = str(uploaded.get("id") or "")
     drive_url = str(uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view")
@@ -275,7 +368,7 @@ def process_queue_row(client: AirtableClient, row: dict) -> dict[str, Any]:
         return _process_preview_pending(client, drive, variant, r2, row)
 
     if kind == "Master Original" and transfer_status == "Pending":
-        return _process_master_pending(client, drive, row)
+        return _process_master_pending(client, drive, row, settings)
 
     if kind == "Platform Variant" and transfer_status == "Pending":
         return _process_variant_pending(client, drive, variant, row)
@@ -310,6 +403,12 @@ def process_one(
     if production_request_record_id and test_run_id:
         _assert_test_mode_boundary(client, production_request_record_id, test_run_id)
 
+    requeue_stale_processing(
+        client,
+        production_request_record_id=production_request_record_id,
+        test_run_id=test_run_id,
+    )
+
     row = select_next_row(
         client,
         production_request_record_id=production_request_record_id,
@@ -328,7 +427,13 @@ def process_one(
             and str(field(row, "Preview_Status") or "") == "Pending"
         )
         try:
-            _fail_row(client, row["id"], message, preview=preview)
+            _fail_row(
+                client,
+                row["id"],
+                message,
+                preview=preview,
+                retryable=not preview and is_retryable_master_error(exc),
+            )
         except Exception:
             pass
         raise

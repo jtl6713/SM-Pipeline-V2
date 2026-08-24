@@ -4,6 +4,8 @@ from __future__ import annotations
 
 VARIANT_RECIPE_VERSION = "fill-crop-v2"
 MEDIA_PUBLIC_BASE = "https://media.chicagoshining.com"
+STUDIO_MASTER_PREFIX = "studio/master-assets/"
+STALE_PROCESSING_MS = 90_000
 
 RATIO_SPECS = {
     "4:5": {"width": 1080, "height": 1350},

@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.118-rr2-python-ready",
+          version: "0.10.119-smv1-master-bridge",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -3985,7 +3985,7 @@ const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BA
 // Cron must also see Master Original rows stuck at Drive Uploaded — those need
 // Studio API reconciliation, not another SMV1 upload. SMV1's own selector stays
 // on Pending-only masters so it does not re-upload.
-const ITEM4_QUEUE_DRAIN_SCAN_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR(AND({Asset_Kind}="Master Original",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending")))';
+const ITEM4_QUEUE_DRAIN_SCAN_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR(AND({Asset_Kind}="Master Original",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded",{Transfer_Status}="Processing")),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded",{Transfer_Status}="Processing")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending")))';
 const ITEM4_P3_SCENARIO_ID = 5531703;
 const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
 const ITEM4_P2_SCENARIO_ID = 5530955;
@@ -4365,6 +4365,8 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === PHASE6_RR2_SCENARIO_ID && pipelineStageBackend(env, "RR2").mode === "python") return true;
   if (id === ITEM4_P2_SCENARIO_ID && pipelineStageBackend(env, "P2").mode === "python") return true;
   if (id === ITEM4_P3_SCENARIO_ID && pipelineStageBackend(env, "P3").mode === "python") return true;
+  if (id === ITEM4_C2_SCENARIO_ID && pipelineStageBackend(env, "C2").mode === "python") return true;
+  if (id === ITEM4_SAI1_SCENARIO_ID && pipelineStageBackend(env, "SAI1").mode === "python") return true;
   return false;
 }
 
@@ -5150,7 +5152,7 @@ async function item4ResumePendingMasterAuthority(env, recordId, record = null) {
   // Existing Ready / Drive Uploaded / Processing checkpoints are preserved.
   await item4UpsertMasterQueue(env, recordId, assets);
 
-  let rows = await item4MasterQueueRows(env, recordId);
+  let rows = await item4RequeueStaleProcessing(env, await item4MasterQueueRows(env, recordId));
   const outstanding = rows.filter((row) =>
     ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
   );
@@ -7044,21 +7046,29 @@ async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     .map((asset) => String(asset?.caption || "").trim())
     .filter(Boolean);
-  const response = await fetch(ITEM4_SAI1_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      source: "studio-ai-slide-themer",
-      production_request_record_id: requestRecord.id,
-      content_record_id: parent?.id || null,
-      title,
-      covered_text: covered.map((text, index) => `${index + 1}. ${text}`).join("\n") || "(none)",
-      needed,
-      total: covered.length + needed,
-    }),
-  });
-  if (!response.ok) throw new Error(`SAI1 slide themer failed (${response.status})`);
-  const parsed = item4ParseJson(await response.text(), null);
+  const sai1Body = {
+    source: "studio-ai-slide-themer",
+    production_request_record_id: requestRecord.id,
+    content_record_id: parent?.id || null,
+    title,
+    covered_text: covered.map((text, index) => `${index + 1}. ${text}`).join("\n") || "(none)",
+    needed,
+    total: covered.length + needed,
+  };
+  let parsed = null;
+  if (pipelineStageBackend(env, "SAI1").mode === "python") {
+    const { response, payload } = await item4PulsePipelineStage(env, "sai1", sai1Body, "SAI1");
+    if (!response.ok) throw new Error(payload?.message || `SAI1 slide themer failed (${response.status})`);
+    parsed = payload?.details?.themes || payload?.details?.run?.themes || null;
+  } else {
+    const response = await fetch(ITEM4_SAI1_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(sai1Body),
+    });
+    if (!response.ok) throw new Error(`SAI1 slide themer failed (${response.status})`);
+    parsed = item4ParseJson(await response.text(), null);
+  }
   const slides = (Array.isArray(parsed?.slides) ? parsed.slides : [])
     .map((slide) => ({
       caption: String(slide?.caption || "").trim().slice(0, 120),
@@ -8266,23 +8276,33 @@ async function pulseStudioP3Handoff(env, contentItemId, requestRecord) {
 async function pulseStudioC2Handoff(env, contentItemId, requestRecord = null) {
   if (!/^rec[A-Za-z0-9]+$/.test(String(contentItemId || ""))) return { ok: false, skipped: "no_parent" };
   const testRunId = String(f(requestRecord || {}, "Test_Run_ID") || "").trim();
+  const body = {
+    source: "studio-ai-fill",
+    target: "C2",
+    content_record_id: contentItemId,
+    content_item_record_id: contentItemId,
+    test_run_id: testRunId,
+    requested_at: new Date().toISOString(),
+  };
+  if (pipelineStageBackend(env, "C2").mode === "python") {
+    const { response, payload } = await item4PulsePipelineStage(env, "c2", body, "C2");
+    if (!response.ok) {
+      console.warn("C2 studio AI pulse failed", response.status, String(payload?.message || "").slice(0, 300));
+      return { ok: false, status: response.status };
+    }
+    return { ok: true, status: response.status, backend: "python" };
+  }
   try { await phase6EnsureScenarioActive(env, ITEM4_C2_SCENARIO_ID); } catch (error) {
     console.warn("C2 webhook could not be armed before pulse", error);
   }
   const response = await fetch(ITEM4_C2_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
-    body: JSON.stringify({
-      source: "studio-ai-fill",
-      target: "C2",
-      content_record_id: contentItemId,
-      test_run_id: testRunId,
-      requested_at: new Date().toISOString(),
-    }),
+    body: JSON.stringify(body),
   });
-  const body = await response.text();
+  const text = await response.text();
   if (!response.ok) {
-    console.warn("C2 studio AI pulse failed", response.status, String(body || "").slice(0, 300));
+    console.warn("C2 studio AI pulse failed", response.status, String(text || "").slice(0, 300));
     return { ok: false, status: response.status };
   }
   return { ok: true, status: response.status };
