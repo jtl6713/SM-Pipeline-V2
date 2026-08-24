@@ -141,6 +141,15 @@
       "python_endpoint": "/stages/a4",
       "production_backend": "python",
       "notes": "Make 5578180 inactive. Isolated healthy checkpoint recFQ5QoZnAy8MtGU. Post-restart daisy-chain checked 20, healthy_count=20, deleted_count=0."
+    },
+    {
+      "stage": "A1P",
+      "scenario_id": 5715500,
+      "name": "A1P - Poll and Finalize Upload Import Compression - MAKE09 v10 Terminal State Cleanup",
+      "blueprint_file": null,
+      "python_endpoint": "/hooks/a1p/<A1P_WEBHOOK_TOKEN>",
+      "production_backend": "python",
+      "notes": "Make 5715500 inactive. A1S 5715530 still Make on-demand; Airtable A1_POLLER_WEBHOOK_URL recBrmzuORriwmz13 now posts to pipeline.chicagoshining.com/hooks/a1p. Isolated dry-run POST /stages/a1p ok."
     }
   ]
 }

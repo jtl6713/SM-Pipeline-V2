@@ -113,6 +113,7 @@ jobs:
               'STAGE_BACKEND_A2B': ('plain_text', 'python'),
               'STAGE_BACKEND_A3': ('plain_text', 'python'),
               'STAGE_BACKEND_A4': ('plain_text', 'python'),
+              'STAGE_BACKEND_A1P': ('plain_text', 'python'),
               'PIPELINE_RUNNER_URL': ('plain_text', os.environ['RUNNER_URL']),
               'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
           }
