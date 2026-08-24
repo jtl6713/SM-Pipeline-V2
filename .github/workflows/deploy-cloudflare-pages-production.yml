@@ -60,15 +60,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS \
+          PROD_BRANCH=""
+          HTTP_CODE=$(curl -sS -o /tmp/pages-project.json -w "%{http_code}" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/chicagoshining-studio" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -o /tmp/pages-project.json
-          jq -e '.success == true' /tmp/pages-project.json >/dev/null
-          PROD_BRANCH=$(jq -r '.result.production_branch // empty' /tmp/pages-project.json)
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" || true)
+          if [ "$HTTP_CODE" = "200" ] && jq -e '.success == true' /tmp/pages-project.json >/dev/null 2>&1; then
+            PROD_BRANCH=$(jq -r '.result.production_branch // empty' /tmp/pages-project.json)
+          else
+            echo "Pages project lookup returned HTTP ${HTTP_CODE:-none}; wrangler will use the known production branch."
+          fi
           if [ -z "$PROD_BRANCH" ]; then
-            echo 'Could not determine the existing Pages production branch.' >&2
-            exit 1
+            PROD_BRANCH=main
           fi
           echo "PROD_BRANCH=$PROD_BRANCH" >> "$GITHUB_ENV"
           echo "Existing production branch: $PROD_BRANCH"
