@@ -118,12 +118,11 @@ Set-Location -LiteralPath '$escapedRoot'
 $launcherPath = Join-Path $env:TEMP 'start-smv2-video-compressor.ps1'
 [System.IO.File]::WriteAllText($launcherPath,$launcher,[System.Text.UTF8Encoding]::new($false))
 
-if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
-    Start-Process -FilePath 'wt.exe' -ArgumentList @('new-tab','--title','7 LOC Video Compressor :3335','powershell.exe','-NoExit','-ExecutionPolicy','Bypass','-File',$launcherPath) | Out-Null
-}
-else {
-    Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoExit','-ExecutionPolicy','Bypass','-File',$launcherPath) | Out-Null
-}
+# Launch PowerShell directly. Passing a multi-word tab title through wt.exe/Start-Process
+# is fragile because Windows command-line quoting can cause wt.exe to treat the title as
+# the command executable. Direct PowerShell launch is deterministic and matches the
+# service's actual runtime requirement.
+Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoExit','-ExecutionPolicy','Bypass','-File',('"' + $launcherPath + '"')) | Out-Null
 
 Write-Step 'Verify local health'
 $deadline = (Get-Date).AddSeconds(60)
