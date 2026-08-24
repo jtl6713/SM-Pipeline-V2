@@ -1,6 +1,12 @@
 {
-  "correlation_id": "MX1-APPROVE-227-20260824",
+  "correlation_id": "MX1-APPROVE-227-20260824B",
   "requests": [
+    {
+      "name": "get-227-creative",
+      "method": "GET",
+      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative",
+      "continue_on_error": false
+    },
     {
       "name": "approve-227-instagram-single-image",
       "method": "POST",

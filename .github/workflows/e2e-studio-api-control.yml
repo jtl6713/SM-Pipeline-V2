@@ -94,7 +94,7 @@ jobs:
                   results.push({{name:spec.name || spec.path,path:spec.path,method,status:response.status,ok:response.ok,body:parsed}});
                   if (!response.ok && spec.continue_on_error !== true) break;
                 }} catch (error) {{
-                  results.push({{name:spec.name || spec.path,path:spec.path,method,status:0,ok:false,body:{{error:error instanceof Error ? error.message : String(error)}}}});
+                  results.push({{name:spec.name || spec.path,path:spec.path,method,status:0,ok:false,body:{{error:String(error)}}}});
                   if (spec.continue_on_error !== true) break;
                 }}
               }}

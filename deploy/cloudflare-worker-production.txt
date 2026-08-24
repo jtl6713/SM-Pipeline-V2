@@ -131,5 +131,7 @@ Native slide C7/C8 stamp Worker deploy: 2026-08-23 - Studio native photo slides 
 
 IG/FB native still Approve dispatch Worker deploy: 2026-08-24 - Instagram Single Image / Feed Post Graph-publishes the public JPEG (3D cover) with caption; Facebook Single Image and Multi-Image Post pulse FB0 and arm FB0-FB3. FB-ORCH stays parked. Worker 0.10.123-ig-fb-photo-dispatch.
 
+IG feed Graph isolate-safe Worker deploy: 2026-08-24 - Approve returns after the Airtable handoff; Instagram feed stills Graph-publish in waitUntil so a Drive/R2 abort cannot 500 the Studio request. Worker 0.10.124-ig-fb-photo-dispatch.
+
 Asset chain A2-A4 Worker deploy: 2026-08-24 - Studio Operations intake pulses Python A2 when STAGE_BACKEND_A2=python instead of Make 5531974. Worker 0.10.124-asset-chain-gates.
 

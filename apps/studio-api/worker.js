@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.124-asset-chain-gates",
+          version: "0.10.124-ig-fb-photo-dispatch",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -14040,20 +14040,24 @@ async function studioFetchImageBytes(source) {
   if (fileId) candidates.push(googleDriveDownloadUrl(fileId));
   if (/^https?:\/\//i.test(url) && !candidates.includes(url)) candidates.push(url);
   for (const href of candidates) {
-    const response = await fetch(href, {
-      redirect: "follow",
-      headers: {
-        Accept: "image/jpeg,image/png,image/webp,image/*;q=0.9,*/*;q=0.4",
-        "User-Agent": "chicagoshining-studio-api/publish-dispatch",
-      },
-    });
-    const type = String(response.headers.get("Content-Type") || "").toLowerCase();
-    if (!response.ok || type.includes("text/html")) {
-      try { await response.body?.cancel(); } catch {}
-      continue;
+    try {
+      const response = await fetch(href, {
+        redirect: "follow",
+        headers: {
+          Accept: "image/jpeg,image/png,image/webp,image/*;q=0.9,*/*;q=0.4",
+          "User-Agent": "chicagoshining-studio-api/publish-dispatch",
+        },
+      });
+      const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+      if (!response.ok || type.includes("text/html")) {
+        try { await response.body?.cancel(); } catch {}
+        continue;
+      }
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > 1000 && buffer.byteLength <= 12 * 1024 * 1024) return buffer;
+    } catch (error) {
+      console.warn("image fetch failed", href.slice(0, 120), error);
     }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > 1000) return buffer;
   }
   return null;
 }
@@ -14397,6 +14401,7 @@ async function studioDispatchApprovedPublishTail(env, record, primary) {
 
 function studioPublishDispatchNote(result) {
   if (!result) return "no result";
+  if (result.accepted) return `accepted: ${result.target || result.plan?.target || "graph"}`;
   if (result.skipped) return `skipped: ${result.skipped}`;
   const armed = (result.armed || []).map((row) => `${row.id}${row.ok ? "" : "!"}`).join(",");
   return [
@@ -14432,6 +14437,22 @@ async function studioStampPublishDispatch(env, record, note) {
 }
 
 async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
+  const plan = studioPublishDispatchTarget(record);
+  // Graph stills (Drive → R2 → Instagram) can OOM or abort the isolate. Finish
+  // the Approve HTTP response first so Studio/E2E are not killed with the publish.
+  if (plan?.graphFeedPhoto && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil((async () => {
+      try {
+        const primary = await studioDispatchApprovedPublishNow(env, record);
+        await studioStampPublishDispatch(env, record, studioPublishDispatchNote(primary));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn("studio publish dispatch failed", record?.id, error);
+        await studioStampPublishDispatch(env, record, `dispatch failed: ${message}`);
+      }
+    })());
+    return { ok: true, accepted: true, target: plan.target, plan };
+  }
   let primary;
   try {
     primary = await studioDispatchApprovedPublishNow(env, record);
@@ -14587,24 +14608,34 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
   const doNotPublish = Boolean(f(existing, "Do_Not_Publish"));
   const productionPublishApprove = action === "approve_for_publishing" || ((action === "approve" || action === "approved") && !doNotPublish);
   if (productionPublishApprove) {
-    const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
-    // Dispatch arms and pulses its own publisher chain, so a concurrent cadence sync would only
-    // compete for this invocation's budget and can park the scenario the pulse just woke up.
-    const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
-    return respond(request, env, {
-      ok: true,
-      action: "approve_for_publishing",
-      record: mapPhase6CreativeOutput(updated),
-      handoff_state: "approved_for_publishing",
-      publish_dispatch: {
-        target: dispatch?.target || dispatch?.skipped || null,
-        ok: dispatch?.ok !== false,
-        detail: studioPublishDispatchNote(dispatch),
-      },
-      message: dispatch?.ok === false
-        ? "Approved for publishing, but the publisher handoff did not go through. Studio will retry it automatically within a few minutes."
-        : "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
-    });
+    try {
+      const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
+      // Dispatch arms and pulses its own publisher chain, so a concurrent cadence sync would only
+      // compete for this invocation's budget and can park the scenario the pulse just woke up.
+      const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
+      return respond(request, env, {
+        ok: true,
+        action: "approve_for_publishing",
+        record: mapPhase6CreativeOutput(updated),
+        handoff_state: "approved_for_publishing",
+        publish_dispatch: {
+          target: dispatch?.target || dispatch?.skipped || null,
+          ok: dispatch?.ok !== false,
+          detail: studioPublishDispatchNote(dispatch),
+        },
+        message: dispatch?.ok === false
+          ? "Approved for publishing, but the publisher handoff did not go through. Studio will retry it automatically within a few minutes."
+          : "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
+      });
+    } catch (error) {
+      if (error instanceof HttpError) throw error;
+      console.error("approve_for_publishing failed", existing?.id, error);
+      return respond(request, env, {
+        ok: false,
+        action: "approve_for_publishing",
+        error: error instanceof Error ? error.message : String(error),
+      }, 500);
+    }
   }
   if (!doNotPublish && phase6ProductionMixAction(action)) {
     phase6AssertProductionAudioMixAllowed(existing);
