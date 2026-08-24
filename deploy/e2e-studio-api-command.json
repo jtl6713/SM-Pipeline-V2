@@ -1,20 +1,10 @@
 {
-  "correlation_id": "MX1-APPROVE-227-20260824B",
+  "correlation_id": "MX1-GET-227-AFTER-GRAPH-20260824",
   "requests": [
     {
-      "name": "get-227-creative",
+      "name": "get-227-creative-after-graph",
       "method": "GET",
-      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative",
-      "continue_on_error": false
-    },
-    {
-      "name": "approve-227-instagram-single-image",
-      "method": "POST",
-      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative/review",
-      "body": {
-        "action": "approve_for_publishing",
-        "notes": "Joseph authorized live Instagram Single Image publish of output 227 for 3D-cover Graph-caption proof. Do not approve 228, 224-226, 245, or 246."
-      }
+      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative"
     }
   ]
 }

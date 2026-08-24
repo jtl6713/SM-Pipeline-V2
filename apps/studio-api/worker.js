@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.124-ig-fb-photo-dispatch",
+          version: "0.10.125-ig-fb-photo-dispatch",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -14062,12 +14062,69 @@ async function studioFetchImageBytes(source) {
   return null;
 }
 
+async function studioPublicJpegIsReachable(url) {
+  const href = String(url || "").trim();
+  if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+  try {
+    const response = await fetch(href, {
+      method: "GET",
+      headers: { Range: "bytes=0-15", "User-Agent": "chicagoshining-studio-api/publish-dispatch" },
+    });
+    const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+    try { await response.body?.cancel(); } catch {}
+    return response.ok && type.startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
+function studioImageContentType(buffer) {
+  const bytes = new Uint8Array(buffer.slice(0, 12));
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57) return "image/webp";
+  return "image/jpeg";
+}
+
+async function studioPutPublicJpegViaUploadWorker(env, record, buffer) {
+  const settings = await studioActivePipelineSettings(env, [
+    "R2_UPLOAD_WORKER_URL",
+    "R2_UPLOAD_WORKER_SECRET",
+  ]);
+  const workerUrl = String(settings.R2_UPLOAD_WORKER_URL || "").trim().replace(/\/+$/, "");
+  const secret = String(settings.R2_UPLOAD_WORKER_SECRET || "").trim();
+  if (!workerUrl || !secret) return "";
+  const contentType = studioImageContentType(buffer);
+  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const key = `studio/previews/platform-output/${record.id}/cover.${ext}`;
+  const response = await fetch(`${workerUrl}?key=${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+      "x-pipeline-secret": secret,
+      "x-output-id": record.id,
+      "x-retain-class": "preview",
+    },
+    body: buffer,
+  });
+  const payload = await response.json().catch(() => ({}));
+  const url = String(payload.public_url || `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`).trim();
+  if (!response.ok || payload.ok === false) {
+    console.warn("public jpeg upload worker failed", record.id, response.status);
+    return "";
+  }
+  if (!(await studioPublicJpegIsReachable(url))) {
+    console.warn("public jpeg upload not reachable", record.id);
+    return "";
+  }
+  return url;
+}
+
 async function studioEnsurePublicJpegForPublish(env, record) {
   const existing = studioClipPublicCdnUrl(f(record, "Publish_Asset_URL"))
     || studioPublicJpegCoverUrl(record)
     || studioClipPublicCdnUrl(f(record, "Studio_Preview_URL"));
-  if (existing) return { record, url: existing };
-  if (!env.STUDIO_MEDIA) return { record, url: "" };
+  if (existing && await studioPublicJpegIsReachable(existing)) return { record, url: existing };
   const source = String(
     f(record, "Thumbnail_URL")
     || f(record, "Studio_Preview_URL")
@@ -14076,12 +14133,8 @@ async function studioEnsurePublicJpegForPublish(env, record) {
   ).trim();
   const buffer = await studioFetchImageBytes(source);
   if (!buffer) return { record, url: "" };
-  const key = `publish/platform-output/${record.id}/cover.jpg`;
-  await env.STUDIO_MEDIA.put(key, buffer, {
-    httpMetadata: { contentType: "image/jpeg" },
-    customMetadata: { platformOutputId: record.id, purpose: "ig-feed-photo" },
-  });
-  const url = `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
+  const url = await studioPutPublicJpegViaUploadWorker(env, record, buffer);
+  if (!url) return { record, url: "" };
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
     method: "PATCH",
     body: JSON.stringify({
