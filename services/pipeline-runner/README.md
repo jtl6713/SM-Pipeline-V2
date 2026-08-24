@@ -24,6 +24,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **P2** | Full (`5530955` — voiceover + thumbnail, 3 routes) | `STAGE_BACKEND_P2=python` |
 | **P3** | Full (`5531703` — studio parent enrich + legacy create) | `STAGE_BACKEND_P3=python` |
 | **RR2** | Full (`5576353` — review decision webhook) | `STAGE_BACKEND_RR2=python` |
+| **R2B** | Full (`5576620` — retry asset selection, max 10) | Make until `STAGE_BACKEND_R2B=python` |
 | **AP0 / publish_*** | Constants only (`publish/constants.py`) | Make |
 
 Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, and RR2 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. Make `5576353` is deactivated.
@@ -166,6 +167,7 @@ Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-dema
 | `POST` | `/stages/p2` | Voiceover + thumbnail for one Content Item |
 | `POST` | `/stages/p3` | Enrich seeded Studio outputs or create legacy mappings |
 | `POST` | `/stages/rr2` | Apply one render-review decision |
+| `POST` | `/stages/r2b` | Retry asset selection batch (max 10) |
 | `GET`/`POST` | `/hooks/rr2/<token>` | Email-button entry (token required; no pipeline secret) |
 
 POST body fields: `output_record_id`, `production_request_record_id`, `test_run_id`, `intended_stage`, `idempotency_key`, `extra.max_runs`, `extra.dry_run`, etc.

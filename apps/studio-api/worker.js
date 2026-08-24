@@ -4357,6 +4357,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   const id = Number(scenarioId);
   if (id === ITEM4_SMV1_SCENARIO_ID && pipelineStageBackend(env, "SMV1").mode === "python") return true;
   if (id === PHASE6_R2_SCENARIO_ID && pipelineStageBackend(env, "R2").mode === "python") return true;
+  if (id === STUDIO_R2B_SCENARIO_ID && pipelineStageBackend(env, "R2B").mode === "python") return true;
   if (id === PHASE6_R3_SCENARIO_ID && pipelineStageBackend(env, "R3").mode === "python") return true;
   if (id === PHASE6_R4_SCENARIO_ID && pipelineStageBackend(env, "R4").mode === "python") return true;
   if (id === PHASE6_R5_SCENARIO_ID && pipelineStageBackend(env, "R5").mode === "python") return true;
@@ -4400,6 +4401,23 @@ async function item4PulseSmv1Python(env, recordId, maxRuns) {
   }
   const processed = Number(payload?.details?.processed_count || 0);
   return processed > 0 ? [`python:smv1:${recordId}`] : [];
+}
+
+async function item4PulseR2BPython(env, options = {}) {
+  const body = {
+    extra: { max_runs: Number(options.maxRuns || 10) },
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "r2b", body, "R2B");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python R2B failed (${response.status})`
+    );
+  }
+  return payload;
 }
 
 async function item4PulseR2Python(env, options = {}) {
@@ -13446,6 +13464,10 @@ async function pulseOnDemandR2B(env) {
   });
   if (!hasWork) return [{ key: "R2B", skipped: "no_work" }];
   try {
+    if (pipelineStageBackend(env, "R2B").mode === "python") {
+      const payload = await item4PulseR2BPython(env, { maxRuns: 10 });
+      return [{ key: "R2B", pulsed: true, backend: "python", payload }];
+    }
     await phase6PulseOnDemandScenario(env, STUDIO_R2B_SCENARIO_ID, { waitMs: 20000 });
     return [{ key: "R2B", pulsed: true }];
   } catch (error) {
