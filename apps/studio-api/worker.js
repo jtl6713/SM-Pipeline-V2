@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.126-ig-fb-photo-dispatch",
+          version: "0.10.127-ig-fb-photo-dispatch",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -702,14 +702,14 @@ export default {
     // waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
       try {
-        await advanceStudioProductionOutputs(env, { waitMs: 0 });
-      } catch (error) {
-        console.warn("production continuation cron failed", error);
-      }
-      try {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
+      }
+      try {
+        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+      } catch (error) {
+        console.warn("production continuation cron failed", error);
       }
       try {
         await syncProductionCadence(env, { skipRenderPulse: true });
@@ -14141,7 +14141,24 @@ async function studioEnsurePublicJpegForPublish(env, record) {
     : String(thumbnail || f(record, "Studio_Preview_URL") || f(record, "Publish_Asset_URL") || "").trim();
   const buffer = await studioFetchImageBytes(source);
   if (!buffer) return { record, url: "", skip: "missing-source-bytes" };
-  const uploaded = await studioPutPublicJpegViaUploadWorker(env, record, buffer);
+  let uploaded = await studioPutPublicJpegViaUploadWorker(env, record, buffer);
+  if (!uploaded.url && env.STUDIO_MEDIA) {
+    const contentType = studioImageContentType(buffer);
+    const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+    const key = `studio/previews/platform-output/${record.id}/cover.${ext}`;
+    try {
+      await env.STUDIO_MEDIA.put(key, buffer, {
+        httpMetadata: { contentType, cacheControl: "public, max-age=300" },
+        customMetadata: { platformOutputId: String(record.id), purpose: "ig-feed-photo" },
+      });
+      uploaded = { url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`, skip: "" };
+      if (!(await studioPublicJpegIsReachable(uploaded.url))) {
+        uploaded = { url: "", skip: "studio-media-not-public" };
+      }
+    } catch (error) {
+      console.warn("studio media public jpeg put failed", record.id, error);
+    }
+  }
   if (!uploaded.url) return { record, url: "", skip: uploaded.skip || "upload-worker-failed" };
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
     method: "PATCH",

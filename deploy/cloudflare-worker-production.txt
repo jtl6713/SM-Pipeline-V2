@@ -133,5 +133,7 @@ IG/FB native still Approve dispatch Worker deploy: 2026-08-24 - Instagram Single
 
 IG feed public JPEG Worker deploy: 2026-08-24 - Feed stills upload the 3D cover through the R2 upload worker under studio/previews so Graph can fetch a real image. A 404 media URL is no longer treated as publish-ready. Worker 0.10.126-ig-fb-photo-dispatch.
 
+IG feed preview-prefix Worker deploy: 2026-08-24 - If the upload worker 404s, Studio writes the cover under studio/previews on STUDIO_MEDIA, the prefix Graph can already fetch for lettered carousels. Reconcile runs before continuation. Worker 0.10.127-ig-fb-photo-dispatch.
+
 Asset chain A2-A4 Worker deploy: 2026-08-24 - Studio Operations intake pulses Python A2 when STAGE_BACKEND_A2=python instead of Make 5531974. Worker 0.10.124-asset-chain-gates.
 
