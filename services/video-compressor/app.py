@@ -125,11 +125,19 @@ def scale_filter(max_width, max_height):
     return f"scale={max_width}:{max_height}:force_original_aspect_ratio=decrease:force_divisible_by=2"
 
 
-def calculate_video_bitrate_kbps(duration_seconds, target_bytes, audio_kbps, has_audio, safety_factor=0.94):
+def calculate_bitrate_budget(duration_seconds, target_bytes, requested_audio_kbps, has_audio, safety_factor=0.94):
     total_kbps = (target_bytes * 8.0 / max(duration_seconds, 0.1) / 1000.0) * safety_factor
-    audio_budget = audio_kbps if has_audio else 0
-    video_kbps = int(total_kbps - audio_budget)
-    return max(250, min(video_kbps, 20000))
+    total_kbps = max(64, total_kbps)
+
+    if has_audio:
+        # Keep audio within the total target for unusually long source videos.
+        audio_kbps = min(int(requested_audio_kbps), max(32, int(total_kbps * 0.18)))
+    else:
+        audio_kbps = 0
+
+    video_kbps = int(total_kbps - audio_kbps)
+    video_kbps = max(32, min(video_kbps, 20000))
+    return video_kbps, audio_kbps
 
 
 def two_pass_encode(input_path, output_path, passlog_path, video_kbps, audio_kbps, has_audio, max_width, max_height):
@@ -144,7 +152,7 @@ def two_pass_encode(input_path, output_path, passlog_path, video_kbps, audio_kbp
     ]
 
     run_cmd(common + [
-        "-pass", "1", "-an", "-f", "mp4", os.devnull
+        "-pass", "1", "-an", "-f", "null", os.devnull
     ])
 
     second = common + ["-pass", "2"]
@@ -172,7 +180,7 @@ def process_job(job_id, payload):
         target_mb = payload["target_mb"]
         max_width = payload["max_width"]
         max_height = payload["max_height"]
-        audio_kbps = payload["audio_kbps"]
+        requested_audio_kbps = payload["audio_kbps"]
         output_name = payload["output_name"]
         base_url = payload["base_url"]
 
@@ -200,8 +208,8 @@ def process_job(job_id, payload):
             )
 
             target_bytes = int(target_mb * 1024 * 1024)
-            video_kbps = calculate_video_bitrate_kbps(
-                source["duration_seconds"], target_bytes, audio_kbps, source["has_audio"], 0.94
+            video_kbps, audio_kbps = calculate_bitrate_budget(
+                source["duration_seconds"], target_bytes, requested_audio_kbps, source["has_audio"], 0.94
             )
 
             two_pass_encode(
@@ -214,13 +222,17 @@ def process_job(job_id, payload):
             if output_size > target_bytes:
                 # A second bounded attempt corrects unusual container/audio overhead.
                 set_job(job_id, status="compressing", progress=70, retry_for_target=True)
-                corrected_kbps = max(250, int(video_kbps * (target_bytes / output_size) * 0.92))
+                ratio = target_bytes / output_size
+                corrected_video_kbps = max(32, int(video_kbps * ratio * 0.90))
+                corrected_audio_kbps = max(24, int(audio_kbps * ratio * 0.95)) if source["has_audio"] else 0
                 two_pass_encode(
                     input_path, output_path, passlog_path,
-                    corrected_kbps, audio_kbps, source["has_audio"], max_width, max_height
+                    corrected_video_kbps, corrected_audio_kbps,
+                    source["has_audio"], max_width, max_height
                 )
                 cleanup_passlogs(passlog_path)
-                video_kbps = corrected_kbps
+                video_kbps = corrected_video_kbps
+                audio_kbps = corrected_audio_kbps
                 output_size = output_path.stat().st_size
 
             final = probe_media(output_path)
@@ -271,7 +283,7 @@ def health():
     return jsonify({
         "ok": True,
         "service": "chicagoshining-local-video-compressor",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffprobe": shutil.which("ffprobe") is not None,
         "port": APP_PORT,
@@ -292,7 +304,7 @@ def compress():
     target_mb = clamp(payload.get("target_mb"), DEFAULT_TARGET_MB, 10, 99, float)
     max_width = clamp(payload.get("max_width"), DEFAULT_MAX_WIDTH, 320, 3840, int)
     max_height = clamp(payload.get("max_height"), DEFAULT_MAX_HEIGHT, 320, 3840, int)
-    audio_kbps = clamp(payload.get("audio_kbps"), DEFAULT_AUDIO_KBPS, 64, 320, int)
+    audio_kbps = clamp(payload.get("audio_kbps"), DEFAULT_AUDIO_KBPS, 32, 320, int)
     record_id = str(payload.get("record_id") or "unknown")[:100]
     asset_name = str(payload.get("asset_name") or "video.mp4")[:255]
     output_name = safe_filename(payload.get("output_filename") or asset_name)
