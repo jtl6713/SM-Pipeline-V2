@@ -29,7 +29,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **P5** | Full (`5536624` — open-shot reminder email) | `STAGE_BACKEND_P5=python`; P4 daisy-chains Python P5 |
 | **SAI1** | Full (`6023816` — Studio AI slide themer, request/response) | Make until live proof. Worker uses `STAGE_BACKEND_SAI1` |
 | **C2** | Full (`5582071` — exact-parent AI slide images) | `STAGE_BACKEND_C2=python` |
-| **C3** | Full (`5587853` — one-parent review email) | Make until live proof |
+| **C3** | Full (`5587853` — one-parent review email) | `STAGE_BACKEND_C3=python`; C2 daisy-chains Python C3 |
 | **C3B** | Full (`5592384` — review buttons) | Make until live proof. Python hook: `/hooks/c3b/<C3B_WEBHOOK_TOKEN>` |
 | **C4** | Full (`5587860` — decision router → C5/C6/C7) | Make until live proof |
 | **C5** | Full (`5582074` — regenerate rejected slides) | Make until live proof |
@@ -41,7 +41,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 
 Wave 2 render chain (R3–R5), SMV1/R2, RR1, P2, P3, RR2, R2B, P4, and P5 are on Python in production. RR1 email buttons call `/hooks/rr2/<token>`. R2 missing-asset handoffs call Python P4. Make `5576353`, `5576620`, `5533802`, and `5536624` are deactivated.
 
-C2 is on Python in production. SAI1 and C3–C9 stay on Make until each is live-proven and flagged. Do not set those remaining `STAGE_BACKEND_*` vars to `python` or archive those Make scenarios yet.
+C2 and C3 are on Python in production. SAI1 and C3B–C9 stay on Make until each is live-proven and flagged. Do not set those remaining `STAGE_BACKEND_*` vars to `python` or archive those Make scenarios yet.
 
 Other stages return `501 not_implemented`.
 
