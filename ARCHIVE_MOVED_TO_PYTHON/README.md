@@ -9,8 +9,11 @@ Make.com scenarios replaced by `services/pipeline-runner/` (Python on `pipeline.
 | R3 | 5557966 | `POST /stages/r3` | `r3-5557966-deterministic-render-prep.json` | Python |
 | R4 | 5556716 | `POST /stages/r4` | `r4-5556716-start-remotion-render.json` | Python |
 | R5 | 5565333 | `POST /stages/r5` | `r5-5565333-render-poller-final-upload.json` | Python |
+| RR1 | 5576363 | `POST /stages/rr1` | `rr1-5576363-render-review-email.json` | Python |
+| P2 | 5530955 | `POST /stages/p2` | Make blueprint retained (inactive) | Python |
 
-Wave 2 cutover guide: `WAVE2_R3_R4_R5.md`
+Wave 2 cutover guide: `WAVE2_R3_R4_R5.md`  
+Wave 3: `WAVE3_RR1.md`, `WAVE3_P2.md`
 
 ## Cutover (2026-08-23)
 
@@ -22,11 +25,13 @@ STAGE_BACKEND_R2=python
 STAGE_BACKEND_R3=python
 STAGE_BACKEND_R4=python
 STAGE_BACKEND_R5=python
+STAGE_BACKEND_RR1=python
+STAGE_BACKEND_P2=python
 PIPELINE_RUNNER_URL=https://pipeline.chicagoshining.com
 PIPELINE_RUNNER_SHARED_SECRET=<secret>
 ```
 
-Make scenarios **5557966**, **5556716**, and **5565333** are **inactive** as of Wave 2 cutover. Reactivate only for emergency rollback.
+Make scenarios **5557966**, **5556716**, **5565333**, **5576363**, and **5530955** are **inactive**. Reactivate only for emergency rollback.
 
 ## Rollback
 

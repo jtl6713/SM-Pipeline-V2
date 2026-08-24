@@ -15,13 +15,13 @@ RR1_REVIEW_EMAIL_TO=chicagoshining@gmail.com
 RR1_DECISION_WEBHOOK_URL=https://hook.us2.make.com/4la4htbwby73twc4omljrc2iip5f50zu
 ```
 
-## Wave 4 (next) — P2 / P3 / publishing
+## Wave 4 (next) — P3 / publishing
 
 | Stage | Make ID | Status |
 |-------|---------|--------|
-| P2 | 5530955 | Scaffold only (`501 deferred`) |
+| P2 | 5530955 | Python routed (`STAGE_BACKEND_P2=python`); live paid proof pending OpenAI billing |
 | P3 | 5531703 | Scaffold only |
 | AP0 | 5612096 | Constants only (`publish/constants.py`) |
 | publish_ig/fb/tt/yt | 5864632 / 5813561 / 5806668 / 5823581 | Not started |
 
-Recommended order: **P2 → P3 → AP0 → publish_tt → publish_fb → publish_ig → publish_yt**
+Recommended order: **P3 → AP0 → publish_tt → publish_fb → publish_ig → publish_yt**

@@ -40,7 +40,9 @@ def generate_thumbnail_png(thumbnail_prompt: str) -> bytes:
         },
         timeout=300,
     )
-    response.raise_for_status()
+    if not response.ok:
+        detail = (response.text or "").strip()[:400]
+        raise RuntimeError(f"OpenAI image generation failed ({response.status_code}): {detail}")
     payload = response.json()
     data = payload.get("data") or []
     if not data:

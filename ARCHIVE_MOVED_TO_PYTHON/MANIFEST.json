@@ -50,7 +50,16 @@
       "name": "RR1 - Render Review Email v1.2 - Native Photo Set Eligible",
       "blueprint_file": "rr1-5576363-render-review-email.json",
       "python_endpoint": "/stages/rr1",
-      "production_backend": "make (flip STAGE_BACKEND_RR1=python after Gmail send scope verified)"
+      "production_backend": "python"
+    },
+    {
+      "stage": "P2",
+      "scenario_id": 5530955,
+      "name": "P2 - Voiceover and Thumbnail Generation - Daisy Chain v2.3 - Optional Voiceover",
+      "blueprint_file": null,
+      "python_endpoint": "/stages/p2",
+      "production_backend": "python",
+      "notes": "Make 5530955 inactive. Silent-thumbnail dry-run proven on CI 95. Live paid thumbnail blocked on OpenAI billing_hard_limit_reached; ELEVENLABS_API_KEY not in runtime .env."
     }
   ]
 }

@@ -18,7 +18,7 @@
 | R4 | 5556716 | `STAGE_BACKEND_R4=python` | ✅ (Make deactivated) |
 | R5 | 5565333 | `STAGE_BACKEND_R5=python` | ✅ (Make deactivated) |
 | RR1 | 5576363 | `STAGE_BACKEND_RR1=python` | ✅ (Make deactivated) |
-| **P2** | **5530955** | **`STAGE_BACKEND_P2=python`** | ❌ **still Make webhook** |
+| **P2** | **5530955** | **`STAGE_BACKEND_P2=python`** | ✅ routed (Make deactivated; live paid proof pending OpenAI billing) |
 | P3 | 5531703 | (none yet) | Make webhook |
 | Publish | various | (none yet) | Make |
 
@@ -94,10 +94,10 @@ Mirror R3–R5 / RR1 pattern:
 
 ### 1. Pre-flight
 
-- [ ] `pytest` in `services/pipeline-runner` — all green
-- [ ] Runtime `.env` has: `AIRTABLE_PAT`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, Google OAuth (Drive), `PIPELINE_RUNNER_SHARED_SECRET`
-- [ ] Voiceover normalizer running on **3012** (or `Voiceover_Normalization_Service_URL` in Airtable Pipeline Settings `tblpHPWeEkyJaF7ql`)
-- [ ] Local/public `/health` shows `stages_implemented: 7`
+- [x] `pytest` in `services/pipeline-runner` — 35 passed
+- [ ] Runtime `.env` has: `AIRTABLE_PAT`, `OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, Google OAuth (Drive), `PIPELINE_RUNNER_SHARED_SECRET` — **ELEVENLABS_API_KEY still missing; OpenAI key billing-limited**
+- [x] Voiceover normalizer running on **3012** (`Voiceover_Normalization_Service_URL` = `https://voiceover.chicagoshining.com`)
+- [x] Local/public `/health` shows `stages_implemented: 7`
 
 ### 2. Enable Worker var
 
@@ -162,6 +162,8 @@ Invoke-RestMethod -Uri "https://pipeline.chicagoshining.com/stages/p2" `
 ### 7. Archive docs
 
 Update `ARCHIVE_MOVED_TO_PYTHON/MANIFEST.json` and add `WAVE3_P2.md` when cutover is proven.
+
+**2026-08-23 status:** Steps 2–5 done (configure [32676302994](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32676302994), deploy [32676304332](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32676304332), Make 5530955 inactive, runner restarted). Dry-run on CI [95](https://airtable.com/appe33zkZn35yirTL/tblwzN9AXWvmKVKPs/recCTw0gxbR07xGu4) selected `silent_thumbnail`. Live paid call failed with OpenAI `billing_hard_limit_reached`. Archive written as routed-not-fully-proven. Do not Approve.
 
 ---
 
