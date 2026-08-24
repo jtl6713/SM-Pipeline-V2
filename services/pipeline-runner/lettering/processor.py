@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+from typing import Any
+
+import requests
+
+from airtable.client import AirtableClient
+from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from item4.constants import MEDIA_PUBLIC_BASE
+from lettering.compositor import (
+    already_lettered_url,
+    is_ai_cover_clip,
+    letter_jpeg_bytes,
+    overlay_text_for_clip,
+)
+from lettering.constants import MAX_RECORDS
+from lettering.formulas import lettering_exact_output_formula, lettering_production_formula
+from render.fields import field_str, first_linked_id, json_text, parse_json_field
+from integrations.r2_upload import R2UploadClient
+
+
+CLIP_JSON_FIELDS = ("Render_Clip_List_JSON",)
+PACKAGE_JSON_FIELDS = ("Selected_Assets_JSON",)
+
+
+def _raw(record: dict[str, Any], name: str) -> Any:
+    return record.get("fields", {}).get(name)
+
+
+def _clip_url(clip: dict[str, Any]) -> str:
+    return str(clip.get("url") or clip.get("src") or "").strip()
+
+
+def _set_clip_url(clip: dict[str, Any], url: str) -> None:
+    clip["url"] = url
+    if "src" in clip:
+        clip["src"] = url
+    clip["lettered"] = True
+
+
+def _clips_from_output(output: dict[str, Any]) -> tuple[str | None, list[dict[str, Any]]]:
+    for name in CLIP_JSON_FIELDS:
+        parsed = parse_json_field(_raw(output, name))
+        if isinstance(parsed, list) and parsed:
+            return name, parsed
+        if isinstance(parsed, dict) and isinstance(parsed.get("clips"), list) and parsed["clips"]:
+            return name, parsed["clips"]
+    for name in PACKAGE_JSON_FIELDS:
+        parsed = parse_json_field(_raw(output, name))
+        if isinstance(parsed, dict):
+            for key in ("selected_clips", "clips"):
+                clips = parsed.get(key)
+                if isinstance(clips, list) and clips:
+                    return name, clips
+        if isinstance(parsed, list) and parsed:
+            return name, parsed
+    return None, []
+
+
+def _rewrite(value: Any, url_map: dict[str, str]) -> Any:
+    if isinstance(value, list):
+        for clip in value:
+            if isinstance(clip, dict):
+                old = _clip_url(clip)
+                if old in url_map:
+                    _set_clip_url(clip, url_map[old])
+        return value
+    if isinstance(value, dict):
+        for key in ("selected_clips", "clips"):
+            if isinstance(value.get(key), list):
+                _rewrite(value[key], url_map)
+        prep = value.get("render_prep")
+        if isinstance(prep, dict):
+            for idx in (1, 2, 3):
+                key = f"compatibility_clip_{idx}_url"
+                old = str(prep.get(key) or "")
+                if old in url_map:
+                    prep[key] = url_map[old]
+        return value
+    return value
+
+
+def select_outputs(
+    client: AirtableClient,
+    *,
+    output_record_id: str | None = None,
+    test_run_id: str | None = None,
+    max_records: int = MAX_RECORDS,
+) -> list[dict[str, Any]]:
+    if output_record_id:
+        formula = lettering_exact_output_formula(output_record_id, test_run_id or "")
+        max_records = 1
+    else:
+        formula = lettering_production_formula()
+    return client.list_records(
+        PLATFORM_OUTPUTS_TABLE,
+        formula=formula,
+        max_records=max_records,
+    )
+
+
+def process_one(
+    *,
+    output_record_id: str | None = None,
+    test_run_id: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    client = AirtableClient()
+    outputs = select_outputs(
+        client,
+        output_record_id=output_record_id,
+        test_run_id=test_run_id,
+        max_records=1,
+    )
+    if not outputs:
+        return {"processed": False, "reason": "no_eligible_platform_output"}
+
+    output = outputs[0]
+    json_field, clips = _clips_from_output(output)
+    if not clips:
+        return {
+            "processed": False,
+            "reason": "missing_clip_json",
+            "output_record_id": output["id"],
+        }
+
+    content_item = None
+    content_item_id = first_linked_id(output.get("fields", {}).get("Content_Item"))
+    if content_item_id:
+        content_item = client.get_record(CONTENT_ITEMS_TABLE, content_item_id)
+    title = (
+        field_str(output, "Output_Title")
+        or field_str(output, "Title_Text")
+        or field_str(content_item or {}, "Content_Title")
+        or ""
+    )
+
+    work: list[tuple[int, dict[str, Any], str]] = []
+    for index, clip in enumerate(clips):
+        if not isinstance(clip, dict) or is_ai_cover_clip(clip):
+            continue
+        url = _clip_url(clip)
+        if not url or already_lettered_url(url):
+            continue
+        text = overlay_text_for_clip(clip, title)
+        if not text:
+            continue
+        work.append((index, clip, text))
+
+    preview = {
+        "output_record_id": output["id"],
+        "output_id": field_str(output, "Output_ID"),
+        "clip_count": len(clips),
+        "letter_count": len(work),
+        "json_field": json_field,
+    }
+    if not work:
+        return {"processed": False, "reason": "already_lettered_or_no_text", **preview}
+    if dry_run:
+        return {
+            "processed": False,
+            "dry_run": True,
+            "would_letter": [item[2] for item in work],
+            **preview,
+        }
+
+    uploader = R2UploadClient()
+    url_map: dict[str, str] = {}
+    lettered_urls: list[str] = []
+    for index, clip, text in work:
+        source_url = _clip_url(clip)
+        response = requests.get(source_url, timeout=120)
+        response.raise_for_status()
+        jpeg = letter_jpeg_bytes(response.content, text)
+        key = f"studio/previews/lettered/{output['id']}/{index}.jpg"
+        uploader.put_object(key, jpeg, "image/jpeg")
+        public_url = f"{MEDIA_PUBLIC_BASE.rstrip('/')}/{key.lstrip('/')}"
+        url_map[source_url] = public_url
+        lettered_urls.append(public_url)
+        _set_clip_url(clip, public_url)
+
+    fields: dict[str, Any] = {}
+    for name in (*CLIP_JSON_FIELDS, *PACKAGE_JSON_FIELDS):
+        parsed = parse_json_field(_raw(output, name))
+        if parsed is None:
+            continue
+        fields[name] = json_text(_rewrite(parsed, url_map))
+
+    first_url = _clip_url(clips[0]) if clips else ""
+    if first_url:
+        fields["Studio_Preview_URL"] = first_url
+        fields["Clip_1_URL"] = first_url
+        fields["Selected_Clip_1_URL"] = first_url
+    if len(clips) > 1:
+        second = _clip_url(clips[1])
+        fields["Clip_2_URL"] = second
+        fields["Selected_Clip_2_URL"] = second
+    if len(clips) > 2:
+        third = _clip_url(clips[2])
+        fields["Clip_3_URL"] = third
+        fields["Selected_Clip_3_URL"] = third
+
+    client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields)
+    return {
+        "processed": True,
+        "route": "native_lettering",
+        "lettered_urls": lettered_urls,
+        **preview,
+    }
+
+
+def process_batch(
+    *,
+    output_record_id: str | None = None,
+    test_run_id: str | None = None,
+    max_runs: int = MAX_RECORDS,
+    dry_run: bool = False,
+) -> list[dict[str, Any]]:
+    client = AirtableClient()
+    outputs = select_outputs(
+        client,
+        output_record_id=output_record_id,
+        test_run_id=test_run_id,
+        max_records=max_runs,
+    )
+    if not outputs:
+        return [{"processed": False, "reason": "no_eligible_platform_output"}]
+    results: list[dict[str, Any]] = []
+    for output in outputs:
+        results.append(
+            process_one(
+                output_record_id=output["id"],
+                test_run_id=test_run_id,
+                dry_run=dry_run,
+            )
+        )
+        if dry_run:
+            break
+    return results

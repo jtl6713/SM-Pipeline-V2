@@ -138,7 +138,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.116-vo-duration-status",
+          version: "0.10.117-native-jpeg-lettering",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -1131,6 +1131,21 @@ function studioOutputIsNativePhoto(record) {
   if (stillUrl) return true;
   if (!clips) return false;
   return true;
+}
+
+function studioNativeStillsNeedLettering(record) {
+  const renderStatus = String(f(record, "Render_Status") || "").trim();
+  if (renderStatus !== "Native Photo Route" && !studioOutputIsNativePhoto(record)) return false;
+  const clips = selectedVisualClips(record);
+  if (!clips.length) return false;
+  return clips.some((clip) => {
+    const url = String(clip?.url || clip?.src || "").trim();
+    if (!url || /\/lettered\//i.test(url)) return false;
+    const source = String(clip?.source || "").toLowerCase();
+    const id = String(clip?.id || "");
+    if (source.includes("ai_grid_cover") || id === "studio-ai-cover") return false;
+    return true;
+  });
 }
 
 function studioOutputHasReviewableDeliverable(record) {
@@ -4442,6 +4457,41 @@ async function item4PulseR5Python(env, options = {}) {
     );
   }
   return payload;
+}
+
+async function item4PulseLetterPython(env, options = {}) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) {
+    console.warn("native JPEG lettering skipped: PIPELINE_RUNNER_URL is not set");
+    return { skipped: "no-runner" };
+  }
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const body = {
+    extra: { max_runs: Number(options.maxRuns || 8) },
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const response = await fetch(`${runnerUrl}/stages/letter`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.warn("native JPEG lettering failed", response.status, payload?.message || payload?.error || "");
+    return { ok: false, status: response.status, payload };
+  }
+  return payload;
+}
+
+async function item4RefreshNativeLetteredSlides(env, outputId) {
+  const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+  await studioEnsureNativePublishSlides(env, refreshed);
+  return refreshed;
 }
 
 async function item4PulseRR1Python(env, options = {}) {
@@ -12860,7 +12910,13 @@ async function studioContinuationInspectOutput(env, po, cache) {
   }
 
   if (nativePhoto && hasClips && studioOutputIsNativePhoto(po) && /^ready for review$/i.test(outputStatus)) {
-    return { action: "reviewable", reason: "native_package" };
+    const lettering = await item4PulseLetterPython(env, { outputRecordId: po.id }).catch((error) => ({
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    await item4RefreshNativeLetteredSlides(env, po.id).catch((error) => {
+      console.warn("native lettered slide refresh failed", po.id, error);
+    });
+    return { action: "reviewable", reason: "native_package", lettering };
   }
 
   if (!hasClips) {
@@ -12891,7 +12947,15 @@ async function studioContinuationInspectOutput(env, po, cache) {
 
   if (hasClips || nativePhoto || studioOutputWrongVideoSelectorPath(po) || studioOutputIsPhotoSequenceRoute(po)) {
     await studioContinuationStampPackage(env, po, context);
-    if (nativePhoto && hasClips) return { action: "opened_review", reason: "native_stamp" };
+    if (nativePhoto && hasClips) {
+      const lettering = await item4PulseLetterPython(env, { outputRecordId: po.id }).catch((error) => ({
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      await item4RefreshNativeLetteredSlides(env, po.id).catch((error) => {
+        console.warn("native lettered slide refresh failed", po.id, error);
+      });
+      return { action: "opened_review", reason: "native_stamp", lettering };
+    }
     if (!nativePhoto && hasClips) return { action: "prep_render", reason: "photo_sequence_stamp" };
     return { action: "prep_render", reason: "stamped" };
   }
@@ -12954,6 +13018,20 @@ async function pulseStudioContinuationJobs(env, options = {}) {
     { id: PHASE6_R2_SCENARIO_ID, key: "R2", table: outputTable, formula: STUDIO_R2_WORK_FORMULA, skipPhotoSequence: true },
   ];
   const pulses = [];
+  try {
+    const lettering = await item4PulseLetterPython(env, { maxRuns: 8 });
+    pulses.push({ key: "LETTER", pulsed: true, backend: "python", lettering });
+    const runs = Array.isArray(lettering?.details?.runs) ? lettering.details.runs : [];
+    for (const run of runs) {
+      if (run?.processed && run.output_record_id) {
+        await item4RefreshNativeLetteredSlides(env, run.output_record_id).catch((error) => {
+          console.warn("native lettered slide refresh failed", run.output_record_id, error);
+        });
+      }
+    }
+  } catch (error) {
+    pulses.push({ key: "LETTER", error: error instanceof Error ? error.message : String(error) });
+  }
   for (const job of jobs) {
     const rows = await listRecords(env, job.table, {
       limit: 5,

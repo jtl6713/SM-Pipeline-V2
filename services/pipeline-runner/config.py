@@ -42,7 +42,7 @@ def load_settings() -> dict[str, Any]:
         "p3_webhook_url": os.environ.get("P3_WEBHOOK_URL", ""),
         "rr1_review_email_to": os.environ.get("RR1_REVIEW_EMAIL_TO", ""),
         "rr1_decision_webhook_url": os.environ.get("RR1_DECISION_WEBHOOK_URL", ""),
-        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-23-wave3-rr1-p2"),
+        "service_version": os.environ.get("SERVICE_VERSION", "2026-08-23-native-jpeg-lettering"),
     }
 
 

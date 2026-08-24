@@ -15,6 +15,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | Stage | Python | Production |
 | --- | --- | --- |
 | **SMV1** | Full (`5894885` replacement) | `STAGE_BACKEND_SMV1=python` |
+| **LETTER** | Native JPEG lower-third compositor (`POST /stages/letter`) | Worker pulses Python directly; no Make scenario |
 | **R2** | Full (`5569495` replacement, OpenAI module 7 port) | `STAGE_BACKEND_R2=python` |
 | **R3** | Full (`5557966` — render prep from `Selected_Assets_JSON`, batch 10) | Make until `STAGE_BACKEND_R3=python` |
 | **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Make until `STAGE_BACKEND_R4=python` |
