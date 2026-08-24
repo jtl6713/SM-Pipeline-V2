@@ -19,7 +19,7 @@ RR1_DECISION_WEBHOOK_URL=https://hook.us2.make.com/4la4htbwby73twc4omljrc2iip5f5
 
 | Stage | Make ID | Status |
 |-------|---------|--------|
-| P2 | 5530955 | Python routed (`STAGE_BACKEND_P2=python`); live paid proof pending OpenAI billing |
+| P2 | 5530955 | Python live (`STAGE_BACKEND_P2=python`); silent-thumbnail proven on CI 95 |
 | P3 | 5531703 | Scaffold only |
 | AP0 | 5612096 | Constants only (`publish/constants.py`) |
 | publish_ig/fb/tt/yt | 5864632 / 5813561 / 5806668 / 5823581 | Not started |

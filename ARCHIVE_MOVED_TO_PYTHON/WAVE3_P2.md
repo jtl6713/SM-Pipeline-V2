@@ -26,19 +26,19 @@ Success still chains **P3** via Make webhook `66wq22...` (P3 remains Make until 
 
 | Check | Result |
 | --- | --- |
-| `/health` | `stages_implemented: 7` |
+| `/health` | `stages_implemented: 7` at cutover (`8` after later runner work) |
 | Dry-run CI [95](https://airtable.com/appe33zkZn35yirTL/tblwzN9AXWvmKVKPs/recCTw0gxbR07xGu4) | `route=silent_thumbnail`, no Airtable writes |
-| Live CI 95 | Blocked: runtime `OPENAI_API_KEY` returns `billing_hard_limit_reached` |
-| Voiceover live | Not attempted — `ELEVENLABS_API_KEY` is not in runtime `.env` |
+| Live CI 95 | Python `silent_thumbnail` OK. `Content_Status=Thumbnail Ready`, Drive `1BtXwbOG2K-YPdbcHQfU72sFhpGdEj225`, P3 webhook `200 Accepted` |
+| Voiceover live | Key present in runtime `.env`; not exercised on this silent item |
 
-CI 95 is still armed (`Thumbnail_Status=Ready`, no `Thumbnail_URL`). After OpenAI billing is raised, one `POST /stages/p2` with `content_item_record_id=recCTw0gxbR07xGu4` completes the live proof. Do **not** Approve any resulting outputs.
+Do **not** Approve CI 95 or any P3 outputs.
 
 ## Runtime secrets
 
 Required in `Services/pipeline-runner/service/.env` (never commit):
 
-- `OPENAI_API_KEY` — thumbnails (`gpt-image-1.5`)
-- `ELEVENLABS_API_KEY` — voiceover (missing at cutover)
+- `OPENAI_API_KEY` — Personal org (`gpt-image-1.5`); Encore `sk-proj` keys fail this account
+- `ELEVENLABS_API_KEY` — voiceover
 - Google OAuth — Drive upload
 - `AIRTABLE_PAT`, `PIPELINE_RUNNER_SHARED_SECRET`
 

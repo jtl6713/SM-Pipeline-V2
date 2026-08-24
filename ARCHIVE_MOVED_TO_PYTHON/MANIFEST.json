@@ -59,7 +59,7 @@
       "blueprint_file": null,
       "python_endpoint": "/stages/p2",
       "production_backend": "python",
-      "notes": "Make 5530955 inactive. Silent-thumbnail dry-run proven on CI 95. Live paid thumbnail blocked on OpenAI billing_hard_limit_reached; ELEVENLABS_API_KEY not in runtime .env."
+      "notes": "Make 5530955 inactive. Silent-thumbnail dry-run and live proof on CI 95 (Drive 1BtXwbOG2K-YPdbcHQfU72sFhpGdEj225, P3 200). Do not Approve."
     }
   ]
 }

@@ -163,7 +163,7 @@ Invoke-RestMethod -Uri "https://pipeline.chicagoshining.com/stages/p2" `
 
 Update `ARCHIVE_MOVED_TO_PYTHON/MANIFEST.json` and add `WAVE3_P2.md` when cutover is proven.
 
-**2026-08-23 status:** Steps 2–5 done (configure [32676302994](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32676302994), deploy [32676304332](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32676304332), Make 5530955 inactive, runner restarted). Dry-run on CI [95](https://airtable.com/appe33zkZn35yirTL/tblwzN9AXWvmKVKPs/recCTw0gxbR07xGu4) selected `silent_thumbnail`. Live paid call failed with OpenAI `billing_hard_limit_reached`. Archive written as routed-not-fully-proven. Do not Approve.
+**2026-08-23 status:** Cutover proven. Steps 2–5 done (configure [32676302994](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32676302994), deploy [32676304332](https://github.com/jtl6713/SM-Pipeline-V2/actions/runs/32676304332), Make 5530955 inactive). Dry-run + live silent thumbnail on CI [95](https://airtable.com/appe33zkZn35yirTL/tblwzN9AXWvmKVKPs/recCTw0gxbR07xGu4): `Thumbnail Ready`, Drive `1BtXwbOG2K-YPdbcHQfU72sFhpGdEj225`, P3 `200`. Runtime OpenAI key must be Personal org, not Encore. Do not Approve.
 
 ---
 
