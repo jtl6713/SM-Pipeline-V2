@@ -72,6 +72,7 @@ def load_settings() -> dict[str, Any]:
         "stage_backend_fbs3": os.environ.get("STAGE_BACKEND_FBS3", "make").strip().lower(),
         "stage_backend_yt0": os.environ.get("STAGE_BACKEND_YT0", "make").strip().lower(),
         "stage_backend_ttd0": os.environ.get("STAGE_BACKEND_TTD0", "make").strip().lower(),
+        "stage_backend_fb0": os.environ.get("STAGE_BACKEND_FB0", "make").strip().lower(),
         "tiktok_worker_base_url": os.environ.get("TIKTOK_WORKER_BASE_URL", "https://auth.chicagoshining.com").rstrip("/"),
         "tiktok_pipeline_secret": os.environ.get("TIKTOK_PIPELINE_SECRET", ""),
         "a2b_webhook_url": os.environ.get("A2B_WEBHOOK_URL", ""),

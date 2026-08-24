@@ -738,6 +738,11 @@ export default {
         console.warn("tiktok draft reconcile cron failed", error);
       }
       try {
+        await studioReconcileFacebookPhotos(env);
+      } catch (error) {
+        console.warn("facebook photo reconcile cron failed", error);
+      }
+      try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
       } catch (error) {
         console.warn("production continuation cron failed", error);
@@ -4178,6 +4183,12 @@ const STUDIO_TTD2_SCENARIO_ID = 5806597;
 const STUDIO_TTD3_SCENARIO_ID = 5806570;
 const STUDIO_TTD4_SCENARIO_ID = 5806518;
 const STUDIO_TTD_ORCH_SCENARIO_ID = 5806668;
+const STUDIO_FB0_SCENARIO_ID = 5813436;
+const STUDIO_FB1_SCENARIO_ID = 5813463;
+const STUDIO_FB2_SCENARIO_ID = 5813487;
+const STUDIO_FB2R_SCENARIO_ID = 5813511;
+const STUDIO_FB3_SCENARIO_ID = 5813534;
+const STUDIO_FB_ORCH_SCENARIO_ID = 5813561;
 
 
 
@@ -4567,6 +4578,11 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_TTD2_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
   if (id === STUDIO_TTD3_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
   if (id === STUDIO_TTD4_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
+  if (id === STUDIO_FB0_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
+  if (id === STUDIO_FB1_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
+  if (id === STUDIO_FB2_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
+  if (id === STUDIO_FB2R_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
+  if (id === STUDIO_FB3_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
   return false;
 }
 
@@ -15011,6 +15027,94 @@ async function studioEnsureTiktokDraft(env, record) {
   return studioPulseTtd1(env, record);
 }
 
+async function studioPulseFbRecord(env, stagePath, target, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target };
+  const { response, payload } = await item4PulsePipelineStage(env, stagePath, {
+    output_record_id: recordId,
+    extra: {
+      replace_transaction_id: String(f(record, "Replace_Transaction_ID") || ""),
+      replace_fingerprint: String(f(record, "Replace_Fingerprint") || ""),
+    },
+  }, "FB0");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target,
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python ${target} returned HTTP ${response.status}`,
+    };
+  }
+  const run = payload?.details?.run || {};
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (run.reason || "python-skip") : undefined,
+    target,
+    backend: "python",
+    needs_photo_media: Boolean(run.needs_photo_media),
+    needs_slideshow: Boolean(run.needs_slideshow),
+    needs_more: Boolean(run.needs_more),
+    photo_media_ready: Boolean(run.photo_media_ready),
+    needs_reconcile: Boolean(run.needs_reconcile),
+    needs_finalize: Boolean(run.needs_finalize),
+    published: Boolean(run.published),
+    platform_post_id: run.platform_post_id,
+  };
+}
+
+async function studioPulseFb0(env, record) {
+  return studioPulseFbRecord(env, "fb0", "FB0", record);
+}
+
+async function studioPulseFb1(env, record) {
+  return studioPulseFbRecord(env, "fb1", "FB1", record);
+}
+
+async function studioPulseFb2(env, record) {
+  return studioPulseFbRecord(env, "fb2", "FB2", record);
+}
+
+async function studioPulseFb2r(env, record) {
+  return studioPulseFbRecord(env, "fb2r", "FB2R", record);
+}
+
+async function studioPulseFb3(env, record) {
+  return studioPulseFbRecord(env, "fb3", "FB3", record);
+}
+
+async function studioEnsureFacebookPhotoPublish(env, record) {
+  const status = String(f(record, "FB_Publish_Status") || "");
+  const postId = String(f(record, "Platform_Post_ID") || "").trim();
+  if (/^ready for photo media$/i.test(status) && !postId) {
+    return studioPulseFb1(env, record);
+  }
+  if (/^photo media ready$/i.test(status) && !postId) {
+    return studioPulseFb2(env, record);
+  }
+  if (/^reconcile pending$/i.test(status) && !postId) {
+    return studioPulseFb2r(env, record);
+  }
+  if (postId && !/^published$/i.test(String(f(record, "Publish_Status") || ""))) {
+    return studioPulseFb3(env, record);
+  }
+  if (/^published pending finalize$/i.test(status) && postId) {
+    return studioPulseFb3(env, record);
+  }
+  const prepared = await studioPulseFb0(env, record);
+  if (!prepared.ok || prepared.skipped || prepared.needs_slideshow) return prepared;
+  if (prepared.needs_photo_media) {
+    const media = await studioPulseFb1(env, record);
+    if (!media.ok || media.skipped || media.needs_more || !media.photo_media_ready) return { ...media, prepare: prepared };
+    const published = await studioPulseFb2(env, record);
+    if (!published.ok || published.skipped || published.needs_reconcile) return { ...published, media, prepare: prepared };
+    if (published.needs_finalize) return { ...await studioPulseFb3(env, record), publish: published, media, prepare: prepared };
+    return { ...published, media, prepare: prepared };
+  }
+  return prepared;
+}
+
 async function studioTiktokComplete(request, env) {
   const incoming = new URL(request.url);
   const { runnerUrl } = pipelineStageBackend(env, "TTD0");
@@ -15195,6 +15299,10 @@ async function studioDispatchApprovedPublishNow(env, record) {
     }
     const emailed = await studioPulseTtd3(env, record);
     return { ...emailed, poll: polled, init: inited, prepare: prepared, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "FB0" && pipelineStageBackend(env, "FB0").mode === "python") {
+    const pulsed = await studioEnsureFacebookPhotoPublish(env, record);
+    return { ...pulsed, ap0, armed: [], plan, record };
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
@@ -15406,6 +15514,59 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`tiktok ${scan.stage} reconcile failed`, row.id, error);
+        results.push({ id: row.id, stage: scan.stage, error: message });
+      }
+    }
+  }
+  return results;
+}
+
+async function studioReconcileFacebookPhotos(env, options = {}) {
+  if (pipelineStageBackend(env, "FB0").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  const results = [];
+  const scans = [
+    {
+      stage: "fb0",
+      pulse: studioPulseFb0,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",OR({FB_Publish_Status}="Ready for Assets",AND({FB_Publish_Status}="Retry Pending",FIND("FB0",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+    {
+      stage: "fb1",
+      pulse: studioPulseFb1,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,{Platform_Post_ID}="",OR({FB_Publish_Status}="Ready for Photo Media",AND({FB_Publish_Status}="Retry Pending",FIND("FB1",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+    {
+      stage: "fb2",
+      pulse: studioPulseFb2,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",OR({FB_Publish_Status}="Photo Media Ready",AND({FB_Publish_Status}="Retry Pending",FIND("FB2_PUBLISH",UPPER({Publish_Error_Stage}&""))>0)))',
+    },
+    {
+      stage: "fb2r",
+      pulse: studioPulseFb2r,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",{FB_Publish_Status}="Reconcile Pending")',
+    },
+    {
+      stage: "fb3",
+      pulse: studioPulseFb3,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}!="",{Publish_Status}!="Published")',
+    },
+  ];
+  for (const scan of scans) {
+    let rows = [];
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: scan.formula });
+    } catch (error) {
+      console.warn(`facebook photo ${scan.stage} reconcile scan failed`, error);
+      continue;
+    }
+    for (const row of rows) {
+      try {
+        const pulsed = await scan.pulse(env, row);
+        results.push({ id: row.id, stage: scan.stage, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`facebook photo ${scan.stage} reconcile failed`, row.id, error);
         results.push({ id: row.id, stage: scan.stage, error: message });
       }
     }

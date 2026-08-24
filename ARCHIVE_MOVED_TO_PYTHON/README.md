@@ -35,6 +35,11 @@ Make.com scenarios replaced by `services/pipeline-runner/` (Python on `pipeline.
 | TTD2 | 5806597 | `POST /stages/ttd2` | Make blueprint retained (inactive) | Python |
 | TTD3 | 5806570 | `POST /stages/ttd3` | Make blueprint retained (inactive) | Python |
 | TTD4 | 5806518 | `GET/POST /hooks/ttd4` | Make blueprint retained (inactive) | Python |
+| FB0 | 5813436 | `POST /stages/fb0` | Make blueprint retained (inactive) | Python |
+| FB1 | 5813463 | `POST /stages/fb1` | Make blueprint retained (inactive) | Python |
+| FB2 | 5813487 | `POST /stages/fb2` | Make blueprint retained (inactive) | Python |
+| FB2R | 5813511 | `POST /stages/fb2r` | Make blueprint retained (inactive) | Python |
+| FB3 | 5813534 | `POST /stages/fb3` | Make blueprint retained (inactive) | Python |
 
 Wave 2 cutover guide: `WAVE2_R3_R4_R5.md`  
 Wave 3: `WAVE3_RR1.md`, `WAVE3_P2.md`  
@@ -64,11 +69,12 @@ STAGE_BACKEND_FBS1=python
 STAGE_BACKEND_FBS3=python
 STAGE_BACKEND_YT0=python
 STAGE_BACKEND_TTD0=python
+STAGE_BACKEND_FB0=python
 PIPELINE_RUNNER_URL=https://pipeline.chicagoshining.com
 PIPELINE_RUNNER_SHARED_SECRET=<secret>
 ```
 
-Make scenarios **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, **5612096**, **5862882**, **5612664**, **5845193**, **5816409**, **5816495**, **5816502**, **5816520**, **5823572**, **5830810**, **5830609**, **5830616**, **5830623**, **5806658**, **5806644**, **5806597**, **5806570**, and **5806518** are **inactive**. Reactivate only for emergency rollback. A1S **5715530** stays Make on-demand and posts `poller_url` at `/hooks/a1p/<token>`. Facebook photos and Instagram carousel stay Make. TTD-ORCH **5806668** and YT-ORCH **5823581** stay parked.
+Make scenarios **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, **5612096**, **5862882**, **5612664**, **5845193**, **5816409**, **5816495**, **5816502**, **5816520**, **5823572**, **5830810**, **5830609**, **5830616**, **5830623**, **5806658**, **5806644**, **5806597**, **5806570**, **5806518**, **5813436**, **5813463**, **5813487**, **5813511**, and **5813534** are **inactive**. Reactivate only for emergency rollback. A1S **5715530** stays Make on-demand and posts `poller_url` at `/hooks/a1p/<token>`. Instagram carousel stays Make. TTD-ORCH **5806668**, YT-ORCH **5823581**, and FB-ORCH **5813561** stay parked.
 
 ## Rollback
 
