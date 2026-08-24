@@ -14,9 +14,18 @@ class InstagramGraphError(RuntimeError):
         self.status = status
 
 
+def graph_numeric_id(payload: Any) -> str:
+    if isinstance(payload, dict):
+        mid = str(payload.get("id") or "").strip()
+        if mid.isdigit():
+            return mid
+        payload = str(payload)
+    return "".join(ch for ch in str(payload or "") if ch.isdigit())
+
+
 def load_instagram_graph_settings(settings: PipelineSettings) -> dict[str, str]:
     ig_user_id = settings.get("INSTAGRAM_BUSINESS_ACCOUNT_ID")
-    token = settings.get("FACEBOOK_PAGE_ACCESS_TOKEN")
+    token = settings.get("META_GRAPH_API_ACCESS_TOKEN") or settings.get("FACEBOOK_PAGE_ACCESS_TOKEN")
     version = (settings.get("FACEBOOK_GRAPH_API_VERSION") or "v25.0").strip().strip("/")
     if not ig_user_id or not token:
         raise InstagramGraphError("missing-instagram-settings")
@@ -35,9 +44,20 @@ class InstagramReelClient:
     def create_reel(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = {**body, "access_token": self._token}
         response = requests.post(self._url(f"{self.ig_user_id}/media"), data=payload, timeout=60)
+        return self._require_creation(response)
+
+    def create_story(self, video_url: str) -> dict[str, Any]:
+        response = requests.post(
+            self._url(f"{self.ig_user_id}/media"),
+            params={"media_type": "STORIES", "video_url": video_url, "access_token": self._token},
+            timeout=60,
+        )
+        return self._require_creation(response)
+
+    def _require_creation(self, response: requests.Response) -> dict[str, Any]:
         created = response.json() if response.content else {}
-        creation_id = str(created.get("id") or "").strip()
-        status_code = str(created.get("status_code") or "")
+        creation_id = graph_numeric_id(created) or str(created.get("id") or "").strip()
+        status_code = str(created.get("status_code") or response.status_code or "")
         status = str(created.get("status") or created.get("error", {}).get("message") or "")
         if not response.ok or not creation_id or "ERROR" in status_code.upper() or "error" in status.lower():
             raise InstagramGraphError(
@@ -45,6 +65,7 @@ class InstagramReelClient:
                 status_code=status_code or "unknown",
                 status=status or "No status returned",
             )
+        created["id"] = creation_id
         return created
 
     def container_status(self, creation_id: str) -> dict[str, Any]:

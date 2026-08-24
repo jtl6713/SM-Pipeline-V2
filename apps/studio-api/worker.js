@@ -145,7 +145,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.131-stale-letter-fix",
+          version: "0.10.133-ap1-igs-python",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -706,6 +706,11 @@ export default {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
+      }
+      try {
+        await studioReconcilePublishingInstagramStories(env);
+      } catch (error) {
+        console.warn("instagram story poll reconcile cron failed", error);
       }
       try {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
@@ -4122,6 +4127,8 @@ const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Le
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
 const STUDIO_AP0_SCENARIO_ID = 5612096;
 const STUDIO_AP1_IG_SCENARIO_ID = 5862882;
+const STUDIO_AP1_IGS_SCENARIO_ID = 5612664;
+const STUDIO_AP1_IGS_POLL_SCENARIO_ID = 5845193;
 
 
 
@@ -4495,6 +4502,8 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_IDEA_I1_SCENARIO_ID && pipelineStageBackend(env, "I1").mode === "python") return true;
   if (id === STUDIO_AP0_SCENARIO_ID && pipelineStageBackend(env, "AP0").mode === "python") return true;
   if (id === STUDIO_AP1_IG_SCENARIO_ID && pipelineStageBackend(env, "AP1_IG").mode === "python") return true;
+  if (id === STUDIO_AP1_IGS_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
+  if (id === STUDIO_AP1_IGS_POLL_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
   return false;
 }
 
@@ -14542,6 +14551,59 @@ async function studioPulseAp1IgReel(env, record) {
   };
 }
 
+async function studioPulseAp1Igs(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IGS" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ap1_igs", {
+    output_record_id: recordId,
+  }, "AP1_IGS");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "AP1-IGS",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python AP1-IGS returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "AP1-IGS",
+    backend: "python",
+    needs_poll: Boolean(payload?.details?.run?.needs_poll),
+    container_id: payload?.details?.run?.container_id,
+  };
+}
+
+async function studioPulseAp1IgsPoll(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "AP1-IGS-POLL" };
+  const { response, payload } = await item4PulsePipelineStage(env, "ap1_igs_poll", {
+    output_record_id: recordId,
+  }, "AP1_IGS");
+  if (!response.ok || payload?.status === "error") {
+    return {
+      ok: false,
+      target: "AP1-IGS-POLL",
+      backend: "python",
+      status: response.status,
+      message: payload?.message || `Python AP1-IGS-POLL returned HTTP ${response.status}`,
+    };
+  }
+  const skipped = payload?.status === "skipped";
+  return {
+    ok: true,
+    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    target: "AP1-IGS-POLL",
+    backend: "python",
+    still_processing: Boolean(payload?.details?.run?.still_processing),
+    post_id: payload?.details?.run?.post_id,
+    container_id: payload?.details?.run?.container_id,
+  };
+}
+
 // Approve pulses these publisher webhooks directly, and a Make webhook aimed at a stopped
 // scenario answers 200 and goes nowhere. Background cadence is supposed to keep the webhook
 // scenarios live and run the on-demand orchestrators, but it parks aggressively and cannot be
@@ -14630,6 +14692,15 @@ async function studioDispatchApprovedPublishNow(env, record) {
   if (plan.target === "AP1-IG" && pipelineStageBackend(env, "AP1_IG").mode === "python") {
     const pulsed = await studioPulseAp1IgReel(env, record);
     return { ...pulsed, ap0, armed: [], plan, record };
+  }
+  if (plan.target === "AP1-IGS" && pipelineStageBackend(env, "AP1_IGS").mode === "python") {
+    const created = await studioPulseAp1Igs(env, record);
+    if (!created.ok || created.skipped || !created.needs_poll) {
+      return { ...created, ap0, armed: [], plan, record };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    const polled = await studioPulseAp1IgsPoll(env, record);
+    return { ...polled, create: created, ap0, armed: [], plan, record };
   }
   const armed = await studioArmPublishScenarios(env, plan.target);
   const settings = await studioActivePipelineSettings(env, [plan.setting, plan.poll].filter(Boolean));
@@ -14769,6 +14840,33 @@ async function studioReconcileApprovedPublishes(env, options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("publish reconcile dispatch failed", row.id, error);
       await studioStampPublishDispatch(env, row, `reconcile failed: ${message}`);
+      results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcilePublishingInstagramStories(env, options = {}) {
+  if (pipelineStageBackend(env, "AP1_IGS").mode !== "python") return [];
+  const limit = Number(options.limit || 3);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Do_Not_Publish}=0,{IG_Story_Status}="Publishing",{IG_Story_Container_ID}!="",{IG_Story_Post_ID}=BLANK())',
+    });
+  } catch (error) {
+    console.warn("instagram story poll reconcile scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const pulsed = await studioPulseAp1IgsPoll(env, row);
+      results.push({ id: row.id, ok: pulsed?.ok !== false, still_processing: pulsed?.still_processing || false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("instagram story poll reconcile failed", row.id, error);
       results.push({ id: row.id, error: message });
     }
   }
