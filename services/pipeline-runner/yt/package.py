@@ -50,7 +50,7 @@ def package_fields(record: dict[str, Any], defaults: dict[str, str], *, source_u
     synthetic = field(record, "YouTube_Contains_Synthetic_Media")
     if synthetic is None or synthetic == "":
         synthetic = setting_is_true(defaults.get("synthetic", ""))
-    return {
+    fields = {
         "YouTube_Category_ID": field_str(record, "YouTube_Category_ID")
         or defaults.get("category_id")
         or DEFAULT_CATEGORY_ID,
@@ -62,8 +62,11 @@ def package_fields(record: dict[str, Any], defaults: dict[str, str], *, source_u
         "YouTube_Description_Final": description_final(record),
         "YouTube_Idempotency_Key": field_str(record, "YouTube_Idempotency_Key") or idempotency_key(record),
         "YouTube_Thumbnail_Status": thumbnail_status(record),
-        "YouTube_Content_Class": field_str(record, "YouTube_Content_Class"),
         "YouTube_Response_JSON": (
             f'{{"prepared_by":"YT0","prepared_at":"{prepared_at}","source_url":"{source_url}"}}'
         ),
     }
+    content_class = field_str(record, "YouTube_Content_Class")
+    if content_class:
+        fields["YouTube_Content_Class"] = content_class
+    return fields
