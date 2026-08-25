@@ -229,9 +229,19 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     return "";
   }
 
+  function claimedByPhase6(element) {
+    return Boolean(
+      element?.closest?.(".phase6-tooltip-target, [data-phase6-tooltip], #phase6ControlTooltip")
+    );
+  }
+
   function decorateElement(element) {
     if (!(element instanceof Element)) return;
     if (element.closest?.(`#${TOOLTIP_ID}`)) return;
+    if (claimedByPhase6(element)) {
+      delete element.dataset[TOOLTIP_ATTR];
+      return;
+    }
     const description = cleanText(descriptionFor(element));
     if (!description) return;
     element.dataset[TOOLTIP_ATTR] = description;
@@ -323,12 +333,27 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     tooltip.style.top = `${Math.round(top)}px`;
   }
 
+  function hidePhase6TooltipLayer() {
+    const tip = document.getElementById("phase6ControlTooltip");
+    if (!tip) return;
+    tip.classList.remove("visible", "above");
+    tip.setAttribute("aria-hidden", "true");
+  }
+
   function showTooltip(target) {
     if (!(target instanceof Element)) return;
+    if (claimedByPhase6(target)) {
+      hideTooltip();
+      return;
+    }
     const described = target.closest?.("[data-studio-tooltip]");
-    if (!described) return;
+    if (!described || claimedByPhase6(described)) {
+      hideTooltip();
+      return;
+    }
     const text = cleanText(described.dataset.studioTooltip);
     if (!text) return;
+    hidePhase6TooltipLayer();
     const tooltip = ensureTooltip();
     if (activeTarget && activeTarget !== described) hideTooltip();
     activeTarget = described;
@@ -378,6 +403,8 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     });
     observer.observe(document.body, { childList: true, subtree: true });
   }
+
+  window.studioHideGlobalTooltip = hideTooltip;
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initTooltips, { once: true });
   else initTooltips();

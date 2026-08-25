@@ -219,3 +219,5 @@ Global Admin Tooltips Pages deploy: 2026-08-24 — Add accessible contextual hel
 
 Promote-to-pipeline Pages deploy: 2026-08-24 — After Production Approve & Promote succeeds, open the Pipeline screen. UI 0.6.132-promote-to-pipeline.
 
+Tooltip dedupe Pages deploy: 2026-08-24 — Keep one Pipeline/review tooltip visible at a time. UI 0.6.133-tooltip-dedupe.
+

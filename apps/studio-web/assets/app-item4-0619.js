@@ -6831,6 +6831,17 @@
     return tip;
   }
 
+  function hideStudioGlobalTooltip() {
+    if (typeof window.studioHideGlobalTooltip === "function") {
+      window.studioHideGlobalTooltip();
+      return;
+    }
+    const tooltip = document.getElementById("studioGlobalTooltip");
+    if (!tooltip) return;
+    tooltip.classList.remove("is-visible");
+    tooltip.hidden = true;
+  }
+
   function phase6HideTooltip() {
     if (!phase6TooltipPopover) return;
     phase6TooltipPopover.classList.remove("visible", "above");
@@ -6841,6 +6852,7 @@
 
   function phase6ShowTooltip(target, text) {
     if (!target || !text) return;
+    hideStudioGlobalTooltip();
     const tip = phase6TooltipElement();
     phase6TooltipActive = target;
     tip.textContent = text;
@@ -6874,7 +6886,8 @@
     target.dataset.phase6TooltipBound = "1";
     target.dataset.phase6Tooltip = text;
     target.classList.add("phase6-tooltip-target");
-    if (!target.getAttribute("title")) target.setAttribute("title", text);
+    delete target.dataset.studioTooltip;
+    target.removeAttribute("title");
     target.addEventListener("mouseenter", () => phase6ShowTooltip(target, text));
     target.addEventListener("mouseleave", phase6HideTooltip);
     target.addEventListener("focus", () => phase6ShowTooltip(target, text));
@@ -8054,6 +8067,7 @@
   }
 
   function renderOutputsTable(target, records) {
+    phase6HideTooltip();
     const isPipeline = target?.id === "outputsList";
     const isDashboard = target?.id === "recentOutputs";
     const source = isPipeline ? filteredPipelineRecords(records) : records;
