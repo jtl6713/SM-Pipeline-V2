@@ -69,7 +69,8 @@ def eligibility_reason(record: dict[str, Any]) -> str | None:
         return "do_not_publish"
     if field_str(record, "Published_At"):
         return "already_published"
-    if _ci(field_str(record, "Publish_Status")) != _ci(PUBLISH_STATUS):
+    publish_status = _ci(field_str(record, "Publish_Status"))
+    if publish_status not in {_ci(PUBLISH_STATUS), "ready to schedule"}:
         return "publish_status_not_ready"
     if not final_file_id(record):
         return "missing_final_file_id"
