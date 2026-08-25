@@ -46,8 +46,8 @@ A1S_DRIVE_PAGE_SIZE = 20
 A1S_METADATA_WAIT_SECONDS = 90
 A1S_METADATA_POLL_SECONDS = 2
 A1S_JOB_NOTES = (
-    "MAKE-09 upload-import compression state. Active=true blocks duplicate jobs. "
-    "No public Google Drive permission is created."
+    "Local Video Compressor state. Active=true blocks duplicate jobs. "
+    "The private original remains unchanged until A1P verifies the replacement in Drive."
 )
 
 A2B_EXISTING_VIEW = "viwjkNLLuZYM8dnoK"

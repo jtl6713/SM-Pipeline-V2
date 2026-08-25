@@ -1,4 +1,5 @@
-from a1s.cloudconvert import coerce_duration_seconds, parse_duration_seconds, target_video_kbps
+from a1m.processor import _probe_one
+from a1s.compressor import target_mb
 from a1s.eligibility import eligibility_reason
 from a1s.processor import process_request
 from stages.registry import STAGE_NAMES, is_implemented
@@ -31,20 +32,15 @@ def test_a1s_eligibility_gates():
     assert eligibility_reason(ready, threshold_bytes=100000000, has_active_job=True, check_job=False) is None
 
 
-def test_duration_and_bitrate_match_make():
-    assert coerce_duration_seconds("24.0 s") == 24.0
-    assert coerce_duration_seconds("12.5s") == 12.5
-    assert coerce_duration_seconds(30) == 30.0
-    assert coerce_duration_seconds("") == 0.0
-    job = {
-        "tasks": [
-            {"name": "import-source"},
-            {"name": "metadata-source", "result": {"metadata": {"Duration": "24 s"}}},
-        ]
-    }
-    assert parse_duration_seconds(job) == 24.0
-    assert target_video_kbps(24) == max(350, int((84000000 * 8 / 24 / 1000) - 160))
-    assert target_video_kbps(1) >= 350
+def test_local_target_and_drive_duration_metadata():
+    assert target_mb() * 1024 * 1024 == 84_000_000
+    result = _probe_one(
+        _file(videoMediaMetadata={"durationMillis": "15166"}),
+        sleep=lambda _seconds: None,
+    )
+    assert result["duration_seconds"] == 15.166
+    assert result["metadata_source"] == "google_drive"
+    assert result["status"] == "probed"
 
 
 class _FakeDrive:

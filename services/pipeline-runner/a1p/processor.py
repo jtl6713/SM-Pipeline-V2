@@ -1,7 +1,8 @@
-"""A1P processor — CloudConvert poll / finalize (Make 5715500)."""
+"""A1P processor — poll local compression and safely replace the Drive original."""
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
@@ -10,6 +11,7 @@ from typing import Any
 import requests
 
 from a1p.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
+from a1s.compressor import delete_job, download_output, poll_job
 from airtable.client import AirtableClient
 from airtable.constants import PIPELINE_SETTINGS_TABLE
 from asset.constants import (
@@ -21,44 +23,41 @@ from asset.constants import (
 from asset.helpers import parse_int
 from carousel.timeutil import iso_ms
 from integrations.google_drive import GoogleDriveClient
-from item4.settings import pipeline_settings
 
-
-def _token() -> str:
-    return pipeline_settings().get("CLOUDCONVERT_API_TOKEN").strip()
-
-
-def _poll_job(job_id: str) -> dict[str, Any]:
-    token = _token()
-    if not token:
-        raise RuntimeError("CLOUDCONVERT_API_TOKEN is missing from Pipeline Settings")
-    response = requests.get(
-        f"https://us-east.api.cloudconvert.com/v2/jobs/{job_id}",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=60,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    return payload.get("data") if isinstance(payload.get("data"), dict) else payload
-
-
-def _export_file(job: dict[str, Any]) -> tuple[str, int]:
-    tasks = job.get("tasks") or []
-    for task in tasks:
-        if str(task.get("name") or "") != "export-result":
-            continue
-        files = ((task.get("result") or {}).get("files") or [])
-        if files:
-            url = str(files[0].get("url") or "")
-            size = parse_int(files[0].get("size"), 0) or 0
-            if url:
-                return url, size
-    raise RuntimeError("CloudConvert job finished without an export-result file")
+logger = logging.getLogger(__name__)
 
 
 def _compressed_names(source_name: str) -> tuple[str, str]:
     stem = re.sub(r"\.[^.]+$", "", source_name or "video")
     return f"{stem}_compressed", f"{stem}_compressed.mp4"
+
+
+def _escape_drive_query(value: str) -> str:
+    return (value or "").replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _existing_output(drive: GoogleDriveClient, filename: str, expected_size: int) -> dict[str, Any]:
+    escaped = _escape_drive_query(filename)
+    rows = drive.list_files(
+        query=(
+            f"'{GDRIVE_INGESTION_FOLDER}' in parents and name = '{escaped}' "
+            "and trashed = false"
+        ),
+        page_size=20,
+        order_by="modifiedTime desc",
+        fields="files(id,name,mimeType,size,parents,trashed,modifiedTime)",
+    )
+    for row in rows:
+        if parse_int(row.get("size"), 0) == expected_size and str(row.get("mimeType") or "").startswith("video/"):
+            return row
+    return {}
+
+
+def _cleanup_job(job_id: str) -> None:
+    try:
+        delete_job(job_id)
+    except Exception:
+        logger.exception("A1P could not clean up local compressor job %s", job_id)
 
 
 def _write_state(client: AirtableClient, record_id: str, *, active: bool, value: str, notes: str) -> None:
@@ -87,6 +86,7 @@ def schedule_next(payload: dict[str, Any]) -> None:
             return
         process_request(**{key: payload.get(key) for key in (
             "job_id",
+            "status_url",
             "state_record_id",
             "source_file_id",
             "source_name",
@@ -105,6 +105,7 @@ _schedule_next = schedule_next
 def process_request(
     *,
     job_id: str | None = None,
+    status_url: str | None = None,
     state_record_id: str | None = None,
     source_file_id: str | None = None,
     source_name: str | None = None,
@@ -119,6 +120,7 @@ def process_request(
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
         "job_id": job_id,
+        "status_url": status_url,
         "state_record_id": state_record_id,
         "source_file_id": source_file_id,
         "source_name": source_name,
@@ -130,16 +132,17 @@ def process_request(
         return {"processed": False, "dry_run": True, **preview}
 
     client = AirtableClient()
-    job = _poll_job(job_id)
+    job = poll_job(job_id)
     status = str(job.get("status") or "").strip().lower()
-    preview["cloudconvert_status"] = status
+    preview["compressor_status"] = status
     now = iso_ms()
 
-    if status in {"waiting", "processing"} and attempt_n < A1P_MAX_ATTEMPTS:
+    if status in {"queued", "downloading", "compressing"} and attempt_n < A1P_MAX_ATTEMPTS:
         value = f"processing|{job_id}|{attempt_n}|{source_file_id}|{permission_id}|{source_name}|{source_size}|{now}"
-        _write_state(client, state_record_id, active=True, value=value, notes="CloudConvert still processing. Poller will retry in 60 seconds.")
+        _write_state(client, state_record_id, active=True, value=value, notes="Local compression is still processing. Poller will retry in 60 seconds.")
         next_payload = {
             "job_id": job_id,
+            "status_url": status_url,
             "state_record_id": state_record_id,
             "source_file_id": source_file_id,
             "source_name": source_name,
@@ -151,22 +154,23 @@ def process_request(
         _schedule_next(next_payload)
         return {"processed": True, "deferred": True, "status": "processing", **preview}
 
-    if status in {"waiting", "processing"}:
+    if status in {"queued", "downloading", "compressing"}:
         value = f"timeout|{job_id}|{attempt_n}|{source_file_id}|{source_name}|{status}|{now}"
-        _write_state(client, state_record_id, active=False, value=value, notes="Polling reached 10 attempts. Original preserved. Inspect the CloudConvert job.")
+        _write_state(client, state_record_id, active=False, value=value, notes="Polling reached 10 attempts. Original preserved. Inspect the local compressor job.")
         _delete_state(client, state_record_id)
         return {"processed": True, "status": "timeout", **preview}
 
-    if status == "error":
-        value = f"failed_cloudconvert|{job_id}|{attempt_n}|{source_file_id}|{source_name}|{status}|{now}"
-        _write_state(client, state_record_id, active=False, value=value, notes="CloudConvert returned an error. Original preserved.")
+    if status == "failed":
+        value = f"failed_local_compressor|{job_id}|{attempt_n}|{source_file_id}|{source_name}|{status}|{now}"
+        _write_state(client, state_record_id, active=False, value=value, notes="Local compressor returned an error. Original preserved.")
         _delete_state(client, state_record_id)
-        return {"processed": True, "status": "failed_cloudconvert", **preview}
+        _cleanup_job(job_id)
+        return {"processed": True, "status": "failed_local_compressor", **preview}
 
-    if status != "finished":
+    if status != "complete":
         return {"processed": False, "reason": f"unexpected_status_{status}", **preview}
 
-    export_url, result_size = _export_file(job)
+    result_size = parse_int(job.get("output_size_bytes"), 0) or 0
     preview["result_size"] = result_size
     if result_size <= 0 or result_size > A1P_MAX_RESULT_BYTES:
         value = f"failed_result_too_large|{job_id}|{attempt_n}|{source_file_id}|{source_name}|{result_size}|{now}"
@@ -178,28 +182,49 @@ def process_request(
             notes="Compressed output exceeded 90 MB or did not expose a valid size. Original preserved.",
         )
         _delete_state(client, state_record_id)
+        _cleanup_job(job_id)
         return {"processed": True, "status": "failed_result_too_large", **preview}
 
-    binary = requests.get(export_url, timeout=300)
-    binary.raise_for_status()
+    binary, output_mime = download_output(job)
+    if len(binary) != result_size:
+        raise RuntimeError("Downloaded compressor output size did not match the completed job")
     title, filename = _compressed_names(str(source_name or "video.mp4"))
     drive = GoogleDriveClient()
-    uploaded = drive.upload_file(GDRIVE_INGESTION_FOLDER, filename, binary.content, "video/mp4")
+    existing = _existing_output(drive, filename, result_size)
+    uploaded = existing or drive.upload_file(GDRIVE_INGESTION_FOLDER, filename, binary, output_mime or "video/mp4")
     new_id = str(uploaded.get("id") or "")
     verified = drive.get_file(new_id, fields="id,name,mimeType,size,parents,trashed") if new_id else {}
     new_size = parse_int(verified.get("size"), 0) or 0
-    if new_id and new_size > 0 and source_file_id:
-        drive.delete_file(source_file_id)
+    verified_parents = [str(value) for value in (verified.get("parents") or [])]
+    if (
+        not new_id
+        or new_id == source_file_id
+        or new_size != result_size
+        or str(verified.get("mimeType") or "") != "video/mp4"
+        or GDRIVE_INGESTION_FOLDER not in verified_parents
+        or bool(verified.get("trashed"))
+    ):
+        raise RuntimeError("Compressed Drive replacement did not pass verification; original preserved")
+    if source_file_id:
+        source = drive.get_file(source_file_id, fields="id,parents,trashed")
+        if not bool(source.get("trashed")):
+            drive.trash_file(source_file_id)
+        source_after = drive.get_file(source_file_id, fields="id,parents,trashed")
+        if not bool(source_after.get("trashed")):
+            raise RuntimeError("Compressed replacement verified but original could not be moved to trash")
+    _cleanup_job(job_id)
     value = f"finished|{job_id}|{attempt_n}|{source_file_id}|{new_id}|{verified.get('name') or filename}|{new_size}|{now}"
     _write_state(
         client,
         state_record_id,
         active=False,
         value=value,
-        notes="Replacement verified and original deleted. No public Drive permission was used.",
+        notes="Replacement verified and original moved to Drive trash. No public Drive permission was used.",
     )
     _delete_state(client, state_record_id)
     preview["new_file_id"] = new_id
     preview["new_name"] = title
     preview["new_size"] = new_size
+    preview["source_trashed"] = bool(source_file_id)
+    preview["reused_existing_output"] = bool(existing)
     return {"processed": True, "status": "finished", **preview}

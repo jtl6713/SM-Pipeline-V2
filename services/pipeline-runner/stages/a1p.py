@@ -16,6 +16,7 @@ def run(request: StageRequest):
         process=process_request,
         kwargs={
             "job_id": extra.get("job_id"),
+            "status_url": extra.get("status_url"),
             "state_record_id": extra.get("state_record_id"),
             "source_file_id": extra.get("source_file_id"),
             "source_name": extra.get("source_name"),
@@ -25,7 +26,7 @@ def run(request: StageRequest):
             "poller_url": extra.get("poller_url"),
             "dry_run": as_bool(extra.get("dry_run")),
         },
-        skip_message="A1P did not poll a CloudConvert job",
+        skip_message="A1P did not poll a local compression job",
         ok_message="A1P poll status {status}",
-        dry_run_message="A1P dry-run preview (no CloudConvert poll)",
+        dry_run_message="A1P dry-run preview (no local compressor poll)",
     )

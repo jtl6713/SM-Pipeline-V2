@@ -21,5 +21,5 @@ def run(request: StageRequest):
         },
         skip_message="A1S did not start an oversized compression job",
         ok_message="A1S started {started_count} compression jobs",
-        dry_run_message="A1S dry-run preview (no CloudConvert jobs)",
+        dry_run_message="A1S dry-run preview (no local compression jobs)",
     )

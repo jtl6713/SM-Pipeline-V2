@@ -1,4 +1,4 @@
-"""A1M processor — probe oversized Drive video duration via CloudConvert (Make 5764543)."""
+"""A1M processor — read oversized-video duration from Google Drive metadata."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from collections.abc import Callable
 from typing import Any
 
 from a1m.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
-from a1s.cloudconvert import api_token, probe_duration
 from a1s.eligibility import eligibility_reason
 from a1s.processor import _resolve_files, _threshold
 from airtable.client import AirtableClient
@@ -21,15 +20,17 @@ logger = logging.getLogger(__name__)
 
 def _probe_one(file: dict[str, Any], *, sleep: Callable[[float], None]) -> dict[str, Any]:
     file_id = str(file.get("id") or "")
-    drive = GoogleDriveClient()
-    content, _mime = drive.download_file(file_id)
-    duration, job_id = probe_duration(api_token(), file_id, content, sleep=sleep)
+    metadata = file.get("videoMediaMetadata") or {}
+    try:
+        duration = int(metadata.get("durationMillis") or 0) / 1000.0
+    except (TypeError, ValueError):
+        duration = 0.0
     return {
         "file_id": file_id,
         "name": file.get("name"),
         "duration_seconds": duration,
-        "metadata_job_id": job_id,
-        "status": "probed",
+        "metadata_source": "google_drive",
+        "status": "probed" if duration > 0 else "metadata_unavailable",
     }
 
 

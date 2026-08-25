@@ -21,5 +21,5 @@ def run(request: StageRequest):
         },
         skip_message="A1M did not probe oversized video duration",
         ok_message="A1M started {probed_count} duration probes",
-        dry_run_message="A1M dry-run preview (no CloudConvert metadata jobs)",
+        dry_run_message="A1M dry-run preview (Drive metadata only)",
     )

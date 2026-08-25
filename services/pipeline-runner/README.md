@@ -46,8 +46,8 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **A2B** | Full (`5568863` — video-folder backfill) | `STAGE_BACKEND_A2B=python`; A2 daisy-chains A2B |
 | **A3** | Full (`5569035` — classify Media Assets) | `STAGE_BACKEND_A3=python`; A2B daisy-chains A3 |
 | **A4** | Full (`5578180` — deleted Drive reconciliation) | `STAGE_BACKEND_A4=python`; A3 daisy-chains A4 |
-| **A1P** | Full (`5715500` — CloudConvert poll/finalize) | `STAGE_BACKEND_A1P=python`. Hook: `/hooks/a1p/<A1P_WEBHOOK_TOKEN>` |
-| **A1S / A1M** | Full (`5715530` oversized CloudConvert start + `5764543` duration probe) | `STAGE_BACKEND_A1S=python` |
+| **A1P** | Full (`5715500` replacement — local-compressor poll/finalize) | `STAGE_BACKEND_A1P=python`. Hook: `/hooks/a1p/<A1P_WEBHOOK_TOKEN>` |
+| **A1S / A1M** | Full (`5715530` local compression start + `5764543` Drive metadata probe) | `STAGE_BACKEND_A1S=python` |
 | **M1** | Full (`5569896` — reset Rendering jobs on an obsolete Remotion URL) | `STAGE_BACKEND_M1=python` |
 | **AP0** | Full (`5612096` — Drive final MP4 → public R2) | `STAGE_BACKEND_AP0=python` |
 | **AP1-IG** | Full (`5862882` — Instagram Reel Graph publish) | `STAGE_BACKEND_AP1_IG=python` |
@@ -59,7 +59,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **AP0C / AP1C / AP2C / AP3C / AP3P / AP4C / AP4R / AP5C** | Full (`5786899` assets + `5790745` children + `5791231` child poll + `5791273` parent + `5791336` parent poll + `5791356` publish + `5791396` reconcile + `5791424` finalize) | `STAGE_BACKEND_AP0C=python` |
 | **FBS3 / FBS4** | Full (`5816502` create + `5816520` poll — Facebook Reel Graph) | `STAGE_BACKEND_FBS3=python` |
 
-Wave 2 render chain (R3–R5), SMV1/R2, RR1, P1–P3, RR2, R2B, P4, P5, SAI1, C2–C9, I1–I4, A2–A4, A1S/A1M/A1P, M1, AP0, AP1-IG, AP1-IGS, FBS1/FBS2, FBS3/FBS4, YT0–YTS3, TTD0–TTD4, FB0–FB3, and AP0C–AP5C are on Python in production. A1S posts `poller_url` at `/hooks/a1p/<A1P_WEBHOOK_TOKEN>`. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. I2 review buttons call `/hooks/i3/<token>`. TikTok inbox emails call `/hooks/ttd4`. R2 missing-asset handoffs call Python P4. Make `5528742`, `5569896`, `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, `5589822`, `5589932`, `5514334`, `5516968`, `5517182`, `5524092`, `5602193`, `5531974`, `5568863`, `5569035`, `5578180`, `5715500`, `5715530`, `5764543`, `5612096`, `5862882`, `5612664`, `5845193`, `5816409`, `5816495`, `5816502`, `5816520`, `5823572`, `5830810`, `5830609`, `5830616`, `5830623`, `5806658`, `5806644`, `5806597`, `5806570`, `5806518`, `5813436`, `5813463`, `5813487`, `5813511`, `5813534`, `5786899`, `5790745`, `5791231`, `5791273`, `5791336`, `5791356`, `5791396`, and `5791424` are deactivated.
+Wave 2 render chain (R3–R5), SMV1/R2, RR1, P1–P3, RR2, R2B, P4, P5, SAI1, C2–C9, I1–I4, A2–A4, A1S/A1M/A1P, M1, AP0, AP1-IG, AP1-IGS, FBS1/FBS2, FBS3/FBS4, YT0–YTS3, TTD0–TTD4, FB0–FB3, and AP0C–AP5C are on Python in production. A1S submits private Drive file IDs to the local Video Compressor and posts `poller_url` at `/hooks/a1p/<A1P_WEBHOOK_TOKEN>`. A1P verifies the compressed Drive upload before moving the original to trash. RR1 email buttons call `/hooks/rr2/<token>`. C3 review buttons call `/hooks/c3b/<token>`. I2 review buttons call `/hooks/i3/<token>`. TikTok inbox emails call `/hooks/ttd4`. R2 missing-asset handoffs call Python P4. Make `5528742`, `5569896`, `5576353`, `5576620`, `5533802`, `5536624`, `5582071`, `5587853`, `5592384`, `6023816`, `5587860`, `5582074`, `5589218`, `5589819`, `5589822`, `5589932`, `5514334`, `5516968`, `5517182`, `5524092`, `5602193`, `5531974`, `5568863`, `5569035`, `5578180`, `5715500`, `5715530`, `5764543`, `5612096`, `5862882`, `5612664`, `5845193`, `5816409`, `5816495`, `5816502`, `5816520`, `5823572`, `5830810`, `5830609`, `5830616`, `5830623`, `5806658`, `5806644`, `5806597`, `5806570`, `5806518`, `5813436`, `5813463`, `5813487`, `5813511`, `5813534`, `5786899`, `5790745`, `5791231`, `5791273`, `5791336`, `5791356`, `5791396`, and `5791424` are deactivated.
 
 SAI1, C2–C9, and I1–I4 are on Python in production. C1 and C2M stay parked. Do not Approve live social posts. Python AP0 does not pulse IG/FB/TT/YT. Python AP1-IG publishes Instagram Reels. Python AP1-IGS publishes Instagram Stories. Python FBS1/FBS2 render or stage Facebook slideshow MP4s. Python FBS3/FBS4 publish Facebook Reels. Python YT0–YTS3 publish YouTube videos through the local uploader. Python TTD0–TTD4 create TikTok inbox drafts and send the manual-completion email. Python FB0–FB3 publish Facebook Single Image and Multi-Image posts. Python AP0C–AP5C publish Instagram carousels. Facebook photos and Instagram carousel no longer share a Make front door.
 
@@ -225,8 +225,23 @@ Header `X-Pipeline-Secret` required when `PIPELINE_RUNNER_SHARED_SECRET` is set.
 9. ~~P4/P5~~ (Python live)
 10. ~~I1–I4 idea chain~~ (Python live)
 11. ~~A2–A4 asset chain~~ (Python live; A0 parked)
-12. ~~A1P~~ (Python live; A1S still Make on-demand)
+12. ~~A1S/A1M/A1P~~ (Python live; local compressor + Drive metadata)
 13. AP0 + publish platforms
+
+## A1 local compression
+
+The A1 oversized-video path depends on the local Video Compressor service. Start and verify the services in this order:
+
+```powershell
+& 'D:\Content Creation\ChicagoShining Pipeline\Services\Video_Compressor\start-video-compressor.bat'
+Invoke-RestMethod http://127.0.0.1:3335/health
+& 'D:\Content Creation\ChicagoShining Pipeline\Services\pipeline-runner\service\start-pipeline-runner.bat'
+Invoke-RestMethod http://127.0.0.1:3350/health
+```
+
+The compressor health response must report `ok=true`, `ffmpeg=true`, `ffprobe=true`, and `google_drive_private_downloads=true`. A1S sends only the private Drive file ID and compression settings to `VIDEO_COMPRESSOR_URL`; the oversized bytes never pass through the pipeline-runner HTTP request. A1M reads duration from Drive metadata. A1P preserves the async submit/poll contract, verifies the uploaded MP4's exact size, MIME type, destination folder, and file ID, and only then moves the original to Drive trash and deletes the local compressor job.
+
+The service-account JSON belongs only in the Video Compressor runtime credentials directory. Do not copy it into this service, a Git checkout, deployment backup, or log. If compressor submit, polling, download, upload, or verification fails, the original remains unchanged.
 
 ## Source-only rule
 

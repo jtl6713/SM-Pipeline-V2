@@ -1,4 +1,4 @@
-"""A1S processor — scan oversized Drive videos and start CloudConvert compression (Make 5715530)."""
+"""A1S processor — scan oversized Drive videos and start local compression."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from a1p.processor import schedule_next
-from a1s.cloudconvert import api_token, compress_job_body, create_job, import_form, probe_duration, target_video_kbps, upload_source
+from a1s.compressor import delete_job, submit_job
 from a1s.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from a1s.eligibility import eligibility_reason
 from airtable.client import AirtableClient
@@ -104,24 +104,22 @@ def _compress_one(
     name = str(file.get("name") or "")
     size = parse_bytes(file.get("size"))
     client = AirtableClient()
-    drive = GoogleDriveClient()
-    token = api_token()
+    job_id = ""
     try:
-        content, _mime = drive.download_file(file_id)
-        duration, _meta_job_id = probe_duration(token, file_id, content, sleep=sleep)
-        kbps = target_video_kbps(duration)
-        job = create_job(token, compress_job_body(file_id, kbps))
+        job = submit_job(file_id, name)
         job_id = str(job.get("id") or "")
         if not job_id:
-            raise RuntimeError("CloudConvert compress job did not return an id")
-        form_url, parameters = import_form(job)
-        upload_source(form_url, parameters, content)
+            job_id = str(job.get("job_id") or "")
+        if not job_id:
+            raise RuntimeError("Video Compressor did not return a job id")
+        status_url = str(job.get("status_url") or "")
         now = iso_ms()
-        value = f"processing|{job_id}|0|{file_id}||{name}|{size}|{now}"
+        value = f"processing_local|{job_id}|0|{file_id}||{name}|{size}|{now}"
         _write_state(client, state_record_id, active=True, value=value, notes=A1S_JOB_NOTES)
         schedule_next(
             {
                 "job_id": job_id,
+                "status_url": status_url,
                 "state_record_id": state_record_id,
                 "source_file_id": file_id,
                 "source_name": name,
@@ -136,17 +134,22 @@ def _compress_one(
             "name": name,
             "job_id": job_id,
             "state_record_id": state_record_id,
-            "duration_seconds": duration,
-            "target_video_kbps": kbps,
+            "status_url": status_url,
             "status": "started",
+            "backend": "local_video_compressor",
         }
     except Exception:
+        if job_id:
+            try:
+                delete_job(job_id)
+            except Exception:
+                logger.exception("A1S could not clean up local compressor job %s", job_id)
         now = iso_ms()
         _clear_state(
             client,
             state_record_id,
             value=f"failed_start||0|{file_id}||{name}|{size}|{now}",
-            notes="A1S failed before CloudConvert compression started. Original preserved.",
+            notes="A1S failed before local compression started. Original preserved.",
         )
         raise
 
