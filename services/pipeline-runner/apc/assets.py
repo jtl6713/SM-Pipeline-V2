@@ -65,16 +65,26 @@ def current_order(slide: dict[str, Any]) -> int:
     return parse_int(field(slide, "Current Order"), parse_int(field(slide, "Slide Number"), 0) or 0) or 0
 
 
+def _branded_url(*urls: str) -> str:
+    for url in urls:
+        if url and ("/lettered/" in url or "/watermarked/" in url):
+            return url
+    return ""
+
+
 def source_image_url(slide: dict[str, Any]) -> str:
+    watermarked = field_str(slide, "Watermarked Image URL")
+    final = field_str(slide, "Final Image URL")
     current = field_str(slide, "Current Image URL")
+    asset = field_str(slide, "Asset_4x5_Public_URL")
+    public = field_str(slide, "IG_Public_Asset_URL")
+    branded = _branded_url(watermarked, final, current, asset, public)
+    if branded:
+        return branded
     if current:
         return current
-    asset = field_str(slide, "Asset_4x5_Public_URL")
     if asset:
         return asset
-    public = field_str(slide, "IG_Public_Asset_URL")
-    if "/lettered/" in public:
-        return public
     return ""
 
 
@@ -89,7 +99,9 @@ def public_asset_url(key: str) -> str:
 
 
 def saved_public_url(source_url: str, generated_url: str) -> str:
-    return source_url if "/lettered/" in source_url else generated_url
+    if "/lettered/" in source_url or "/watermarked/" in source_url:
+        return source_url
+    return generated_url
 
 
 def child_ids(slides: list[dict[str, Any]]) -> list[str]:

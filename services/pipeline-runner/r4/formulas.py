@@ -21,5 +21,5 @@ def r4_exact_output_formula(output_record_id: str, test_run_id: str = "") -> str
     return (
         f'AND(RECORD_ID()="{quoted_id}",{test_guard}'
         f'{{Render_Status}}="Ready for Render",{{Composition_ID}}!="",'
-        f'{{Output_Filename}}!="",{{Render_Clip_List_JSON}}!="",{{Render_Total_Frames}}>0)'
+        f'{{Output_Filename}}!="",{{Render_Total_Frames}}>0)'
     )

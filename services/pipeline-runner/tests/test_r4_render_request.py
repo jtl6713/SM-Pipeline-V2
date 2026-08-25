@@ -1,4 +1,6 @@
+from r4.constants import R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
+from r4.processor import _eligible_exact_output
 from r4.render_request import build_no_voiceover_request, choose_render_request
 
 
@@ -13,6 +15,26 @@ def test_r4_exact_output_formula_pins_record():
     formula = r4_exact_output_formula("recR4TEST", "")
     assert 'RECORD_ID()="recR4TEST"' in formula
     assert "{Test_Run_ID}=BLANK()" in formula
+    assert "Render_Clip_List_JSON" not in formula
+
+
+def test_r4_clear_fields_null_select_instead_of_empty_string():
+    assert R4_CLEAR_FIELDS["Final_File_Storage_Status"] is None
+
+
+def test_r4_exact_eligibility_requires_ready_package():
+    output = {
+        "fields": {
+            "Render_Status": "Ready for Render",
+            "Composition_ID": "ChicagoShiningPhotoSequence",
+            "Output_Filename": "out.mp4",
+            "Render_Clip_List_JSON": "[{}]",
+            "Render_Total_Frames": 450,
+        }
+    }
+    assert _eligible_exact_output(output) is True
+    output["fields"]["Render_Status"] = "Rendering"
+    assert _eligible_exact_output(output) is False
 
 
 def test_r4_no_voiceover_request_dimensions():

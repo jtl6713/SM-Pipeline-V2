@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from branding.watermark import already_branded_url
 from lettering.constants import LEFTOVER_OVERLAY_TEXTS, MAX_OVERLAY_CHARS
 
 _FONT_CANDIDATES = (
@@ -49,7 +50,7 @@ def is_ai_cover_clip(clip: dict) -> bool:
 
 
 def already_lettered_url(url: str) -> bool:
-    return "/lettered/" in str(url or "").lower()
+    return already_branded_url(url)
 
 
 def _font(size: int) -> ImageFont.ImageFont:

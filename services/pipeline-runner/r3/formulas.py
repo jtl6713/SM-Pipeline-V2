@@ -23,6 +23,5 @@ def r3_exact_output_formula(output_record_id: str, test_run_id: str = "") -> str
     )
     return (
         f'AND(RECORD_ID()="{quoted_id}",{test_guard}'
-        f'{{Asset_Selection_Status}}="Selected",{{Selected_Assets_JSON}}!="",'
-        f'{{Render_Status}}=BLANK())'
+        f'{{Asset_Selection_Status}}="Selected",{{Render_Status}}=BLANK())'
     )

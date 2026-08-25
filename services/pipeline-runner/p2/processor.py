@@ -9,6 +9,7 @@ import requests
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE
+from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
 from config import load_settings
 from integrations.google_drive import GoogleDriveClient
 from item4.settings import pipeline_settings
@@ -173,8 +174,12 @@ def process_request(
     content_id = field_str(item, "Content_ID") or item["id"]
     test_run = field_str(item, "Test_Run_ID")
 
+    def _branded_thumbnail(prompt: str) -> bytes:
+        raw = generate_thumbnail_png(prompt)
+        return apply_watermark_bytes(raw, brand_watermark_bytes(client), output_format="png")
+
     if route == "silent_thumbnail":
-        png_bytes = generate_thumbnail_png(field_str(item, "Thumbnail_Prompt"))
+        png_bytes = _branded_thumbnail(field_str(item, "Thumbnail_Prompt"))
         thumb_file = drive.upload_and_share(
             THUMBNAIL_DRIVE_FOLDER_ID,
             f"{content_id}_thumb.png",
@@ -230,7 +235,7 @@ def process_request(
 
     thumb_file: dict[str, Any] | None = None
     if want_thumbnail:
-        png_bytes = generate_thumbnail_png(field_str(item, "Thumbnail_Prompt"))
+        png_bytes = _branded_thumbnail(field_str(item, "Thumbnail_Prompt"))
         thumb_file = drive.upload_and_share(
             THUMBNAIL_DRIVE_FOLDER_ID,
             f"{content_id}_thumb.png",

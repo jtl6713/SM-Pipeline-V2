@@ -6,6 +6,7 @@ import requests
 
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
+from branding.watermark import already_branded_url, apply_watermark_bytes, brand_watermark_bytes
 from item4.constants import MEDIA_PUBLIC_BASE
 from lettering.compositor import (
     already_lettered_url,
@@ -37,6 +38,7 @@ def _set_clip_url(clip: dict[str, Any], url: str) -> None:
     if "src" in clip:
         clip["src"] = url
     clip["lettered"] = True
+    clip["watermarked"] = True
 
 
 def _clip_has_leftover_overlay(clip: dict[str, Any]) -> bool:
@@ -80,6 +82,29 @@ def _clips_from_output(output: dict[str, Any]) -> tuple[str | None, list[dict[st
         if isinstance(parsed, list) and parsed:
             return name, parsed
     return None, []
+
+
+def branding_jobs_for_clips(
+    clips: list[dict[str, Any]],
+    output: dict[str, Any],
+    title: str,
+) -> list[tuple[int, dict[str, Any], str, str]]:
+    work: list[tuple[int, dict[str, Any], str, str]] = []
+    for index, clip in enumerate(clips):
+        if not isinstance(clip, dict):
+            continue
+        text = "" if is_ai_cover_clip(clip) else overlay_text_for_clip(clip, title)
+        url = _clip_url(clip)
+        leftover = _clip_has_leftover_overlay(clip)
+        if already_branded_url(url) and not leftover:
+            continue
+        source_url = _unlettered_source_url(clip, output, index)
+        if not source_url and url and not already_branded_url(url):
+            source_url = url
+        if not source_url:
+            continue
+        work.append((index, clip, text, source_url))
+    return work
 
 
 def _rewrite(value: Any, url_map: dict[str, str]) -> Any:
@@ -160,39 +185,28 @@ def process_one(
         or ""
     )
 
-    work: list[tuple[int, dict[str, Any], str, str]] = []
-    for index, clip in enumerate(clips):
-        if not isinstance(clip, dict) or is_ai_cover_clip(clip):
-            continue
-        text = overlay_text_for_clip(clip, title)
-        if not text:
-            continue
-        url = _clip_url(clip)
-        leftover = _clip_has_leftover_overlay(clip)
-        if already_lettered_url(url) and not leftover:
-            continue
-        source_url = _unlettered_source_url(clip, output, index)
-        if not source_url:
-            continue
-        work.append((index, clip, text, source_url))
+    work = branding_jobs_for_clips(clips, output, title)
 
     preview = {
         "output_record_id": output["id"],
         "output_id": field_str(output, "Output_ID"),
         "clip_count": len(clips),
-        "letter_count": len(work),
+        "letter_count": sum(1 for item in work if item[2]),
+        "brand_count": len(work),
         "json_field": json_field,
     }
     if not work:
-        return {"processed": False, "reason": "already_lettered_or_no_text", **preview}
+        return {"processed": False, "reason": "already_branded_or_no_stills", **preview}
     if dry_run:
         return {
             "processed": False,
             "dry_run": True,
-            "would_letter": [item[2] for item in work],
+            "would_letter": [item[2] for item in work if item[2]],
+            "would_watermark": [item[3] for item in work],
             **preview,
         }
 
+    watermark_png = brand_watermark_bytes(client)
     uploader = R2UploadClient()
     url_map: dict[str, str] = {}
     lettered_urls: list[str] = []
@@ -200,18 +214,21 @@ def process_one(
         response = requests.get(source_url, timeout=120)
         response.raise_for_status()
         jpeg = letter_jpeg_bytes(response.content, text)
-        key = f"studio/previews/lettered/{output['id']}/{index}.jpg"
-        uploader.put_object(key, jpeg, "image/jpeg")
+        branded = apply_watermark_bytes(jpeg, watermark_png, output_format="jpeg")
+        folder = "lettered" if text else "watermarked"
+        key = f"studio/previews/{folder}/{output['id']}/{index}.jpg"
+        uploader.put_object(key, branded, "image/jpeg")
         public_url = f"{MEDIA_PUBLIC_BASE.rstrip('/')}/{key.lstrip('/')}"
         url_map[source_url] = public_url
         current = _clip_url(clip)
         if current and current != source_url:
             url_map[current] = public_url
-        if isinstance(clip.get("overlay"), dict):
-            clip["overlay"] = {**clip["overlay"], "text": text}
-        elif clip.get("overlay") is not None:
-            clip["overlay"] = text
-        clip["caption"] = text
+        if text:
+            if isinstance(clip.get("overlay"), dict):
+                clip["overlay"] = {**clip["overlay"], "text": text}
+            elif clip.get("overlay") is not None:
+                clip["overlay"] = text
+            clip["caption"] = text
         lettered_urls.append(public_url)
         _set_clip_url(clip, public_url)
 
@@ -239,7 +256,7 @@ def process_one(
     client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields)
     return {
         "processed": True,
-        "route": "native_lettering",
+        "route": "native_branding",
         "lettered_urls": lettered_urls,
         **preview,
     }

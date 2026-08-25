@@ -8,7 +8,7 @@ R4_CLEAR_FIELDS = {
     "Final_File_ID": "",
     "Final_File_Name": "",
     "Remotion_Props_JSON": "",
-    "Final_File_Storage_Status": "",
+    "Final_File_Storage_Status": None,
     "Render_Server_URL": "",
     "Output_URL": "",
     "Remotion_Job_ID": "",

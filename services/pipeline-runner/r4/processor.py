@@ -15,6 +15,34 @@ from render.remotion_client import RemotionClient
 from render.settings import get_render_server_url, get_render_volumes
 
 
+def _eligible_exact_output(
+    output: dict[str, Any],
+    *,
+    test_run_id: str | None = None,
+) -> bool:
+    actual_test = field_str(output, "Test_Run_ID")
+    expected_test = (test_run_id or "").strip()
+    if expected_test:
+        if actual_test != expected_test:
+            return False
+    elif actual_test:
+        return False
+    if field_str(output, "Render_Status") != "Ready for Render":
+        return False
+    if not field_str(output, "Composition_ID"):
+        return False
+    if not field_str(output, "Output_Filename"):
+        return False
+    raw_clips = (output.get("fields") or {}).get("Render_Clip_List_JSON")
+    if not str(raw_clips or "").strip():
+        return False
+    try:
+        frames = float((output.get("fields") or {}).get("Render_Total_Frames") or 0)
+    except (TypeError, ValueError):
+        return False
+    return frames > 0
+
+
 def select_output(
     client: AirtableClient,
     *,
@@ -22,10 +50,15 @@ def select_output(
     test_run_id: str | None = None,
 ) -> dict[str, Any] | None:
     if output_record_id:
-        formula = r4_exact_output_formula(output_record_id, test_run_id or "")
-    else:
-        formula = r4_production_formula()
-    rows = client.list_records(PLATFORM_OUTPUTS_TABLE, formula=formula, max_records=MAX_RECORDS)
+        # Fetch by ID. Do not re-run the formula that compares Render_Clip_List_JSON;
+        # Airtable 422s when that long-text field is huge.
+        output = client.get_record(PLATFORM_OUTPUTS_TABLE, output_record_id)
+        return output if _eligible_exact_output(output, test_run_id=test_run_id) else None
+    rows = client.list_records(
+        PLATFORM_OUTPUTS_TABLE,
+        formula=r4_production_formula(),
+        max_records=MAX_RECORDS,
+    )
     return rows[0] if rows else None
 
 

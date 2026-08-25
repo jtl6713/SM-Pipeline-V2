@@ -80,10 +80,17 @@ def test_asset_and_caption_helpers():
     assert source_image_url({"fields": {"Asset_4x5_Public_URL": "https://cdn/b.jpg"}}) == "https://cdn/b.jpg"
     assert source_image_url({"fields": {"IG_Public_Asset_URL": "https://cdn/lettered/c.jpg"}}) == "https://cdn/lettered/c.jpg"
     assert source_image_url({"fields": {"IG_Public_Asset_URL": "https://cdn/plain.jpg"}}) == ""
+    assert source_image_url({
+        "fields": {
+            "Current Image URL": "https://media.chicagoshining.com/catalog/raw.jpg",
+            "Watermarked Image URL": "https://media.chicagoshining.com/studio/previews/watermarked/recX/0.jpg",
+        }
+    }) == "https://media.chicagoshining.com/studio/previews/watermarked/recX/0.jpg"
     key = r2_object_key("ig-carousel", 224, slide)
     assert key == "ig-carousel/output-224/slide-03.jpg"
     assert public_asset_url(key) == "https://media.chicagoshining.com/ig-carousel/output-224/slide-03.jpg"
     assert saved_public_url("https://x/lettered/a.jpg", "https://generated") == "https://x/lettered/a.jpg"
+    assert saved_public_url("https://x/watermarked/a.jpg", "https://generated") == "https://x/watermarked/a.jpg"
     assert saved_public_url("https://x/plain.jpg", "https://generated") == "https://generated"
     assert publish_caption(_record(Output_Caption="Hello", Output_Hashtags="#Chicago")) == "Hello\n\n#Chicago"
     assert publish_caption(_record(Output_Caption="Hello")) == "Hello"

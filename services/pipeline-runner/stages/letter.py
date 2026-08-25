@@ -35,14 +35,14 @@ def run(request: StageRequest) -> StageResult:
         return StageResult(
             stage="letter",
             status="ok",
-            message="Native JPEG lettering dry-run (no writes)",
+            message="Native still branding dry-run (no writes)",
             details={"dry_run": True, "runs": runs},
         )
     if processed_count == 0:
         return StageResult(
             stage="letter",
             status="skipped",
-            message="No native stills needed JPEG lettering",
+            message="No native stills needed branding",
             details={
                 "selector_formula": (
                     lettering_exact_output_formula(output_record_id, test_run_id or "")
@@ -55,7 +55,7 @@ def run(request: StageRequest) -> StageResult:
     return StageResult(
         stage="letter",
         status="ok",
-        message=f"Lettered {processed_count} native Platform Output(s)",
+        message=f"Branded {processed_count} native Platform Output(s)",
         details={
             "processed_count": processed_count,
             "runs": runs,

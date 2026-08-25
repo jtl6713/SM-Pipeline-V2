@@ -32,6 +32,27 @@ def select_outputs(
     )
 
 
+def _eligible_exact_output(
+    output: dict[str, Any],
+    *,
+    test_run_id: str | None = None,
+) -> bool:
+    fields = output.get("fields") or {}
+    actual_test = field_str(output, "Test_Run_ID")
+    expected_test = (test_run_id or "").strip()
+    if expected_test:
+        if actual_test != expected_test:
+            return False
+    elif actual_test:
+        return False
+    if field_str(output, "Asset_Selection_Status") != "Selected":
+        return False
+    if field_str(output, "Render_Status"):
+        return False
+    raw_json = fields.get("Selected_Assets_JSON")
+    return bool(str(raw_json or "").strip())
+
+
 def process_one(
     *,
     output_record_id: str | None = None,
@@ -39,20 +60,31 @@ def process_one(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     client = AirtableClient()
-    outputs = select_outputs(
-        client,
-        output_record_id=output_record_id,
-        test_run_id=test_run_id,
-        max_records=1,
-    )
-    if not outputs:
-        return {
-            "processed": False,
-            "reason": "no_eligible_platform_output",
-            "make_scenario_id": MAKE_SCENARIO_ID,
-        }
-
-    output = outputs[0]
+    if output_record_id:
+        # Fetch by ID. Do not re-run the formula that compares Selected_Assets_JSON;
+        # Airtable 422s when that long-text field is huge.
+        output = client.get_record(PLATFORM_OUTPUTS_TABLE, output_record_id)
+        if not _eligible_exact_output(output, test_run_id=test_run_id):
+            return {
+                "processed": False,
+                "reason": "no_eligible_platform_output",
+                "output_record_id": output_record_id,
+                "make_scenario_id": MAKE_SCENARIO_ID,
+            }
+    else:
+        outputs = select_outputs(
+            client,
+            output_record_id=output_record_id,
+            test_run_id=test_run_id,
+            max_records=1,
+        )
+        if not outputs:
+            return {
+                "processed": False,
+                "reason": "no_eligible_platform_output",
+                "make_scenario_id": MAKE_SCENARIO_ID,
+            }
+        output = outputs[0]
     raw_json = field_str(output, "Selected_Assets_JSON")
     if not raw_json:
         return {
