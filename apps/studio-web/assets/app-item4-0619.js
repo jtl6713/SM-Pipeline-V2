@@ -109,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.130-dashboard-sorts";
+  const BUILD_ID = "item4-0.6.132-promote-to-pipeline";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1424,9 +1424,14 @@
     document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
     document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
     $(`page-${page}`).classList.add("active");
+    if (page === "outputs") pipelineViewFilter = "all";
     if (page !== "outputs") stopPipelinePoll();
     if (page === "support") showSupportDoc("walkthrough");
     loadPage(page);
+  }
+
+  function openPipelineAfterPromote() {
+    switchToPage("outputs");
   }
 
   function showSupportDoc(id) {
@@ -5739,6 +5744,7 @@
       if (result.promoted) {
         const content = result.content_item_record_id ? ` Content Item: ${result.content_item_record_id}.` : "";
         setRequestMessage(`${result.message || "Approved. This request is in production."}${content}`, "success");
+        openPipelineAfterPromote();
       } else {
         setRequestMessage(result.message || "Promotion is processing.", "");
       }
@@ -5757,6 +5763,7 @@
               setRequestMessage("Approved. This request is in production.", "success");
               item4PromoteInFlight = false;
               if (promoteButton) delete promoteButton.dataset.busy;
+              openPipelineAfterPromote();
               return;
             }
             if (latestStatus === "Submitted") {

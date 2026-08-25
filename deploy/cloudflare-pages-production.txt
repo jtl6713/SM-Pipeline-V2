@@ -217,3 +217,5 @@ Dashboard sorts Pages deploy: 2026-08-24 - Dashboard Content items and output li
 
 Global Admin Tooltips Pages deploy: 2026-08-24 — Add accessible contextual help across Studio admin controls, fields, dynamic actions, and Operations controls. UI 0.6.131-tooltips. Source commit ec5495dfb280c59bd01f00c2d415f4f640f3258d.
 
+Promote-to-pipeline Pages deploy: 2026-08-24 — After Production Approve & Promote succeeds, open the Pipeline screen. UI 0.6.132-promote-to-pipeline.
+
