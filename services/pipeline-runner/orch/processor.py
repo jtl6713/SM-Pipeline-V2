@@ -9,19 +9,26 @@ from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from item4.settings import pipeline_settings
 from orch.constants import (
+    IGPUB_PROMOTE_NOTE,
     MAKE_APCAR_ORCH_ID,
     MAKE_APCAR_ORCH_NAME,
     MAKE_FB_ORCH_ID,
     MAKE_FB_ORCH_NAME,
+    MAKE_IG_ORCH_ID,
+    MAKE_IG_ORCH_NAME,
     MAKE_TTD_ORCH_ID,
     MAKE_TTD_ORCH_NAME,
     MAKE_YT_ORCH_ID,
     MAKE_YT_ORCH_NAME,
 )
-from orch.formulas import APCAR_BRANCHES, FB_BRANCHES, OrchBranch, TTD_BRANCHES, YT_BRANCHES
+from orch.formulas import APCAR_BRANCHES, FB_BRANCHES, IGPUB_BRANCHES, OrchBranch, TTD_BRANCHES, YT_BRANCHES
 from render.fields import field_str
 
 _STAGE_MODULES = {
+    "ap0": "ap0.processor",
+    "ap1_ig": "ap1_ig.processor",
+    "ap1_igs": "ap1_igs.processor",
+    "ap1_igs_poll": "ap1_igs.poll",
     "ttd0": "ttd.ttd0",
     "ttd1": "ttd.ttd1",
     "ttd2": "ttd.ttd2",
@@ -112,6 +119,22 @@ def run_tick(
             "output_record_id": record["id"],
             "output_id": field_str(record, "Output_ID"),
         }
+        if branch.action == "promote":
+            if dry_run:
+                runs.append({**hit, "dry_run": True, "action": "promote"})
+                dispatched += 1
+                continue
+            existing = field_str(record, "Output_Notes")
+            notes = f"{existing}\n\n{IGPUB_PROMOTE_NOTE}" if existing else IGPUB_PROMOTE_NOTE
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record["id"],
+                {"Publish_Status": "Ready to Publish", "Output_Notes": notes},
+                typecast=True,
+            )
+            runs.append({**hit, "action": "promote", "result": {"processed": True}})
+            dispatched += 1
+            continue
         if dry_run:
             runs.append({**hit, "dry_run": True})
             dispatched += 1
@@ -166,5 +189,15 @@ def process_apcar(*, dry_run: bool = False) -> dict[str, Any]:
         make_id=MAKE_APCAR_ORCH_ID,
         make_name=MAKE_APCAR_ORCH_NAME,
         source="AP-CAR-ORCH",
+        dry_run=dry_run,
+    )
+
+
+def process_igrs(*, dry_run: bool = False) -> dict[str, Any]:
+    return run_tick(
+        branches=IGPUB_BRANCHES,
+        make_id=MAKE_IG_ORCH_ID,
+        make_name=MAKE_IG_ORCH_NAME,
+        source="IG-PUB-ORCH",
         dry_run=dry_run,
     )

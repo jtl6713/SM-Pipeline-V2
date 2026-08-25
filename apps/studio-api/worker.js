@@ -4204,6 +4204,7 @@ const STUDIO_AP4C_SCENARIO_ID = 5791356;
 const STUDIO_AP4R_SCENARIO_ID = 5791396;
 const STUDIO_AP5C_SCENARIO_ID = 5791424;
 const STUDIO_AP_CAR_ORCH_SCENARIO_ID = 5791537;
+const STUDIO_IG_ORCH_SCENARIO_ID = 5864632;
 
 
 
@@ -4614,6 +4615,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_YT_ORCH_SCENARIO_ID && pipelineStageBackend(env, "YT_ORCH").mode === "python") return true;
   if (id === STUDIO_FB_ORCH_SCENARIO_ID && pipelineStageBackend(env, "FB_ORCH").mode === "python") return true;
   if (id === STUDIO_AP_CAR_ORCH_SCENARIO_ID && pipelineStageBackend(env, "APCAR_ORCH").mode === "python") return true;
+  if (id === STUDIO_IG_ORCH_SCENARIO_ID && pipelineStageBackend(env, "IG_ORCH").mode === "python") return true;
   if (id === PHASE6_P0202_SCENARIO_ID && pipelineStageBackend(env, "P0202").mode === "python") return true;
   return false;
 }
@@ -12832,13 +12834,14 @@ const PRODUCTION_CADENCE_RENDER = Object.freeze([
   { id: 5576363, key: "RR1" },
 ]);
 const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
-  { id: 5864632, key: "IG" },
+  { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG" },
   { id: 5791537, key: "APCAR" },
   { id: 5813561, key: "FB" },
   { id: 5806668, key: "TTD" },
   { id: 5823581, key: "YT" },
 ]);
-// AP-CAR-ORCH 5791537 is Python when STAGE_BACKEND_APCAR_ORCH=python. These
+// AP-CAR-ORCH 5791537 is Python when STAGE_BACKEND_APCAR_ORCH=python.
+// IG-PUB-ORCH 5864632 is Python when STAGE_BACKEND_IG_ORCH=python. These
 // webhook workers are the carousel chain Studio Approve starts (AP0C).
 const STUDIO_AP0C_CHAIN_WEBHOOKS = Object.freeze([
   { id: 5786899, key: "AP0C" },
@@ -12887,7 +12890,7 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
 const STUDIO_AP0_WEBHOOK_URL = "https://hook.us2.make.com/q1lx2g0gg7khxzgvnkums12wu649pjnw";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
-  { id: 5864632, key: "IG" },
+  { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG" },
   { id: 5813561, key: "FB" },
   { id: 5823581, key: "YT" },
   { id: 5806668, key: "TTD" },
@@ -13759,7 +13762,7 @@ async function pulseOnDemandRenderChain(env, options = {}) {
 async function pulseOnDemandPublishChain(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const jobs = [
-    { id: 5864632, key: "IG", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Publishing",{IG_Story_Status}="Publishing"),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
+    { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish",{Publish_Status}="Publishing",{IG_Story_Status}="Publishing"),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
     { id: 5813561, key: "FB", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
     { id: 5806668, key: "TTD", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
     { id: 5823581, key: "YT", formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{Published_At}=BLANK(),{Publish_Status}!="Published",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))' },
@@ -15396,8 +15399,8 @@ const STUDIO_PUBLISH_DISPATCH_SCENARIOS = Object.freeze({
   "AP0": { webhooks: [5612096] },
   "AP0C": { webhooks: STUDIO_AP0C_CHAIN_WEBHOOKS.map((item) => item.id) },
   "FB0": { webhooks: STUDIO_FB0_CHAIN_WEBHOOKS.map((item) => item.id) },
-  "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: 5864632 },
-  "AP1-IG": { webhooks: [5862882], orchestrator: 5864632 },
+  "AP1-IGS": { webhooks: [5612664, 5845193], orchestrator: STUDIO_IG_ORCH_SCENARIO_ID },
+  "AP1-IG": { webhooks: [5862882], orchestrator: STUDIO_IG_ORCH_SCENARIO_ID },
   "FBS3": { webhooks: [STUDIO_FBS3_SCENARIO_ID, STUDIO_FBS4_SCENARIO_ID], orchestrator: 5813561 },
   "YT0": { webhooks: [STUDIO_YT0_SCENARIO_ID, STUDIO_YTP1_SCENARIO_ID, STUDIO_YTS1_SCENARIO_ID, STUDIO_YTS2_SCENARIO_ID, STUDIO_YTS3_SCENARIO_ID] },
   "TTD0": { webhooks: [STUDIO_TTD0_SCENARIO_ID, STUDIO_TTD1_SCENARIO_ID, STUDIO_TTD2_SCENARIO_ID, STUDIO_TTD3_SCENARIO_ID, STUDIO_TTD4_SCENARIO_ID], orchestrator: STUDIO_TTD_ORCH_SCENARIO_ID },
@@ -15424,6 +15427,7 @@ const STUDIO_PUBLISH_ORCH_PYTHON = Object.freeze({
   [STUDIO_YT_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_yt", flag: "YT_ORCH" }),
   [STUDIO_FB_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_fb", flag: "FB_ORCH" }),
   [STUDIO_AP_CAR_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_ig", flag: "APCAR_ORCH" }),
+  [STUDIO_IG_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_igrs", flag: "IG_ORCH" }),
 });
 
 async function studioRunPublishOrchestrator(env, target) {
@@ -16424,7 +16428,7 @@ const REPAIR_LEASE_TABLE_ID = "tbltuSt9UibYzxpah";
 const REPAIR_CONTROL_SCENARIOS = new Set([
   5893243, // MAKE-ADMIN-BRIDGE
   5813561, // FB-ORCH
-  5864632, // IG-PUB-ORCH
+  STUDIO_IG_ORCH_SCENARIO_ID, // IG-PUB-ORCH
   5556716, // R4 renderer handoff
   5528742, // P1 content package scheduled root (Test Mode exact selector pulse only)
   5569495, // R2 exact Test Mode selector pulse only

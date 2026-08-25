@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from config import StageRequest
 from rr2.constants import DECISION_CHANGES, PUBLISHER_START_SCENARIOS
 from rr2.decisions import append_decision_note, decision_fields, normalize_decision
-from rr2.publisher import MAKE_API_SETTINGS_FORMULA
+from rr2.publisher import MAKE_API_SETTINGS_FORMULA, orch_make_start_skipped
 from stages.rr2 import run as run_rr2
 
 
@@ -62,6 +62,8 @@ def test_publisher_settings_formula_matches_make():
     assert '{Setting_Name}="MAKE_API_TOKEN"' in MAKE_API_SETTINGS_FORMULA
     ids = [item[0] for item in PUBLISHER_START_SCENARIOS]
     assert ids == [5864632, 5813561, 5806668]
+    assert orch_make_start_skipped(5864632, {"stage_backend_ig_orch": "python"})
+    assert not orch_make_start_skipped(5864632, {"stage_backend_ig_orch": "make"})
 
 
 def test_stage_skips_unknown_decision_without_airtable():

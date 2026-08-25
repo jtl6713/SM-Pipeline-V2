@@ -9,7 +9,20 @@ import requests
 from airtable.client import AirtableClient
 from airtable.constants import PIPELINE_SETTINGS_TABLE
 from render.fields import field_str
+from config import load_settings
 from rr2.constants import PUBLISHER_START_SCENARIOS
+
+ORCH_BACKEND_BY_SCENARIO = {
+    5864632: "stage_backend_ig_orch",
+    5813561: "stage_backend_fb_orch",
+    5806668: "stage_backend_ttd_orch",
+}
+
+
+def orch_make_start_skipped(scenario_id: int, settings: dict | None = None) -> bool:
+    settings = settings or load_settings()
+    key = ORCH_BACKEND_BY_SCENARIO.get(int(scenario_id))
+    return bool(key) and str(settings.get(key) or "").strip().lower() == "python"
 
 MAKE_API_SETTINGS_FORMULA = (
     'AND({Active}=1,OR({Setting_Name}="MAKE_API_BASE_URL",{Setting_Name}="MAKE_API_TOKEN"))'
@@ -42,6 +55,9 @@ def start_publisher_cadence(client: AirtableClient | None = None) -> list[dict[s
             "Content-Type": "application/json",
         }
         for scenario_id, name in PUBLISHER_START_SCENARIOS:
+            if orch_make_start_skipped(scenario_id):
+                results.append({"scenario_id": scenario_id, "name": name, "skipped": "python"})
+                continue
             try:
                 response = requests.post(
                     f"{base}/scenarios/{scenario_id}/start",

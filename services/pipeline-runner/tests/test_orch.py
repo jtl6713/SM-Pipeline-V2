@@ -1,9 +1,24 @@
-from orch.formulas import APCAR_BRANCHES, APCAR_GUARD, FB_BRANCHES, FB_PRE, TTD_BRANCHES, TTD_GUARD, YT_BRANCHES
+from orch.constants import IGPUB_PROMOTE_NOTE
+from orch.formulas import (
+    APCAR_BRANCHES,
+    APCAR_GUARD,
+    FB_BRANCHES,
+    FB_PRE,
+    IGPUB_AP0_FORMULA,
+    IGPUB_AP1_FORMULA,
+    IGPUB_BRANCHES,
+    IGPUB_DUE_FORMULA,
+    IGPUB_IGS_FORMULA,
+    IGPUB_POLL_FORMULA,
+    TTD_BRANCHES,
+    TTD_GUARD,
+    YT_BRANCHES,
+)
 from stages.registry import STAGE_NAMES, is_implemented
 
 
 def test_publish_orch_stages_are_registered():
-    for name in ("publish_tt", "publish_yt", "publish_fb", "publish_ig"):
+    for name in ("publish_tt", "publish_yt", "publish_fb", "publish_ig", "publish_igrs"):
         assert name in STAGE_NAMES
         assert is_implemented(name)
 
@@ -52,3 +67,32 @@ def test_apcar_orch_branches_match_make():
     ]
     assert APCAR_GUARD == APCAR_BRANCHES[0].formula
     assert '{IG_Carousel_Status}!="Published"' in APCAR_GUARD
+
+
+def test_ig_pub_orch_branches_match_make():
+    assert [branch.name for branch in IGPUB_BRANCHES] == [
+        "Due promote",
+        "AP0",
+        "AP1-IG",
+        "AP1-IGS",
+        "AP1-IGS-POLL",
+    ]
+    assert [branch.stage for branch in IGPUB_BRANCHES] == [
+        "promote",
+        "ap0",
+        "ap1_ig",
+        "ap1_igs",
+        "ap1_igs_poll",
+    ]
+    assert IGPUB_BRANCHES[0].action == "promote"
+    assert IGPUB_BRANCHES[0].view is None
+    assert IGPUB_BRANCHES[1].view == "AP0 - Ready to Prepare Publish Asset"
+    assert IGPUB_BRANCHES[0].formula == IGPUB_DUE_FORMULA
+    assert IGPUB_BRANCHES[1].formula == IGPUB_AP0_FORMULA
+    assert IGPUB_BRANCHES[2].formula == IGPUB_AP1_FORMULA
+    assert IGPUB_BRANCHES[3].formula == IGPUB_IGS_FORMULA
+    assert IGPUB_BRANCHES[4].formula == IGPUB_POLL_FORMULA
+    assert '{Publish_Status}="Ready to Schedule"' in IGPUB_DUE_FORMULA
+    assert '{Platform_Output_Type}="Instagram Reel"' in IGPUB_AP1_FORMULA
+    assert '{IG_Story_Status}="Publishing"' in IGPUB_POLL_FORMULA
+    assert "Ready to Publish because its schedule is due" in IGPUB_PROMOTE_NOTE

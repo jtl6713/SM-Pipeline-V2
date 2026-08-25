@@ -7,8 +7,9 @@ from dataclasses import dataclass
 class OrchBranch:
     name: str
     stage: str
-    view: str
+    view: str | None
     formula: str
+    action: str = "dispatch"
 
 
 TTD_GUARD = (
@@ -125,6 +126,51 @@ FB_BRANCHES = (
     OrchBranch("FBS2", "fbs2", "FBS2 — Slideshow Renders to Poll", FB_PRE),
     OrchBranch("FBS3", "fbs3", "FBS3 — Ready to Publish Slideshow Reel", FB_FBS3),
     OrchBranch("FBS4", "fbs4", "FBS4 — Slideshow Reels to Poll", FB_POST),
+)
+
+IGPUB_DUE_FORMULA = (
+    'AND({Test_Run_ID}=BLANK(),AND({Platform}="Instagram",{Review_Status}="Approved",'
+    '{Output_Status}="Approved for Publishing",{Publish_Status}="Ready to Schedule",'
+    '{Publish_Method}="Automated",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,'
+    '{Published_At}=BLANK(),OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW()))))'
+)
+IGPUB_AP0_FORMULA = (
+    'AND({Test_Run_ID}=BLANK(),AND({Platform}="Instagram",'
+    'OR({Platform_Output_Type}="Instagram Reel",{Platform_Output_Type}="Instagram Story",'
+    '{Platform_Output_Type}="Instagram Feed Post"),{Review_Status}="Approved",'
+    '{Output_Status}="Approved for Publishing",{Publish_Status}="Ready to Publish",'
+    '{Publish_Method}="Automated",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,'
+    '{Final_File_ID}!="",{Publish_Asset_URL}=BLANK(),{Published_At}=BLANK()))'
+)
+IGPUB_AP1_FORMULA = (
+    'AND({Test_Run_ID}=BLANK(),AND({Platform}="Instagram",'
+    'OR({Platform_Output_Type}="Instagram Reel",{Platform_Output_Type}="Instagram Feed Post"),'
+    '{Review_Status}="Approved",{Output_Status}="Approved for Publishing",'
+    '{Publish_Status}="Ready to Publish",{Publish_Method}="Automated",{Auto_Publish_Enabled}=1,'
+    '{Do_Not_Publish}=0,{Publish_Asset_URL}!="",{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),'
+    '{Publish_Locked_By}=BLANK(),{Publish_Locked_At}=BLANK(),'
+    'OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW()))))'
+)
+IGPUB_IGS_FORMULA = (
+    'AND({Test_Run_ID}=BLANK(),AND({Platform}="Instagram",{Platform_Output_Type}="Instagram Story",'
+    '{Review_Status}="Approved",{Output_Status}="Approved for Publishing",{Do_Not_Publish}=0,'
+    '{Publish_Asset_URL}!="",{Publish_Status}="Ready to Publish",{Publish_Method}="Automated",'
+    '{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Platform_Post_ID}=BLANK(),'
+    '{IG_Story_Container_ID}=BLANK(),{IG_Story_Post_ID}=BLANK(),'
+    'OR({IG_Story_Status}=BLANK(),{IG_Story_Status}="Ready")))'
+)
+IGPUB_POLL_FORMULA = (
+    'AND({Test_Run_ID}=BLANK(),AND({Platform}="Instagram",{Platform_Output_Type}="Instagram Story",'
+    '{IG_Story_Status}="Publishing",{IG_Story_Container_ID}!="",{IG_Story_Post_ID}=BLANK(),'
+    '{Do_Not_Publish}=0,{Review_Status}="Approved",{Published_At}=BLANK()))'
+)
+
+IGPUB_BRANCHES = (
+    OrchBranch("Due promote", "promote", None, IGPUB_DUE_FORMULA, action="promote"),
+    OrchBranch("AP0", "ap0", "AP0 - Ready to Prepare Publish Asset", IGPUB_AP0_FORMULA),
+    OrchBranch("AP1-IG", "ap1_ig", None, IGPUB_AP1_FORMULA),
+    OrchBranch("AP1-IGS", "ap1_igs", None, IGPUB_IGS_FORMULA),
+    OrchBranch("AP1-IGS-POLL", "ap1_igs_poll", None, IGPUB_POLL_FORMULA),
 )
 
 APCAR_BRANCHES = (
