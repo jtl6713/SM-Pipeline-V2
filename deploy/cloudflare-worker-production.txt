@@ -141,3 +141,5 @@ IG carousel Due_Now Worker deploy: 2026-08-24 - Cron no longer filters AP2C/AP3P
 
 A1S/A1M Python Worker deploy: 2026-08-24 - Oversized Drive files pulse Python A1S/A1M when STAGE_BACKEND_A1S=python instead of Make 5715530/5764543. Worker a1s-a1m-python.
 
+M1/P1 Python Worker deploy: 2026-08-24 - Continuation and repair pulse Python M1/P1 when STAGE_BACKEND_M1=python and STAGE_BACKEND_P1=python instead of Make 5569896/5528742. Worker m1-p1-python.
+

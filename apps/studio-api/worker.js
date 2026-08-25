@@ -4161,6 +4161,7 @@ const ITEM4_P3_SCENARIO_ID = 5531703;
 const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
 const ITEM4_P2_SCENARIO_ID = 5530955;
 const ITEM4_P2_WEBHOOK_URL = "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt";
+const STUDIO_P1_SCENARIO_ID = 5528742;
 const ITEM4_C2_SCENARIO_ID = 5582071;
 const ITEM4_C2_WEBHOOK_URL = "https://hook.us2.make.com/t1wjrdod0k433jgaz10tf30q2rq0sfpb";
 const ITEM4_SAI1_SCENARIO_ID = 6023816;
@@ -4569,6 +4570,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === PHASE6_R5_SCENARIO_ID && pipelineStageBackend(env, "R5").mode === "python") return true;
   if (id === PHASE6_RR1_SCENARIO_ID && pipelineStageBackend(env, "RR1").mode === "python") return true;
   if (id === PHASE6_RR2_SCENARIO_ID && pipelineStageBackend(env, "RR2").mode === "python") return true;
+  if (id === STUDIO_P1_SCENARIO_ID && pipelineStageBackend(env, "P1").mode === "python") return true;
   if (id === ITEM4_P2_SCENARIO_ID && pipelineStageBackend(env, "P2").mode === "python") return true;
   if (id === ITEM4_P3_SCENARIO_ID && pipelineStageBackend(env, "P3").mode === "python") return true;
   if (id === ITEM4_C2_SCENARIO_ID && pipelineStageBackend(env, "C2").mode === "python") return true;
@@ -4607,6 +4609,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_AP5C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
   if (id === STUDIO_A1S_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
   if (id === STUDIO_A1M_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
+  if (id === STUDIO_M1_SCENARIO_ID && pipelineStageBackend(env, "M1").mode === "python") return true;
   return false;
 }
 
@@ -4821,6 +4824,26 @@ async function item4PulseRR1Python(env, options = {}) {
     throw new HttpError(
       response.status,
       payload?.message || payload?.error || `Python RR1 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
+async function item4PulseP1Python(env, options = {}) {
+  const body = {
+    content_item_record_id: options.contentItemId || undefined,
+    test_run_id: options.testRunId || undefined,
+    extra: {
+      max_runs: options.maxRuns || 1,
+      ...(options.dryRun ? { dry_run: true } : {}),
+      ...(options.triggerNext === false ? { trigger_next: false } : {}),
+    },
+  };
+  const { response, payload } = await item4PulsePipelineStage(env, "p1", body, "P1");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python P1 failed (${response.status})`
     );
   }
   return payload;
@@ -13547,6 +13570,11 @@ async function pulseStudioContinuationJobs(env, options = {}) {
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
         continue;
       }
+      if (job.key === "P1" && pipelineStageBackend(env, "P1").mode === "python") {
+        await item4PulseP1Python(env, { maxRuns: 1 });
+        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
+        continue;
+      }
       if (job.key === "R2" && pipelineStageBackend(env, "R2").mode === "python") {
         await item4PulseR2Python(env, { maxRuns: 1 });
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
@@ -13841,6 +13869,16 @@ async function pulseOnDemandM1(env, { force = false } = {}) {
     if (!hasWork) return [{ key: "M1", skipped: "no_work" }];
   }
   try {
+    if (pipelineStageBackend(env, "M1").mode === "python") {
+      const { response, payload } = await item4PulsePipelineStage(env, "m1", { extra: { force } }, "M1");
+      if (!response.ok) {
+        throw new HttpError(
+          response.status,
+          payload?.message || payload?.error || `Python M1 failed (${response.status})`
+        );
+      }
+      return [{ key: "M1", pulsed: true, backend: "python", payload, force }];
+    }
     await phase6PulseOnDemandScenario(env, STUDIO_M1_SCENARIO_ID, { waitMs: 20000 });
     return [{ key: "M1", pulsed: true }];
   } catch (error) {
@@ -16679,7 +16717,7 @@ async function repairWaitForP1Package(env, recordId, expectedTestRunId, timeoutM
 }
 
 async function repairPulseP1TestSelector(env, lease, input, action) {
-  const P1_SCENARIO_ID = 5528742;
+  const P1_SCENARIO_ID = STUDIO_P1_SCENARIO_ID;
   if (lease.scenario_id !== P1_SCENARIO_ID) throw new HttpError(403, `pulse_p1_test_selector is limited to P1 scenario ${P1_SCENARIO_ID}`);
   const recordId = repairString(input.content_item_record_id, "content_item_record_id", 32);
   const allowlist = Array.isArray(lease.contract.allowed_content_item_record_ids) ? lease.contract.allowed_content_item_record_ids : [];
@@ -16688,6 +16726,47 @@ async function repairPulseP1TestSelector(env, lease, input, action) {
 
   const target = await repairVerifyContentItemRecord(env, recordId, lease.test_run_id);
   if (!repairP1Eligibility(target?.fields || {})) throw new HttpError(409, `Content Item ${recordId} does not satisfy the P1 package eligibility contract`);
+
+  if (pipelineStageBackend(env, "P1").mode === "python") {
+    await repairReserveBudget(env, lease, { operationCost: 30, runCost: 1, action });
+    let failure = null;
+    let observed = null;
+    try {
+      try {
+        await item4PulseP1Python(env, {
+          contentItemId: recordId,
+          testRunId: lease.test_run_id,
+          maxRuns: 1,
+        });
+      } catch (error) {
+        console.warn("P1 python pulse returned before Airtable wait", error);
+      }
+      observed = await repairWaitForP1Package(env, recordId, lease.test_run_id, 90000);
+      if (!observed?.matched) throw new HttpError(502, `P1 did not generate a package for exact Content Item ${recordId} within 90 seconds`);
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+    if (failure) {
+      try { await repairCloseLease(env, lease, "failed", { reason: "p1-python-pulse-failed", error: failure }); } catch {}
+      throw new HttpError(502, failure);
+    }
+    try { await repairCloseLease(env, lease, "released", { reason: "p1-python-one-run-complete", exact_content_item_record_id: recordId, operations_used: lease.operations_used, runs_used: lease.runs_used }); } catch {}
+    const finalFields = observed?.record?.fields || {};
+    return {
+      action,
+      lease,
+      backend: "python",
+      target_record_id: recordId,
+      exact_selector: true,
+      observed_script_status: String(finalFields.Script_Status || ""),
+      script_generated: Boolean(String(finalFields.Script || "").trim()),
+      durable_test_run_id: String(finalFields.Test_Run_ID || ""),
+      scenario_started: false,
+      scenario_stopped: true,
+      selector_restored: true,
+      schedule_preserved: true,
+    };
+  }
 
   const beforeState = await phase6ScenarioState(env, P1_SCENARIO_ID);
   if (beforeState.isActive) throw new HttpError(409, "P1 must be OFF before Test Mode selector pulse");
@@ -19358,7 +19437,7 @@ async function pulseM1ResetRenderUrls(request, env, ctx) {
   const result = await pulseOnDemandM1(env, { force: true });
   return respond(request, env, {
     ok: true,
-    triggered: "m1-on-demand",
+    triggered: result.some((row) => row.backend === "python") ? "m1-python" : "m1-on-demand",
     pulses: result,
     message: "M1 will reset Rendering jobs that still point at an old Remotion URL, then those jobs can rerun R4.",
   }, 202);
