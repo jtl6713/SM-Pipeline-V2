@@ -52,7 +52,7 @@ def decision_fields(
         return {
             "Auto_Publish_Enabled": True,
             "Review_Status": "Approved",
-            "Publish_Status": "Ready to Schedule",
+            "Publish_Status": "Ready to Publish",
             "Output_Status": "Approved for Publishing",
             "Output_Notes": notes,
             "Review_Decision_At": decided_at,
