@@ -151,3 +151,5 @@ IG-PUB-ORCH Python Worker deploy: 2026-08-24 - Cadence pulses Python IG-PUB-ORCH
 
 Native photo branding Worker deploy: 2026-08-24 - Approve for publishing pulses letter/watermark branding first, then stamps Watermarked Image URL and TikTok 9:16 public fields on native slides. Worker 0.10.134-native-photo-branding.
 
+Review restore Worker deploy: 2026-08-24 - After a remix/revision preview lands, restore Review Sent instead of leaving Changes Requested. Approved and publishing rows are left alone. Worker 0.10.135-review-restore.
+

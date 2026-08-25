@@ -150,7 +150,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.134-native-photo-branding",
+          version: "0.10.135-review-restore",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -9001,7 +9001,11 @@ async function listOutputs(request, env, url, authorization) {
     limit: clampLimit(url, 100, 100),
     filterFormula: contentProfileFilterFormula(profile),
   });
-  return respond(request, env, { ok: true, records: records.map(mapOutput), profile: mapStudioContentProfile(profile) });
+  const healed = [];
+  for (const record of records) {
+    healed.push(await phase6RestoreProductionReviewReady(env, record));
+  }
+  return respond(request, env, { ok: true, records: healed.map(mapOutput), profile: mapStudioContentProfile(profile) });
 }
 
 async function listMusic(request, env, url) {
@@ -12459,9 +12463,18 @@ function phase6PreviewFulfillsCurrentReview(record) {
 
 async function phase6RestoreProductionReviewReady(env, record) {
   if (Boolean(f(record, "Do_Not_Publish"))) return record;
-  if (!phase6PreviewFulfillsCurrentReview(record)) return record;
   const outputStatus = String(f(record, "Output_Status") || "").trim();
   const reviewStatus = String(f(record, "Review_Status") || "").trim();
+  const publishStatus = String(f(record, "Publish_Status") || "").trim();
+  if (
+    reviewStatus === "Approved"
+    || outputStatus === "Approved for Publishing"
+    || ["Published", "Publishing", "Scheduled"].includes(outputStatus)
+    || ["Published", "Publishing", "Scheduled", "Ready to Schedule", "Ready to Publish"].includes(publishStatus)
+  ) {
+    return record;
+  }
+  if (!phase6PreviewFulfillsCurrentReview(record)) return record;
   if (outputStatus === "Ready for Review" && (reviewStatus === "Review Sent" || reviewStatus === "Ready for Review")) return record;
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
     method: "PATCH",
@@ -12587,7 +12600,10 @@ async function getOutputCreativeHandoffStatus(request, env, url, authorization) 
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/creative\/handoff\/status$/);
   if (!match) throw new HttpError(400, "Invalid Phase 6 handoff status route");
   const id = match[1];
-  const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+  const record = await phase6RestoreProductionReviewReady(
+    env,
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id)
+  );
   const slides = await phase6SlidesForOutput(env, record);
   return respond(request, env, {
     ok: true,
@@ -12603,6 +12619,7 @@ async function phase6AdvanceRenderPipelineShort(env, outputRecordId) {
   }
   let state = phase6RenderHandoffState(current);
   if (state === "rendered_preview_ready") {
+    current = await phase6RestoreProductionReviewReady(env, current);
     return {
       completed: true,
       handoff_state: state,

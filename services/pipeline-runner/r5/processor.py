@@ -25,6 +25,14 @@ def _status_payload(status: dict[str, Any]) -> dict[str, Any]:
     return status.get("data") if isinstance(status.get("data"), dict) else status
 
 
+def review_fields_after_successful_render(output: dict[str, Any]) -> dict[str, str]:
+    """Put a remix/revision back on the review board after the new preview lands."""
+    current = field_str(output, "Review_Status").lower()
+    if current == "changes requested":
+        return {"Review_Status": "Review Sent"}
+    return {}
+
+
 def _classify_status(status: dict[str, Any]) -> str:
     payload = _status_payload(status)
     raw = str(payload.get("status") or "").strip().lower()
@@ -157,9 +165,9 @@ def process_one_output(
         PLATFORM_OUTPUTS_TABLE,
         output["id"],
         {
-            "Render_Status": "Failed",
+            "Render_Status": "Rendering",
             "Final_File_Storage_Status": "Uploading",
-            "Final_File_Error_Message": "Render completed, but final Google Drive upload did not complete.",
+            "Final_File_Error_Message": "",
             "Remotion_Error_Message": "",
             "Output_Status": "In Production",
             "Output_Filename": field_str(output, "Output_Filename"),
@@ -170,49 +178,62 @@ def process_one_output(
         },
     )
 
-    mp4_bytes = remotion.download_render(render_url)
-    drive = GoogleDriveClient()
-    folder_id = get_google_drive_folder_id(client)
-    drive_file = drive.upload_file(
-        folder_id,
-        field_str(output, "Output_Filename") or f"{output['id']}.mp4",
-        mp4_bytes,
-        "video/mp4",
-    )
-    file_id = str(drive_file.get("id") or "")
-    drive_link = f"https://drive.google.com/file/d/{file_id}/view" if file_id else ""
+    try:
+        mp4_bytes = remotion.download_render(render_url)
+        drive = GoogleDriveClient()
+        folder_id = get_google_drive_folder_id(client)
+        drive_file = drive.upload_file(
+            folder_id,
+            field_str(output, "Output_Filename") or f"{output['id']}.mp4",
+            mp4_bytes,
+            "video/mp4",
+        )
+        file_id = str(drive_file.get("id") or "")
+        drive_link = f"https://drive.google.com/file/d/{file_id}/view" if file_id else ""
 
-    client.update_record(
-        PLATFORM_OUTPUTS_TABLE,
-        output["id"],
-        {
-            "Final_File_Error_Message": "",
-            "Remotion_Error_Message": "",
-            "Final_File_ID": file_id,
-            "Output_Status": "Ready for Review",
-            "Output_Filename": field_str(output, "Output_Filename"),
-            "Final_File_Storage_Status": "Uploaded",
-            "Render_Server_URL": render_url,
-            "Output_URL": drive_link,
-            "Remotion_Job_ID": job_id,
-            "Final_File_URL": drive_link,
-            "Remotion_Status_URL": status_url,
-            "Render_Status": "Rendered",
-        },
-    )
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {
+                "Final_File_Error_Message": "",
+                "Remotion_Error_Message": "",
+                "Final_File_ID": file_id,
+                "Output_Status": "Ready for Review",
+                "Output_Filename": field_str(output, "Output_Filename"),
+                "Final_File_Storage_Status": "Uploaded",
+                "Render_Server_URL": render_url,
+                "Output_URL": drive_link,
+                "Remotion_Job_ID": job_id,
+                "Final_File_URL": drive_link,
+                "Remotion_Status_URL": status_url,
+                "Render_Status": "Rendered",
+                **review_fields_after_successful_render(output),
+            },
+        )
 
-    remotion.cleanup_job(job_id, filename=field_str(output, "Output_Filename") or None)
+        remotion.cleanup_job(job_id, filename=field_str(output, "Output_Filename") or None)
 
-    preview_key, preview_url = _upload_preview(client, output_id=output["id"], content=mp4_bytes)
-    client.update_record(
-        PLATFORM_OUTPUTS_TABLE,
-        output["id"],
-        {
-            "Studio_Preview_URL": preview_url,
-            "Studio_Preview_R2_Key": preview_key,
-            "Studio_Preview_Updated_At": _now_iso(),
-        },
-    )
+        preview_key, preview_url = _upload_preview(client, output_id=output["id"], content=mp4_bytes)
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {
+                "Studio_Preview_URL": preview_url,
+                "Studio_Preview_R2_Key": preview_key,
+                "Studio_Preview_Updated_At": _now_iso(),
+            },
+        )
+    except Exception as exc:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {
+                "Render_Status": "Failed",
+                "Final_File_Error_Message": str(exc) or "Render completed, but final Google Drive upload did not complete.",
+                "Output_Status": "In Production",
+            },
+        )
+        raise
 
     return {
         "processed": True,
