@@ -4614,6 +4614,7 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_YT_ORCH_SCENARIO_ID && pipelineStageBackend(env, "YT_ORCH").mode === "python") return true;
   if (id === STUDIO_FB_ORCH_SCENARIO_ID && pipelineStageBackend(env, "FB_ORCH").mode === "python") return true;
   if (id === STUDIO_AP_CAR_ORCH_SCENARIO_ID && pipelineStageBackend(env, "APCAR_ORCH").mode === "python") return true;
+  if (id === PHASE6_P0202_SCENARIO_ID && pipelineStageBackend(env, "P0202").mode === "python") return true;
   return false;
 }
 
@@ -13816,6 +13817,17 @@ async function pulseOnDemandMediaChain(env) {
       continue;
     }
     try {
+      if (pipelineStageBackend(env, "P0202").mode === "python") {
+        const { response, payload } = await item4PulsePipelineStage(env, "p0202", { extra: {} }, "P0202");
+        if (!response.ok) {
+          throw new HttpError(
+            response.status,
+            payload?.message || payload?.error || `Python P020-2 failed (${response.status})`
+          );
+        }
+        pulses.push({ key: job.key, pulsed: true, backend: "python", payload });
+        continue;
+      }
       await phase6PulseOnDemandScenario(env, job.id, { waitMs: 20000 });
       pulses.push({ key: job.key, pulsed: true });
     } catch (error) {
@@ -14158,10 +14170,13 @@ async function phase6AdvanceVoicePrepShort(env, outputRecord) {
     };
   }
 
-  const scenarioState = await phase6ScenarioState(env, PHASE6_P0202_SCENARIO_ID);
-  const scenarioName = String(scenarioState?.scenario?.name || "");
-  if (!/v1\.8/i.test(scenarioName) || !/request scoped/i.test(scenarioName)) {
-    throw new HttpError(409, `P020-2 request-scoped v1.8 is required before Studio voice prep can run. Live scenario: ${scenarioName || PHASE6_P0202_SCENARIO_ID}`);
+  const python = pipelineStageBackend(env, "P0202").mode === "python";
+  if (!python) {
+    const scenarioState = await phase6ScenarioState(env, PHASE6_P0202_SCENARIO_ID);
+    const scenarioName = String(scenarioState?.scenario?.name || "");
+    if (!/v1\.8/i.test(scenarioName) || !/request scoped/i.test(scenarioName)) {
+      throw new HttpError(409, `P020-2 request-scoped v1.8 is required before Studio voice prep can run. Live scenario: ${scenarioName || PHASE6_P0202_SCENARIO_ID}`);
+    }
   }
 
   const existingToken = pending.map((x) => x.voice_prep_request_id).find(Boolean) || null;
@@ -14176,7 +14191,17 @@ async function phase6AdvanceVoicePrepShort(env, outputRecord) {
 
   let started = false;
   try {
-    await phase6PulseOnDemandScenario(env, PHASE6_P0202_SCENARIO_ID, { waitMs: 20000 });
+    if (python) {
+      const { response, payload } = await item4PulsePipelineStage(env, "p0202", { extra: {} }, "P0202");
+      if (!response.ok) {
+        throw new HttpError(
+          response.status,
+          payload?.message || payload?.error || `Python P020-2 failed (${response.status})`
+        );
+      }
+    } else {
+      await phase6PulseOnDemandScenario(env, PHASE6_P0202_SCENARIO_ID, { waitMs: 20000 });
+    }
     started = true;
   } catch (error) {
     console.error("P020-2 on-demand short pulse failed", error);
@@ -14198,7 +14223,8 @@ async function phase6AdvanceVoicePrepShort(env, outputRecord) {
 }
 
 async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
-  await phase6EnsureP0202ProductionGeneric(env, authorization);
+  const python = pipelineStageBackend(env, "P0202").mode === "python";
+  if (!python) await phase6EnsureP0202ProductionGeneric(env, authorization);
   let slides = await phase6SlidesForOutput(env, outputRecord);
   let pending = phase6PendingVoicePrepSlides(slides);
   if (!pending.length) {
@@ -14216,8 +14242,9 @@ async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
     });
   }
 
-  const priorState = await phase6ScenarioState(env, PHASE6_P0202_SCENARIO_ID);
+  const priorState = python ? { isActive: false } : await phase6ScenarioState(env, PHASE6_P0202_SCENARIO_ID);
   const executionIds = [];
+  let pythonRuns = 0;
   try {
     const maxRuns = Math.min(40, Math.max(1, scopedSlideIds.length + 5));
     let lastPendingSignature = "";
@@ -14228,8 +14255,19 @@ async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
       if (!pending.length) break;
 
       const signature = pending.map((x) => `${x.id}:${x.reason}`).join("|");
-      const run = await phase6PulseOnDemandScenario(env, PHASE6_P0202_SCENARIO_ID, { waitMs: 60000 });
-      if (run?.executionId) executionIds.push(run.executionId);
+      if (python) {
+        const { response, payload } = await item4PulsePipelineStage(env, "p0202", { extra: {} }, "P0202");
+        if (!response.ok) {
+          throw new HttpError(
+            response.status,
+            payload?.message || payload?.error || `Python P020-2 failed (${response.status})`
+          );
+        }
+        pythonRuns += 1;
+      } else {
+        const run = await phase6PulseOnDemandScenario(env, PHASE6_P0202_SCENARIO_ID, { waitMs: 60000 });
+        if (run?.executionId) executionIds.push(run.executionId);
+      }
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
       await phase6MeasureAndPersistMissingVoiceDurations(env, outputRecord);
@@ -14241,12 +14279,13 @@ async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
       lastPendingSignature = nextSignature;
     }
     return {
-      triggered: executionIds.length > 0,
+      triggered: python ? pythonRuns > 0 : executionIds.length > 0,
       activation_triggered_run: false,
       completed: pending.length === 0,
       pending_voice_slides: pending,
       scenario_id: PHASE6_P0202_SCENARIO_ID,
       execution_ids: executionIds,
+      backend: python ? "python" : "make",
       execution_status: pending.length ? "INCOMPLETE" : "SUCCESS",
       timed_out: false,
       request_id: requestId,
@@ -14261,7 +14300,7 @@ async function phase6AutoVoicePrepForOutput(env, outputRecord, authorization) {
         });
       } catch {}
     }
-    try { if (!priorState.isActive) await phase6SetScenarioActive(env, PHASE6_P0202_SCENARIO_ID, false); } catch {}
+    try { if (!python && !priorState.isActive) await phase6SetScenarioActive(env, PHASE6_P0202_SCENARIO_ID, false); } catch {}
   }
 }
 

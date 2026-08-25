@@ -13,6 +13,7 @@ Make.com scenarios replaced by `services/pipeline-runner/` (Python on `pipeline.
 | P1 | 5528742 | `POST /stages/p1` | `p1-5528742-content-package-generation.json` | Python |
 | P2 | 5530955 | `POST /stages/p2` | Make blueprint retained (inactive) | Python |
 | M1 | 5569896 | `POST /stages/m1` | `m1-5569896-render-server-url-maintenance.json` | Python |
+| P020-2 | 5893683 | `POST /stages/p0202` | Make blueprint retained (inactive) | Python |
 | A0 | 5602193 | Python A2→A2B→A3→A4 daisy-chain | Parked conductor (inactive) | Python |
 | A2 | 5531974 | `POST /stages/a2` | Make blueprint retained (inactive) | Python |
 | A2B | 5568863 | `POST /stages/a2b` | Make blueprint retained (inactive) | Python |
@@ -82,11 +83,12 @@ STAGE_BACKEND_TTD_ORCH=python
 STAGE_BACKEND_YT_ORCH=python
 STAGE_BACKEND_FB_ORCH=python
 STAGE_BACKEND_APCAR_ORCH=python
+STAGE_BACKEND_P0202=python
 PIPELINE_RUNNER_URL=https://pipeline.chicagoshining.com
 PIPELINE_RUNNER_SHARED_SECRET=<secret>
 ```
 
-Make scenarios **5528742**, **5569896**, **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, **5715530**, **5764543**, **5612096**, **5862882**, **5612664**, **5845193**, **5816409**, **5816495**, **5816502**, **5816520**, **5823572**, **5830810**, **5830609**, **5830616**, **5830623**, **5806658**, **5806644**, **5806597**, **5806570**, **5806518**, **5813436**, **5813463**, **5813487**, **5813511**, **5813534**, **5786899**, **5790745**, **5791231**, **5791273**, **5791336**, **5791356**, **5791396**, and **5791424** are **inactive**. Reactivate only for emergency rollback. TTD-ORCH **5806668**, YT-ORCH **5823581**, FB-ORCH **5813561**, and AP-CAR-ORCH **5791537** are inactive Python replacements (`publish_tt` / `publish_yt` / `publish_fb` / `publish_ig`). IG-PUB-ORCH **5864632** stays parked.
+Make scenarios **5528742**, **5569896**, **5557966**, **5556716**, **5565333**, **5576363**, **5530955**, **5602193**, **5531974**, **5568863**, **5569035**, **5578180**, **5715500**, **5715530**, **5764543**, **5612096**, **5862882**, **5612664**, **5845193**, **5816409**, **5816495**, **5816502**, **5816520**, **5823572**, **5830810**, **5830609**, **5830616**, **5830623**, **5806658**, **5806644**, **5806597**, **5806570**, **5806518**, **5813436**, **5813463**, **5813487**, **5813511**, **5813534**, **5786899**, **5790745**, **5791231**, **5791273**, **5791336**, **5791356**, **5791396**, and **5791424** are **inactive**. Reactivate only for emergency rollback. TTD-ORCH **5806668**, YT-ORCH **5823581**, FB-ORCH **5813561**, and AP-CAR-ORCH **5791537** are inactive Python replacements (`publish_tt` / `publish_yt` / `publish_fb` / `publish_ig`). P020-2 **5893683** is an inactive Python replacement (`publish` path `POST /stages/p0202`). IG-PUB-ORCH **5864632** stays parked.
 
 ## Rollback
 

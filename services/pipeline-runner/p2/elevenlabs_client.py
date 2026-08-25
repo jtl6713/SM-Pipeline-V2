@@ -19,12 +19,14 @@ def voice_id_for_name(voice_name: str) -> str:
     return VOICE_ID_DEFAULT
 
 
-def synthesize_voiceover(text: str, *, voice_name: str) -> bytes:
+def synthesize_voiceover_by_id(text: str, *, voice_id: str) -> bytes:
     settings = load_settings()
     api_key = str(settings.get("elevenlabs_api_key") or "").strip()
     if not api_key:
-        raise RuntimeError("ELEVENLABS_API_KEY is required for P2 voiceover generation")
-    voice_id = voice_id_for_name(voice_name)
+        raise RuntimeError("ELEVENLABS_API_KEY is required for voiceover generation")
+    voice_id = str(voice_id or "").strip()
+    if not voice_id:
+        raise RuntimeError("ElevenLabs voice_id is required")
     response = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={
@@ -51,3 +53,7 @@ def synthesize_voiceover(text: str, *, voice_name: str) -> bytes:
     if not content:
         raise RuntimeError("ElevenLabs returned empty audio")
     return content
+
+
+def synthesize_voiceover(text: str, *, voice_name: str) -> bytes:
+    return synthesize_voiceover_by_id(text, voice_id=voice_id_for_name(voice_name))

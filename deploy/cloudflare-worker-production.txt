@@ -145,3 +145,5 @@ M1/P1 Python Worker deploy: 2026-08-24 - Continuation and repair pulse Python M1
 
 Publish ORCH Python Worker deploy: 2026-08-24 - Cadence pulses Python TTD/YT/FB/AP-CAR orchestrators when STAGE_BACKEND_TTD_ORCH/YT_ORCH/FB_ORCH/APCAR_ORCH=python instead of Make 5806668/5823581/5813561/5791537. Worker publish-orch-python.
 
+P020-2 Python Worker deploy: 2026-08-24 - Studio voice prep and media cadence pulse Python P020-2 when STAGE_BACKEND_P0202=python instead of Make 5893683. Worker p0202-python.
+
