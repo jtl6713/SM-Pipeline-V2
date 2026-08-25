@@ -248,6 +248,8 @@ The compressor health response must report `ok=true`, `ffmpeg=true`, `ffprobe=tr
 
 The service-account JSON belongs only in the Video Compressor runtime credentials directory. Do not copy it into this service, a Git checkout, deployment backup, or log. If compressor submit, polling, download, upload, or verification fails, the original remains unchanged.
 
+`start-pipeline-runner.bat` refuses to launch when another process already owns port 3350. When restarting, stop the listening process tree—not only the virtual-environment launcher—and confirm `netstat -ano | findstr ":3350"` shows exactly one listener before sending work.
+
 ## Source-only rule
 
 Never commit `.env`, `.venv/`, or `logs/`. Deploy with `Deploy-SMService.ps1 -Service pipeline-runner` once the runtime folder exists.

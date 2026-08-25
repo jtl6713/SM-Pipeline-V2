@@ -4,7 +4,7 @@ Free local FFmpeg replacement for the CloudConvert step used by A1 oversized-vid
 
 ## Status
 
-The service is deployed locally and exposed through its permanent Cloudflare route. Do **not** retire or disable the current CloudConvert A1 path until the exact A1 submit/poll replacement is validated on a disposable/test-only asset.
+The service is deployed locally and exposed through its permanent Cloudflare route. The authenticated private-Drive download and the Python A1S/A1P submit-poll-finalize path have been validated with the exact 106,015,623-byte `Streeterville 1.mp4` asset. The legacy CloudConvert implementation remains source-controlled and unmodified as a rollback reference, but the active A1 processors no longer import or call it.
 
 ## Runtime
 
@@ -133,22 +133,16 @@ Invoke-RestMethod http://localhost:3335/health
 
 Expected for the private-Drive-ready runtime: `ok=true`, `ffmpeg=true`, `ffprobe=true`, and `google_drive_private_downloads=true`. Public health remains available even when the credential is absent.
 
-## A1 cutover plan
+## A1 production flow
 
-Keep CloudConvert live while validating the new path.
+1. A1S finds an eligible private Drive video over 100,000,000 bytes and creates the existing `A1_JOB_<file_id>` Airtable state.
+2. A1S submits only the Drive file ID and target settings to the local `/compress` endpoint.
+3. A1P polls the local job through the existing asynchronous webhook contract.
+4. On `complete`, A1P downloads the local result and uploads `<source>_compressed.mp4` to the ingestion folder.
+5. A1P verifies the replacement's distinct file ID, exact byte count, MP4 MIME type, parent folder, and non-trashed state.
+6. Only after those checks pass, A1P moves the original to Drive trash, removes the local job, and clears the Airtable state.
 
-1. Deploy the service locally on port 3335.
-2. Add the stable Cloudflare hostname `compress.chicagoshining.com -> http://localhost:3335`.
-3. Verify local and public `/health`.
-4. Clone/repair the existing A1 submit stage so its input/output state contract remains exact-record-addressable.
-5. Replace CloudConvert submit with `POST /compress` using the same oversized asset's private Drive file ID and exact Airtable record ID.
-6. Store the local `job_id` in the same bounded test record/state used for polling.
-7. Replace CloudConvert polling with `GET /jobs/<job_id>`.
-8. On `complete`, upload `output_url` to the existing Google Drive ingestion destination.
-9. Verify the Drive file exists, is playable, and is below the configured size target before changing/deleting the original.
-10. Call `DELETE /jobs/<job_id>` only after Drive verification succeeds.
-11. Run a disposable/test-only end-to-end A1 validation with no publishing.
-12. Only after validation, switch production A1 to local compression and retain CloudConvert as rollback until a second successful production ingestion.
+The production proof output was H.264/AAC, 1080x1920, 15.184 seconds, and 38,026,724 bytes. The 106,015,623-byte source remained private throughout and was moved to recoverable Drive trash only after the replacement passed verification.
 
 ## Safety rules
 

@@ -19,7 +19,7 @@ This directory contains **source code and reproducible configuration only** for 
 | Voiceover Normalizer | `services/voiceover-normalizer/` | `Services\voiceover-normalizer\service` | 3012 | Source captured and controlled deployment validated. |
 | YouTube Uploader | `services/youtube-uploader/` | `Services\youtube-uploader\service` | 3340 | Source captured and controlled deployment validated; `.env`, OAuth material, and runtime job data remain local only. |
 | Pipeline Runner | `services/pipeline-runner/` | `Services\pipeline-runner\service` | 3350 | Source controlled; retain existing deployment/health contract. |
-| Video Compressor | `services/video-compressor/` | `Services\Video_Compressor` | 3335 | **Planned / source implemented.** Local FFmpeg replacement for CloudConvert A1 compression; not yet deployed or cut over. |
+| Video Compressor | `services/video-compressor/` | `Services\Video_Compressor` | 3335 | Deployed and integrated with central start/stop/verify; authenticated private-Drive A1 compression proven end to end. |
 
 ## Source-only rule
 
@@ -63,6 +63,6 @@ Use the full runbook:
 
 `Documentation/GITHUB_SOURCE_CONTROL_AND_LOCAL_SERVICE_DEPLOYMENT_RUNBOOK.md`
 
-The new Video Compressor is intentionally **not yet added to the guarded deployment selector** because its permanent Cloudflare route and local runtime have not been created/validated. Add it to `Deploy-SMService.ps1` only after the local service is installed and the proposed `compress.chicagoshining.com` route is confirmed.
+The Video Compressor installer and central start/stop/verify integration are under `deploy/local-services/`. Its live runtime and `compress.chicagoshining.com` route are validated. It remains outside the general `Deploy-SMService.ps1` selector, so compressor source updates use the dedicated installer/integration workflow until that selector is extended.
 
 A self-hosted GitHub Actions runner may be considered later, but it is **not** required for the current proven manual/guarded deployment model and should not be introduced without a separate security and operational design.
