@@ -4610,6 +4610,10 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   if (id === STUDIO_A1S_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
   if (id === STUDIO_A1M_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
   if (id === STUDIO_M1_SCENARIO_ID && pipelineStageBackend(env, "M1").mode === "python") return true;
+  if (id === STUDIO_TTD_ORCH_SCENARIO_ID && pipelineStageBackend(env, "TTD_ORCH").mode === "python") return true;
+  if (id === STUDIO_YT_ORCH_SCENARIO_ID && pipelineStageBackend(env, "YT_ORCH").mode === "python") return true;
+  if (id === STUDIO_FB_ORCH_SCENARIO_ID && pipelineStageBackend(env, "FB_ORCH").mode === "python") return true;
+  if (id === STUDIO_AP_CAR_ORCH_SCENARIO_ID && pipelineStageBackend(env, "APCAR_ORCH").mode === "python") return true;
   return false;
 }
 
@@ -12833,8 +12837,8 @@ const PRODUCTION_CADENCE_PUBLISH = Object.freeze([
   { id: 5806668, key: "TTD" },
   { id: 5823581, key: "YT" },
 ]);
-// AP-CAR-ORCH 5791537 stays parked. These webhook workers are the carousel chain
-// Studio Approve starts (AP0C) and each stage then pulses the next.
+// AP-CAR-ORCH 5791537 is Python when STAGE_BACKEND_APCAR_ORCH=python. These
+// webhook workers are the carousel chain Studio Approve starts (AP0C).
 const STUDIO_AP0C_CHAIN_WEBHOOKS = Object.freeze([
   { id: 5786899, key: "AP0C" },
   { id: 5790745, key: "AP1C" },
@@ -13768,6 +13772,18 @@ async function pulseOnDemandPublishChain(env) {
       continue;
     }
     try {
+      const orch = STUDIO_PUBLISH_ORCH_PYTHON[job.id];
+      if (orch && pipelineStageBackend(env, orch.flag).mode === "python") {
+        const { response, payload } = await item4PulsePipelineStage(env, orch.stage, { extra: {} }, orch.flag);
+        if (!response.ok) {
+          throw new HttpError(
+            response.status,
+            payload?.message || payload?.error || `Python ${job.key} orch failed (${response.status})`
+          );
+        }
+        pulses.push({ key: job.key, pulsed: true, backend: "python", payload });
+        continue;
+      }
       await phase6PulseOnDemandScenario(env, job.id);
       pulses.push({ key: job.key, pulsed: true });
     } catch (error) {
@@ -14038,7 +14054,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
     ...PRODUCTION_CADENCE_ALWAYS_ON.map((item) => cadenceSetActive(env, item.id, true)),
     ...PRODUCTION_CADENCE_WEBHOOK_LIVE.map((item) => cadenceSetActive(env, item.id, !cadenceScenarioManagedByPython(env, item.id))),
     ...PRODUCTION_CADENCE_RENDER.map((item) => cadenceSetActive(env, item.id, wantRender && !cadenceScenarioManagedByPython(env, item.id))),
-    ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish)),
+    ...PRODUCTION_CADENCE_PUBLISH.map((item) => cadenceSetActive(env, item.id, wantPublish && !cadenceScenarioManagedByPython(env, item.id))),
   ];
   const results = await Promise.all(actions);
   return {
@@ -15364,10 +15380,28 @@ async function studioArmPublishScenarios(env, target) {
 
 // The webhook scenario only stages the platform payload; an on-demand orchestrator carries the
 // record the rest of the way, so approval has to run it too or the output stops at the staging step.
+const STUDIO_PUBLISH_ORCH_PYTHON = Object.freeze({
+  [STUDIO_TTD_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_tt", flag: "TTD_ORCH" }),
+  [STUDIO_YT_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_yt", flag: "YT_ORCH" }),
+  [STUDIO_FB_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_fb", flag: "FB_ORCH" }),
+  [STUDIO_AP_CAR_ORCH_SCENARIO_ID]: Object.freeze({ stage: "publish_ig", flag: "APCAR_ORCH" }),
+});
+
 async function studioRunPublishOrchestrator(env, target) {
   const scenarioId = STUDIO_PUBLISH_DISPATCH_SCENARIOS[target]?.orchestrator;
   if (!scenarioId) return null;
+  const orch = STUDIO_PUBLISH_ORCH_PYTHON[scenarioId];
   try {
+    if (orch && pipelineStageBackend(env, orch.flag).mode === "python") {
+      const { response, payload } = await item4PulsePipelineStage(env, orch.stage, { extra: {} }, orch.flag);
+      if (!response.ok) {
+        throw new HttpError(
+          response.status,
+          payload?.message || payload?.error || `Python ${orch.stage} failed (${response.status})`
+        );
+      }
+      return { ok: true, id: scenarioId, backend: "python", payload };
+    }
     return await phase6PulseOnDemandScenario(env, scenarioId, { waitMs: 0 });
   } catch (error) {
     console.warn("publish orchestrator pulse failed", target, scenarioId, error);

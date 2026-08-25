@@ -31,7 +31,7 @@ def _eligible(**overrides):
 def test_ap1_ig_is_registered():
     assert "ap1_ig" in STAGE_NAMES
     assert is_implemented("ap1_ig")
-    assert not is_implemented("publish_ig")
+    assert is_implemented("publish_ig")
 
 
 def test_ap1_ig_eligible_reel():

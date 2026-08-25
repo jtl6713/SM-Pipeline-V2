@@ -126,6 +126,10 @@ jobs:
               'STAGE_BACKEND_TTD0': ('plain_text', 'python'),
               'STAGE_BACKEND_FB0': ('plain_text', 'python'),
               'STAGE_BACKEND_AP0C': ('plain_text', 'python'),
+              'STAGE_BACKEND_TTD_ORCH': ('plain_text', 'python'),
+              'STAGE_BACKEND_YT_ORCH': ('plain_text', 'python'),
+              'STAGE_BACKEND_FB_ORCH': ('plain_text', 'python'),
+              'STAGE_BACKEND_APCAR_ORCH': ('plain_text', 'python'),
               'PIPELINE_RUNNER_URL': ('plain_text', os.environ['RUNNER_URL']),
               'PIPELINE_RUNNER_SHARED_SECRET': ('secret_text', os.environ['PIPELINE_RUNNER_SHARED_SECRET']),
           }

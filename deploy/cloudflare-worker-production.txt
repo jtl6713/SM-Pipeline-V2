@@ -143,3 +143,5 @@ A1S/A1M Python Worker deploy: 2026-08-24 - Oversized Drive files pulse Python A1
 
 M1/P1 Python Worker deploy: 2026-08-24 - Continuation and repair pulse Python M1/P1 when STAGE_BACKEND_M1=python and STAGE_BACKEND_P1=python instead of Make 5569896/5528742. Worker m1-p1-python.
 
+Publish ORCH Python Worker deploy: 2026-08-24 - Cadence pulses Python TTD/YT/FB/AP-CAR orchestrators when STAGE_BACKEND_TTD_ORCH/YT_ORCH/FB_ORCH/APCAR_ORCH=python instead of Make 5806668/5823581/5813561/5791537. Worker publish-orch-python.
+

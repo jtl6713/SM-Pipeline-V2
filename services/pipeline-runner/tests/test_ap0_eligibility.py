@@ -33,7 +33,7 @@ def _eligible(**overrides):
 def test_ap0_is_registered():
     assert "ap0" in STAGE_NAMES
     assert is_implemented("ap0")
-    assert not is_implemented("publish_tt")
+    assert is_implemented("publish_tt")
 
 
 def test_ap0_r2_key_and_public_url():
