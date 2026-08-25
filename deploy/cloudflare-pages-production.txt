@@ -215,3 +215,5 @@ Sortable Ideas Pages deploy: 2026-08-24 - Ideas table column headers sort Idea, 
 
 Dashboard sorts Pages deploy: 2026-08-24 - Dashboard Content items and output lists (platform, active, attention, published) use sortable column headers. UI 0.6.130-dashboard-sorts.
 
+Global Admin Tooltips Pages deploy: 2026-08-24 — Add accessible contextual help across Studio admin controls, fields, dynamic actions, and Operations controls. UI 0.6.131-tooltips. Source commit ec5495dfb280c59bd01f00c2d415f4f640f3258d.
+
