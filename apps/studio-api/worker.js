@@ -150,7 +150,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.133-ap1-igs-python",
+          version: "0.10.134-native-photo-branding",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -207,6 +207,7 @@ export default {
           studio_ap0c_carousel_dispatch_v1: true,
           studio_ig_fb_photo_dispatch_v1: true,
           studio_native_still_no_mix_handoff_v1: true,
+          studio_native_photo_brand_on_approve_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_item_voiceover_v1: true,
@@ -1240,6 +1241,10 @@ function studioNativeSlidePublicFields(clip, platform) {
     fields.IG_Public_Asset_URL = url;
     fields.IG_Public_Asset_Status = "Ready";
   }
+  if (platform === "TikTok") {
+    fields.Asset_9x16_Public_URL = url;
+    fields.Asset_9x16_Public_Status = "Ready";
+  }
   return fields;
 }
 
@@ -1417,6 +1422,9 @@ async function studioPatchExistingNativeSlides(env, record, slideIds, clips) {
       id: row.id,
       fields: {
         ...studioNativeSlidePublicFields({ url }, platform),
+        "Current Image URL": url,
+        "Final Image URL": url,
+        "Watermarked Image URL": url,
         "Review Status": "Final Approved",
         "Approved For Final": true,
         ...(contentItemId ? { "Content Item": [contentItemId] } : {}),
@@ -1454,6 +1462,7 @@ async function studioEnsureNativePublishSlides(env, record) {
         "Is Cover": index === 0,
         "Current Image URL": url || null,
         "Final Image URL": url || null,
+        "Watermarked Image URL": url || null,
         "Google Drive File ID": driveId || null,
         "Final Google Drive File ID": driveId || null,
         "Platform Output": [record.id],
@@ -16054,6 +16063,13 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp) {
     throw new HttpError(409, "This output is not ready for publishing approval");
   }
   const existingNotes = String(f(existing, "Review_Notes") || "").trim();
+  let record = existing;
+  if (studioOutputIsNativePhoto(record)) {
+    await item4PulseLetterPython(env, { outputRecordId: record.id }).catch((error) => {
+      console.warn("native photo branding before publish approval failed", record.id, error);
+    });
+    record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
+  }
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
@@ -16063,9 +16079,9 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp) {
     Review_Decision_At: stamp,
     Do_Not_Publish: false,
     Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
-    ...studioPublishHandoffFields(existing),
+    ...studioPublishHandoffFields(record),
   };
-  const prepared = await studioEnsureNativePublishSlides(env, existing);
+  const prepared = await studioEnsureNativePublishSlides(env, record);
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
     method: "PATCH",
     body: JSON.stringify({ fields: { ...fields, ...studioPublishHandoffFields(prepared) }, typecast: true }),
