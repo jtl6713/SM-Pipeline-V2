@@ -10,7 +10,9 @@ Make.com scenarios replaced by `services/pipeline-runner/` (Python on `pipeline.
 | R4 | 5556716 | `POST /stages/r4` | `r4-5556716-start-remotion-render.json` | Python |
 | R5 | 5565333 | `POST /stages/r5` | `r5-5565333-render-poller-final-upload.json` | Python |
 | RR1 | 5576363 | `POST /stages/rr1` | `rr1-5576363-render-review-email.json` | Python |
+| P1 | 5528742 | `POST /stages/p1` | `p1-5528742-content-package-generation.json` | Python |
 | P2 | 5530955 | `POST /stages/p2` | Make blueprint retained (inactive) | Python |
+| M1 | 5569896 | `POST /stages/m1` | `m1-5569896-render-server-url-maintenance.json` | Python |
 | A0 | 5602193 | Python A2→A2B→A3→A4 daisy-chain | Parked conductor (inactive) | Python |
 | A2 | 5531974 | `POST /stages/a2` | Make blueprint retained (inactive) | Python |
 | A2B | 5568863 | `POST /stages/a2b` | Make blueprint retained (inactive) | Python |

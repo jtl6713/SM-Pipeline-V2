@@ -1,0 +1,841 @@
+{
+  "scenarioId": 5528742,
+  "stage": "P1",
+  "name": "P1 - Content Package Generation - Scalable Configuration v2.2 - Advanced Production Directives",
+  "archivedAt": "2026-08-24",
+  "replacedBy": "services/pipeline-runner/p1/",
+  "makeFolderId": 272039,
+  "makeFolderName": "ARCHIVE_MOVED_TO_PYTHON",
+  "isActive": false,
+  "blueprint": {
+    "flow": [
+      {
+        "id": 900,
+        "mapper": {
+          "duration": "1"
+        },
+        "module": "util:FunctionSleep",
+        "version": 1,
+        "metadata": {
+          "designer": {
+            "x": 3,
+            "y": 70,
+            "name": "Scheduled chain anchor"
+          }
+        },
+        "parameters": {}
+      },
+      {
+        "id": 901,
+        "mapper": null,
+        "module": "builtin:BasicRouter",
+        "routes": [
+          {
+            "flow": [
+              {
+                "id": 1,
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "sort": [
+                    {
+                      "field": "Created_At",
+                      "direction": "asc"
+                    },
+                    {
+                      "field": "Priority_Score",
+                      "direction": "desc"
+                    }
+                  ],
+                  "view": "P1 - Ready for Package Generation",
+                  "table": "Content Items",
+                  "formula": "{Test_Run_ID}=BLANK()",
+                  "maxRecords": "10",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 310,
+                    "y": -266,
+                    "name": "1 - Search Full Content Item Ready for Package - Advanced Directive Aware"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 2,
+                "filter": {
+                  "name": "Safety - item still blank and has profile",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{1.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{1.Content_Profile}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{1.Content_Title}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{1.Idea_Summary}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{1.Script}}",
+                        "o": "notexist"
+                      },
+                      {
+                        "a": "{{1.Caption}}",
+                        "o": "notexist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{get(1.Content_Profile; 1)}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblNYg2QB0BmmVACy",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionGetRecord",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 660,
+                    "y": -254,
+                    "name": "2 - Get Linked Content Profile by Record ID"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 7,
+                "filter": {
+                  "name": "Require active Content Profile with complete scalable links",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{2.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{2.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{2.Organization}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{2.Brand}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{2.Content_Vertical}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{2.Market}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{2.AI_Persona}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{2.Production_Profile}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{get(2.Organization; 1)}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblwu2pvRppcnM5j6",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionGetRecord",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 649,
+                    "y": 66,
+                    "name": "3 - Get Organization Configuration"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 8,
+                "filter": {
+                  "name": "Require active Organization configuration",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{7.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{7.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{7.Organization_Name}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{get(2.Brand; 1)}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblUV8Cd7C2UCyuJ9",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionGetRecord",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 651,
+                    "y": 423,
+                    "name": "4 - Get Brand Configuration"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 9,
+                "filter": {
+                  "name": "Require active Brand configuration",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{8.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{8.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{8.Brand_Name}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{get(2.Content_Vertical; 1)}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblbrVDbqxySAd8sK",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionGetRecord",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 981,
+                    "y": 423,
+                    "name": "5 - Get Content Vertical Configuration"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 10,
+                "filter": {
+                  "name": "Require active Content Vertical configuration",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{9.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{9.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{9.Vertical_Name}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{get(2.Market; 1)}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblT2zTdUV5ADPWUU",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionGetRecord",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 980,
+                    "y": 66,
+                    "name": "6 - Get Market Configuration"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 11,
+                "filter": {
+                  "name": "Require active Market configuration",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{10.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{10.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{10.Market_Name}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{get(2.AI_Persona; 1)}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblIfUHO11qzUgZ24",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionGetRecord",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1310,
+                    "y": 66,
+                    "name": "7 - Get AI Persona Configuration"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 12,
+                "filter": {
+                  "name": "Require active AI Persona configuration",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{11.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{11.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{11.Persona_Name}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{get(2.Production_Profile; 1)}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "tblRT9xwcYJ8A5z4e",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionGetRecord",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1319,
+                    "y": -273,
+                    "name": "8 - Get Production Profile Configuration"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 13,
+                "filter": {
+                  "name": "Require active Production Profile before prompt lookup",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{12.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{12.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{12.Production_Profile_Name}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "view": "Make - P1 Content Package Prompt",
+                  "table": "tbl3bGFEcfruzyUVT",
+                  "fields": [
+                    "Prompt Key",
+                    "Prompt Name",
+                    "Scenario",
+                    "Module Purpose",
+                    "Prompt Type",
+                    "System Prompt",
+                    "User Prompt Template",
+                    "Required Variables",
+                    "Optional Variables",
+                    "Model",
+                    "Temperature",
+                    "Max Output Tokens",
+                    "Response Format",
+                    "JSON Schema",
+                    "Version",
+                    "Active",
+                    "Environment",
+                    "Change Notes",
+                    "Implementation Notes",
+                    "Runtime_Context_Template",
+                    "Prompt_Category",
+                    "Applicable_Scenario_Version"
+                  ],
+                  "maxRecords": "1",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 1717,
+                    "y": -269,
+                    "name": "9 - Get Active Scalable P1 Prompt"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 14,
+                "filter": {
+                  "name": "Require complete active configuration and scalable P1 prompt",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{7.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{8.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{9.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{10.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{11.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{12.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.`Prompt Key`}}",
+                        "b": "P1_CONTENT_PACKAGE",
+                        "o": "text:equal"
+                      },
+                      {
+                        "a": "{{13.Active}}",
+                        "b": true,
+                        "o": "boolean:equal"
+                      },
+                      {
+                        "a": "{{13.Environment}}",
+                        "b": "Production",
+                        "o": "text:equal"
+                      },
+                      {
+                        "a": "{{13.`System Prompt`}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.`User Prompt Template`}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.`JSON Schema`}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "name": "runtime_context",
+                  "scope": "roundtrip",
+                  "value": "RUNTIME CONTEXT\n\nORGANIZATION\nOrganization Record ID: {{7.id}}\nOrganization ID: {{7.Organization_ID}}\nOrganization Name: {{7.Organization_Name}}\nOrganization Status: {{7.Organization_Status}}\nSubscription Plan: {{7.Subscription_Plan}}\nDefault Timezone: {{7.Default_Timezone}}\nDefault Language: {{7.Default_Language}}\nCountry: {{7.Country}}\nOnboarding Status: {{7.Onboarding_Status}}\n\nBRAND\nBrand Record ID: {{8.id}}\nBrand ID: {{8.Brand_ID}}\nBrand Name: {{8.Brand_Name}}\nBrand Description: {{8.Brand_Description}}\nBrand Voice: {{8.Brand_Voice}}\nBrand Personality: {{8.Brand_Personality}}\nPrimary Audience: {{8.Primary_Audience}}\nAudience Pain Points: {{8.Audience_Pain_Points}}\nAudience Interests: {{8.Audience_Interests}}\nValue Proposition: {{8.Value_Proposition}}\nDefault CTA Guidelines: {{8.Default_CTA_Guidelines}}\nCaption Guidelines: {{8.Caption_Guidelines}}\nHashtag Guidelines: {{8.Hashtag_Guidelines}}\nThumbnail Style Guidelines: {{8.Thumbnail_Style_Guidelines}}\nVisual Style Guidelines: {{8.Visual_Style_Guidelines}}\nBranding Guidelines: {{8.Branding_Guidelines}}\nFact Verification Guidelines: {{8.Fact_Verification_Guidelines}}\nRestricted Topics: {{8.Restricted_Topics}}\nDefault Language: {{8.Default_Language}}\nWebsite URL: {{8.Website_URL}}\nBrand Color Notes: {{8.Brand_Color_Notes}}\n\nCONTENT VERTICAL\nContent Vertical Record ID: {{9.id}}\nVertical ID: {{9.Vertical_ID}}\nVertical Name: {{9.Vertical_Name}}\nVertical Description: {{9.Vertical_Description}}\nContent Strategy Guidelines: {{9.Content_Strategy_Guidelines}}\nScript Structure Guidelines: {{9.Script_Structure_Guidelines}}\nVisual Guidelines: {{9.Visual_Guidelines}}\nCaption Guidelines: {{9.Caption_Guidelines}}\nThumbnail Guidelines: {{9.Thumbnail_Guidelines}}\nHook Guidelines: {{9.Hook_Guidelines}}\nCTA Guidelines: {{9.CTA_Guidelines}}\nFact Verification Guidelines: {{9.Fact_Verification_Guidelines}}\nSafety and Compliance Guidelines: {{9.Safety_Compliance_Guidelines}}\nCommon Content Types: {{9.Common_Content_Types}}\nRecommended Formats: {{9.Recommended_Formats}}\nRecommended Platforms: {{9.Recommended_Platforms}}\n\nMARKET\nMarket Record ID: {{10.id}}\nMarket ID: {{10.Market_ID}}\nMarket Name: {{10.Market_Name}}\nMarket Type: {{10.Market_Type}}\nCity: {{10.City}}\nState or Region: {{10.State_Region}}\nCountry: {{10.Country}}\nTimezone: {{10.Timezone}}\nPrimary Language: {{10.Primary_Language}}\nRegional Language Notes: {{10.Regional_Language_Notes}}\nLocal Context: {{10.Local_Context}}\nPriority Locations: {{10.Priority_Locations}}\nSeasonal Context: {{10.Seasonal_Context}}\nCommon Local Terms: {{10.Common_Local_Terms}}\nAvoided Local Topics: {{10.Avoided_Local_Topics}}\nLocation Verification Guidelines: {{10.Location_Verification_Guidelines}}\nDefault Hashtags: {{10.Default_Hashtags}}\n\nAI PERSONA\nAI Persona Record ID: {{11.id}}\nPersona ID: {{11.Persona_ID}}\nPersona Name: {{11.Persona_Name}}\nPersona Description: {{11.Persona_Description}}\nExpert Role: {{11.Expert_Role}}\nCommunication Style: {{11.Communication_Style}}\nTone Guidelines: {{11.Tone_Guidelines}}\nVocabulary Guidelines: {{11.Vocabulary_Guidelines}}\nPacing Guidelines: {{11.Pacing_Guidelines}}\nHumor Guidelines: {{11.Humor_Guidelines}}\nAuthority Level: {{11.Authority_Level}}\nAvoided Behaviors: {{11.Avoided_Behaviors}}\n\nCONTENT PROFILE\nContent Profile Record ID: {{2.id}}\nProfile Name: {{2.Profile_Name}}\nLegacy Brand Name: {{2.Brand_Name}}\nLegacy Market Name: {{2.Market_Name}}\nLegacy State or Region: {{2.State_Region}}\nLegacy Country: {{2.Country}}\nLegacy Timezone: {{2.Timezone}}\nLegacy Primary Audience: {{2.Primary_Audience}}\nLegacy Brand Voice: {{2.Brand_Voice}}\nDefault Platforms: {{join(2.Default_Platforms; \", \")}}\nDefault Formats: {{join(2.Default_Formats; \", \")}}\nAllowed Content Themes: {{join(2.Allowed_Content_Themes; \", \")}}\nLegacy Priority Locations: {{2.Priority_Locations}}\nLegacy Avoid Topics: {{2.Avoid_Topics}}\nLegacy Local Context: {{2.Local_Context}}\nLegacy Default Hashtags: {{2.Default_Hashtags}}\nAsset Filter Tag: {{2.Asset_Filter_Tag}}\nProfile Override Guidelines: {{2.Profile_Override_Guidelines}}\nContent Strategy Overrides: {{2.Content_Strategy_Overrides}}\nCaption Guideline Overrides: {{2.Caption_Guideline_Overrides}}\nThumbnail Guideline Overrides: {{2.Thumbnail_Guideline_Overrides}}\nFact Verification Overrides: {{2.Fact_Verification_Overrides}}\nProduction Guideline Overrides: {{2.Production_Guideline_Overrides}}\n\nPRODUCTION PROFILE\nProduction Profile Record ID: {{12.id}}\nProduction Profile ID: {{12.Production_Profile_ID}}\nProduction Profile Name: {{12.Production_Profile_Name}}\nProduction Type: {{12.Production_Type}}\nDefault Content Type: {{12.Default_Content_Type}}\nDefault Platforms: {{join(12.Default_Platforms; \", \")}}\nDefault Formats: {{join(12.Default_Formats; \", \")}}\nDefault Duration: {{12.Default_Duration}}\nDefault Video Clip Count: {{12.Default_Video_Clip_Count}}\nDefault Carousel Slide Count: {{12.Default_Carousel_Slide_Count}}\nDefault Carousel Image Mode: {{12.Default_Carousel_Image_Mode}}\nDefault Include Voiceover: {{if(12.Include_Voiceover = true; \"Yes\"; \"No\")}}\nDefault Include Background Music: {{if(12.Include_Background_Music = true; \"Yes\"; \"No\")}}\nDefault Include Thumbnail: {{if(12.Include_Thumbnail = true; \"Yes\"; \"No\")}}\nVoiceover Guidelines: {{12.Voiceover_Guidelines}}\nMusic Guidelines: {{12.Music_Guidelines}}\nAspect Ratio: {{12.Aspect_Ratio}}\nSafe Area Guidelines: {{12.Safe_Area_Guidelines}}\nRender Composition: {{12.Render_Composition}}\n\nCURRENT CONTENT ITEM\nContent Item Record ID: {{1.id}}\nContent ID: {{1.Content_ID}}\nContent Title: {{1.Content_Title}}\nContent Type: {{1.Content_Type}}\nContent Status: {{1.Content_Status}}\nLookup Market Name: {{1.Market_Name}}\nLookup Brand Name: {{1.Brand_Name}}\nContent Themes: {{join(1.Content_Themes; \", \")}}\nPrimary Location: {{1.Primary_Location}}\nNeighborhood or Area: {{1.Neighborhood_or_Area}}\nOriginal Hook: {{1.Hook}}\nIdea Summary: {{1.Idea_Summary}}\nReviewer Notes: {{1.Reviewer_Notes}}\nSuggested Visuals: {{1.Suggested_Visuals}}\nRequired Assets: {{1.Required_Assets}}\nPriority Score: {{1.Priority_Score}}\nContent Duration Override: {{1.Content_Duration}}\nVoiceover Tail Seconds Override: {{1.Voiceover_Tail_Seconds}}\nVideo Clip Count Override: {{1.Video_Clip_Count}}\nCarousel Image Mode Override: {{1.Carousel_Image_Mode}}\nCarousel Slide Count Override: {{1.Carousel_Slide_Count}}\nCarousel Target Platforms: {{join(1.Carousel_Target_Platforms; \", \")}}\nInclude Voiceover Override: {{1.Include_Voiceover}}\nInclude Background Music Override: {{1.Include_Background_Music}}\nInclude Thumbnail Override: {{1.Include_Thumbnail}}\nExisting Internal Notes: {{1.Internal_Notes}}\n\nADVANCED PRODUCTION REQUEST DIRECTIVES\nThese values are Content Item-specific direction and therefore have the highest creative precedence.\nRequested Title Mode: {{1.Requested_Title_Mode}}\nRequested Title: {{1.Requested_Title}}\nRequested Caption Mode: {{1.Requested_Caption_Mode}}\nRequested Caption: {{1.Requested_Caption}}\nRequested Script Mode: {{1.Requested_Script_Mode}}\nRequested Script: {{1.Requested_Script}}\nProduction Request Notes: {{1.Production_Request_Notes}}\n\nADVANCED DIRECTIVE POLICY\n- AI decides: use the normal scalable P1 generation behavior and the configuration hierarchy below.\n- Force exact: the supplied requested text is authoritative. Do not rewrite, shorten, embellish, or paraphrase it. Keep all related generated fields consistent with it.\n- AI improve: treat the supplied requested text as a draft. Improve clarity, engagement, flow, and platform suitability while preserving its factual meaning, core intent, named entities, and explicit constraints.\n- Production Request Notes are mandatory high-priority creative direction whenever present.\n- For Requested Title Mode = Force exact, treat Requested Title as the canonical title for all script, caption, thumbnail, and publishing decisions.\n- For Requested Title Mode = AI improve, use Requested Title as the draft working-title direction and improve the surrounding package to match its strongest accurate interpretation.\n- For Requested Caption Mode = Force exact, still generate the rest of the package normally, but keep all related outputs consistent with the exact requested caption.\n- For Requested Caption Mode = AI improve, return the improved caption in the caption output field.\n- For Requested Script Mode = Force exact, still generate supporting package fields, but keep voiceover, caption, thumbnail, and publishing recommendations consistent with the exact requested script.\n- For Requested Script Mode = AI improve, return the improved script in the script output field and, when voiceover is enabled, an aligned improved voiceover_script.\n- Never let lower-priority profile/default guidance override an explicit Production Request directive.\n\nEFFECTIVE PRODUCTION OPTIONS\nEffective Duration: {{ifempty(1.Content_Duration; 12.Default_Duration)}}\nEffective Video Clip Count: {{ifempty(1.Video_Clip_Count; 12.Default_Video_Clip_Count)}}\nEffective Carousel Slide Count: {{ifempty(1.Carousel_Slide_Count; 12.Default_Carousel_Slide_Count)}}\nEffective Carousel Image Mode: {{ifempty(1.Carousel_Image_Mode; 12.Default_Carousel_Image_Mode)}}\nEffective Include Voiceover: {{ifempty(1.Include_Voiceover; if(12.Include_Voiceover = true; \"Yes\"; \"No\"))}}\nEffective Voiceover Tail Seconds: {{if(ifempty(1.Include_Voiceover; if(12.Include_Voiceover = true; \"Yes\"; \"No\")) = \"Yes\"; ifempty(1.Voiceover_Tail_Seconds; 2); 0)}}\nTarget Voiceover Duration: {{if(ifempty(1.Include_Voiceover; if(12.Include_Voiceover = true; \"Yes\"; \"No\")) = \"Yes\"; if(ifempty(1.Content_Duration; 12.Default_Duration) - ifempty(1.Voiceover_Tail_Seconds; 2) > 1; ifempty(1.Content_Duration; 12.Default_Duration) - ifempty(1.Voiceover_Tail_Seconds; 2); 1); 0)}} seconds\nEffective Include Background Music: {{ifempty(1.Include_Background_Music; if(12.Include_Background_Music = true; \"Yes\"; \"No\"))}}\nEffective Include Thumbnail: {{ifempty(1.Include_Thumbnail; if(12.Include_Thumbnail = true; \"Yes\"; \"No\"))}}\nEffective Aspect Ratio: {{12.Aspect_Ratio}}\n\n\nVOICEOVER TIMING POLICY\n- When Effective Include Voiceover is Yes, write the voiceover_script to fit approximately within Target Voiceover Duration.\n- Treat Effective Duration as the requested complete video length, including the visual/music ending after narration.\n- Reserve Effective Voiceover Tail Seconds for visuals and music only; do not place required narration in that tail.\n- Keep the final sentence concise so text-to-speech can finish naturally before the reserved tail.\n- When Effective Include Voiceover is No, ignore Voiceover Tail Seconds and return an empty voiceover_script.\n- The render server will measure the actual generated audio and may extend the final video when needed so narration is never cut off.\n\nCONFIGURATION PRECEDENCE\n1. Advanced Production Request directives and other Content Item-specific direction/overrides\n2. Content Profile overrides\n3. Brand, Content Vertical, Market, and AI Persona guidelines\n4. Production Profile defaults\n5. Generic P1 scenario fallbacks\n\nOUTPUT REQUIREMENTS\nReturn only the fields defined by the supplied JSON schema.\nDo not return configuration fields, runtime context, Airtable statuses, or explanatory commentary."
+                },
+                "module": "util:SetVariable2",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 1718,
+                    "y": 60,
+                    "name": "10 - Build Runtime Context - Advanced Production Directives"
+                  }
+                },
+                "parameters": {}
+              },
+              {
+                "id": 3,
+                "filter": {
+                  "name": "Only generate after standardized runtime context is complete",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{14.runtime_context}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.`System Prompt`}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.`User Prompt Template`}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{13.`JSON Schema`}}",
+                        "o": "exist"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "input": "{{13.`User Prompt Template`}}\n\n{{14.runtime_context}}\n\nREQUIRED OUTPUT STRUCTURE\n{{13.`JSON Schema`}}",
+                  "model": "gpt-5",
+                  "store": true,
+                  "format": {
+                    "type": "json_object"
+                  },
+                  "reasoning": {},
+                  "background": false,
+                  "truncation": "auto",
+                  "instructions": "{{13.`System Prompt`}}",
+                  "inputContentType": "text",
+                  "max_output_tokens": "{{ifempty(13.`Max Output Tokens`; 6000)}}",
+                  "createConversation": true,
+                  "parallel_tool_calls": true
+                },
+                "module": "openai-gpt-3:createModelResponse",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 2048,
+                    "y": 60,
+                    "name": "11 - Generate Scalable Content Package - Advanced Directive Aware"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293407
+                }
+              },
+              {
+                "id": 4,
+                "mapper": {
+                  "json": "{{3.result}}"
+                },
+                "module": "json:ParseJSON",
+                "version": 1,
+                "metadata": {
+                  "designer": {
+                    "x": 2047,
+                    "y": 419,
+                    "name": "12 - Parse Content Package JSON"
+                  }
+                },
+                "parameters": {
+                  "type": 414291
+                }
+              },
+              {
+                "id": 5,
+                "filter": {
+                  "name": "Only recheck after complete parsed package",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{4.script}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.caption}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.hashtags}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.publish_recommendation}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.script_quality_score}}",
+                        "b": "0",
+                        "o": "number:greater"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "base": "appe33zkZn35yirTL",
+                  "table": "Content Items",
+                  "formula": "AND(\n  RECORD_ID() = '{{1.id}}',\n  OR(\n    {Content_Status} = \"Idea Approved\",\n    {Content_Status} = \"Ready for Script\"\n  ),\n  {Content_Profile} != BLANK(),\n  {Content_Title} != BLANK(),\n  {Idea_Summary} != BLANK(),\n  NOT({Do_Not_Produce}),\n  {Script} = BLANK(),\n  {Caption} = BLANK(),\n  OR(\n    {Script_Status} = BLANK(),\n    {Script_Status} = \"Not Started\",\n    {Script_Status} = \"Ready\"\n  )\n)",
+                  "maxRecords": "1",
+                  "useColumnId": false
+                },
+                "module": "airtable:ActionSearchRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 2377,
+                    "y": 419,
+                    "name": "13 - Recheck Content Item Before Update"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 6,
+                "filter": {
+                  "name": "Only update still-eligible item with complete package",
+                  "conditions": [
+                    [
+                      {
+                        "a": "{{5.id}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.script}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.caption}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.hashtags}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.publish_recommendation}}",
+                        "o": "exist"
+                      },
+                      {
+                        "a": "{{4.script_quality_score}}",
+                        "b": "0",
+                        "o": "number:greater"
+                      }
+                    ]
+                  ]
+                },
+                "mapper": {
+                  "id": "{{5.id}}",
+                  "base": "appe33zkZn35yirTL",
+                  "table": "Content Items",
+                  "record": {
+                    "fld5nrvqiaULzjAuM": "{{4.hashtags}}",
+                    "fldRAMVUr0sfe8crm": "{{4.script_quality_score}}",
+                    "fldWVqlvqBd8jxOXu": "{{if(ifempty(1.Include_Voiceover; if(12.Include_Voiceover = true; \"Yes\"; \"No\")) = \"Yes\"; \"Ready\"; \"Not Needed\")}}",
+                    "fldWkgsC9SkLoRAqv": "{{4.publish_recommendation}}",
+                    "fldcDDaUCwHGsiZnc": "{{if(ifempty(1.Include_Thumbnail; if(12.Include_Thumbnail = true; \"Yes\"; \"No\")) = \"Yes\"; 4.thumbnail_concept; \"\")}}",
+                    "fldczozdEMhI3OUEV": "Not Ready",
+                    "fldhG8IweBP97PlcK": "{{if(ifempty(1.Include_Thumbnail; if(12.Include_Thumbnail = true; \"Yes\"; \"No\")) = \"Yes\"; \"Ready\"; \"Not Needed\")}}",
+                    "fldiM7nIA3KlLNuAi": "{{if(ifempty(1.Include_Voiceover; if(12.Include_Voiceover = true; \"Yes\"; \"No\")) = \"Yes\"; if(1.Requested_Script_Mode = \"Force exact\"; if(length(trim(1.Requested_Script)) > 0; 1.Requested_Script; 4.voiceover_script); 4.voiceover_script); \"\")}}",
+                    "fldmZfn57sIjHzFbb": "{{if(length(trim(4.internal_notes)) > 0; 4.internal_notes; ifempty(1.Internal_Notes; \"\"))}}",
+                    "fldq5svCjDgdtXKZe": "{{if(ifempty(1.Include_Thumbnail; if(12.Include_Thumbnail = true; \"Yes\"; \"No\")) = \"Yes\"; 4.thumbnail_prompt; \"\")}}",
+                    "fldq6kRZTr6zwisuQ": "{{if(1.Requested_Title_Mode = \"Force exact\"; if(length(trim(1.Requested_Title)) > 0; 1.Requested_Title; 1.Content_Title); 1.Content_Title)}}",
+                    "fldsjudjeJ6domp25": "{{if(1.Requested_Script_Mode = \"Force exact\"; if(length(trim(1.Requested_Script)) > 0; 1.Requested_Script; 4.script); 4.script)}}",
+                    "fldt7gtRQXreCRrTv": "{{if(1.Requested_Caption_Mode = \"Force exact\"; if(length(trim(1.Requested_Caption)) > 0; 1.Requested_Caption; 4.caption); 4.caption)}}",
+                    "fldtkhVaQzr0oCTB7": "{{if(ifempty(1.Include_Voiceover; if(12.Include_Voiceover = true; \"Yes\"; \"No\")) = \"Yes\"; \"Ready for Voiceover\"; if(ifempty(1.Include_Thumbnail; if(12.Include_Thumbnail = true; \"Yes\"; \"No\")) = \"Yes\"; \"Ready for Thumbnail\"; \"Script Generated\"))}}",
+                    "fldySDtYDgKpdUzxj": "Generated"
+                  },
+                  "typecast": false,
+                  "useColumnId": true
+                },
+                "module": "airtable:ActionUpdateRecords",
+                "version": 3,
+                "metadata": {
+                  "designer": {
+                    "x": 2707,
+                    "y": 419,
+                    "name": "14 - Update Content Item Package - Advanced Directive Aware"
+                  }
+                },
+                "parameters": {
+                  "__IMTCONN__": 9293192
+                }
+              },
+              {
+                "id": 902,
+                "mapper": {
+                  "url": "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt",
+                  "method": "post",
+                  "headers": [
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "timeout": "40",
+                  "contentType": "json",
+                  "inputMethod": "jsonString",
+                  "shareCookies": false,
+                  "parseResponse": true,
+                  "allowRedirects": true,
+                  "stopOnHttpError": true,
+                  "jsonStringBodyContent": "{\"source\":\"P-series daisy chain\",\"target\":\"P2\",\"content_record_id\":\"{{6.id}}\",\"test_run_id\":\"{{1.Test_Run_ID}}\",\"requested_at\":\"{{formatDate(now; \\\"YYYY-MM-DDTHH:mm:ssZ\\\"; \\\"UTC\\\")}}\"}",
+                  "requestCompressedContent": true
+                },
+                "module": "http:MakeRequest",
+                "version": 4,
+                "metadata": {
+                  "designer": {
+                    "x": 311,
+                    "y": 393,
+                    "name": "Trigger P2 webhook"
+                  }
+                },
+                "parameters": {
+                  "tlsType": "",
+                  "authenticationType": "noAuth"
+                }
+              },
+              {
+                "id": 903,
+                "mapper": {
+                  "url": "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65",
+                  "method": "post",
+                  "headers": [
+                    {
+                      "name": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "timeout": "40",
+                  "contentType": "json",
+                  "inputMethod": "jsonString",
+                  "shareCookies": false,
+                  "parseResponse": true,
+                  "allowRedirects": true,
+                  "stopOnHttpError": true,
+                  "jsonStringBodyContent": "{\"source\":\"P-series daisy chain\",\"target\":\"P3\",\"content_record_id\":\"{{6.id}}\",\"test_run_id\":\"{{1.Test_Run_ID}}\",\"requested_at\":\"{{formatDate(now; \\\"YYYY-MM-DDTHH:mm:ssZ\\\"; \\\"UTC\\\")}}\"}",
+                  "requestCompressedContent": true
+                },
+                "module": "http:MakeRequest",
+                "version": 4,
+                "metadata": {
+                  "designer": {
+                    "x": 591,
+                    "y": 393,
+                    "name": "Process P1, then continue to P3"
+                  }
+                },
+                "parameters": {
+                  "tlsType": "",
+                  "authenticationType": "noAuth"
+                }
+              }
+            ]
+          }
+        ],
+        "version": 1,
+        "metadata": {
+          "designer": {
+            "x": 303,
+            "y": 70,
+            "name": "Process P1, then continue to P2"
+          }
+        },
+        "parameters": {}
+      }
+    ],
+    "name": "P1 - Content Package Generation - Scalable Configuration v2.2 - Advanced Production Directives",
+    "metadata": {
+      "instant": false,
+      "version": 1,
+      "designer": {
+        "orphans": []
+      },
+      "scenario": {
+        "dlq": false,
+        "slots": null,
+        "dataloss": false,
+        "maxErrors": 3,
+        "autoCommit": true,
+        "roundtrips": 1,
+        "sequential": true,
+        "confidential": false,
+        "freshVariables": false,
+        "autoCommitTriggerLast": true
+      }
+    }
+  },
+  "scheduling": {
+    "type": "on-demand"
+  },
+  "metadata": {
+    "input_spec": [],
+    "output_spec": []
+  },
+  "concept": false,
+  "created": "2026-06-29T21:17:06.195Z",
+  "lastEdit": "2026-08-22T06:15:52.448Z",
+  "idSequence": 904
+}

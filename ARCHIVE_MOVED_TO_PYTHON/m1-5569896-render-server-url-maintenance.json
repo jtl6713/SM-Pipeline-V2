@@ -1,0 +1,1359 @@
+{
+  "scenarioId": 5569896,
+  "stage": "M1",
+  "name": "M1 - Render Server URL Maintenance v2 - Deterministic Obsolete URL Reset",
+  "archivedAt": "2026-08-24",
+  "replacedBy": "services/pipeline-runner/m1/",
+  "makeFolderId": 272039,
+  "makeFolderName": "ARCHIVE_MOVED_TO_PYTHON",
+  "isActive": false,
+  "blueprint": {
+    "flow": [
+      {
+        "id": 1,
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "view": "CFG - Active Render Server URL",
+          "table": "Pipeline Settings",
+          "maxRecords": "1",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "expect": [
+            {
+              "name": "base",
+              "type": "select",
+              "label": "Base",
+              "required": true
+            },
+            {
+              "name": "useColumnId",
+              "type": "boolean",
+              "label": "Use Column ID",
+              "required": true
+            },
+            {
+              "name": "table",
+              "type": "select",
+              "label": "Table",
+              "required": true
+            },
+            {
+              "name": "formula",
+              "type": "text",
+              "label": "Formula"
+            },
+            {
+              "name": "maxRecords",
+              "type": "integer",
+              "label": "Limit"
+            },
+            {
+              "name": "sort",
+              "spec": [
+                {
+                  "name": "field",
+                  "type": "select",
+                  "label": "Field",
+                  "dynamic": true,
+                  "options": []
+                },
+                {
+                  "name": "direction",
+                  "type": "select",
+                  "label": "Direction",
+                  "options": [
+                    {
+                      "label": "Descending",
+                      "value": "desc"
+                    },
+                    {
+                      "label": "Ascending",
+                      "value": "asc"
+                    }
+                  ]
+                }
+              ],
+              "type": "array",
+              "label": "Sort"
+            },
+            {
+              "name": "view",
+              "type": "select",
+              "label": "View"
+            },
+            {
+              "name": "fields",
+              "type": "select",
+              "label": "Output Fields",
+              "multiple": true
+            }
+          ],
+          "restore": {
+            "expect": {
+              "base": {
+                "mode": "chose",
+                "label": "ChicagoShining AI Content Creator"
+              },
+              "sort": {
+                "mode": "chose"
+              },
+              "view": {
+                "mode": "chose",
+                "label": "CFG - Active Render Server URL"
+              },
+              "table": {
+                "mode": "chose",
+                "label": "Pipeline Settings"
+              },
+              "fields": {
+                "mode": "chose"
+              },
+              "useColumnId": {
+                "mode": "chose"
+              }
+            },
+            "parameters": {
+              "__IMTCONN__": {
+                "data": {
+                  "scoped": "true",
+                  "connection": "airtable3"
+                },
+                "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+              }
+            }
+          },
+          "designer": {
+            "x": 0,
+            "y": 0,
+            "name": "Get Active Render Server Base URL"
+          },
+          "interface": [
+            {
+              "name": "__IMTLENGTH__",
+              "type": "uinteger",
+              "label": "Total number of bundles"
+            },
+            {
+              "name": "__IMTINDEX__",
+              "type": "uinteger",
+              "label": "Bundle order position"
+            },
+            {
+              "name": "id",
+              "type": "text",
+              "label": "ID"
+            },
+            {
+              "name": "createdTime",
+              "type": "date",
+              "label": "Created Time"
+            },
+            {
+              "name": "Setting_Name",
+              "type": "text",
+              "label": "Setting_Name"
+            },
+            {
+              "name": "Setting_Value",
+              "type": "text",
+              "label": "Setting_Value"
+            },
+            {
+              "name": "Active",
+              "type": "boolean",
+              "label": "Active"
+            },
+            {
+              "name": "Notes",
+              "type": "text",
+              "label": "Notes",
+              "multiline": true
+            },
+            {
+              "name": "Last_Modified",
+              "type": "date",
+              "label": "Last_Modified"
+            }
+          ],
+          "parameters": [
+            {
+              "name": "__IMTCONN__",
+              "type": "account:airtable3,airtable2",
+              "label": "Connection",
+              "required": true
+            }
+          ]
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 2,
+        "filter": {
+          "name": "Only test if active render server URL exists",
+          "conditions": [
+            [
+              {
+                "a": "{{1.Setting_Value}}",
+                "o": "exist"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "ca": "",
+          "qs": [],
+          "url": "{{trim(1.Setting_Value)}}/health",
+          "gzip": true,
+          "method": "get",
+          "headers": [],
+          "timeout": "300",
+          "useMtls": false,
+          "authPass": "",
+          "authUser": "",
+          "bodyType": "",
+          "serializeUrl": false,
+          "shareCookies": false,
+          "parseResponse": true,
+          "followRedirect": true,
+          "useQuerystring": false,
+          "followAllRedirects": false,
+          "rejectUnauthorized": true
+        },
+        "module": "http:ActionSendData",
+        "version": 3,
+        "metadata": {
+          "expect": [
+            {
+              "name": "url",
+              "type": "url",
+              "label": "URL",
+              "required": true
+            },
+            {
+              "name": "serializeUrl",
+              "type": "boolean",
+              "label": "Serialize URL",
+              "required": true
+            },
+            {
+              "name": "method",
+              "type": "select",
+              "label": "Method",
+              "required": true,
+              "validate": {
+                "enum": [
+                  "get",
+                  "head",
+                  "post",
+                  "put",
+                  "patch",
+                  "delete",
+                  "options"
+                ]
+              }
+            },
+            {
+              "name": "headers",
+              "spec": [
+                {
+                  "name": "name",
+                  "type": "text",
+                  "label": "Name",
+                  "required": true
+                },
+                {
+                  "name": "value",
+                  "type": "text",
+                  "label": "Value"
+                }
+              ],
+              "type": "array",
+              "label": "Headers"
+            },
+            {
+              "name": "qs",
+              "spec": [
+                {
+                  "name": "name",
+                  "type": "text",
+                  "label": "Name",
+                  "required": true
+                },
+                {
+                  "name": "value",
+                  "type": "text",
+                  "label": "Value"
+                }
+              ],
+              "type": "array",
+              "label": "Query String"
+            },
+            {
+              "name": "bodyType",
+              "type": "select",
+              "label": "Body type",
+              "validate": {
+                "enum": [
+                  "raw",
+                  "x_www_form_urlencoded",
+                  "multipart_form_data"
+                ]
+              }
+            },
+            {
+              "name": "parseResponse",
+              "type": "boolean",
+              "label": "Parse response",
+              "required": true
+            },
+            {
+              "name": "authUser",
+              "type": "text",
+              "label": "User name"
+            },
+            {
+              "name": "authPass",
+              "type": "password",
+              "label": "Password"
+            },
+            {
+              "name": "timeout",
+              "type": "uinteger",
+              "label": "Timeout",
+              "validate": {
+                "max": 300,
+                "min": 1
+              }
+            },
+            {
+              "name": "shareCookies",
+              "type": "boolean",
+              "label": "Share cookies with other HTTP modules",
+              "required": true
+            },
+            {
+              "name": "ca",
+              "type": "cert",
+              "label": "Self-signed certificate"
+            },
+            {
+              "name": "rejectUnauthorized",
+              "type": "boolean",
+              "label": "Reject connections that are using unverified (self-signed) certificates",
+              "required": true
+            },
+            {
+              "name": "followRedirect",
+              "type": "boolean",
+              "label": "Follow redirect",
+              "required": true
+            },
+            {
+              "name": "useQuerystring",
+              "type": "boolean",
+              "label": "Disable serialization of multiple same query string keys as arrays",
+              "required": true
+            },
+            {
+              "name": "gzip",
+              "type": "boolean",
+              "label": "Request compressed content",
+              "required": true
+            },
+            {
+              "name": "useMtls",
+              "type": "boolean",
+              "label": "Use Mutual TLS",
+              "required": true
+            },
+            {
+              "name": "followAllRedirects",
+              "type": "boolean",
+              "label": "Follow all redirect",
+              "required": true
+            }
+          ],
+          "restore": {
+            "expect": {
+              "qs": {
+                "mode": "chose"
+              },
+              "method": {
+                "mode": "chose",
+                "label": "GET"
+              },
+              "headers": {
+                "mode": "chose"
+              },
+              "bodyType": {
+                "label": "Empty"
+              }
+            }
+          },
+          "designer": {
+            "x": 300,
+            "y": 0,
+            "name": "GET Current Render Server Health"
+          },
+          "parameters": [
+            {
+              "name": "handleErrors",
+              "type": "boolean",
+              "label": "Evaluate all states as errors (except for 2xx and 3xx )",
+              "required": true
+            },
+            {
+              "name": "useNewZLibDeCompress",
+              "type": "hidden"
+            }
+          ]
+        },
+        "parameters": {
+          "handleErrors": true,
+          "useNewZLibDeCompress": true
+        }
+      },
+      {
+        "id": 3,
+        "filter": {
+          "name": "Only continue after current render server health succeeds",
+          "conditions": [
+            [
+              {
+                "a": "{{1.Setting_Value}}",
+                "o": "exist"
+              },
+              {
+                "a": "{{2.statusCode}}",
+                "b": "200",
+                "o": "number:equal"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "base": "appe33zkZn35yirTL",
+          "table": "Platform Outputs",
+          "formula": "AND({Test_Run_ID}=BLANK(),AND({Render_Status}=\"Rendering\",{Remotion_Job_ID}!=\"\",{Remotion_Status_URL}!=\"\",{Render_Server_URL}!=\"\",{Final_File_URL}=\"\",OR(FIND(\"{{trim(1.Setting_Value)}}\",{Remotion_Status_URL})=0,FIND(\"{{trim(1.Setting_Value)}}\",{Render_Server_URL})=0)))",
+          "maxRecords": "50",
+          "useColumnId": false
+        },
+        "module": "airtable:ActionSearchRecords",
+        "version": 3,
+        "metadata": {
+          "expect": [
+            {
+              "name": "base",
+              "type": "select",
+              "label": "Base",
+              "required": true
+            },
+            {
+              "name": "useColumnId",
+              "type": "boolean",
+              "label": "Use Column ID",
+              "required": true
+            },
+            {
+              "name": "table",
+              "type": "select",
+              "label": "Table",
+              "required": true
+            },
+            {
+              "name": "formula",
+              "type": "text",
+              "label": "Formula"
+            },
+            {
+              "name": "maxRecords",
+              "type": "integer",
+              "label": "Limit"
+            },
+            {
+              "name": "sort",
+              "spec": [
+                {
+                  "name": "field",
+                  "type": "select",
+                  "label": "Field",
+                  "dynamic": true,
+                  "options": []
+                },
+                {
+                  "name": "direction",
+                  "type": "select",
+                  "label": "Direction",
+                  "options": [
+                    {
+                      "label": "Descending",
+                      "value": "desc"
+                    },
+                    {
+                      "label": "Ascending",
+                      "value": "asc"
+                    }
+                  ]
+                }
+              ],
+              "type": "array",
+              "label": "Sort"
+            },
+            {
+              "name": "view",
+              "type": "select",
+              "label": "View"
+            },
+            {
+              "name": "fields",
+              "type": "select",
+              "label": "Output Fields",
+              "multiple": true
+            }
+          ],
+          "restore": {
+            "expect": {
+              "base": {
+                "mode": "chose",
+                "label": "ChicagoShining AI Content Creator"
+              },
+              "sort": {
+                "mode": "chose"
+              },
+              "table": {
+                "mode": "chose",
+                "label": "Platform Outputs"
+              },
+              "fields": {
+                "mode": "chose"
+              },
+              "useColumnId": {
+                "mode": "chose"
+              }
+            },
+            "parameters": {
+              "__IMTCONN__": {
+                "data": {
+                  "scoped": "true",
+                  "connection": "airtable3"
+                },
+                "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+              }
+            }
+          },
+          "designer": {
+            "x": 600,
+            "y": 0,
+            "name": "Find Rendering Jobs Using an Obsolete Render Server URL"
+          },
+          "interface": [
+            {
+              "name": "__IMTLENGTH__",
+              "type": "uinteger",
+              "label": "Total number of bundles"
+            },
+            {
+              "name": "__IMTINDEX__",
+              "type": "uinteger",
+              "label": "Bundle order position"
+            },
+            {
+              "name": "id",
+              "type": "text",
+              "label": "ID"
+            },
+            {
+              "name": "createdTime",
+              "type": "date",
+              "label": "Created Time"
+            },
+            {
+              "name": "Output_ID",
+              "type": "number",
+              "label": "Output_ID"
+            },
+            {
+              "name": "Content_Item",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Content_Item"
+            },
+            {
+              "name": "Content_Profile",
+              "type": "array",
+              "label": "Content_Profile"
+            },
+            {
+              "name": "Market_Name",
+              "type": "array",
+              "label": "Market_Name"
+            },
+            {
+              "name": "Platform",
+              "type": "text",
+              "label": "Platform"
+            },
+            {
+              "name": "Format",
+              "type": "text",
+              "label": "Format"
+            },
+            {
+              "name": "Platform_Output_Type",
+              "type": "text",
+              "label": "Platform_Output_Type"
+            },
+            {
+              "name": "Aspect_Ratio",
+              "type": "text",
+              "label": "Aspect_Ratio"
+            },
+            {
+              "name": "Output_Status",
+              "type": "text",
+              "label": "Output_Status"
+            },
+            {
+              "name": "Output_Title",
+              "type": "text",
+              "label": "Output_Title"
+            },
+            {
+              "name": "Output_Caption",
+              "type": "text",
+              "label": "Output_Caption",
+              "multiline": true
+            },
+            {
+              "name": "Output_Hashtags",
+              "type": "text",
+              "label": "Output_Hashtags",
+              "multiline": true
+            },
+            {
+              "name": "Output_URL",
+              "type": "text",
+              "label": "Output_URL"
+            },
+            {
+              "name": "Thumbnail_URL",
+              "type": "text",
+              "label": "Thumbnail_URL"
+            },
+            {
+              "name": "Voiceover_URL",
+              "type": "text",
+              "label": "Voiceover_URL"
+            },
+            {
+              "name": "Scheduled_Post_Date",
+              "time": true,
+              "type": "date",
+              "label": "Scheduled_Post_Date"
+            },
+            {
+              "name": "Published_At",
+              "time": true,
+              "type": "date",
+              "label": "Published_At"
+            },
+            {
+              "name": "Platform_Post_URL",
+              "type": "text",
+              "label": "Platform_Post_URL"
+            },
+            {
+              "name": "Do_Not_Publish",
+              "type": "boolean",
+              "label": "Do_Not_Publish"
+            },
+            {
+              "name": "Output_Notes",
+              "type": "text",
+              "label": "Output_Notes",
+              "multiline": true
+            },
+            {
+              "name": "Asset Requests",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Asset Requests"
+            },
+            {
+              "name": "Asset Request Shots",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Asset Request Shots"
+            },
+            {
+              "name": "Asset_Need_Status",
+              "type": "text",
+              "label": "Asset_Need_Status"
+            },
+            {
+              "name": "Target_Final_Length",
+              "type": "number",
+              "label": "Target_Final_Length"
+            },
+            {
+              "name": "Recommended_Raw_Capture_Length",
+              "type": "number",
+              "label": "Recommended_Raw_Capture_Length"
+            },
+            {
+              "name": "Missing_Asset_Summary",
+              "type": "text",
+              "label": "Missing_Asset_Summary",
+              "multiline": true
+            },
+            {
+              "name": "Asset_Request_Link",
+              "spec": {
+                "label": "Record ID"
+              },
+              "type": "array",
+              "label": "Asset_Request_Link"
+            },
+            {
+              "name": "Render_Status",
+              "type": "text",
+              "label": "Render_Status"
+            },
+            {
+              "name": "Render_Server_URL",
+              "type": "text",
+              "label": "Render_Server_URL"
+            },
+            {
+              "name": "Final_File_URL",
+              "type": "text",
+              "label": "Final_File_URL"
+            },
+            {
+              "name": "Final_File_ID",
+              "type": "text",
+              "label": "Final_File_ID"
+            },
+            {
+              "name": "Final_File_Name",
+              "type": "text",
+              "label": "Final_File_Name"
+            },
+            {
+              "name": "Final_File_Storage_Status",
+              "type": "text",
+              "label": "Final_File_Storage_Status"
+            },
+            {
+              "name": "Final_File_Error_Message",
+              "type": "text",
+              "label": "Final_File_Error_Message",
+              "multiline": true
+            },
+            {
+              "name": "Remotion_Job_ID",
+              "type": "text",
+              "label": "Remotion_Job_ID"
+            },
+            {
+              "name": "Remotion_Status_URL",
+              "type": "text",
+              "label": "Remotion_Status_URL"
+            },
+            {
+              "name": "Remotion_Props_JSON",
+              "type": "text",
+              "label": "Remotion_Props_JSON",
+              "multiline": true
+            },
+            {
+              "name": "Remotion_Error_Message",
+              "type": "text",
+              "label": "Remotion_Error_Message",
+              "multiline": true
+            },
+            {
+              "name": "Composition_ID",
+              "type": "text",
+              "label": "Composition_ID"
+            },
+            {
+              "name": "Output_Filename",
+              "type": "text",
+              "label": "Output_Filename"
+            },
+            {
+              "name": "Clip_1_URL",
+              "type": "text",
+              "label": "Clip_1_URL"
+            },
+            {
+              "name": "Clip_1_Duration_Frames",
+              "type": "number",
+              "label": "Clip_1_Duration_Frames"
+            },
+            {
+              "name": "Clip_2_URL",
+              "type": "text",
+              "label": "Clip_2_URL"
+            },
+            {
+              "name": "Clip_2_Duration_Frames",
+              "type": "number",
+              "label": "Clip_2_Duration_Frames"
+            },
+            {
+              "name": "Clip_3_URL",
+              "type": "text",
+              "label": "Clip_3_URL"
+            },
+            {
+              "name": "Clip_3_Duration_Frames",
+              "type": "number",
+              "label": "Clip_3_Duration_Frames"
+            },
+            {
+              "name": "Music_URL",
+              "type": "text",
+              "label": "Music_URL"
+            },
+            {
+              "name": "Music_Volume",
+              "type": "number",
+              "label": "Music_Volume"
+            },
+            {
+              "name": "Title_Text",
+              "type": "text",
+              "label": "Title_Text"
+            },
+            {
+              "name": "Brand_Text",
+              "type": "text",
+              "label": "Brand_Text"
+            }
+          ],
+          "parameters": [
+            {
+              "name": "__IMTCONN__",
+              "type": "account:airtable3,airtable2",
+              "label": "Connection",
+              "required": true
+            }
+          ]
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      },
+      {
+        "id": 4,
+        "filter": {
+          "name": "Only reset if stale Platform Output was found",
+          "conditions": [
+            [
+              {
+                "a": "{{3.id}}",
+                "o": "exist"
+              }
+            ]
+          ]
+        },
+        "mapper": {
+          "id": "{{3.id}}",
+          "base": "appe33zkZn35yirTL",
+          "table": "tblrlPeboBthkplH0",
+          "record": {
+            "fldEADvZ9DsB9nhhd": "",
+            "fldUDa6cnmfKFTAU4": "Reset by M1 Render Server URL Maintenance. Current configured render base URL: {{trim(1.Setting_Value)}}. Rerun R4 to start a fresh render job.",
+            "fldblKqQfBucVN85k": "",
+            "fldciHLBrMpdou6Zf": "",
+            "fldenXjFd1HRasCYD": "",
+            "fldleMgHqTQctbMdG": "",
+            "fldt6e8Ov1T4kyKax": "",
+            "fldtEZy0rdIVS5LML": "Ready for Render"
+          },
+          "typecast": false,
+          "useColumnId": false
+        },
+        "module": "airtable:ActionUpdateRecords",
+        "version": 3,
+        "metadata": {
+          "expect": [
+            {
+              "name": "base",
+              "type": "select",
+              "label": "Base",
+              "required": true
+            },
+            {
+              "name": "typecast",
+              "type": "boolean",
+              "label": "Smart links",
+              "required": true
+            },
+            {
+              "name": "useColumnId",
+              "type": "boolean",
+              "label": "Use Column ID",
+              "required": true
+            },
+            {
+              "name": "table",
+              "type": "select",
+              "label": "Table",
+              "required": true
+            },
+            {
+              "name": "id",
+              "type": "text",
+              "label": "Record ID",
+              "required": true
+            },
+            {
+              "name": "record",
+              "spec": [
+                {
+                  "name": "fldgpBV1vc4gQgFaw",
+                  "type": "url",
+                  "label": "Output_URL"
+                },
+                {
+                  "mode": "edit",
+                  "name": "fldtEZy0rdIVS5LML",
+                  "type": "select",
+                  "label": "Render_Status"
+                },
+                {
+                  "mode": "edit",
+                  "name": "fldlftCb1r06p6IhB",
+                  "type": "select",
+                  "label": "Composition_ID"
+                },
+                {
+                  "name": "fldcVmpi1yva89dzy",
+                  "type": "text",
+                  "label": "Output_Filename"
+                },
+                {
+                  "name": "fld9pyFQFHat3ayYr",
+                  "type": "text",
+                  "label": "Title_Text"
+                },
+                {
+                  "name": "fldrxvDPiPWMfruny",
+                  "type": "text",
+                  "label": "Brand_Text"
+                },
+                {
+                  "name": "fldF6WSBlSP1PF2ZM",
+                  "type": "url",
+                  "label": "Music_URL"
+                },
+                {
+                  "name": "fldGBazRAYCGgONhw",
+                  "type": "number",
+                  "label": "Music_Volume"
+                },
+                {
+                  "name": "fldlGTytbyovFNJoA",
+                  "type": "url",
+                  "label": "Clip_1_URL"
+                },
+                {
+                  "name": "fldRzH8LJOeeGqsPh",
+                  "type": "number",
+                  "label": "Clip_1_Duration_Frames"
+                },
+                {
+                  "name": "fldTqqOzC2cECX9EM",
+                  "type": "url",
+                  "label": "Clip_2_URL"
+                },
+                {
+                  "name": "fldTw2sPDvKEHElP9",
+                  "type": "number",
+                  "label": "Clip_2_Duration_Frames"
+                },
+                {
+                  "name": "fldbQ1pyfyMkO7yhz",
+                  "type": "url",
+                  "label": "Clip_3_URL"
+                },
+                {
+                  "name": "fldyfaEjpmsQm7rA4",
+                  "type": "number",
+                  "label": "Clip_3_Duration_Frames"
+                },
+                {
+                  "name": "fldleMgHqTQctbMdG",
+                  "type": "text",
+                  "label": "Remotion_Job_ID"
+                },
+                {
+                  "name": "fldt6e8Ov1T4kyKax",
+                  "type": "url",
+                  "label": "Remotion_Status_URL"
+                },
+                {
+                  "name": "fldenXjFd1HRasCYD",
+                  "type": "url",
+                  "label": "Render_Server_URL"
+                },
+                {
+                  "name": "fldssVMZv37e2Ij6y",
+                  "type": "url",
+                  "label": "Final_File_URL"
+                },
+                {
+                  "name": "fldWePFtTPPsyreQv",
+                  "type": "text",
+                  "label": "Final_File_ID"
+                },
+                {
+                  "name": "fldY02WY2eRTclVpn",
+                  "type": "text",
+                  "label": "Final_File_Name"
+                },
+                {
+                  "mode": "edit",
+                  "name": "fldciHLBrMpdou6Zf",
+                  "type": "select",
+                  "label": "Final_File_Storage_Status"
+                },
+                {
+                  "name": "fldEADvZ9DsB9nhhd",
+                  "type": "text",
+                  "label": "Final_File_Error_Message",
+                  "multiline": true
+                },
+                {
+                  "name": "fldblKqQfBucVN85k",
+                  "type": "text",
+                  "label": "Remotion_Props_JSON",
+                  "multiline": true
+                },
+                {
+                  "name": "fldUDa6cnmfKFTAU4",
+                  "type": "text",
+                  "label": "Remotion_Error_Message",
+                  "multiline": true
+                }
+              ],
+              "type": "collection",
+              "label": "Record"
+            }
+          ],
+          "restore": {
+            "expect": {
+              "base": {
+                "label": "ChicagoShining AI Content Creator"
+              },
+              "table": {
+                "label": "Platform Outputs"
+              },
+              "record": {
+                "nested": {
+                  "fldciHLBrMpdou6Zf": {
+                    "mode": "edit"
+                  },
+                  "fldlftCb1r06p6IhB": {
+                    "mode": "edit"
+                  },
+                  "fldtEZy0rdIVS5LML": {
+                    "mode": "edit"
+                  }
+                }
+              },
+              "typecast": {
+                "mode": "chose"
+              },
+              "useColumnId": {
+                "mode": "chose"
+              }
+            },
+            "parameters": {
+              "__IMTCONN__": {
+                "data": {
+                  "scoped": "true",
+                  "connection": "airtable3"
+                },
+                "label": "AirtableConnection (User ID: usrZdHmnUMXBJKaZ0)"
+              }
+            }
+          },
+          "designer": {
+            "x": 900,
+            "y": 0,
+            "name": "Reset Stale Job for R4 Rerun"
+          },
+          "interface": [
+            {
+              "name": "__IMTLENGTH__",
+              "type": "uinteger",
+              "label": "Total number of bundles"
+            },
+            {
+              "name": "__IMTINDEX__",
+              "type": "uinteger",
+              "label": "Bundle order position"
+            },
+            {
+              "name": "id",
+              "type": "text",
+              "label": "ID"
+            },
+            {
+              "name": "createdTime",
+              "type": "date",
+              "label": "Created Time"
+            },
+            {
+              "name": "Output_ID",
+              "type": "uinteger",
+              "label": "Output_ID"
+            },
+            {
+              "name": "Platform",
+              "type": "text",
+              "label": "Platform"
+            },
+            {
+              "name": "Format",
+              "type": "text",
+              "label": "Format"
+            },
+            {
+              "name": "Platform_Output_Type",
+              "type": "text",
+              "label": "Platform_Output_Type"
+            },
+            {
+              "name": "Aspect_Ratio",
+              "type": "text",
+              "label": "Aspect_Ratio"
+            },
+            {
+              "name": "Output_Status",
+              "type": "text",
+              "label": "Output_Status"
+            },
+            {
+              "name": "Output_Title",
+              "type": "text",
+              "label": "Output_Title"
+            },
+            {
+              "name": "Output_Caption",
+              "type": "text",
+              "label": "Output_Caption",
+              "multiline": true
+            },
+            {
+              "name": "Output_Hashtags",
+              "type": "text",
+              "label": "Output_Hashtags",
+              "multiline": true
+            },
+            {
+              "name": "Output_URL",
+              "type": "url",
+              "label": "Output_URL"
+            },
+            {
+              "name": "Thumbnail_URL",
+              "type": "url",
+              "label": "Thumbnail_URL"
+            },
+            {
+              "name": "Voiceover_URL",
+              "type": "url",
+              "label": "Voiceover_URL"
+            },
+            {
+              "name": "Do_Not_Publish",
+              "type": "boolean",
+              "label": "Do_Not_Publish"
+            },
+            {
+              "name": "Target_Final_Length",
+              "type": "number",
+              "label": "Target_Final_Length"
+            },
+            {
+              "name": "Render_Status",
+              "type": "text",
+              "label": "Render_Status"
+            },
+            {
+              "name": "Render_Server_URL",
+              "type": "url",
+              "label": "Render_Server_URL"
+            },
+            {
+              "name": "Final_File_URL",
+              "type": "url",
+              "label": "Final_File_URL"
+            },
+            {
+              "name": "Final_File_ID",
+              "type": "text",
+              "label": "Final_File_ID"
+            },
+            {
+              "name": "Final_File_Name",
+              "type": "text",
+              "label": "Final_File_Name"
+            },
+            {
+              "name": "Final_File_Storage_Status",
+              "type": "text",
+              "label": "Final_File_Storage_Status"
+            },
+            {
+              "name": "Final_File_Error_Message",
+              "type": "text",
+              "label": "Final_File_Error_Message",
+              "multiline": true
+            },
+            {
+              "name": "Remotion_Job_ID",
+              "type": "text",
+              "label": "Remotion_Job_ID"
+            },
+            {
+              "name": "Remotion_Status_URL",
+              "type": "url",
+              "label": "Remotion_Status_URL"
+            },
+            {
+              "name": "Remotion_Props_JSON",
+              "type": "text",
+              "label": "Remotion_Props_JSON",
+              "multiline": true
+            },
+            {
+              "name": "Remotion_Error_Message",
+              "type": "text",
+              "label": "Remotion_Error_Message",
+              "multiline": true
+            },
+            {
+              "name": "Composition_ID",
+              "type": "text",
+              "label": "Composition_ID"
+            },
+            {
+              "name": "Output_Filename",
+              "type": "text",
+              "label": "Output_Filename"
+            },
+            {
+              "name": "Clip_1_URL",
+              "type": "url",
+              "label": "Clip_1_URL"
+            },
+            {
+              "name": "Clip_1_Duration_Frames",
+              "type": "number",
+              "label": "Clip_1_Duration_Frames"
+            },
+            {
+              "name": "Clip_2_URL",
+              "type": "url",
+              "label": "Clip_2_URL"
+            },
+            {
+              "name": "Clip_2_Duration_Frames",
+              "type": "number",
+              "label": "Clip_2_Duration_Frames"
+            },
+            {
+              "name": "Clip_3_URL",
+              "type": "url",
+              "label": "Clip_3_URL"
+            },
+            {
+              "name": "Clip_3_Duration_Frames",
+              "type": "number",
+              "label": "Clip_3_Duration_Frames"
+            },
+            {
+              "name": "Music_URL",
+              "type": "url",
+              "label": "Music_URL"
+            },
+            {
+              "name": "Music_Volume",
+              "type": "number",
+              "label": "Music_Volume"
+            },
+            {
+              "name": "Title_Text",
+              "type": "text",
+              "label": "Title_Text"
+            },
+            {
+              "name": "Brand_Text",
+              "type": "text",
+              "label": "Brand_Text"
+            }
+          ],
+          "parameters": [
+            {
+              "name": "__IMTCONN__",
+              "type": "account:airtable3,airtable2",
+              "label": "Connection",
+              "required": true
+            }
+          ]
+        },
+        "parameters": {
+          "__IMTCONN__": 9293192
+        }
+      }
+    ],
+    "name": "M1 - Render Server URL Maintenance v2 - Deterministic Obsolete URL Reset",
+    "metadata": {
+      "instant": false,
+      "version": 1,
+      "designer": {
+        "orphans": []
+      },
+      "scenario": {
+        "dlq": false,
+        "slots": null,
+        "dataloss": false,
+        "maxErrors": 3,
+        "autoCommit": true,
+        "roundtrips": 1,
+        "sequential": true,
+        "confidential": false,
+        "freshVariables": false,
+        "autoCommitTriggerLast": true
+      }
+    }
+  },
+  "scheduling": {
+    "type": "on-demand"
+  },
+  "metadata": {
+    "input_spec": [],
+    "output_spec": []
+  },
+  "concept": false,
+  "created": "2026-07-04T03:55:54.343Z",
+  "lastEdit": "2026-08-22T06:53:17.285Z",
+  "idSequence": 5
+}

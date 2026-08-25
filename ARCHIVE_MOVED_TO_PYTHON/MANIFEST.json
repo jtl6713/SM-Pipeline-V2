@@ -53,6 +53,24 @@
       "production_backend": "python"
     },
     {
+      "stage": "P1",
+      "scenario_id": 5528742,
+      "name": "P1 - Content Package Generation - Scalable Configuration v2.2 - Advanced Production Directives",
+      "blueprint_file": "p1-5528742-content-package-generation.json",
+      "python_endpoint": "/stages/p1",
+      "production_backend": "python",
+      "notes": "Make 5528742 is inactive and stored in Make folder ARCHIVE_MOVED_TO_PYTHON. Python P1 is registered, live, and routes to Python P2/P3 when their backends are Python."
+    },
+    {
+      "stage": "M1",
+      "scenario_id": 5569896,
+      "name": "M1 - Render Server URL Maintenance v2 - Deterministic Obsolete URL Reset",
+      "blueprint_file": "m1-5569896-render-server-url-maintenance.json",
+      "python_endpoint": "/stages/m1",
+      "production_backend": "python",
+      "notes": "Make 5569896 is inactive and stored in Make folder ARCHIVE_MOVED_TO_PYTHON. Python M1 checks render health before resetting stale render jobs."
+    },
+    {
       "stage": "P2",
       "scenario_id": 5530955,
       "name": "P2 - Voiceover and Thumbnail Generation - Daisy Chain v2.3 - Optional Voiceover",
