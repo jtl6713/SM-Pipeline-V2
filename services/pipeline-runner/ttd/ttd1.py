@@ -239,6 +239,28 @@ def _init_failure(
         result["manual_fallback"] = True
         return {"processed": True, "terminal": True, **result}
 
+    if status_code in {401, 403}:
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                **unlock_fields(),
+                "Output_Notes": append_note(output, f"{stage} authentication failure at {stamp_minutes()}; automatic retries stopped."),
+                "Publish_Status": PUBLISH_STATUS_FAILED,
+                "Publish_Error_Stage": stage,
+                "TikTok_Draft_Status": STATUS_MANUAL_FALLBACK,
+                "Publish_Error_Message": message,
+                "Publish_Next_Retry_At": None,
+                "Publish_Retry_Eligible": False,
+                "Manual_Fallback_Required": True,
+                "TikTok_Draft_Response_JSON": response_json(body),
+            },
+        )
+        result["http_status"] = status_code
+        result["manual_fallback"] = True
+        result["auth_failure"] = True
+        return {"processed": True, "terminal": True, **result}
+
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         record_id,
