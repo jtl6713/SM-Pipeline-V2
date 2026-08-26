@@ -159,3 +159,5 @@ AI ingest budget Worker deploy: 2026-08-25 - Cron was hitting the Worker subrequ
 
 Studio produce job Worker deploy: 2026-08-26 - Approve enqueues one pipeline-runner job per Production Request (`POST /jobs/studio-produce`). Cron only resumes stale jobs. Live path no longer hopscotches C2/ingest/SMV1 from 12 leftover outputs. Worker 0.10.138-studio-produce-job. UI 0.6.134.
 
+Approve All durable Worker deploy: 2026-08-26 - Approve All only stamps every Ready-for-Review row Approved for Publishing. It no longer inline-dispatches each publisher (webhook + 10s tail), which burned the isolate and left 262/267 unapproved. Cron `studioReconcileApprovedPublishes` starts publishers. Worker 0.10.139-approve-all-durable. UI 0.6.135.
+

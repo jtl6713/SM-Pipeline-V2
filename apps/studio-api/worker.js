@@ -150,7 +150,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.138-studio-produce-job",
+          version: "0.10.139-approve-all-durable",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -1142,18 +1142,27 @@ function clampLimit(url, fallback = 50, max = 100) {
 
 async function listRecords(env, tableId, options = {}) {
   const { limit = 50, view = null, sortDirection = "desc", filterFormula = null } = options;
-  const sortField = options.sortField || options.sortField || null;
-  const params = new URLSearchParams();
-  params.set("pageSize", String(Math.min(100, limit)));
-  params.set("maxRecords", String(limit));
-  if (view) params.set("view", view);
-  if (filterFormula) params.set("filterByFormula", filterFormula);
-  if (sortField) {
-    params.set("sort[0][field]", sortField);
-    params.set("sort[0][direction]", sortDirection);
+  const sortField = options.sortField || null;
+  const records = [];
+  let offset = null;
+  while (records.length < limit) {
+    const params = new URLSearchParams();
+    params.set("pageSize", String(Math.min(100, limit - records.length)));
+    params.set("maxRecords", String(limit));
+    if (view) params.set("view", view);
+    if (filterFormula) params.set("filterByFormula", filterFormula);
+    if (sortField) {
+      params.set("sort[0][field]", sortField);
+      params.set("sort[0][direction]", sortDirection);
+    }
+    if (offset) params.set("offset", offset);
+    const result = await airtableFetch(env, tableId, `?${params.toString()}`);
+    const page = Array.isArray(result.records) ? result.records : [];
+    records.push(...page);
+    offset = result.offset || null;
+    if (!offset || !page.length) break;
   }
-  const result = await airtableFetch(env, tableId, `?${params.toString()}`);
-  return Array.isArray(result.records) ? result.records : [];
+  return records.slice(0, limit);
 }
 
 function f(record, field) {
@@ -1386,6 +1395,12 @@ function studioPublishHandoffFields(record) {
       fields.FB_Slideshow_Public_URL = preview;
       fields.Publish_Status = "Ready to Publish";
     }
+  }
+  if (platform === "YouTube") {
+    if (preview.startsWith("https://media.chicagoshining.com/")) {
+      fields.Publish_Asset_URL = preview;
+    }
+    fields.Publish_Status = "Ready to Publish";
   }
   if (platform === "TikTok") {
     if (!current("TikTok_Draft_Status")) fields.TikTok_Draft_Status = "Ready for Assets";
@@ -2010,6 +2025,12 @@ function contentProfileFilterFormula(profile) {
   const parts = [`FIND("${id}", ARRAYJOIN({Content_Profile})&"")`];
   if (name) parts.push(`FIND("${name}", ARRAYJOIN({Content_Profile})&"")`);
   return parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
+}
+
+function studioApproveAllCandidateFormula(profile) {
+  const ready = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent"),{Review_Status}!="Approved",{Output_Status}!="Approved for Publishing",{Output_Status}!="Published")';
+  const profileFormula = contentProfileFilterFormula(profile);
+  return profileFormula ? `AND(${profileFormula},${ready})` : ready;
 }
 
 async function listContentProfileRecords(env) {
@@ -16300,9 +16321,13 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   const note = phase6Text(payload?.notes, 10000);
   const stamp = new Date().toISOString();
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(null, payload));
+  // Approval is the click that must survive this isolate. Inline dispatch of every
+  // ready row (webhook + 10s orchestrator tail) is what left 262/267 unapproved.
   const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: 100,
-    filterFormula: contentProfileFilterFormula(profile),
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: studioApproveAllCandidateFormula(profile),
   });
   const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
   const approved = [];
@@ -16311,13 +16336,17 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     try {
       const updated = await approveOutputRecordForPublishing(env, record, note, stamp);
       approved.push(mapApprovedOutputSummary(updated));
-      await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
     } catch (error) {
       failed.push({
         ...mapApprovedOutputSummary(record),
         error: error?.message || "Approval failed",
       });
     }
+  }
+  if (approved.length && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioReconcileApprovedPublishes(env, { limit: 2 }).catch((error) => {
+      console.warn("approve-all publish kickoff failed", error);
+    }));
   }
   const skipped = records.length - eligible.length;
   return respond(request, env, {
@@ -16326,10 +16355,11 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     approved_count: approved.length,
     failed_count: failed.length,
     skipped_count: skipped,
+    dispatch_deferred: true,
     approved,
     failed,
     message: approved.length
-      ? `Approved ${approved.length} output${approved.length === 1 ? "" : "s"} for publishing. Instagram, Facebook, and YouTube will auto-publish; TikTok will be created as a draft.`
+      ? `Approved ${approved.length} output${approved.length === 1 ? "" : "s"} for publishing. Publishers start from the approved queue so a Worker budget miss cannot leave rows unapproved.`
       : "No outputs were ready to approve.",
   });
 }

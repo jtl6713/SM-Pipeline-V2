@@ -109,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.134-studio-produce-job";
+  const BUILD_ID = "item4-0.6.135-approve-all-durable";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -7896,6 +7896,8 @@
       const failed = Number(result.failed_count || 0);
       if (failed) {
         setPipelineLiveHint(result.message || `Approved ${approved}, ${failed} failed`);
+      } else if (result.dispatch_deferred) {
+        setPipelineLiveHint(result.message || `Approved ${approved}. Publishers start from the approved queue.`);
       } else {
         setPipelineLiveHint(result.message || `Approved ${approved} output${approved === 1 ? "" : "s"}`);
       }

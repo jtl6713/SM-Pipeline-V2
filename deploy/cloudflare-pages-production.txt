@@ -221,3 +221,5 @@ Promote-to-pipeline Pages deploy: 2026-08-24 — After Production Approve & Prom
 
 Tooltip dedupe Pages deploy: 2026-08-24 — Keep one Pipeline/review tooltip visible at a time. UI 0.6.133-tooltip-dedupe.
 
+Approve All durable Pages deploy: 2026-08-26 — Pipeline hint after Approve All says publishers start from the approved queue. UI 0.6.135-approve-all-durable.
+
