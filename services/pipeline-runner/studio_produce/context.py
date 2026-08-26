@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from render.fields import field, field_str, first_linked_id
+from render.fields import field, field_str, first_linked_id, linked_ids
 from studio_produce.constants import (
     CONTENT_ITEMS_TABLE,
     JOB_FIELD,
@@ -27,10 +27,37 @@ def load_parent(client: AirtableClient, request: dict[str, Any]) -> dict[str, An
     return client.get_record(CONTENT_ITEMS_TABLE, parent_id)
 
 
-def load_outputs(client: AirtableClient, request_id: str) -> list[dict[str, Any]]:
+def outputs_formula(request_id: str, parent_id: str | None = None, content_id: str | int | None = None) -> str:
+    if content_id not in (None, ""):
+        return f'FIND(",{content_id},", "," & ARRAYJOIN({{Content_Item}}) & ",")>0'
+    if parent_id:
+        return f'FIND("{parent_id}", ARRAYJOIN({{Content_Item}}))'
+    return f'FIND("{request_id}", ARRAYJOIN({{Production_Request_Output}}))'
+
+
+def _parent_output_ids(parent: dict[str, Any] | None) -> list[str]:
+    if not parent:
+        return []
+    return linked_ids(field(parent, "Platform Outputs")) or linked_ids(field(parent, "Platform_Outputs"))
+
+
+def load_outputs(
+    client: AirtableClient,
+    request_id: str,
+    parent: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    if parent is None:
+        parent = load_parent(client, client.get_record(PRODUCTION_REQUESTS_TABLE, request_id))
+    ids = _parent_output_ids(parent)
+    if ids:
+        rows = [client.get_record(PLATFORM_OUTPUTS_TABLE, record_id) for record_id in ids]
+        rows.sort(key=lambda row: int(field(row, "Output_ID") or 0), reverse=True)
+        return rows
+    content_id = field(parent, "Content_ID") if parent else None
+    parent_id = (parent or {}).get("id")
     return client.list_records(
         PLATFORM_OUTPUTS_TABLE,
-        formula=f'FIND("{request_id}", ARRAYJOIN({{Production_Request}}))',
+        formula=outputs_formula(request_id, parent_id, content_id),
         max_records=50,
         sort_field="Output_ID",
         sort_direction="desc",

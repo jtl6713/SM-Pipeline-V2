@@ -16,8 +16,10 @@ logger = logging.getLogger("pipeline-runner.studio-produce")
 _RUNNING: set[str] = set()
 _LOCK = threading.Lock()
 MAX_WALL_SECONDS = 12 * 60
-MAX_LOOPS = 40
+MAX_LOOPS = 200
 MAX_ATTEMPTS = 24
+WAIT_SECONDS = 2
+RENDER_WAIT_SECONDS = 8
 
 
 def start_job(production_request_record_id: str, *, resume: bool = False) -> dict[str, Any]:
@@ -26,7 +28,8 @@ def start_job(production_request_record_id: str, *, resume: bool = False) -> dic
         raise ValueError("production_request_record_id is required")
     client = AirtableClient()
     request = load_request(client, request_id)
-    outputs = load_outputs(client, request_id)
+    parent = load_parent(client, request)
+    outputs = load_outputs(client, request_id, parent)
     job = read_job(request)
     if job_is_terminal(job) and not resume:
         return {"accepted": False, "reason": "terminal", "job": job, "production_request_record_id": request_id}
@@ -86,7 +89,7 @@ def _run(request_id: str) -> None:
             return
         request = load_request(client, request_id)
         parent = load_parent(client, request)
-        outputs = load_outputs(client, request_id)
+        outputs = load_outputs(client, request_id, parent)
         job = read_job(request)
         step = str(job.get("step") or "themes").strip()
         if step in TERMINAL_STEPS:
@@ -94,7 +97,7 @@ def _run(request_id: str) -> None:
         if int(job.get("attempt") or 1) > MAX_ATTEMPTS:
             write_job(client, request_id, with_step(job, "blocked", error=f"Step {step} exceeded {MAX_ATTEMPTS} attempts"))
             return
-        job = with_step(job, step, detail=job.get("detail") or STEP_LABELS.get(step, step))
+        job = with_step(job, step, detail=job.get("detail") or STEP_LABELS.get(step, step), bump_attempt=False)
         write_job(client, request_id, job)
         handler = STEP_HANDLERS.get(step)
         if not handler:
@@ -111,8 +114,8 @@ def _run(request_id: str) -> None:
         try:
             nxt = handler(client, ctx)
         except StepWait as exc:
-            write_job(client, request_id, with_step(job, step, detail=str(exc.detail)))
-            time.sleep(2)
+            write_job(client, request_id, with_step(job, step, detail=str(exc.detail), bump_attempt=False))
+            time.sleep(RENDER_WAIT_SECONDS if step == "render" else WAIT_SECONDS)
             continue
         except StepBlocked as exc:
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))

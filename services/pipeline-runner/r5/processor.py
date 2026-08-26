@@ -251,9 +251,24 @@ def process_one(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     client = AirtableClient()
+    if output_record_id:
+        output = client.get_record(PLATFORM_OUTPUTS_TABLE, output_record_id)
+        output_test = field_str(output, "Test_Run_ID")
+        if test_run_id and output_test != test_run_id:
+            return {
+                "processed": False,
+                "reason": "no_rendering_platform_output",
+                "make_scenario_id": MAKE_SCENARIO_ID,
+            }
+        if not test_run_id and output_test:
+            return {
+                "processed": False,
+                "reason": "no_rendering_platform_output",
+                "make_scenario_id": MAKE_SCENARIO_ID,
+            }
+        return process_one_output(client, output, dry_run=dry_run)
     outputs = select_outputs(
         client,
-        output_record_id=output_record_id,
         test_run_id=test_run_id,
         max_records=1,
     )

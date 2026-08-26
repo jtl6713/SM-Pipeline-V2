@@ -54,14 +54,24 @@ def new_job(*, route: str, step: str = "themes") -> dict[str, Any]:
     }
 
 
-def with_step(job: dict[str, Any], step: str, *, error: str | None = None, detail: str | None = None) -> dict[str, Any]:
+def with_step(
+    job: dict[str, Any],
+    step: str,
+    *,
+    error: str | None = None,
+    detail: str | None = None,
+    bump_attempt: bool = True,
+) -> dict[str, Any]:
     next_job = dict(job or {})
     next_job["schema_version"] = JOB_SCHEMA
     next_job["job_id"] = next_job.get("job_id") or f"spj-{uuid.uuid4().hex[:12]}"
     next_job["step"] = step
-    next_job["attempt"] = int(next_job.get("attempt") or 1) + (1 if step == job.get("step") else 0)
     if step != job.get("step"):
         next_job["attempt"] = 1
+    elif bump_attempt:
+        next_job["attempt"] = int(next_job.get("attempt") or 1) + 1
+    else:
+        next_job["attempt"] = int(next_job.get("attempt") or 1)
     next_job["updated_at"] = utc_now()
     next_job["error"] = error
     next_job["detail"] = detail or STEP_LABELS.get(step, step)

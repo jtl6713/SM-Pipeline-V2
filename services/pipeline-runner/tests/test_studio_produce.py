@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
+from render.fields import first_linked_id, linked_ids
 from studio_produce.constants import STEP_LABELS, STEP_PERCENT
+from studio_produce.context import outputs_formula
 from studio_produce.job import derive_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, variant_transfer_id
 from studio_produce.stamp import is_native_photo
@@ -31,6 +33,9 @@ def test_next_step_and_with_step():
     assert moved["attempt"] == 1
     retried = with_step(moved, "stamp")
     assert retried["attempt"] == 2
+    waiting = with_step(moved, "stamp", detail="Rendering 0/6", bump_attempt=False)
+    assert waiting["attempt"] == 1
+    assert waiting["detail"] == "Rendering 0/6"
 
 
 def test_derive_route_ai_photo_sequence():
@@ -106,6 +111,19 @@ def test_rebuild_manifest_ready_count():
     assert manifest["plan_ready_count"] == 1
     assert manifest["plan_complete"] is True
     assert manifest["assets"][0]["variants"]["9:16"]["preview_url"].startswith("https://media.")
+
+
+def test_first_linked_id_accepts_record_objects():
+    assert first_linked_id(["recParent12345678"]) == "recParent12345678"
+    assert first_linked_id([{"id": "recParent12345678", "name": "102"}]) == "recParent12345678"
+    assert linked_ids(["recA123456789012", {"id": "recB123456789012"}]) == ["recA123456789012", "recB123456789012"]
+
+
+def test_outputs_formula_uses_content_id():
+    formula = outputs_formula("recPR", content_id=102)
+    assert "102" in formula
+    assert 'ARRAYJOIN({Content_Item})' in formula
+    assert "recParent" in outputs_formula("recPR", "recParent")
 
 
 def test_native_photo_detection():

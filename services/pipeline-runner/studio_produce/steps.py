@@ -370,6 +370,8 @@ def step_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
 
 def step_stamp(client: AirtableClient, ctx: dict[str, Any]) -> str:
+    if not ctx.get("outputs"):
+        raise StepBlocked("No Platform Outputs found for this Production Request")
     result = stamp_outputs(client, ctx["request"], ctx["outputs"], ctx["parent"])
     if result["missing"]:
         raise StepBlocked(f"{len(result['missing'])} output(s) are missing a complete source package")
@@ -392,6 +394,8 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     from r5.processor import process_one as process_r5
     from lettering.processor import process_one as process_letter
 
+    if not ctx.get("outputs"):
+        raise StepBlocked("No Platform Outputs found for this Production Request")
     test_run_id = field_str(ctx["request"], "Test_Run_ID") or None
     remaining = []
     for output in ctx["outputs"]:

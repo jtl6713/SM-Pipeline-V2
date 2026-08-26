@@ -13,13 +13,21 @@ def field_str(record: dict[str, Any], name: str) -> str:
 
 
 def first_linked_id(value: Any) -> str | None:
-    if isinstance(value, list) and value:
-        first = value[0]
-        if isinstance(first, str) and first.startswith("rec"):
-            return first
+    ids = linked_ids(value)
+    return ids[0] if ids else None
+
+
+def linked_ids(value: Any) -> list[str]:
+    if isinstance(value, list):
+        ids: list[str] = []
+        for item in value:
+            ids.extend(linked_ids(item))
+        return ids
+    if isinstance(value, dict) and str(value.get("id") or "").startswith("rec"):
+        return [str(value["id"])]
     if isinstance(value, str) and value.startswith("rec"):
-        return value
-    return None
+        return [value]
+    return []
 
 
 def parse_json_field(value: Any) -> Any:
