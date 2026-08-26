@@ -425,7 +425,7 @@ def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict
         ) else None,
         "Music_URL": package.get("effective", {}).get("music_url") or None,
         "Preferred_Music_URL": package.get("effective", {}).get("music_url") or None,
-        "Music_Volume": 0.24 if package.get("effective", {}).get("music_url") else 0,
+        "Music_Volume": 1.0 if package.get("effective", {}).get("music_url") else 0,
     }
     if thumb:
         fields["Thumbnail_URL"] = thumb

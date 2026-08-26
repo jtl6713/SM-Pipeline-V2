@@ -223,3 +223,5 @@ Tooltip dedupe Pages deploy: 2026-08-24 — Keep one Pipeline/review tooltip vis
 
 Approve All durable Pages deploy: 2026-08-26 — Pipeline hint after Approve All says publishers start from the approved queue. UI 0.6.135-approve-all-durable.
 
+Produce-skip + music 100% Pages deploy: 2026-08-26 — Pipeline shows job blockers instead of fake Rendering; creative music normal defaults to 100%. UI 0.6.140-music-full.
+

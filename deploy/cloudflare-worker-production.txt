@@ -161,3 +161,5 @@ Studio produce job Worker deploy: 2026-08-26 - Approve enqueues one pipeline-run
 
 Approve All durable Worker deploy: 2026-08-26 - Approve All only stamps every Ready-for-Review row Approved for Publishing. It no longer inline-dispatches each publisher (webhook + 10s tail), which burned the isolate and left 262/267 unapproved. Cron `studioReconcileApprovedPublishes` starts publishers. Worker 0.10.139-approve-all-durable. UI 0.6.135.
 
+Produce-skip + music 100% Worker deploy: 2026-08-26 - Skip P2 when voiceover is Not Needed, resume blocked jobs at stamp/render, stop fake Rendering on Selected-but-idle rows, and default music normal to 100%. Worker 0.10.146-music-full.
+

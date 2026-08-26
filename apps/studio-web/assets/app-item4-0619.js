@@ -109,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.139-similar-status";
+  const BUILD_ID = "item4-0.6.140-music-full";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -7455,7 +7455,7 @@
     $("creativeDefaultVoice").closest(".voice-select-wrap")?.insertAdjacentHTML("beforeend", `<div class="voice-catalog-note">${escapeHtml(voiceNote)}</div>`);
 
     const voiceover = Math.max(0, Math.min(125, Number(output.voiceover?.volume ?? 1) * 100));
-    const normal = phase6Percent(output.music?.normal_volume, 24);
+    const normal = phase6Percent(output.music?.normal_volume, 100);
     const ducked = phase6Percent(output.music?.ducked_volume, 8);
     $("creativeVoiceoverVolume").value = phase6FormatPercent(voiceover);
     $("creativeVoiceoverVolumeRange").value = phase6FormatPercent(voiceover);
@@ -7748,7 +7748,7 @@
       transition: { type: slide.transition?.type || "fade", duration_frames: Number(slide.transition?.duration_frames ?? 12) },
     }));
 
-    const normalPct = Math.max(0, Math.min(100, phase6NumberFromInput("creativeMusicNormal", 24)));
+    const normalPct = Math.max(0, Math.min(100, phase6NumberFromInput("creativeMusicNormal", 100)));
     const duckedPct = Math.max(0, Math.min(100, phase6NumberFromInput("creativeMusicDucked", 8)));
     const duckingEnabled = Boolean($("creativeDuckingEnabled").checked);
     if (duckingEnabled && duckedPct > normalPct) throw new Error("Music during narration cannot be louder than normal music while ducking is enabled.");
