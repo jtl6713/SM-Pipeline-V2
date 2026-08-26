@@ -212,7 +212,10 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     if (explicitTooltips[element.id]) return explicitTooltips[element.id];
     if (element.classList?.contains("nav-item")) {
       const page = pageHelp[element.dataset.page] || cleanText(element.textContent);
-      return `Open the ${page} admin page. This navigation action does not change pipeline records.`;
+      if (element.dataset.page === "content") {
+        return "Open Production to add photos, choose platforms, and frame each post.";
+      }
+      return `Open the ${page} page. This does not change any records.`;
     }
     if (element.matches?.("[data-refresh]")) return "Reload the latest data for this admin page without intentionally changing any records.";
     if (element.matches?.("[data-open-page]")) {
