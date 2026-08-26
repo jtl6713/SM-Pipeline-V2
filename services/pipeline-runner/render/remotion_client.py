@@ -32,6 +32,9 @@ class RemotionClient:
 
     def download_render(self, render_url: str) -> bytes:
         response = requests.get(render_url, timeout=600)
+        if response.status_code == 404 and "render.chicagoshining.com" in render_url:
+            local = render_url.replace("https://render.chicagoshining.com", "http://127.0.0.1:3333")
+            response = requests.get(local, timeout=600)
         response.raise_for_status()
         return response.content
 

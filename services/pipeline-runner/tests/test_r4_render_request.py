@@ -1,7 +1,7 @@
 from r4.constants import R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
 from r4.processor import _eligible_exact_output
-from r4.render_request import build_no_voiceover_request, choose_render_request
+from r4.render_request import choose_render_request, voiceover_is_required
 
 
 def test_r4_production_formula_requires_render_package():
@@ -89,6 +89,14 @@ def test_r4_voiceover_without_content_item_does_not_crash():
     route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
     assert route == "voiceover"
     assert payload["voiceover"]["url"] == "https://example.com/output-vo.mp3"
+
+
+def test_r4_voiceover_required_when_effective_mode_is_yes():
+    output = _photo_output(Studio_Effective_Voiceover_Mode="Yes")
+    assert voiceover_is_required(output, None) is True
+    parent = {"fields": {"Include_Voiceover": "Yes"}}
+    assert voiceover_is_required(_photo_output(), parent) is True
+    assert voiceover_is_required(_photo_output(Studio_Effective_Voiceover_Mode="No"), parent) is False
 
 
 def test_r4_p020_merges_parent_voiceover():

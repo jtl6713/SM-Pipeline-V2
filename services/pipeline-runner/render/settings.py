@@ -40,7 +40,11 @@ def get_render_volumes(client: AirtableClient) -> tuple[float, float]:
 
 def get_google_drive_folder_id(client: AirtableClient) -> str:
     settings = PipelineSettings(client)
-    for name in ("GOOGLE_DRIVE_FINAL_OUTPUT_FOLDER_ID", "FINAL_OUTPUT_DRIVE_FOLDER_ID"):
+    for name in (
+        "GOOGLE_DRIVE_FINAL_OUTPUT_FOLDER_ID",
+        "FINAL_OUTPUT_DRIVE_FOLDER_ID",
+        "RENDERED_PLATFORM_OUTPUTS_FOLDER_ID",
+    ):
         value = settings.get(name)
         if value:
             return value

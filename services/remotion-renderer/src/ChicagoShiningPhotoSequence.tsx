@@ -196,6 +196,66 @@ const resolveSource = (value?: string): string | undefined => {
     : staticFile(clean.replace(/^[/\\]+/, ""));
 };
 
+export const overlayTrackKey = (clip: ChicagoShiningPhotoClip): string => {
+  const overlay = clip.overlay;
+  const text = String(overlay?.text ?? "").trim();
+  if (!overlay || overlay.enabled === false || !text) return "";
+  return [
+    text.toLowerCase(),
+    String(overlay.role ?? "caption"),
+    String(overlay.position ?? "lower-third"),
+    String(overlay.stylePreset ?? "Clean Documentary"),
+    String(overlay.size ?? 62),
+    String(overlay.eyebrow ?? "").trim(),
+    String(overlay.subtitle ?? "").trim(),
+    String(overlay.brand ?? "").trim(),
+    String(overlay.accentText ?? "").trim(),
+  ].join("|");
+};
+
+export const persistentOverlayRuns = (
+  clips: ChicagoShiningPhotoClip[],
+  durations: number[],
+): Array<{
+  startFrame: number;
+  durationInFrames: number;
+  clipIndexes: number[];
+  clip: ChicagoShiningPhotoClip;
+}> => {
+  const runs: Array<{
+    startFrame: number;
+    durationInFrames: number;
+    clipIndexes: number[];
+    clip: ChicagoShiningPhotoClip;
+  }> = [];
+  let index = 0;
+  let startFrame = 0;
+  while (index < clips.length) {
+    const key = overlayTrackKey(clips[index]);
+    const runIndexes = [index];
+    let duration = Math.max(1, Math.round(Number(durations[index]) || 0));
+    let cursor = index + 1;
+    if (key) {
+      while (cursor < clips.length && overlayTrackKey(clips[cursor]) === key) {
+        runIndexes.push(cursor);
+        duration += Math.max(1, Math.round(Number(durations[cursor]) || 0));
+        cursor += 1;
+      }
+    }
+    if (key && runIndexes.length >= 2) {
+      runs.push({
+        startFrame,
+        durationInFrames: duration,
+        clipIndexes: runIndexes,
+        clip: clips[index],
+      });
+    }
+    startFrame += key ? duration : Math.max(1, Math.round(Number(durations[index]) || 0));
+    index = key ? cursor : index + 1;
+  }
+  return runs;
+};
+
 const aspectDimensions = (
   ratio?: PhotoSequenceAspectRatio,
 ): {width: number; height: number} => {
@@ -662,6 +722,7 @@ const ImageSegment: React.FC<{
   defaultFitMode: PhotoSequenceFitMode;
   defaultBackgroundColor: string;
   targetAspectRatio: PhotoSequenceAspectRatio;
+  suppressOverlay?: boolean;
 }> = ({
   clip,
   source,
@@ -673,6 +734,7 @@ const ImageSegment: React.FC<{
   defaultFitMode,
   defaultBackgroundColor,
   targetAspectRatio,
+  suppressOverlay = false,
 }) => {
   const frame = useCurrentFrame();
   const {entering, exiting} = useTransitionProgress();
@@ -861,7 +923,7 @@ const ImageSegment: React.FC<{
         </Sequence>
       ) : null}
 
-      {overlay?.enabled !== false && text && end > start ? (
+      {!suppressOverlay && overlay?.enabled !== false && text && end > start ? (
         <Sequence
           from={start}
           durationInFrames={overlayDuration}
@@ -1202,6 +1264,10 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
       ? duration + normalizedEndHoldFrames
       : duration,
   );
+  const liftedOverlayRuns = persistentOverlayRuns(safeClips, contentDurations);
+  const liftedOverlayClips = new Set(
+    liftedOverlayRuns.flatMap((run) => run.clipIndexes),
+  );
 
   const boundaryTransitions: Array<NativeBoundaryTransition | null> =
     safeClips.slice(1).map((incomingClip, boundaryIndex) =>
@@ -1255,6 +1321,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
           defaultFitMode={defaultFitMode}
           defaultBackgroundColor={defaultBackgroundColor}
           targetAspectRatio={resolvedTargetAspectRatio}
+          suppressOverlay={liftedOverlayClips.has(index)}
         />
       </TransitionSeries.Sequence>,
     );
@@ -1374,6 +1441,36 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
       ) : null}
 
       <TransitionSeries>{transitionSeriesItems}</TransitionSeries>
+
+      {liftedOverlayRuns.map((run) => {
+        const overlay = run.clip.overlay;
+        const text = String(overlay?.text ?? "").trim();
+        if (!overlay || !text) return null;
+        return (
+          <Sequence
+            key={`persist-overlay-${run.startFrame}-${text}`}
+            from={run.startFrame}
+            durationInFrames={run.durationInFrames}
+          >
+            <AnimatedText
+              text={text}
+              preset={overlay.stylePreset ?? "Clean Documentary"}
+              position={overlay.position ?? "lower-third"}
+              size={Math.max(34, Math.min(120, Number(overlay.size) || 62))}
+              animation={overlay.animation ?? "fade"}
+              role={overlay.role ?? "caption"}
+              eyebrow={String(overlay.eyebrow ?? "").trim() || undefined}
+              subtitle={String(overlay.subtitle ?? "").trim() || undefined}
+              brand={String(overlay.brand ?? "").trim() || undefined}
+              accentText={String(overlay.accentText ?? "").trim() || undefined}
+              backgroundOpacity={overlay.backgroundOpacity}
+              durationInFrames={run.durationInFrames}
+              targetAspectRatio={resolvedTargetAspectRatio}
+              safeArea={overlay.safeArea}
+            />
+          </Sequence>
+        );
+      })}
 
       {showSpokenCaptions ? (
         <SpokenCaptionTrack

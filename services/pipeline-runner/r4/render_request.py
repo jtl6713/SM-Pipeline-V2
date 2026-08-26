@@ -50,6 +50,14 @@ def voiceover_url(output: dict[str, Any], content_item: dict[str, Any] | None = 
     return field_str(output, "Voiceover_URL") or field_str(content_item or {}, "Voiceover_URL")
 
 
+def voiceover_is_required(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> bool:
+    mode = (
+        field_str(output, "Studio_Effective_Voiceover_Mode")
+        or field_str(content_item or {}, "Include_Voiceover")
+    ).strip().lower()
+    return mode in {"yes", "true", "1"}
+
+
 def duration_is_explicit(output: dict[str, Any]) -> bool:
     override = field(output, "Video_Duration_Seconds_Override")
     return override is not None and str(override).strip() != ""

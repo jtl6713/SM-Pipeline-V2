@@ -6,6 +6,7 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { registerRemotionCleanup } = require('./remotion-cleanup');
 
 const app = express();
 
@@ -15,7 +16,7 @@ const DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
 const DEFAULT_MUSIC_BOOST_DELTA = 0.05;
 const DEFAULT_MUSIC_BOOST_FADE_SECONDS = 0.5;
 const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
-const SERVICE_VERSION = '2026-08-22-r5-done-callback';
+const SERVICE_VERSION = '2026-08-24-cleanup-wired';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -35,6 +36,14 @@ app.use('/out', express.static(OUT_DIR));
 app.use(express.static(PUBLIC_DIR));
 
 const jobs = new Map();
+const remotionCleanup = registerRemotionCleanup({
+    app,
+    jobs,
+    projectDir: PROJECT_DIR,
+    outDir: OUT_DIR,
+    renderPropsDir: RENDER_PROPS_DIR,
+    renderAssetsDir: RENDER_ASSETS_DIR,
+});
 
 function nowIso() {
     return new Date().toISOString();
@@ -911,6 +920,12 @@ app.get('/health', async (req, res) => {
         voiceoverAwareDuration: true,
         defaultVoiceoverTailSeconds: DEFAULT_VOICEOVER_TAIL_SECONDS,
         postVoiceoverMusicBoost: true,
+        cleanup: {
+            enabled: true,
+            staleHours: remotionCleanup.staleHours,
+            sweepIntervalMs: remotionCleanup.sweepIntervalMs,
+            lastSweep: remotionCleanup.getLastSweep(),
+        },
         port: PORT,
         time: nowIso(),
     });
@@ -1015,8 +1030,11 @@ app.post('/render', async (req, res) => {
 
 app.listen(PORT, async () => {
     await ensureDirectories();
+    await remotionCleanup.runStartupSweep();
+    remotionCleanup.startStaleSweepTimer();
 
     console.log(`SM Pipeline V2 Remotion render server running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/health`);
     console.log(`Render: http://localhost:${PORT}/render`);
+    console.log(`Cleanup: http://localhost:${PORT}/cleanup/<jobId>`);
 });

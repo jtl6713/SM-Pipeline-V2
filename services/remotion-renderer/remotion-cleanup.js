@@ -32,6 +32,7 @@ function registerRemotionCleanup(options) {
         renderPropsDir,
         renderAssetsDir,
         staleHours = Number(process.env.REMOTION_STALE_CLEANUP_HOURS || DEFAULT_STALE_HOURS),
+        sweepIntervalMs = Number(process.env.REMOTION_STALE_SWEEP_INTERVAL_MS || 60 * 60 * 1000),
     } = options;
 
     if (!app || !jobs || !projectDir || !outDir || !renderPropsDir || !renderAssetsDir) {
@@ -151,6 +152,9 @@ function registerRemotionCleanup(options) {
         return names;
     }
 
+    let lastSweep = null;
+    let sweepTimer = null;
+
     async function runStartupSweep() {
         const threshold = Number.isFinite(staleHours) && staleHours >= 24 ? staleHours : DEFAULT_STALE_HOURS;
         const result = {
@@ -210,8 +214,23 @@ function registerRemotionCleanup(options) {
         }
 
         result.ok = result.errors.length === 0;
-        await log('Startup stale sweep completed', result);
+        lastSweep = result;
+        await log('Stale sweep completed', result);
         return result;
+    }
+
+    function startStaleSweepTimer() {
+        if (sweepTimer) return sweepTimer;
+        const interval = Number.isFinite(sweepIntervalMs) && sweepIntervalMs >= 60 * 1000
+            ? sweepIntervalMs
+            : 60 * 60 * 1000;
+        sweepTimer = setInterval(() => {
+            runStartupSweep().catch((error) => {
+                log('Stale sweep failed', { error: error.message }).catch(() => {});
+            });
+        }, interval);
+        if (typeof sweepTimer.unref === 'function') sweepTimer.unref();
+        return sweepTimer;
     }
 
     app.post('/cleanup/:jobId', async (req, res) => {
@@ -234,7 +253,10 @@ function registerRemotionCleanup(options) {
     return {
         cleanupJob,
         runStartupSweep,
+        startStaleSweepTimer,
         staleHours,
+        sweepIntervalMs,
+        getLastSweep: () => lastSweep,
         logFile,
     };
 }
