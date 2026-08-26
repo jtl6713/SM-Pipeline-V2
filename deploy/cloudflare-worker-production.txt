@@ -157,3 +157,5 @@ Continuation no-lock Worker deploy: 2026-08-25 - After Approve, pulse C2 and ing
 
 AI ingest budget Worker deploy: 2026-08-25 - Cron was hitting the Worker subrequest cap before AI master ingest (C2 200/524, AI_INGEST too many subrequests, outputs stayed Queued). Continuation now runs first, ingests one waiting AI parent before letter/R3 work, and skips C2 when slide URLs already exist. Worker 0.10.137-ai-ingest-budget.
 
+Studio produce job Worker deploy: 2026-08-26 - Approve enqueues one pipeline-runner job per Production Request (`POST /jobs/studio-produce`). Cron only resumes stale jobs. Live path no longer hopscotches C2/ingest/SMV1 from 12 leftover outputs. Worker 0.10.138-studio-produce-job. UI 0.6.134.
+

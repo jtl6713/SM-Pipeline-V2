@@ -150,7 +150,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.137-ai-ingest-budget",
+          version: "0.10.138-studio-produce-job",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -592,8 +592,9 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_promote");
         requirePermission(authorization, "production_configure");
+        const requestId = productionRequestPromotionRecordIdFromPath(url);
         const response = await promoteProductionRequestViaI3I4(request, env, url, authorization);
-        continueParkedProductionAfterPromote(ctx, env);
+        continueParkedProductionAfterPromote(ctx, env, requestId);
         return response;
       }
 
@@ -612,7 +613,12 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "ideas_promote");
         const response = await promoteIdeaViaI3I4(request, env, url, authorization);
-        continueParkedProductionAfterPromote(ctx, env);
+        let requestId = null;
+        try {
+          const payload = await response.clone().json();
+          requestId = payload?.production_request?.id || payload?.production_request_record_id || null;
+        } catch {}
+        continueParkedProductionAfterPromote(ctx, env, requestId);
         return response;
       }
 
@@ -709,9 +715,9 @@ export default {
     // waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
       try {
-        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+        await resumeStaleStudioProductionJobs(env);
       } catch (error) {
-        console.warn("production continuation cron failed", error);
+        console.warn("studio produce watchdog failed", error);
       }
       try {
         await studioReconcileApprovedPublishes(env);
@@ -1666,7 +1672,7 @@ function outputProgressMilestoneFloor(record) {
   return 0;
 }
 
-function outputProgressPercent(record, state) {
+function outputProgressPercent(record, state, job = null) {
   const processingRaw = f(record, "YouTube_Processing_Progress_Percent");
   const uploadRaw = f(record, "YouTube_Upload_Progress_Percent");
   const processing = processingRaw === null || processingRaw === "" ? null : Number(processingRaw);
@@ -1690,6 +1696,13 @@ function outputProgressPercent(record, state) {
     Skipped: 100,
   };
   let computed = defaults[state] ?? null;
+  const jobPercent = Number(job?.percent);
+  if (
+    Number.isFinite(jobPercent)
+    && ["Queued", "In Production", "Preparing Assets", "Rendering"].includes(state)
+  ) {
+    computed = Math.max(0, Math.min(100, jobPercent));
+  }
   // A stored 0% YouTube upload percent is "job accepted, no bytes yet" — do not
   // collapse Uploading/Processing to 0% on the Pipeline bar. Do not let a completed
   // upload percent paint Retry Pending as 100%.
@@ -1740,8 +1753,9 @@ function outputCreativeAvailable(record) {
   return studioOutputHasReviewableDeliverable(record);
 }
 
-function mapOutput(record) {
+function mapOutput(record, job = null) {
   const studioState = normalizedOutputState(record);
+  const studioJob = job && typeof job === "object" ? job : null;
   return {
     id: record.id,
     output_id: f(record, "Output_ID"),
@@ -1756,7 +1770,10 @@ function mapOutput(record) {
     review_status: f(record, "Review_Status"),
     publish_status: f(record, "Publish_Status"),
     platform_publish_status: platformPublishStatus(record),
-    studio_progress_percent: outputProgressPercent(record, studioState),
+    studio_progress_percent: outputProgressPercent(record, studioState, studioJob),
+    studio_production_job: studioJob,
+    studio_job_label: studioProductionJobLabel(studioJob),
+    studio_job_error: studioJob?.error || null,
     publish_method: f(record, "Publish_Method"),
     auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
     do_not_publish: Boolean(f(record, "Do_Not_Publish")),
@@ -4629,6 +4646,136 @@ function cadenceScenarioManagedByPython(env, scenarioId) {
   return false;
 }
 
+const STUDIO_PRODUCTION_JOB_LABELS = {
+  themes: "Writing slide themes",
+  audio: "Generating voiceover and cover",
+  images: "Generating AI images",
+  ingest: "Ingesting source photos",
+  queue_crops: "Queuing platform crops",
+  crops: "Cropping platform variants",
+  stamp: "Packaging outputs",
+  render: "Rendering previews",
+  done: "Ready for Review",
+  blocked: "Blocked",
+};
+
+function parseStudioProductionJob(recordOrRaw) {
+  if (recordOrRaw && typeof recordOrRaw === "object" && recordOrRaw.fields) {
+    return item4ParseJson(f(recordOrRaw, "Studio_Production_Job_JSON"), null);
+  }
+  return item4ParseJson(recordOrRaw, null);
+}
+
+function studioProductionJobLabel(job) {
+  if (!job || typeof job !== "object") return null;
+  if (String(job.step || "") === "blocked") return String(job.error || job.detail || "Blocked").trim() || "Blocked";
+  return String(job.detail || STUDIO_PRODUCTION_JOB_LABELS[job.step] || job.step || "").trim() || null;
+}
+
+async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const path = resume ? "/jobs/studio-produce/resume" : "/jobs/studio-produce";
+  const response = await fetch(`${runnerUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({ production_request_record_id: recordId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.error || payload?.message || `Studio produce job failed (${response.status})`
+    );
+  }
+  return { response, payload };
+}
+
+async function enqueueStudioProductionJob(env, requestId) {
+  if (!requestId) return null;
+  const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const existing = parseStudioProductionJob(record);
+  const step = String(existing?.step || "").trim();
+  if (!existing?.job_id || step === "done" || step === "blocked") {
+    const job = {
+      schema_version: "studio.production-job.1",
+      job_id: `spj-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      route: null,
+      step: "themes",
+      attempt: 1,
+      updated_at: new Date().toISOString(),
+      error: null,
+      detail: STUDIO_PRODUCTION_JOB_LABELS.themes,
+      percent: 12,
+    };
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Studio_Production_Job_JSON: JSON.stringify(job), Updated_At: new Date().toISOString() },
+        typecast: false,
+      }),
+    });
+  }
+  return item4PulseStudioProduceJob(env, requestId);
+}
+
+async function loadStudioProductionJobsForOutputs(env, records) {
+  const ids = [];
+  for (const record of records || []) {
+    const id = studioFirstLinkedId(f(record, "Production_Request"));
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  const jobs = new Map();
+  for (const id of ids.slice(0, 25)) {
+    try {
+      const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id);
+      jobs.set(id, parseStudioProductionJob(requestRecord));
+    } catch {}
+  }
+  return jobs;
+}
+
+async function resumeStaleStudioProductionJobs(env, options = {}) {
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 50,
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Production_Request}!=BLANK())',
+  }).catch(() => []);
+  const ids = [...new Set((rows || []).map((row) => studioFirstLinkedId(f(row, "Production_Request"))).filter(Boolean))];
+  const pulses = [];
+  const now = Date.now();
+  const staleAfter = Number(options.staleAfterMs || 180000);
+  for (const requestId of ids.slice(0, 8)) {
+    try {
+      const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+      const job = parseStudioProductionJob(record);
+      const step = String(job?.step || "").trim();
+      if (step === "done" || step === "blocked") continue;
+      const updated = Date.parse(String(job?.updated_at || ""));
+      const stale = !job?.job_id || !Number.isFinite(updated) || (now - updated) >= staleAfter;
+      if (!stale) continue;
+      const { payload } = await item4PulseStudioProduceJob(env, requestId, { resume: true });
+      pulses.push({
+        key: "STUDIO_PRODUCE",
+        request: requestId,
+        resumed: true,
+        step: payload?.job?.step || step || "themes",
+      });
+    } catch (error) {
+      pulses.push({
+        key: "STUDIO_PRODUCE",
+        request: requestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (pulses.length) console.log("Studio produce watchdog", JSON.stringify({ count: pulses.length, pulses }));
+  return pulses;
+}
+
 async function item4PulsePipelineStage(env, stagePath, body = {}, stageKey = null) {
   const key = stageKey || String(stagePath || "").split("/")[0].trim().toUpperCase();
   const { runnerUrl } = pipelineStageBackend(env, key);
@@ -5732,6 +5879,7 @@ function mapProductionRequest(record, ideaTitle = null) {
     studio_publish_batch_id: f(record, "Studio_Publish_Batch_ID") || null,
     studio_publish_requested_at: f(record, "Studio_Publish_Requested_At") || null,
     studio_publish_status: item4ParseJson(f(record, "Studio_Publish_Status_JSON"), null),
+    studio_production_job: parseStudioProductionJob(record),
   };
 }
 
@@ -9010,7 +9158,12 @@ async function listOutputs(request, env, url, authorization) {
   for (const record of records) {
     healed.push(await phase6RestoreProductionReviewReady(env, record));
   }
-  return respond(request, env, { ok: true, records: healed.map(mapOutput), profile: mapStudioContentProfile(profile) });
+  const jobs = await loadStudioProductionJobsForOutputs(env, healed);
+  return respond(request, env, {
+    ok: true,
+    records: healed.map((record) => mapOutput(record, jobs.get(studioFirstLinkedId(f(record, "Production_Request"))))),
+    profile: mapStudioContentProfile(profile),
+  });
 }
 
 async function listMusic(request, env, url) {
@@ -12970,14 +13123,15 @@ function cadenceScheduleSync(ctx, env, options = {}) {
   return run;
 }
 
-function continueParkedProductionAfterPromote(ctx, env) {
+function continueParkedProductionAfterPromote(ctx, env, requestId = null) {
   const run = (async () => {
-    await syncProductionCadence(env, { startCarousel: true }).catch((error) => {
+    await syncProductionCadence(env, { startCarousel: true, skipRenderPulse: true }).catch((error) => {
       console.warn("promote cadence start failed", error);
     });
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-    try { await advanceStudioProductionOutputs(env); } catch (error) {
-      console.warn("promote follow-up continuation failed", error);
+    if (requestId) {
+      try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
+        console.warn("studio produce enqueue failed", requestId, error);
+      }
     }
   })();
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
@@ -13804,8 +13958,7 @@ async function advanceStudioProductionOutputs(env, options = {}) {
 }
 
 async function pulseOnDemandRenderChain(env, options = {}) {
-  const result = await advanceStudioProductionOutputs(env, options);
-  return Array.isArray(result?.pulses) ? result.pulses : [];
+  return resumeStaleStudioProductionJobs(env, options);
 }
 
 async function pulseOnDemandPublishChain(env) {
@@ -14015,8 +14168,12 @@ async function handleR5DoneCallback(request, env, ctx) {
     try { await pulseOnDemandM1(env); } catch (error) {
       console.error("M1 r5-done pulse failed", error);
     }
-    try { await advanceStudioProductionOutputs(env, { waitMs: 8000 }); } catch (error) {
-      console.error("continuation r5-done failed", error);
+    try {
+      const requestId = studioFirstLinkedId(f(eligible[0] || {}, "Production_Request"));
+      if (requestId) await item4PulseStudioProduceJob(env, requestId, { resume: true });
+      else await resumeStaleStudioProductionJobs(env);
+    } catch (error) {
+      console.error("studio produce r5-done resume failed", error);
     }
   })();
   if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
@@ -16408,7 +16565,11 @@ async function getOutputRoute(request, env, url) {
   const id = decodeURIComponent(url.pathname.split("/").pop() || "");
   if (!/^rec[A-Za-z0-9]+$/.test(id)) throw new HttpError(400, "Invalid Airtable record ID");
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
-  return respond(request, env, { ok: true, record: mapOutput(record) });
+  const jobs = await loadStudioProductionJobsForOutputs(env, [record]);
+  return respond(request, env, {
+    ok: true,
+    record: mapOutput(record, jobs.get(studioFirstLinkedId(f(record, "Production_Request")))),
+  });
 }
 
 async function dashboard(request, env, url, authorization) {
@@ -16416,7 +16577,9 @@ async function dashboard(request, env, url, authorization) {
   const formula = contentProfileFilterFormula(profile);
   const ideas = (await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date", filterFormula: formula })).map(mapIdea);
   const content = (await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula })).map(mapContent);
-  const mappedOutputs = (await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula })).map(mapOutput);
+  const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula });
+  const outputJobs = await loadStudioProductionJobsForOutputs(env, outputRows);
+  const mappedOutputs = outputRows.map((row) => mapOutput(row, outputJobs.get(studioFirstLinkedId(f(row, "Production_Request")))));
   const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
   const published = mappedOutputs.filter((o) => o.studio_state === "Published").length;
   const attention = mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length;

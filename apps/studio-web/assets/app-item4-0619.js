@@ -109,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.132-promote-to-pipeline";
+  const BUILD_ID = "item4-0.6.134-studio-produce-job";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -458,7 +458,15 @@
 
   function pipelineStudioStateLabel(record) {
     if (pipelineIsRetryingRender(record)) return "Trying Again";
-    return String(record?.studio_state || "").trim();
+    const job = record?.studio_production_job;
+    const step = String(job?.step || "").trim();
+    if (step === "blocked") return "Blocked";
+    const label = String(record?.studio_job_label || "").trim();
+    const state = String(record?.studio_state || "").trim();
+    if (label && ["Queued", "In Production", "Preparing Assets", "Rendering", ""].includes(state)) {
+      return label;
+    }
+    return state;
   }
 
   function pipelineRenderLabel(record) {
@@ -6718,6 +6726,7 @@
     "Open review": "Open this output to watch the render or review the still, see the photo package, and read the caption.",
     "Open editor": "Open the Phase 6 creative review editor for this output.",
     "Not ready yet": "This output does not have a rendered file or photo package to review yet.",
+    "Blocked": "Production stopped on this request. The job error is shown on the output row.",
   };
 
   const PRODUCTION_CONTROL_HELP = {
@@ -8026,7 +8035,7 @@
     if (key === "output") return String(record.output_id || "");
     if (key === "platform") return String(record.platform || "");
     if (key === "type") return `${record.platform_output_type || record.format || ""} ${record.aspect_ratio || ""}`.trim();
-    if (key === "state") return String(record.studio_state || "");
+    if (key === "state") return String(pipelineStudioStateLabel(record) || record.studio_state || "");
     if (key === "render") return String(record.render_status || "");
     if (key === "review") return String(record.review_status || "");
     if (key === "publish") return String(record.platform_publish_status || record.publish_status || "");
@@ -8085,7 +8094,10 @@
       const timing = studioOutputTimingLabel(r);
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
       const canOpen = Boolean(r.creative_available);
-      const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"}>${canOpen ? "Open review" : "Not ready yet"}</button></td>` : "";
+      const blocked = String(r.studio_production_job?.step || "") === "blocked" || Boolean(r.studio_job_error);
+      const notReadyLabel = blocked ? "Blocked" : "Not ready yet";
+      const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
+      const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button></td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
       return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;

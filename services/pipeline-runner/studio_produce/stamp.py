@@ -1,0 +1,356 @@
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, Any
+
+from studio_produce.constants import PLATFORM_OUTPUTS_TABLE
+from render.fields import field, field_str
+from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
+from studio_produce.context import expected_photo_count, master_assets, variant_manifest
+from studio_produce.job import parse_json
+
+if TYPE_CHECKING:
+    from airtable.client import AirtableClient
+
+
+STORY_TEASER_SECONDS = 5
+SINGLE_STILL_SECONDS = 5
+
+
+def is_native_photo(platform: str, output_type: str, mapping: str = "") -> bool:
+    platform = str(platform or "").strip()
+    output_type = str(output_type or "").strip()
+    mapping = str(mapping or "").strip()
+    if output_type in STORY_OUTPUT_TYPES:
+        return False
+    if platform == "TikTok" and output_type in {"Multi-Photo", "Single Photo", *NATIVE_OUTPUT_TYPES}:
+        return output_type in {"Multi-Photo", "Single Photo"} or mapping == "TikTok Slideshow"
+    if platform == "Instagram" and (
+        output_type in {"Carousel", "Single Image", "Instagram Feed Post", *NATIVE_OUTPUT_TYPES}
+        or mapping in {"Instagram Carousel", "Instagram Feed Post"}
+    ):
+        return output_type != "Reel" and output_type not in STORY_OUTPUT_TYPES
+    if platform == "Facebook" and (
+        output_type in {"Multi-Image Post", "Single Image", "Facebook Post", *NATIVE_OUTPUT_TYPES}
+        or mapping in {"Facebook Photo Set", "Facebook Post"}
+    ):
+        return output_type != "Slideshow Reel" and output_type not in STORY_OUTPUT_TYPES
+    return output_type in NATIVE_OUTPUT_TYPES
+
+
+def plan_item_for_output(request: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    plan = parse_json(field(request, "Studio_Output_Plan_JSON"), {}) or {}
+    platform = field_str(output, "Platform")
+    output_type = field_str(output, "Studio_Output_Type") or field_str(output, "Output_Type")
+    key = f"{platform}::{output_type}"
+    for item in plan.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        if f"{item.get('platform') or ''}::{item.get('output_type') or ''}" == key:
+            return item
+    return {}
+
+
+def directive_yes(value: Any) -> bool:
+    return str(value or "").strip() != "No"
+
+
+def output_effective(output: dict[str, Any], request: dict[str, Any], parent: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        "platform": field_str(output, "Platform"),
+        "output_type": field_str(output, "Studio_Output_Type") or field_str(output, "Output_Type"),
+        "voiceover_mode": field_str(output, "Studio_Effective_Voiceover_Mode") or field_str(request, "Voiceover_Mode") or "Yes",
+        "thumbnail_mode": field_str(output, "Studio_Effective_Thumbnail_Mode") or field_str(request, "Thumbnail_Mode") or "Yes",
+        "background_music_mode": field_str(output, "Studio_Effective_Background_Music_Mode") or field_str(request, "Background_Music_Mode") or "Yes",
+        "video_duration_seconds": field(output, "Studio_Effective_Video_Duration_Seconds") or field(request, "Video_Duration_Seconds") or 0,
+        "requested_title": field_str(output, "Studio_Effective_Requested_Title") or field_str(request, "Requested_Title") or field_str(parent or {}, "Content_Title"),
+        "requested_caption": field_str(output, "Studio_Effective_Requested_Caption") or field_str(request, "Requested_Caption") or field_str(parent or {}, "Caption"),
+        "music_url": field_str(output, "Music_URL") or field_str(output, "Preferred_Music_URL") or field_str(parent or {}, "Selected_Music_URL"),
+    }
+
+
+def duration_seconds(*, story: bool, clip_count: int, effective: dict[str, Any], request: dict[str, Any]) -> float:
+    override = field(request, "Video_Duration_Seconds_Override")
+    try:
+        if override and float(override) > 0:
+            return float(override)
+    except (TypeError, ValueError):
+        pass
+    if story:
+        return SINGLE_STILL_SECONDS if clip_count <= 1 else min(15, clip_count * SINGLE_STILL_SECONDS)
+    stored = effective.get("video_duration_seconds") or field(request, "Video_Duration_Seconds") or 0
+    try:
+        stored_n = float(stored)
+    except (TypeError, ValueError):
+        stored_n = 0
+    if stored_n > 0 and stored_n != 30:
+        return stored_n
+    if clip_count <= 1:
+        return SINGLE_STILL_SECONDS
+    return min(30, max(clip_count * 3, 9))
+
+
+def overlay_from_caption(text: str, *, tiktok_916: bool = False) -> dict[str, Any] | None:
+    overlay_text = str(text or "").strip()
+    if not overlay_text:
+        return None
+    return {
+        "enabled": True,
+        "text": overlay_text,
+        "role": "caption",
+        "position": "lower-third" if tiktok_916 else "bottom",
+        "size": 52,
+        "stylePreset": "Lower Third / Minimal",
+        "animation": "fade",
+        "startFraction": 0,
+        "endFraction": 1,
+        "backgroundOpacity": 0.4,
+    }
+
+
+def pick_variant(source: dict[str, Any], ratio: str) -> dict[str, Any] | None:
+    variants = source.get("variants") if isinstance(source.get("variants"), dict) else {}
+    wanted = str(ratio or "").replace("x", ":")
+    aliases = {
+        "9:16": ["9:16", "9x16"],
+        "16:9": ["16:9", "16x9"],
+        "4:5": ["4:5", "4x5"],
+        "1:1": ["1:1", "1x1"],
+    }
+    for key in aliases.get(wanted, [wanted]):
+        variant = variants.get(key)
+        if _renderable(variant):
+            return variant
+        for existing, item in variants.items():
+            if str(existing).replace("x", ":") == wanted and _renderable(item):
+                return item
+    for item in variants.values():
+        if _renderable(item):
+            return item
+    return None
+
+
+def _renderable(variant: Any) -> bool:
+    if not isinstance(variant, dict):
+        return False
+    url = str(variant.get("preview_url") or "").strip()
+    media_id = str(variant.get("media_asset_record_id") or "").strip()
+    return bool(url) and media_id.startswith("rec")
+
+
+def source_package(
+    request: dict[str, Any],
+    output: dict[str, Any],
+    parent: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if field_str(request, "Studio_Variant_Status") != "Ready":
+        return None
+    effective = output_effective(output, request, parent)
+    plan_item = plan_item_for_output(request, output)
+    ratio = str(plan_item.get("aspect_ratio") or field_str(output, "Aspect_Ratio") or "9:16").strip()
+    if not ratio:
+        return None
+    masters = master_assets(request)
+    expected = expected_photo_count(request, masters)
+    if masters and len(masters) < expected:
+        return None
+    manifest = variant_manifest(request)
+    sources = [item for item in (manifest.get("assets") or []) if isinstance(item, dict)]
+    sources.sort(key=lambda item: int(item.get("order") or 0))
+    story = effective["output_type"] in STORY_OUTPUT_TYPES
+    if story:
+        sources = sources[:1]
+    elif expected and len(sources) < expected:
+        return None
+    captions = {
+        str(asset.get("id") or ""): str(asset.get("caption") or "").strip()
+        for asset in masters
+        if str(asset.get("caption") or "").strip()
+    }
+    clips = []
+    omitted = []
+    for source in sources:
+        variant = pick_variant(source, ratio)
+        url = str((variant or {}).get("preview_url") or "").strip()
+        media_id = str((variant or {}).get("media_asset_record_id") or "").strip()
+        if not url or not media_id.startswith("rec"):
+            omitted.append(str(source.get("id") or source.get("name") or "unknown"))
+            continue
+        overlay_text = captions.get(str(source.get("id") or "")) or str(source.get("caption") or "").strip()
+        overlay = overlay_from_caption(
+            overlay_text,
+            tiktok_916=effective["platform"] == "TikTok" and ratio == "9:16",
+        )
+        clips.append({
+            "source": source,
+            "variant": variant,
+            "url": url,
+            "media_asset_id": media_id,
+            "drive_id": str((variant or {}).get("google_drive_file_id") or "").strip(),
+            "overlay": overlay,
+        })
+    if omitted or not clips:
+        return None
+    seconds = duration_seconds(story=story, clip_count=len(clips), effective=effective, request=request)
+    fps = 30
+    total_frames = max(len(clips), round(seconds * fps))
+    base = total_frames // len(clips)
+    remainder = total_frames - (base * len(clips))
+    start = 0
+    built = []
+    for index, item in enumerate(clips):
+        frames = base + (1 if remainder > 0 else 0)
+        if remainder > 0:
+            remainder -= 1
+        overlay = item["overlay"]
+        built.append({
+            "id": f"studio-source-{index + 1}",
+            "order": int((item["source"] or {}).get("order") or index + 1),
+            "media_asset_record_id": item["media_asset_id"],
+            "source_asset_id": str((item["source"] or {}).get("id") or "") or None,
+            "asset_name": str((item["variant"] or {}).get("file_name") or (item["source"] or {}).get("name") or f"photo-{index + 1}.jpg"),
+            "google_drive_url": str((item["variant"] or {}).get("google_drive_url") or "").strip() or None,
+            "url": item["url"],
+            "src": item["url"],
+            "startFrame": start,
+            "durationFrames": frames,
+            "motionStyle": "slowZoom" if story else "stillPhoto",
+            "source": "studio_platform_variant",
+            "aspect_ratio": ratio,
+            "google_drive_file_id": item["drive_id"] or None,
+            "overlay": overlay or None,
+            "caption": (overlay or {}).get("text") or "",
+        })
+        start += frames
+    native = is_native_photo(effective["platform"], effective["output_type"], field_str(output, "Platform_Output_Type"))
+    composition_id = None if native else "ChicagoShiningPhotoSequence"
+    safe_type = "".join(ch if ch.isalnum() else "-" for ch in effective["output_type"].lower()).strip("-") or "output"
+    filename = f"studio-{field_str(request, 'Production_Request_ID') or request['id']}-{effective['platform'].lower()}-{safe_type}.mp4"
+    clip_list = [
+        {
+            "id": clip["id"],
+            "order": clip["order"],
+            "mediaAssetRecordId": clip["media_asset_record_id"],
+            "assetName": clip["asset_name"],
+            "url": clip["url"],
+            "src": clip["src"],
+            "startFrame": clip["startFrame"],
+            "durationFrames": clip["durationFrames"],
+            "motionStyle": clip["motionStyle"],
+            "overlay": clip.get("overlay") or None,
+            "caption": clip.get("caption") or "",
+        }
+        for clip in built
+    ]
+    selected = {
+        "schema_version": "studio.source-selection.2",
+        "authority": "studio_owner_uploaded_exact_source",
+        "production_request_record_id": request["id"],
+        "platform": effective["platform"],
+        "output_type": effective["output_type"],
+        "aspect_ratio": ratio,
+        "selection_status": "Selected",
+        "selected_clips": built,
+        "fps": fps,
+        "target_total_frames": total_frames,
+        "render_prep": {
+            "render_status": "Native Photo Route" if native else "Ready for Render",
+            "composition_id": composition_id,
+            "output_filename": filename,
+            "render_total_frames": total_frames,
+            "render_clip_list_json": json.dumps(clip_list),
+        },
+    }
+    return {
+        "status": "Ready",
+        "ratio": ratio,
+        "clips": built,
+        "clip_count": len(built),
+        "total_frames": total_frames,
+        "composition_id": composition_id,
+        "output_filename": filename if composition_id else None,
+        "selected_assets_json": json.dumps(selected),
+        "render_clip_list_json": json.dumps(clip_list),
+        "native": native,
+        "story": story,
+        "effective": effective,
+    }
+
+
+def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict[str, Any]:
+    clips = package.get("clips") or []
+    per = int(package["total_frames"] / package["clip_count"]) if package.get("clip_count") else 0
+    native = bool(package.get("native"))
+    thumb = field_str(parent or {}, "Thumbnail_URL")
+    fields = {
+        "Asset_Need_Status": "Not Needed",
+        "Selected_Clip_1_URL": clips[0]["url"] if len(clips) > 0 else None,
+        "Selected_Clip_2_URL": clips[1]["url"] if len(clips) > 1 else None,
+        "Selected_Clip_3_URL": clips[2]["url"] if len(clips) > 2 else None,
+        "Clip_1_URL": clips[0]["url"] if len(clips) > 0 else None,
+        "Clip_2_URL": clips[1]["url"] if len(clips) > 1 else None,
+        "Clip_3_URL": clips[2]["url"] if len(clips) > 2 else None,
+        "Selected_Clip_1_Media_Asset_ID": clips[0]["media_asset_record_id"] if len(clips) > 0 else None,
+        "Selected_Clip_2_Media_Asset_ID": clips[1]["media_asset_record_id"] if len(clips) > 1 else None,
+        "Selected_Clip_3_Media_Asset_ID": clips[2]["media_asset_record_id"] if len(clips) > 2 else None,
+        "Selected_Clip_Count": package.get("clip_count") or 0,
+        "Selected_Assets_JSON": package.get("selected_assets_json"),
+        "Render_Clip_List_JSON": package.get("render_clip_list_json"),
+        "Render_Total_Frames": package.get("total_frames") or 0,
+        "Clip_1_Duration_Frames": per if clips else 0,
+        "Clip_2_Duration_Frames": per if len(clips) > 1 else 0,
+        "Clip_3_Duration_Frames": per if len(clips) > 2 else 0,
+        "Voiceover_URL": field_str(parent or {}, "Voiceover_URL") or None if (
+            directive_yes(package.get("effective", {}).get("voiceover_mode")) and not package.get("story")
+        ) else None,
+        "Music_URL": package.get("effective", {}).get("music_url") or None,
+        "Preferred_Music_URL": package.get("effective", {}).get("music_url") or None,
+        "Music_Volume": 0.24 if package.get("effective", {}).get("music_url") else 0,
+    }
+    if thumb:
+        fields["Thumbnail_URL"] = thumb
+    if native:
+        fields.update({
+            "Output_Status": "Ready for Review",
+            "Render_Status": "Native Photo Route",
+            "Asset_Selection_Status": None,
+            "Studio_Preview_URL": clips[0]["url"] if clips else None,
+            "Composition_ID": None,
+            "Output_Filename": None,
+        })
+    else:
+        fields.update({
+            "Output_Status": "In Production",
+            "Render_Status": "Ready for Render",
+            "Asset_Selection_Status": "Selected",
+            "Composition_ID": "ChicagoShiningPhotoSequence",
+            "Output_Filename": package.get("output_filename"),
+            "Review_Status": None,
+            "Review_Email_Sent_At": None,
+            "Studio_Preview_URL": None,
+        })
+    return fields
+
+
+def stamp_outputs(
+    client: AirtableClient,
+    request: dict[str, Any],
+    outputs: list[dict[str, Any]],
+    parent: dict[str, Any] | None,
+) -> dict[str, Any]:
+    stamped = 0
+    missing = []
+    for output in outputs:
+        status = field_str(output, "Output_Status")
+        if status in {"Ready for Review", "Approved for Publishing", "Published"} and (
+            field_str(output, "Final_File_URL") or field_str(output, "Studio_Preview_URL") or field_str(output, "Render_Status") == "Native Photo Route"
+        ):
+            stamped += 1
+            continue
+        package = source_package(request, output, parent)
+        if not package:
+            missing.append(output["id"])
+            continue
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], stamp_fields(package, parent), typecast=True)
+        stamped += 1
+    return {"stamped": stamped, "missing": missing, "total": len(outputs)}

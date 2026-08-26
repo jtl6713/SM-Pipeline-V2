@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 from config import StageRequest, load_settings
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
+from studio_produce.processor import resume_job, start_job
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
@@ -252,6 +253,65 @@ def run_smv1_drain():
     status_code = 422 if result.status == "error" else 200
     logger.info("stage=smv1-drain status=%s message=%s", result.status, result.message)
     return jsonify(result.to_dict()), status_code
+
+
+def _studio_produce_body() -> tuple[str, bool]:
+    payload = request.get_json(silent=True) or {}
+    record_id = str(
+        payload.get("production_request_record_id")
+        or payload.get("record_id")
+        or ""
+    ).strip()
+    resume = bool(payload.get("resume"))
+    return record_id, resume
+
+
+@app.post("/jobs/studio-produce")
+def run_studio_produce():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    record_id, resume = _studio_produce_body()
+    if not record_id:
+        return jsonify({"error": "production_request_record_id is required"}), 422
+    try:
+        result = start_job(record_id, resume=resume)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-produce start failed")
+        return jsonify({"error": str(exc)}), 500
+    logger.info(
+        "job=studio-produce accepted=%s request=%s step=%s",
+        result.get("accepted"),
+        record_id,
+        (result.get("job") or {}).get("step"),
+    )
+    return jsonify({"ok": True, **result}), 202
+
+
+@app.post("/jobs/studio-produce/resume")
+def run_studio_produce_resume():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    record_id, _ = _studio_produce_body()
+    if not record_id:
+        return jsonify({"error": "production_request_record_id is required"}), 422
+    try:
+        result = resume_job(record_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-produce resume failed")
+        return jsonify({"error": str(exc)}), 500
+    logger.info(
+        "job=studio-produce-resume accepted=%s request=%s step=%s",
+        result.get("accepted"),
+        record_id,
+        (result.get("job") or {}).get("step"),
+    )
+    return jsonify({"ok": True, **result}), 202
 
 
 def main() -> None:
