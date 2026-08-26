@@ -449,6 +449,17 @@
  <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty">Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them.</div></div>
  </div>
 
+ <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
+ <div class="form-message" id="productionPromotionCompatibility">
+              Photos, platforms, and crops need to be ready before you approve.
+ </div>
+ <div class="request-actions production-studio-actions">
+ <button type="button" class="secondary-button" id="closeProductionRequest">Close</button>
+ <button type="submit" class="secondary-button" id="saveProductionRequest">Save</button>
+ <button type="button" class="secondary-button" id="syncProductionRequestDirectives" hidden>Sync advanced directives</button>
+ <button type="button" class="primary-button" id="promoteProductionRequest">Approve</button>
+ </div>
+
  <details class="ez-advanced production-advanced" id="ezAdvancedOptions">
  <summary>More options</summary>
  <p class="ez-advanced-note">Extra outputs, structure, audio, wording, or notes. Facebook Slideshow Reel is opt-in here.</p>
@@ -774,17 +785,6 @@
  <label class="form-field"><textarea id="prProductionNotes" rows="5" maxlength="10000"></textarea></label>
  </div>
  </details>
-
- <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
- <div class="form-message" id="productionPromotionCompatibility">
-              Photos, platforms, and crops need to be ready before you approve.
- </div>
- <div class="request-actions production-studio-actions">
- <button type="button" class="secondary-button" id="closeProductionRequest">Close</button>
- <button type="submit" class="secondary-button" id="saveProductionRequest">Save</button>
- <button type="button" class="secondary-button" id="syncProductionRequestDirectives" hidden>Sync advanced directives</button>
- <button type="button" class="primary-button" id="promoteProductionRequest">Approve</button>
- </div>
  </form>
  </section>
 
