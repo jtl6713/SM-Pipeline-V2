@@ -1204,9 +1204,9 @@ html[data-studio-theme="nyc"]{
 }
 .main:has(#page-content.active){
   background:
-    radial-gradient(1200px 420px at 8% -8%, color-mix(in srgb, var(--gold) 16%, transparent), transparent 58%),
-    radial-gradient(900px 380px at 100% 0%, color-mix(in srgb, var(--teal) 12%, transparent), transparent 52%),
-    var(--bg);
+    radial-gradient(1200px 420px at 8% -8%, color-mix(in srgb, var(--gold) 22%, transparent), transparent 58%),
+    radial-gradient(900px 380px at 100% 0%, color-mix(in srgb, var(--teal) 16%, transparent), transparent 52%),
+    #f4efe6;
 }
 #page-content .production-page-heading{
   align-items:flex-end;
@@ -1248,7 +1248,7 @@ html[data-studio-theme="nyc"]{
   align-items:flex-end;
   justify-content:space-between;
   gap:20px;
-  padding:28px 30px 24px;
+  padding:22px 26px 20px;
   border:0;
   border-radius:28px;
   color:#eef4ff;
@@ -1274,16 +1274,7 @@ html[data-studio-theme="nyc"]{
   color:rgba(238,244,255,.78);
   font-size:.95rem;
 }
-#page-content .production-request-id{
-  display:inline-block;
-  margin-top:10px;
-  padding:4px 8px;
-  border-radius:999px;
-  background:rgba(255,255,255,.08);
-  color:rgba(238,244,255,.62);
-  font-size:.68rem;
-  letter-spacing:.04em;
-}
+#page-content .production-request-id{display:none!important}
 #page-content .production-studio-hero .badge{
   background:color-mix(in srgb, var(--gold) 22%, transparent);
   color:#fff7e0;
@@ -1501,17 +1492,24 @@ html[data-studio-theme="nyc"]{
 }
 #page-content .item4-thumb{aspect-ratio:4/5}
 #page-content .item4-asset-meta{padding:10px 12px 12px}
-#page-content .empty.compact-empty{
-  border:1px dashed var(--line);
-  border-radius:16px;
-  background:#fbfcfe;
+#page-content .empty.compact-empty,
+#page-content .production-empty{
+  border:0;
+  border-radius:18px;
+  background:color-mix(in srgb, var(--teal-soft) 35%, #fff);
   color:var(--muted);
-  padding:22px 16px;
+  padding:28px 18px;
+  display:grid;
+  gap:6px;
+  text-align:center;
+}
+#page-content .production-empty .subtle{
+  display:block;
 }
 
 #page-content .item4-platform-toggles{
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
   gap:10px;
   margin:0;
 }
@@ -1698,7 +1696,6 @@ html[data-studio-theme="nyc"]{
 }
 
 @media(max-width:980px){
-  #page-content .item4-platform-toggles{grid-template-columns:repeat(2,minmax(0,1fr))}
   .production-step-rail{grid-template-columns:1fr;padding:8px}
   .production-step-rail-item + .production-step-rail-item::before{display:none}
 }

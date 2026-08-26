@@ -5408,7 +5408,8 @@
     const requestId = $("productionRequestId");
     if (requestId) {
       requestId.textContent = record.production_request_id || "";
-      requestId.hidden = !record.production_request_id;
+      requestId.hidden = true;
+      if (record.production_request_id) requestId.setAttribute("title", record.production_request_id);
     }
     $("productionRequestStatus").textContent = record.status || "Draft";
     $("productionRequestStatus").className = `badge ${stateClass(record.status || "Draft")}`;
@@ -5952,11 +5953,11 @@
 
   async function loadProductionRequests() {
     const target = $("productionRequestList");
-    target.innerHTML = '<div class="empty">Loading production requests…</div>';
+    target.innerHTML = '<div class="empty production-empty"><strong>Loading drafts…</strong></div>';
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty"><strong>No drafts yet.</strong><br><span class="subtle">Start from Home, or open an idea and add photos.</span></div>';
+        target.innerHTML = '<div class="empty production-empty"><strong>No drafts yet.</strong><span class="subtle">Start from Home, or open an idea and add photos.</span></div>';
         return;
       }
       await ensureIdeasCache();
@@ -6198,11 +6199,11 @@
     }
     loadProductionRequests();
     const target = $("contentList");
-    target.innerHTML = '<div class="empty">Loading content items…</div>';
+    target.innerHTML = '<div class="empty production-empty"><strong>Loading the pipeline…</strong></div>';
     try {
       const { records = [] } = await api("/api/content?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty"><strong>No content items are currently in production.</strong><br><span class="subtle">Studio is connected; new promoted ideas will appear here as production begins.</span></div>';
+        target.innerHTML = '<div class="empty production-empty"><strong>Nothing in the pipeline yet.</strong><span class="subtle">Approved pieces will show up here when they start rendering.</span></div>';
         return;
       }
       renderContentItemsTable(target, records);
