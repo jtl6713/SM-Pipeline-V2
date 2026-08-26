@@ -70,6 +70,7 @@ public/frames/
 .DS_Store
 Thumbs.db
 .vscode/
+.vs/
 .idea/
 
 # Archives / backups
