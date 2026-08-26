@@ -1180,4 +1180,13 @@ html[data-studio-theme="nyc"]{
 .support-steps .text-button,.support-article .primary-button{justify-self:start;width:fit-content;margin-top:4px}
 @media(max-width:860px){.support-layout{grid-template-columns:1fr}.support-toc{position:static;flex-direction:row;flex-wrap:wrap}}
 
+.similar-heatmap{padding:0 20px 16px;overflow:auto}
+.similar-heatmap table{width:100%;border-collapse:collapse;font-size:.72rem}
+.similar-heatmap th,.similar-heatmap td{padding:5px 6px;text-align:center;border:1px solid var(--line);white-space:nowrap}
+.similar-heatmap td[data-heat="1"]{background:#e8f4f2}
+.similar-heatmap td[data-heat="2"]{background:#c5e0db}
+.similar-heatmap td[data-heat="3"]{background:#7fb8b0;color:#fff}
+.similar-heatmap td[data-heat="4"]{background:#2f6f68;color:#fff}
+.similar-heatmap-empty{padding:0 20px 12px;font-size:.86rem}
+
 

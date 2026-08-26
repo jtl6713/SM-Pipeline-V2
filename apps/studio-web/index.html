@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.130-dashboard-sorts">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.138-similar-times">
 </head>
 <body>
  <header class="topbar">
@@ -932,7 +932,11 @@
  <p class="subtle" id="operationsIntakeMeta"></p>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Similar accounts</h2><p>Chicago-first watchlist for public timing research. Instagram and YouTube can be timed from public posts. TikTok and Facebook groups are stored for reference. Suggested publish times never auto-apply; Now stays the default.</p></div></div>
+ <div class="panel-heading"><div><h2>Similar accounts</h2><p>Profile-scoped watchlist for public timing research. Instagram and YouTube are timed from public posts. TikTok and Facebook groups are stored for reference. Suggested publish times never auto-apply; Now stays the default.</p></div>
+ <button type="button" class="secondary-button" id="operationsRefreshSimilarTimes">Refresh similar times</button>
+ </div>
+ <p class="subtle" id="operationsSimilarTimesMeta">Similar-account timing loads with Operations.</p>
+ <div id="operationsSimilarHeatmap" class="similar-heatmap"></div>
  <form class="ops-inline-form" id="operationsWatchlistForm">
  <select id="operationsWatchlistPlatform"><option value="instagram">Instagram</option><option value="youtube">YouTube</option><option value="tiktok">TikTok</option><option value="facebook">Facebook</option></select>
  <input type="text" id="operationsWatchlistHandle" placeholder="handle" maxlength="80">
@@ -1294,9 +1298,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.133-tooltip-dedupe"></script>
+ <script src="/assets/config.js?v=0.6.138-similar-times"></script>
  <script src="/assets/ez-plan.js?v=0.6.125-tiktok-single-photo"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.136-finished-passthrough"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.136";</script>
+ <script src="/assets/app-item4-0619.js?v=0.6.138-similar-times"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.138";</script>
 </body>
 </html>

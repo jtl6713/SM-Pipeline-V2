@@ -50,6 +50,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsResetRenderUrls: "Repair stale Remotion render URLs on eligible failed/waiting records. Use this after the renderer URL or tunnel has changed.",
     operationsRetryAssetSelection: "Retry asset selection for outputs that previously failed at the asset-selection stage. It does not rerun healthy outputs.",
     operationsMakeAdminBridge: "Run the pending Make admin queue now. Use this only for commands intentionally placed in that queue.",
+    operationsRefreshSimilarTimes: "Look up public Instagram and YouTube post times for the current profile watchlist. Suggested times never auto-apply; Now stays the default.",
     operationsIdeaMeta: "Shows the current Daily Ideas timing/profile summary returned by the Operations API.",
     operationsIntakeMeta: "Shows the latest library-intake summary returned by the Operations API.",
     operationsIntakeProgress: "Live progress for the current library-intake run, including intake, video backfill, classification, and reconciliation stages."

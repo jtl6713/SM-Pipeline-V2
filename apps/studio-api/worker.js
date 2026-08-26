@@ -92,6 +92,7 @@ export default {
       const isOperationsMakeAdminBridgeWrite = isOperationsMakeAdminBridgeRoute && request.method === "POST";
       const isOperationsIntakeWrite = isOperationsIntakeRoute && request.method === "POST";
       const isInsightsWatchlistWrite = isInsightsWatchlistRoute && (request.method === "POST" || request.method === "PATCH");
+      const isInsightsSimilarTimesWrite = isInsightsSimilarTimesRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
@@ -130,6 +131,7 @@ export default {
         isOperationsMakeAdminBridgeWrite ||
         isOperationsIntakeWrite ||
         isInsightsWatchlistWrite ||
+        isInsightsSimilarTimesWrite ||
         (isInsightsBestTimesRoute && request.method === "GET") ||
         (isInsightsSimilarTimesRoute && request.method === "GET") ||
         (isInsightsWatchlistRoute && request.method === "GET") ||
@@ -158,10 +160,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.142-finished-passthrough",
+          version: "0.10.143-similar-times",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
+          studio_insights_similar_times_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -461,12 +464,15 @@ export default {
 
       if (isInsightsBestTimesRoute) {
         requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
-        return getInsightsBestTimes(request, env, url);
+        return getInsightsBestTimes(request, env, url, authorization);
       }
 
       if (isInsightsSimilarTimesRoute) {
         requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
-        return getInsightsSimilarTimes(request, env);
+        if (request.method === "GET") return getInsightsSimilarTimes(request, env, url, authorization, ctx);
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "tenant_admin");
+        return postInsightsSimilarTimesSweep(request, env, url, authorization);
       }
 
       if (isInsightsWatchlistRoute) {
@@ -797,6 +803,11 @@ export default {
         await studioSweepPublishedInsights(env, { limit: 8 });
       } catch (error) {
         console.warn("insights sweep cron failed", error);
+      }
+      try {
+        await studioSweepSimilarAccountTimes(env, { limit: 3 });
+      } catch (error) {
+        console.warn("similar-account times sweep cron failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -8603,38 +8614,56 @@ function studioSuggestedLocalDatetime(windows) {
 }
 
 const STUDIO_WATCHLIST_PLATFORMS = new Set(["instagram", "youtube", "tiktok", "facebook"]);
+const STUDIO_SIMILAR_TIMED_PLATFORMS = new Set(["instagram", "youtube"]);
+const STUDIO_SIMILAR_TIMES_SETTING = "SIMILAR_ACCOUNT_TIMES_CACHE";
+const STUDIO_SIMILAR_TIMES_TTL_MS = 24 * 60 * 60 * 1000;
+const STUDIO_SIMILAR_TIMES_MIN_SAMPLE = 8;
+const STUDIO_HEATMAP_DAYS = Object.freeze(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
 const STUDIO_CHICAGO_SIMILAR_SEED = Object.freeze([
-  { platform: "instagram", handle: "tatiana.pesotskaya", source: "joseph" },
-  { platform: "instagram", handle: "charmaine.sky", source: "joseph" },
-  { platform: "instagram", handle: "layne_ferd", source: "joseph" },
-  { platform: "instagram", handle: "chicagobydesi", source: "joseph" },
-  { platform: "instagram", handle: "chicago.explore", source: "joseph" },
-  { platform: "instagram", handle: "dronevixen", source: "joseph" },
-  { platform: "instagram", handle: "choosechicago", source: "joseph" },
-  { platform: "instagram", handle: "chicago", source: "joseph" },
-  { platform: "instagram", handle: "allfortheloveofchicago", source: "joseph" },
-  { platform: "instagram", handle: "the312watch", source: "joseph" },
-  { platform: "instagram", handle: "chictown_matt", source: "joseph" },
-  { platform: "instagram", handle: "bywellcarvalho", source: "joseph" },
-  { platform: "instagram", handle: "windy_citychicago", source: "joseph" },
-  { platform: "instagram", handle: "doorwaysofchicago", source: "research" },
-  { platform: "instagram", handle: "alanainwanderland", source: "research" },
-  { platform: "instagram", handle: "timeoutchicago", source: "research" },
-  { platform: "instagram", handle: "chicagoarchitecturecenter", source: "research" },
-  { platform: "youtube", handle: "ChooseChicago", source: "research" },
-  { platform: "youtube", handle: "TimeOutChicago", source: "research" },
-  { platform: "youtube", handle: "ChicagoArchitectureCenter", source: "research" },
-  { platform: "tiktok", handle: "chicago.mp4", source: "joseph" },
-  { platform: "tiktok", handle: "ChooseChicago", source: "joseph" },
-  { platform: "tiktok", handle: "Chicago.by.desi", source: "joseph" },
-  { platform: "tiktok", handle: "explorechicago", source: "joseph" },
-  { platform: "tiktok", handle: "anuchicago", source: "joseph" },
-  { platform: "tiktok", handle: "chibucketlist", source: "joseph" },
-  { platform: "tiktok", handle: "only_chicago", source: "joseph" },
-  { platform: "facebook", handle: "groups/1589897138463791", source: "joseph" },
-  { platform: "facebook", handle: "groups/951998221479788", source: "joseph" },
-  { platform: "facebook", handle: "chicagoepic", source: "joseph" },
+  { platform: "instagram", handle: "tatiana.pesotskaya", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "charmaine.sky", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "layne_ferd", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "chicagobydesi", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "chicago.explore", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "dronevixen", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "choosechicago", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "chicago", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "allfortheloveofchicago", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "the312watch", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "chictown_matt", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "bywellcarvalho", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "windy_citychicago", source: "joseph", profile: "chicago" },
+  { platform: "instagram", handle: "doorwaysofchicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "alanainwanderland", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "timeoutchicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "chicagoarchitecturecenter", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "ChooseChicago", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "TimeOutChicago", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "ChicagoArchitectureCenter", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "chicago.mp4", source: "joseph", profile: "chicago" },
+  { platform: "tiktok", handle: "ChooseChicago", source: "joseph", profile: "chicago" },
+  { platform: "tiktok", handle: "Chicago.by.desi", source: "joseph", profile: "chicago" },
+  { platform: "tiktok", handle: "explorechicago", source: "joseph", profile: "chicago" },
+  { platform: "tiktok", handle: "anuchicago", source: "joseph", profile: "chicago" },
+  { platform: "tiktok", handle: "chibucketlist", source: "joseph", profile: "chicago" },
+  { platform: "tiktok", handle: "only_chicago", source: "joseph", profile: "chicago" },
+  { platform: "facebook", handle: "groups/1589897138463791", source: "joseph", profile: "chicago" },
+  { platform: "facebook", handle: "groups/951998221479788", source: "joseph", profile: "chicago" },
+  { platform: "facebook", handle: "chicagoepic", source: "joseph", profile: "chicago" },
 ]);
+
+function studioNormalizeSimilarProfile(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "la" || raw === "los angeles" || raw === "losangeles") return "la";
+  if (raw === "nyc" || raw === "new york" || raw === "newyork") return "nyc";
+  return "chicago";
+}
+
+function studioSimilarProfileLabel(theme) {
+  if (theme === "la") return "Los Angeles";
+  if (theme === "nyc") return "New York";
+  return "Chicago";
+}
 
 function parseSimilarWatchlist(raw) {
   try {
@@ -8645,6 +8674,7 @@ function parseSimilarWatchlist(raw) {
         platform: String(row?.platform || "").trim().toLowerCase(),
         handle: String(row?.handle || row?.username || row?.url || "").trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?facebook\.com\//i, "").replace(/\/$/, ""),
         source: String(row?.source || "").trim() || null,
+        profile: studioNormalizeSimilarProfile(row?.profile || row?.theme || "chicago"),
       }))
       .filter((row) => row.handle && STUDIO_WATCHLIST_PLATFORMS.has(row.platform));
   } catch {
@@ -8652,11 +8682,86 @@ function parseSimilarWatchlist(raw) {
   }
 }
 
-async function getInsightsWatchlist(request, env) {
+function studioSimilarAccountKey(platform, handle) {
+  return `${String(platform || "").toLowerCase()}:${String(handle || "").toLowerCase()}`;
+}
+
+function parseSimilarTimesCache(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || "{}"));
+    const accounts = parsed?.accounts && typeof parsed.accounts === "object" ? parsed.accounts : {};
+    return { as_of: parsed?.as_of || null, accounts };
+  } catch {
+    return { as_of: null, accounts: {} };
+  }
+}
+
+function studioChicagoWeekdayHour(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    weekday: "short",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || "";
+  const weekday = get("weekday");
+  const hour = Number(get("hour"));
+  if (!STUDIO_HEATMAP_DAYS.includes(weekday) || !Number.isFinite(hour)) return null;
+  return { day: weekday, hour };
+}
+
+function studioHeatmapWindow(hour) {
+  const n = Number(hour);
+  if (!Number.isFinite(n)) return "00:00-06:00";
+  if (n < 6) return "00:00-06:00";
+  const start = n - (n % 2);
+  const end = (start + 2) % 24;
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${pad(start)}:00-${pad(end)}:00`;
+}
+
+function studioBuildSimilarHeatmap(posts) {
+  const map = new Map();
+  for (const post of posts || []) {
+    const parts = studioChicagoWeekdayHour(post.published_at);
+    if (!parts) continue;
+    const window = studioHeatmapWindow(parts.hour);
+    const key = `${parts.day}|${window}`;
+    const engagement = Number(post.likes || 0) + Number(post.views || 0);
+    const weight = 1 + Math.log1p(Math.max(0, engagement)) / 10;
+    const current = map.get(key) || { day: parts.day, window, posts: 0, score: 0, platforms: new Set() };
+    current.posts += 1;
+    current.score += weight;
+    if (post.platform) current.platforms.add(post.platform);
+    map.set(key, current);
+  }
+  const buckets = [...map.values()]
+    .map((row) => ({
+      day: row.day,
+      window: row.window,
+      posts: row.posts,
+      score: Math.round(row.score * 10) / 10,
+      platforms: [...row.platforms],
+    }))
+    .sort((a, b) => b.score - a.score || b.posts - a.posts || STUDIO_HEATMAP_DAYS.indexOf(a.day) - STUDIO_HEATMAP_DAYS.indexOf(b.day));
+  const top = buckets.slice(0, 3);
+  const suggested = top.length
+    ? {
+        days: [...new Set(top.map((row) => row.day))],
+        windows: [...new Set(top.map((row) => row.window))],
+        label: `Similar accounts · ${top[0].day} ${top[0].window}`,
+      }
+    : null;
+  return { buckets, suggested, sample_size: (posts || []).length };
+}
+
+async function studioEnsureSimilarWatchlist(env) {
   const row = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING);
   let accounts = parseSimilarWatchlist(f(row, "Setting_Value"));
   if (!accounts.length) {
-    accounts = STUDIO_CHICAGO_SIMILAR_SEED.map((row) => ({ ...row }));
+    accounts = STUDIO_CHICAGO_SIMILAR_SEED.map((item) => ({ ...item }));
     await studioUpsertSetting(
       env,
       STUDIO_SIMILAR_WATCHLIST_SETTING,
@@ -8664,6 +8769,89 @@ async function getInsightsWatchlist(request, env) {
       "Chicago similar-account watchlist. Joseph handles plus researched city/tourism peers. TikTok/Facebook stored for reference; official competitor sweeps use IG/YouTube only."
     );
   }
+  return accounts;
+}
+
+async function studioResolveSimilarTimesTheme(env, url, authorization) {
+  const raw = String(url?.searchParams?.get("profile") || url?.searchParams?.get("theme") || "").trim();
+  if (["chicago", "la", "nyc"].includes(raw.toLowerCase())) return raw.toLowerCase();
+  if (/^rec[A-Za-z0-9]+$/.test(raw) && authorization) {
+    const profiles = await resolveAuthorizedContentProfiles(env, authorization).catch(() => []);
+    const found = profiles.find((record) => record.id === raw);
+    if (found) return studioThemeForProfile(found);
+  }
+  return "chicago";
+}
+
+function studioTimedWatchlistAccounts(accounts, theme, platform) {
+  const wantedPlatform = String(platform || "").trim().toLowerCase();
+  return (accounts || []).filter((row) => {
+    if (!STUDIO_SIMILAR_TIMED_PLATFORMS.has(row.platform)) return false;
+    if (theme && (row.profile || "chicago") !== theme) return false;
+    if (wantedPlatform && row.platform !== wantedPlatform && !wantedPlatform.includes(row.platform)) return false;
+    return true;
+  });
+}
+
+function studioSimilarAccountStale(entry, now = Date.now()) {
+  if (!entry?.fetched_at) return true;
+  const ts = Date.parse(entry.fetched_at);
+  return !Number.isFinite(ts) || now - ts > STUDIO_SIMILAR_TIMES_TTL_MS;
+}
+
+function studioBuildSimilarTimesView({ accounts, cache, theme, platform }) {
+  const timed = studioTimedWatchlistAccounts(accounts, theme, platform);
+  const reference = (accounts || []).filter((row) => !STUDIO_SIMILAR_TIMED_PLATFORMS.has(row.platform) && (!theme || (row.profile || "chicago") === theme));
+  const posts = [];
+  const accountViews = timed.map((row) => {
+    const entry = cache?.accounts?.[studioSimilarAccountKey(row.platform, row.handle)] || {};
+    const rowPosts = Array.isArray(entry.posts) ? entry.posts : [];
+    for (const post of rowPosts) posts.push({ ...post, platform: row.platform });
+    return {
+      platform: row.platform,
+      handle: row.handle,
+      source: row.source,
+      profile: row.profile || theme,
+      status: entry.status || (entry.fetched_at ? "ok" : "pending"),
+      posts: rowPosts.length,
+      fetched_at: entry.fetched_at || null,
+      error: entry.error || null,
+    };
+  });
+  const heatmap = studioBuildSimilarHeatmap(posts);
+  const stale = timed.filter((row) => studioSimilarAccountStale(cache?.accounts?.[studioSimilarAccountKey(row.platform, row.handle)]));
+  const label = studioSimilarProfileLabel(theme);
+  let message;
+  if (!timed.length) {
+    message = `No Instagram or YouTube handles for ${label} yet. Add some on Operations. TikTok and Facebook stay reference-only.`;
+  } else if (!heatmap.sample_size) {
+    message = stale.length
+      ? `Watchlist saved for ${label}. Public Instagram and YouTube timing fills in after the next insights sweep.`
+      : `Public Instagram/YouTube lookup found no dated posts for the ${label} watchlist yet.`;
+  } else if (heatmap.sample_size < STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
+    message = `${heatmap.sample_size} similar-account posts so far for ${label}. Need ${STUDIO_SIMILAR_TIMES_MIN_SAMPLE} before this beats industry defaults.`;
+  } else {
+    message = `Similar-account timing for ${label} uses public Instagram and YouTube posts. Suggested times never auto-apply.`;
+  }
+  return {
+    timezone: "America/Chicago",
+    profile: theme,
+    profile_label: label,
+    source: heatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE ? "similar_accounts" : "insufficient",
+    sample_size: heatmap.sample_size,
+    accounts: accountViews,
+    reference_accounts: reference.map((row) => ({ platform: row.platform, handle: row.handle, source: row.source, profile: row.profile || theme })),
+    buckets: heatmap.buckets.slice(0, 16),
+    suggested: heatmap.suggested,
+    suggested_iso: heatmap.suggested ? studioSuggestedLocalDatetime(heatmap.suggested.windows) : null,
+    as_of: cache?.as_of || null,
+    remaining_to_sweep: stale.length,
+    message,
+  };
+}
+
+async function getInsightsWatchlist(request, env) {
+  const accounts = await studioEnsureSimilarWatchlist(env);
   return respond(request, env, {
     ok: true,
     accounts,
@@ -8686,7 +8874,16 @@ async function putInsightsWatchlist(request, env) {
   return respond(request, env, { ok: true, accounts });
 }
 
-async function getInsightsBestTimes(request, env, url) {
+async function studioLoadSimilarTimesView(env, url, authorization) {
+  const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
+  const platform = String(url?.searchParams?.get("platform") || "").trim().toLowerCase();
+  const accounts = await studioEnsureSimilarWatchlist(env);
+  const cacheRow = await studioSettingsByName(env, STUDIO_SIMILAR_TIMES_SETTING).catch(() => null);
+  const cache = parseSimilarTimesCache(f(cacheRow, "Setting_Value"));
+  return studioBuildSimilarTimesView({ accounts, cache, theme, platform });
+}
+
+async function getInsightsBestTimes(request, env, url, authorization) {
   const platform = String(url.searchParams.get("platform") || "").trim();
   const outputType = String(url.searchParams.get("output_type") || "").trim();
   const industry = studioIndustryBestWindows(platform, outputType);
@@ -8714,31 +8911,72 @@ async function getInsightsBestTimes(request, env, url) {
     console.warn("best-times first-party read failed", error);
   }
   const sample = firstParty.filter((row) => row.views > 0 || row.likes > 0);
+  let similar = null;
+  try {
+    similar = await studioLoadSimilarTimesView(env, url, authorization);
+  } catch (error) {
+    console.warn("best-times similar read failed", error);
+  }
+  const useFirstParty = sample.length >= 8;
+  const useSimilar = !useFirstParty && similar?.source === "similar_accounts" && similar.suggested;
   return respond(request, env, {
     ok: true,
     timezone: "America/Chicago",
     platform,
     output_type: outputType,
-    source: sample.length >= 8 ? "first_party" : "industry_default",
+    source: useFirstParty ? "first_party" : useSimilar ? "similar_accounts" : "industry_default",
     sample_size: sample.length,
-    suggested: industry,
-    suggested_iso: studioSuggestedLocalDatetime(industry.windows),
-    note: sample.length >= 8
+    suggested: useFirstParty ? industry : useSimilar ? similar.suggested : industry,
+    suggested_iso: studioSuggestedLocalDatetime((useFirstParty ? industry : useSimilar ? similar.suggested : industry).windows),
+    similar: similar?.suggested || null,
+    similar_sample_size: similar?.sample_size || 0,
+    similar_profile: similar?.profile || "chicago",
+    note: useFirstParty
       ? "Suggestion uses your published posts that already have insights."
-      : "Not enough first-party insight rows yet. Showing travel/city industry defaults in Chicago time.",
+      : useSimilar
+        ? `Suggestion uses public posts from similar ${similar.profile_label} accounts. Now stays selected unless you pick a time.`
+        : "Not enough first-party or similar-account posts yet. Showing travel/city industry defaults in Chicago time.",
   });
 }
 
-async function getInsightsSimilarTimes(request, env) {
-  const row = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING);
-  const accounts = parseSimilarWatchlist(f(row, "Setting_Value"));
+async function getInsightsSimilarTimes(request, env, url, authorization, ctx) {
+  const view = await studioLoadSimilarTimesView(env, url, authorization);
+  if (ctx && view.remaining_to_sweep) {
+    const asOf = view.as_of ? Date.parse(view.as_of) : 0;
+    const quiet = Number.isFinite(asOf) && Date.now() - asOf < 10 * 60 * 1000;
+    if (!quiet) {
+      ctx.waitUntil(studioSweepSimilarAccountTimes(env, { limit: 2, theme: view.profile }).catch((error) => {
+        console.warn("similar-times on-demand sweep failed", error);
+      }));
+    }
+  }
+  return respond(request, env, { ok: true, ...view });
+}
+
+async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const theme = payload.profile || payload.theme
+    ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
+    : await studioResolveSimilarTimesTheme(env, url, authorization);
+  const result = await studioSweepSimilarAccountTimes(env, {
+    limit: payload.limit,
+    force: Boolean(payload.force),
+    theme,
+  });
+  const accounts = await studioEnsureSimilarWatchlist(env);
+  const view = studioBuildSimilarTimesView({
+    accounts,
+    cache: result.cache,
+    theme,
+    platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
+  });
   return respond(request, env, {
     ok: true,
-    accounts,
-    buckets: [],
-    message: accounts.length
-      ? "Watchlist saved. Public Instagram and YouTube timing fills in after the next insights sweep. TikTok and Facebook groups are reference-only."
-      : "Add Instagram or YouTube handles to start. Similar-account times stay empty until you do.",
+    swept: result.scanned,
+    updated: result.updated,
+    remaining_to_sweep: result.remaining,
+    ...view,
   });
 }
 
@@ -8837,6 +9075,145 @@ async function studioFetchOutputInsights(platform, postId, creds) {
     };
   }
   return null;
+}
+
+function studioSanitizeIgHandle(handle) {
+  return String(handle || "").trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._]/g, "").slice(0, 30);
+}
+
+function studioSanitizeYtHandle(handle) {
+  return String(handle || "").trim().replace(/^@/, "").replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 50);
+}
+
+function studioTruncateInsightError(error) {
+  return String(error?.message || error || "Lookup failed").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+async function studioFetchInstagramBusinessDiscovery(handle, creds) {
+  const username = studioSanitizeIgHandle(handle);
+  if (!username) return { status: "error", error: "Instagram handle is empty.", posts: [] };
+  if (!creds.token || !creds.igUserId) return { status: "error", error: "Instagram Graph credentials are missing.", posts: [] };
+  const fields = `business_discovery.username(${username}){media.limit(20){timestamp,like_count,comments_count,media_type}}`;
+  const url = `https://graph.facebook.com/${creds.version}/${encodeURIComponent(creds.igUserId)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(creds.token)}`;
+  const response = await fetch(url);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body?.error) {
+    const code = Number(body?.error?.code || 0);
+    const unavailable = code === 110 || code === 100 || /business_discovery|does not exist|not found|not a business/i.test(String(body?.error?.message || ""));
+    return {
+      status: unavailable ? "unavailable" : "error",
+      error: studioTruncateInsightError(body?.error || { message: `Instagram lookup HTTP ${response.status}` }),
+      posts: [],
+    };
+  }
+  const media = body?.business_discovery?.media?.data || [];
+  const posts = media
+    .map((item) => ({
+      published_at: item.timestamp || null,
+      likes: Number(item.like_count || 0) || 0,
+      comments: Number(item.comments_count || 0) || 0,
+      media_type: item.media_type || null,
+    }))
+    .filter((item) => item.published_at);
+  return { status: posts.length ? "ok" : "unavailable", error: posts.length ? null : "No public dated posts.", posts };
+}
+
+async function studioFetchYoutubePublicUploads(handle, creds) {
+  const forHandle = studioSanitizeYtHandle(handle);
+  if (!forHandle) return { status: "error", error: "YouTube handle is empty.", posts: [] };
+  if (!creds.youtubeKey) return { status: "error", error: "YouTube API key is missing.", posts: [] };
+  const key = encodeURIComponent(creds.youtubeKey);
+  const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&forHandle=${encodeURIComponent(forHandle)}&key=${key}`;
+  let response = await fetch(channelUrl);
+  let body = await response.json().catch(() => ({}));
+  if (!body?.items?.length) {
+    response = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails&forUsername=${encodeURIComponent(forHandle)}&key=${key}`);
+    body = await response.json().catch(() => ({}));
+  }
+  const uploads = body?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+  if (!uploads) {
+    return { status: "unavailable", error: studioTruncateInsightError(body?.error || { message: "YouTube channel was not found." }), posts: [] };
+  }
+  const itemsResponse = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${encodeURIComponent(uploads)}&maxResults=20&key=${key}`);
+  const itemsBody = await itemsResponse.json().catch(() => ({}));
+  const items = itemsBody?.items || [];
+  const ids = items
+    .map((item) => item?.snippet?.resourceId?.videoId)
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!ids.length) return { status: "unavailable", error: "No public uploads.", posts: [] };
+  const statsResponse = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${ids.map(encodeURIComponent).join(",")}&key=${key}`);
+  const statsBody = await statsResponse.json().catch(() => ({}));
+  const posts = (statsBody?.items || [])
+    .map((item) => ({
+      published_at: item?.snippet?.publishedAt || null,
+      views: Number(item?.statistics?.viewCount || 0) || 0,
+      likes: Number(item?.statistics?.likeCount || 0) || 0,
+      comments: Number(item?.statistics?.commentCount || 0) || 0,
+    }))
+    .filter((item) => item.published_at);
+  return { status: posts.length ? "ok" : "unavailable", error: posts.length ? null : "No dated public uploads.", posts };
+}
+
+async function studioSweepSimilarAccountTimes(env, options = {}) {
+  const limit = Math.max(1, Math.min(6, Number(options.limit) || 3));
+  const force = Boolean(options.force);
+  const accounts = await studioEnsureSimilarWatchlist(env);
+  const timed = studioTimedWatchlistAccounts(accounts, options.theme || null);
+  const cacheRow = await studioSettingsByName(env, STUDIO_SIMILAR_TIMES_SETTING).catch(() => null);
+  const cache = parseSimilarTimesCache(f(cacheRow, "Setting_Value"));
+  const stale = timed.filter((row) => force || studioSimilarAccountStale(cache.accounts[studioSimilarAccountKey(row.platform, row.handle)]));
+  const batch = stale.slice(0, limit);
+  if (!batch.length) return { scanned: 0, updated: 0, remaining: 0, cache };
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+    "INSTAGRAM_BUSINESS_ACCOUNT_ID",
+    "YOUTUBE_API_KEY",
+  ]).catch(() => ({}));
+  const creds = {
+    token: settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN,
+    version: String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, ""),
+    igUserId: settings.INSTAGRAM_BUSINESS_ACCOUNT_ID || env.INSTAGRAM_BUSINESS_ACCOUNT_ID,
+    youtubeKey: settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
+  };
+  let updated = 0;
+  for (const account of batch) {
+    const key = studioSimilarAccountKey(account.platform, account.handle);
+    try {
+      const fetched = account.platform === "instagram"
+        ? await studioFetchInstagramBusinessDiscovery(account.handle, creds)
+        : await studioFetchYoutubePublicUploads(account.handle, creds);
+      cache.accounts[key] = {
+        platform: account.platform,
+        handle: account.handle,
+        profile: account.profile || "chicago",
+        status: fetched.status,
+        error: fetched.error || null,
+        fetched_at: new Date().toISOString(),
+        posts: fetched.posts || [],
+      };
+      if (fetched.status === "ok") updated += 1;
+    } catch (error) {
+      cache.accounts[key] = {
+        platform: account.platform,
+        handle: account.handle,
+        profile: account.profile || "chicago",
+        status: "error",
+        error: studioTruncateInsightError(error),
+        fetched_at: new Date().toISOString(),
+        posts: cache.accounts[key]?.posts || [],
+      };
+    }
+  }
+  cache.as_of = new Date().toISOString();
+  await studioUpsertSetting(
+    env,
+    STUDIO_SIMILAR_TIMES_SETTING,
+    JSON.stringify(cache),
+    "Cached public Instagram/YouTube post times for similar-account heatmaps. TikTok/Facebook are not swept."
+  );
+  return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache };
 }
 
 async function restoreParentContentItemFromStudioUmbrella(env, parentContentItem) {
@@ -20043,7 +20420,7 @@ async function getStudioOperations(request, env, authorization) {
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
   ]);
   const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
-  const watchlistRow = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING).catch(() => null);
+  const similarAccounts = await studioEnsureSimilarWatchlist(env).catch(() => []);
   return respond(request, env, {
     ok: true,
     page: "operations",
@@ -20060,7 +20437,7 @@ async function getStudioOperations(request, env, authorization) {
     oversized_media: oversized,
     a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
     library_intake: libraryIntake,
-    similar_accounts: parseSimilarWatchlist(f(watchlistRow, "Setting_Value")),
+    similar_accounts: similarAccounts,
   });
 }
 

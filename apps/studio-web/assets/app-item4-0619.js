@@ -109,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.137-finished-passthrough";
+  const BUILD_ID = "item4-0.6.138-similar-times";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -129,7 +129,7 @@
     if (!selectedProfileId) return path;
     const qIndex = String(path || "").indexOf("?");
     const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
-    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests"].includes(pathname)) return path;
+    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests", "/api/insights/best-times", "/api/insights/similar-times"].includes(pathname)) return path;
     const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1));
     params.set("profile", selectedProfileId);
     return `${pathname}?${params.toString()}`;
@@ -271,6 +271,25 @@
       setOperationsMessage(error.message || "Could not run the Make admin queue.", "error-text");
     }
   });
+  $("operationsRefreshSimilarTimes")?.addEventListener("click", async () => {
+    const button = $("operationsRefreshSimilarTimes");
+    try {
+      if (button) button.disabled = true;
+      setOperationsMessage("Refreshing public Instagram and YouTube times…");
+      const result = await api("/api/insights/similar-times", {
+        method: "POST",
+        body: JSON.stringify({ force: true, limit: 6, profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago" }),
+      });
+      renderOperationsSimilarTimes(result);
+      setOperationsMessage(result.remaining_to_sweep
+        ? `Swept ${result.swept || 0} account(s). ${result.remaining_to_sweep} still queued for the next refresh.`
+        : `Swept ${result.swept || 0} account(s).`);
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not refresh similar times.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
   $("operationsWatchlistForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const platform = String($("operationsWatchlistPlatform")?.value || "instagram").trim();
@@ -281,7 +300,8 @@
     }
     try {
       const current = await api("/api/insights/watchlist");
-      const accounts = [...(current.accounts || []), { platform, handle }];
+      const profile = studioProfiles.find((item) => item.id === selectedProfileId);
+      const accounts = [...(current.accounts || []), { platform, handle, profile: profile?.theme || "chicago" }];
       await api("/api/insights/watchlist", { method: "POST", body: JSON.stringify({ accounts }) });
       if ($("operationsWatchlistHandle")) $("operationsWatchlistHandle").value = "";
       setOperationsMessage("Handle added.");
@@ -7946,8 +7966,12 @@
     if (!hint) return;
     try {
       const data = await api(`/api/insights/best-times?platform=${encodeURIComponent(record?.platform || "")}&output_type=${encodeURIComponent(record?.platform_output_type || record?.studio_output_type || "")}`);
+      const sourceLabel = data.source === "first_party" ? "your posts" : data.source === "similar_accounts" ? "similar accounts" : "industry default";
+      const similarNote = data?.similar?.label && data.source !== "similar_accounts"
+        ? ` Similar accounts: ${data.similar.days.join(", ")} · ${data.similar.windows.join(" or ")}.`
+        : "";
       hint.textContent = data?.suggested?.label
-        ? `Suggested: ${data.suggested.days.join(", ")} · ${data.suggested.windows.join(" or ")} (${data.source === "first_party" ? "your posts" : "industry default"}). Now stays selected unless you pick a time.`
+        ? `Suggested: ${data.suggested.days.join(", ")} · ${data.suggested.windows.join(" or ")} (${sourceLabel}).${similarNote} Now stays selected unless you pick a time.`
         : "";
     } catch {
       hint.textContent = "";
@@ -8401,6 +8425,49 @@
     return [record?.output_title, record?.output_caption, record?.output_hashtags].filter(Boolean).join("\n\n");
   }
 
+  function similarHeatLevel(posts, maxPosts) {
+    if (!posts) return 0;
+    if (!maxPosts) return 1;
+    const ratio = posts / maxPosts;
+    if (ratio >= 0.75) return 4;
+    if (ratio >= 0.5) return 3;
+    if (ratio >= 0.25) return 2;
+    return 1;
+  }
+
+  function renderOperationsSimilarTimes(data) {
+    const meta = $("operationsSimilarTimesMeta");
+    const target = $("operationsSimilarHeatmap");
+    if (meta) {
+      const parts = [
+        data?.profile_label || "Chicago",
+        data?.sample_size ? `${data.sample_size} public posts` : "no public posts yet",
+        data?.suggested?.label || null,
+        data?.remaining_to_sweep ? `${data.remaining_to_sweep} still sweeping` : null,
+      ].filter(Boolean);
+      meta.textContent = data?.message || parts.join(" · ");
+    }
+    if (!target) return;
+    const buckets = data?.buckets || [];
+    if (!buckets.length) {
+      target.innerHTML = `<p class="similar-heatmap-empty">${escapeHtml(data?.message || "No similar-account times yet for this profile.")}</p>`;
+      return;
+    }
+    const windows = [...new Set(buckets.map((row) => row.window))].sort();
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const maxPosts = Math.max(...buckets.map((row) => Number(row.posts) || 0), 1);
+    const lookup = new Map(buckets.map((row) => [`${row.day}|${row.window}`, row]));
+    const body = days.map((day) => {
+      const cells = windows.map((window) => {
+        const row = lookup.get(`${day}|${window}`);
+        const posts = Number(row?.posts || 0);
+        return `<td data-heat="${similarHeatLevel(posts, maxPosts)}">${posts || "·"}</td>`;
+      }).join("");
+      return `<tr><th>${day}</th>${cells}</tr>`;
+    }).join("");
+    target.innerHTML = `<table><thead><tr><th></th>${windows.map((window) => `<th>${escapeHtml(window)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
   function renderOperationsWatchlist(accounts, canEdit) {
     const target = $("operationsWatchlist");
     const empty = $("operationsWatchlistEmpty");
@@ -8412,7 +8479,7 @@
     }
     target.innerHTML = accounts.map((account, index) => `
       <article class="ops-profile-card">
-        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle">${escapeHtml(account.platform)}${account.source ? ` · ${escapeHtml(account.source)}` : ""}</div></div>
+        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle">${escapeHtml(account.platform)}${account.profile ? ` · ${escapeHtml(account.profile)}` : ""}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(account.status)}` : ""}</div></div>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
       </article>
     `).join("");
@@ -8569,7 +8636,20 @@
         meta.textContent = `Today: ${today}. Last daily ideas run: ${lastRun}. Times shown in ${studioTimezoneLabel(tz)}.`;
       }
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
-      renderOperationsWatchlist(data.similar_accounts || [], Boolean(data.can_edit_profiles));
+      const watchlist = data.similar_accounts || [];
+      renderOperationsWatchlist(watchlist, Boolean(data.can_edit_profiles));
+      try {
+        const similar = await api(`/api/insights/similar-times?profile=${encodeURIComponent(selectedProfileId || "chicago")}`);
+        renderOperationsSimilarTimes(similar);
+        const statusByKey = new Map((similar.accounts || []).map((row) => [`${row.platform}:${String(row.handle || "").toLowerCase()}`, row]));
+        renderOperationsWatchlist(watchlist.map((row) => ({
+          ...row,
+          status: statusByKey.get(`${row.platform}:${String(row.handle || "").toLowerCase()}`)?.status
+            || (row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
+        })), Boolean(data.can_edit_profiles));
+      } catch (error) {
+        renderOperationsSimilarTimes({ message: error.message || "Could not load similar-account times." });
+      }
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
       renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");
       renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles));
@@ -8584,6 +8664,8 @@
       if (retryAssets) retryAssets.hidden = !data.can_edit_profiles;
       const makeAdmin = $("operationsMakeAdminBridge");
       if (makeAdmin) makeAdmin.hidden = !data.can_edit_profiles;
+      const refreshSimilar = $("operationsRefreshSimilarTimes");
+      if (refreshSimilar) refreshSimilar.hidden = !data.can_edit_profiles;
     } catch (error) {
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
       if (meta) meta.textContent = "Unable to load operations.";
