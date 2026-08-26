@@ -116,8 +116,31 @@ def _output_type(row: dict[str, Any]) -> str:
     return str(fields.get("Studio_Output_Type") or fields.get("Platform_Output_Type") or fields.get("Format") or "").strip()
 
 
+def request_notes(request_fields: dict[str, Any]) -> str:
+    return " ".join(
+        str(request_fields.get(name) or "")
+        for name in ("Production_Notes", "Production_Request_Notes", "Production_Config_Notes", "Output_Notes")
+    )
+
+
+def finished_origin_kind(request_fields: dict[str, Any]) -> str:
+    text = request_notes(request_fields).lower()
+    if "ez-input=finished-video" in text:
+        return "finished-video"
+    if "ez-input=finished-stills" in text or "ez-input=finished-carousel" in text:
+        return "finished-stills"
+    return ""
+
+
+def is_finished_route(route: str) -> bool:
+    return str(route or "").endswith(":passthrough") or str(route or "").startswith("finished-")
+
+
 def derive_route(request_fields: dict[str, Any], output_rows: list[dict[str, Any]] | None = None) -> str:
-    notes = str(request_fields.get("Production_Notes") or "")
+    notes = request_notes(request_fields)
+    finished = finished_origin_kind(request_fields)
+    if finished:
+        return f"{finished}:passthrough"
     mode = str(request_fields.get("Carousel_Image_Mode") or "").strip()
     assets = parse_json(request_fields.get("Studio_Master_Assets_JSON"), [])
     uploaded = [item for item in assets if isinstance(item, dict) and item.get("source") != "studio_ai"]

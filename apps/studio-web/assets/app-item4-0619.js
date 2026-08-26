@@ -109,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.135-approve-all-durable";
+  const BUILD_ID = "item4-0.6.137-finished-passthrough";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -269,6 +269,25 @@
       setOperationsMessage(result.message || "Make admin bridge started.");
     } catch (error) {
       setOperationsMessage(error.message || "Could not run the Make admin queue.", "error-text");
+    }
+  });
+  $("operationsWatchlistForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const platform = String($("operationsWatchlistPlatform")?.value || "instagram").trim();
+    const handle = String($("operationsWatchlistHandle")?.value || "").trim().replace(/^@/, "");
+    if (!handle) {
+      setOperationsMessage("Enter a handle. Instagram and YouTube are used for timing. TikTok and Facebook are stored for reference.", "error-text");
+      return;
+    }
+    try {
+      const current = await api("/api/insights/watchlist");
+      const accounts = [...(current.accounts || []), { platform, handle }];
+      await api("/api/insights/watchlist", { method: "POST", body: JSON.stringify({ accounts }) });
+      if ($("operationsWatchlistHandle")) $("operationsWatchlistHandle").value = "";
+      setOperationsMessage("Handle added.");
+      loadOperations(true);
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not add handle.", "error-text");
     }
   });
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
@@ -1555,6 +1574,13 @@
     return ezCaptionMode() === "manual";
   }
 
+  function item4IsFinishedRequest(record = activeProductionRequest) {
+    const kind = String(ezIntakeKind || "").trim();
+    if (kind === "finished-video" || kind === "finished-stills") return true;
+    const notes = String(record?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
+    return notes.includes("ez-input=finished-video") || notes.includes("ez-input=finished-stills") || notes.includes("ez-input=finished-carousel");
+  }
+
   function setPageContentSimple(on) {
     $("page-content")?.classList.toggle("page-content-simple", Boolean(on));
   }
@@ -1576,16 +1602,27 @@
   }
 
   function selectPrMediaKind(kind, { quiet = false } = {}) {
-    const nextKind = kind === "multiple-photos" ? "multiple-photos" : kind === "single-photo" ? "single-photo" : null;
+    const nextKind = ["multiple-photos", "single-photo", "finished-video", "finished-stills"].includes(kind) ? kind : null;
     ezIntakeKind = nextKind;
     document.querySelectorAll("[data-pr-input]").forEach((button) => {
       button.classList.toggle("selected", Boolean(nextKind) && button.dataset.prInput === nextKind);
     });
     const input = $("item4MediaInput");
-    if (input) input.multiple = nextKind === "multiple-photos";
+    if (input) {
+      input.multiple = nextKind === "multiple-photos" || nextKind === "finished-stills";
+      input.accept = nextKind === "finished-video"
+        ? "video/mp4,video/quicktime,video/webm,video/*,image/*"
+        : "image/*,.heic,.heif,image/heic,image/heif";
+    }
     const title = $("item4UploadTitle");
     const hint = $("item4UploadHint");
-    if (nextKind === "multiple-photos") {
+    if (nextKind === "finished-video") {
+      if (title) title.textContent = "Drop the finished video here or choose a file";
+      if (hint) hint.textContent = "One MP4 · skips production · review and schedule only";
+    } else if (nextKind === "finished-stills") {
+      if (title) title.textContent = "Drop finished photos here or choose files";
+      if (hint) hint.textContent = "Finished stills or carousel · no on-image lettering";
+    } else if (nextKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos here or choose files";
       if (hint) hint.textContent = "Add or remove one at a time · 2 or more in the set · up to 20";
     } else if (nextKind === "single-photo") {
@@ -2530,7 +2567,7 @@
   }
 
   function selectEzInput(kind, { resetPlatforms = true } = {}) {
-    if (kind === "video-clips" || kind === "finished-video") return;
+    if (kind === "video-clips") return;
     const nextKind = kind === "multiple-photos" ? "multiple-photos" : "single-photo";
     if (resetPlatforms && ezIntakeKind && ezIntakeKind !== nextKind) {
       ezStagedFiles = [];
@@ -2757,16 +2794,17 @@
     const helpers = ezPlanApi();
     const count = helpers?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || fileCount || 1;
     const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
-    let captionFields = helpers?.ezCaptionFields(ezCaptionMode(), { captions: joinedManualSlideCaptions() }) || {};
+    const finished = ["finished-video", "finished-stills"].includes((ezWizardPending || ezWizardAnswers)?.inputKind || ezIntakeKind);
+    let captionFields = helpers?.ezCaptionFields(ezCaptionMode(), { captions: joinedManualSlideCaptions(), finished }) || {};
     if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
       captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
     }
     return {
       content_type: planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set",
       platforms: planned?.platforms || ezSelectedPlatforms(),
-      voiceover_mode: $("ezAudioVoiceover")?.value || "Yes",
-      background_music_mode: $("ezAudioMusic")?.value || "Yes",
-      thumbnail_mode: $("ezThumbnail")?.value || "Yes",
+      voiceover_mode: finished ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
+      background_music_mode: finished ? "No" : ($("ezAudioMusic")?.value || "Yes"),
+      thumbnail_mode: finished ? "No" : ($("ezThumbnail")?.value || "Yes"),
       video_duration_seconds: $("ezVideoDuration")?.value || 30,
       video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
       video_clip_count_exact: $("ezVideoClipExact")?.value || "",
@@ -2956,6 +2994,8 @@
         { label: "Single AI image", onClick: () => ezWizardPick("Single AI image", { inputKind: "single-ai", photoCount: 1 }, "package") },
         { label: "Multiple AI images", onClick: () => ezWizardPick("Multiple AI images", { inputKind: "multiple-ai" }, "aiCount") },
         { label: "Mix of my photos and AI", onClick: () => ezWizardPick("Mix of my photos and AI", { inputKind: "mixed" }, "mixManual") },
+        { label: "Finished video I’ll upload", onClick: () => ezWizardPick("Finished video", { inputKind: "finished-video", photoCount: 1 }, "package") },
+        { label: "Finished photos I’ll upload", onClick: () => ezWizardPick("Finished photos", { inputKind: "finished-stills" }, "photoCount") },
       ]);
       return;
     }
@@ -2982,7 +3022,8 @@
       const ai = ezWizardStep === "aiCount";
       prompt.textContent = ai ? "How many AI images do you prefer?" : "How many photos do you prefer?";
       const next = "package";
-      renderEzWizardChips([2, 3, 4, 5, 6, 8, 10, 12].map((n) => ({
+      const counts = (ezWizardAnswers.inputKind === "finished-stills") ? [1, 2, 3, 4, 5, 6, 8, 10, 12] : [2, 3, 4, 5, 6, 8, 10, 12];
+      renderEzWizardChips(counts.map((n) => ({
         label: String(n),
         onClick: () => ezWizardPick(`${n}`, { photoCount: n }, next),
       })));
@@ -4542,6 +4583,9 @@
   function item4IsSupportedPhotoFile(file) {
     const mime = String(file?.type || "").toLowerCase();
     const ext = item4UploadFileExtension(file?.name);
+    if (ezIntakeKind === "finished-video") {
+      return mime.startsWith("video/") || mime.startsWith("image/") || ["mp4", "mov", "m4v", "webm", "heic", "heif"].includes(ext);
+    }
     return mime.startsWith("image/") || ext === "heic" || ext === "heif";
   }
 
@@ -5190,14 +5234,19 @@
         promote.textContent = "Check promotion status";
       } else if (item4Workspace?.assets?.length) {
         const planReady = item4Workspace?.plan_status === "Ready";
-        const variantsReady = item4Workspace?.variant_status === "Ready";
+        const finished = item4IsFinishedRequest(record);
+        const variantsReady = finished
+          || item4Workspace?.variant_status === "Ready"
+          || item4Workspace?.variant_status === "Not Needed";
         promote.disabled = Boolean(item4Uploading);
         promote.textContent = "Approve & Promote";
         promote.title = !planReady
           ? "Save the platform plan first."
           : (!variantsReady
               ? "Wait until platform crops are ready, then approve."
-              : "Approve this request and start production.");
+              : (finished
+                  ? "Approve this finished file and send it to review."
+                  : "Approve this request and start production."));
       } else {
         promote.disabled = false;
         promote.textContent = "Approve & Promote";
@@ -5216,16 +5265,19 @@
       const warnings = Array.isArray(item4BridgePreflight?.warnings) ? item4BridgePreflight.warnings.filter(Boolean) : [];
       const notes = Array.isArray(item4BridgePreflight?.notes) ? item4BridgePreflight.notes.filter(Boolean) : [];
       let kind = "";
-      let text = "Photos, plan, and platform crops need to be ready before you approve.";
+      const finished = item4IsFinishedRequest(record);
+      let text = finished
+        ? "Finished file, caption, and platform plan need to be ready before you approve."
+        : "Photos, plan, and platform crops need to be ready before you approve.";
       if (status === "Promoted") {
         kind = "success";
-        text = "Approved. This request is in production.";
+        text = finished ? "Approved. This finished file is going to review." : "Approved. This request is in production.";
       } else if (status === "Submitted") {
         text = "This request was sent. Use Check promotion status if you need an update.";
       } else if (item4Workspace?.assets?.length) {
         if (item4Workspace?.plan_status !== "Ready") {
           text = "Photos are saved. Next: save the platform plan.";
-        } else if (item4Workspace?.variant_status !== "Ready") {
+        } else if (!finished && item4Workspace?.variant_status !== "Ready" && item4Workspace?.variant_status !== "Not Needed") {
           text = "Plan is ready. Next: prepare the platform crops.";
         } else if (item4BridgePreflight?.ready) {
           kind = "success";
@@ -5708,7 +5760,7 @@
       setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
       return;
     }
-    if (item4Workspace?.assets?.length && item4Workspace?.variant_status !== "Ready") {
+    if (item4Workspace?.assets?.length && !item4IsFinishedRequest() && item4Workspace?.variant_status !== "Ready" && item4Workspace?.variant_status !== "Not Needed") {
       setRequestMessage("Platform crops are still finishing. Wait until they show ready, then click Approve again.", "error-text");
       return;
     }
@@ -5717,7 +5769,9 @@
 
     if (status !== "Submitted") {
       const confirmed = window.confirm(
-        "Approve this request and start production?\n\nThis locks the request after it is sent."
+        item4IsFinishedRequest()
+          ? "Approve this finished file and send it to review?\n\nThis skips production crops and render. It locks the request after it is sent."
+          : "Approve this request and start production?\n\nThis locks the request after it is sent."
       );
       if (!confirmed) return;
     }
@@ -6691,8 +6745,8 @@
     reloadCreativeEditor: "Discard unsaved edits and reload the latest saved values from Studio.",
     creativeRequestChanges: "Save the current music and voiceover levels and render a new preview. Approve stays locked until that preview is ready.",
     "Save draft": "Save these edits as a draft without creating a new rendered preview. Unavailable in watch-only review.",
-    creativeApprovePreview: "Approve this output for publishing. Instagram, Facebook, and YouTube auto-publish publicly. TikTok is created as a draft. You can also approve from the review email.",
-    pipelineApproveAll: "Approve every Ready for Review output on this page for publishing. Instagram, Facebook, and YouTube auto-publish publicly. TikTok is created as a draft.",
+    creativeApprovePreview: "Approve this output for publishing. Immediate is the default. Set a local date and time to override. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
+    pipelineApproveAll: "Approve every Ready for Review output. Immediate is the default. Per-row times override. Instagram, Facebook, and YouTube auto-publish; TikTok is a draft.",
     creativeUnlockTitles: "Unlock per-photo titles after approval so you can start a new title version. Publishing stays locked.",
     closeCreativeEditor: "Close the creative editor. Unsaved changes are not preserved.",
   };
@@ -7578,6 +7632,15 @@
     syncCreativeStoryTeaserChrome(output);
     $("creativeEditorPanel").scrollIntoView({ behavior: "smooth", block: "start" });
     setCreativeBusy(false);
+    refreshCreativeScheduleHint(output);
+    if ($("creativeScheduleAt") && output.scheduled_post_date) {
+      $("creativeScheduleAt").value = formatDateTimeLocalInput(output.scheduled_post_date);
+      document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
+        radio.checked = radio.value === "schedule";
+      });
+    }
+    const finished = /ez-input=finished-/i.test(String(output.output_notes || ""));
+    if ($("creativeRequestChanges")) $("creativeRequestChanges").hidden = finished;
     const watchOnly = !output.do_not_publish;
     $("saveCreativeEditor").disabled = watchOnly;
     if ($("creativeRequestChanges")) {
@@ -7861,6 +7924,36 @@
     return `${id} · ${platform} ${type}`.trim();
   }
 
+  function collectCreativeSchedulePayload() {
+    const mode = document.querySelector("input[name='creativeScheduleMode']:checked")?.value || "immediate";
+    const raw = String($("creativeScheduleAt")?.value || "").trim();
+    if (mode !== "schedule" || !raw) return { scheduled_post_date: "" };
+    return { scheduled_post_date: new Date(raw).toISOString() };
+  }
+
+  function collectPipelineSchedules() {
+    const map = {};
+    document.querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
+      const id = input.dataset.pipelineSchedule;
+      const raw = String(input.value || "").trim();
+      map[id] = raw ? new Date(raw).toISOString() : "";
+    });
+    return map;
+  }
+
+  async function refreshCreativeScheduleHint(record) {
+    const hint = $("creativeScheduleSuggest");
+    if (!hint) return;
+    try {
+      const data = await api(`/api/insights/best-times?platform=${encodeURIComponent(record?.platform || "")}&output_type=${encodeURIComponent(record?.platform_output_type || record?.studio_output_type || "")}`);
+      hint.textContent = data?.suggested?.label
+        ? `Suggested: ${data.suggested.days.join(", ")} · ${data.suggested.windows.join(" or ")} (${data.source === "first_party" ? "your posts" : "industry default"}). Now stays selected unless you pick a time.`
+        : "";
+    } catch {
+      hint.textContent = "";
+    }
+  }
+
   function updatePipelineApproveAllButton() {
     const button = $("pipelineApproveAll");
     if (!button) return;
@@ -7888,7 +7981,7 @@
       setPipelineLiveHint("Approving all ready outputs…");
       const result = await api("/api/outputs/approve-all", {
         method: "POST",
-        body: JSON.stringify({ notes: "Studio Pipeline Approve All" }),
+        body: JSON.stringify({ notes: "Studio Pipeline Approve All", schedules: collectPipelineSchedules() }),
         timeoutMs: 120000,
       });
       await refreshPipelineOutputs({ silent: true });
@@ -7918,7 +8011,7 @@
       const publishing = action === "approve_for_publishing" || (action === "approve" && creativeWatchOnly());
       phase6Message(publishing ? "Saving publish approval…" : (action === "approve" ? "Saving review approval…" : "Applying mix and starting render…"));
       setCreativeBusy(true);
-      const reviewBody = { action, notes: $("creativeReviewNotes").value || "" };
+      const reviewBody = { action, notes: $("creativeReviewNotes").value || "", ...collectCreativeSchedulePayload() };
       if (action === "apply_audio_mix" || action === "changes_requested") {
         const collected = collectCreativePayload();
         reviewBody.audio = collected.audio;
@@ -8099,7 +8192,11 @@
       const blocked = String(r.studio_production_job?.step || "") === "blocked" || Boolean(r.studio_job_error);
       const notReadyLabel = blocked ? "Blocked" : "Not ready yet";
       const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
-      const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button></td>` : "";
+      const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
+      const scheduleCell = isPipeline && ready
+        ? `<div class="subtle">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(formatDateTimeLocalInput(r.scheduled_post_date))}" title="Leave empty to publish now"> ${r.scheduled_post_date ? "" : "Now"}</div>`
+        : "";
+      const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
       return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
@@ -8304,6 +8401,36 @@
     return [record?.output_title, record?.output_caption, record?.output_hashtags].filter(Boolean).join("\n\n");
   }
 
+  function renderOperationsWatchlist(accounts, canEdit) {
+    const target = $("operationsWatchlist");
+    const empty = $("operationsWatchlistEmpty");
+    if (empty) empty.hidden = Boolean(accounts?.length);
+    if (!target) return;
+    if (!accounts?.length) {
+      target.innerHTML = "";
+      return;
+    }
+    target.innerHTML = accounts.map((account, index) => `
+      <article class="ops-profile-card">
+        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle">${escapeHtml(account.platform)}${account.source ? ` · ${escapeHtml(account.source)}` : ""}</div></div>
+        <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
+      </article>
+    `).join("");
+    target.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (!canEdit) return;
+        const next = accounts.filter((_, i) => i !== Number(button.dataset.watchlistRemove));
+        try {
+          await api("/api/insights/watchlist", { method: "POST", body: JSON.stringify({ accounts: next }) });
+          setOperationsMessage("Watchlist updated.");
+          loadOperations(true);
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not update watchlist.", "error-text");
+        }
+      });
+    });
+  }
+
   function renderOperationsProfiles(profiles, canEdit) {
     const target = $("operationsProfiles");
     if (!target) return;
@@ -8442,6 +8569,7 @@
         meta.textContent = `Today: ${today}. Last daily ideas run: ${lastRun}. Times shown in ${studioTimezoneLabel(tz)}.`;
       }
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
+      renderOperationsWatchlist(data.similar_accounts || [], Boolean(data.can_edit_profiles));
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
       renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");
       renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles));

@@ -850,6 +850,16 @@
  <section class="creative-review-section" id="creativeReviewSection">
  <div class="creative-review-notes-heading"><span>Review notes</span><button type="button" class="text-button" id="clearCreativeReviewNotes" title="Clear the review notes field">Clear notes</button></div>
  <label class="form-field creative-review-notes"><textarea id="creativeReviewNotes" rows="3" maxlength="10000" placeholder="Optional notes for this review cycle"></textarea></label>
+ <div class="form-field" id="creativeScheduleBox">
+ <span>Publish time</span>
+ <div class="ops-inline-form">
+ <label><input type="radio" name="creativeScheduleMode" value="immediate" checked> Immediate</label>
+ <label><input type="radio" name="creativeScheduleMode" value="schedule"> Schedule</label>
+ <input type="datetime-local" id="creativeScheduleAt">
+ </div>
+ <p class="subtle" id="creativeScheduleHint">Immediate publishes as soon as you approve. Schedule uses your local time.</p>
+ <p class="subtle" id="creativeScheduleSuggest"></p>
+ </div>
  </section>
 
  <section class="creative-change-progress" id="creativeChangeProgress" aria-live="polite">
@@ -920,6 +930,16 @@
  <ol id="operationsIntakeStages" class="ops-intake-stages"></ol>
  </div>
  <p class="subtle" id="operationsIntakeMeta"></p>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Similar accounts</h2><p>Chicago-first watchlist for public timing research. Instagram and YouTube can be timed from public posts. TikTok and Facebook groups are stored for reference. Suggested publish times never auto-apply; Now stays the default.</p></div></div>
+ <form class="ops-inline-form" id="operationsWatchlistForm">
+ <select id="operationsWatchlistPlatform"><option value="instagram">Instagram</option><option value="youtube">YouTube</option><option value="tiktok">TikTok</option><option value="facebook">Facebook</option></select>
+ <input type="text" id="operationsWatchlistHandle" placeholder="handle" maxlength="80">
+ <button type="submit" class="secondary-button">Add handle</button>
+ </form>
+ <p class="subtle" id="operationsWatchlistEmpty">No handles yet. Opening Operations seeds the Chicago list Joseph provided, plus researched city/tourism peers.</p>
+ <div id="operationsWatchlist" class="ops-profile-list"></div>
  </section>
  <section class="panel">
  <div class="panel-heading"><div><h2>Ready to schedule</h2><p>Approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</p></div></div>
@@ -1276,7 +1296,7 @@
 
  <script src="/assets/config.js?v=0.6.133-tooltip-dedupe"></script>
  <script src="/assets/ez-plan.js?v=0.6.125-tiktok-single-photo"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.135-approve-all-durable"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.133";</script>
+ <script src="/assets/app-item4-0619.js?v=0.6.136-finished-passthrough"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.136";</script>
 </body>
 </html>

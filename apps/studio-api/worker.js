@@ -53,6 +53,9 @@ export default {
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
+      const isInsightsBestTimesRoute = url.pathname === "/api/insights/best-times";
+      const isInsightsSimilarTimesRoute = url.pathname === "/api/insights/similar-times";
+      const isInsightsWatchlistRoute = url.pathname === "/api/insights/watchlist";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
@@ -88,6 +91,7 @@ export default {
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
       const isOperationsMakeAdminBridgeWrite = isOperationsMakeAdminBridgeRoute && request.method === "POST";
       const isOperationsIntakeWrite = isOperationsIntakeRoute && request.method === "POST";
+      const isInsightsWatchlistWrite = isInsightsWatchlistRoute && (request.method === "POST" || request.method === "PATCH");
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
@@ -125,6 +129,10 @@ export default {
         isOperationsRetryAssetSelectionWrite ||
         isOperationsMakeAdminBridgeWrite ||
         isOperationsIntakeWrite ||
+        isInsightsWatchlistWrite ||
+        (isInsightsBestTimesRoute && request.method === "GET") ||
+        (isInsightsSimilarTimesRoute && request.method === "GET") ||
+        (isInsightsWatchlistRoute && request.method === "GET") ||
         (isR5DoneHookRoute && request.method === "POST") ||
         (isRr2HookRoute && (request.method === "GET" || request.method === "POST"));
       if (!allowedMethod) {
@@ -150,7 +158,10 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.139-approve-all-durable",
+          version: "0.10.142-finished-passthrough",
+          studio_finished_passthrough_v1: true,
+          studio_review_schedule_override_v1: true,
+          studio_insights_best_times_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -446,6 +457,24 @@ export default {
         if (request.method === "GET") return getStudioLibraryIntakeStatus(request, env, url);
         assertWriteRequest(request, env);
         return pulseStudioLibraryIntake(request, env, authorization);
+      }
+
+      if (isInsightsBestTimesRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getInsightsBestTimes(request, env, url);
+      }
+
+      if (isInsightsSimilarTimesRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getInsightsSimilarTimes(request, env);
+      }
+
+      if (isInsightsWatchlistRoute) {
+        requireAnyPermission(authorization, ["publishing_control", "tenant_admin"]);
+        if (request.method === "GET") return getInsightsWatchlist(request, env);
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "tenant_admin");
+        return putInsightsWatchlist(request, env);
       }
 
       if (isVoicePreviewRoute) {
@@ -763,6 +792,11 @@ export default {
         await syncProductionCadence(env, { skipRenderPulse: true });
       } catch (error) {
         console.warn("production cadence cron failed", error);
+      }
+      try {
+        await studioSweepPublishedInsights(env, { limit: 8 });
+      } catch (error) {
+        console.warn("insights sweep cron failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -1207,6 +1241,7 @@ function studioOutputIsNativePhoto(record) {
 }
 
 function studioNativeStillsNeedLettering(record) {
+  if (studioIsFinishedPassthrough(record)) return false;
   const renderStatus = String(f(record, "Render_Status") || "").trim();
   if (renderStatus !== "Native Photo Route" && !studioOutputIsNativePhoto(record)) return false;
   const clips = selectedVisualClips(record);
@@ -1795,6 +1830,7 @@ function mapOutput(record, job = null) {
     final_file_url: f(record, "Final_File_URL"),
     output_title: f(record, "Output_Title"),
     output_caption: f(record, "Output_Caption"),
+    output_notes: f(record, "Output_Notes"),
     output_hashtags: f(record, "Output_Hashtags"),
     thumbnail_url: f(record, "Thumbnail_URL"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
@@ -2815,12 +2851,21 @@ function item4IsSupportedImageFile(file) {
   return mime.startsWith("image/") || item4IsHeicFile(file);
 }
 
+function item4IsSupportedVideoFile(file) {
+  const mime = String(file?.type || "").toLowerCase();
+  const ext = item4FileExtension(file?.name);
+  return mime.startsWith("video/") || ["mp4", "mov", "m4v", "webm"].includes(ext);
+}
+
 function item4NormalizedMimeType(file) {
   const mime = String(file?.type || "").toLowerCase();
-  if (mime.startsWith("image/")) return mime;
+  if (mime.startsWith("image/") || mime.startsWith("video/")) return mime;
   const ext = item4FileExtension(file?.name);
   if (ext === "heic") return "image/heic";
   if (ext === "heif") return "image/heif";
+  if (ext === "mp4") return "video/mp4";
+  if (ext === "mov") return "video/quicktime";
+  if (ext === "webm") return "video/webm";
   return "application/octet-stream";
 }
 
@@ -3327,18 +3372,31 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
   let form;
   try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded media"); }
   const files = form.getAll("files").filter(value => value && typeof value.arrayBuffer === "function");
-  if (!files.length) throw new HttpError(400, "Choose at least one image");
+  if (!files.length) throw new HttpError(400, "Choose at least one file");
   if (files.length > ITEM4_MAX_FILES) throw new HttpError(400, `Upload no more than ${ITEM4_MAX_FILES} files at once`);
 
   const existing = item4AssetManifest(record);
   if (existing.length + files.length > ITEM4_MAX_FILES) throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
   const meta = item4ParseJson(form.get("metadata"), []);
   const metadata = Array.isArray(meta) ? meta : [];
+  const finishedVideo = studioFinishedOriginKind(record) === "finished-video";
+  const maxBytes = finishedVideo ? 200 * 1024 * 1024 : ITEM4_MAX_FILE_BYTES;
   let total = 0;
   for (const file of files) {
     total += Number(file.size || 0);
-    if (!item4IsSupportedImageFile(file)) throw new HttpError(415, `${file.name || "A file"} is not a supported photo. HEIC and HEIF are supported.`);
-    if (Number(file.size || 0) > ITEM4_MAX_FILE_BYTES) throw new HttpError(413, `${file.name || "An image"} exceeds the 25 MB per-image limit`);
+    const allowed = finishedVideo
+      ? (item4IsSupportedVideoFile(file) || item4IsSupportedImageFile(file))
+      : item4IsSupportedImageFile(file);
+    if (!allowed) {
+      throw new HttpError(415, finishedVideo
+        ? `${file.name || "A file"} is not a supported video or cover image.`
+        : `${file.name || "A file"} is not a supported photo. HEIC and HEIF are supported.`);
+    }
+    if (Number(file.size || 0) > maxBytes) {
+      throw new HttpError(413, finishedVideo
+        ? `${file.name || "A file"} exceeds the 200 MB finished-video limit`
+        : `${file.name || "An image"} exceeds the 25 MB per-image limit`);
+    }
   }
   if (total > ITEM4_MAX_TOTAL_BYTES) throw new HttpError(413, "The selected images exceed the 150 MB upload limit");
 
@@ -3384,7 +3442,7 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
       Studio_Output_Plan_Status: "Needs Plan",
       Studio_Output_Plan_JSON: null,
       Studio_Variant_Manifest_JSON: null,
-      Studio_Variant_Status: "None",
+      Studio_Variant_Status: studioFinishedOriginKind(record) ? "Not Needed" : "None",
       Studio_Variant_Updated_At: null,
       Studio_Variant_Error: null,
       Studio_Item4_State: "Draft",
@@ -3761,7 +3819,12 @@ function item4PhotoCountKind(count) {
 }
 
 function item4ParseEzOrigin(record) {
-  const text = String(f(record, "Production_Notes") || "");
+  const text = [
+    f(record, "Production_Notes"),
+    f(record, "Output_Notes"),
+    f(record, "Internal_Notes"),
+    f(record, "Production_Request_Notes"),
+  ].map((value) => String(value || "")).join("\n");
   const manual = Number(/ez-manual=(\d+)/i.exec(text)?.[1] || "");
   const ai = Number(/ez-ai=(\d+)/i.exec(text)?.[1] || "");
   return {
@@ -3769,6 +3832,40 @@ function item4ParseEzOrigin(record) {
     manualCount: Number.isFinite(manual) && manual > 0 ? Math.round(manual) : null,
     aiCount: Number.isFinite(ai) && ai > 0 ? Math.round(ai) : null,
   };
+}
+
+function studioFinishedOriginKind(record) {
+  const kind = item4ParseEzOrigin(record).inputKind;
+  if (kind === "finished-video" || kind === "finished-stills" || kind === "finished-carousel") return kind;
+  return "";
+}
+
+function studioIsFinishedPassthrough(record) {
+  return Boolean(studioFinishedOriginKind(record));
+}
+
+function studioFinishedVariantsSkipped(record) {
+  if (!studioIsFinishedPassthrough(record)) return false;
+  const status = String(f(record, "Studio_Variant_Status") || "").trim();
+  return status === "Ready" || status === "Not Needed" || status === "None";
+}
+
+function studioPublishScheduleFields(payload = {}, record = null) {
+  const raw = payload?.scheduled_post_date;
+  if (raw === undefined || raw === null || String(raw).trim() === "" || String(raw).trim().toLowerCase() === "immediate") {
+    return {};
+  }
+  const value = String(raw).trim();
+  if (Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
+  const iso = new Date(value).toISOString();
+  const due = Date.parse(iso) <= Date.now() + 120000;
+  const fields = {
+    Scheduled_Post_Date: iso,
+    Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
+  };
+  const platform = String(f(record, "Platform") || "").trim();
+  if (platform === "YouTube") fields.YouTube_Scheduled_Publish_At = iso;
+  return fields;
 }
 
 function item4EffectivePhotoCount(record, assets) {
@@ -3875,11 +3972,14 @@ function item4StudioThumbnailPrompt(requestRecord, parent) {
     || ""
   ).trim();
   const concept = String(f(parent, "Thumbnail_Concept") || "").trim();
+  const finished = studioIsFinishedPassthrough(requestRecord);
   return [
     `Create a ChicagoShining social thumbnail / promo still for: ${title}.`,
     caption ? `Post context: ${caption.slice(0, 500)}` : "",
     concept ? `Thumbnail concept: ${concept}` : "",
-    "The thumbnail MUST include bold, colorful 3D block lettering (glossy, dimensional, high-impact) or black-and-gold slightly arched block lettering.",
+    finished
+      ? "The thumbnail MUST include bold, colorful 3D block lettering: glossy, dimensional, high-impact letters in bright ChicagoShining colors. Do not use flat type, thin script, or black-and-gold arched lettering for this cover."
+      : "The thumbnail MUST include bold, colorful 3D block lettering (glossy, dimensional, high-impact) or black-and-gold slightly arched block lettering.",
     "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%.",
     "Polished, high-contrast, and dramatic. Do not invent logos, watermarks, platform UI, or distorted letters.",
   ].filter(Boolean).join("\n");
@@ -4722,16 +4822,17 @@ async function enqueueStudioProductionJob(env, requestId) {
   const existing = parseStudioProductionJob(record);
   const step = String(existing?.step || "").trim();
   if (!existing?.job_id || step === "done" || step === "blocked") {
+    const finishedKind = studioFinishedOriginKind(record);
     const job = {
       schema_version: "studio.production-job.1",
       job_id: `spj-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
-      route: null,
+      route: finishedKind ? `${finishedKind}:passthrough` : null,
       step: "themes",
       attempt: 1,
       updated_at: new Date().toISOString(),
       error: null,
-      detail: STUDIO_PRODUCTION_JOB_LABELS.themes,
-      percent: 12,
+      detail: finishedKind ? "Writing post caption" : STUDIO_PRODUCTION_JOB_LABELS.themes,
+      percent: finishedKind ? 20 : 12,
     };
     await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
       method: "PATCH",
@@ -5764,7 +5865,9 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
   }));
 
   const assetsStatus = f(record, "Studio_Master_Asset_Status") || "None";
-  const variantStatus = f(record, "Studio_Variant_Status") || "None";
+  const variantStatus = studioIsFinishedPassthrough(record)
+    ? (String(f(record, "Studio_Variant_Status") || "") === "Ready" ? "Ready" : "Not Needed")
+    : (f(record, "Studio_Variant_Status") || "None");
   const previewSelfHealState = assetsStatus === "Error" || variantStatus === "Error"
     ? "error"
     : assetsStatus === "Uploading"
@@ -5773,7 +5876,7 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
         ? "preview_pending"
         : (masterAuthorityResume?.attempted || variantResume?.attempted)
           ? "retrying"
-          : (assetsStatus === "Ready" && (variantStatus === "Ready" || variantStatus === "None"))
+          : (assetsStatus === "Ready" && (variantStatus === "Ready" || variantStatus === "None" || variantStatus === "Not Needed"))
             ? "ready"
             : "idle";
 
@@ -6108,7 +6211,9 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
     Target_Platforms: input.platforms || [],
     Voiceover_Mode: input.voiceover_mode,
     Background_Music_Mode: input.background_music_mode,
-    Thumbnail_Mode: input.thumbnail_mode,
+    Thumbnail_Mode: /ez-input=finished-(video|stills|carousel)/i.test(String(input.production_notes || ""))
+      ? "Yes"
+      : input.thumbnail_mode,
     Video_Duration_Seconds: input.video_duration_seconds,
     Video_Clip_Count_Mode: input.video_clip_count_mode,
     Video_Clip_Count_Exact: input.video_clip_count_exact,
@@ -6422,9 +6527,20 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
   const variantManifest = item4ParseJson(f(requestRecord, "Studio_Variant_Manifest_JSON"), null);
 
-  addCheck("master_media_ready", masterStatus === "Ready", "Master media must be Ready before source-to-production handoff.");
+  const finishedPassthrough = studioIsFinishedPassthrough(requestRecord);
+  const finishedPublicMasters = finishedPassthrough && Array.isArray(masterAssets) && masterAssets.length > 0
+    && masterAssets.every((asset) => String(asset?.url || "").startsWith("https://media.chicagoshining.com/"));
+  addCheck(
+    "master_media_ready",
+    masterStatus === "Ready" || finishedPublicMasters,
+    "Master media must be Ready before source-to-production handoff."
+  );
   addCheck("output_plan_ready", planStatus === "Ready", "Platform output plan must be Ready before source-to-production handoff.");
-  addCheck("platform_variants_ready", variantStatus === "Ready", "Platform-ready variants must be Ready before source-to-production handoff.");
+  addCheck(
+    "platform_variants_ready",
+    finishedPassthrough ? studioFinishedVariantsSkipped(requestRecord) : variantStatus === "Ready",
+    finishedPassthrough ? null : "Platform-ready variants must be Ready before source-to-production handoff."
+  );
 
   addCheck(
     "master_manifest_present",
@@ -6437,10 +6553,13 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
       !String(asset?.google_drive_file_id || "").trim() ||
       !/^rec[A-Za-z0-9]+$/.test(String(asset?.media_asset_record_id || "").trim())
     );
+    const publicReady = finishedPassthrough && masterAssets.every((asset) =>
+      String(asset?.url || "").startsWith("https://media.chicagoshining.com/")
+    );
     addCheck(
       "master_drive_authority_complete",
-      incompleteMasters.length === 0,
-      incompleteMasters.length ? `${incompleteMasters.length} master asset(s) are missing Google Drive or Media Asset authority.` : null
+      incompleteMasters.length === 0 || publicReady,
+      incompleteMasters.length && !publicReady ? `${incompleteMasters.length} master asset(s) are missing Google Drive or Media Asset authority.` : null
     );
   }
 
@@ -6488,14 +6607,15 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   const variantAssets = Array.isArray(variantManifest?.assets) ? variantManifest.assets : [];
   const targetCount = Number(variantManifest?.plan_target_count || variantManifest?.target_count || 0);
   const readyCount = Number(variantManifest?.plan_ready_count || variantManifest?.ready_count || 0);
-  const manifestComplete = item4VariantManifestPlanComplete(variantManifest, plan, masterAssets);
+  const manifestComplete = finishedPassthrough || item4VariantManifestPlanComplete(variantManifest, plan, masterAssets);
 
   addCheck(
     "variant_manifest_complete",
     manifestComplete,
-    "The platform-ready variant manifest is not complete."
+    finishedPassthrough ? null : "The platform-ready variant manifest is not complete."
   );
 
+  if (!finishedPassthrough) {
   for (const routeRow of routeRows.filter(row => row.ready && row.aspect_ratio)) {
     const missing = variantAssets.filter(asset => {
       const variant = asset?.variants?.[routeRow.aspect_ratio];
@@ -6507,8 +6627,10 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
       issues.push(`${routeRow.platform} / ${routeRow.output_type} is missing ${routeRow.aspect_ratio} authoritative variant coverage for ${missing.length} source asset(s).`);
     }
   }
+  }
 
   const notes = [];
+  if (!finishedPassthrough) {
   for (const routeRow of routeRows.filter(row => row.ready && row.aspect_ratio)) {
     const unavailable = variantAssets.filter(asset => {
       const variant = asset?.variants?.[routeRow.aspect_ratio];
@@ -6535,6 +6657,9 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
     if (!matching.length || missingLinks.length) {
       issues.push(`${routeRow.platform} / ${routeRow.output_type} is not fully linked from the ${routeRow.aspect_ratio} source variants to its Production Request Output.`);
     }
+  }
+  } else {
+    notes.push("Finished file passthrough. Crops, Remotion, and lettering are skipped.");
   }
 
   const ideaLinks = arrayOrEmpty(f(requestRecord, "Idea_Candidate"));
@@ -7309,7 +7434,9 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
       "Background_Music_Mode",
       profileDefaults.include_background_music
     ),
-    thumbnail_mode: resolvedThumbnailMode(
+    thumbnail_mode: studioIsFinishedPassthrough(requestRecord)
+      ? "Yes"
+      : resolvedThumbnailMode(
       outputRow,
       requestRecord,
       profileDefaults.include_thumbnail
@@ -7405,6 +7532,7 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
       effective.thumbnail_mode = "No";
     }
   }
+  if (studioIsFinishedPassthrough(requestRecord)) effective.thumbnail_mode = "Yes";
   effective.issues = outputWorkItemIssues(outputRow, route, effective);
   return effective;
 }
@@ -8415,7 +8543,300 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
       ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
       : null,
+    ...studioFinishedSeedOverlay(requestRecord, clips, nativeReady),
   };
+}
+
+function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
+  const kind = studioFinishedOriginKind(requestRecord);
+  if (!kind) return {};
+  const firstUrl = String(clips[0]?.url || "").trim() || null;
+  const note = `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the colorful 3D block-letter thumbnail. AI may write the post caption only; do not burn text onto the finished file.`;
+  if (kind === "finished-video") {
+    return {
+      Output_Status: firstUrl ? "Ready for Review" : "In Production",
+      Render_Status: firstUrl ? "Rendered" : null,
+      Final_File_URL: firstUrl,
+      Studio_Preview_URL: firstUrl,
+      Publish_Asset_URL: firstUrl && String(firstUrl).startsWith("https://media.chicagoshining.com/") ? firstUrl : null,
+      Asset_Need_Status: "Not Needed",
+      Voiceover_Status: "Not Needed",
+      Asset_Selection_Status: null,
+      Composition_ID: null,
+      Output_Notes: note,
+    };
+  }
+  return {
+    Output_Status: nativeReady || clips.length ? "Ready for Review" : "In Production",
+    Render_Status: clips.length ? "Native Photo Route" : null,
+    Asset_Need_Status: "Not Needed",
+    Voiceover_Status: "Not Needed",
+    Output_Notes: note,
+  };
+}
+
+const STUDIO_SIMILAR_WATCHLIST_SETTING = "SIMILAR_ACCOUNT_WATCHLIST";
+
+function studioIndustryBestWindows(platform, outputType) {
+  const p = String(platform || "").toLowerCase();
+  const t = String(outputType || "").toLowerCase();
+  if (p.includes("tiktok")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["19:00-21:00"], label: "TikTok weekday evenings" };
+  if (p.includes("youtube") && (t.includes("standard") || t.includes("long"))) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["10:00-16:00"], label: "YouTube standard weekday daytime" };
+  if (p.includes("youtube")) return { days: ["Wed", "Thu", "Fri", "Sat"], windows: ["14:00-16:00", "20:00-22:00"], label: "YouTube Short afternoon/evening" };
+  if (t.includes("story")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["16:00-18:00", "19:00-21:00"], label: "Stories late afternoon/evening" };
+  if (t.includes("carousel") || t.includes("single") || t.includes("feed") || t.includes("multi-image") || t.includes("photo")) {
+    return { days: ["Wed", "Thu"], windows: ["12:00-14:00", "18:00-20:00"], label: "Feed/carousel midday or evening" };
+  }
+  if (p.includes("facebook")) return { days: ["Tue", "Wed", "Thu"], windows: ["12:00-13:00", "18:00-20:00"], label: "Facebook Reel lunch/evening" };
+  return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"], label: "Reel midday or evening" };
+}
+
+function studioSuggestedLocalDatetime(windows) {
+  const first = String(windows?.[0] || "12:00-13:00");
+  const start = first.split("-")[0] || "12:00";
+  const now = new Date();
+  const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
+  const suggested = new Date(now);
+  suggested.setHours(hh, mm, 0, 0);
+  if (suggested.getTime() <= now.getTime() + 10 * 60 * 1000) suggested.setDate(suggested.getDate() + 1);
+  return suggested.toISOString();
+}
+
+const STUDIO_WATCHLIST_PLATFORMS = new Set(["instagram", "youtube", "tiktok", "facebook"]);
+const STUDIO_CHICAGO_SIMILAR_SEED = Object.freeze([
+  { platform: "instagram", handle: "tatiana.pesotskaya", source: "joseph" },
+  { platform: "instagram", handle: "charmaine.sky", source: "joseph" },
+  { platform: "instagram", handle: "layne_ferd", source: "joseph" },
+  { platform: "instagram", handle: "chicagobydesi", source: "joseph" },
+  { platform: "instagram", handle: "chicago.explore", source: "joseph" },
+  { platform: "instagram", handle: "dronevixen", source: "joseph" },
+  { platform: "instagram", handle: "choosechicago", source: "joseph" },
+  { platform: "instagram", handle: "chicago", source: "joseph" },
+  { platform: "instagram", handle: "allfortheloveofchicago", source: "joseph" },
+  { platform: "instagram", handle: "the312watch", source: "joseph" },
+  { platform: "instagram", handle: "chictown_matt", source: "joseph" },
+  { platform: "instagram", handle: "bywellcarvalho", source: "joseph" },
+  { platform: "instagram", handle: "windy_citychicago", source: "joseph" },
+  { platform: "instagram", handle: "doorwaysofchicago", source: "research" },
+  { platform: "instagram", handle: "alanainwanderland", source: "research" },
+  { platform: "instagram", handle: "timeoutchicago", source: "research" },
+  { platform: "instagram", handle: "chicagoarchitecturecenter", source: "research" },
+  { platform: "youtube", handle: "ChooseChicago", source: "research" },
+  { platform: "youtube", handle: "TimeOutChicago", source: "research" },
+  { platform: "youtube", handle: "ChicagoArchitectureCenter", source: "research" },
+  { platform: "tiktok", handle: "chicago.mp4", source: "joseph" },
+  { platform: "tiktok", handle: "ChooseChicago", source: "joseph" },
+  { platform: "tiktok", handle: "Chicago.by.desi", source: "joseph" },
+  { platform: "tiktok", handle: "explorechicago", source: "joseph" },
+  { platform: "tiktok", handle: "anuchicago", source: "joseph" },
+  { platform: "tiktok", handle: "chibucketlist", source: "joseph" },
+  { platform: "tiktok", handle: "only_chicago", source: "joseph" },
+  { platform: "facebook", handle: "groups/1589897138463791", source: "joseph" },
+  { platform: "facebook", handle: "groups/951998221479788", source: "joseph" },
+  { platform: "facebook", handle: "chicagoepic", source: "joseph" },
+]);
+
+function parseSimilarWatchlist(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || "[]"));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => ({
+        platform: String(row?.platform || "").trim().toLowerCase(),
+        handle: String(row?.handle || row?.username || row?.url || "").trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?facebook\.com\//i, "").replace(/\/$/, ""),
+        source: String(row?.source || "").trim() || null,
+      }))
+      .filter((row) => row.handle && STUDIO_WATCHLIST_PLATFORMS.has(row.platform));
+  } catch {
+    return [];
+  }
+}
+
+async function getInsightsWatchlist(request, env) {
+  const row = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING);
+  let accounts = parseSimilarWatchlist(f(row, "Setting_Value"));
+  if (!accounts.length) {
+    accounts = STUDIO_CHICAGO_SIMILAR_SEED.map((row) => ({ ...row }));
+    await studioUpsertSetting(
+      env,
+      STUDIO_SIMILAR_WATCHLIST_SETTING,
+      JSON.stringify(accounts),
+      "Chicago similar-account watchlist. Joseph handles plus researched city/tourism peers. TikTok/Facebook stored for reference; official competitor sweeps use IG/YouTube only."
+    );
+  }
+  return respond(request, env, {
+    ok: true,
+    accounts,
+    message: accounts.length
+      ? "Chicago watchlist loaded. Instagram and YouTube can be timed from public posts. TikTok and Facebook groups are stored for reference only."
+      : "Add Instagram or YouTube handles to start similar-account timing.",
+  });
+}
+
+async function putInsightsWatchlist(request, env) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const accounts = parseSimilarWatchlist(JSON.stringify(payload?.accounts || payload || []));
+  await studioUpsertSetting(
+    env,
+    STUDIO_SIMILAR_WATCHLIST_SETTING,
+    JSON.stringify(accounts),
+    "Chicago similar-account watchlist. Editable. TikTok/Facebook stored for reference; official competitor sweeps use IG/YouTube only."
+  );
+  return respond(request, env, { ok: true, accounts });
+}
+
+async function getInsightsBestTimes(request, env, url) {
+  const platform = String(url.searchParams.get("platform") || "").trim();
+  const outputType = String(url.searchParams.get("output_type") || "").trim();
+  const industry = studioIndustryBestWindows(platform, outputType);
+  let firstParty = [];
+  try {
+    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 80,
+      sortField: "Published_At",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0)',
+    });
+    firstParty = rows
+      .filter((row) => {
+        if (platform && String(f(row, "Platform") || "") !== platform) return false;
+        if (outputType && String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "") !== outputType) return false;
+        return true;
+      })
+      .map((row) => ({
+        id: row.id,
+        published_at: f(row, "Published_At"),
+        views: Number(f(row, "Insights_Views") || 0) || 0,
+        likes: Number(f(row, "Insights_Likes") || 0) || 0,
+      }));
+  } catch (error) {
+    console.warn("best-times first-party read failed", error);
+  }
+  const sample = firstParty.filter((row) => row.views > 0 || row.likes > 0);
+  return respond(request, env, {
+    ok: true,
+    timezone: "America/Chicago",
+    platform,
+    output_type: outputType,
+    source: sample.length >= 8 ? "first_party" : "industry_default",
+    sample_size: sample.length,
+    suggested: industry,
+    suggested_iso: studioSuggestedLocalDatetime(industry.windows),
+    note: sample.length >= 8
+      ? "Suggestion uses your published posts that already have insights."
+      : "Not enough first-party insight rows yet. Showing travel/city industry defaults in Chicago time.",
+  });
+}
+
+async function getInsightsSimilarTimes(request, env) {
+  const row = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING);
+  const accounts = parseSimilarWatchlist(f(row, "Setting_Value"));
+  return respond(request, env, {
+    ok: true,
+    accounts,
+    buckets: [],
+    message: accounts.length
+      ? "Watchlist saved. Public Instagram and YouTube timing fills in after the next insights sweep. TikTok and Facebook groups are reference-only."
+      : "Add Instagram or YouTube handles to start. Similar-account times stay empty until you do.",
+  });
+}
+
+async function studioSweepPublishedInsights(env, options = {}) {
+  const limit = Math.max(1, Math.min(10, Number(options.limit) || 8));
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit,
+    sortField: "Published_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Platform_Post_ID}!="",OR({Insights_As_Of}="",IS_BEFORE({Insights_As_Of},DATEADD(NOW(),-1,"days"))))',
+  }).catch(() => []);
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+    "INSTAGRAM_BUSINESS_ACCOUNT_ID",
+    "YOUTUBE_API_KEY",
+  ]).catch(() => ({}));
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+  const token = settings.FACEBOOK_PAGE_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN;
+  const youtubeKey = settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY;
+  let updated = 0;
+  for (const row of rows || []) {
+    const platform = String(f(row, "Platform") || "");
+    const postId = String(f(row, "Platform_Post_ID") || "").trim();
+    if (!postId) continue;
+    try {
+      const metrics = await studioFetchOutputInsights(platform, postId, { token, version, youtubeKey });
+      if (!metrics) continue;
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Insights_Views: metrics.views ?? null,
+            Insights_Likes: metrics.likes ?? null,
+            Insights_Comments: metrics.comments ?? null,
+            Insights_Shares: metrics.shares ?? null,
+            Insights_Reach: metrics.reach ?? null,
+            Insights_Saves: metrics.saves ?? null,
+            Insights_Watch_Time_Sec: metrics.watch_time_sec ?? null,
+            Insights_As_Of: new Date().toISOString(),
+            Insights_Source: metrics.source || platform,
+          },
+          typecast: true,
+        }),
+      });
+      updated += 1;
+    } catch (error) {
+      console.warn("insights row failed", row.id, error);
+    }
+  }
+  return { scanned: (rows || []).length, updated };
+}
+
+async function studioFetchOutputInsights(platform, postId, creds) {
+  if (platform === "YouTube" && creds.youtubeKey) {
+    const videoId = postId.includes("watch?v=") ? postId.split("watch?v=").pop().split("&")[0] : postId;
+    const url = `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${encodeURIComponent(videoId)}&key=${encodeURIComponent(creds.youtubeKey)}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const body = await response.json();
+    const stats = body?.items?.[0]?.statistics || {};
+    return {
+      views: Number(stats.viewCount || 0) || 0,
+      likes: Number(stats.likeCount || 0) || 0,
+      comments: Number(stats.commentCount || 0) || 0,
+      source: "youtube-data-api",
+    };
+  }
+  if (!creds.token) return null;
+  if (platform === "Instagram") {
+    const url = `https://graph.facebook.com/${creds.version}/${encodeURIComponent(postId)}?fields=like_count,comments_count,insights.metric(views,reach,saved,shares)&access_token=${encodeURIComponent(creds.token)}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const body = await response.json();
+    const insightMap = Object.fromEntries((body.insights?.data || []).map((item) => [item.name, item.values?.[0]?.value]));
+    return {
+      views: Number(insightMap.views || 0) || 0,
+      likes: Number(body.like_count || 0) || 0,
+      comments: Number(body.comments_count || 0) || 0,
+      shares: Number(insightMap.shares || 0) || 0,
+      reach: Number(insightMap.reach || 0) || 0,
+      saves: Number(insightMap.saved || 0) || 0,
+      source: "instagram-graph",
+    };
+  }
+  if (platform === "Facebook") {
+    const url = `https://graph.facebook.com/${creds.version}/${encodeURIComponent(postId)}?fields=likes.summary(true),comments.summary(true),shares&access_token=${encodeURIComponent(creds.token)}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const body = await response.json();
+    return {
+      likes: Number(body.likes?.summary?.total_count || 0) || 0,
+      comments: Number(body.comments?.summary?.total_count || 0) || 0,
+      shares: Number(body.shares?.count || 0) || 0,
+      source: "facebook-graph",
+    };
+  }
+  return null;
 }
 
 async function restoreParentContentItemFromStudioUmbrella(env, parentContentItem) {
@@ -8483,6 +8904,21 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
     await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{method:"PATCH",body:JSON.stringify({fields:{Content_Item:[parent.id],Platform_Output:[po.id],Pipeline_Family:route.pipeline_family,Pipeline_Route_Status:"Routed",Pipeline_Route_Notes:`Single-parent route: ${route.pipeline_family}; Platform Output ${po.id}; Content Item ${parent.id}.`,Routed_At:now,Updated_At:now},typecast:false})});
     routed++;
     workItems.push({production_request_output_record_id:outputRow.id,platform:effective.platform,output_type:effective.output_type,content_item_record_id:parent.id,platform_output_record_id:po.id,routed:true});
+  }
+  if (studioIsFinishedPassthrough(requestRecord) && parent?.id) {
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parent.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Include_Thumbnail: "Yes",
+          Include_Voiceover: "No",
+          Voiceover_Status: "Not Needed",
+          Thumbnail_Status: studioAiThumbnailUrl(f(parent, "Thumbnail_URL")) ? "Generated" : "Ready",
+          Thumbnail_Prompt: item4StudioThumbnailPrompt(requestRecord, parent),
+        },
+        typecast: true,
+      }),
+    }).catch(() => null);
   }
   return {enabled_output_count:outputRows.length,routed_count:routed,blocked_count:blocked,work_items:workItems,single_parent_mode:true};
 }
@@ -13027,7 +13463,7 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
 const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),{Format}!="Story",{Studio_Output_Type}!="Story",OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
 const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story"))';
-const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
+const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Render_Status}="Native Photo Route",OR({Studio_Preview_URL}!="",{Thumbnail_URL}!="",{Selected_Assets_JSON}!="")),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
 const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
 const STUDIO_RFR_MISSING_COVER_FORMULA = `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}="Ready for Review",{Output_ID}>=227,OR({Thumbnail_URL}="",FIND("ITEM4-VARIANT-fill-crop",{Thumbnail_URL}&""),{Output_Caption}=""))`;
 const PRODUCTION_CADENCE_RENDER = Object.freeze([
@@ -13446,6 +13882,20 @@ async function studioContinuationStampPackage(env, po, context) {
 
 async function studioContinuationInspectOutput(env, po, cache) {
   if (studioOutputIsTerminalForContinuation(po)) return { action: "stop", reason: "terminal" };
+  if (studioIsFinishedPassthrough(po)) {
+    const status = String(f(po, "Output_Status") || "");
+    if (!/^ready for review$/i.test(status) && (String(f(po, "Final_File_URL") || "").trim() || studioOutputIsNativePhoto(po))) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Output_Status: "Ready for Review" }, typecast: true }),
+      }).catch(() => null);
+    }
+    const thumbContext = await studioContinuationLoadContext(env, po, cache).catch(() => null);
+    if (thumbContext?.parent) {
+      await studioStampParentAiCoverOnOutput(env, po, thumbContext.parent).catch(() => null);
+    }
+    return { action: "reviewable", reason: "finished_passthrough" };
+  }
   const outputStatus = String(f(po, "Output_Status") || "");
   const renderStatus = String(f(po, "Render_Status") || "");
   const finalUrl = String(f(po, "Final_File_URL") || "").trim();
@@ -14543,7 +14993,12 @@ function studioOutputReadyForPublishApproval(record) {
   if (Boolean(f(record, "Do_Not_Publish"))) return false;
   if (outputStatus === "In Production" || ["Ready for Render", "Rendering"].includes(String(f(record, "Render_Status") || "").trim())) return false;
   const rendered = String(f(record, "Render_Status") || "").trim() === "Rendered" && Boolean(String(f(record, "Final_File_URL") || "").trim());
-  if (!rendered && !studioOutputIsNativePhoto(record)) return false;
+  const finished = studioIsFinishedPassthrough(record);
+  if (finished && studioFinishedOriginKind(record) === "finished-video") {
+    return Boolean(String(f(record, "Final_File_URL") || "").trim())
+      && (outputStatus === "Ready for Review" || reviewStatus === "Review Sent");
+  }
+  if (!rendered && !studioOutputIsNativePhoto(record) && !finished) return false;
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
 }
 
@@ -16272,7 +16727,7 @@ async function studioReconcileFacebookReels(env, options = {}) {
   return results;
 }
 
-async function approveOutputRecordForPublishing(env, existing, note, stamp) {
+async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}) {
   const id = existing.id;
   if (Boolean(f(existing, "Do_Not_Publish"))) {
     throw new HttpError(409, "Do_Not_Publish outputs cannot be approved for live publishing");
@@ -16282,12 +16737,13 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp) {
   }
   const existingNotes = String(f(existing, "Review_Notes") || "").trim();
   let record = existing;
-  if (studioOutputIsNativePhoto(record)) {
+  if (studioOutputIsNativePhoto(record) && !studioIsFinishedPassthrough(record)) {
     await item4PulseLetterPython(env, { outputRecordId: record.id }).catch((error) => {
       console.warn("native photo branding before publish approval failed", record.id, error);
     });
     record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
   }
+  const scheduleFields = studioPublishScheduleFields(payload || {}, record);
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
@@ -16298,6 +16754,7 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp) {
     Do_Not_Publish: false,
     Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
     ...studioPublishHandoffFields(record),
+    ...scheduleFields,
   };
   const prepared = await studioEnsureNativePublishSlides(env, record);
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
@@ -16332,9 +16789,13 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
   const approved = [];
   const failed = [];
+  const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};
   for (const record of eligible) {
     try {
-      const updated = await approveOutputRecordForPublishing(env, record, note, stamp);
+      const rowSchedule = schedules[record.id] !== undefined ? schedules[record.id] : payload?.scheduled_post_date;
+      const updated = await approveOutputRecordForPublishing(env, record, note, stamp, {
+        scheduled_post_date: rowSchedule,
+      });
       approved.push(mapApprovedOutputSummary(updated));
     } catch (error) {
       failed.push({
@@ -16377,7 +16838,7 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
   const productionPublishApprove = action === "approve_for_publishing" || ((action === "approve" || action === "approved") && !doNotPublish);
   if (productionPublishApprove) {
     try {
-      const updated = await approveOutputRecordForPublishing(env, existing, note, stamp);
+      const updated = await approveOutputRecordForPublishing(env, existing, note, stamp, payload);
       // Dispatch arms and pulses its own publisher chain, so a concurrent cadence sync would only
       // compete for this invocation's budget and can park the scenario the pulse just woke up.
       const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
@@ -19582,6 +20043,7 @@ async function getStudioOperations(request, env, authorization) {
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
   ]);
   const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
+  const watchlistRow = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING).catch(() => null);
   return respond(request, env, {
     ok: true,
     page: "operations",
@@ -19598,6 +20060,7 @@ async function getStudioOperations(request, env, authorization) {
     oversized_media: oversized,
     a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
     library_intake: libraryIntake,
+    similar_accounts: parseSimilarWatchlist(f(watchlistRow, "Setting_Value")),
   });
 }
 

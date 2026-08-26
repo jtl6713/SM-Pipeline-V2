@@ -7,7 +7,7 @@ from studio_produce.constants import PLATFORM_OUTPUTS_TABLE
 from render.fields import field, field_str
 from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
-from studio_produce.job import parse_json
+from studio_produce.job import finished_origin_kind, parse_json
 
 if TYPE_CHECKING:
     from airtable.client import AirtableClient
@@ -138,11 +138,131 @@ def _renderable(variant: Any) -> bool:
     return bool(url) and media_id.startswith("rec")
 
 
+def _public_master_url(master: dict[str, Any]) -> str:
+    return str(master.get("url") or master.get("preview_url") or "").strip()
+
+
+def finished_source_package(
+    request: dict[str, Any],
+    output: dict[str, Any],
+    parent: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    kind = finished_origin_kind(request.get("fields") or request)
+    if not kind:
+        notes = str(field(request, "Production_Notes") or "")
+        kind = "finished-video" if "ez-input=finished-video" in notes else (
+            "finished-stills" if "ez-input=finished-stills" in notes or "ez-input=finished-carousel" in notes else ""
+        )
+    if not kind:
+        return None
+    masters = master_assets(request)
+    if not masters:
+        return None
+    effective = output_effective(output, request, parent)
+    plan_item = plan_item_for_output(request, output)
+    ratio = str(plan_item.get("aspect_ratio") or field_str(output, "Aspect_Ratio") or "").strip()
+    if kind == "finished-video":
+        ratio = ratio or "9:16"
+        chosen = next(
+            (
+                item for item in masters
+                if str(item.get("mime_type") or "").lower().startswith("video/")
+                or str(item.get("name") or "").lower().endswith((".mp4", ".mov", ".m4v", ".webm"))
+            ),
+            masters[0],
+        )
+        masters = [chosen]
+    else:
+        ratio = ratio or ("4:5" if len(masters) == 1 else "1:1")
+        masters = [
+            item for item in masters
+            if not str(item.get("mime_type") or "").lower().startswith("video/")
+        ] or masters
+    clips = []
+    for index, master in enumerate(masters):
+        url = _public_master_url(master)
+        if not url:
+            return None
+        clips.append({
+            "id": f"finished-source-{index + 1}",
+            "order": int(master.get("order") or index + 1),
+            "media_asset_record_id": str(master.get("media_asset_record_id") or ""),
+            "source_asset_id": str(master.get("id") or "") or None,
+            "asset_name": str(master.get("name") or f"finished-{index + 1}"),
+            "url": url,
+            "src": url,
+            "startFrame": 0,
+            "durationFrames": 1,
+            "motionStyle": "stillPhoto",
+            "source": "finished_passthrough",
+            "aspect_ratio": ratio,
+            "google_drive_file_id": str(master.get("google_drive_file_id") or "") or None,
+            "overlay": None,
+            "caption": "",
+        })
+    if not clips:
+        return None
+    native = kind != "finished-video"
+    selected = {
+        "schema_version": "studio.source-selection.2",
+        "authority": "studio_finished_passthrough",
+        "production_request_record_id": request["id"],
+        "platform": effective["platform"],
+        "output_type": effective["output_type"],
+        "aspect_ratio": ratio,
+        "selection_status": "Selected",
+        "selected_clips": clips,
+        "fps": 30,
+        "target_total_frames": 1,
+        "render_prep": {
+            "render_status": "Rendered" if kind == "finished-video" else "Native Photo Route",
+            "composition_id": None,
+            "output_filename": None,
+            "render_total_frames": 1,
+            "render_clip_list_json": "[]",
+        },
+    }
+    return {
+        "status": "Ready",
+        "ratio": ratio,
+        "clips": clips,
+        "clip_count": len(clips),
+        "total_frames": 1,
+        "composition_id": None,
+        "output_filename": None,
+        "selected_assets_json": json.dumps(selected),
+        "render_clip_list_json": json.dumps([
+            {
+                "id": clip["id"],
+                "order": clip["order"],
+                "mediaAssetRecordId": clip["media_asset_record_id"] or None,
+                "assetName": clip["asset_name"],
+                "url": clip["url"],
+                "src": clip["src"],
+                "startFrame": 0,
+                "durationFrames": 1,
+                "motionStyle": "stillPhoto",
+                "overlay": None,
+                "caption": "",
+            }
+            for clip in clips
+        ]),
+        "native": native,
+        "finished": True,
+        "finished_kind": kind,
+        "story": effective["output_type"] in STORY_OUTPUT_TYPES,
+        "effective": effective,
+    }
+
+
 def source_package(
     request: dict[str, Any],
     output: dict[str, Any],
     parent: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    finished = finished_source_package(request, output, parent)
+    if finished:
+        return finished
     if field_str(request, "Studio_Variant_Status") != "Ready":
         return None
     effective = output_effective(output, request, parent)
@@ -309,6 +429,23 @@ def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict
     }
     if thumb:
         fields["Thumbnail_URL"] = thumb
+    first_url = clips[0]["url"] if clips else None
+    public = first_url if str(first_url or "").startswith("https://media.chicagoshining.com/") else None
+    if package.get("finished"):
+        video = package.get("finished_kind") == "finished-video"
+        fields.update({
+            "Output_Status": "Ready for Review",
+            "Render_Status": "Rendered" if video else "Native Photo Route",
+            "Asset_Selection_Status": None,
+            "Voiceover_Status": "Not Needed",
+            "Studio_Preview_URL": first_url,
+            "Final_File_URL": first_url if video else None,
+            "Publish_Asset_URL": public,
+            "Composition_ID": None,
+            "Output_Filename": None,
+            "Review_Status": None,
+        })
+        return fields
     if native:
         fields.update({
             "Output_Status": "Ready for Review",

@@ -6,13 +6,14 @@
     MULTIPLE_PHOTOS: "multiple-photos",
     VIDEO_CLIPS: "video-clips",
     FINISHED_VIDEO: "finished-video",
+    FINISHED_STILLS: "finished-stills",
     SINGLE_AI: "single-ai",
     MULTIPLE_AI: "multiple-ai",
     MIXED: "mixed",
   });
   const EZ_CAPTION_MODES = Object.freeze(["manual", "none", "ai"]);
   const EZ_PHASE1_INPUTS = Object.freeze([EZ_INPUTS.SINGLE_PHOTO, EZ_INPUTS.MULTIPLE_PHOTOS]);
-  const EZ_DISABLED_INPUTS = Object.freeze([EZ_INPUTS.VIDEO_CLIPS, EZ_INPUTS.FINISHED_VIDEO]);
+  const EZ_DISABLED_INPUTS = Object.freeze([EZ_INPUTS.VIDEO_CLIPS]);
   const EZ_PHOTO_PASSES = Object.freeze({
     single: Object.freeze({
       Instagram: "Single Image",
@@ -74,8 +75,19 @@
     return String(outputType || "").trim();
   }
 
-  function ezCaptionFields(mode, { caption = "", captions = [] } = {}) {
+  function ezCaptionFields(mode, { caption = "", captions = [], finished = false } = {}) {
     const normalized = String(mode || "ai").trim().toLowerCase();
+    if (finished) {
+      return {
+        mode: normalized === "manual" ? "manual" : (normalized === "none" ? "none" : "ai"),
+        overlay_titles: false,
+        title_mode: "Leave blank",
+        requested_title: "",
+        caption_mode: normalized === "manual" ? "Force exact" : (normalized === "none" ? "Leave blank" : "AI decides"),
+        requested_caption: String(caption || "").trim(),
+        slide_captions: [],
+      };
+    }
     if (normalized === "manual") {
       const parts = Array.isArray(captions) ? captions.map((value) => String(value || "").trim()).filter(Boolean) : [];
       return {
@@ -153,7 +165,9 @@
 
   function ezIntakeKindFromWizard(inputKind) {
     const kind = String(inputKind || "").trim();
-    if (kind === EZ_INPUTS.MULTIPLE_PHOTOS || kind === EZ_INPUTS.MULTIPLE_AI || kind === EZ_INPUTS.MIXED) {
+    if (kind === EZ_INPUTS.FINISHED_VIDEO) return EZ_INPUTS.FINISHED_VIDEO;
+    if (kind === EZ_INPUTS.FINISHED_STILLS) return EZ_INPUTS.FINISHED_STILLS;
+    if (kind === EZ_INPUTS.MULTIPLE_PHOTOS || kind === EZ_INPUTS.MULTIPLE_AI || EZ_INPUTS.MIXED === kind) {
       return EZ_INPUTS.MULTIPLE_PHOTOS;
     }
     return EZ_INPUTS.SINGLE_PHOTO;
@@ -180,7 +194,8 @@
   function ezWizardExpectedUploads(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
-    if (kind === EZ_INPUTS.SINGLE_PHOTO) return 1;
+    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO) return 1;
+    if (kind === EZ_INPUTS.FINISHED_STILLS) return Math.max(1, Number(answers.photoCount) || 1);
     if (kind === EZ_INPUTS.MIXED) return Math.max(1, Number(answers.manualCount) || 1);
     if (kind === EZ_INPUTS.MULTIPLE_PHOTOS) return Math.max(2, Number(answers.photoCount) || 2);
     return null;
@@ -274,14 +289,14 @@
     const selected = Array.isArray(answers.platforms) && answers.platforms.length
       ? answers.platforms
       : null;
-    if (packageId === "video") {
-      const overrides = { Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" };
+    if (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO || packageId === "video") {
+      const overrides = { Instagram: "Reel", Facebook: "Reel", TikTok: "Video Draft", YouTube: "Short" };
       const filtered = selected
         ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
         : overrides;
       return ezPlanFromOverrides(count, filtered);
     }
-    if (packageId === "stills") {
+    if (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_STILLS || packageId === "stills") {
       const overrides = ezStillsOverrides(count);
       const filtered = selected
         ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))

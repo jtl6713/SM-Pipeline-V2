@@ -14,7 +14,7 @@ from studio_produce.context import (
     slide_image_url,
     variant_manifest,
 )
-from studio_produce.job import parse_json, utc_now
+from studio_produce.job import finished_origin_kind, is_finished_route, parse_json, utc_now
 from studio_produce.queue import (
     outstanding_count,
     persist_variant_manifest,
@@ -41,6 +41,13 @@ class StepWait(RuntimeError):
 
 def source_kind(route: str) -> str:
     return str(route or "").split(":", 1)[0] or "uploaded"
+
+
+def is_finished(ctx: dict[str, Any]) -> bool:
+    route = str((ctx.get("job") or {}).get("route") or "")
+    if is_finished_route(route):
+        return True
+    return bool(finished_origin_kind((ctx.get("request") or {}).get("fields") or {}))
 
 
 def caption_locked(request: dict[str, Any]) -> bool:
@@ -158,6 +165,28 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
     request = ctx["request"]
     parent = ctx["parent"]
     route = source_kind(ctx["job"].get("route"))
+    if is_finished(ctx):
+        if not parent:
+            raise StepBlocked("Finished files need a promoted Content Item before the 3D thumbnail can be generated")
+        if not caption_locked(request) and not field_str(parent, "Caption"):
+            from sai1.processor import process_request
+
+            title = theme_title(request, parent) or field_str(request, "Production_Request_ID") or "Chicago"
+            result = process_request(
+                title=title,
+                covered_text="(none)",
+                needed=0,
+                total=1,
+            )
+            themes = result.get("themes") or {}
+            apply_caption(client, parent, ctx["outputs"], themes)
+            parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+            ctx["parent"] = parent
+        from studio_produce.thumbnail import ensure_finished_thumbnail
+
+        ensure_finished_thumbnail(client, request, parent, ctx.get("outputs") or [])
+        ctx["parent"] = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+        return "ingest"
     if not parent:
         if route == "uploaded":
             return "audio"
@@ -196,6 +225,8 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
 
 def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
+    if is_finished(ctx):
+        return "ingest"
     parent = ctx["parent"]
     request = ctx["request"]
     if not parent:
@@ -224,7 +255,7 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
 
 def step_images(client: AirtableClient, ctx: dict[str, Any]) -> str:
-    if source_kind(ctx["job"].get("route")) == "uploaded":
+    if is_finished(ctx) or source_kind(ctx["job"].get("route")) == "uploaded":
         return "ingest"
     parent = ctx["parent"]
     if not parent:
@@ -258,6 +289,23 @@ def step_ingest(client: AirtableClient, ctx: dict[str, Any]) -> str:
     parent = ctx["parent"]
     request_id = ctx["request_id"]
     assets = master_assets(request)
+    if is_finished(ctx):
+        if not assets:
+            raise StepBlocked("Upload the finished file before review")
+        upsert_master_queue(client, request_id, assets, test_run_id=field_str(request, "Test_Run_ID"))
+        drain_smv1(request_id, field_str(request, "Test_Run_ID"), max_runs=max(2, len(assets) + 2))
+        client.update_record(
+            PRODUCTION_REQUESTS_TABLE,
+            request_id,
+            {
+                "Studio_Variant_Status": "Not Needed",
+                "Studio_Variant_Error": None,
+                "Updated_At": utc_now(),
+            },
+            typecast=True,
+        )
+        ctx["request"] = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
+        return "stamp"
     expected = expected_photo_count(request, assets)
     slides = ctx.get("slides") or []
     if parent and not slides:
@@ -304,6 +352,8 @@ def step_ingest(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
 
 def step_queue_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
+    if is_finished(ctx):
+        return "stamp"
     request_id = ctx["request_id"]
     request = reconcile_master_authority(client, request_id, client.get_record(PRODUCTION_REQUESTS_TABLE, request_id))
     ctx["request"] = request
@@ -347,6 +397,8 @@ def step_queue_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
 
 def step_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
+    if is_finished(ctx):
+        return "stamp"
     from studio_produce.context import load_queue_rows
 
     request_id = ctx["request_id"]
@@ -372,9 +424,16 @@ def step_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
 def step_stamp(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if not ctx.get("outputs"):
         raise StepBlocked("No Platform Outputs found for this Production Request")
+    if is_finished(ctx) and ctx.get("parent"):
+        from studio_produce.thumbnail import ensure_finished_thumbnail
+
+        ensure_finished_thumbnail(client, ctx["request"], ctx["parent"], ctx.get("outputs") or [])
+        ctx["parent"] = client.get_record(CONTENT_ITEMS_TABLE, ctx["parent"]["id"])
     result = stamp_outputs(client, ctx["request"], ctx["outputs"], ctx["parent"])
     if result["missing"]:
         raise StepBlocked(f"{len(result['missing'])} output(s) are missing a complete source package")
+    if is_finished(ctx):
+        return "done"
     return "render"
 
 
@@ -389,6 +448,8 @@ def _output_ready(output: dict[str, Any]) -> bool:
 
 
 def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
+    if is_finished(ctx):
+        return "done"
     from r3.processor import process_one as process_r3
     from r4.processor import process_one as process_r4
     from r5.processor import process_one as process_r5

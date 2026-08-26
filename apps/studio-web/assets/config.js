@@ -43,7 +43,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     creativeUnlockTitles: "Allow title fields that were intentionally locked to be edited for this review cycle.",
     saveCreativeEditor: "Save the current creative edits without requesting a new render or publishing anything.",
     creativeRequestChanges: "Save the current creative edits and request a new preview render. Publishing does not start until the new preview is approved.",
-    creativeApprovePreview: "Approve this preview for publishing. Public-platform outputs can enter their publish queues; TikTok remains a draft where required.",
+    creativeApprovePreview: "Approve this output for publishing. Immediate is the default. Choose Schedule and a local date/time to override. TikTok remains a draft.",
     pipelineFilterClear: "Remove the current Pipeline filter and show all platform-output rows again.",
     operationsRunDailyIdeas: "Run today's enabled daily-idea batches immediately. Only profiles whose Daily Ideas toggle is enabled are included.",
     operationsRunIntake: "Start the library intake chain for files waiting in the configured Drive intake folder. This can classify, reconcile, or compress eligible assets.",

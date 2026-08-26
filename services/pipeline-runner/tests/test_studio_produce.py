@@ -1,11 +1,13 @@
+import json
 from datetime import datetime, timezone
 
 from render.fields import first_linked_id, linked_ids
 from studio_produce.constants import STEP_LABELS, STEP_PERCENT
 from studio_produce.context import outputs_formula
-from studio_produce.job import derive_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
+from studio_produce.job import derive_route, finished_origin_kind, is_finished_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, variant_transfer_id
-from studio_produce.stamp import is_native_photo
+from studio_produce.stamp import finished_source_package, is_native_photo, stamp_fields
+from studio_produce.thumbnail_prompt import COLORFUL_3D_RULE, build_finished_thumbnail_prompt
 
 
 def test_parse_job_empty():
@@ -55,6 +57,31 @@ def test_derive_route_uploaded_native():
         [{"fields": {"Studio_Output_Type": "Single Image", "Platform": "Instagram"}}],
     )
     assert route == "uploaded:native_still"
+
+
+def test_derive_route_finished_video():
+    route = derive_route(
+        {
+            "Production_Notes": "origin=ez-wizard; ez-input=finished-video. Finished passthrough.",
+            "Studio_Master_Assets_JSON": '[{"id":"v1","source":"upload","url":"https://media.chicagoshining.com/studio/master-assets/x.mp4"}]',
+        },
+        [{"fields": {"Studio_Output_Type": "Reel", "Platform": "Instagram"}}],
+    )
+    assert route == "finished-video:passthrough"
+    assert is_finished_route(route)
+    assert finished_origin_kind({"Production_Notes": "ez-input=finished-video"}) == "finished-video"
+
+
+def test_derive_route_finished_stills():
+    route = derive_route(
+        {
+            "Production_Notes": "origin=ez-wizard; ez-input=finished-stills",
+            "Studio_Master_Assets_JSON": '[{"id":"a1","source":"upload"}]',
+        },
+        [{"fields": {"Studio_Output_Type": "Carousel", "Platform": "Instagram"}}],
+    )
+    assert route == "finished-stills:passthrough"
+    assert finished_origin_kind({"Production_Request_Notes": "ez-input=finished-carousel"}) == "finished-stills"
 
 
 def test_derive_route_mixed():
@@ -132,3 +159,63 @@ def test_native_photo_detection():
     assert not is_native_photo("Instagram", "Story")
     assert not is_native_photo("Instagram", "Reel")
     assert not is_native_photo("TikTok", "Video Draft")
+
+
+def test_finished_video_package_skips_crops():
+    request = {
+        "id": "recPRFinished",
+        "fields": {
+            "Production_Notes": "origin=ez-wizard; ez-input=finished-video",
+            "Studio_Variant_Status": "Not Needed",
+            "Studio_Master_Assets_JSON": json.dumps([{
+                "id": "v1",
+                "order": 1,
+                "name": "final.mp4",
+                "mime_type": "video/mp4",
+                "url": "https://media.chicagoshining.com/studio/master-assets/final.mp4",
+            }]),
+        },
+    }
+    output = {"id": "recPO1", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel"}}
+    package = finished_source_package(request, output, None)
+    assert package["finished"] is True
+    assert package["finished_kind"] == "finished-video"
+    assert package["clips"][0]["overlay"] is None
+    fields = stamp_fields(package, None)
+    assert fields["Output_Status"] == "Ready for Review"
+    assert fields["Render_Status"] == "Rendered"
+    assert fields["Final_File_URL"].endswith(".mp4")
+    assert fields["Composition_ID"] is None
+
+
+def test_finished_stills_package_is_native():
+    request = {
+        "id": "recPRStills",
+        "fields": {
+            "Production_Notes": "origin=ez-wizard; ez-input=finished-stills",
+            "Studio_Master_Assets_JSON": json.dumps([
+                {"id": "a1", "order": 1, "name": "one.jpg", "mime_type": "image/jpeg", "url": "https://media.chicagoshining.com/studio/master-assets/one.jpg"},
+                {"id": "a2", "order": 2, "name": "two.jpg", "mime_type": "image/jpeg", "url": "https://media.chicagoshining.com/studio/master-assets/two.jpg"},
+            ]),
+        },
+    }
+    output = {"id": "recPO2", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Carousel"}}
+    package = finished_source_package(request, output, None)
+    assert package["native"] is True
+    assert package["clip_count"] == 2
+    fields = stamp_fields(package, None)
+    assert fields["Render_Status"] == "Native Photo Route"
+    assert fields["Output_Status"] == "Ready for Review"
+    assert not fields.get("Final_File_URL")
+
+
+def test_finished_thumbnail_prompt_requires_colorful_3d():
+    prompt = build_finished_thumbnail_prompt(
+        {"fields": {"Requested_Title": "Rainy Chicago"}},
+        {"fields": {"Caption": "Lake Shore Drive at dusk"}},
+    )
+    assert "Rainy Chicago" in prompt
+    assert "Lake Shore Drive" in prompt
+    assert "colorful 3D block lettering" in prompt
+    assert COLORFUL_3D_RULE in prompt
+    assert "Do not use" in prompt and "black-and-gold" in prompt
