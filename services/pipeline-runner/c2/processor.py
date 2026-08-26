@@ -16,6 +16,8 @@ from c2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from integrations.google_drive import GoogleDriveClient
 from render.fields import field, field_str
 
+_RUNNING_PARENTS: set[str] = set()
+
 
 def _filename(parent: dict[str, Any], slide: dict[str, Any]) -> str:
     content_id = field(parent, "Content_ID") or field_str(parent, "Content_ID") or "x"
@@ -41,6 +43,8 @@ def process_request(
     }
     if not content_item_record_id:
         return {"processed": False, "reason": "missing_content_record_id", **preview}
+    if content_item_record_id in _RUNNING_PARENTS:
+        return {"processed": False, "reason": "already_running", **preview}
 
     client = AirtableClient()
     parent = load_parent(client, content_item_record_id, test_run_id=test_run_id)
@@ -61,64 +65,68 @@ def process_request(
     if not eligible:
         return {"processed": False, "reason": "no_make_ai_slides_with_prompt", **preview}
 
-    drive = GoogleDriveClient()
-    generated: list[str] = []
-    for slide in eligible:
-        prompt = build_c2_prompt(
-            field_str(slide, "AI Prompt"),
-            platform=field_str(slide, "Platform"),
-            ratio=field_str(slide, "AI Image Ratio") or field_str(slide, "Aspect Ratio"),
-        )
-        png = generate_carousel_png(
-            prompt,
-            ratio=field_str(slide, "AI Image Ratio") or field_str(slide, "Aspect Ratio"),
-        )
-        uploaded = drive.upload_and_share(
-            C2_DRIVE_FOLDER_ID,
-            _filename(parent, slide),
-            png,
-            "image/png",
-        )
-        link = str(uploaded.get("webContentLink") or "")
-        client.update_record(
-            CAROUSEL_SLIDES_TABLE,
-            slide["id"],
-            {
-                "Google Drive File ID": uploaded["id"],
-                "Render Status": "Not Started",
-                "AI Image URL": link,
-                "Image Source": "Make AI Generated",
-                "Current Image URL": link,
-                "Error Message": "",
-                "Review Status": "Generated",
-            },
-        )
-        generated.append(slide["id"])
-
-    chain = None
-    if trigger_c3 and generated:
-        payload = {
-            "content_record_id": parent["id"],
-            "content_id": field(parent, "Content_ID"),
-            "source": "Carousel daisy chain",
-            "target": "C3",
-            "requested_at": iso_utc(),
-            "test_run_id": field_str(parent, "Test_Run_ID"),
-        }
-
-        def _python_c3() -> dict[str, Any]:
-            from c3.processor import process_request as process_c3
-
-            return process_c3(
-                content_item_record_id=parent["id"],
-                test_run_id=field_str(parent, "Test_Run_ID") or None,
+    _RUNNING_PARENTS.add(content_item_record_id)
+    try:
+        drive = GoogleDriveClient()
+        generated: list[str] = []
+        for slide in eligible:
+            prompt = build_c2_prompt(
+                field_str(slide, "AI Prompt"),
+                platform=field_str(slide, "Platform"),
+                ratio=field_str(slide, "AI Image Ratio") or field_str(slide, "Aspect Ratio"),
             )
+            png = generate_carousel_png(
+                prompt,
+                ratio=field_str(slide, "AI Image Ratio") or field_str(slide, "Aspect Ratio"),
+            )
+            uploaded = drive.upload_and_share(
+                C2_DRIVE_FOLDER_ID,
+                _filename(parent, slide),
+                png,
+                "image/png",
+            )
+            link = str(uploaded.get("webContentLink") or "")
+            client.update_record(
+                CAROUSEL_SLIDES_TABLE,
+                slide["id"],
+                {
+                    "Google Drive File ID": uploaded["id"],
+                    "Render Status": "Not Started",
+                    "AI Image URL": link,
+                    "Image Source": "Make AI Generated",
+                    "Current Image URL": link,
+                    "Error Message": "",
+                    "Review Status": "Generated",
+                },
+            )
+            generated.append(slide["id"])
 
-        chain = trigger_next("c3", payload, python_call=_python_c3)
+        chain = None
+        if trigger_c3 and generated:
+            payload = {
+                "content_record_id": parent["id"],
+                "content_id": field(parent, "Content_ID"),
+                "source": "Carousel daisy chain",
+                "target": "C3",
+                "requested_at": iso_utc(),
+                "test_run_id": field_str(parent, "Test_Run_ID"),
+            }
 
-    return {
-        "processed": True,
-        "generated_slide_ids": generated,
-        "c3": chain,
-        **preview,
-    }
+            def _python_c3() -> dict[str, Any]:
+                from c3.processor import process_request as process_c3
+
+                return process_c3(
+                    content_item_record_id=parent["id"],
+                    test_run_id=field_str(parent, "Test_Run_ID") or None,
+                )
+
+            chain = trigger_next("c3", payload, python_call=_python_c3)
+
+        return {
+            "processed": True,
+            "generated_slide_ids": generated,
+            "c3": chain,
+            **preview,
+        }
+    finally:
+        _RUNNING_PARENTS.discard(content_item_record_id)

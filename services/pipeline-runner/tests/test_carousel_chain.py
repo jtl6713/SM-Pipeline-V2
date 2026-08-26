@@ -51,6 +51,13 @@ def test_c2_c3_c5_filters():
     }
     assert c2_should_generate(generate)
     assert not c2_should_generate({"fields": {"Image Generation Mode": "Manual Upload", "AI Prompt": "x"}})
+    assert not c2_should_generate({
+        "fields": {
+            "Image Generation Mode": "Make AI Generated",
+            "AI Prompt": "Lincoln Park sunrise",
+            "AI Image URL": "https://drive.google.com/uc?id=already",
+        }
+    })
     assert c3_include_slide({"fields": {"Review Status": "Generated", "Current Image URL": "https://x"}})
     assert c3_include_slide({"fields": {"Review Status": "Replacement Generated", "Current Image URL": "https://x"}})
     assert not c3_include_slide({"fields": {"Review Status": "Approved", "Current Image URL": "https://x"}})

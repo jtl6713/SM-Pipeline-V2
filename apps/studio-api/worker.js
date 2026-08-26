@@ -150,7 +150,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.135-review-restore",
+          version: "0.10.136-continuation-nolock",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -8568,12 +8568,15 @@ async function pulseStudioC2Handoff(env, contentItemId, requestRecord = null) {
     requested_at: new Date().toISOString(),
   };
   if (pipelineStageBackend(env, "C2").mode === "python") {
-    const { response, payload } = await item4PulsePipelineStage(env, "c2", body, "C2");
+    const { response, payload } = await item4PulsePipelineStage(env, "c2", {
+      ...body,
+      extra: { ...(body.extra || {}), background: true, trigger_c3: false },
+    }, "C2");
     if (!response.ok) {
       console.warn("C2 studio AI pulse failed", response.status, String(payload?.message || "").slice(0, 300));
       return { ok: false, status: response.status };
     }
-    return { ok: true, status: response.status, backend: "python" };
+    return { ok: true, status: response.status, backend: "python", background: true };
   }
   try { await phase6EnsureScenarioActive(env, ITEM4_C2_SCENARIO_ID); } catch (error) {
     console.warn("C2 webhook could not be armed before pulse", error);
@@ -12974,9 +12977,6 @@ function continueParkedProductionAfterPromote(ctx, env) {
     try { await advanceStudioProductionOutputs(env); } catch (error) {
       console.warn("promote follow-up continuation failed", error);
     }
-    try { await pulseOnDemandCarouselChain(env); } catch (error) {
-      console.warn("promote follow-up carousel pulse failed", error);
-    }
   })();
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
   return run;
@@ -13655,6 +13655,21 @@ async function studioContinuationMediaGate(env, po, cache) {
     const stamped = await studioStampParentAiCoverOnOutput(env, po, parent).catch(() => false);
     if (stamped) return { action: "stamped_cover", reason: "parent_ai_cover", contentItemId: parentId };
   }
+  const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+    || studioFirstLinkedId(f(parent, "Production Requests"));
+  if (requestId) {
+    if (!cache.requests.has(requestId)) {
+      cache.requests.set(requestId, await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null));
+    }
+    const requestRecord = cache.requests.get(requestId);
+    if (requestRecord) {
+      const assets = item4AssetManifest(requestRecord);
+      const expected = item4EffectivePhotoCount(requestRecord, assets);
+      if (expected > assets.length) {
+        return { action: "wait_ai", reason: "missing_ai_masters", contentItemId: parentId, requestRecordId: requestId };
+      }
+    }
+  }
   return { action: "media_ok", contentItemId: parentId };
 }
 
@@ -13686,7 +13701,6 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
     pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
   }
-  const pulsedRender = pulses.some((row) => (row.key === "R3" || row.key === "R4") && (row.pulsed || row.error));
   const candidates = await listStudioContinuationCandidates(env, options).catch((error) => {
     console.warn("Studio continuation candidate list failed", error);
     return [];
@@ -13707,29 +13721,6 @@ async function advanceStudioProductionOutputs(env, options = {}) {
       coverMedia.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
     }
   }
-  if (pulsedRender) {
-    const stranded = (candidates || []).filter((po) => studioOutputNeedsRemotionPackage(po)).slice(0, 2);
-    const inspected = coverMedia.slice();
-    for (const po of stranded) {
-      if (inspected.some((row) => row.id === po.id && row.action && row.action !== "media_ok" && row.action !== "stamped_cover")) continue;
-      try {
-        const result = await studioContinuationInspectOutput(env, po, cache);
-        const idx = inspected.findIndex((row) => row.id === po.id);
-        const payload = { id: po.id, ...result };
-        if (idx >= 0) inspected[idx] = payload;
-        else inspected.push(payload);
-      } catch (error) {
-        inspected.push({ id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) });
-      }
-    }
-    console.log("Studio continuation", JSON.stringify({
-      count: inspected.length,
-      inspected: inspected.map((row) => ({ id: row.id, action: row.action, reason: row.reason || row.error || null })),
-      pulses,
-      stranded_remotion: true,
-    }));
-    return { inspected, pulses };
-  }
   const media = coverMedia;
   const waitingVoiceover = media.some((row) => row.action === "wait_voiceover");
   const waitingThumbnail = media.some((row) => row.action === "wait_thumbnail");
@@ -13739,35 +13730,57 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     )];
     await pulseStudioP2ForWaitingParents(env, mediaParents, pulses);
   }
-  const pulsedP2 = pulses.some((row) => row.key === "P2" && row.pulsed);
-  const inspected = media.slice();
-  if (!pulsedP2 && !pulsedRender) {
-    let inspectedRemotion = 0;
-    for (const po of candidates || []) {
-      const gate = media.find((row) => row.id === po.id);
-      if (!gate || gate.action !== "media_ok") continue;
-      if (inspectedRemotion >= 4) break;
+  const waitingAiParents = [...new Set(
+    media.filter((row) => row.action === "wait_ai").map((row) => row.contentItemId).filter(Boolean)
+  )];
+  if (waitingAiParents.length) {
+    try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: waitingAiParents })); } catch (error) {
+      pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
+    }
+    for (const parentId of waitingAiParents) {
       try {
-        const result = await studioContinuationInspectOutput(env, po, cache);
-        const idx = inspected.findIndex((row) => row.id === po.id);
-        if (idx >= 0) inspected[idx] = { id: po.id, ...result };
-        inspectedRemotion += 1;
+        const parent = cache.parents.get(parentId) || await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+        cache.parents.set(parentId, parent);
+        const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+          || studioFirstLinkedId(f(parent, "Production Requests"));
+        if (!requestId) continue;
+        const requestRecord = cache.requests.get(requestId)
+          || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+        cache.requests.set(requestId, requestRecord);
+        const filled = await item4EnsureAiSourceMasters(env, requestRecord, parent);
+        if (filled?.requestRecord) cache.requests.set(requestId, filled.requestRecord);
+        pulses.push({
+          key: "AI_INGEST",
+          parent: parentId,
+          waiting: filled?.waiting ?? null,
+        });
       } catch (error) {
-        const idx = inspected.findIndex((row) => row.id === po.id);
-        const payload = { id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) };
-        if (idx >= 0) inspected[idx] = payload;
-        else inspected.push(payload);
-        inspectedRemotion += 1;
+        pulses.push({ key: "AI_INGEST", parent: parentId, error: error instanceof Error ? error.message : String(error) });
       }
     }
   }
-  const waitingAi = inspected.some((row) => row.action === "wait_ai");
-  const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
-  const carouselParents = [...new Set(inspected.map((row) => row.contentItemId).filter(Boolean))];
-  if (!pulsedP2 && !pulsedRender && (waitingAi || waitingPackage)) {
-    try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: carouselParents })); } catch (error) {
-      pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
+  const inspected = media.slice();
+  let inspectedRemotion = 0;
+  for (const po of candidates || []) {
+    const gate = media.find((row) => row.id === po.id);
+    if (!gate || (gate.action !== "media_ok" && gate.action !== "wait_ai")) continue;
+    if (inspectedRemotion >= 4) break;
+    try {
+      const result = await studioContinuationInspectOutput(env, po, cache);
+      const idx = inspected.findIndex((row) => row.id === po.id);
+      if (idx >= 0) inspected[idx] = { id: po.id, ...result };
+      else inspected.push({ id: po.id, ...result });
+      inspectedRemotion += 1;
+    } catch (error) {
+      const idx = inspected.findIndex((row) => row.id === po.id);
+      const payload = { id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) };
+      if (idx >= 0) inspected[idx] = payload;
+      else inspected.push(payload);
+      inspectedRemotion += 1;
     }
+  }
+  const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
+  if (waitingPackage) {
     try { pulses.push(...await pulseOnDemandMediaChain(env)); } catch (error) {
       pulses.push({ key: "SMV1", error: error instanceof Error ? error.message : String(error) });
     }
@@ -14074,7 +14087,7 @@ async function syncProductionCadence(env, { force = false, startRender = false, 
     }
     if (startPublish || force) pulses.push(...await pulseOnDemandPublishChain(env));
     if (force) pulses.push(...await pulseOnDemandMediaChain(env));
-    if (startCarousel || force) pulses.push(...await pulseOnDemandCarouselChain(env));
+    if (force) pulses.push(...await pulseOnDemandCarouselChain(env));
     if (startRender || force) pulses.push(...await pulseOnDemandR2B(env));
     if (force) pulses.push(...await pulseOnDemandMakeAdminBridge(env));
     return { ok: true, parked: true, results, pulses };

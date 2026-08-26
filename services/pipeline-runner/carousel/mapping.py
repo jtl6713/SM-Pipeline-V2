@@ -40,7 +40,12 @@ def platform_output_mapping(platform: str) -> tuple[str, str]:
 def c2_should_generate(slide: dict[str, Any]) -> bool:
     mode = field_str(slide, "Image Generation Mode").lower()
     prompt = field_str(slide, "AI Prompt")
-    return mode == "make ai generated" and bool(prompt)
+    if mode != "make ai generated" or not prompt:
+        return False
+    # A 524/retry must not regenerate slides that already have an image.
+    if field_str(slide, "AI Image URL") or field_str(slide, "Current Image URL"):
+        return False
+    return True
 
 
 def c5_should_regenerate(slide: dict[str, Any]) -> bool:
