@@ -9,7 +9,7 @@ from airtable.client import AirtableClient
 from studio_produce.constants import STEP_LABELS, TERMINAL_STEPS
 from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job
 from studio_produce.job import derive_route, job_is_terminal, new_job, next_step, with_step
-from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait
+from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
@@ -33,9 +33,15 @@ def start_job(production_request_record_id: str, *, resume: bool = False) -> dic
     job = read_job(request)
     if job_is_terminal(job) and not resume:
         return {"accepted": False, "reason": "terminal", "job": job, "production_request_record_id": request_id}
-    if not job or not job.get("job_id") or (resume and job_is_terminal(job)):
+    if not job or not job.get("job_id"):
         route = derive_route(request.get("fields") or {}, outputs)
         job = new_job(route=route, step="themes")
+        write_job(client, request_id, job)
+    elif resume and job_is_terminal(job):
+        route = job.get("route") or derive_route(request.get("fields") or {}, outputs)
+        step = pick_resume_step(request, outputs)
+        job = with_step({**job, "route": route, "error": None}, step, error=None)
+        job["error"] = None
         write_job(client, request_id, job)
     elif not job.get("route"):
         job = {**job, "route": derive_route(request.get("fields") or {}, outputs)}

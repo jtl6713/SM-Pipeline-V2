@@ -109,7 +109,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.138-similar-times";
+  const BUILD_ID = "item4-0.6.139-similar-status";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -8468,6 +8468,18 @@
     target.innerHTML = `<table><thead><tr><th></th>${windows.map((window) => `<th>${escapeHtml(window)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
   }
 
+  function similarAccountStatusLabel(status) {
+    const key = String(status || "").trim();
+    if (key === "ok") return "timed";
+    if (key === "reference") return "reference only";
+    if (key === "needs_permission") return "needs Meta IG permission";
+    if (key === "needs_key") return "needs YouTube API key";
+    if (key === "unavailable") return "not publicly readable";
+    if (key === "pending") return "waiting for sweep";
+    if (key === "error") return "lookup failed";
+    return key;
+  }
+
   function renderOperationsWatchlist(accounts, canEdit) {
     const target = $("operationsWatchlist");
     const empty = $("operationsWatchlistEmpty");
@@ -8479,7 +8491,7 @@
     }
     target.innerHTML = accounts.map((account, index) => `
       <article class="ops-profile-card">
-        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle">${escapeHtml(account.platform)}${account.profile ? ` · ${escapeHtml(account.profile)}` : ""}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(account.status)}` : ""}</div></div>
+        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.platform)}${account.profile ? ` · ${escapeHtml(account.profile)}` : ""}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
       </article>
     `).join("");

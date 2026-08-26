@@ -7,6 +7,7 @@ from studio_produce.context import outputs_formula
 from studio_produce.job import derive_route, finished_origin_kind, is_finished_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, variant_transfer_id
 from studio_produce.stamp import finished_source_package, is_native_photo, stamp_fields
+from studio_produce.steps import pick_resume_step, thumbnail_required, voiceover_required
 from studio_produce.thumbnail_prompt import COLORFUL_3D_RULE, build_finished_thumbnail_prompt
 
 
@@ -151,6 +152,26 @@ def test_outputs_formula_uses_content_id():
     assert "102" in formula
     assert 'ARRAYJOIN({Content_Item})' in formula
     assert "recParent" in outputs_formula("recPR", "recParent")
+
+
+def test_voiceover_not_needed_does_not_require_p2():
+    request = {"fields": {"Voiceover_Mode": "Yes", "Thumbnail_Mode": "Yes"}}
+    parent = {"fields": {"Voiceover_Status": "Not Needed"}}
+    assert voiceover_required(request, parent) is False
+    assert voiceover_required({"fields": {"Voiceover_Mode": "Yes"}}, {"fields": {"Voiceover_Status": "Ready"}}) is True
+    assert thumbnail_required({"fields": {"Thumbnail_Mode": "Yes"}}) is True
+    assert thumbnail_required({"fields": {"Thumbnail_Mode": "Use Photo Frame"}}) is False
+
+
+def test_pick_resume_step_jumps_to_stamp_when_selected():
+    request = {"fields": {"Studio_Variant_Status": "Ready"}}
+    outputs = [{"fields": {"Asset_Selection_Status": "Selected", "Output_Status": "In Production"}}]
+    assert pick_resume_step(request, outputs) == "stamp"
+    ready = [{"fields": {
+        "Output_Status": "Ready for Review",
+        "Final_File_URL": "https://media.chicagoshining.com/studio/previews/x.mp4",
+    }}]
+    assert pick_resume_step(request, ready) == "done"
 
 
 def test_native_photo_detection():

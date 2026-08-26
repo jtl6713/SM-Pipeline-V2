@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.143-similar-times",
+          version: "0.10.145-produce-skip-p2",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -1638,9 +1638,11 @@ function normalizedOutputState(record) {
     if ((has("Review_Status", "pending") || has("Review_Status", "review sent") || has("Output_Status", "ready for review")) && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
     if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
   }
-  if (has("Render_Status", "rendering") || has("Render_Status", "ready for render") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
+  if (has("Render_Status", "rendering") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
   if (inProduction && !remotionFinished && !studioOutputIsNativePhoto(record)) {
-    if (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()) || has("Asset_Selection_Status", "selected")) return "Rendering";
+    const remotionStarted = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
+    if (has("Render_Status", "ready for render") || remotionStarted) return "Rendering";
+    if (hasFinishedFile || Boolean(String(f(record, "Studio_Preview_URL") || "").trim())) return "Rendering";
   }
   const studioAssetPrep = has("Asset_Selection_Status", "needs selection") || has("Asset_Selection_Status", "selecting");
   const publisherAssetPrep = has("TikTok_Draft_Status", "ready for assets") || has("TikTok_Draft_Status", "preparing assets") || has("FB_Publish_Status", "ready for assets") || has("FB_Publish_Status", "preparing assets");
@@ -4856,28 +4858,62 @@ async function enqueueStudioProductionJob(env, requestId) {
   return item4PulseStudioProduceJob(env, requestId);
 }
 
+function studioOutputProductionRequestId(record, contentToRequest = new Map()) {
+  return studioFirstLinkedId(f(record, "Production_Request"))
+    || contentToRequest.get(studioFirstLinkedId(f(record, "Content_Item")))
+    || null;
+}
+
 async function loadStudioProductionJobsForOutputs(env, records) {
-  const ids = [];
+  const directIds = [];
+  const contentIds = new Set();
   for (const record of records || []) {
-    const id = studioFirstLinkedId(f(record, "Production_Request"));
-    if (id && !ids.includes(id)) ids.push(id);
+    const direct = studioFirstLinkedId(f(record, "Production_Request"));
+    if (direct && !directIds.includes(direct)) directIds.push(direct);
+    const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+    if (contentId) contentIds.add(contentId);
   }
+  const recent = contentIds.size
+    ? await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+        limit: 50,
+        sortField: "Created_At",
+        sortDirection: "desc",
+        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
+      }).catch(() => [])
+    : [];
   const jobs = new Map();
-  for (const id of ids.slice(0, 25)) {
+  const contentToRequest = new Map();
+  for (const row of recent || []) {
+    const job = parseStudioProductionJob(row);
+    if (job) jobs.set(row.id, job);
+    const parentId = studioFirstLinkedId(f(row, "Promoted_Content_Item"));
+    if (parentId && contentIds.has(parentId) && !contentToRequest.has(parentId)) {
+      contentToRequest.set(parentId, row.id);
+    }
+  }
+  for (const id of directIds.slice(0, 25)) {
+    if (jobs.has(id)) continue;
     try {
       const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, id);
       jobs.set(id, parseStudioProductionJob(requestRecord));
     } catch {}
   }
-  return jobs;
+  return {
+    get(record) {
+      const id = studioOutputProductionRequestId(record, contentToRequest);
+      return id ? jobs.get(id) || null : null;
+    },
+  };
 }
 
 async function resumeStaleStudioProductionJobs(env, options = {}) {
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 50,
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Production_Request}!=BLANK())',
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 25,
+    sortField: "Created_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
   }).catch(() => []);
-  const ids = [...new Set((rows || []).map((row) => studioFirstLinkedId(f(row, "Production_Request"))).filter(Boolean))];
+  const ids = [...new Set((rows || []).map((row) => String(row?.id || "").trim()).filter((id) => id.startsWith("rec")))];
   const pulses = [];
   const now = Date.now();
   const staleAfter = Number(options.staleAfterMs || 180000);
@@ -4886,9 +4922,11 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
       const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       const job = parseStudioProductionJob(record);
       const step = String(job?.step || "").trim();
-      if (step === "done" || step === "blocked") continue;
+      if (step === "done") continue;
+      const skippableBlock = step === "blocked" && /no_eligible_p2_route/i.test(String(job?.error || ""));
+      if (step === "blocked" && !skippableBlock) continue;
       const updated = Date.parse(String(job?.updated_at || ""));
-      const stale = !job?.job_id || !Number.isFinite(updated) || (now - updated) >= staleAfter;
+      const stale = skippableBlock || !job?.job_id || !Number.isFinite(updated) || (now - updated) >= staleAfter;
       if (!stale) continue;
       const { payload } = await item4PulseStudioProduceJob(env, requestId, { resume: true });
       pulses.push({
@@ -8799,6 +8837,15 @@ function studioSimilarAccountStale(entry, now = Date.now()) {
   return !Number.isFinite(ts) || now - ts > STUDIO_SIMILAR_TIMES_TTL_MS;
 }
 
+function studioNormalizeSimilarStatus(entry) {
+  const status = String(entry?.status || "").trim();
+  const error = String(entry?.error || "");
+  if (status === "needs_permission" || status === "needs_key" || status === "unavailable" || status === "ok" || status === "pending") return status;
+  if (/permission|#10/i.test(error)) return "needs_permission";
+  if (/YouTube API key is missing|YOUTUBE_API_KEY/i.test(error)) return "needs_key";
+  return status || (entry?.fetched_at ? "ok" : "pending");
+}
+
 function studioBuildSimilarTimesView({ accounts, cache, theme, platform }) {
   const timed = studioTimedWatchlistAccounts(accounts, theme, platform);
   const reference = (accounts || []).filter((row) => !STUDIO_SIMILAR_TIMED_PLATFORMS.has(row.platform) && (!theme || (row.profile || "chicago") === theme));
@@ -8812,7 +8859,7 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform }) {
       handle: row.handle,
       source: row.source,
       profile: row.profile || theme,
-      status: entry.status || (entry.fetched_at ? "ok" : "pending"),
+      status: studioNormalizeSimilarStatus(entry),
       posts: rowPosts.length,
       fetched_at: entry.fetched_at || null,
       error: entry.error || null,
@@ -8825,9 +8872,19 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform }) {
   if (!timed.length) {
     message = `No Instagram or YouTube handles for ${label} yet. Add some on Operations. TikTok and Facebook stay reference-only.`;
   } else if (!heatmap.sample_size) {
-    message = stale.length
-      ? `Watchlist saved for ${label}. Public Instagram and YouTube timing fills in after the next insights sweep.`
-      : `Public Instagram/YouTube lookup found no dated posts for the ${label} watchlist yet.`;
+    const needPerm = accountViews.some((row) => row.status === "needs_permission");
+    const needKey = accountViews.some((row) => row.status === "needs_key");
+    if (needPerm && needKey) {
+      message = `${label} watchlist is saved. Instagram needs Meta business_discovery permission. YouTube needs YOUTUBE_API_KEY. TikTok and Facebook stay reference-only.`;
+    } else if (needPerm) {
+      message = `${label} Instagram lookups are blocked by Meta permission #10 (business_discovery). TikTok and Facebook stay reference-only.`;
+    } else if (needKey) {
+      message = `${label} YouTube timing needs YOUTUBE_API_KEY in Pipeline Settings or the Worker.`;
+    } else {
+      message = stale.length
+        ? `Watchlist saved for ${label}. Public Instagram and YouTube timing fills in after the next insights sweep.`
+        : `Public Instagram/YouTube lookup found no dated posts for the ${label} watchlist yet.`;
+    }
   } else if (heatmap.sample_size < STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
     message = `${heatmap.sample_size} similar-account posts so far for ${label}. Need ${STUDIO_SIMILAR_TIMES_MIN_SAMPLE} before this beats industry defaults.`;
   } else {
@@ -9099,10 +9156,14 @@ async function studioFetchInstagramBusinessDiscovery(handle, creds) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body?.error) {
     const code = Number(body?.error?.code || 0);
-    const unavailable = code === 110 || code === 100 || /business_discovery|does not exist|not found|not a business/i.test(String(body?.error?.message || ""));
+    const message = studioTruncateInsightError(body?.error || { message: `Instagram lookup HTTP ${response.status}` });
+    const needsPermission = code === 10 || /does not have permission|permission for this action/i.test(message);
+    const unavailable = !needsPermission && (code === 110 || code === 100 || /business_discovery|does not exist|not found|not a business/i.test(message));
     return {
-      status: unavailable ? "unavailable" : "error",
-      error: studioTruncateInsightError(body?.error || { message: `Instagram lookup HTTP ${response.status}` }),
+      status: needsPermission ? "needs_permission" : unavailable ? "unavailable" : "error",
+      error: needsPermission
+        ? "Meta app cannot read other Instagram accounts (business_discovery permission #10)."
+        : message,
       posts: [],
     };
   }
@@ -9121,7 +9182,7 @@ async function studioFetchInstagramBusinessDiscovery(handle, creds) {
 async function studioFetchYoutubePublicUploads(handle, creds) {
   const forHandle = studioSanitizeYtHandle(handle);
   if (!forHandle) return { status: "error", error: "YouTube handle is empty.", posts: [] };
-  if (!creds.youtubeKey) return { status: "error", error: "YouTube API key is missing.", posts: [] };
+  if (!creds.youtubeKey) return { status: "needs_key", error: "Add YOUTUBE_API_KEY to Pipeline Settings or the Worker to time public YouTube uploads.", posts: [] };
   const key = encodeURIComponent(creds.youtubeKey);
   const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&forHandle=${encodeURIComponent(forHandle)}&key=${key}`;
   let response = await fetch(channelUrl);
@@ -9995,7 +10056,7 @@ async function listOutputs(request, env, url, authorization) {
   const jobs = await loadStudioProductionJobsForOutputs(env, healed);
   return respond(request, env, {
     ok: true,
-    records: healed.map((record) => mapOutput(record, jobs.get(studioFirstLinkedId(f(record, "Production_Request"))))),
+    records: healed.map((record) => mapOutput(record, jobs.get(record))),
     profile: mapStudioContentProfile(profile),
   });
 }
@@ -14065,7 +14126,13 @@ async function cadenceHasRenderWork(env) {
 }
 
 function studioFirstLinkedId(value) {
-  return (Array.isArray(value) ? value : [value]).find((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))) || null;
+  const rows = Array.isArray(value) ? value : [value];
+  for (const row of rows) {
+    if (typeof row === "string" && /^rec[A-Za-z0-9]+$/.test(row)) return row;
+    const id = row && typeof row === "object" ? String(row.id || "") : "";
+    if (/^rec[A-Za-z0-9]+$/.test(id)) return id;
+  }
+  return null;
 }
 
 function studioOutputIsPhotoSequenceRoute(record) {
@@ -17436,7 +17503,7 @@ async function getOutputRoute(request, env, url) {
   const jobs = await loadStudioProductionJobsForOutputs(env, [record]);
   return respond(request, env, {
     ok: true,
-    record: mapOutput(record, jobs.get(studioFirstLinkedId(f(record, "Production_Request")))),
+    record: mapOutput(record, jobs.get(record)),
   });
 }
 
@@ -17447,7 +17514,7 @@ async function dashboard(request, env, url, authorization) {
   const content = (await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula })).map(mapContent);
   const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula });
   const outputJobs = await loadStudioProductionJobsForOutputs(env, outputRows);
-  const mappedOutputs = outputRows.map((row) => mapOutput(row, outputJobs.get(studioFirstLinkedId(f(row, "Production_Request")))));
+  const mappedOutputs = outputRows.map((row) => mapOutput(row, outputJobs.get(row)));
   const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
   const published = mappedOutputs.filter((o) => o.studio_state === "Published").length;
   const attention = mappedOutputs.filter((o) => attentionStates.has(o.studio_state)).length;

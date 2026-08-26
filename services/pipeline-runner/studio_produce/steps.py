@@ -54,6 +54,33 @@ def caption_locked(request: dict[str, Any]) -> bool:
     return "force exact" in field_str(request, "Caption_Mode").lower()
 
 
+def voiceover_required(request: dict[str, Any], parent: dict[str, Any] | None) -> bool:
+    status = field_str(parent or {}, "Voiceover_Status")
+    if status in {"Not Needed", "Skipped"}:
+        return False
+    return directive_yes(field_str(request, "Voiceover_Mode"))
+
+
+def thumbnail_required(request: dict[str, Any]) -> bool:
+    return field_str(request, "Thumbnail_Mode") not in {"No", "Use Photo Frame", "Photo Frame"}
+
+
+def pick_resume_step(request: dict[str, Any], outputs: list[dict[str, Any]] | None = None) -> str:
+    rows = outputs or []
+    if rows and all(_output_ready(row) for row in rows):
+        return "done"
+    if any(field_str(row, "Remotion_Job_ID") or field_str(row, "Render_Status").lower() == "rendering" for row in rows):
+        return "render"
+    if any(field_str(row, "Asset_Selection_Status") == "Selected" for row in rows):
+        return "stamp"
+    manifest = variant_manifest(request)
+    if manifest.get("plan_complete") or field_str(request, "Studio_Variant_Status") == "Ready":
+        return "stamp"
+    if master_assets(request):
+        return "queue_crops"
+    return "themes"
+
+
 def theme_title(request: dict[str, Any], parent: dict[str, Any] | None) -> str:
     return (
         field_str(request, "Requested_Title")
@@ -231,8 +258,8 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     request = ctx["request"]
     if not parent:
         return "images"
-    want_voice = directive_yes(field_str(request, "Voiceover_Mode"))
-    want_thumb = field_str(request, "Thumbnail_Mode") not in {"No", "Use Photo Frame", "Photo Frame"}
+    want_voice = voiceover_required(request, parent)
+    want_thumb = thumbnail_required(request)
     has_voice = bool(field_str(parent, "Voiceover_URL"))
     has_thumb = bool(field_str(parent, "Thumbnail_URL"))
     if (not want_voice or has_voice) and (not want_thumb or has_thumb):
@@ -250,6 +277,10 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if still_voice or still_thumb:
         if result.get("processed"):
             raise StepWait("Waiting for voiceover or thumbnail")
+        # P2 has no work when VO is Not Needed and the 3D cover is not staged.
+        # Blocking here left 268-273 on fake Rendering with no Remotion job.
+        if result.get("reason") == "no_eligible_p2_route":
+            return "images"
         raise StepBlocked(result.get("reason") or "P2 did not generate voiceover or thumbnail")
     return "images"
 
