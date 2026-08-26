@@ -7,7 +7,7 @@
  <title>ChicagoShining Studio</title>
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
- <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
+ <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
  <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.142-pipeline-schedule">
 </head>
 <body>
@@ -128,10 +128,14 @@
  <section class="panel"><div id="ideasList" class="table-wrap"></div></section>
  </section>
 
- <section id="page-content" class="page">
- <div class="page-heading ez-busy-panel" id="productionPageHeading">
- <div><span class="eyebrow">Production</span><h1>Production</h1><p>Open a draft, continue platform prep, or review promoted items.</p></div>
- <button class="secondary-button" data-refresh="content" title="Reload drafts and promoted items without interrupting photo uploads.">Refresh</button>
+ <section id="page-content" class="page production-page">
+ <div class="page-heading ez-busy-panel production-page-heading" id="productionPageHeading">
+ <div>
+ <span class="eyebrow">Studio</span>
+ <h1>Production</h1>
+ <p>Add photos, choose where they go, and frame each post.</p>
+ </div>
+ <button class="secondary-button production-refresh" data-refresh="content" title="Reload drafts and promoted items without interrupting photo uploads.">Refresh</button>
  </div>
  <section class="panel ez-intake" id="ezIntake" hidden>
  <div class="panel-heading ez-intake-heading">
@@ -335,77 +339,119 @@
  </div>
  </section>
 
- <section class="panel production-request-shell ez-busy-panel" id="productionRequestWorkspace" hidden>
- <div class="panel-heading production-request-heading">
+ <section class="panel production-request-shell production-studio-shell ez-busy-panel" id="productionRequestWorkspace" hidden>
+ <div class="panel-heading production-request-heading production-studio-hero">
  <div>
- <span class="eyebrow">Production request</span>
- <h2 id="productionRequestTitle">Configure production</h2>
- <p id="productionRequestSubtitle">Draft creative intent before the pipeline starts.</p>
+ <span class="eyebrow">Now working on</span>
+ <h2 id="productionRequestTitle">Untitled piece</h2>
+ <p id="productionRequestSubtitle">Keep editing until you are ready to approve.</p>
+ <code class="production-request-id" id="productionRequestId" hidden></code>
  </div>
  <span class="badge" id="productionRequestStatus">Draft</span>
  </div>
 
- <form id="productionRequestForm" class="production-request-form">
- <div class="request-section item4-master-media-section">
+ <ol class="production-step-rail" id="productionStepRail" aria-label="Production steps">
+ <li class="production-step-rail-item" data-production-step="media" data-progress="current">
+ <span class="production-step-num">1</span>
+ <span class="production-step-copy"><strong>Photos</strong><em>Add the originals</em></span>
+ </li>
+ <li class="production-step-rail-item" data-production-step="plan" data-progress="idle">
+ <span class="production-step-num">2</span>
+ <span class="production-step-copy"><strong>Platforms</strong><em>Pick where it posts</em></span>
+ </li>
+ <li class="production-step-rail-item" data-production-step="frames" data-progress="idle">
+ <span class="production-step-num">3</span>
+ <span class="production-step-copy"><strong>Frames</strong><em>Crop each post</em></span>
+ </li>
+ </ol>
+
+ <form id="productionRequestForm" class="production-request-form production-studio-form">
+ <div class="request-section item4-master-media-section production-step-card">
  <div class="request-section-heading item4-heading-row">
- <div><h3>1. Master media</h3><p>Choose single or multiple photos first, then upload. Studio preserves the originals and plans platform treatments from the same source set.</p></div>
- <span class="item4-state-pill" id="item4AssetStatus">No media yet</span>
+ <div class="production-step-title">
+ <span class="production-step-badge">1</span>
+ <div>
+ <h3>Add your photos</h3>
+ <p>Drop the originals. Studio keeps them and builds every platform crop from this set.</p>
+ </div>
+ </div>
+ <span class="item4-state-pill" id="item4AssetStatus" data-state="idle">No media yet</span>
  </div>
  <div class="ez-card-grid item4-media-kind-grid" id="item4MediaKindGrid">
- <button type="button" class="ez-card" data-pr-input="single-photo">
- <strong>Single photo</strong>
- <span>Instagram 4:5, Facebook image, TikTok photo draft.</span>
+ <button type="button" class="ez-card production-media-kind" data-pr-input="single-photo">
+ <span class="production-media-kind-icon" aria-hidden="true">▣</span>
+ <strong>One photo</strong>
+ <span>A single still for feed, story, or photo draft.</span>
  </button>
- <button type="button" class="ez-card" data-pr-input="multiple-photos">
- <strong>Multiple photos</strong>
- <span>Carousel, album, TikTok photo draft, YouTube Short.</span>
+ <button type="button" class="ez-card production-media-kind" data-pr-input="multiple-photos">
+ <span class="production-media-kind-icon" aria-hidden="true">▤</span>
+ <strong>A set of photos</strong>
+ <span>Carousel, album, TikTok photos, or a YouTube Short.</span>
  </button>
  </div>
- <em class="ez-option-hint" id="item4MediaKindHint">Pick one before uploading so the platform plan matches what you intend.</em>
+ <em class="ez-option-hint" id="item4MediaKindHint">Pick one so Studio can recommend the right formats.</em>
  <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos" hidden>
  <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
- <div class="item4-upload-icon">＋</div>
- <div> <strong id="item4UploadTitle">Drop photos here or choose files</strong><span id="item4UploadHint">Add or remove one at a time · up to 20. You can keep working or leave while Drive copies finish.</span></div>
- <button type="button" class="secondary-button" id="item4ChooseMedia">Choose photos</button>
+ <div class="item4-upload-icon" aria-hidden="true">
+ <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
+ <rect x="8" y="12" width="32" height="24" rx="5" stroke="currentColor" stroke-width="2"></rect>
+ <circle cx="18" cy="21" r="3" fill="currentColor"></circle>
+ <path d="M12 32l8-8 6 6 5-5 5 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+ </svg>
+ </div>
+ <div> <strong id="item4UploadTitle">Drop photos here or choose files</strong><span id="item4UploadHint">Add or remove one at a time · up to 20. You can keep working or leave while copies finish.</span></div>
+ <button type="button" class="primary-button" id="item4ChooseMedia">Choose photos</button>
  </div>
  <div class="item4-upload-progress" id="item4UploadProgress" hidden></div>
- <div class="item4-asset-strip" id="item4AssetStrip"><div class="empty compact-empty">No master photos uploaded yet.</div></div>
+ <div class="item4-asset-strip" id="item4AssetStrip"><div class="empty compact-empty">Your photos will show up here.</div></div>
  </div>
 
- <div class="request-section item4-output-plan-section">
+ <div class="request-section item4-output-plan-section production-step-card">
  <div class="request-section-heading item4-heading-row">
- <div><h3>2. Platform output plan</h3><p>Studio recommends the strongest format for each platform and uses Platform Output Mappings as the aspect-ratio authority. You can override any recommendation.</p></div>
- <span class="item4-state-pill" id="item4PlanStatus">Needs plan</span>
+ <div class="production-step-title">
+ <span class="production-step-badge">2</span>
+ <div>
+ <h3>Choose platforms</h3>
+ <p>Studio picks the strongest format for each one. Change any recommendation you want.</p>
+ </div>
+ </div>
+ <span class="item4-state-pill" id="item4PlanStatus" data-state="idle">Not started</span>
  </div>
  <div class="item4-platform-toggles" id="item4PlatformToggles">
- <label><input type="checkbox" data-item4-platform value="Instagram" checked> Instagram</label>
- <label><input type="checkbox" data-item4-platform value="Facebook" checked> Facebook</label>
- <label><input type="checkbox" data-item4-platform value="TikTok" checked> TikTok</label>
- <label><input type="checkbox" data-item4-platform value="YouTube" checked> YouTube</label>
+ <label data-platform="Instagram"><input type="checkbox" data-item4-platform value="Instagram" checked> <span class="production-platform-mark" aria-hidden="true"></span> Instagram</label>
+ <label data-platform="Facebook"><input type="checkbox" data-item4-platform value="Facebook" checked> <span class="production-platform-mark" aria-hidden="true"></span> Facebook</label>
+ <label data-platform="TikTok"><input type="checkbox" data-item4-platform value="TikTok" checked> <span class="production-platform-mark" aria-hidden="true"></span> TikTok</label>
+ <label data-platform="YouTube"><input type="checkbox" data-item4-platform value="YouTube" checked> <span class="production-platform-mark" aria-hidden="true"></span> YouTube</label>
  </div>
- <div class="item4-plan-actions"><button type="button" class="primary-button" id="item4BuildPlan">Recommend platform plan</button><span id="item4PlanHint">Upload photos first, then build the plan.</span></div>
- <div class="item4-output-plan" id="item4OutputPlan"><div class="empty compact-empty">Your platform recommendations will appear here.</div></div>
+ <div class="item4-plan-actions"><button type="button" class="primary-button" id="item4BuildPlan">Recommend formats</button><span id="item4PlanHint">Add photos first, then get a plan.</span></div>
+ <div class="item4-output-plan" id="item4OutputPlan"><div class="empty compact-empty">Recommended formats will appear here.</div></div>
  <div class="item4-production-gate" id="item4ProductionGate" hidden>
- <strong>Output plan ready.</strong>
- <span>The master photos and requested outputs are saved. Studio validates the source-to-production bridge automatically before promotion.</span>
+ <strong>Platforms are set.</strong>
+ <span>Your photos and formats are saved. Next, frame each post.</span>
  </div>
  </div>
- <div class="request-section item4-variant-section">
+ <div class="request-section item4-variant-section production-step-card">
  <div class="request-section-heading item4-heading-row">
- <div><h3>3. Platform-ready media</h3><p>Drag each photo to keep the important part in the frame. Studio then converts the original into that crop. HEIC originals stay untouched.</p></div>
- <span class="item4-state-pill" id="item4VariantStatus">Not prepared</span>
+ <div class="production-step-title">
+ <span class="production-step-badge">3</span>
+ <div>
+ <h3>Frame each post</h3>
+ <p>Drag to keep the important part in view. Originals stay untouched.</p>
+ </div>
+ </div>
+ <span class="item4-state-pill" id="item4VariantStatus" data-state="idle">Waiting</span>
  </div>
  <div class="item4-variant-actions">
  <button type="button" class="primary-button" id="item4PrepareVariants">Prepare platform media</button>
- <span id="item4VariantHint">Build the platform plan first.</span>
+ <span id="item4VariantHint">Choose platforms first.</span>
  </div>
  <div class="item4-variant-error error-text" id="item4VariantError" hidden></div>
- <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty">Prepared 4:5, 9:16, 1:1, or 16:9 versions will appear here only when required by the selected outputs.</div></div>
+ <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty">Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them.</div></div>
  </div>
 
- <details class="ez-advanced" id="ezAdvancedOptions">
- <summary>Advanced options</summary>
- <p class="ez-advanced-note">Use this only for extra outputs, structure, audio, wording, or notes. Facebook Slideshow Reel is opt-in here, not an EZ default.</p>
+ <details class="ez-advanced production-advanced" id="ezAdvancedOptions">
+ <summary>More options</summary>
+ <p class="ez-advanced-note">Extra outputs, structure, audio, wording, or notes. Facebook Slideshow Reel is opt-in here.</p>
 
  <div class="request-section" id="prMasterDefaultsSection" hidden>
  <select id="prContentType" hidden aria-hidden="true" tabindex="-1">
@@ -731,24 +777,24 @@
 
  <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
  <div class="form-message" id="productionPromotionCompatibility">
-              Photos, plan, and platform crops need to be ready before you approve.
+              Photos, platforms, and crops need to be ready before you approve.
  </div>
- <div class="request-actions">
- <button type="button" class="secondary-button" id="closeProductionRequest">Close request</button>
- <button type="submit" class="primary-button" id="saveProductionRequest">Save draft</button>
+ <div class="request-actions production-studio-actions">
+ <button type="button" class="secondary-button" id="closeProductionRequest">Close</button>
+ <button type="submit" class="secondary-button" id="saveProductionRequest">Save</button>
  <button type="button" class="secondary-button" id="syncProductionRequestDirectives" hidden>Sync advanced directives</button>
- <button type="button" class="primary-button" id="promoteProductionRequest">Approve &amp; Promote</button>
+ <button type="button" class="primary-button" id="promoteProductionRequest">Approve</button>
  </div>
  </form>
  </section>
 
- <section class="panel request-list-panel ez-busy-panel" id="productionRequestListPanel">
- <div class="panel-heading"><div><h2>Production request drafts</h2><p>Saved creative requests waiting for approval/promotion. Opening a draft does not interrupt photo uploads.</p></div></div>
+ <section class="panel request-list-panel production-library-panel ez-busy-panel" id="productionRequestListPanel">
+ <div class="panel-heading"><div><h2>Drafts</h2><p>Pick up where you left off. Opening a draft does not interrupt photo uploads.</p></div></div>
  <div id="productionRequestList" class="table-wrap"></div>
  </section>
 
- <section class="panel ez-busy-panel" id="promotedContentPanel">
- <div class="panel-heading"><div><h2>Promoted content items</h2><p>Items that have entered the existing production pipeline.</p></div></div>
+ <section class="panel production-library-panel ez-busy-panel" id="promotedContentPanel">
+ <div class="panel-heading"><div><h2>In the pipeline</h2><p>Approved pieces moving through render and review.</p></div></div>
  <div id="contentList" class="table-wrap"></div>
  </section>
  </section>
@@ -1298,7 +1344,7 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.138-similar-times"></script>
+ <script src="/assets/config.js?v=0.6.141-production-studio"></script>
  <script src="/assets/ez-plan.js?v=0.6.125-tiktok-single-photo"></script>
  <script src="/assets/app-item4-0619.js?v=0.6.142-pipeline-schedule"></script>
  <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.142";</script>
