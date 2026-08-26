@@ -150,7 +150,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.136-continuation-nolock",
+          version: "0.10.137-ai-ingest-budget",
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -709,6 +709,11 @@ export default {
     // waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
       try {
+        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+      } catch (error) {
+        console.warn("production continuation cron failed", error);
+      }
+      try {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
@@ -747,11 +752,6 @@ export default {
         await studioReconcileInstagramCarousels(env);
       } catch (error) {
         console.warn("instagram carousel reconcile cron failed", error);
-      }
-      try {
-        await advanceStudioProductionOutputs(env, { waitMs: 0 });
-      } catch (error) {
-        console.warn("production continuation cron failed", error);
       }
       try {
         await syncProductionCadence(env, { skipRenderPulse: true });
@@ -7649,7 +7649,9 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
     }
   }
   const parentId = parent?.id || studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
-  if (parentId) {
+  let slides = parentId ? await item4ListParentCarouselSlides(env, parentId) : [];
+  const imagedCount = slides.filter((slide) => item4SlideImageUrl(slide)).length;
+  if (parentId && imagedCount < expected) {
     try {
       await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
         method: "PATCH",
@@ -7666,8 +7668,8 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
       console.warn("Studio AI carousel arm failed", error);
     }
     await item4SeedAiCarouselSlides(env, parentId, requestRecord, needed, expected);
+    slides = await item4ListParentCarouselSlides(env, parentId);
   }
-  const slides = parentId ? await item4ListParentCarouselSlides(env, parentId) : [];
   let current = requestRecord;
   for (const slide of slides) {
     if (item4AssetManifest(current).length >= expected) break;
@@ -13698,9 +13700,6 @@ async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
 async function advanceStudioProductionOutputs(env, options = {}) {
   const cache = { outputRows: new Map(), requests: new Map(), parents: new Map(), profiles: new Map() };
   const pulses = [];
-  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
-    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
-  }
   const candidates = await listStudioContinuationCandidates(env, options).catch((error) => {
     console.warn("Studio continuation candidate list failed", error);
     return [];
@@ -13734,16 +13733,13 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     media.filter((row) => row.action === "wait_ai").map((row) => row.contentItemId).filter(Boolean)
   )];
   if (waitingAiParents.length) {
-    try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: waitingAiParents })); } catch (error) {
-      pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
-    }
-    for (const parentId of waitingAiParents) {
-      try {
-        const parent = cache.parents.get(parentId) || await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
-        cache.parents.set(parentId, parent);
-        const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
-          || studioFirstLinkedId(f(parent, "Production Requests"));
-        if (!requestId) continue;
+    const parentId = waitingAiParents[0];
+    try {
+      const parent = cache.parents.get(parentId) || await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+      cache.parents.set(parentId, parent);
+      const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+        || studioFirstLinkedId(f(parent, "Production Requests"));
+      if (requestId) {
         const requestRecord = cache.requests.get(requestId)
           || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
         cache.requests.set(requestId, requestRecord);
@@ -13754,16 +13750,30 @@ async function advanceStudioProductionOutputs(env, options = {}) {
           parent: parentId,
           waiting: filled?.waiting ?? null,
         });
-      } catch (error) {
-        pulses.push({ key: "AI_INGEST", parent: parentId, error: error instanceof Error ? error.message : String(error) });
+        if (Number(filled?.waiting || 0) > 0) {
+          try { pulses.push(...await pulseOnDemandCarouselChain(env, { contentItemIds: [parentId] })); } catch (error) {
+            pulses.push({ key: "C1C2", error: error instanceof Error ? error.message : String(error) });
+          }
+        }
       }
+    } catch (error) {
+      pulses.push({ key: "AI_INGEST", parent: parentId, error: error instanceof Error ? error.message : String(error) });
     }
+    console.log("Studio continuation", JSON.stringify({
+      count: media.length,
+      inspected: media.map((row) => ({ id: row.id, action: row.action, reason: row.reason || row.error || null })),
+      pulses,
+    }));
+    return { inspected: media, pulses };
+  }
+  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
+    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
   }
   const inspected = media.slice();
   let inspectedRemotion = 0;
   for (const po of candidates || []) {
     const gate = media.find((row) => row.id === po.id);
-    if (!gate || (gate.action !== "media_ok" && gate.action !== "wait_ai")) continue;
+    if (!gate || gate.action !== "media_ok") continue;
     if (inspectedRemotion >= 4) break;
     try {
       const result = await studioContinuationInspectOutput(env, po, cache);
