@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.150-finished-detect",
+          version: "0.10.151-finished-po-fields",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -8720,7 +8720,6 @@ function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
       Studio_Preview_URL: firstUrl,
       Publish_Asset_URL: firstUrl && String(firstUrl).startsWith("https://media.chicagoshining.com/") ? firstUrl : null,
       Asset_Need_Status: "Not Needed",
-      Voiceover_Status: "Not Needed",
       Asset_Selection_Status: null,
       Composition_ID: null,
       Output_Notes: note,
@@ -8730,7 +8729,6 @@ function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
     Output_Status: nativeReady || clips.length ? "Ready for Review" : "In Production",
     Render_Status: clips.length ? "Native Photo Route" : null,
     Asset_Need_Status: "Not Needed",
-    Voiceover_Status: "Not Needed",
     Output_Notes: note,
   };
 }

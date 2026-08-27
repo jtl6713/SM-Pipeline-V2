@@ -437,7 +437,6 @@ def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict
             "Output_Status": "Ready for Review",
             "Render_Status": "Rendered" if video else "Native Photo Route",
             "Asset_Selection_Status": None,
-            "Voiceover_Status": "Not Needed",
             "Studio_Preview_URL": first_url,
             "Final_File_URL": first_url if video else None,
             "Publish_Asset_URL": public,

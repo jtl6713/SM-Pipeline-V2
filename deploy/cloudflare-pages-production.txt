@@ -237,3 +237,5 @@ Production heading clip Pages deploy: 2026-08-27 — Stop the rounded panel clip
 
 Finished-video detect Pages deploy: 2026-08-27 — Dropping an MP4 on the photo door switches to finished-video, hides on-photo labels, and uses the Reel/TikTok/Short package. UI 0.6.147-finished-detect.
 
+Finished-video frames Pages deploy: 2026-08-27 — Finished video hides the photo crop strip. UI 0.6.148-finished-po-fields.
+

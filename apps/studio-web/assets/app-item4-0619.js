@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.147-finished-detect";
+  const BUILD_ID = "item4-0.6.148-finished-po-fields";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1931,7 +1931,7 @@
     for (let index = 0; index < count; index += 1) {
       const file = files[index];
       const asset = assets[index] || {};
-      const name = asset.name || file?.name || `Photo ${index + 1}`;
+      const name = asset.name || file?.name || (ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`);
       const id = String(asset.id || `staged:${index}`);
       const localUrl = ezLocalPreviewFor(index, name);
       const remoteUrl = asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
@@ -1943,9 +1943,9 @@
       const canRemove = asset.id && !String(asset.id).startsWith("local:") && !String(asset.id).startsWith("staged:");
       cards.push(`<article class="ez-photo-card" data-item4-asset="${escapeHtml(id)}">
         ${visual}
-        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>Photo ${index + 1}</span></div>
+        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>${ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`}</span></div>
         ${item4CaptionField(id)}
-        ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="Remove this photo">×</button>` : ""}
+        ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
       </article>`);
     }
     host.innerHTML = cards.join("");
@@ -4259,7 +4259,7 @@
       <div class="item4-variant-image-wrap item4-crop-frame" data-item4-crop-asset="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}" style="aspect-ratio:${escapeHtml(cssRatio)}">${visual}${safe}</div>
       <p class="item4-crop-hint">Drag any direction. Use + / − or the scroll wheel to zoom.</p>
       <div class="item4-variant-meta">
-        <strong>Photo ${escapeHtml(row.asset?.order || "")}</strong>
+        <strong>${ezIsFinishedVideo() ? "Video" : `Photo ${escapeHtml(row.asset?.order || "")}`}</strong>
         <span>${escapeHtml(row.asset?.name || "")}</span>
         <span class="item4-crop-tools">
           <button type="button" class="item4-crop-zoom" data-item4-crop-zoom="${escapeHtml(assetId)}" data-item4-crop-ratio="${escapeHtml(ratio)}" data-dir="-1">−</button>
@@ -4277,6 +4277,22 @@
     const error = $("item4VariantError");
     const host = $("item4VariantGallery");
     const button = $("item4PrepareVariants");
+    if (ezIsFinishedVideo()) {
+      if (badge) badge.textContent = "Not needed";
+      if (error) {
+        error.hidden = true;
+        error.textContent = "";
+      }
+      if (button) {
+        button.hidden = true;
+        button.disabled = true;
+      }
+      if (hint) hint.textContent = "Finished video. Studio skips crops and Remotion.";
+      if (host) host.innerHTML = '<div class="empty compact-empty">This file is already finished. Approve sends it to review as-is.</div>';
+      syncProductionStudioState();
+      return;
+    }
+    if (button) button.hidden = false;
     const variantStatus = status?.variant_status || "None";
     const manifest = status?.variants || null;
     const readyCount = Number(manifest?.ready_count || 0);

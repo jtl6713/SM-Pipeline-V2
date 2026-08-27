@@ -171,3 +171,5 @@ Finished-video upload Worker deploy: 2026-08-26 - Stop writing Studio_Variant_St
 
 Finished-video detect Worker deploy: 2026-08-27 - Treat MP4 masters as finished passthrough even when notes still say single-photo. Skip the photo crop bridge. Worker 0.10.150-finished-detect.
 
+Finished-video Platform Output seed Worker deploy: 2026-08-27 - Do not write Content Item Voiceover_Status onto Platform Outputs during finished passthrough. Worker 0.10.151-finished-po-fields.
+
