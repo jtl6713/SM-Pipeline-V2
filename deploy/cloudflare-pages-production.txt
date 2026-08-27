@@ -245,3 +245,5 @@ Production glass Pages deploy: 2026-08-27 — Frosted-glass tiles, buttons, and 
 
 Studio hub Pages deploy: 2026-08-27 — Home and Dashboard share one Hotelify-style card screen. UI 0.6.152-hub.
 
+Review cover Pages deploy: 2026-08-27 — Open review shows the 3D thumbnail when the MP4 preview is a 404 master-assets URL. UI 0.6.153-review-cover.
+
