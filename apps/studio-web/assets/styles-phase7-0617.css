@@ -1740,8 +1740,13 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 #page-content .production-draft-card p,
 #page-content .production-draft-meta .subtle{color:#6a6762;font-size:.8rem}
 #page-content .production-empty{
-  padding:32px 0;
-  background:transparent;
+  padding:28px 22px;
+  background:var(--prod-glass);
+  backdrop-filter:var(--prod-glass-blur);
+  -webkit-backdrop-filter:var(--prod-glass-blur);
+  border:1px solid var(--prod-glass-border);
+  border-radius:18px;
+  box-shadow:var(--prod-glass-shadow);
   color:#6a6762;
   text-align:left;
 }
