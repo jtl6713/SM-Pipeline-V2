@@ -243,3 +243,5 @@ Finished-video retry Pages deploy: 2026-08-27 — Promoted finished video shows 
 
 Production glass Pages deploy: 2026-08-27 — Frosted-glass tiles, buttons, and Production areas on the quiet navy/gold path. UI 0.6.150-glass.
 
+Studio hub Pages deploy: 2026-08-27 — Home and Dashboard share one Hotelify-style card screen. UI 0.6.151-hub.
+

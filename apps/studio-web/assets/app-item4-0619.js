@@ -110,13 +110,21 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.150-glass";
+  const BUILD_ID = "item4-0.6.151-hub";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
   const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
   const uiBuildLabel = $("uiBuildLabel");
   if (uiBuildLabel) uiBuildLabel.textContent = `UI build ${uiBuildMatch ? uiBuildMatch[1] : BUILD_ID}`;
+  const hubDate = $("studioHubDate");
+  if (hubDate) {
+    hubDate.textContent = new Date().toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+  }
   let studioSession = null;
   let pipelinePollTimer = null;
   let pipelineCountdownTimer = null;
@@ -159,7 +167,7 @@
     });
     if (reload) {
       const page = activeNavPage();
-      if (page && page !== "home") loadPage(page);
+      if (page) loadPage(page);
     }
   }
 
@@ -226,17 +234,31 @@
     }
   });
 
+  function isHubPage(page) {
+    return page === "home" || page === "dashboard";
+  }
+
+  function showStudioPage(page) {
+    document.querySelectorAll(".nav-item").forEach((button) => {
+      button.classList.toggle("active", isHubPage(page) ? button.dataset.page === "home" : button.dataset.page === page);
+    });
+    document.querySelectorAll(".page").forEach((section) => section.classList.remove("active"));
+    if (isHubPage(page)) {
+      $("page-home")?.classList.add("active");
+      $("page-dashboard")?.classList.add("active");
+    } else {
+      $(`page-${page}`)?.classList.add("active");
+    }
+    if (page === "outputs") pipelineViewFilter = "all";
+    if (page !== "outputs") stopPipelinePoll();
+    if (page === "support") showSupportDoc("walkthrough");
+    loadPage(isHubPage(page) ? "home" : page);
+  }
+
   document.querySelectorAll(".nav-item").forEach((button) => {
     button.addEventListener("click", () => {
       if (!phase6ConfirmDiscardUnsaved("leave this editor")) return;
-      document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
-      document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
-      button.classList.add("active");
-      $(`page-${button.dataset.page}`).classList.add("active");
-      if (button.dataset.page === "outputs") pipelineViewFilter = "all";
-      if (button.dataset.page !== "outputs") stopPipelinePoll();
-      if (button.dataset.page === "support") showSupportDoc("walkthrough");
-      loadPage(button.dataset.page);
+      showStudioPage(button.dataset.page);
     });
   });
 
@@ -1484,13 +1506,7 @@
   });
 
   function switchToPage(page) {
-    document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
-    document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
-    $(`page-${page}`).classList.add("active");
-    if (page === "outputs") pipelineViewFilter = "all";
-    if (page !== "outputs") stopPipelinePoll();
-    if (page === "support") showSupportDoc("walkthrough");
-    loadPage(page);
+    showStudioPage(page);
   }
 
   function openPipelineAfterPromote() {
@@ -9029,8 +9045,7 @@
 
   function loadPage(page) {
     if (page !== "operations") stopIntakePoll();
-    if (page === "home") return;
-    if (page === "dashboard") return loadDashboard();
+    if (page === "home" || page === "dashboard") return loadDashboard();
     if (page === "ideas") return loadIdeas();
     if (page === "content") return loadContent();
     if (page === "outputs") return loadOutputs();
