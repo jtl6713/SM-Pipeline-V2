@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.146-music-full",
+          version: "0.10.147-approve-return",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -17281,10 +17281,50 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
   const doNotPublish = Boolean(f(existing, "Do_Not_Publish"));
   const productionPublishApprove = action === "approve_for_publishing" || ((action === "approve" || action === "approved") && !doNotPublish);
   if (productionPublishApprove) {
+    const publishStatus = String(f(existing, "Publish_Status") || "").trim();
+    const outputStatus = String(f(existing, "Output_Status") || "").trim();
+    if (publishStatus === "Published" || outputStatus === "Published") {
+      return respond(request, env, {
+        ok: true,
+        action: "approve_for_publishing",
+        already_published: true,
+        record: mapPhase6CreativeOutput(existing),
+        handoff_state: "published",
+        message: "This output is already published.",
+      });
+    }
+    if (String(f(existing, "Review_Status") || "").trim() === "Approved" || outputStatus === "Approved for Publishing") {
+      if (ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil(studioReconcileApprovedPublishes(env, { limit: 1 }).catch((error) => {
+          console.warn("approve republish kickoff failed", existing?.id, error);
+        }));
+      }
+      return respond(request, env, {
+        ok: true,
+        action: "approve_for_publishing",
+        already_approved: true,
+        record: mapPhase6CreativeOutput(existing),
+        handoff_state: "approved_for_publishing",
+        message: "Already approved. Studio is starting the publisher from the approved queue.",
+      });
+    }
     try {
       const updated = await approveOutputRecordForPublishing(env, existing, note, stamp, payload);
-      // Dispatch arms and pulses its own publisher chain, so a concurrent cadence sync would only
-      // compete for this invocation's budget and can park the scenario the pulse just woke up.
+      // Facebook Reel/Story publish can take a minute. Return as soon as the
+      // row is approved so the review click cannot time out into a fake 500.
+      if (ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil(studioDispatchApprovedPublishAndSchedule(null, env, updated).catch((error) => {
+          console.warn("approve publish kickoff failed", updated?.id, error);
+        }));
+        return respond(request, env, {
+          ok: true,
+          action: "approve_for_publishing",
+          record: mapPhase6CreativeOutput(updated),
+          handoff_state: "approved_for_publishing",
+          publish_dispatch: { accepted: true, detail: "queued" },
+          message: "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
+        });
+      }
       const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
       return respond(request, env, {
         ok: true,

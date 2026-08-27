@@ -225,3 +225,5 @@ Approve All durable Pages deploy: 2026-08-26 — Pipeline hint after Approve All
 
 Produce-skip + music 100% Pages deploy: 2026-08-26 — Pipeline shows job blockers instead of fake Rendering; creative music normal defaults to 100%. UI 0.6.140-music-full.
 
+Pipeline schedule Pages deploy: 2026-08-26 — Clicking a Pipeline date field no longer opens review; the picked time survives live refresh until Approve All. Approve no longer retries after a timeout. UI 0.6.142-pipeline-schedule.
+

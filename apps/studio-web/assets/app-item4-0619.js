@@ -92,6 +92,7 @@
   let ideasSort = { key: "idea", dir: "desc" };
   let contentSort = { key: "content", dir: "desc" };
   const pipelineGroupOpen = new Map();
+  const pipelineScheduleDrafts = new Map();
   let pipelineViewFilter = "all";
   let pipelineOpenSingleOnLoad = false;
   let dashboardCache = { metrics: {}, ideas: [], content: [], outputs: [] };
@@ -109,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.140-music-full";
+  const BUILD_ID = "item4-0.6.142-pipeline-schedule";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -273,21 +274,33 @@
   });
   $("operationsRefreshSimilarTimes")?.addEventListener("click", async () => {
     const button = $("operationsRefreshSimilarTimes");
+    const meta = $("operationsSimilarTimesMeta");
+    const idleLabel = "Refresh similar times";
     try {
-      if (button) button.disabled = true;
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Refreshing…";
+      }
+      if (meta) meta.textContent = "Refreshing public Instagram and YouTube times…";
       setOperationsMessage("Refreshing public Instagram and YouTube times…");
       const result = await api("/api/insights/similar-times", {
         method: "POST",
         body: JSON.stringify({ force: true, limit: 6, profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago" }),
+        timeoutMs: 60000,
       });
       renderOperationsSimilarTimes(result);
-      setOperationsMessage(result.remaining_to_sweep
+      const done = result.remaining_to_sweep
         ? `Swept ${result.swept || 0} account(s). ${result.remaining_to_sweep} still queued for the next refresh.`
-        : `Swept ${result.swept || 0} account(s).`);
+        : `Swept ${result.swept || 0} account(s).`;
+      setOperationsMessage(done);
     } catch (error) {
+      if (meta) meta.textContent = error.message || "Could not refresh similar times.";
       setOperationsMessage(error.message || "Could not refresh similar times.", "error-text");
     } finally {
-      if (button) button.disabled = false;
+      if (button) {
+        button.disabled = false;
+        button.textContent = idleLabel;
+      }
     }
   });
   $("operationsWatchlistForm")?.addEventListener("submit", async (event) => {
@@ -7926,7 +7939,8 @@
     if (!output || output.do_not_publish) return false;
     const review = String(output.review_status || "").trim();
     const status = String(output.output_status || "").trim();
-    if (review === "Approved" || status === "Approved for Publishing") return false;
+    if (review === "Approved" || status === "Approved for Publishing" || status === "Published") return false;
+    if (String(output.publish_status || "").trim() === "Published") return false;
     const hasFile = Boolean(String(output.final_file_url || "").trim() || String(output.studio_preview_url || "").trim());
     if (!hasFile && !creativeIsNativePhotoPackage(output)) return false;
     if (!output.creative_available) return false;
@@ -7951,8 +7965,39 @@
     return { scheduled_post_date: new Date(raw).toISOString() };
   }
 
+  function rememberPipelineScheduleDrafts() {
+    document.querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
+      const id = input.dataset.pipelineSchedule;
+      if (!id) return;
+      pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+    });
+  }
+
+  function pipelineScheduleInputValue(record) {
+    if (pipelineScheduleDrafts.has(record.id)) return pipelineScheduleDrafts.get(record.id);
+    return formatDateTimeLocalInput(record.scheduled_post_date);
+  }
+
+  function bindPipelineScheduleInputs(root) {
+    (root || document).querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      input.addEventListener("click", keepOnRow);
+      input.addEventListener("mousedown", keepOnRow);
+      input.addEventListener("pointerdown", keepOnRow);
+      input.addEventListener("keydown", keepOnRow);
+      input.addEventListener("change", () => {
+        const id = input.dataset.pipelineSchedule;
+        if (id) pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+      });
+    });
+  }
+
   function collectPipelineSchedules() {
+    rememberPipelineScheduleDrafts();
     const map = {};
+    pipelineScheduleDrafts.forEach((raw, id) => {
+      map[id] = raw ? new Date(raw).toISOString() : "";
+    });
     document.querySelectorAll("[data-pipeline-schedule]").forEach((input) => {
       const id = input.dataset.pipelineSchedule;
       const raw = String(input.value || "").trim();
@@ -8008,6 +8053,7 @@
         body: JSON.stringify({ notes: "Studio Pipeline Approve All", schedules: collectPipelineSchedules() }),
         timeoutMs: 120000,
       });
+      pipelineScheduleDrafts.clear();
       await refreshPipelineOutputs({ silent: true });
       const approved = Number(result.approved_count || 0);
       const failed = Number(result.failed_count || 0);
@@ -8044,7 +8090,8 @@
       const result = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative/review`, {
         method: "POST",
         body: JSON.stringify(reviewBody),
-        timeoutMs: 30000,
+        timeoutMs: publishing ? 45000 : 30000,
+        retries: 1,
       });
       const refreshed = await api(`/api/outputs/${encodeURIComponent(activeCreativeOutputId)}/creative`);
       populateCreativeEditor(refreshed);
@@ -8217,8 +8264,9 @@
       const notReadyLabel = blocked ? "Blocked" : "Not ready yet";
       const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
+      const scheduleValue = pipelineScheduleInputValue(r);
       const scheduleCell = isPipeline && ready
-        ? `<div class="subtle">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(formatDateTimeLocalInput(r.scheduled_post_date))}" title="Leave empty to publish now"> ${r.scheduled_post_date ? "" : "Now"}</div>`
+        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Leave empty to publish now"> ${scheduleValue ? "" : "Now"}</div>`
         : "";
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
@@ -8239,6 +8287,7 @@
       : isDashboard
       ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}</tr>`
       : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
+    rememberPipelineScheduleDrafts();
     const tableClass = isDashboard ? "data-table dashboard-output-table" : "data-table";
     target.innerHTML = `<table class="${tableClass}"><thead>${head}</thead>${body}</table>`;
     if (isPipeline || isDashboard) {
@@ -8278,12 +8327,14 @@
           openCreativeEditor(button.dataset.creativeOutputId);
         });
       });
+      bindPipelineScheduleInputs(target);
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
-          if (event.target.closest("a, button")) return;
+          if (event.target.closest("a, button, input, select, textarea, label, .pipeline-schedule-cell")) return;
           openCreativeEditor(row.dataset.openOutputId);
         });
         row.addEventListener("keydown", (event) => {
+          if (event.target.closest("input, select, textarea")) return;
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           openCreativeEditor(row.dataset.openOutputId);

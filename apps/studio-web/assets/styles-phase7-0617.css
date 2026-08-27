@@ -950,6 +950,8 @@ input, select, textarea, button {
 #outputsList .data-table tbody tr.pipeline-open-row{cursor:pointer}
 #outputsList .data-table tbody tr.pipeline-open-row:hover{background:#f3fbfa}
 #outputsList .data-table tbody tr.pipeline-open-row:focus{outline:2px solid var(--teal);outline-offset:-2px}
+#outputsList .data-table tbody tr.pipeline-open-row .pipeline-schedule-cell,
+#outputsList .data-table tbody tr.pipeline-open-row .pipeline-schedule-cell input{cursor:auto}
 #outputsList .data-table thead th{white-space:nowrap;padding:4px 6px}
 #outputsList .pipeline-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:800;padding:6px 4px;margin:0;cursor:pointer;display:inline-flex;align-items:center;gap:5px;border-radius:8px}
 #outputsList .pipeline-sort:hover,#outputsList .pipeline-sort:focus-visible{background:var(--teal-soft);color:var(--teal-dark);outline:0}

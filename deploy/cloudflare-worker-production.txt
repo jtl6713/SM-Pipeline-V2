@@ -163,3 +163,5 @@ Approve All durable Worker deploy: 2026-08-26 - Approve All only stamps every Re
 
 Produce-skip + music 100% Worker deploy: 2026-08-26 - Skip P2 when voiceover is Not Needed, resume blocked jobs at stamp/render, stop fake Rendering on Selected-but-idle rows, and default music normal to 100%. Worker 0.10.146-music-full.
 
+Approve return Worker deploy: 2026-08-26 - Approve for publishing returns as soon as the row is stamped, treats already-published/already-approved as success, and starts Facebook/Instagram on waitUntil so a 30s UI timeout cannot turn a live post into Request failed (500). Worker 0.10.147-approve-return.
+
