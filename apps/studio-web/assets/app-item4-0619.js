@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.142-pipeline-schedule";
+  const BUILD_ID = "item4-0.6.142-quiet";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -711,7 +711,10 @@
       studioSession = session;
       try { await loadStudioProfiles(); } catch {}
       const navOps = $("navOperations");
-      if (navOps) navOps.hidden = !(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
+      const footerOps = $("footerOperations");
+      const showOps = Boolean(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
+      if (navOps) navOps.hidden = !showOps;
+      if (footerOps) footerOps.hidden = !showOps;
       if (!health.airtable_configured) {
         $("apiStatus").textContent = "API needs Airtable configuration";
       } else if (session.authorized && session.user?.display_name) {
@@ -1651,24 +1654,24 @@
     const hint = $("item4UploadHint");
     const choose = $("item4ChooseMedia");
     if (nextKind === "finished-video") {
-      if (title) title.textContent = "Drop the finished video here or choose a file";
-      if (hint) hint.textContent = "One MP4 · skips production · review and schedule only";
+      if (title) title.textContent = "Drop video";
+      if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose video";
     } else if (nextKind === "finished-stills") {
-      if (title) title.textContent = "Drop finished photos here or choose files";
-      if (hint) hint.textContent = "Finished stills or carousel · no on-image lettering";
+      if (title) title.textContent = "Drop photos";
+      if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose photos";
     } else if (nextKind === "multiple-photos") {
-      if (title) title.textContent = "Drop photos here or choose files";
-      if (hint) hint.textContent = "Add or remove one at a time · 2 or more in the set · up to 20";
+      if (title) title.textContent = "Drop photos";
+      if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose photos";
     } else if (nextKind === "single-photo") {
-      if (title) title.textContent = "Drop one photo here or choose a file";
-      if (hint) hint.textContent = "One photo · original is preserved";
+      if (title) title.textContent = "Drop a photo";
+      if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose photo";
     } else {
-      if (title) title.textContent = "Drop photos here or choose files";
-      if (hint) hint.textContent = "Up to 20 photos · originals are preserved";
+      if (title) title.textContent = "Drop photos";
+      if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose photos";
     }
     syncPrMediaKindUi();
@@ -3815,7 +3818,7 @@
     if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
       host.innerHTML = '<div class="empty compact-empty">Photos are loading into the system. You can keep working or leave this screen.</div>';
     } else {
-      host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">Your photos will show up here.</div>';
+      host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty"></div>';
     }
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
       const card = img.closest("[data-item4-asset]");
@@ -3860,7 +3863,7 @@
       return;
     }
     if (!plan?.items?.length) {
-      host.innerHTML = '<div class="empty compact-empty">Recommended formats will appear here.</div>';
+      host.innerHTML = '<div class="empty compact-empty"></div>';
       if (gate) gate.hidden = true;
       syncProductionStudioState();
       return;
@@ -4205,10 +4208,10 @@
     if (button) {
       button.disabled = status?.plan_status !== "Ready" || item4PreparingVariants || variantStatus === "Preparing";
       button.textContent = variantStatus === "Ready"
-        ? "Rebuild platform media"
+        ? "Rebuild"
         : (item4PreparingVariants || variantStatus === "Preparing")
           ? `Preparing… ${readyCount}/${targetCount || "?"}`
-          : "Prepare platform media";
+          : "Prepare";
     }
     if (hint) {
       hint.textContent = status?.plan_status !== "Ready"
@@ -5404,7 +5407,7 @@
       $("productionRequestWorkspace").hidden = true;
     }
     $("productionRequestTitle").textContent = activeIdea?.title || ideaTitleForRequest(record) || "Untitled piece";
-    $("productionRequestSubtitle").textContent = "Keep editing until you are ready to approve.";
+    if ($("productionRequestSubtitle")) $("productionRequestSubtitle").textContent = "";
     const requestId = $("productionRequestId");
     if (requestId) {
       requestId.textContent = record.production_request_id || "";
@@ -5957,7 +5960,7 @@
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty production-empty"><strong>No drafts yet.</strong><span class="subtle">Start from Home, or open an idea and add photos.</span></div>';
+        target.innerHTML = '<div class="empty production-empty">No drafts yet.</div>';
         return;
       }
       await ensureIdeasCache();
@@ -6203,7 +6206,7 @@
     try {
       const { records = [] } = await api("/api/content?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty production-empty"><strong>Nothing in the pipeline yet.</strong><span class="subtle">Approved pieces will show up here when they start rendering.</span></div>';
+        target.innerHTML = '<div class="empty production-empty">Nothing in the pipeline yet.</div>';
         return;
       }
       renderContentItemsTable(target, records);
