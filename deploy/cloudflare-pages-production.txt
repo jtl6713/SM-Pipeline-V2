@@ -241,3 +241,5 @@ Finished-video frames Pages deploy: 2026-08-27 — Finished video hides the phot
 
 Finished-video retry Pages deploy: 2026-08-27 — Promoted finished video shows Send to review so a failed handoff can be retried without publishing. UI 0.6.149-finished-retry.
 
+Production glass Pages deploy: 2026-08-27 — Frosted-glass tiles, buttons, and Production areas on the quiet navy/gold path. UI 0.6.150-glass.
+
