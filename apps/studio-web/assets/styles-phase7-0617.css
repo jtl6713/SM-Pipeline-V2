@@ -1658,10 +1658,13 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   background:transparent;
   box-shadow:none;
   margin-bottom:48px;
+  overflow:visible;
+  border-radius:0;
 }
 #page-content .production-library-panel .panel-heading{
   padding:0 0 16px;
   border:0;
+  overflow:visible;
 }
 #page-content .production-library-panel h2{
   font-family:Inter,ui-sans-serif,system-ui,sans-serif;
@@ -1669,8 +1672,11 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   font-size:.78rem;
   font-weight:600;
   letter-spacing:.12em;
+  line-height:1.4;
   text-transform:uppercase;
   color:var(--prod-navy);
+  padding-inline-start:.12em;
+  overflow:visible;
 }
 #page-content .production-draft-grid{
   display:grid;
