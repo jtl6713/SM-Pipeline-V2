@@ -229,3 +229,5 @@ Pipeline schedule Pages deploy: 2026-08-26 — Clicking a Pipeline date field no
 
 Production brand Pages deploy: 2026-08-27 — Quiet Photos → Platforms → Frames Production path with navy header/footer and gold Approve. UI 0.6.143-brand.
 
+Finished-video upload Pages deploy: 2026-08-26 — Wizard keeps finished-video intake, accepts MP4s, sends origin_kind, and does not retry a 45MB upload. UI 0.6.144-finished-upload.
+

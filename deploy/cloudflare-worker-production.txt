@@ -167,3 +167,5 @@ Approve return Worker deploy: 2026-08-26 - Approve for publishing returns as soo
 
 Schedule hold Worker deploy: 2026-08-26 - Approve with a future Scheduled_Post_Date holds Instagram, Facebook, and TikTok in Studio until due. YouTube may still upload now when publishAt is set. Worker 0.10.148-schedule-hold.
 
+Finished-video upload Worker deploy: 2026-08-26 - Stop writing Studio_Variant_Status "Not Needed" (Airtable has no such choice), stream the file to R2, skip Drive/Remotion for finished video, and keep the public media URL. Worker 0.10.149-finished-upload.
+

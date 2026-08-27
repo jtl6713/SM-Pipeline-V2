@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.148-schedule-hold",
+          version: "0.10.149-finished-upload",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -3241,6 +3241,16 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
   let currentRecord = record || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const assets = item4AssetManifest(currentRecord).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   if (!assets.length) return { record: currentRecord, assets, status: "None", ready_count: 0, target_count: 0 };
+  if (item4FinishedVideoMastersReady(currentRecord, assets)) {
+    if (String(f(currentRecord, "Studio_Master_Asset_Status") || "").trim() !== "Ready") {
+      currentRecord = await item4UpdateRequestState(env, recordId, {
+        Studio_Master_Asset_Status: "Ready",
+        Studio_Variant_Status: "None",
+        Studio_Item4_State: "Assets Ready",
+      });
+    }
+    return { record: currentRecord, assets, status: "Ready", ready_count: assets.length, target_count: assets.length, error: null };
+  }
 
   const rows = await item4MasterQueueRows(env, recordId);
   const byTransferId = new Map(rows.map((row) => [String(f(row, "Transfer_ID") || "").trim(), row]));
@@ -3392,7 +3402,8 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
   if (existing.length + files.length > ITEM4_MAX_FILES) throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
   const meta = item4ParseJson(form.get("metadata"), []);
   const metadata = Array.isArray(meta) ? meta : [];
-  const finishedVideo = studioFinishedOriginKind(record) === "finished-video";
+  const finishedKind = studioNormalizeFinishedOriginKind(form.get("origin_kind")) || studioFinishedOriginKind(record);
+  const finishedVideo = finishedKind === "finished-video";
   const maxBytes = finishedVideo ? 200 * 1024 * 1024 : ITEM4_MAX_FILE_BYTES;
   let total = 0;
   for (const file of files) {
@@ -3411,9 +3422,17 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
         : `${file.name || "An image"} exceeds the 25 MB per-image limit`);
     }
   }
-  if (total > ITEM4_MAX_TOTAL_BYTES) throw new HttpError(413, "The selected images exceed the 150 MB upload limit");
+  if (!finishedVideo && total > ITEM4_MAX_TOTAL_BYTES) throw new HttpError(413, "The selected images exceed the 150 MB upload limit");
+  if (finishedVideo && total > maxBytes) throw new HttpError(413, "The finished video exceeds the 200 MB upload limit");
 
-  await item4UpdateRequestState(env, recordId, { Studio_Master_Asset_Status: "Uploading" });
+  const originNotes = String(f(record, "Production_Notes") || "").trim();
+  const originStamp = finishedKind && !studioFinishedOriginKind(record)
+    ? `origin=ez-wizard; ez-input=${finishedKind}; ez-caption=ai`
+    : "";
+  record = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Asset_Status: "Uploading",
+    ...(originStamp ? { Production_Notes: originNotes ? `${originStamp}\n\n${originNotes}` : originStamp } : {}),
+  });
   const uploaded = [];
   let authorityQueueStarted = false;
   try {
@@ -3422,8 +3441,8 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
       const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
       const safeName = item4SafeFileName(file.name);
       const key = `studio/master-assets/${recordId}/${id}-${safeName}`;
-      const buffer = await file.arrayBuffer();
-      await env.STUDIO_MEDIA.put(key, buffer, {
+      const body = typeof file.stream === "function" ? file.stream() : await file.arrayBuffer();
+      await env.STUDIO_MEDIA.put(key, body, {
         httpMetadata: { contentType: item4NormalizedMimeType(file) },
         customMetadata: { productionRequestId: recordId, originalName: String(file.name || safeName), assetId: id },
       });
@@ -3437,7 +3456,7 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
         mime_type: item4NormalizedMimeType(file),
         source_format: item4IsHeicFile(file) ? item4FileExtension(file.name).toUpperCase() : (item4FileExtension(file.name).toUpperCase() || null),
         browser_preview_compatible: !item4IsHeicFile(file),
-        size_bytes: Number(file.size || buffer.byteLength || 0),
+        size_bytes: Number(file.size || 0),
         width,
         height,
         source_ratio: width && height ? `${width}:${height}` : null,
@@ -3451,15 +3470,28 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
     record = await item4UpdateRequestState(env, recordId, {
       Studio_Master_Assets_JSON: JSON.stringify(assets),
       Studio_Master_Asset_Count: assets.length,
-      Studio_Master_Asset_Status: "Uploading",
+      Studio_Master_Asset_Status: finishedVideo ? "Ready" : "Uploading",
       Studio_Output_Plan_Status: "Needs Plan",
       Studio_Output_Plan_JSON: null,
       Studio_Variant_Manifest_JSON: null,
-      Studio_Variant_Status: studioFinishedOriginKind(record) ? "Not Needed" : "None",
+      Studio_Variant_Status: "None",
       Studio_Variant_Updated_At: null,
       Studio_Variant_Error: null,
-      Studio_Item4_State: "Draft",
+      Studio_Item4_State: finishedVideo ? "Assets Ready" : "Draft",
     });
+
+    if (finishedVideo) {
+      return respond(request, env, {
+        ok: true,
+        uploaded: uploaded.length,
+        authority_status: "Ready",
+        authority_progress: { ready: assets.length, target: assets.length },
+        assets,
+        execution_ids: [],
+        record: mapProductionRequest(record),
+        message: "Finished video is stored and ready. Crops, Remotion, and Drive copies are skipped.",
+      }, 201);
+    }
 
     authorityQueueStarted = true;
     const expected = await item4UpsertMasterQueue(env, recordId, assets);
@@ -3523,7 +3555,7 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
     // Before queue handoff begins, an upload failure can be rolled back completely.
     // After queue handoff begins, preserve staging and a resumable state unless
     // reconciliation has proven a terminal handoff failure.
-    if (!authorityQueueStarted) {
+    if (!authorityQueueStarted && !finishedVideo) {
       for (const asset of uploaded) { try { await env.STUDIO_MEDIA.delete(asset.r2_key); } catch {} }
       try {
         await item4UpdateRequestState(env, recordId, {
@@ -3853,8 +3885,23 @@ function studioFinishedOriginKind(record) {
   return "";
 }
 
+function studioNormalizeFinishedOriginKind(value) {
+  const kind = String(value || "").trim().toLowerCase();
+  if (kind === "finished-video" || kind === "finished-stills" || kind === "finished-carousel") return kind;
+  return "";
+}
+
 function studioIsFinishedPassthrough(record) {
   return Boolean(studioFinishedOriginKind(record));
+}
+
+function item4FinishedPublicUrl(asset) {
+  return String(asset?.url || "").startsWith("https://media.chicagoshining.com/");
+}
+
+function item4FinishedVideoMastersReady(record, assets) {
+  if (studioFinishedOriginKind(record) !== "finished-video") return false;
+  return Array.isArray(assets) && assets.length > 0 && assets.every((asset) => item4FinishedPublicUrl(asset));
 }
 
 function studioFinishedVariantsSkipped(record) {
@@ -4857,6 +4904,9 @@ async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}
 async function enqueueStudioProductionJob(env, requestId) {
   if (!requestId) return null;
   const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  if (studioIsFinishedPassthrough(record)) {
+    return { skipped: "finished-passthrough", request_id: requestId };
+  }
   const existing = parseStudioProductionJob(record);
   const step = String(existing?.step || "").trim();
   if (!existing?.job_id || step === "done" || step === "blocked") {
@@ -5754,6 +5804,15 @@ async function getItem4Variants(request, env, url, authorization, ctx = null) {
 async function item4ResumePendingMasterAuthority(env, recordId, record = null) {
   let currentRecord = record || await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   let assets = item4AssetManifest(currentRecord).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  if (studioFinishedOriginKind(currentRecord) === "finished-video") {
+    return {
+      attempted: false,
+      reason: "finished-video-passthrough",
+      record: currentRecord,
+      assets,
+      execution_ids: [],
+    };
+  }
 
   const incomplete = assets.filter((asset) =>
     !String(asset?.google_drive_file_id || "").trim() ||

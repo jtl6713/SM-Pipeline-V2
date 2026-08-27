@@ -175,7 +175,12 @@
 
   function ezImageModeFromWizard(inputKind) {
     const kind = String(inputKind || "").trim();
-    if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.MULTIPLE_PHOTOS) return "Manual Upload";
+    if (
+      kind === EZ_INPUTS.SINGLE_PHOTO
+      || kind === EZ_INPUTS.MULTIPLE_PHOTOS
+      || kind === EZ_INPUTS.FINISHED_VIDEO
+      || kind === EZ_INPUTS.FINISHED_STILLS
+    ) return "Manual Upload";
     return "Make AI Generated";
   }
 

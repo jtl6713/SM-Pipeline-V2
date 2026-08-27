@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.143-brand";
+  const BUILD_ID = "item4-0.6.144-finished-upload";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -2601,16 +2601,18 @@
 
   function syncEzYouTubeAvailability(resetChecked = true) {
     const youtube = $("ezYouTube");
-    const single = ezIntakeKind !== "multiple-photos";
+    const youtubeOn = ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills";
     if (!youtube) return;
-    youtube.disabled = single;
-    if (single) youtube.checked = false;
+    youtube.disabled = !youtubeOn;
+    if (!youtubeOn) youtube.checked = false;
     else if (resetChecked) youtube.checked = true;
   }
 
   function selectEzInput(kind, { resetPlatforms = true } = {}) {
     if (kind === "video-clips") return;
-    const nextKind = kind === "multiple-photos" ? "multiple-photos" : "single-photo";
+    const nextKind = ["multiple-photos", "single-photo", "finished-video", "finished-stills"].includes(kind)
+      ? kind
+      : "single-photo";
     if (resetPlatforms && ezIntakeKind && ezIntakeKind !== nextKind) {
       ezStagedFiles = [];
       revokeEzLocalPreviews();
@@ -2623,13 +2625,28 @@
     const composer = $("ezComposer");
     if (composer) composer.hidden = false;
     const input = $("ezMediaInput");
-    if (input) input.multiple = ezIntakeKind === "multiple-photos";
+    if (input) {
+      input.multiple = ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-stills";
+      input.accept = ezIntakeKind === "finished-video"
+        ? "video/mp4,video/quicktime,video/webm,video/*,image/*"
+        : "image/*,.heic,.heif,image/heic,image/heif";
+    }
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
-    if (title) title.textContent = ezIntakeKind === "multiple-photos" ? "Drop photos here" : "Drop one photo here";
-    if (hint) hint.textContent = ezIntakeKind === "multiple-photos"
-      ? "Add or remove one at a time. They show up here immediately."
-      : "Drop one photo. It shows up here immediately.";
+    if (ezIntakeKind === "finished-video") {
+      if (title) title.textContent = "Drop the finished video here";
+      if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
+    } else if (ezIntakeKind === "finished-stills") {
+      if (title) title.textContent = "Drop finished photos here";
+      if (hint) hint.textContent = "Finished stills. No on-image lettering.";
+    } else if (ezIntakeKind === "multiple-photos") {
+      if (title) title.textContent = "Drop photos here";
+      if (hint) hint.textContent = "Add or remove one at a time. They show up here immediately.";
+    } else {
+      if (title) title.textContent = "Drop one photo here";
+      if (hint) hint.textContent = "Drop one photo. It shows up here immediately.";
+    }
+    selectPrMediaKind(nextKind, { quiet: true });
     syncEzYouTubeAvailability(resetPlatforms);
     if (resetPlatforms) syncItem4PlatformsFromEz();
     renderEzCaptionUi();
@@ -2823,6 +2840,12 @@
     } else if (answers.inputKind === "multiple-photos") {
       if (title) title.textContent = `Add ${count} photos`;
       if (hint) hint.textContent = "Add or remove one at a time. You can also drop several together.";
+    } else if (answers.inputKind === "finished-video") {
+      if (title) title.textContent = "Drop the finished video here";
+      if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
+    } else if (answers.inputKind === "finished-stills") {
+      if (title) title.textContent = "Drop finished photos here";
+      if (hint) hint.textContent = "Finished stills. No on-image lettering.";
     } else if (answers.inputKind === "single-ai" || answers.inputKind === "multiple-ai") {
       if (title) title.textContent = "No upload needed for AI images";
       if (hint) hint.textContent = "Make generates the images from this plan.";
@@ -4677,7 +4700,8 @@
   function item4IsSupportedPhotoFile(file) {
     const mime = String(file?.type || "").toLowerCase();
     const ext = item4UploadFileExtension(file?.name);
-    if (ezIntakeKind === "finished-video") {
+    const kind = ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
+    if (kind === "finished-video") {
       return mime.startsWith("video/") || mime.startsWith("image/") || ["mp4", "mov", "m4v", "webm", "heic", "heif"].includes(ext);
     }
     return mime.startsWith("image/") || ext === "heic" || ext === "heif";
@@ -4759,7 +4783,14 @@
       const form = new FormData();
       files.forEach(file => form.append("files", file, file.name));
       form.append("metadata", JSON.stringify(metadata));
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, { method: "POST", body: form, timeoutMs: 90000 });
+      const originKind = ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
+      if (originKind) form.append("origin_kind", originKind);
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, {
+        method: "POST",
+        body: form,
+        timeoutMs: originKind === "finished-video" ? 180000 : 90000,
+        retries: 1,
+      });
       if (result.record) activeProductionRequest = result.record;
       await loadItem4Workspace(activeProductionRequest);
       ezStagedFiles = [];
@@ -5458,7 +5489,7 @@
     const intakeKind = parsed?.inputKind
       ? (ezPlanApi()?.ezIntakeKindFromWizard?.(parsed.inputKind) || parsed.inputKind)
       : null;
-    if (ezEntryPath === "content" && (intakeKind === "multiple-photos" || intakeKind === "single-photo")) {
+    if (ezEntryPath === "content" && ["multiple-photos", "single-photo", "finished-video", "finished-stills"].includes(intakeKind)) {
       selectEzInput(intakeKind, { resetPlatforms: false });
       document.querySelectorAll("[data-ez-platform]").forEach((input) => {
         input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
