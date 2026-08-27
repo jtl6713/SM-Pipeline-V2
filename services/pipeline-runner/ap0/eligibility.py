@@ -11,6 +11,7 @@ from ap0.constants import (
     REVIEW_STATUS,
     R2_KEY_PREFIX,
 )
+from ap0.public_mp4 import is_public_publish_url, master_r2_key_from_record
 from asset.helpers import as_bool
 from render.fields import field, field_str
 
@@ -27,12 +28,16 @@ def final_file_id(record: dict[str, Any]) -> str:
     return field_str(record, "Final_File_ID")
 
 
+def source_token(record: dict[str, Any]) -> str:
+    return final_file_id(record) or "finished"
+
+
 def expected_file_name(record: dict[str, Any]) -> str:
-    return f"platform-output-{output_id_token(record)}-{final_file_id(record)}.mp4"
+    return f"platform-output-{output_id_token(record)}-{source_token(record)}.mp4"
 
 
 def r2_object_key(record: dict[str, Any]) -> str:
-    return f"{R2_KEY_PREFIX}/platform-output-{output_id_token(record)}/{final_file_id(record)}.mp4"
+    return f"{R2_KEY_PREFIX}/platform-output-{output_id_token(record)}/{source_token(record)}.mp4"
 
 
 def public_asset_url(record: dict[str, Any]) -> str:
@@ -72,11 +77,11 @@ def eligibility_reason(record: dict[str, Any]) -> str | None:
     publish_status = _ci(field_str(record, "Publish_Status"))
     if publish_status not in {_ci(PUBLISH_STATUS), "ready to schedule"}:
         return "publish_status_not_ready"
-    if not final_file_id(record):
+    if not final_file_id(record) and not master_r2_key_from_record(record):
         return "missing_final_file_id"
-    has_url = bool(field_str(record, "Publish_Asset_URL"))
+    public_url = field_str(record, "Publish_Asset_URL")
     filename_matches = field_str(record, "Publish_Asset_File_Name") == expected_file_name(record)
-    if has_url and filename_matches:
+    if is_public_publish_url(public_url) and filename_matches:
         return "already_prepared"
     return None
 

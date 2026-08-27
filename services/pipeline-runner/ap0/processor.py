@@ -10,12 +10,11 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
-from ap0.constants import ASSET_HOST, CONTENT_TYPE, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
+from ap0.constants import ASSET_HOST, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from ap0.eligibility import asset_plan, eligibility_reason
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
-from integrations.google_drive import GoogleDriveClient
-from integrations.r2_upload import R2UploadClient
+from ap0.public_mp4 import ensure_public_mp4_url
 from render.fields import field, field_str
 
 RECORD_ID_PREFIX = "rec"
@@ -101,8 +100,8 @@ def process_request(
     output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
 
     try:
-        content, _mime = GoogleDriveClient().download_file(field_str(output, "Final_File_ID"))
-        upload = R2UploadClient().put_object(plan["r2_object_key"], content, CONTENT_TYPE)
+        public_url = ensure_public_mp4_url(client, output, plan)
+        upload = {"ok": True, "public_url": public_url, "key": plan["r2_object_key"]}
     except Exception as exc:
         message = f"AP0 Worker/R2 upload failed. {exc}"
         _mark_failed(client, output, message[:1500])
@@ -115,32 +114,36 @@ def process_request(
             f"AP0 publish asset staged at {stamp_minutes()}.\n"
             f"R2 object: {plan['r2_object_key']}\n"
             f"Publish asset file name: {file_name}\n"
-            f"Publish asset URL: {plan['publish_asset_url']}"
+            f"Publish asset URL: {public_url}"
         ),
     )
     response_text = (
         "AP0 Worker/R2 upload response status: 200\n"
         f"Object key: {plan['r2_object_key']}\n"
-        f"Public URL: {plan['publish_asset_url']}\n"
+        f"Public URL: {public_url}\n"
         f"Worker response: {json.dumps(upload, default=str)}"
     )
-    client.update_record(
-        PLATFORM_OUTPUTS_TABLE,
-        output["id"],
-        {
+    patch = {
             "Publish_Asset_Error_Message": "",
             "Publish_Asset_Host": ASSET_HOST,
             "Publish_Asset_File_Name": file_name,
             "Platform_Publish_Response_JSON": response_text,
-            "Publish_Asset_URL": plan["publish_asset_url"],
+            "Publish_Asset_URL": public_url,
             "Publish_Asset_Ready_At": iso_utc(),
             "Output_Notes": ready_notes,
-        },
+        }
+    if str(field_str(output, "Platform") or "").casefold() == "facebook":
+        patch["FB_Slideshow_Public_URL"] = public_url
+        patch["FB_Slideshow_Status"] = "Video Ready"
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        output["id"],
+        patch,
         typecast=True,
     )
     return {
         "processed": True,
-        "bytes": len(content),
+        "bytes": None,
         "attempt_count": attempt,
         **preview,
         **plan,

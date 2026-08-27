@@ -11,14 +11,16 @@ R2_KEY_PREFIX = "publish"
 ASSET_HOST = "Cloudflare R2"
 CONTENT_TYPE = "video/mp4"
 
-# Make filter is an OR of (platform, Platform_Output_Type) pairs. TikTok is not included
-# even though Studio Approve still pulses AP0 before TTD0.
+# Studio Approve pulses AP0 before IG/FB/TT/YT publishers. TikTok drafts must
+# land under publish/ on the public bucket; studio/master-assets 404 there.
 ELIGIBLE_VIDEO_TYPES = frozenset(
     {
         ("instagram", "instagram reel"),
         ("instagram", "instagram story"),
         ("youtube", "youtube short"),
         ("facebook", "facebook reel"),
+        ("tiktok", "tiktok video"),
+        ("tiktok", "tiktok video draft"),
     }
 )
 
