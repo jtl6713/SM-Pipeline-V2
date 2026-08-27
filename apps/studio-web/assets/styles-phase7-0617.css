@@ -1826,6 +1826,11 @@ body{
   background:#e8eef6;
 }
 .sidebar{
+  position:sticky;
+  top:90px;
+  align-self:start;
+  height:fit-content;
+  min-height:calc(100vh - 126px);
   margin:18px 0 18px 18px;
   padding:18px 14px;
   border:0;
@@ -1870,6 +1875,8 @@ body{
 .primary-button,
 .secondary-button{
   border-radius:999px;
+  padding-inline:18px;
+  width:auto;
 }
 .studio-footer{
   background:#fff;

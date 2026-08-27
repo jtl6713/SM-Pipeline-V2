@@ -762,7 +762,7 @@
     const metrics = $("metrics");
     const list = $("recentOutputs");
     const run = (async () => {
-      metrics.innerHTML = '<div class="metric"><div class="metric-label">Loading</div><div class="metric-value">…</div></div>';
+      renderDashboardMetrics();
       list.innerHTML = '<div class="empty">Loading pipeline data…</div>';
       try {
         const data = await api("/api/dashboard");
@@ -777,7 +777,7 @@
         renderDashboardMetrics();
         renderDashboardPanel();
       } catch (e) {
-        metrics.innerHTML = "";
+        renderDashboardMetrics();
         list.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
       }
     })();
