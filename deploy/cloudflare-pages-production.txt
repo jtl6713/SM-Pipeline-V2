@@ -231,3 +231,5 @@ Production brand Pages deploy: 2026-08-27 — Quiet Photos → Platforms → Fra
 
 Finished-video upload Pages deploy: 2026-08-26 — Wizard keeps finished-video intake, accepts MP4s, sends origin_kind, and does not retry a 45MB upload. UI 0.6.144-finished-upload.
 
+Finished-video copy Pages deploy: 2026-08-27 — Finished video uses Video headings and status, not Photos or Google Drive. UI 0.6.145-finished-copy.
+

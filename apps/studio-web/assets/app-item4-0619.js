@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.144-finished-upload";
+  const BUILD_ID = "item4-0.6.145-finished-copy";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1611,10 +1611,33 @@
   }
 
   function item4IsFinishedRequest(record = activeProductionRequest) {
-    const kind = String(ezIntakeKind || "").trim();
+    const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
     if (kind === "finished-video" || kind === "finished-stills") return true;
     const notes = String(record?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
     return notes.includes("ez-input=finished-video") || notes.includes("ez-input=finished-stills") || notes.includes("ez-input=finished-carousel");
+  }
+
+  function ezIsFinishedVideo() {
+    const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
+    if (kind === "finished-video") return true;
+    const notes = String(activeProductionRequest?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
+    return notes.includes("ez-input=finished-video");
+  }
+
+  function ezMediaWord(count = 1) {
+    const n = Math.max(1, Number(count) || 1);
+    return ezIsFinishedVideo() ? (n === 1 ? "video" : "videos") : (n === 1 ? "photo" : "photos");
+  }
+
+  function syncFinishedMediaHeadings() {
+    const video = ezIsFinishedVideo();
+    const heading = video ? "Video" : "Photos";
+    const mediaH = $("item4MediaHeading");
+    if (mediaH) mediaH.textContent = heading;
+    const step = $("productionStepMedia");
+    if (step) step.textContent = heading;
+    const zone = $("item4UploadZone");
+    if (zone) zone.setAttribute("aria-label", video ? "Upload finished video" : "Upload master photos");
   }
 
   function setPageContentSimple(on) {
@@ -1674,6 +1697,7 @@
       if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose photos";
     }
+    syncFinishedMediaHeadings();
     syncPrMediaKindUi();
     if (!quiet && nextKind) setRequestMessage();
   }
@@ -2647,6 +2671,7 @@
       if (hint) hint.textContent = "Drop one photo. It shows up here immediately.";
     }
     selectPrMediaKind(nextKind, { quiet: true });
+    syncFinishedMediaHeadings();
     syncEzYouTubeAvailability(resetPlatforms);
     if (resetPlatforms) syncItem4PlatformsFromEz();
     renderEzCaptionUi();
@@ -3268,9 +3293,11 @@
       const expected = helpers.ezWizardExpectedUploads(answers);
       setEzMessage(answers.inputKind === "mixed"
         ? `Add ${expected} of your photo${expected === 1 ? "" : "s"} one at a time. Studio will add ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"}.`
-        : expected === 1
-          ? "Drop one photo to continue."
-          : `Add ${expected} photos one at a time, or drop several together.`);
+        : answers.inputKind === "finished-video"
+          ? "Drop the finished video to continue."
+          : expected === 1
+            ? "Drop one photo to continue."
+            : `Add ${expected} photos one at a time, or drop several together.`);
     } catch (error) {
       ezWizardSetMessage(error.message || "Could not continue.", "error-text");
     } finally {
@@ -3293,8 +3320,9 @@
       setRequestMessage(unsupportedNote, "error-text");
       if (!files.length) return;
     } else if (!files.length) {
-      setEzMessage("Choose one or more photo files.", "error-text");
-      setRequestMessage("Choose one or more photo files.", "error-text");
+      const choose = ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.";
+      setEzMessage(choose, "error-text");
+      setRequestMessage(choose, "error-text");
       return;
     }
     if (item4Uploading || ezStarting) {
@@ -3326,7 +3354,7 @@
       setEzMessage(unsupportedNote, "error-text");
       if (!supported.length) return;
     } else if (!allowEmpty && !supported.length) {
-      setEzMessage("Choose one or more photo files.", "error-text");
+      setEzMessage(ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.", "error-text");
       return;
     }
     if (!ezIntakeKind && supported.length) {
@@ -3638,6 +3666,7 @@
   }
 
   function syncProductionStudioState() {
+    syncFinishedMediaHeadings();
     const asset = $("item4AssetStatus");
     const plan = $("item4PlanStatus");
     const variant = $("item4VariantStatus");
@@ -3812,9 +3841,9 @@
     const canRemove = asset.id && !String(asset.id).startsWith("local:");
     return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}" data-item4-asset="${escapeHtml(asset.id)}">
       <div class="item4-thumb">${visual}</div>
-      <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || "Photo")}</strong><span>Photo ${escapeHtml(asset.order || "")} · ${escapeHtml(dims)}${formatNote}</span></div>
+      <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || (ezIsFinishedVideo() ? "Video" : "Photo"))}</strong><span>${escapeHtml(ezIsFinishedVideo() ? "Video" : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${formatNote}</span></div>
       ${captionField}
-      ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="Remove this photo">×</button>` : ""}
+      ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
     </article>`;
   }
 
@@ -3825,13 +3854,14 @@
     const authority = String(status?.assets_status || "None");
     if (authority === "Ready") item4PreviewFailures.clear();
     if (badge) {
+      const word = ezMediaWord(assets.length || 1);
       badge.textContent = !assets.length
         ? "No media yet"
         : authority === "Ready"
-          ? `${assets.length} photo${assets.length === 1 ? "" : "s"} ready`
+          ? `${assets.length} ${word} ready`
           : authority === "Error"
-            ? "Photos need attention"
-            : `${assets.length} photo${assets.length === 1 ? "" : "s"} processing`;
+            ? `${word.charAt(0).toUpperCase()}${word.slice(1)} need${assets.length === 1 ? "s" : ""} attention`
+            : `${assets.length} ${word} processing`;
     }
     if (!host) {
       syncProductionStudioState();
@@ -3839,7 +3869,7 @@
     }
     hydrateEzCaptionDrafts(status);
     if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
-      host.innerHTML = '<div class="empty compact-empty">Photos are loading into the system. You can keep working or leave this screen.</div>';
+      host.innerHTML = `<div class="empty compact-empty">${ezIsFinishedVideo() ? "Video is loading into the system." : "Photos are loading into the system."} You can keep working or leave this screen.</div>`;
     } else {
       host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty"></div>';
     }
@@ -3855,6 +3885,7 @@
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
+    syncFinishedMediaHeadings();
     syncProductionStudioState();
   }
 
@@ -4361,24 +4392,32 @@
     const loading = item4Uploading || state === "Uploading" || state === "Processing" || (target && state !== "Ready" && state !== "Error");
     if (!target && !loading) return null;
     if (state === "Ready") {
-      return {
-        heal: "ready",
-        title: "Photos are loaded into the system.",
-        body: `${target} photo${target === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
-      };
+      return ezIsFinishedVideo()
+        ? {
+          heal: "ready",
+          title: "Video is loaded into the system.",
+          body: "The finished video is stored and ready. Crops and Drive copies are skipped.",
+        }
+        : {
+          heal: "ready",
+          title: "Photos are loaded into the system.",
+          body: `${target} photo${target === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
+        };
     }
     if (state === "Error") {
       return {
         heal: "error",
-        title: "Master photos need attention.",
+        title: ezIsFinishedVideo() ? "Video upload needs attention." : "Master photos need attention.",
         body: `${ready} of ${target} saved. Your originals remain in Studio. You can keep working or leave this screen.`,
       };
     }
     const count = target ? `${ready} of ${target} saved so far.` : "";
     return {
       heal: "uploading",
-      title: "Photos are loading into the system.",
-      body: "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background.",
+      title: ezIsFinishedVideo() ? "Video is loading into the system." : "Photos are loading into the system.",
+      body: ezIsFinishedVideo()
+        ? "You can keep working on this screen, or leave and come back."
+        : "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background.",
       count,
     };
   }
@@ -4429,7 +4468,9 @@
       updateItem4MasterProgress(item4Workspace || {});
       if (state === "Ready") {
         stopItem4MasterPolling();
-        setRequestMessage("Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
+        setRequestMessage(ezIsFinishedVideo()
+          ? "Video is loaded into the system. You can keep working or leave this screen anytime."
+          : "Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
         await maybeAutoEzPlan();
         return;
       }
@@ -4441,12 +4482,14 @@
       const decision = item4NextStatusPoll(Date.now() - item4MasterPollStartedAt, ITEM4_MASTER_POLL_TIMEOUT_MS, item4MasterExtraWindows);
       if (!decision.continue) {
         stopItem4MasterPolling();
-        setRequestMessage("Photos are still loading into the system. You can keep working or leave this screen; Studio will finish Drive copies in the background.", "success");
+        setRequestMessage(ezIsFinishedVideo()
+          ? "Video is still loading into the system. You can keep working or leave this screen."
+          : "Photos are still loading into the system. You can keep working or leave this screen; Studio will finish Drive copies in the background.", "success");
         return;
       }
       if (decision.mode === "revalidate") {
         item4MasterExtraWindows = decision.extra_windows_used;
-        setRequestMessage(`Photos are still loading into the system. You can keep working or leave. Automatic retry ${item4MasterExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}.`, "success");
+        setRequestMessage(`${ezIsFinishedVideo() ? "Video is" : "Photos are"} still loading into the system. You can keep working or leave. Automatic retry ${item4MasterExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}.`, "success");
         item4MasterPollTimer = setTimeout(pollItem4MasterAssets, decision.delay_ms);
         return;
       }
@@ -4711,9 +4754,10 @@
     const rejected = Array.from(files || []).filter((file) => !item4IsSupportedPhotoFile(file));
     if (!rejected.length) return "";
     const names = rejected.map((file) => String(file?.name || "").trim()).filter(Boolean);
-    if (names.length === 1) return `${names[0]} is not a supported photo.`;
-    if (names.length === 2 || names.length === 3) return `${names.join(", ")} are not supported photos.`;
-    return `${rejected.length} files are not supported photos.`;
+    const noun = ezIsFinishedVideo() ? "video" : "photo";
+    if (names.length === 1) return `${names[0]} is not a supported ${noun}.`;
+    if (names.length === 2 || names.length === 3) return `${names.join(", ")} are not supported ${noun}s.`;
+    return `${rejected.length} files are not supported ${noun}s.`;
   }
 
   async function imageMetadataForFiles(files) {
@@ -4747,10 +4791,17 @@
       setRequestMessage(unsupportedNote, "error-text");
       if (!files.length) return;
     } else if (!files.length) {
-      setRequestMessage("Choose one or more photo files.", "error-text");
+      setRequestMessage(ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.", "error-text");
       return;
     }
     const existingCount = ezPersistedAssetCount();
+    if (ezIntakeKind === "finished-video") {
+      if (existingCount >= 1) {
+        setRequestMessage("This piece already has a video. Remove it first to replace it.", "error-text");
+        return;
+      }
+      if (files.length > 1) files = files.slice(0, 1);
+    }
     if (ezIntakeKind === "single-photo") {
       if (existingCount >= 1) {
         setRequestMessage("This piece already has a photo. Remove it first to replace it.", "error-text");
@@ -4776,7 +4827,9 @@
     const button = $("item4BuildPlan");
     paintItem4LocalPreviews(files, { uploading: true });
     if (button) button.disabled = true;
-    setRequestMessage("Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background.", "success");
+    setRequestMessage(ezIsFinishedVideo()
+      ? "Video is loading into the system. You can keep working on this screen, or leave and come back."
+      : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background.", "success");
     try {
       mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
@@ -4804,10 +4857,14 @@
         if (item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
       } else if (item4Workspace?.assets_status === "Ready") {
         updateItem4MasterProgress(item4Workspace);
-        setRequestMessage("Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
+        setRequestMessage(ezIsFinishedVideo()
+          ? "Video is loaded into the system. You can keep working or leave this screen anytime."
+          : "Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
       } else {
         updateItem4MasterProgress(item4Workspace || {});
-        setRequestMessage("Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background.", "success");
+        setRequestMessage(ezIsFinishedVideo()
+          ? "Video is loading into the system. You can keep working or leave this screen."
+          : "Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background.", "success");
         startItem4MasterPolling();
       }
       if (!incomplete) await maybeAutoEzPlan();
@@ -4818,7 +4875,7 @@
       if (progress) {
         progress.hidden = false;
         progress.dataset.heal = "error";
-        progress.innerHTML = `<strong>Photo upload needs attention.</strong><span>${escapeHtml(error.message)}</span>`;
+        progress.innerHTML = `<strong>${ezIsFinishedVideo() ? "Video" : "Photo"} upload needs attention.</strong><span>${escapeHtml(error.message)}</span>`;
       }
       setRequestMessage(error.message, "error-text");
     } finally {
