@@ -175,3 +175,5 @@ Finished-video Platform Output seed Worker deploy: 2026-08-27 - Do not write Con
 
 Finished-video retry Worker deploy: 2026-08-27 - Re-running Approve after Promoted fans out Platform Outputs without pulsing Remotion P3. Worker 0.10.152-finished-retry.
 
+Review preview Worker deploy: 2026-08-27 - Open review plays the public publish MP4 and does not use 404 studio/master-assets URLs. Worker 0.10.153-review-preview.
+

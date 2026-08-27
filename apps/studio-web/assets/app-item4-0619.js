@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.152-hub";
+  const BUILD_ID = "item4-0.6.153-review-cover";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -6558,6 +6558,25 @@
     return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(String(url || ""));
   }
 
+  function phase6UrlLooksPublicPublish(url) {
+    const href = String(url || "").trim();
+    if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+    const path = href.slice("https://media.chicagoshining.com/".length);
+    return path.startsWith("studio/previews/") || path.startsWith("publish/");
+  }
+
+  function phase6CoverStillUrl(output) {
+    const candidates = [output?.thumbnail_url, output?.native_still_url];
+    for (const raw of candidates) {
+      const href = String(raw || "").trim();
+      if (!href) continue;
+      if (phase6PreviewLooksLikeImage(href) || /googleusercontent\.com/i.test(href)) return href;
+      const id = phase6DriveFileId(href);
+      if (id) return `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1920`;
+    }
+    return "";
+  }
+
   function phase6IsNativeStillPreview(output = activeCreativeOutput) {
     if (!output) return false;
     if (/story/i.test(String(output.studio_output_type || output.platform_output_type || output.format || ""))) return false;
@@ -6715,7 +6734,7 @@
       story: ["This Story", "Fixed 15-second teaser. Music volume is the useful control."],
       reel: ["This Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
       slideshow: ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
-      tiktok: ["This TikTok video", "Photo sequence saved as a TikTok draft. Music volume is the useful control."],
+      tiktok: ["This TikTok video", "Finished file saved as a TikTok draft. Set the cover in TikTok from the 3D thumbnail."],
       short: ["This YouTube Short", "Photo sequence with your audio settings. Music volume is the useful control."],
       still: ["This photo post", "These photos publish as stills. There is no video mix to edit."],
       video: [`This ${String(output?.platform || "video").trim()} ${creativeOutputTypeLabel(output) || "output"}`.replace(/\s+/g, " ").trim(), "Play the render. Music volume is the useful control."],
@@ -7791,9 +7810,27 @@
       return;
     }
 
+    const coverUrl = phase6CoverStillUrl(output);
+    const showCoverStill = () => {
+      if (!coverUrl || !still) return false;
+      still.alt = "Output thumbnail";
+      still.src = coverUrl;
+      still.hidden = false;
+      empty.hidden = true;
+      video.hidden = true;
+      drive.hidden = true;
+      return true;
+    };
+
     const fileId = output.final_file_id || phase6DriveFileId(output.final_file_url) || phase6DriveFileId(output.output_url);
-    const directPreview = phase6PreviewLooksLikeImage(output.studio_preview_url) ? "" : (output.studio_preview_url || "");
-    if (!fileId && !output.final_file_url && !directPreview) {
+    const publicVideo = [
+      output.publish_asset_url,
+      output.final_file_url,
+      output.studio_preview_url,
+    ].map((value) => String(value || "").trim()).find((href) => href && !phase6PreviewLooksLikeImage(href) && phase6UrlLooksPublicPublish(href)) || "";
+    const directPreview = publicVideo;
+    if (!fileId && !output.final_file_url && !directPreview && !output.studio_preview_url) {
+      if (showCoverStill()) return;
       empty.textContent = String(output.render_status || "").toLowerCase().includes("native photo")
         ? "Native photo route — review the stills below. No Remotion MP4."
         : (String(output.render_status || "").toLowerCase().includes("render") || /story/i.test(String(output.studio_output_type || output.platform_output_type || ""))
@@ -7807,6 +7844,7 @@
 
     empty.hidden = true;
     const fallbackToDrive = () => {
+      if (showCoverStill()) return;
       const embed = phase6DriveEmbedUrl(fileId);
       if (!embed) {
         empty.textContent = "Rendered file exists, but no playable preview source is available.";
@@ -7830,6 +7868,8 @@
       return output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "";
     })();
     if (playableSrc) {
+      if (coverUrl) video.setAttribute("poster", coverUrl);
+      else video.removeAttribute("poster");
       video.src = playableSrc;
       video.hidden = false;
       video.onerror = fallbackToDrive;
@@ -7842,6 +7882,7 @@
       return;
     }
 
+    if (showCoverStill()) return;
     fallbackToDrive();
   }
 

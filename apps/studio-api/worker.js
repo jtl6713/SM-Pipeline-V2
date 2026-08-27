@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.152-finished-retry",
+          version: "0.10.153-review-preview",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -1280,6 +1280,13 @@ function studioClipPublicCdnUrl(clipOrUrl) {
   return url.startsWith("https://media.chicagoshining.com/") ? url : "";
 }
 
+function item4UrlIsPublicPublishCdn(url) {
+  const href = String(url || "").trim();
+  if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+  const path = href.slice("https://media.chicagoshining.com/".length);
+  return path.startsWith("studio/previews/") || path.startsWith("publish/");
+}
+
 function studioNativeClipsArePublicCdn(record) {
   const clips = selectedVisualClips(record);
   return clips.length > 0 && clips.every((clip) => studioClipPublicCdnUrl(clip));
@@ -1841,6 +1848,7 @@ function mapOutput(record, job = null) {
     auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
     do_not_publish: Boolean(f(record, "Do_Not_Publish")),
     final_file_url: f(record, "Final_File_URL"),
+    publish_asset_url: f(record, "Publish_Asset_URL"),
     output_title: f(record, "Output_Title"),
     output_caption: f(record, "Output_Caption"),
     output_notes: f(record, "Output_Notes"),
@@ -11834,7 +11842,12 @@ async function outputPreview(request, env, url, authorization) {
 
   const recordId = outputPreviewRecordIdFromPath(url);
   const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId);
-  const studioPreviewUrl = String(f(record, "Studio_Preview_URL") || "").trim();
+  const studioPreviewUrl = [
+    f(record, "Publish_Asset_URL"),
+    f(record, "Final_File_URL"),
+    f(record, "Studio_Preview_URL"),
+  ].map((value) => String(value || "").trim()).find((href) => item4UrlIsPublicPublishCdn(href))
+    || "";
 
   // Preferred Phase 6 path: R5 writes a browser-playable MP4 copy to the existing
   // ChicagoShining R2 media host. The Studio API remains the authenticated URL the
