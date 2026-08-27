@@ -344,7 +344,12 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     tip.setAttribute("aria-hidden", "true");
   }
 
+  function tooltipsEnabled() {
+    return !window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+  }
+
   function showTooltip(target) {
+    if (!tooltipsEnabled()) return;
     if (!(target instanceof Element)) return;
     if (claimedByPhase6(target)) {
       hideTooltip();
