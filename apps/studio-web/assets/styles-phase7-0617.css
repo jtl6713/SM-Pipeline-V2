@@ -1672,9 +1672,11 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   font-size:.78rem;
   font-weight:600;
   letter-spacing:.12em;
+  line-height:1.4;
   text-transform:uppercase;
   color:var(--prod-navy);
   padding-inline-start:.12em;
+  overflow:visible;
 }
 #page-content .production-draft-grid{
   display:grid;
