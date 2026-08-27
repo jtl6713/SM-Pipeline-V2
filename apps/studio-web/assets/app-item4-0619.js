@@ -7194,6 +7194,7 @@
 
   function phase6ShowTooltip(target, text) {
     if (!target || !text) return;
+    if (window.matchMedia("(max-width: 760px), (pointer: coarse)").matches) return;
     hideStudioGlobalTooltip();
     const tip = phase6TooltipElement();
     phase6TooltipActive = target;

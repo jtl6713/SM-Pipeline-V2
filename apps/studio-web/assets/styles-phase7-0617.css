@@ -2105,8 +2105,10 @@ body:has(#page-content.active) .studio-footer-meta{
     overflow-y:hidden;
     -webkit-overflow-scrolling:touch;
     backdrop-filter:none;
+    background:#fff;
     box-shadow:0 6px 16px rgba(15,35,70,.06);
   }
+  .sidebar [data-page="music"]{display:none}
   .nav-item{
     flex:0 0 auto;
     white-space:nowrap;
@@ -2179,6 +2181,8 @@ body:has(#page-content.active) .studio-footer-meta{
     padding:12px;
     border-radius:16px;
   }
+  .ez-wizard-log:empty,
+  .ez-wizard-bubble--bot{display:none}
   .ez-wizard-chips{
     display:grid;
     grid-template-columns:1fr;
