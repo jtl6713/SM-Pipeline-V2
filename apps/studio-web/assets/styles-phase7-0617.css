@@ -1278,6 +1278,11 @@ body:has(#page-content.active) .main{
   --prod-line:#e8e6e1;
   max-width:880px;
 }
+#page-content [hidden],
+#page-content .item4-production-gate,
+#page-content .item4-upload-progress:empty{
+  display:none!important;
+}
 #page-content .production-page-heading{
   align-items:baseline;
   margin:0 0 56px;
