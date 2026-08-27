@@ -1878,9 +1878,14 @@ body{
   padding-inline:18px;
   width:auto;
 }
+.heading-actions{
+  flex-wrap:nowrap;
+}
 .heading-actions .primary-button{
+  flex:0 0 auto;
   padding:10px 22px;
   min-width:8.5rem;
+  white-space:nowrap;
 }
 .studio-footer{
   background:#fff;
@@ -1910,10 +1915,12 @@ body{
   align-items:stretch;
 }
 .studio-hub-hello{
-  flex:0 1 250px;
+  flex:1 1 220px;
+  max-width:280px;
 }
 .studio-hub-top .metrics{
-  flex:1 1 520px;
+  flex:2 1 360px;
+  min-width:360px;
 }
 .studio-hub-list{order:3}
 .studio-hub-hello{
