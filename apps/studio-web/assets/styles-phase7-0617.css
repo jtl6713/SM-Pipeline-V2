@@ -1275,9 +1275,9 @@ body:has(#page-content.active) .nav-item.active{
 }
 body:has(#page-content.active) .main{
   background:
-    radial-gradient(980px 520px at 8% -8%, rgba(216,170,69,.16), transparent 58%),
-    radial-gradient(860px 480px at 100% 12%, rgba(1,37,89,.08), transparent 52%),
-    #f6f4ee;
+    radial-gradient(820px 460px at 10% 6%, rgba(216,170,69,.32), transparent 52%),
+    radial-gradient(760px 500px at 94% 16%, rgba(1,37,89,.18), transparent 50%),
+    linear-gradient(180deg,#efe6d4 0%,#f6f4ee 46%,#e7eef5 100%);
   padding:48px 56px 72px;
 }
 body:has(#page-content.active) .studio-footer{
@@ -1300,11 +1300,11 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   --prod-ink:var(--prod-navy);
   --prod-muted:#5c6573;
   --prod-line:#e4e0d6;
-  --prod-glass:rgba(255,255,255,.44);
-  --prod-glass-strong:rgba(255,255,255,.62);
-  --prod-glass-border:rgba(255,255,255,.72);
-  --prod-glass-shadow:0 12px 32px rgba(1,37,89,.07), inset 0 1px 0 rgba(255,255,255,.86);
-  --prod-glass-blur:blur(18px) saturate(160%);
+  --prod-glass:rgba(255,255,255,.28);
+  --prod-glass-strong:rgba(255,255,255,.4);
+  --prod-glass-border:rgba(255,255,255,.82);
+  --prod-glass-shadow:0 14px 34px rgba(1,37,89,.1), inset 0 1px 0 rgba(255,255,255,.9);
+  --prod-glass-blur:blur(20px) saturate(170%);
   max-width:880px;
 }
 #page-content [hidden],
