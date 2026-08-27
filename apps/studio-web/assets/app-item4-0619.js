@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.142-pipeline-schedule";
+  const BUILD_ID = "item4-0.6.143-brand";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -711,7 +711,10 @@
       studioSession = session;
       try { await loadStudioProfiles(); } catch {}
       const navOps = $("navOperations");
-      if (navOps) navOps.hidden = !(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
+      const footerOps = $("footerOperations");
+      const showOps = Boolean(session?.permissions?.tenant_admin || session?.permissions?.publishing_control || session?.permissions?.production_configure);
+      if (navOps) navOps.hidden = !showOps;
+      if (footerOps) footerOps.hidden = !showOps;
       if (!health.airtable_configured) {
         $("apiStatus").textContent = "API needs Airtable configuration";
       } else if (session.authorized && session.user?.display_name) {
@@ -1649,21 +1652,27 @@
     }
     const title = $("item4UploadTitle");
     const hint = $("item4UploadHint");
+    const choose = $("item4ChooseMedia");
     if (nextKind === "finished-video") {
-      if (title) title.textContent = "Drop the finished video here or choose a file";
-      if (hint) hint.textContent = "One MP4 · skips production · review and schedule only";
+      if (title) title.textContent = "Drop video";
+      if (hint) hint.textContent = "";
+      if (choose) choose.textContent = "Choose video";
     } else if (nextKind === "finished-stills") {
-      if (title) title.textContent = "Drop finished photos here or choose files";
-      if (hint) hint.textContent = "Finished stills or carousel · no on-image lettering";
+      if (title) title.textContent = "Drop photos";
+      if (hint) hint.textContent = "";
+      if (choose) choose.textContent = "Choose photos";
     } else if (nextKind === "multiple-photos") {
-      if (title) title.textContent = "Drop photos here or choose files";
-      if (hint) hint.textContent = "Add or remove one at a time · 2 or more in the set · up to 20";
+      if (title) title.textContent = "Drop photos";
+      if (hint) hint.textContent = "";
+      if (choose) choose.textContent = "Choose photos";
     } else if (nextKind === "single-photo") {
-      if (title) title.textContent = "Drop one photo here or choose a file";
-      if (hint) hint.textContent = "One photo · original is preserved";
+      if (title) title.textContent = "Drop a photo";
+      if (hint) hint.textContent = "";
+      if (choose) choose.textContent = "Choose photo";
     } else {
-      if (title) title.textContent = "Drop photos here or choose files";
-      if (hint) hint.textContent = "Up to 20 photos · originals are preserved";
+      if (title) title.textContent = "Drop photos";
+      if (hint) hint.textContent = "";
+      if (choose) choose.textContent = "Choose photos";
     }
     syncPrMediaKindUi();
     if (!quiet && nextKind) setRequestMessage();
@@ -3583,8 +3592,46 @@
   }
 
   function item4StateLabel(value, fallback) {
-    const v = String(value || fallback || "").trim();
-    return v || fallback || "—";
+    const raw = String(value || fallback || "").trim();
+    const key = raw.toLowerCase();
+    const labels = {
+      "needs plan": "Not started",
+      none: "Not started",
+      ready: "Ready",
+      building: "Building…",
+      error: "Needs attention",
+      "not prepared": "Waiting",
+      preparing: "Preparing…",
+    };
+    return labels[key] || raw || fallback || "—";
+  }
+
+  function productionPillState(text) {
+    const t = String(text || "").toLowerCase();
+    if (/attention|error|need/.test(t)) return "attention";
+    if (/ready|complete/.test(t)) return "ready";
+    if (/process|prepar|upload|building/.test(t)) return "busy";
+    return "idle";
+  }
+
+  function syncProductionStudioState() {
+    const asset = $("item4AssetStatus");
+    const plan = $("item4PlanStatus");
+    const variant = $("item4VariantStatus");
+    [asset, plan, variant].forEach((el) => {
+      if (el) el.dataset.state = productionPillState(el.textContent);
+    });
+    const assetState = asset?.dataset.state || "idle";
+    const planState = plan?.dataset.state || "idle";
+    const variantState = variant?.dataset.state || "idle";
+    const steps = {
+      media: assetState === "ready" ? "complete" : "current",
+      plan: assetState === "ready" ? (planState === "ready" ? "complete" : "current") : "idle",
+      frames: planState === "ready" ? (variantState === "ready" ? "complete" : "current") : "idle",
+    };
+    document.querySelectorAll("[data-production-step]").forEach((el) => {
+      el.dataset.progress = steps[el.dataset.productionStep] || "idle";
+    });
   }
 
   function item4AssetExtension(name) {
@@ -3760,15 +3807,18 @@
         : authority === "Ready"
           ? `${assets.length} photo${assets.length === 1 ? "" : "s"} ready`
           : authority === "Error"
-            ? "Master media needs attention"
+            ? "Photos need attention"
             : `${assets.length} photo${assets.length === 1 ? "" : "s"} processing`;
     }
-    if (!host) return;
+    if (!host) {
+      syncProductionStudioState();
+      return;
+    }
     hydrateEzCaptionDrafts(status);
     if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
       host.innerHTML = '<div class="empty compact-empty">Photos are loading into the system. You can keep working or leave this screen.</div>';
     } else {
-      host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty">No master photos uploaded yet.</div>';
+      host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty"></div>';
     }
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
       const card = img.closest("[data-item4-asset]");
@@ -3782,6 +3832,7 @@
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
+    syncProductionStudioState();
   }
 
   function item4PlanCard(item) {
@@ -3807,10 +3858,14 @@
     const badge = $("item4PlanStatus");
     const gate = $("item4ProductionGate");
     if (badge) badge.textContent = item4StateLabel(status?.plan_status, "Needs plan");
-    if (!host) return;
+    if (!host) {
+      syncProductionStudioState();
+      return;
+    }
     if (!plan?.items?.length) {
-      host.innerHTML = '<div class="empty compact-empty">Your platform recommendations will appear here.</div>';
+      host.innerHTML = '<div class="empty compact-empty"></div>';
       if (gate) gate.hidden = true;
+      syncProductionStudioState();
       return;
     }
     host.innerHTML = plan.items.map(item4PlanCard).join("");
@@ -3827,11 +3882,12 @@
           return;
         }
         const button = $("item4BuildPlan");
-        if (button) button.textContent = "Update platform plan";
+        if (button) button.textContent = "Update formats";
       });
     });
     if (gate) gate.hidden = status?.plan_status !== "Ready";
     productionDecorateTooltips(host);
+    syncProductionStudioState();
   }
 
   function item4MediaAssetPreviewUrl(recordId) {
@@ -4141,10 +4197,10 @@
     const readyCount = Number(manifest?.ready_count || 0);
     const targetCount = Number(manifest?.target_count || manifest?.source_asset_count || 0);
     if (badge) badge.textContent = variantStatus === "Ready"
-      ? `${readyCount} variants ready`
+      ? `${readyCount} frames ready`
       : variantStatus === "Preparing"
         ? `Preparing… ${readyCount}/${targetCount || "?"} ready`
-        : variantStatus === "Error" ? "Needs attention" : "Not prepared";
+        : variantStatus === "Error" ? "Needs attention" : "Waiting";
     if (error) {
       error.hidden = !status?.variant_error;
       error.textContent = status?.variant_error || "";
@@ -4152,23 +4208,26 @@
     if (button) {
       button.disabled = status?.plan_status !== "Ready" || item4PreparingVariants || variantStatus === "Preparing";
       button.textContent = variantStatus === "Ready"
-        ? "Rebuild platform media"
+        ? "Rebuild"
         : (item4PreparingVariants || variantStatus === "Preparing")
           ? `Preparing… ${readyCount}/${targetCount || "?"}`
-          : "Prepare platform media";
+          : "Prepare";
     }
     if (hint) {
       hint.textContent = status?.plan_status !== "Ready"
-        ? "Build the platform plan first."
+        ? "Choose platforms first."
         : variantStatus === "Preparing"
-          ? `Studio is preparing platform media in the background. This page updates automatically (${readyCount}/${targetCount || "?"} ready).`
+          ? `Studio is preparing crops in the background. This page updates automatically (${readyCount}/${targetCount || "?"} ready).`
           : variantStatus === "Error"
-            ? "Preparation stopped at the failed transformation. The originals are still safe."
+            ? "Preparation stopped. The originals are still safe."
             : variantStatus === "Ready"
               ? "Rebuild if you change the crop."
               : "Click Prepare when the framing looks right.";
     }
-    if (!host) return;
+    if (!host) {
+      syncProductionStudioState();
+      return;
+    }
     const activeCaption = document.activeElement?.matches?.("[data-ez-asset-caption]") ? document.activeElement : null;
     const restoreCaption = activeCaption ? {
       id: String(activeCaption.dataset.ezAssetCaption || ""),
@@ -4183,8 +4242,9 @@
     const assetsReady = Array.isArray(status?.assets) && status.assets.length;
     if (!ratios.length || !assetsReady) {
       host.innerHTML = variantStatus === "Ready"
-        ? '<div class="empty compact-empty">Platform variants are prepared. Preview details are being reconciled from the media manifest.</div>'
-        : '<div class="empty compact-empty">Prepared 4:5, 9:16, 1:1, or 16:9 versions will appear here only when required by the selected outputs.</div>';
+        ? '<div class="empty compact-empty">Crops are ready. Previews are catching up.</div>'
+        : '<div class="empty compact-empty">Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them.</div>';
+      syncProductionStudioState();
       return;
     }
     host.innerHTML = ratios.map(ratio => {
@@ -4253,6 +4313,7 @@
       }
     }
     productionDecorateTooltips(host);
+    syncProductionStudioState();
   }
 
   function stopItem4MasterPolling() {
@@ -4486,7 +4547,7 @@
     const button = $("item4BuildPlan");
     const assets = Array.isArray(status?.assets) ? status.assets : [];
     if (button) button.disabled = !assets.length || item4Uploading;
-    if (hint) hint.textContent = !assets.length ? "Upload photos first, then build the plan." : status?.plan_status === "Ready" ? "Recommendations are saved. Change a format and choose Update platform plan if needed." : "Ready to recommend the best output for each selected platform.";
+    if (hint) hint.textContent = !assets.length ? "Add photos first, then get a plan." : status?.plan_status === "Ready" ? "Formats are saved. Change one and choose Update formats if needed." : "Ready to recommend the best format for each selected platform.";
     document.querySelectorAll("[data-item4-platform]").forEach(input => {
       const planPlatforms = status?.plan?.items?.map(x => x.platform) || [];
       if (planPlatforms.length) input.checked = planPlatforms.includes(input.value);
@@ -4776,7 +4837,7 @@
     } catch (error) { setRequestMessage(error.message, "error-text"); }
     finally {
       if (button) {
-        button.textContent = item4Workspace?.plan?.items?.length ? "Update platform plan" : "Recommend platform plan";
+        button.textContent = item4Workspace?.plan?.items?.length ? "Update formats" : "Recommend formats";
         button.disabled = !(item4Workspace?.assets?.length || ezWizardAllowsPlanWithoutAssets());
       }
       syncEzPlanChrome();
@@ -5251,7 +5312,7 @@
     const save = $("saveProductionRequest");
     if (save) {
       save.disabled = !editable;
-      save.textContent = editable ? "Save draft" : (status === "Promoted" ? "Draft locked" : "Submitted");
+      save.textContent = editable ? "Save" : (status === "Promoted" ? "Locked" : "Submitted");
     }
 
     const promote = $("promoteProductionRequest");
@@ -5272,17 +5333,17 @@
           || item4Workspace?.variant_status === "Ready"
           || item4Workspace?.variant_status === "Not Needed";
         promote.disabled = Boolean(item4Uploading);
-        promote.textContent = "Approve & Promote";
+        promote.textContent = "Approve";
         promote.title = !planReady
-          ? "Save the platform plan first."
+          ? "Choose platforms first."
           : (!variantsReady
               ? "Wait until platform crops are ready, then approve."
               : (finished
                   ? "Approve this finished file and send it to review."
-                  : "Approve this request and start production."));
+                  : "Approve this piece and start production."));
       } else {
         promote.disabled = false;
-        promote.textContent = "Approve & Promote";
+        promote.textContent = "Approve";
       }
     }
 
@@ -5345,8 +5406,14 @@
     } else {
       $("productionRequestWorkspace").hidden = true;
     }
-    $("productionRequestTitle").textContent = activeIdea?.title || ideaTitleForRequest(record) || record.production_request_id || "Production request";
-    $("productionRequestSubtitle").textContent = `${record.production_request_id || "Draft"} · Creative configuration remains editable until submission.`;
+    $("productionRequestTitle").textContent = activeIdea?.title || ideaTitleForRequest(record) || "Untitled piece";
+    if ($("productionRequestSubtitle")) $("productionRequestSubtitle").textContent = "";
+    const requestId = $("productionRequestId");
+    if (requestId) {
+      requestId.textContent = record.production_request_id || "";
+      requestId.hidden = true;
+      if (record.production_request_id) requestId.setAttribute("title", record.production_request_id);
+    }
     $("productionRequestStatus").textContent = record.status || "Draft";
     $("productionRequestStatus").className = `badge ${stateClass(record.status || "Draft")}`;
 
@@ -5875,7 +5942,7 @@
       if (promoteButton) {
         delete promoteButton.dataset.busy;
         promoteButton.disabled = false;
-        promoteButton.textContent = "Approve & Promote";
+        promoteButton.textContent = "Approve";
       }
       setRequestMessage(e.message, "error-text");
       setProductionRequestControlState(activeProductionRequest);
@@ -5889,24 +5956,25 @@
 
   async function loadProductionRequests() {
     const target = $("productionRequestList");
-    target.innerHTML = '<div class="empty">Loading production requests…</div>';
+    target.innerHTML = '<div class="empty production-empty"><strong>Loading drafts…</strong></div>';
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty"><strong>No Production Request drafts yet.</strong><br><span class="subtle">Start from Home, or open an Idea Candidate and choose Add photos.</span></div>';
+        target.innerHTML = '<div class="empty production-empty">No drafts yet.</div>';
         return;
       }
       await ensureIdeasCache();
-      target.innerHTML = `<table class="data-table"><thead><tr><th>Idea</th><th>Status</th><th>Type</th><th>Platforms</th><th>Structure</th><th></th></tr></thead><tbody>${records.map(r => {
-        let structure = "AI decides";
-        if (r.video_clip_count_mode === "Exact") structure = `${value(r.video_clip_count_exact)} clips`;
-        if (r.video_clip_count_mode === "Target range") structure = `${value(r.video_clip_count_min)}–${value(r.video_clip_count_max)} clips`;
-        if (r.carousel_slide_count_mode === "Exact") structure = `${value(r.carousel_slide_count_exact)} slides`;
-        if (r.carousel_slide_count_mode === "Target range") structure = `${value(r.carousel_slide_count_min)}–${value(r.carousel_slide_count_max)} slides`;
-        const ideaName = ideaTitleForRequest(r) || "Untitled idea";
+      target.innerHTML = `<div class="production-draft-grid">${records.map(r => {
+        const ideaName = ideaTitleForRequest(r) || "Untitled piece";
         const timing = studioRecordTimingLabel(r);
-        return `<tr><td><div class="title-cell">${value(ideaName)}</div><div class="subtle">${value(r.production_request_id)}${timing ? ` · ${escapeHtml(timing)}` : ""}</div></td><td>${badge(r.status)}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${structure}</td><td><button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">Open</button></td></tr>`;
-      }).join("")}</tbody></table>`;
+        const platforms = join(r.platforms);
+        return `<article class="production-draft-card">
+          <div class="production-draft-meta">${badge(r.status)}${timing ? `<span class="subtle">${escapeHtml(timing)}</span>` : ""}</div>
+          <h3>${value(ideaName)}</h3>
+          <p>${platforms !== "—" ? platforms : "Platforms not chosen yet"}</p>
+          <button type="button" class="manage-button" data-pr-id="${escapeHtml(r.id)}">Continue</button>
+        </article>`;
+      }).join("")}</div>`;
 
       const byId = new Map(records.map(record => [record.id, record]));
       target.querySelectorAll("[data-pr-id]").forEach(button => {
@@ -5914,7 +5982,7 @@
           const record = byId.get(button.dataset.prId);
 
           if (!record) {
-            setRequestMessage("Production Request not found in the current list. Click Refresh and try again.", "error-text");
+            setRequestMessage("That draft is not in the current list. Click Refresh and try again.", "error-text");
             return;
           }
 
@@ -6134,11 +6202,11 @@
     }
     loadProductionRequests();
     const target = $("contentList");
-    target.innerHTML = '<div class="empty">Loading content items…</div>';
+    target.innerHTML = '<div class="empty production-empty"><strong>Loading the pipeline…</strong></div>';
     try {
       const { records = [] } = await api("/api/content?limit=100");
       if (!records.length) {
-        target.innerHTML = '<div class="empty"><strong>No content items are currently in production.</strong><br><span class="subtle">Studio is connected; new promoted ideas will appear here as production begins.</span></div>';
+        target.innerHTML = '<div class="empty production-empty">Nothing in the pipeline yet.</div>';
         return;
       }
       renderContentItemsTable(target, records);

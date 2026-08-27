@@ -7,8 +7,8 @@
  <title>ChicagoShining Studio</title>
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
- <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.142-pipeline-schedule">
+ <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.143-brand">
 </head>
 <body>
  <header class="topbar">
@@ -25,7 +25,6 @@
  <span>Profile</span>
  <select id="studioProfileSelect" aria-label="Working content profile"></select>
  </label>
- <div class="topbar-status" id="apiStatus">Connecting…</div>
  </header>
 
  <div class="shell">
@@ -37,9 +36,7 @@
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
- <button class="nav-item" data-page="support">Support</button>
- <div class="nav-divider"></div>
- <div class="nav-note">Creative Review<br><span class="subtle" id="uiBuildLabel">UI build 0.6.133</span></div>
+ <button class="nav-item nav-item-footer-only" data-page="support">Support</button>
  </nav>
 
  <main class="main" id="main">
@@ -128,10 +125,10 @@
  <section class="panel"><div id="ideasList" class="table-wrap"></div></section>
  </section>
 
- <section id="page-content" class="page">
- <div class="page-heading ez-busy-panel" id="productionPageHeading">
- <div><span class="eyebrow">Production</span><h1>Production</h1><p>Open a draft, continue platform prep, or review promoted items.</p></div>
- <button class="secondary-button" data-refresh="content" title="Reload drafts and promoted items without interrupting photo uploads.">Refresh</button>
+ <section id="page-content" class="page production-page">
+ <div class="page-heading ez-busy-panel production-page-heading" id="productionPageHeading">
+ <h1>Production</h1>
+ <button class="text-button production-refresh" data-refresh="content" title="Reload drafts and promoted items without interrupting photo uploads.">Refresh</button>
  </div>
  <section class="panel ez-intake" id="ezIntake" hidden>
  <div class="panel-heading ez-intake-heading">
@@ -335,77 +332,90 @@
  </div>
  </section>
 
- <section class="panel production-request-shell ez-busy-panel" id="productionRequestWorkspace" hidden>
- <div class="panel-heading production-request-heading">
- <div>
- <span class="eyebrow">Production request</span>
- <h2 id="productionRequestTitle">Configure production</h2>
- <p id="productionRequestSubtitle">Draft creative intent before the pipeline starts.</p>
- </div>
+ <section class="panel production-request-shell production-studio-shell ez-busy-panel" id="productionRequestWorkspace" hidden>
+ <div class="panel-heading production-request-heading production-studio-hero">
+ <h2 id="productionRequestTitle">Untitled piece</h2>
  <span class="badge" id="productionRequestStatus">Draft</span>
+ <p id="productionRequestSubtitle" hidden></p>
+ <code class="production-request-id" id="productionRequestId" hidden aria-hidden="true"></code>
  </div>
 
- <form id="productionRequestForm" class="production-request-form">
- <div class="request-section item4-master-media-section">
+ <ol class="production-step-rail" id="productionStepRail" aria-label="Production steps">
+ <li class="production-step-rail-item" data-production-step="media" data-progress="current">Photos</li>
+ <li class="production-step-rail-item" data-production-step="plan" data-progress="idle">Platforms</li>
+ <li class="production-step-rail-item" data-production-step="frames" data-progress="idle">Frames</li>
+ </ol>
+
+ <form id="productionRequestForm" class="production-request-form production-studio-form">
+ <div class="request-section item4-master-media-section production-step-card">
  <div class="request-section-heading item4-heading-row">
- <div><h3>1. Master media</h3><p>Choose single or multiple photos first, then upload. Studio preserves the originals and plans platform treatments from the same source set.</p></div>
- <span class="item4-state-pill" id="item4AssetStatus">No media yet</span>
+ <h3>Photos</h3>
+ <span class="item4-state-pill" id="item4AssetStatus" data-state="idle">No media yet</span>
  </div>
  <div class="ez-card-grid item4-media-kind-grid" id="item4MediaKindGrid">
- <button type="button" class="ez-card" data-pr-input="single-photo">
- <strong>Single photo</strong>
- <span>Instagram 4:5, Facebook image, TikTok photo draft.</span>
+ <button type="button" class="ez-card production-media-kind" data-pr-input="single-photo">
+ <strong>One photo</strong>
+ <span>Single still</span>
  </button>
- <button type="button" class="ez-card" data-pr-input="multiple-photos">
- <strong>Multiple photos</strong>
- <span>Carousel, album, TikTok photo draft, YouTube Short.</span>
+ <button type="button" class="ez-card production-media-kind" data-pr-input="multiple-photos">
+ <strong>A set</strong>
+ <span>Carousel or album</span>
  </button>
  </div>
- <em class="ez-option-hint" id="item4MediaKindHint">Pick one before uploading so the platform plan matches what you intend.</em>
+ <em class="ez-option-hint" id="item4MediaKindHint"></em>
  <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos" hidden>
  <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
- <div class="item4-upload-icon">＋</div>
- <div> <strong id="item4UploadTitle">Drop photos here or choose files</strong><span id="item4UploadHint">Add or remove one at a time · up to 20. You can keep working or leave while Drive copies finish.</span></div>
- <button type="button" class="secondary-button" id="item4ChooseMedia">Choose photos</button>
+ <div class="item4-upload-icon" aria-hidden="true">+</div>
+ <div> <strong id="item4UploadTitle">Drop photos</strong><span id="item4UploadHint">Up to 20</span></div>
+ <button type="button" class="primary-button" id="item4ChooseMedia">Choose photos</button>
  </div>
  <div class="item4-upload-progress" id="item4UploadProgress" hidden></div>
- <div class="item4-asset-strip" id="item4AssetStrip"><div class="empty compact-empty">No master photos uploaded yet.</div></div>
+ <div class="item4-asset-strip" id="item4AssetStrip"><div class="empty compact-empty"></div></div>
  </div>
 
- <div class="request-section item4-output-plan-section">
+ <div class="request-section item4-output-plan-section production-step-card">
  <div class="request-section-heading item4-heading-row">
- <div><h3>2. Platform output plan</h3><p>Studio recommends the strongest format for each platform and uses Platform Output Mappings as the aspect-ratio authority. You can override any recommendation.</p></div>
- <span class="item4-state-pill" id="item4PlanStatus">Needs plan</span>
+ <h3>Platforms</h3>
+ <span class="item4-state-pill" id="item4PlanStatus" data-state="idle">Not started</span>
  </div>
  <div class="item4-platform-toggles" id="item4PlatformToggles">
- <label><input type="checkbox" data-item4-platform value="Instagram" checked> Instagram</label>
- <label><input type="checkbox" data-item4-platform value="Facebook" checked> Facebook</label>
- <label><input type="checkbox" data-item4-platform value="TikTok" checked> TikTok</label>
- <label><input type="checkbox" data-item4-platform value="YouTube" checked> YouTube</label>
+ <label data-platform="Instagram"><input type="checkbox" data-item4-platform value="Instagram" checked> Instagram</label>
+ <label data-platform="Facebook"><input type="checkbox" data-item4-platform value="Facebook" checked> Facebook</label>
+ <label data-platform="TikTok"><input type="checkbox" data-item4-platform value="TikTok" checked> TikTok</label>
+ <label data-platform="YouTube"><input type="checkbox" data-item4-platform value="YouTube" checked> YouTube</label>
  </div>
- <div class="item4-plan-actions"><button type="button" class="primary-button" id="item4BuildPlan">Recommend platform plan</button><span id="item4PlanHint">Upload photos first, then build the plan.</span></div>
- <div class="item4-output-plan" id="item4OutputPlan"><div class="empty compact-empty">Your platform recommendations will appear here.</div></div>
+ <div class="item4-plan-actions"><button type="button" class="primary-button" id="item4BuildPlan">Recommend formats</button><span id="item4PlanHint"></span></div>
+ <div class="item4-output-plan" id="item4OutputPlan"><div class="empty compact-empty"></div></div>
  <div class="item4-production-gate" id="item4ProductionGate" hidden>
- <strong>Output plan ready.</strong>
- <span>The master photos and requested outputs are saved. Studio validates the source-to-production bridge automatically before promotion.</span>
+ <strong>Ready.</strong>
+ <span>Frame each post next.</span>
  </div>
  </div>
- <div class="request-section item4-variant-section">
+ <div class="request-section item4-variant-section production-step-card">
  <div class="request-section-heading item4-heading-row">
- <div><h3>3. Platform-ready media</h3><p>Drag each photo to keep the important part in the frame. Studio then converts the original into that crop. HEIC originals stay untouched.</p></div>
- <span class="item4-state-pill" id="item4VariantStatus">Not prepared</span>
+ <h3>Frames</h3>
+ <span class="item4-state-pill" id="item4VariantStatus" data-state="idle">Waiting</span>
  </div>
  <div class="item4-variant-actions">
- <button type="button" class="primary-button" id="item4PrepareVariants">Prepare platform media</button>
- <span id="item4VariantHint">Build the platform plan first.</span>
+ <button type="button" class="primary-button" id="item4PrepareVariants">Prepare</button>
+ <span id="item4VariantHint"></span>
  </div>
  <div class="item4-variant-error error-text" id="item4VariantError" hidden></div>
- <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty">Prepared 4:5, 9:16, 1:1, or 16:9 versions will appear here only when required by the selected outputs.</div></div>
+ <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty"></div></div>
  </div>
 
- <details class="ez-advanced" id="ezAdvancedOptions">
- <summary>Advanced options</summary>
- <p class="ez-advanced-note">Use this only for extra outputs, structure, audio, wording, or notes. Facebook Slideshow Reel is opt-in here, not an EZ default.</p>
+ <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
+ <div class="form-message" id="productionPromotionCompatibility"></div>
+ <div class="request-actions production-studio-actions">
+ <button type="button" class="secondary-button" id="closeProductionRequest">Close</button>
+ <button type="submit" class="secondary-button" id="saveProductionRequest">Save</button>
+ <button type="button" class="secondary-button" id="syncProductionRequestDirectives" hidden>Sync advanced directives</button>
+ <button type="button" class="primary-button" id="promoteProductionRequest">Approve</button>
+ </div>
+
+ <details class="ez-advanced production-advanced" id="ezAdvancedOptions">
+ <summary>More options</summary>
+ <p class="ez-advanced-note">Outputs, audio, wording, and notes.</p>
 
  <div class="request-section" id="prMasterDefaultsSection" hidden>
  <select id="prContentType" hidden aria-hidden="true" tabindex="-1">
@@ -728,27 +738,16 @@
  <label class="form-field"><textarea id="prProductionNotes" rows="5" maxlength="10000"></textarea></label>
  </div>
  </details>
-
- <div class="form-message" id="productionRequestMessage" aria-live="polite"></div>
- <div class="form-message" id="productionPromotionCompatibility">
-              Photos, plan, and platform crops need to be ready before you approve.
- </div>
- <div class="request-actions">
- <button type="button" class="secondary-button" id="closeProductionRequest">Close request</button>
- <button type="submit" class="primary-button" id="saveProductionRequest">Save draft</button>
- <button type="button" class="secondary-button" id="syncProductionRequestDirectives" hidden>Sync advanced directives</button>
- <button type="button" class="primary-button" id="promoteProductionRequest">Approve &amp; Promote</button>
- </div>
  </form>
  </section>
 
- <section class="panel request-list-panel ez-busy-panel" id="productionRequestListPanel">
- <div class="panel-heading"><div><h2>Production request drafts</h2><p>Saved creative requests waiting for approval/promotion. Opening a draft does not interrupt photo uploads.</p></div></div>
+ <section class="panel request-list-panel production-library-panel ez-busy-panel" id="productionRequestListPanel">
+ <div class="panel-heading"><div><h2>Drafts</h2></div></div>
  <div id="productionRequestList" class="table-wrap"></div>
  </section>
 
- <section class="panel ez-busy-panel" id="promotedContentPanel">
- <div class="panel-heading"><div><h2>Promoted content items</h2><p>Items that have entered the existing production pipeline.</p></div></div>
+ <section class="panel production-library-panel ez-busy-panel" id="promotedContentPanel">
+ <div class="panel-heading"><div><h2>Pipeline</h2></div></div>
  <div id="contentList" class="table-wrap"></div>
  </section>
  </section>
@@ -1173,6 +1172,17 @@
  </main>
  </div>
 
+ <footer class="studio-footer">
+ <nav class="studio-footer-links" aria-label="Secondary">
+ <button type="button" data-open-page="support">Support</button>
+ <button type="button" data-open-page="music">Music</button>
+ <button type="button" data-open-page="operations" id="footerOperations" hidden>Operations</button>
+ </nav>
+ <div class="studio-footer-meta">
+ <span id="apiStatus" class="topbar-status">Connecting…</span>
+ <span id="uiBuildLabel">UI build 0.6.143</span>
+ </div>
+ </footer>
 
  <div class="drawer-backdrop" id="ideaDrawerBackdrop" hidden></div>
  <aside class="idea-drawer" id="ideaManageDrawer" aria-hidden="true" aria-label="Idea details">
@@ -1298,9 +1308,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.138-similar-times"></script>
+ <script src="/assets/config.js?v=0.6.143-brand"></script>
  <script src="/assets/ez-plan.js?v=0.6.125-tiktok-single-photo"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.142-pipeline-schedule"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.142";</script>
+ <script src="/assets/app-item4-0619.js?v=0.6.143-brand"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.143";</script>
 </body>
 </html>
