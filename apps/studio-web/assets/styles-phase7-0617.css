@@ -1878,6 +1878,10 @@ body{
   padding-inline:18px;
   width:auto;
 }
+.heading-actions .primary-button{
+  padding:10px 22px;
+  min-width:8.5rem;
+}
 .studio-footer{
   background:#fff;
   border-top:1px solid #e4ebf3;
