@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.147-approve-return",
+          version: "0.10.148-schedule-hold",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -3879,6 +3879,31 @@ function studioPublishScheduleFields(payload = {}, record = null) {
   const platform = String(f(record, "Platform") || "").trim();
   if (platform === "YouTube") fields.YouTube_Scheduled_Publish_At = iso;
   return fields;
+}
+
+function studioPublishScheduledMs(record) {
+  const raw = String(f(record, "Scheduled_Post_Date") || "").trim();
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function studioPublishIsDue(record, graceMs = 120000) {
+  const ms = studioPublishScheduledMs(record);
+  if (ms == null) return true;
+  return ms <= Date.now() + graceMs;
+}
+
+function studioPublishCanDispatchNow(record) {
+  if (studioPublishIsDue(record)) return true;
+  // YouTube can upload now and let the channel release at publishAt.
+  const platform = String(f(record, "Platform") || "").trim();
+  return platform === "YouTube" && Boolean(String(f(record, "YouTube_Scheduled_Publish_At") || "").trim());
+}
+
+function studioPublishHeldUntilIso(record) {
+  const ms = studioPublishScheduledMs(record);
+  return ms == null ? "" : new Date(ms).toISOString();
 }
 
 function item4EffectivePhotoCount(record, assets) {
@@ -16607,6 +16632,14 @@ async function studioEnsureOutputCaption(env, record) {
 // after it is recoverable on a later pass, so it is split off: this half runs on the request
 // path where it cannot be dropped by a cancelled background task or an exhausted invocation.
 async function studioDispatchApprovedPublishNow(env, record) {
+  if (!studioPublishCanDispatchNow(record)) {
+    return {
+      ok: true,
+      skipped: "scheduled-hold",
+      held_until: studioPublishHeldUntilIso(record),
+      record,
+    };
+  }
   record = await studioEnsureOutputCaption(env, record);
   const plan = studioPublishDispatchTarget(record);
   if (!plan) return { ok: true, skipped: "no-dispatch", record };
@@ -16743,6 +16776,11 @@ async function studioStampPublishDispatch(env, record, note) {
 }
 
 async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
+  if (!studioPublishCanDispatchNow(record)) {
+    const heldUntil = studioPublishHeldUntilIso(record);
+    await studioStampPublishDispatch(env, record, `held until ${heldUntil || "scheduled time"}`);
+    return { ok: true, skipped: "scheduled-hold", held_until: heldUntil, record };
+  }
   const plan = studioPublishDispatchTarget(record);
   // Graph stills (Drive → R2 → Instagram) can OOM or abort the isolate. Finish
   // the Approve HTTP response first so Studio/E2E are not killed with the publish.
@@ -16800,7 +16838,7 @@ async function studioReconcileYoutubePublishes(env, options = {}) {
     {
       stage: "yt0",
       target: "YT0",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Platform_Post_ID}="",OR({YouTube_Stage}="",{YouTube_Stage}="YT0",AND({Publish_Retry_Eligible}=1,FIND("YT0",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Platform_Post_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW()),{YouTube_Scheduled_Publish_At}!=""),OR({YouTube_Stage}="",{YouTube_Stage}="YT0",AND({Publish_Retry_Eligible}=1,FIND("YT0",UPPER({Publish_Error_Stage}&""))>0)))',
     },
     {
       stage: "ytp1",
@@ -16859,7 +16897,7 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
     {
       stage: "ttd0",
       pulse: studioPulseTtd0,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({TikTok_Draft_Status}="Ready for Assets",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({TikTok_Draft_Status}="Ready for Assets",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))',
     },
     {
       stage: "ttd1",
@@ -16907,7 +16945,7 @@ async function studioReconcileFacebookPhotos(env, options = {}) {
     {
       stage: "fb0",
       pulse: studioPulseFb0,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",OR({FB_Publish_Status}="Ready for Assets",AND({FB_Publish_Status}="Retry Pending",FIND("FB0",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({FB_Publish_Status}="Ready for Assets",AND({FB_Publish_Status}="Retry Pending",FIND("FB0",UPPER({Publish_Error_Stage}&""))>0)))',
     },
     {
       stage: "fb1",
@@ -16917,7 +16955,7 @@ async function studioReconcileFacebookPhotos(env, options = {}) {
     {
       stage: "fb2",
       pulse: studioPulseFb2,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",OR({FB_Publish_Status}="Photo Media Ready",AND({FB_Publish_Status}="Retry Pending",FIND("FB2_PUBLISH",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({FB_Publish_Status}="Photo Media Ready",AND({FB_Publish_Status}="Retry Pending",FIND("FB2_PUBLISH",UPPER({Publish_Error_Stage}&""))>0)))',
     },
     {
       stage: "fb2r",
@@ -16960,7 +16998,7 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
     {
       stage: "ap0c",
       pulse: studioPulseAp0c,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Carousel",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",OR({IG_Carousel_Status}="Ready for Asset Prep",AND({IG_Carousel_Status}="Retry Pending",{Publish_Retry_Eligible}=1)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Instagram",{Platform_Output_Type}="Instagram Carousel",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Platform_Post_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({IG_Carousel_Status}="Ready for Asset Prep",AND({IG_Carousel_Status}="Retry Pending",{Publish_Retry_Eligible}=1)))',
     },
     {
       stage: "ap1c",
@@ -16985,7 +17023,7 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
     {
       stage: "ap4c",
       pulse: studioPulseAp4c,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Parent_Container_ID}!="")',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Parent_Container_ID}!="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))',
     },
     {
       stage: "ap4r",
@@ -17090,7 +17128,7 @@ async function studioReconcileFacebookSlideshows(env, options = {}) {
   try {
     ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Ready to Render",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS1",UPPER({Publish_Error_Stage}&""))>0)))',
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({FB_Slideshow_Status}="Ready to Render",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS1",UPPER({Publish_Error_Stage}&""))>0)))',
     });
   } catch (error) {
     console.warn("facebook slideshow create reconcile scan failed", error);
@@ -17098,7 +17136,7 @@ async function studioReconcileFacebookSlideshows(env, options = {}) {
   try {
     processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0),AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Final_File_ID}!="",{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="")))',
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({FB_Slideshow_Status}="Rendering",{FB_Slideshow_Status}="Staging Final MP4",AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS2",UPPER({Publish_Error_Stage}&""))>0),AND({Platform}="Facebook",{Platform_Output_Type}="Facebook Reel",{Output_Status}="Approved for Publishing",{Review_Status}="Approved",{Final_File_ID}!="",{Platform_Post_ID}="",{Publish_Asset_URL}="",{FB_Slideshow_Public_URL}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))))',
     });
   } catch (error) {
     console.warn("facebook slideshow poll reconcile scan failed", error);
@@ -17135,7 +17173,7 @@ async function studioReconcileFacebookReels(env, options = {}) {
   try {
     ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0)))',
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0)))',
     });
   } catch (error) {
     console.warn("facebook reel create reconcile scan failed", error);
@@ -17149,6 +17187,7 @@ async function studioReconcileFacebookReels(env, options = {}) {
     console.warn("facebook reel poll reconcile scan failed", error);
   }
   for (const row of ready) {
+    if (!studioPublishCanDispatchNow(row)) continue;
     try {
       const pulsed = await studioPulseFbs3(env, row);
       results.push({ id: row.id, stage: "fbs3", ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
@@ -17294,7 +17333,8 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
       });
     }
     if (String(f(existing, "Review_Status") || "").trim() === "Approved" || outputStatus === "Approved for Publishing") {
-      if (ctx && typeof ctx.waitUntil === "function") {
+      const held = !studioPublishCanDispatchNow(existing);
+      if (!held && ctx && typeof ctx.waitUntil === "function") {
         ctx.waitUntil(studioReconcileApprovedPublishes(env, { limit: 1 }).catch((error) => {
           console.warn("approve republish kickoff failed", existing?.id, error);
         }));
@@ -17305,11 +17345,14 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
         already_approved: true,
         record: mapPhase6CreativeOutput(existing),
         handoff_state: "approved_for_publishing",
-        message: "Already approved. Studio is starting the publisher from the approved queue.",
+        message: held
+          ? "Already approved. Studio will publish at the scheduled time."
+          : "Already approved. Studio is starting the publisher from the approved queue.",
       });
     }
     try {
       const updated = await approveOutputRecordForPublishing(env, existing, note, stamp, payload);
+      const held = !studioPublishCanDispatchNow(updated);
       // Facebook Reel/Story publish can take a minute. Return as soon as the
       // row is approved so the review click cannot time out into a fake 500.
       if (ctx && typeof ctx.waitUntil === "function") {
@@ -17321,11 +17364,16 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
           action: "approve_for_publishing",
           record: mapPhase6CreativeOutput(updated),
           handoff_state: "approved_for_publishing",
-          publish_dispatch: { accepted: true, detail: "queued" },
-          message: "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
+          publish_dispatch: held
+            ? { accepted: true, detail: "scheduled-hold", held_until: studioPublishHeldUntilIso(updated) }
+            : { accepted: true, detail: "queued" },
+          message: held
+            ? "Approved. Studio will publish at the scheduled time."
+            : "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
         });
       }
       const dispatch = await studioDispatchApprovedPublishAndSchedule(ctx, env, updated);
+      const heldAfter = dispatch?.skipped === "scheduled-hold";
       return respond(request, env, {
         ok: true,
         action: "approve_for_publishing",
@@ -17335,8 +17383,11 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
           target: dispatch?.target || dispatch?.skipped || null,
           ok: dispatch?.ok !== false,
           detail: studioPublishDispatchNote(dispatch),
+          held_until: dispatch?.held_until || null,
         },
-        message: dispatch?.ok === false
+        message: heldAfter
+          ? "Approved. Studio will publish at the scheduled time."
+          : dispatch?.ok === false
           ? "Approved for publishing, but the publisher handoff did not go through. Studio will retry it automatically within a few minutes."
           : "Approved for publishing. Instagram and Facebook will auto-publish; TikTok will be created as a draft.",
       });
