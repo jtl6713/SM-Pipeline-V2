@@ -55,6 +55,7 @@ export default {
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
       const isInsightsBestTimesRoute = url.pathname === "/api/insights/best-times";
       const isInsightsSimilarTimesRoute = url.pathname === "/api/insights/similar-times";
+      const isInsightsCaptionsRoute = url.pathname === "/api/insights/captions";
       const isInsightsWatchlistRoute = url.pathname === "/api/insights/watchlist";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
@@ -165,6 +166,9 @@ export default {
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
           studio_insights_similar_times_v1: true,
+          studio_insights_learning_db_v1: true,
+          studio_insights_seasonal_v1: true,
+          studio_insights_caption_learning_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -465,6 +469,11 @@ export default {
       if (isInsightsBestTimesRoute) {
         requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
         return getInsightsBestTimes(request, env, url, authorization);
+      }
+
+      if (isInsightsCaptionsRoute) {
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control", "tenant_admin"]);
+        return getInsightsCaptions(request, env, url, authorization);
       }
 
       if (isInsightsSimilarTimesRoute) {
@@ -808,6 +817,16 @@ export default {
         await studioSweepSimilarAccountTimes(env, { limit: 3 });
       } catch (error) {
         console.warn("similar-account times sweep cron failed", error);
+      }
+      try {
+        await studioIngestFirstPartyObservations(env, { limit: 12 });
+      } catch (error) {
+        console.warn("first-party insights observation ingest failed", error);
+      }
+      try {
+        await studioRecomputeInsightsLearned(env, { profile: "chicago" });
+      } catch (error) {
+        console.warn("insights learned-model recompute failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -8773,6 +8792,562 @@ const STUDIO_SIMILAR_TIMED_PLATFORMS = new Set(["instagram", "youtube"]);
 const STUDIO_SIMILAR_TIMES_SETTING = "SIMILAR_ACCOUNT_TIMES_CACHE";
 const STUDIO_SIMILAR_TIMES_TTL_MS = 24 * 60 * 60 * 1000;
 const STUDIO_SIMILAR_TIMES_MIN_SAMPLE = 8;
+const STUDIO_SIMILAR_ACCOUNT_STATUS_SETTING = "SIMILAR_ACCOUNT_STATUS_CACHE";
+const STUDIO_INSIGHTS_OBSERVATIONS_TABLE = "Studio Insights Observations";
+const STUDIO_INSIGHTS_LEARNED_TABLE = "Studio Insights Learned";
+const STUDIO_INSIGHTS_SEASONS = Object.freeze(["winter", "spring", "summer", "fall"]);
+const STUDIO_INSIGHTS_CTA_PATTERN = /\b(follow|save|link in bio|link|tap|comment|share|visit|book|dm|click|learn more|tag a friend)\b/i;
+
+function studioInsightsObservationsTable(env) {
+  return env.STUDIO_INSIGHTS_OBSERVATIONS_TABLE_ID || STUDIO_INSIGHTS_OBSERVATIONS_TABLE;
+}
+
+function studioInsightsLearnedTable(env) {
+  return env.STUDIO_INSIGHTS_LEARNED_TABLE_ID || STUDIO_INSIGHTS_LEARNED_TABLE;
+}
+
+function studioInsightsDbEnabled(env) {
+  return Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID);
+}
+
+function studioChicagoSeason(iso, when = new Date()) {
+  const raw = iso || when.toISOString();
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "winter";
+  const month = Number(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    month: "numeric",
+  }).format(date));
+  if ([12, 1, 2].includes(month)) return "winter";
+  if ([3, 4, 5].includes(month)) return "spring";
+  if ([6, 7, 8].includes(month)) return "summer";
+  return "fall";
+}
+
+function studioNormalizeInsightsSeason(value, fallback = studioChicagoSeason()) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "all") return "all";
+  return STUDIO_INSIGHTS_SEASONS.includes(raw) ? raw : fallback;
+}
+
+function studioSeasonLabel(season) {
+  if (season === "winter") return "Winter";
+  if (season === "spring") return "Spring";
+  if (season === "summer") return "Summer";
+  if (season === "fall") return "Fall";
+  return "All seasons";
+}
+
+function studioAnalyzeCaption(caption) {
+  const text = String(caption || "").trim();
+  const hashtags = (text.match(/#[\w\u0080-\uFFFF]+/g) || []).length;
+  const emoji = (text.match(/\p{Extended_Pictographic}/gu) || []).length;
+  return {
+    text: text.slice(0, 5000),
+    length: text.length,
+    hashtags,
+    emoji,
+    has_question: /\?/.test(text),
+    has_cta: STUDIO_INSIGHTS_CTA_PATTERN.test(text),
+  };
+}
+
+function studioInsightsEngagementScore(post) {
+  const engagement = Number(post?.views || 0) + Number(post?.likes || 0) + Number(post?.comments || 0);
+  return Math.round((1 + Math.log1p(Math.max(0, engagement)) / 10) * 1000) / 1000;
+}
+
+function studioInsightsObservationKey(source, platform, handle, publishedAt, externalPostId) {
+  const src = String(source || "similar_account").trim().toLowerCase();
+  const plat = String(platform || "").trim().toLowerCase();
+  const acct = String(handle || "first_party").trim().toLowerCase();
+  const stamp = String(publishedAt || externalPostId || "").trim();
+  const external = String(externalPostId || stamp).trim();
+  return `${src}:${plat}:${acct}:${external}`.slice(0, 180);
+}
+
+function studioInsightsLearnedKey(profile, platform, outputType, season, metricType) {
+  return [
+    studioNormalizeSimilarProfile(profile),
+    String(platform || "all").trim().toLowerCase(),
+    String(outputType || "all").trim().toLowerCase(),
+    studioNormalizeInsightsSeason(season, "all"),
+    String(metricType || "post_time").trim().toLowerCase(),
+  ].join("|");
+}
+
+function studioInsightsObservationFields(post, meta = {}) {
+  const publishedAt = post?.published_at || null;
+  const weekdayHour = publishedAt ? studioChicagoWeekdayHour(publishedAt) : null;
+  const caption = studioAnalyzeCaption(post?.caption);
+  const platform = String(meta.platform || post?.platform || "").trim();
+  const handle = String(meta.handle || post?.handle || "first_party").trim();
+  const source = String(meta.source || post?.source || "similar_account").trim().toLowerCase();
+  const externalPostId = String(post?.external_post_id || post?.platform_post_id || publishedAt || "").trim();
+  return {
+    Observation_Key: studioInsightsObservationKey(source, platform, handle, publishedAt, externalPostId),
+    Source: source === "first_party" ? "first_party" : "similar_account",
+    Profile: studioNormalizeSimilarProfile(meta.profile || post?.profile || "chicago"),
+    Platform: platform,
+    Account_Handle: handle,
+    Platform_Output_Type: String(meta.output_type || post?.output_type || "").trim() || null,
+    Published_At: publishedAt,
+    Chicago_Weekday: weekdayHour?.day || null,
+    Chicago_Hour: Number.isFinite(weekdayHour?.hour) ? weekdayHour.hour : null,
+    Chicago_Season: studioChicagoSeason(publishedAt),
+    Views: Number(post?.views || 0) || 0,
+    Likes: Number(post?.likes || 0) || 0,
+    Comments: Number(post?.comments || 0) || 0,
+    Engagement_Score: studioInsightsEngagementScore(post),
+    Caption: caption.text || null,
+    Caption_Length: caption.length,
+    Hashtag_Count: caption.hashtags,
+    Emoji_Count: caption.emoji,
+    Caption_Has_CTA: caption.has_cta,
+    Caption_Has_Question: caption.has_question,
+    External_Post_ID: externalPostId || null,
+    Fetched_At: meta.fetched_at || new Date().toISOString(),
+    Active: true,
+  };
+}
+
+function studioInsightsObservationToPost(record) {
+  return {
+    platform: String(f(record, "Platform") || "").trim().toLowerCase(),
+    handle: String(f(record, "Account_Handle") || "").trim(),
+    profile: studioNormalizeSimilarProfile(f(record, "Profile")),
+    output_type: String(f(record, "Platform_Output_Type") || "").trim(),
+    published_at: f(record, "Published_At"),
+    views: Number(f(record, "Views") || 0) || 0,
+    likes: Number(f(record, "Likes") || 0) || 0,
+    comments: Number(f(record, "Comments") || 0) || 0,
+    caption: String(f(record, "Caption") || "").trim(),
+    source: String(f(record, "Source") || "similar_account").trim().toLowerCase(),
+    season: studioNormalizeInsightsSeason(f(record, "Chicago_Season")),
+    caption_length: Number(f(record, "Caption_Length") || 0) || 0,
+    hashtag_count: Number(f(record, "Hashtag_Count") || 0) || 0,
+    emoji_count: Number(f(record, "Emoji_Count") || 0) || 0,
+    caption_has_cta: Boolean(f(record, "Caption_Has_CTA")),
+    caption_has_question: Boolean(f(record, "Caption_Has_Question")),
+    engagement_score: Number(f(record, "Engagement_Score") || 0) || 0,
+  };
+}
+
+function studioInsightsPlatformMatches(wanted, actual) {
+  const target = String(wanted || "").trim().toLowerCase();
+  const value = String(actual || "").trim().toLowerCase();
+  if (!target) return true;
+  if (value === target) return true;
+  if (target.includes(value) || value.includes(target)) return true;
+  if (target.includes("instagram") && value.includes("instagram")) return true;
+  if (target.includes("youtube") && value.includes("youtube")) return true;
+  if (target.includes("facebook") && value.includes("facebook")) return true;
+  if (target.includes("tiktok") && value.includes("tiktok")) return true;
+  return false;
+}
+
+function studioInsightsOutputTypeMatches(wanted, actual) {
+  const target = String(wanted || "").trim().toLowerCase();
+  const value = String(actual || "").trim().toLowerCase();
+  if (!target) return true;
+  if (!value) return true;
+  if (value === target) return true;
+  if (value.includes(target) || target.includes(value)) return true;
+  return false;
+}
+
+function studioInsightsSeasonFilterFormula(season) {
+  const normalized = studioNormalizeInsightsSeason(season, "all");
+  if (normalized === "all") return null;
+  return `{Chicago_Season}='${normalized}'`;
+}
+
+async function studioInsightsFindObservation(env, observationKey) {
+  const rows = await listRecords(env, studioInsightsObservationsTable(env), {
+    limit: 1,
+    filterFormula: `{Observation_Key}='${String(observationKey || "").replace(/'/g, "\\'")}'`,
+  }).catch(() => []);
+  return rows[0] || null;
+}
+
+async function studioInsightsUpsertObservation(env, fields) {
+  const key = String(fields?.Observation_Key || "").trim();
+  if (!key) return null;
+  const existing = await studioInsightsFindObservation(env, key);
+  if (existing?.id) {
+    return airtableFetch(env, studioInsightsObservationsTable(env), existing.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  }
+  const created = await airtableFetch(env, studioInsightsObservationsTable(env), "", {
+    method: "POST",
+    body: JSON.stringify({ records: [{ fields }], typecast: true }),
+  });
+  return created?.records?.[0] || null;
+}
+
+async function studioInsightsUpsertObservations(env, posts, meta = {}) {
+  if (!studioInsightsDbEnabled(env) || !Array.isArray(posts) || !posts.length) return { upserted: 0 };
+  let upserted = 0;
+  for (const post of posts) {
+    try {
+      await studioInsightsUpsertObservation(env, studioInsightsObservationFields(post, meta));
+      upserted += 1;
+    } catch (error) {
+      console.warn("insights observation upsert failed", error);
+    }
+  }
+  return { upserted };
+}
+
+async function studioInsightsLoadObservations(env, options = {}) {
+  if (!studioInsightsDbEnabled(env)) return [];
+  const profile = studioNormalizeSimilarProfile(options.profile || "chicago");
+  const parts = [`{Active}=1`, `{Profile}='${profile}'`];
+  const seasonFormula = studioInsightsSeasonFilterFormula(options.season);
+  if (seasonFormula) parts.push(seasonFormula);
+  if (options.source) parts.push(`{Source}='${String(options.source).replace(/'/g, "\\'")}'`);
+  const rows = await listRecords(env, studioInsightsObservationsTable(env), {
+    limit: Math.max(20, Math.min(500, Number(options.limit) || 250)),
+    sortField: "Published_At",
+    sortDirection: "desc",
+    filterFormula: `AND(${parts.join(",")})`,
+  }).catch(() => []);
+  return (rows || [])
+    .map(studioInsightsObservationToPost)
+    .filter((row) => row.published_at)
+    .filter((row) => studioInsightsPlatformMatches(options.platform, row.platform))
+    .filter((row) => studioInsightsOutputTypeMatches(options.output_type, row.output_type));
+}
+
+function parseSimilarAccountStatusCache(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || "{}"));
+    const accounts = parsed?.accounts && typeof parsed.accounts === "object" ? parsed.accounts : {};
+    return { as_of: parsed?.as_of || null, accounts };
+  } catch {
+    return { as_of: null, accounts: {} };
+  }
+}
+
+async function studioLoadSimilarAccountStatusCache(env) {
+  const cacheRow = await studioSettingsByName(env, STUDIO_SIMILAR_ACCOUNT_STATUS_SETTING).catch(() => null);
+  if (cacheRow) return parseSimilarAccountStatusCache(f(cacheRow, "Setting_Value"));
+  const legacyRow = await studioSettingsByName(env, STUDIO_SIMILAR_TIMES_SETTING).catch(() => null);
+  return parseSimilarTimesCache(f(legacyRow, "Setting_Value"));
+}
+
+async function studioSaveSimilarAccountStatusCache(env, cache) {
+  await studioUpsertSetting(
+    env,
+    STUDIO_SIMILAR_ACCOUNT_STATUS_SETTING,
+    JSON.stringify(cache),
+    "Similar-account fetch status metadata. Post observations persist in Studio Insights Observations."
+  );
+}
+
+async function studioInsightsMigrateCacheToDb(env) {
+  const legacyRow = await studioSettingsByName(env, STUDIO_SIMILAR_TIMES_SETTING).catch(() => null);
+  const cache = parseSimilarTimesCache(f(legacyRow, "Setting_Value"));
+  let migrated = 0;
+  for (const [key, entry] of Object.entries(cache.accounts || {})) {
+    const posts = Array.isArray(entry?.posts) ? entry.posts : [];
+    if (!posts.length) continue;
+    const result = await studioInsightsUpsertObservations(env, posts.map((post) => ({
+      ...post,
+      platform: entry.platform,
+      handle: entry.handle,
+      profile: entry.profile,
+      source: "similar_account",
+    })), {
+      platform: entry.platform,
+      handle: entry.handle,
+      profile: entry.profile,
+      source: "similar_account",
+      fetched_at: entry.fetched_at || cache.as_of || new Date().toISOString(),
+    });
+    migrated += result.upserted || 0;
+    cache.accounts[key] = {
+      platform: entry.platform,
+      handle: entry.handle,
+      profile: entry.profile || "chicago",
+      status: entry.status,
+      error: entry.error || null,
+      fetched_at: entry.fetched_at || null,
+      posts: posts.length,
+    };
+  }
+  if (migrated) {
+    cache.as_of = cache.as_of || new Date().toISOString();
+    await studioSaveSimilarAccountStatusCache(env, cache);
+  }
+  return { migrated };
+}
+
+function studioInsightsBuildCaptionLearned(posts) {
+  const scored = (posts || []).filter((post) => String(post.caption || "").trim());
+  if (!scored.length) return null;
+  const weighted = scored.map((post) => ({
+    post,
+    weight: studioInsightsEngagementScore(post),
+  }));
+  const totalWeight = weighted.reduce((sum, row) => sum + row.weight, 0) || weighted.length;
+  const avg = (selector, fallback = 0) => weighted.reduce((sum, row) => sum + selector(row.post) * row.weight, 0) / totalWeight || fallback;
+  const ctaRate = weighted.filter((row) => row.post.caption_has_cta).reduce((sum, row) => sum + row.weight, 0) / totalWeight;
+  const questionRate = weighted.filter((row) => row.post.caption_has_question).reduce((sum, row) => sum + row.weight, 0) / totalWeight;
+  const patterns = {
+    avg_caption_length: Math.round(avg((post) => post.caption_length)),
+    avg_hashtags: Math.round(avg((post) => post.hashtag_count) * 10) / 10,
+    avg_emojis: Math.round(avg((post) => post.emoji_count) * 10) / 10,
+    cta_rate: Math.round(ctaRate * 100),
+    question_rate: Math.round(questionRate * 100),
+    top_captions: weighted
+      .sort((a, b) => b.weight - a.weight || b.post.likes - a.post.likes)
+      .slice(0, 3)
+      .map((row) => ({
+        caption: String(row.post.caption || "").slice(0, 220),
+        likes: row.post.likes,
+        views: row.post.views,
+      })),
+  };
+  const bits = [];
+  if (patterns.avg_caption_length) bits.push(`~${patterns.avg_caption_length} chars`);
+  if (patterns.avg_hashtags) bits.push(`${patterns.avg_hashtags} hashtags`);
+  if (patterns.avg_emojis) bits.push(`${patterns.avg_emojis} emojis`);
+  if (patterns.cta_rate >= 35) bits.push("CTA language");
+  if (patterns.question_rate >= 25) bits.push("questions");
+  return {
+    patterns,
+    label: bits.length ? `Captions: ${bits.join(" · ")}` : "Captions: keep concise with local detail",
+    sample_size: scored.length,
+    score: Math.round(totalWeight * 10) / 10,
+  };
+}
+
+function studioInsightsLearnedFromHeatmap(heatmap, source, season, platform, outputType) {
+  if (!heatmap?.suggested || heatmap.sample_size < STUDIO_SIMILAR_TIMES_MIN_SAMPLE) return null;
+  const seasonLabel = studioSeasonLabel(season);
+  return {
+    days: heatmap.suggested.days,
+    windows: heatmap.suggested.windows,
+    label: `${seasonLabel} · ${heatmap.suggested.label}`,
+    sample_size: heatmap.sample_size,
+    score: heatmap.buckets?.[0]?.score || heatmap.sample_size,
+    source,
+    platform,
+    output_type: outputType || "all",
+    season,
+    metric_type: "post_time",
+  };
+}
+
+async function studioInsightsFindLearned(env, learnedKey) {
+  const rows = await listRecords(env, studioInsightsLearnedTable(env), {
+    limit: 1,
+    filterFormula: `{Learned_Key}='${String(learnedKey || "").replace(/'/g, "\\'")}'`,
+  }).catch(() => []);
+  return rows[0] || null;
+}
+
+async function studioInsightsUpsertLearned(env, payload) {
+  const key = studioInsightsLearnedKey(payload.profile, payload.platform, payload.output_type, payload.season, payload.metric_type);
+  const fields = {
+    Learned_Key: key,
+    Profile: studioNormalizeSimilarProfile(payload.profile),
+    Platform: String(payload.platform || "all").trim() || "all",
+    Output_Type: String(payload.output_type || "all").trim() || "all",
+    Season: studioNormalizeInsightsSeason(payload.season, "all"),
+    Metric_Type: payload.metric_type === "caption" ? "caption" : "post_time",
+    Days: Array.isArray(payload.days) ? payload.days.join(",") : null,
+    Windows: Array.isArray(payload.windows) ? payload.windows.join(",") : null,
+    Label: payload.label || null,
+    Caption_Patterns_JSON: payload.caption_patterns ? JSON.stringify(payload.caption_patterns) : null,
+    Sample_Size: Number(payload.sample_size || 0) || 0,
+    Score: Number(payload.score || 0) || 0,
+    Source: payload.source || "blended",
+    As_Of: new Date().toISOString(),
+  };
+  const existing = await studioInsightsFindLearned(env, key);
+  if (existing?.id) {
+    return airtableFetch(env, studioInsightsLearnedTable(env), existing.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  }
+  const created = await airtableFetch(env, studioInsightsLearnedTable(env), "", {
+    method: "POST",
+    body: JSON.stringify({ records: [{ fields }], typecast: true }),
+  });
+  return created?.records?.[0] || null;
+}
+
+async function studioInsightsLoadLearned(env, options = {}) {
+  if (!studioInsightsDbEnabled(env)) return null;
+  const key = studioInsightsLearnedKey(
+    options.profile,
+    options.platform,
+    options.output_type,
+    options.season,
+    options.metric_type || "post_time"
+  );
+  const row = await studioInsightsFindLearned(env, key);
+  if (!row) return null;
+  let captionPatterns = null;
+  try {
+    captionPatterns = JSON.parse(String(f(row, "Caption_Patterns_JSON") || ""));
+  } catch {
+    captionPatterns = null;
+  }
+  const days = String(f(row, "Days") || "").split(",").map((part) => part.trim()).filter(Boolean);
+  const windows = String(f(row, "Windows") || "").split(",").map((part) => part.trim()).filter(Boolean);
+  return {
+    profile: studioNormalizeSimilarProfile(f(row, "Profile")),
+    platform: String(f(row, "Platform") || "").trim(),
+    output_type: String(f(row, "Output_Type") || "").trim(),
+    season: studioNormalizeInsightsSeason(f(row, "Season"), "all"),
+    metric_type: String(f(row, "Metric_Type") || "post_time").trim(),
+    days,
+    windows,
+    label: String(f(row, "Label") || "").trim(),
+    caption_patterns: captionPatterns,
+    sample_size: Number(f(row, "Sample_Size") || 0) || 0,
+    score: Number(f(row, "Score") || 0) || 0,
+    source: String(f(row, "Source") || "").trim(),
+    as_of: f(row, "As_Of") || null,
+  };
+}
+
+async function studioRecomputeInsightsLearned(env, options = {}) {
+  if (!studioInsightsDbEnabled(env)) return { updated: 0 };
+  const profile = studioNormalizeSimilarProfile(options.profile || "chicago");
+  const platform = String(options.platform || "").trim();
+  const outputType = String(options.output_type || "").trim();
+  const seasons = options.season ? [studioNormalizeInsightsSeason(options.season)] : STUDIO_INSIGHTS_SEASONS;
+  let updated = 0;
+  for (const season of seasons) {
+    const firstParty = await studioInsightsLoadObservations(env, {
+      profile,
+      platform,
+      output_type: outputType,
+      season,
+      source: "first_party",
+      limit: 250,
+    });
+    const similar = await studioInsightsLoadObservations(env, {
+      profile,
+      platform,
+      season,
+      source: "similar_account",
+      limit: 250,
+    });
+    const firstHeatmap = studioBuildSimilarHeatmap(firstParty);
+    const similarHeatmap = studioBuildSimilarHeatmap(similar);
+    const firstLearned = studioInsightsLearnedFromHeatmap(firstHeatmap, "first_party", season, platform, outputType);
+    const similarLearned = studioInsightsLearnedFromHeatmap(similarHeatmap, "similar_accounts", season, platform, outputType);
+    if (firstLearned) {
+      await studioInsightsUpsertLearned(env, { ...firstLearned, profile, metric_type: "post_time" });
+      updated += 1;
+    }
+    if (similarLearned) {
+      await studioInsightsUpsertLearned(env, { ...similarLearned, profile, metric_type: "post_time" });
+      updated += 1;
+    }
+    const captionLearned = studioInsightsBuildCaptionLearned([...firstParty, ...similar]);
+    if (captionLearned) {
+      await studioInsightsUpsertLearned(env, {
+        profile,
+        platform: platform || "all",
+        output_type: outputType || "all",
+        season,
+        metric_type: "caption",
+        label: captionLearned.label,
+        caption_patterns: captionLearned.patterns,
+        sample_size: captionLearned.sample_size,
+        score: captionLearned.score,
+        source: firstParty.length && similar.length ? "blended" : firstParty.length ? "first_party" : "similar_accounts",
+      });
+      updated += 1;
+    }
+  }
+  return { updated, profile };
+}
+
+async function studioIngestFirstPartyObservations(env, options = {}) {
+  if (!studioInsightsDbEnabled(env)) return { upserted: 0 };
+  const limit = Math.max(1, Math.min(25, Number(options.limit) || 12));
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit,
+    sortField: "Published_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0)',
+  }).catch(() => []);
+  let upserted = 0;
+  for (const row of rows || []) {
+    const publishedAt = f(row, "Published_At");
+    if (!publishedAt) continue;
+    const platform = String(f(row, "Platform") || "").trim();
+    const outputType = String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "").trim();
+    const caption = String(f(row, "Output_Caption") || "").trim();
+    const post = {
+      published_at: publishedAt,
+      views: Number(f(row, "Insights_Views") || 0) || 0,
+      likes: Number(f(row, "Insights_Likes") || 0) || 0,
+      comments: Number(f(row, "Insights_Comments") || 0) || 0,
+      caption,
+      platform,
+      output_type: outputType,
+      external_post_id: String(f(row, "Platform_Post_ID") || row.id).trim(),
+      source: "first_party",
+    };
+    try {
+      await studioInsightsUpsertObservation(env, studioInsightsObservationFields(post, {
+        source: "first_party",
+        platform,
+        handle: "first_party",
+        profile: "chicago",
+        output_type: outputType,
+        fetched_at: f(row, "Insights_As_Of") || new Date().toISOString(),
+      }));
+      upserted += 1;
+    } catch (error) {
+      console.warn("first-party observation ingest failed", row.id, error);
+    }
+  }
+  return { upserted };
+}
+
+function studioInsightsResolveSeason(url) {
+  return studioNormalizeInsightsSeason(url?.searchParams?.get("season") || url?.searchParams?.get("seasonal"));
+}
+
+async function studioInsightsPostsForView(env, { accounts, theme, platform, season, cache }) {
+  let posts = [];
+  if (studioInsightsDbEnabled(env)) {
+    try {
+      await studioInsightsMigrateCacheToDb(env);
+      posts = await studioInsightsLoadObservations(env, {
+        profile: theme,
+        platform,
+        season,
+        source: "similar_account",
+        limit: 300,
+      });
+    } catch (error) {
+      console.warn("insights observation read failed", error);
+    }
+  }
+  if (!posts.length) {
+    const timed = studioTimedWatchlistAccounts(accounts, theme, platform);
+    for (const row of timed) {
+      const entry = cache?.accounts?.[studioSimilarAccountKey(row.platform, row.handle)] || {};
+      const rowPosts = Array.isArray(entry.posts) ? entry.posts : [];
+      for (const post of rowPosts) posts.push({ ...post, platform: row.platform, handle: row.handle, profile: row.profile || theme });
+    }
+  }
+  return posts;
+}
+
 const STUDIO_HEATMAP_DAYS = Object.freeze(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
 const STUDIO_CHICAGO_SIMILAR_SEED = Object.freeze([
   { platform: "instagram", handle: "tatiana.pesotskaya", source: "joseph", profile: "chicago" },
@@ -8963,28 +9538,31 @@ function studioNormalizeSimilarStatus(entry) {
   return status || (entry?.fetched_at ? "ok" : "pending");
 }
 
-function studioBuildSimilarTimesView({ accounts, cache, theme, platform }) {
+function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts: providedPosts }) {
   const timed = studioTimedWatchlistAccounts(accounts, theme, platform);
   const reference = (accounts || []).filter((row) => !STUDIO_SIMILAR_TIMED_PLATFORMS.has(row.platform) && (!theme || (row.profile || "chicago") === theme));
-  const posts = [];
+  const posts = Array.isArray(providedPosts) ? providedPosts : [];
   const accountViews = timed.map((row) => {
     const entry = cache?.accounts?.[studioSimilarAccountKey(row.platform, row.handle)] || {};
-    const rowPosts = Array.isArray(entry.posts) ? entry.posts : [];
-    for (const post of rowPosts) posts.push({ ...post, platform: row.platform });
+    const rowPosts = posts.filter((post) => post.platform === row.platform && String(post.handle || "").toLowerCase() === String(row.handle || "").toLowerCase());
+    const cachedCount = Number(entry.posts);
+    const postCount = rowPosts.length || (Number.isFinite(cachedCount) ? cachedCount : (Array.isArray(entry.posts) ? entry.posts.length : 0));
     return {
       platform: row.platform,
       handle: row.handle,
       source: row.source,
       profile: row.profile || theme,
       status: studioNormalizeSimilarStatus(entry),
-      posts: rowPosts.length,
+      posts: postCount,
       fetched_at: entry.fetched_at || null,
       error: entry.error || null,
     };
   });
   const heatmap = studioBuildSimilarHeatmap(posts);
+  const captionLearned = studioInsightsBuildCaptionLearned(posts);
   const stale = timed.filter((row) => studioSimilarAccountStale(cache?.accounts?.[studioSimilarAccountKey(row.platform, row.handle)]));
   const label = studioSimilarProfileLabel(theme);
+  const seasonLabel = studioSeasonLabel(season);
   let message;
   if (!timed.length) {
     message = `No Instagram or YouTube handles for ${label} yet. Add some on Operations. TikTok and Facebook stay reference-only.`;
@@ -9003,21 +9581,25 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform }) {
         : `Public Instagram/YouTube lookup found no dated posts for the ${label} watchlist yet.`;
     }
   } else if (heatmap.sample_size < STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
-    message = `${heatmap.sample_size} similar-account posts so far for ${label}. Need ${STUDIO_SIMILAR_TIMES_MIN_SAMPLE} before this beats industry defaults.`;
+    message = `${heatmap.sample_size} ${seasonLabel.toLowerCase()} posts so far for ${label}. Need ${STUDIO_SIMILAR_TIMES_MIN_SAMPLE} before this beats industry defaults.`;
   } else {
-    message = `Similar-account timing for ${label} uses public Instagram and YouTube posts. Suggested times never auto-apply.`;
+    message = `${seasonLabel} timing for ${label} uses historical similar-account posts stored in Studio Insights. Suggested times never auto-apply.`;
   }
   return {
     timezone: "America/Chicago",
     profile: theme,
     profile_label: label,
+    season,
+    season_label: seasonLabel,
     source: heatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE ? "similar_accounts" : "insufficient",
+    storage: posts.length ? "database" : "cache",
     sample_size: heatmap.sample_size,
     accounts: accountViews,
     reference_accounts: reference.map((row) => ({ platform: row.platform, handle: row.handle, source: row.source, profile: row.profile || theme })),
     buckets: heatmap.buckets.slice(0, 16),
     suggested: heatmap.suggested,
     suggested_iso: heatmap.suggested ? studioSuggestedLocalDatetime(heatmap.suggested.windows) : null,
+    caption: captionLearned,
     as_of: cache?.as_of || null,
     remaining_to_sweep: stale.length,
     message,
@@ -9051,36 +9633,57 @@ async function putInsightsWatchlist(request, env) {
 async function studioLoadSimilarTimesView(env, url, authorization) {
   const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
   const platform = String(url?.searchParams?.get("platform") || "").trim().toLowerCase();
+  const season = studioInsightsResolveSeason(url);
   const accounts = await studioEnsureSimilarWatchlist(env);
-  const cacheRow = await studioSettingsByName(env, STUDIO_SIMILAR_TIMES_SETTING).catch(() => null);
-  const cache = parseSimilarTimesCache(f(cacheRow, "Setting_Value"));
-  return studioBuildSimilarTimesView({ accounts, cache, theme, platform });
+  const cache = await studioLoadSimilarAccountStatusCache(env);
+  const posts = await studioInsightsPostsForView(env, { accounts, theme, platform, season, cache });
+  return studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts });
 }
 
 async function getInsightsBestTimes(request, env, url, authorization) {
   const platform = String(url.searchParams.get("platform") || "").trim();
   const outputType = String(url.searchParams.get("output_type") || "").trim();
+  const season = studioInsightsResolveSeason(url);
   const industry = studioIndustryBestWindows(platform, outputType);
+  const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
   let firstParty = [];
   try {
-    const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 80,
-      sortField: "Published_At",
-      sortDirection: "desc",
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0)',
+    firstParty = await studioInsightsLoadObservations(env, {
+      profile: theme,
+      platform,
+      output_type: outputType,
+      season,
+      source: "first_party",
+      limit: 120,
     });
-    firstParty = rows
-      .filter((row) => {
-        if (platform && String(f(row, "Platform") || "") !== platform) return false;
-        if (outputType && String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "") !== outputType) return false;
-        return true;
-      })
-      .map((row) => ({
-        id: row.id,
-        published_at: f(row, "Published_At"),
-        views: Number(f(row, "Insights_Views") || 0) || 0,
-        likes: Number(f(row, "Insights_Likes") || 0) || 0,
-      }));
+    if (!firstParty.length) {
+      const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: 80,
+        sortField: "Published_At",
+        sortDirection: "desc",
+        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0)',
+      });
+      firstParty = rows
+        .filter((row) => {
+          if (platform && String(f(row, "Platform") || "") !== platform) return false;
+          if (outputType && String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "") !== outputType) return false;
+          const publishedAt = f(row, "Published_At");
+          if (!publishedAt) return false;
+          if (studioChicagoSeason(publishedAt) !== season) return false;
+          return true;
+        })
+        .map((row) => ({
+          id: row.id,
+          published_at: f(row, "Published_At"),
+          views: Number(f(row, "Insights_Views") || 0) || 0,
+          likes: Number(f(row, "Insights_Likes") || 0) || 0,
+          comments: Number(f(row, "Insights_Comments") || 0) || 0,
+          caption: String(f(row, "Output_Caption") || "").trim(),
+          platform,
+          output_type: outputType,
+          source: "first_party",
+        }));
+    }
   } catch (error) {
     console.warn("best-times first-party read failed", error);
   }
@@ -9091,25 +9694,143 @@ async function getInsightsBestTimes(request, env, url, authorization) {
   } catch (error) {
     console.warn("best-times similar read failed", error);
   }
-  const useFirstParty = sample.length >= 8;
-  const useSimilar = !useFirstParty && similar?.source === "similar_accounts" && similar.suggested;
+  let learned = null;
+  try {
+    learned = await studioInsightsLoadLearned(env, {
+      profile: theme,
+      platform,
+      output_type: outputType,
+      season,
+      metric_type: "post_time",
+    });
+  } catch (error) {
+    console.warn("best-times learned read failed", error);
+  }
+  const firstHeatmap = studioBuildSimilarHeatmap(sample);
+  const firstSuggested = firstHeatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE ? firstHeatmap.suggested : null;
+  const useFirstParty = Boolean(firstSuggested);
+  const useLearned = !useFirstParty && learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE;
+  const useSimilar = !useFirstParty && !useLearned && similar?.source === "similar_accounts" && similar.suggested;
+  const chosen = useFirstParty
+    ? { ...firstSuggested, label: `${studioSeasonLabel(season)} · your posts · ${firstSuggested.label}` }
+    : useLearned
+      ? { days: learned.days, windows: learned.windows, label: learned.label || `${studioSeasonLabel(season)} learned model` }
+      : useSimilar
+        ? similar.suggested
+        : industry;
+  const source = useFirstParty ? "first_party" : useLearned ? learned.source || "learned_model" : useSimilar ? "similar_accounts" : "industry_default";
+  let captionLearned = null;
+  try {
+    captionLearned = await studioInsightsLoadLearned(env, {
+      profile: theme,
+      platform,
+      output_type: outputType,
+      season,
+      metric_type: "caption",
+    });
+  } catch (error) {
+    console.warn("best-times caption learned read failed", error);
+  }
+  if (!captionLearned?.caption_patterns) {
+    captionLearned = studioInsightsBuildCaptionLearned([...sample, ...(similar ? await studioInsightsPostsForView(env, {
+      accounts: await studioEnsureSimilarWatchlist(env),
+      theme,
+      platform,
+      season,
+      cache: await studioLoadSimilarAccountStatusCache(env),
+    }) : [])]);
+  }
   return respond(request, env, {
     ok: true,
     timezone: "America/Chicago",
     platform,
     output_type: outputType,
-    source: useFirstParty ? "first_party" : useSimilar ? "similar_accounts" : "industry_default",
-    sample_size: sample.length,
-    suggested: useFirstParty ? industry : useSimilar ? similar.suggested : industry,
-    suggested_iso: studioSuggestedLocalDatetime((useFirstParty ? industry : useSimilar ? similar.suggested : industry).windows),
+    season,
+    season_label: studioSeasonLabel(season),
+    source,
+    sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
+    suggested: chosen,
+    suggested_iso: studioSuggestedLocalDatetime(chosen.windows),
     similar: similar?.suggested || null,
     similar_sample_size: similar?.sample_size || 0,
-    similar_profile: similar?.profile || "chicago",
+    similar_profile: similar?.profile || theme,
+    caption: captionLearned?.caption_patterns ? {
+      label: captionLearned.label,
+      patterns: captionLearned.caption_patterns,
+      sample_size: captionLearned.sample_size,
+      source: captionLearned.source || "historical",
+    } : captionLearned ? {
+      label: captionLearned.label,
+      patterns: captionLearned.patterns,
+      sample_size: captionLearned.sample_size,
+      source: "historical",
+    } : null,
     note: useFirstParty
-      ? "Suggestion uses your published posts that already have insights."
-      : useSimilar
-        ? `Suggestion uses public posts from similar ${similar.profile_label} accounts. Now stays selected unless you pick a time.`
-        : "Not enough first-party or similar-account posts yet. Showing travel/city industry defaults in Chicago time.",
+      ? `${studioSeasonLabel(season)} suggestion uses your published posts with insights stored in Studio Insights Observations.`
+      : useLearned
+        ? `${studioSeasonLabel(season)} suggestion uses the learned historical model for ${platform || "this platform"}. Now stays selected unless you pick a time.`
+        : useSimilar
+          ? `Suggestion uses public posts from similar ${similar.profile_label} accounts for ${studioSeasonLabel(season).toLowerCase()}. Now stays selected unless you pick a time.`
+          : `Not enough ${studioSeasonLabel(season).toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time.`,
+  });
+}
+
+async function getInsightsCaptions(request, env, url, authorization) {
+  const platform = String(url.searchParams.get("platform") || "").trim();
+  const outputType = String(url.searchParams.get("output_type") || "").trim();
+  const season = studioInsightsResolveSeason(url);
+  const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
+  let learned = await studioInsightsLoadLearned(env, {
+    profile: theme,
+    platform,
+    output_type: outputType,
+    season,
+    metric_type: "caption",
+  }).catch(() => null);
+  const firstParty = await studioInsightsLoadObservations(env, {
+    profile: theme,
+    platform,
+    output_type: outputType,
+    season,
+    source: "first_party",
+    limit: 120,
+  }).catch(() => []);
+  const similar = await studioInsightsLoadObservations(env, {
+    profile: theme,
+    platform,
+    season,
+    source: "similar_account",
+    limit: 200,
+  }).catch(() => []);
+  const computed = studioInsightsBuildCaptionLearned([...firstParty, ...similar]);
+  if (!learned && computed) {
+    learned = {
+      label: computed.label,
+      caption_patterns: computed.patterns,
+      sample_size: computed.sample_size,
+      source: firstParty.length && similar.length ? "blended" : firstParty.length ? "first_party" : similar.length ? "similar_accounts" : "insufficient",
+    };
+  }
+  return respond(request, env, {
+    ok: true,
+    profile: theme,
+    profile_label: studioSimilarProfileLabel(theme),
+    platform,
+    output_type: outputType,
+    season,
+    season_label: studioSeasonLabel(season),
+    source: learned?.source || "insufficient",
+    sample_size: learned?.sample_size || computed?.sample_size || 0,
+    caption: learned?.caption_patterns ? {
+      label: learned.label,
+      patterns: learned.caption_patterns,
+    } : computed ? {
+      label: computed.label,
+      patterns: computed.patterns,
+    } : null,
+    note: learned?.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE
+      ? `${studioSeasonLabel(season)} caption guidance comes from historical posts in Studio Insights Observations.`
+      : `Need more ${studioSeasonLabel(season).toLowerCase()} caption examples before learned caption guidance beats defaults.`,
   });
 }
 
@@ -9133,18 +9854,38 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
   const theme = payload.profile || payload.theme
     ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
     : await studioResolveSimilarTimesTheme(env, url, authorization);
+  const season = payload.season ? studioNormalizeInsightsSeason(payload.season) : studioInsightsResolveSeason(url);
   const result = await studioSweepSimilarAccountTimes(env, {
     limit: payload.limit,
     force: Boolean(payload.force),
     theme,
   });
   const accounts = await studioEnsureSimilarWatchlist(env);
-  const view = studioBuildSimilarTimesView({
+  const cache = result.cache || await studioLoadSimilarAccountStatusCache(env);
+  const posts = await studioInsightsPostsForView(env, {
     accounts,
-    cache: result.cache,
     theme,
     platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
+    season: studioInsightsResolveSeason(url),
+    cache,
   });
+  const view = studioBuildSimilarTimesView({
+    accounts,
+    cache,
+    theme,
+    platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
+    season,
+    posts,
+  });
+  try {
+    await studioRecomputeInsightsLearned(env, {
+      profile: theme,
+      platform: payload.platform || url.searchParams.get("platform") || "",
+      season,
+    });
+  } catch (error) {
+    console.warn("insights learned recompute after sweep failed", error);
+  }
   return respond(request, env, {
     ok: true,
     swept: result.scanned,
@@ -9267,7 +10008,7 @@ async function studioFetchInstagramBusinessDiscovery(handle, creds) {
   const username = studioSanitizeIgHandle(handle);
   if (!username) return { status: "error", error: "Instagram handle is empty.", posts: [] };
   if (!creds.token || !creds.igUserId) return { status: "error", error: "Instagram Graph credentials are missing.", posts: [] };
-  const fields = `business_discovery.username(${username}){media.limit(20){timestamp,like_count,comments_count,media_type}}`;
+  const fields = `business_discovery.username(${username}){media.limit(20){id,timestamp,like_count,comments_count,media_type,caption}}`;
   const url = `https://graph.facebook.com/${creds.version}/${encodeURIComponent(creds.igUserId)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(creds.token)}`;
   const response = await fetch(url);
   const body = await response.json().catch(() => ({}));
@@ -9291,6 +10032,8 @@ async function studioFetchInstagramBusinessDiscovery(handle, creds) {
       likes: Number(item.like_count || 0) || 0,
       comments: Number(item.comments_count || 0) || 0,
       media_type: item.media_type || null,
+      caption: String(item.caption || "").trim(),
+      external_post_id: String(item.id || item.timestamp || "").trim(),
     }))
     .filter((item) => item.published_at);
   return { status: posts.length ? "ok" : "unavailable", error: posts.length ? null : "No public dated posts.", posts };
@@ -9328,6 +10071,8 @@ async function studioFetchYoutubePublicUploads(handle, creds) {
       views: Number(item?.statistics?.viewCount || 0) || 0,
       likes: Number(item?.statistics?.likeCount || 0) || 0,
       comments: Number(item?.statistics?.commentCount || 0) || 0,
+      caption: String(item?.snippet?.description || item?.snippet?.title || "").trim(),
+      external_post_id: String(item?.id || item?.snippet?.publishedAt || "").trim(),
     }))
     .filter((item) => item.published_at);
   return { status: posts.length ? "ok" : "unavailable", error: posts.length ? null : "No dated public uploads.", posts };
@@ -9338,8 +10083,7 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   const force = Boolean(options.force);
   const accounts = await studioEnsureSimilarWatchlist(env);
   const timed = studioTimedWatchlistAccounts(accounts, options.theme || null);
-  const cacheRow = await studioSettingsByName(env, STUDIO_SIMILAR_TIMES_SETTING).catch(() => null);
-  const cache = parseSimilarTimesCache(f(cacheRow, "Setting_Value"));
+  const cache = await studioLoadSimilarAccountStatusCache(env);
   const stale = timed.filter((row) => force || studioSimilarAccountStale(cache.accounts[studioSimilarAccountKey(row.platform, row.handle)]));
   const batch = stale.slice(0, limit);
   if (!batch.length) return { scanned: 0, updated: 0, remaining: 0, cache };
@@ -9362,16 +10106,32 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
       const fetched = account.platform === "instagram"
         ? await studioFetchInstagramBusinessDiscovery(account.handle, creds)
         : await studioFetchYoutubePublicUploads(account.handle, creds);
+      const fetchedAt = new Date().toISOString();
+      if (fetched.status === "ok") {
+        await studioInsightsUpsertObservations(env, (fetched.posts || []).map((post) => ({
+          ...post,
+          platform: account.platform,
+          handle: account.handle,
+          profile: account.profile || "chicago",
+          source: "similar_account",
+        })), {
+          platform: account.platform,
+          handle: account.handle,
+          profile: account.profile || "chicago",
+          source: "similar_account",
+          fetched_at: fetchedAt,
+        });
+        updated += 1;
+      }
       cache.accounts[key] = {
         platform: account.platform,
         handle: account.handle,
         profile: account.profile || "chicago",
         status: fetched.status,
         error: fetched.error || null,
-        fetched_at: new Date().toISOString(),
-        posts: fetched.posts || [],
+        fetched_at: fetchedAt,
+        posts: Array.isArray(fetched.posts) ? fetched.posts.length : Number(cache.accounts[key]?.posts || 0) || 0,
       };
-      if (fetched.status === "ok") updated += 1;
     } catch (error) {
       cache.accounts[key] = {
         platform: account.platform,
@@ -9380,17 +10140,17 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
         status: "error",
         error: studioTruncateInsightError(error),
         fetched_at: new Date().toISOString(),
-        posts: cache.accounts[key]?.posts || [],
+        posts: Number(cache.accounts[key]?.posts || 0) || 0,
       };
     }
   }
   cache.as_of = new Date().toISOString();
-  await studioUpsertSetting(
-    env,
-    STUDIO_SIMILAR_TIMES_SETTING,
-    JSON.stringify(cache),
-    "Cached public Instagram/YouTube post times for similar-account heatmaps. TikTok/Facebook are not swept."
-  );
+  await studioSaveSimilarAccountStatusCache(env, cache);
+  try {
+    await studioRecomputeInsightsLearned(env, { profile: options.theme || "chicago" });
+  } catch (error) {
+    console.warn("insights learned recompute after similar sweep failed", error);
+  }
   return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache };
 }
 

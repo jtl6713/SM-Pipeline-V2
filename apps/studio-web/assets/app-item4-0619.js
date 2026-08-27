@@ -138,7 +138,7 @@
     if (!selectedProfileId) return path;
     const qIndex = String(path || "").indexOf("?");
     const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
-    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests", "/api/insights/best-times", "/api/insights/similar-times"].includes(pathname)) return path;
+    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests", "/api/insights/best-times", "/api/insights/similar-times", "/api/insights/captions"].includes(pathname)) return path;
     const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1));
     params.set("profile", selectedProfileId);
     return `${pathname}?${params.toString()}`;
@@ -307,7 +307,12 @@
       setOperationsMessage("Refreshing public Instagram and YouTube times…");
       const result = await api("/api/insights/similar-times", {
         method: "POST",
-        body: JSON.stringify({ force: true, limit: 6, profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago" }),
+        body: JSON.stringify({
+          force: true,
+          limit: 6,
+          profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
+          season: selectedInsightsSeason(),
+        }),
         timeoutMs: 60000,
       });
       renderOperationsSimilarTimes(result);
@@ -324,6 +329,9 @@
         button.textContent = idleLabel;
       }
     }
+  });
+  $("operationsInsightsSeason")?.addEventListener("change", () => {
+    loadOperations(true);
   });
   $("operationsWatchlistForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -611,6 +619,29 @@
     } catch {
       return timeZone;
     }
+  }
+
+  function studioInsightsSeason(date = new Date()) {
+    const month = Number(new Intl.DateTimeFormat("en-US", {
+      timeZone: studioTimezone(),
+      month: "numeric",
+    }).format(date));
+    if ([12, 1, 2].includes(month)) return "winter";
+    if ([3, 4, 5].includes(month)) return "spring";
+    if ([6, 7, 8].includes(month)) return "summer";
+    return "fall";
+  }
+
+  function studioInsightsSeasonLabel(season) {
+    if (season === "winter") return "Winter";
+    if (season === "spring") return "Spring";
+    if (season === "summer") return "Summer";
+    if (season === "fall") return "Fall";
+    return "All seasons";
+  }
+
+  function selectedInsightsSeason() {
+    return String($("operationsInsightsSeason")?.value || studioInsightsSeason()).trim() || studioInsightsSeason();
   }
 
   function parseStudioDate(raw) {
@@ -8278,13 +8309,20 @@
     const hint = $("creativeScheduleSuggest");
     if (!hint) return;
     try {
-      const data = await api(`/api/insights/best-times?platform=${encodeURIComponent(record?.platform || "")}&output_type=${encodeURIComponent(record?.platform_output_type || record?.studio_output_type || "")}`);
-      const sourceLabel = data.source === "first_party" ? "your posts" : data.source === "similar_accounts" ? "similar accounts" : "industry default";
+      const data = await api(`/api/insights/best-times?platform=${encodeURIComponent(record?.platform || "")}&output_type=${encodeURIComponent(record?.platform_output_type || record?.studio_output_type || "")}&season=${encodeURIComponent(studioInsightsSeason())}`);
+      const sourceLabel = data.source === "first_party"
+        ? "your posts"
+        : data.source === "similar_accounts"
+          ? "similar accounts"
+          : data.source === "learned_model" || data.source === "blended"
+            ? "learned model"
+            : "industry default";
       const similarNote = data?.similar?.label && data.source !== "similar_accounts"
         ? ` Similar accounts: ${data.similar.days.join(", ")} · ${data.similar.windows.join(" or ")}.`
         : "";
+      const captionNote = data?.caption?.label ? ` ${data.caption.label}.` : "";
       hint.textContent = data?.suggested?.label
-        ? `Suggested: ${data.suggested.days.join(", ")} · ${data.suggested.windows.join(" or ")} (${sourceLabel}).${similarNote} Now stays selected unless you pick a time.`
+        ? `Suggested: ${data.suggested.days.join(", ")} · ${data.suggested.windows.join(" or ")} (${data.season_label || studioInsightsSeasonLabel(studioInsightsSeason())} · ${sourceLabel}).${similarNote}${captionNote} Now stays selected unless you pick a time.`
         : "";
     } catch {
       hint.textContent = "";
@@ -8756,15 +8794,24 @@
 
   function renderOperationsSimilarTimes(data) {
     const meta = $("operationsSimilarTimesMeta");
+    const caption = $("operationsInsightsCaptionMeta");
     const target = $("operationsSimilarHeatmap");
     if (meta) {
       const parts = [
         data?.profile_label || "Chicago",
-        data?.sample_size ? `${data.sample_size} public posts` : "no public posts yet",
+        data?.season_label || studioInsightsSeasonLabel(selectedInsightsSeason()),
+        data?.storage === "database" ? "historical database" : null,
+        data?.sample_size ? `${data.sample_size} posts` : "no posts yet",
         data?.suggested?.label || null,
         data?.remaining_to_sweep ? `${data.remaining_to_sweep} still sweeping` : null,
       ].filter(Boolean);
       meta.textContent = data?.message || parts.join(" · ");
+    }
+    if (caption) {
+      const captionData = data?.caption;
+      caption.textContent = captionData?.label
+        ? `${captionData.label}${captionData.sample_size ? ` · ${captionData.sample_size} captions in model` : ""}`
+        : "Caption guidance fills in as historical posts accumulate in Studio Insights.";
     }
     if (!target) return;
     const buckets = data?.buckets || [];
@@ -8954,6 +9001,11 @@
 
   async function loadOperations() {
     const meta = $("operationsIdeaMeta");
+    const seasonSelect = $("operationsInsightsSeason");
+    if (seasonSelect && !seasonSelect.dataset.initialized) {
+      seasonSelect.value = studioInsightsSeason();
+      seasonSelect.dataset.initialized = "true";
+    }
     if (meta) meta.textContent = "Loading operations…";
     try {
       const data = await api("/api/operations");
@@ -8970,7 +9022,7 @@
       const watchlist = data.similar_accounts || [];
       renderOperationsWatchlist(watchlist, Boolean(data.can_edit_profiles));
       try {
-        const similar = await api(`/api/insights/similar-times?profile=${encodeURIComponent(selectedProfileId || "chicago")}`);
+        const similar = await api(`/api/insights/similar-times?profile=${encodeURIComponent(selectedProfileId || "chicago")}&season=${encodeURIComponent(selectedInsightsSeason())}`);
         renderOperationsSimilarTimes(similar);
         const statusByKey = new Map((similar.accounts || []).map((row) => [`${row.platform}:${String(row.handle || "").toLowerCase()}`, row]));
         renderOperationsWatchlist(watchlist.map((row) => ({
