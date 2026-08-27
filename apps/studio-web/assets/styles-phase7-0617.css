@@ -1556,8 +1556,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 #page-content .item4-plan-actions .primary-button,
 #page-content .item4-variant-actions .primary-button,
 #page-content .production-studio-actions .primary-button{
-  background:rgba(1,37,89,.7);
-  border:1px solid rgba(255,255,255,.28);
+  background:rgba(1,37,89,.58);
+  border:1px solid rgba(255,255,255,.38);
   color:#fff;
 }
 #page-content .item4-upload-zone .primary-button:hover,
@@ -1567,8 +1567,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   border-color:rgba(255,255,255,.4);
 }
 #page-content .production-studio-actions .primary-button{
-  background:rgba(216,170,69,.62);
-  border:1px solid rgba(255,255,255,.45);
+  background:rgba(216,170,69,.48);
+  border:1px solid rgba(255,255,255,.55);
   color:var(--prod-navy);
 }
 #page-content .production-studio-actions .primary-button:hover{
@@ -1683,8 +1683,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   -webkit-backdrop-filter:blur(16px);
 }
 #page-content .production-studio-actions .secondary-button{
-  background:rgba(255,255,255,.42);
-  border:1px solid rgba(255,255,255,.7);
+  background:rgba(255,255,255,.3);
+  border:1px solid rgba(255,255,255,.78);
   color:var(--prod-navy);
 }
 
