@@ -74,9 +74,26 @@ def test_ap0_youtube_short_and_facebook_reel():
     assert is_eligible(_eligible(Platform_Output_Type="Instagram Story"))
 
 
-def test_ap0_tiktok_is_not_in_make_filter():
-    record = _eligible(Platform="TikTok", Platform_Output_Type="TikTok Video Draft")
-    assert eligibility_reason(record) == "not_eligible_video_type"
+def test_ap0_tiktok_video_is_eligible():
+    assert is_eligible(_eligible(Platform="TikTok", Platform_Output_Type="TikTok Video"))
+    assert is_eligible(_eligible(Platform="TikTok", Platform_Output_Type="TikTok Video Draft"))
+
+
+def test_ap0_finished_master_without_drive_id():
+    record = _eligible(
+        Final_File_ID="",
+        Final_File_URL="https://media.chicagoshining.com/studio/master-assets/recPR1/clip.mp4",
+    )
+    assert eligibility_reason(record) is None
+    assert r2_object_key(record) == "publish/platform-output-42/finished.mp4"
+
+
+def test_ap0_master_assets_url_is_not_already_prepared():
+    record = _eligible(
+        Publish_Asset_URL="https://media.chicagoshining.com/studio/master-assets/recPR1/clip.mp4",
+        Publish_Asset_File_Name="platform-output-42-driveFile123.mp4",
+    )
+    assert eligibility_reason(record) is None
 
 
 def test_ap0_gate_failures():

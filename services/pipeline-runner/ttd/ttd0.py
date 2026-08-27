@@ -12,6 +12,8 @@ from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
 from render.fields import field, field_str
+from ap0.eligibility import asset_plan
+from ap0.public_mp4 import ensure_public_mp4_url, is_public_publish_url
 from ttd.assets import (
     draft_type_for_photos,
     expected_image_count,
@@ -166,6 +168,41 @@ def process_request(
 
     if video:
         source_url = video_source_url(output)
+        if not is_public_publish_url(source_url):
+            try:
+                plan = asset_plan(output)
+                source_url = ensure_public_mp4_url(client, output, plan)
+                client.update_record(
+                    PLATFORM_OUTPUTS_TABLE,
+                    record_id,
+                    {
+                        "Publish_Asset_URL": source_url,
+                        "Publish_Asset_File_Name": plan["publish_asset_file_name"],
+                        "Publish_Asset_Host": "Cloudflare R2",
+                    },
+                    typecast=True,
+                )
+            except Exception as exc:
+                client.update_record(
+                    PLATFORM_OUTPUTS_TABLE,
+                    record_id,
+                    {
+                        **unlock_fields(),
+                        "Output_Notes": append_note(
+                            output,
+                            f"TTD0 public MP4 stage failed at {stamp_minutes()}. {type(exc).__name__}: {exc}",
+                        ),
+                        "Publish_Status": PUBLISH_STATUS_FAILED,
+                        "Publish_Error_Stage": "TTD0_VIDEO_ASSET",
+                        "TikTok_Draft_Status": STATUS_RETRY,
+                        "Publish_Error_Message": (
+                            f"TikTok video is on the private master bucket; public CDN copy failed. {exc}"
+                        ),
+                        "Publish_Next_Retry_At": retry_at(VIDEO_RETRY_MINUTES),
+                        "Publish_Retry_Eligible": True,
+                    },
+                )
+                return {"processed": True, "retry": True, "reason": "video_public_stage_failed", **result}
         result["source_url"] = source_url
         try:
             response = requests.get(source_url, headers={"Range": "bytes=0-0"}, timeout=60)
