@@ -2108,7 +2108,7 @@ body:has(#page-content.active) .studio-footer-meta{
     background:#fff;
     box-shadow:0 6px 16px rgba(15,35,70,.06);
   }
-  .sidebar [data-page="music"]{display:none}
+  .sidebar .nav-item[data-page="music"]{display:none!important}
   .nav-item{
     flex:0 0 auto;
     white-space:nowrap;
