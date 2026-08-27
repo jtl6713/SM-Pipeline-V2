@@ -173,3 +173,5 @@ Finished-video detect Worker deploy: 2026-08-27 - Treat MP4 masters as finished 
 
 Finished-video Platform Output seed Worker deploy: 2026-08-27 - Do not write Content Item Voiceover_Status onto Platform Outputs during finished passthrough. Worker 0.10.151-finished-po-fields.
 
+Finished-video retry Worker deploy: 2026-08-27 - Re-running Approve after Promoted fans out Platform Outputs without pulsing Remotion P3. Worker 0.10.152-finished-retry.
+

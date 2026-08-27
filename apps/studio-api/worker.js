@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.151-finished-po-fields",
+          version: "0.10.152-finished-retry",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -9525,12 +9525,14 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
       console.warn("P3 parent arm failed", error);
     }
     const armed = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentItemId).catch(() => null);
-    const needVoiceover = String(f(armed || {}, "Include_Voiceover") || "").trim() === "Yes"
+    const finished = studioIsFinishedPassthrough(requestRecord);
+    const needVoiceover = !finished
+      && String(f(armed || {}, "Include_Voiceover") || "").trim() === "Yes"
       && !String(f(armed || {}, "Voiceover_URL") || "").trim();
     const needAiThumb = studioNeedsAiThumbnail(armed, requestRecord);
     try {
       if (needVoiceover || needAiThumb) await pulseStudioP2Handoff(env, contentItemId, requestRecord);
-      await pulseStudioP3Handoff(env, contentItemId, requestRecord);
+      if (!finished) await pulseStudioP3Handoff(env, contentItemId, requestRecord);
     } catch (error) {
       console.warn("Studio promote media pulse failed", error);
     }
@@ -9569,6 +9571,7 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
     || String(f(parent, "Caption") || "").trim()
     || String(f(parent, "Hook") || "").trim()
     || String(f(parent, "Content_Title") || "").trim();
+  const finished = studioIsFinishedPassthrough(requestRecord);
   const voiceoverMode = String(f(requestRecord, "Voiceover_Mode") || f(parent, "Include_Voiceover") || "Yes").trim();
   const musicMode = String(f(requestRecord, "Background_Music_Mode") || f(parent, "Include_Background_Music") || "Yes").trim();
   const thumbnailMode = String(f(requestRecord, "Thumbnail_Mode") || f(parent, "Include_Thumbnail") || "Yes").trim();
@@ -9578,18 +9581,18 @@ async function armStudioParentForP3Handoff(env, contentItemId, requestRecord) {
   const frameUrl = item4CoverStillUrl(requestRecord);
   const thumbSource = item4ThumbnailSource(thumbnailMode);
   const wantThumb = thumbSource !== "none";
-  const wantAiThumb = thumbSource === "ai";
-  const wantFrameThumb = thumbSource === "frame";
-  const wantVoiceover = item4StudioDirectiveYes(voiceoverMode);
+  const wantAiThumb = thumbSource === "ai" || finished;
+  const wantFrameThumb = !finished && thumbSource === "frame";
+  const wantVoiceover = !finished && item4StudioDirectiveYes(voiceoverMode);
   const script = String(f(requestRecord, "Requested_Script") || f(parent, "Voiceover_Script") || f(parent, "Requested_Script") || caption || "").trim();
   const waitingForVoiceover = wantVoiceover && !voiceoverUrl;
   const fields = {
     Caption: caption || null,
     Include_Voiceover: wantVoiceover ? "Yes" : "No",
-    Include_Background_Music: item4StudioDirectiveYes(musicMode) ? "Yes" : "No",
+    Include_Background_Music: finished ? "No" : (item4StudioDirectiveYes(musicMode) ? "Yes" : "No"),
     Carousel_Image_Mode: String(f(requestRecord, "Carousel_Image_Mode") || "").trim() || null,
     Carousel_Slide_Count: f(requestRecord, "Carousel_Slide_Count_Exact") ?? null,
-    Include_Thumbnail: wantThumb ? "Yes" : "No",
+    Include_Thumbnail: (finished || wantThumb) ? "Yes" : "No",
   };
   if (wantAiThumb) {
     fields.Thumbnail_Prompt = item4StudioThumbnailPrompt(requestRecord, parent);

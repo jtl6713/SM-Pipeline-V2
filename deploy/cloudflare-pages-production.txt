@@ -239,3 +239,5 @@ Finished-video detect Pages deploy: 2026-08-27 — Dropping an MP4 on the photo 
 
 Finished-video frames Pages deploy: 2026-08-27 — Finished video hides the photo crop strip. UI 0.6.148-finished-po-fields.
 
+Finished-video retry Pages deploy: 2026-08-27 — Promoted finished video shows Send to review so a failed handoff can be retried without publishing. UI 0.6.149-finished-retry.
+

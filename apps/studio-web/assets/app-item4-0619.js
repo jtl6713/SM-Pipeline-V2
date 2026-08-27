@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.148-finished-po-fields";
+  const BUILD_ID = "item4-0.6.149-finished-retry";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -5457,8 +5457,12 @@
         promote.disabled = true;
         promote.textContent = status === "Submitted" ? "Checking…" : "Submitting…";
       } else if (status === "Promoted") {
-        promote.disabled = true;
-        promote.textContent = "Promoted";
+        const retryHandoff = item4IsFinishedRequest(record);
+        promote.disabled = !retryHandoff;
+        promote.textContent = retryHandoff ? "Send to review" : "Promoted";
+        if (retryHandoff) {
+          promote.title = "Finish the Pipeline review handoff. This does not publish.";
+        }
       } else if (status === "Submitted") {
         promote.disabled = false;
         promote.textContent = "Check promotion status";
@@ -6006,7 +6010,9 @@
 
     if (status !== "Submitted") {
       const confirmed = window.confirm(
-        item4IsFinishedRequest()
+        status === "Promoted" && item4IsFinishedRequest()
+          ? "Send this finished file to Pipeline review?\n\nThis does not publish."
+          : item4IsFinishedRequest()
           ? "Approve this finished file and send it to review?\n\nThis skips production crops and render. It locks the request after it is sent."
           : "Approve this request and start production?\n\nThis locks the request after it is sent."
       );
