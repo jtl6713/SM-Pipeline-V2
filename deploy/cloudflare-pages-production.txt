@@ -235,3 +235,5 @@ Finished-video copy Pages deploy: 2026-08-27 — Finished video uses Video headi
 
 Production heading clip Pages deploy: 2026-08-27 — Stop the rounded panel clip from cutting the D in Drafts and the P in Pipeline. UI 0.6.146-heading-clip.
 
+Finished-video detect Pages deploy: 2026-08-27 — Dropping an MP4 on the photo door switches to finished-video, hides on-photo labels, and uses the Reel/TikTok/Short package. UI 0.6.147-finished-detect.
+

@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.146-heading-clip";
+  const BUILD_ID = "item4-0.6.147-finished-detect";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -1614,14 +1614,30 @@
     const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
     if (kind === "finished-video" || kind === "finished-stills") return true;
     const notes = String(record?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
-    return notes.includes("ez-input=finished-video") || notes.includes("ez-input=finished-stills") || notes.includes("ez-input=finished-carousel");
+    if (notes.includes("ez-input=finished-video") || notes.includes("ez-input=finished-stills") || notes.includes("ez-input=finished-carousel")) return true;
+    const assets = item4Workspace?.assets || [];
+    return assets.length > 0 && assets.every(item4AssetLooksLikeVideo);
+  }
+
+  function item4FileLooksLikeVideo(file) {
+    const mime = String(file?.type || "").toLowerCase();
+    const ext = item4UploadFileExtension(file?.name);
+    return mime.startsWith("video/") || ["mp4", "mov", "m4v", "webm"].includes(ext);
+  }
+
+  function item4AssetLooksLikeVideo(asset) {
+    const mime = String(asset?.mime_type || "").toLowerCase();
+    const name = String(asset?.name || "").toLowerCase();
+    return mime.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(name);
   }
 
   function ezIsFinishedVideo() {
     const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
     if (kind === "finished-video") return true;
     const notes = String(activeProductionRequest?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
-    return notes.includes("ez-input=finished-video");
+    if (notes.includes("ez-input=finished-video")) return true;
+    const assets = item4Workspace?.assets || [];
+    return assets.length > 0 && assets.every(item4AssetLooksLikeVideo);
   }
 
   function ezMediaWord(count = 1) {
@@ -2332,6 +2348,7 @@
   }
 
   function item4CaptionField(assetId) {
+    if (ezIsFinishedVideo()) return "";
     const id = String(assetId || "");
     if (!id) return "";
     const mode = ezCaptionModeFor(id);
@@ -3313,6 +3330,9 @@
 
   function receiveMasterPhotos(fileList) {
     const incoming = Array.from(fileList || []);
+    if (incoming.some(item4FileLooksLikeVideo)) {
+      selectEzInput("finished-video", { resetPlatforms: false });
+    }
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
     const files = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
@@ -3348,6 +3368,9 @@
     const expected = pending?.inputKind ? apiHelpers.ezWizardExpectedUploads(pending) : null;
     const allowEmpty = expected === 0;
     const incoming = Array.from(files || []);
+    if (incoming.some(item4FileLooksLikeVideo)) {
+      selectEzInput("finished-video", { resetPlatforms: false });
+    }
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
     const supported = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
@@ -3369,6 +3392,10 @@
       return;
     }
     let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
+    if (ezIntakeKind === "finished-video") {
+      nextFiles = supported.filter(item4FileLooksLikeVideo).slice(0, 1);
+      if (!nextFiles.length) nextFiles = supported.slice(0, 1);
+    }
     if (pending?.inputKind === "mixed") {
       const remaining = Math.max(0, Number(expected || 0) - existingCount);
       if (!remaining) {
@@ -3398,6 +3425,9 @@
       if (wizardPlanned) {
         planned = wizardPlanned;
         item4PlanOverrides = { ...(wizardPlanned.overrides || {}) };
+      } else if (ezIntakeKind === "finished-video") {
+        planned = apiHelpers.ezWizardResolvePackage({ inputKind: "finished-video", photoCount: 1, packageId: "video" });
+        item4PlanOverrides = { ...(planned.overrides || {}) };
       } else {
         item4PlanOverrides = {};
         planned = applyEzPlanOverrides(photoCount, ezSelectedPlatforms());
@@ -3848,6 +3878,7 @@
   }
 
   function renderItem4Assets(status) {
+    syncFinishedMediaHeadings();
     const assets = Array.isArray(status?.assets) ? status.assets : [];
     const host = $("item4AssetStrip");
     const badge = $("item4AssetStatus");
@@ -4743,9 +4774,10 @@
   function item4IsSupportedPhotoFile(file) {
     const mime = String(file?.type || "").toLowerCase();
     const ext = item4UploadFileExtension(file?.name);
+    if (item4FileLooksLikeVideo(file)) return true;
     const kind = ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
     if (kind === "finished-video") {
-      return mime.startsWith("video/") || mime.startsWith("image/") || ["mp4", "mov", "m4v", "webm", "heic", "heif"].includes(ext);
+      return mime.startsWith("image/") || ["heic", "heif"].includes(ext);
     }
     return mime.startsWith("image/") || ext === "heic" || ext === "heif";
   }
@@ -5561,6 +5593,7 @@
     // Always start collapsed; operators can expand when they need the matrix.
     setEzAdvancedOpen(false);
     loadEzAudioOptions().catch(() => {});
+    syncFinishedMediaHeadings();
   }
 
   async function openProductionRequestForIdea(idea) {

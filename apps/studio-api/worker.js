@@ -160,7 +160,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.149-finished-upload",
+          version: "0.10.150-finished-detect",
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -3402,7 +3402,10 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
   if (existing.length + files.length > ITEM4_MAX_FILES) throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
   const meta = item4ParseJson(form.get("metadata"), []);
   const metadata = Array.isArray(meta) ? meta : [];
-  const finishedKind = studioNormalizeFinishedOriginKind(form.get("origin_kind")) || studioFinishedOriginKind(record);
+  const inferredVideo = files.some((file) => item4IsSupportedVideoFile(file));
+  const finishedKind = studioNormalizeFinishedOriginKind(form.get("origin_kind"))
+    || studioFinishedOriginKind(record)
+    || (inferredVideo ? "finished-video" : "");
   const finishedVideo = finishedKind === "finished-video";
   const maxBytes = finishedVideo ? 200 * 1024 * 1024 : ITEM4_MAX_FILE_BYTES;
   let total = 0;
@@ -3426,12 +3429,10 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
   if (finishedVideo && total > maxBytes) throw new HttpError(413, "The finished video exceeds the 200 MB upload limit");
 
   const originNotes = String(f(record, "Production_Notes") || "").trim();
-  const originStamp = finishedKind && !studioFinishedOriginKind(record)
-    ? `origin=ez-wizard; ez-input=${finishedKind}; ez-caption=ai`
-    : "";
+  const originStamp = finishedKind ? studioRewriteFinishedOriginNotes(originNotes, finishedKind) : originNotes;
   record = await item4UpdateRequestState(env, recordId, {
     Studio_Master_Asset_Status: "Uploading",
-    ...(originStamp ? { Production_Notes: originNotes ? `${originStamp}\n\n${originNotes}` : originStamp } : {}),
+    ...(originStamp !== originNotes ? { Production_Notes: originStamp } : {}),
   });
   const uploaded = [];
   let authorityQueueStarted = false;
@@ -3879,9 +3880,29 @@ function item4ParseEzOrigin(record) {
   };
 }
 
+function item4MasterLooksLikeVideo(asset) {
+  const mime = String(asset?.mime_type || "").toLowerCase();
+  const name = String(asset?.name || "").toLowerCase();
+  return mime.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(name);
+}
+
+function studioRewriteFinishedOriginNotes(existing, kind) {
+  const nextKind = studioNormalizeFinishedOriginKind(kind);
+  if (!nextKind) return String(existing || "");
+  const stamp = `origin=ez-wizard; ez-input=${nextKind}; ez-caption=ai`;
+  const text = String(existing || "").trim();
+  if (!text) return stamp;
+  if (new RegExp(`ez-input=${nextKind}(?:;|\\s|$)`, "i").test(text)) return text;
+  const replaced = text.replace(/ez-input=[a-z0-9-]+/i, `ez-input=${nextKind}`);
+  if (replaced !== text) return replaced;
+  return `${stamp}\n\n${text}`;
+}
+
 function studioFinishedOriginKind(record) {
   const kind = item4ParseEzOrigin(record).inputKind;
   if (kind === "finished-video" || kind === "finished-stills" || kind === "finished-carousel") return kind;
+  const assets = item4AssetManifest(record);
+  if (assets.length && assets.every(item4MasterLooksLikeVideo)) return "finished-video";
   return "";
 }
 
@@ -3899,9 +3920,15 @@ function item4FinishedPublicUrl(asset) {
   return String(asset?.url || "").startsWith("https://media.chicagoshining.com/");
 }
 
+function item4FinishedMasterReady(asset) {
+  if (item4FinishedPublicUrl(asset)) return true;
+  return Boolean(String(asset?.google_drive_file_id || "").trim())
+    && /^rec[A-Za-z0-9]+$/.test(String(asset?.media_asset_record_id || "").trim());
+}
+
 function item4FinishedVideoMastersReady(record, assets) {
   if (studioFinishedOriginKind(record) !== "finished-video") return false;
-  return Array.isArray(assets) && assets.length > 0 && assets.every((asset) => item4FinishedPublicUrl(asset));
+  return Array.isArray(assets) && assets.length > 0 && assets.every((asset) => item4FinishedMasterReady(asset));
 }
 
 function studioFinishedVariantsSkipped(record) {
