@@ -81,8 +81,13 @@ def process_request(
     now = iso_utc()
     thumb_status = field_str(output, "YouTube_Thumbnail_Status")
     thumb_url = field_str(output, "Thumbnail_URL")
-
     if 200 <= status_code <= 299 and status == "succeeded" and thumb_url and thumb_status.casefold() != "uploaded":
+        try:
+            from ap0.public_cover import ensure_public_cover_url
+
+            thumb_url = ensure_public_cover_url(client, output) or thumb_url
+        except Exception:
+            pass
         thumb_code, thumb_body = uploader.set_thumbnail(
             video_id=video_id,
             source_url=thumb_url,

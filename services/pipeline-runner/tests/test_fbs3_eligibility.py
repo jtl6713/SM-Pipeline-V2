@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fbs3.caption import cache_busted_public_url, reel_description, reel_title
+from fbs3.caption import cache_busted_public_url, public_mp4_url, reel_description, reel_title
 from fbs3.eligibility import create_eligibility_reason, poll_eligibility_reason
 from fbs3.poll import reel_is_ready, reel_is_terminal_error, reel_permalink
 from stages.registry import STAGE_NAMES, is_implemented
@@ -43,6 +43,12 @@ def test_fbs3_create_gates():
     assert create_eligibility_reason(_ready(FB_Slideshow_Status="Retry Pending", Publish_Error_Stage="FBS3_UPLOAD")) is None
     assert create_eligibility_reason(_ready(FB_Slideshow_Status="Initializing Reel")) == "slideshow_status_not_ready"
     assert create_eligibility_reason(_ready(FB_Slideshow_Public_URL="")) == "missing_slideshow_public_url"
+    assert create_eligibility_reason(
+        _ready(FB_Slideshow_Public_URL="https://media.chicagoshining.com/studio/master-assets/recX/clip.mp4")
+    ) == "missing_slideshow_public_url"
+    assert public_mp4_url(
+        _ready(Publish_Asset_URL="https://media.chicagoshining.com/publish/platform-output-282/finished.mp4")
+    ).endswith("finished.mp4")
     assert create_eligibility_reason(_ready(FB_Slideshow_Status="Retry Pending", Publish_Error_Stage="FBS4")) == (
         "fbs3_retry_stage_mismatch"
     )

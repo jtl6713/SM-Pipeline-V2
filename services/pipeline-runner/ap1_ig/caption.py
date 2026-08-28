@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from ap0.public_cover import graph_fetchable_cover_url
 from ap1_ig.constants import THUMB_OFFSET_MS
 from carousel.timeutil import chicago_now
 from render.fields import field_str
@@ -33,10 +34,7 @@ def cache_busted_video_url(record: dict[str, Any], now: datetime | None = None) 
 
 
 def cover_url(record: dict[str, Any]) -> str:
-    url = field_str(record, "Thumbnail_URL")
-    if url.startswith("https://"):
-        return url
-    return ""
+    return graph_fetchable_cover_url(field_str(record, "Thumbnail_URL"))
 
 
 def reel_create_body(record: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
@@ -45,9 +43,10 @@ def reel_create_body(record: dict[str, Any], now: datetime | None = None) -> dic
         "video_url": cache_busted_video_url(record, now),
         "caption": graph_caption(record),
         "share_to_feed": True,
-        "thumb_offset": THUMB_OFFSET_MS,
     }
     cover = cover_url(record)
     if cover:
         body["cover_url"] = cover
+    else:
+        body["thumb_offset"] = THUMB_OFFSET_MS
     return body

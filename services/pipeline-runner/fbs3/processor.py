@@ -9,7 +9,9 @@ from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, utc_now
-from fbs3.caption import cache_busted_public_url, reel_description, reel_title
+from ap0.eligibility import asset_plan
+from ap0.public_mp4 import ensure_public_mp4_url, is_public_publish_url
+from fbs3.caption import cache_busted_public_url, public_mp4_url, reel_description, reel_title
 from fbs3.constants import (
     FB_PUBLISH_PUBLISHING,
     FB_PUBLISH_RETRY,
@@ -40,6 +42,32 @@ _PUBLIC_MESSAGES = {
 }
 
 
+def _ensure_public_reel_mp4(client, output: dict[str, Any]) -> bool:
+    if is_public_publish_url(public_mp4_url(output)):
+        return False
+    plan = asset_plan(output)
+    public = ensure_public_mp4_url(client, output, plan)
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        output["id"],
+        {
+            "Publish_Asset_URL": public,
+            "FB_Slideshow_Public_URL": public,
+            "Publish_Asset_File_Name": plan["publish_asset_file_name"],
+            "FB_Slideshow_Meta_Video_ID": "",
+            "FB_Slideshow_Meta_Upload_URL": "",
+        },
+        typecast=True,
+    )
+    fields = output.setdefault("fields", {})
+    fields["Publish_Asset_URL"] = public
+    fields["FB_Slideshow_Public_URL"] = public
+    fields["Publish_Asset_File_Name"] = plan["publish_asset_file_name"]
+    fields["FB_Slideshow_Meta_Video_ID"] = ""
+    fields["FB_Slideshow_Meta_Upload_URL"] = ""
+    return True
+
+
 def _preview(*, output_record_id: str | None, test_run_id: str | None) -> dict[str, Any]:
     return {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -67,6 +95,13 @@ def process_request(
     output = client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
     if test_run_id and field_str(output, "Test_Run_ID") != test_run_id:
         return {"processed": False, "reason": "test_run_mismatch", **preview}
+
+    try:
+        staged = _ensure_public_reel_mp4(client, output)
+        if staged:
+            preview["video_url"] = cache_busted_public_url(output)
+    except Exception as exc:
+        preview["stage_error"] = str(exc)
 
     reason = create_eligibility_reason(output)
     video_url = cache_busted_public_url(output)

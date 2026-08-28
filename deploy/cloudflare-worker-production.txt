@@ -177,3 +177,5 @@ Finished-video retry Worker deploy: 2026-08-27 - Re-running Approve after Promot
 
 Review preview Worker deploy: 2026-08-27 - Open review plays the public publish MP4 and does not use 404 studio/master-assets URLs. Worker 0.10.153-review-preview.
 
+Native grid cover Worker deploy: 2026-08-27 - Keep the 3D thumbnail on Platform Outputs and treat it as the native IG/FB/YT cover. Worker 0.10.154-native-cover.
+
