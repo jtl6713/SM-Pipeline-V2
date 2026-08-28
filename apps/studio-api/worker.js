@@ -161,13 +161,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-<<<<<<< HEAD
-          version: "0.10.154-insights-learning-db",
-=======
-          version: "0.10.154-native-cover",
-          studio_native_grid_cover_v1: true,
->>>>>>> origin/main
-          studio_finished_passthrough_v1: true,
+          version: "0.10.155-insights-learning-db",
+          studio_native_grid_cover_v1: true,          studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
           studio_insights_similar_times_v1: true,
