@@ -8793,8 +8793,8 @@ const STUDIO_SIMILAR_TIMES_SETTING = "SIMILAR_ACCOUNT_TIMES_CACHE";
 const STUDIO_SIMILAR_TIMES_TTL_MS = 24 * 60 * 60 * 1000;
 const STUDIO_SIMILAR_TIMES_MIN_SAMPLE = 8;
 const STUDIO_SIMILAR_ACCOUNT_STATUS_SETTING = "SIMILAR_ACCOUNT_STATUS_CACHE";
-const STUDIO_INSIGHTS_OBSERVATIONS_TABLE = "Studio Insights Observations";
-const STUDIO_INSIGHTS_LEARNED_TABLE = "Studio Insights Learned";
+const STUDIO_INSIGHTS_OBSERVATIONS_TABLE = "tblcDNIZs125iVi2B";
+const STUDIO_INSIGHTS_LEARNED_TABLE = "tblb6LfRv7CemHHN6";
 const STUDIO_INSIGHTS_SEASONS = Object.freeze(["winter", "spring", "summer", "fall"]);
 const STUDIO_INSIGHTS_CTA_PATTERN = /\b(follow|save|link in bio|link|tap|comment|share|visit|book|dm|click|learn more|tag a friend)\b/i;
 
