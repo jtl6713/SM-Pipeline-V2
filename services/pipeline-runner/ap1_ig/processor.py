@@ -7,6 +7,7 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
+from ap0.public_cover import ensure_public_cover_url
 from ap1_ig.caption import reel_create_body
 from ap1_ig.constants import (
     MAKE_SCENARIO_ID,
@@ -73,10 +74,16 @@ def process_request(
         replace_transaction_id=replace_transaction_id,
         replace_fingerprint=replace_fingerprint,
     )
+    if not reason and not dry_run:
+        try:
+            ensure_public_cover_url(client, output)
+        except Exception:
+            pass
     body = reel_create_body(output)
     preview["eligibility_reason"] = reason
     preview["video_url"] = body.get("video_url")
     preview["has_cover_url"] = bool(body.get("cover_url"))
+    preview["cover_url"] = body.get("cover_url") or ""
     preview["replace_transaction_id"] = field_str(output, "Replace_Transaction_ID")
     if reason:
         return {"processed": False, "reason": reason, **preview}
@@ -89,7 +96,7 @@ def process_request(
         (
             f"AP1-IG publish lock set at {stamp_minutes()}. "
             f"Publish asset URL: {field_str(output, 'Publish_Asset_URL')}. "
-            "Cover source: generated thumbnail / safe offset."
+            "Cover source: public Thumbnail_URL as cover_url when Graph-fetchable; thumb_offset only if no cover."
         ),
     )
     now = iso_utc()
@@ -148,7 +155,7 @@ def process_request(
         f"Get Post Timestamp: {meta.get('timestamp') or ''}\n"
         f"Published at: {stamp_minutes()}\n"
         f"Source URL: {field_str(output, 'Publish_Asset_URL')}\n"
-        "Cover handling: AP1-IG sent generated Thumbnail_URL as cover_url and retained thumb_offset=1500 fallback."
+        "Cover handling: AP1-IG sent the public thumbnail as cover_url without thumb_offset when a cover exists."
     )
     ready_notes = _append_notes(
         field_str(output, "Output_Notes"),
@@ -157,7 +164,7 @@ def process_request(
             f"Instagram response ID: {creation_id}\n"
             f"Instagram permalink: {permalink}\n"
             f"Published from: {field_str(output, 'Publish_Asset_URL')}\n"
-            "Cover handling: non-black Reel cover frame offset sent by AP1-IG."
+            "Cover handling: native 3D thumbnail as Instagram Reel cover_url when a public cover exists."
         ),
     )
     client.update_record(

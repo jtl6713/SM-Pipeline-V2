@@ -68,6 +68,13 @@ def test_ap1_ig_caption_and_cover():
     body = reel_create_body(record, now)
     assert body["media_type"] == "REELS"
     assert body["share_to_feed"] is True
-    assert body["thumb_offset"] == 1500
+    assert "thumb_offset" not in body
     assert body["cover_url"].endswith("cover.jpg")
     assert body["caption"] == "Night walk\n\n#chicago"
+
+
+def test_ap1_ig_drive_thumbnail_is_not_graph_cover():
+    record = _eligible(Thumbnail_URL="https://drive.google.com/uc?id=13rIboxRJt50N9SWX12vfh2CBc4Jp6pMa")
+    body = reel_create_body(record)
+    assert "cover_url" not in body
+    assert body["thumb_offset"] == 1500

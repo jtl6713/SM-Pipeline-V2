@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.155-hub-mobile";
+  const BUILD_ID = "item4-0.6.156-native-cover";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -2927,7 +2927,7 @@
       platforms: planned?.platforms || ezSelectedPlatforms(),
       voiceover_mode: finished ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
       background_music_mode: finished ? "No" : ($("ezAudioMusic")?.value || "Yes"),
-      thumbnail_mode: finished ? "No" : ($("ezThumbnail")?.value || "Yes"),
+      thumbnail_mode: finished ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
       video_duration_seconds: $("ezVideoDuration")?.value || 30,
       video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
       video_clip_count_exact: $("ezVideoClipExact")?.value || "",

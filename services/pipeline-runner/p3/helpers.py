@@ -79,6 +79,10 @@ def pick_caption(output: dict[str, Any], parent: dict[str, Any]) -> str:
 
 
 def copied_media_url(parent: dict[str, Any], field_name: str, mode: Any) -> str:
+    # Native grid covers stay on the output even when thumbnail mode is No.
+    # Mode No means do not letter the video; it does not mean omit the cover.
+    if field_name == "Thumbnail_URL":
+        return field_str(parent, field_name)
     if not media_required(mode):
         return ""
     return field_str(parent, field_name)

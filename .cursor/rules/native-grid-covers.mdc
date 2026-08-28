@@ -1,0 +1,28 @@
+---
+description: Attach the 3D thumbnail as the native grid cover on every platform that allows it
+alwaysApply: true
+---
+
+# Native grid covers
+
+The generated 3D block-letter thumbnail is the **grid cover** wherever a platform API allows a cover that is separate from the video or album body.
+
+## Always
+
+- Generate the thumbnail for finished video passthrough (`Thumbnail_Mode=Yes`). Do not skip covers because Remotion, VO, or crops are skipped.
+- Keep `Thumbnail_URL` on Platform Outputs even when `Studio_Effective_Thumbnail_Mode` is `No`. Mode `No` skips **lettering on the video**, not the native cover.
+- Stage covers onto `https://media.chicagoshining.com/publish/` or `studio/previews/` before Graph/YouTube fetch. Drive `uc?id=` / `webContentLink` is not a cover_url.
+
+## Platform behavior
+
+| Surface | Cover |
+|---|---|
+| Instagram Reel | Graph `cover_url` from the public thumbnail. Do **not** send `thumb_offset` when `cover_url` is present (offset wins and shows a video frame). |
+| Facebook Reel | Graph `/{video-id}/thumbnails?is_preferred=true` with the public thumbnail URL. |
+| YouTube Short | `thumbnails.set` after processing. |
+| Instagram Carousel / FB multi-image | First slide **is** the grid. Prepend the 3D cover as child/slide 1 when Include Thumbnail is on. Remaining slides stay the photos. |
+| Instagram Single Image | No separate cover. The image *is* the post — do not replace the photo with the 3D still. |
+| Instagram/Facebook Story | Ephemeral; no profile grid cover. |
+| TikTok Content Posting draft | API does not accept a cover. Keep the thumbnail in Studio/Airtable/email. Operator sets cover in the TikTok app. |
+
+Suggested times, mix, and Remotion are unrelated. Do not treat a missing IG Reel cover as “thumbnail not needed.”
