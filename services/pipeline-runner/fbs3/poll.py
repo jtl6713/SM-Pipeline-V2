@@ -131,7 +131,7 @@ def process_request(
         return {"processed": True, "still_processing": True, "error": str(exc), **preview}
 
     if reel_is_ready(data):
-        thumbnail_ok = _attach_thumbnail(graph, output, video_id)
+        thumbnail_ok = _attach_thumbnail(graph, client, output, video_id)
         permalink = reel_permalink(data, video_id)
         _mark_published(client, output, video_id, data, permalink=permalink, thumbnail_ok=thumbnail_ok)
         return {"processed": True, "video_id": video_id, "permalink": permalink, **preview}
@@ -143,7 +143,13 @@ def process_request(
     return {"processed": True, "still_processing": True, "status_code": status_code, **preview}
 
 
-def _attach_thumbnail(graph: FacebookReelClient, output: dict[str, Any], video_id: str) -> bool:
+def _attach_thumbnail(graph: FacebookReelClient, client: AirtableClient, output: dict[str, Any], video_id: str) -> bool:
+    try:
+        from ap0.public_cover import ensure_public_cover_url
+
+        ensure_public_cover_url(client, output)
+    except Exception:
+        pass
     thumbnail_url = field_str(output, "Thumbnail_URL")
     if not thumbnail_url:
         return False

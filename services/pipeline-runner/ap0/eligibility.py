@@ -11,6 +11,7 @@ from ap0.constants import (
     REVIEW_STATUS,
     R2_KEY_PREFIX,
 )
+from ap0.public_cover import cover_needs_public_stage
 from ap0.public_mp4 import is_public_publish_url, master_r2_key_from_record
 from asset.helpers import as_bool
 from render.fields import field, field_str
@@ -82,6 +83,8 @@ def eligibility_reason(record: dict[str, Any]) -> str | None:
     public_url = field_str(record, "Publish_Asset_URL")
     filename_matches = field_str(record, "Publish_Asset_File_Name") == expected_file_name(record)
     if is_public_publish_url(public_url) and filename_matches:
+        if cover_needs_public_stage(record):
+            return None
         return "already_prepared"
     return None
 

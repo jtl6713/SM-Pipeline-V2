@@ -68,6 +68,15 @@ def test_ap0_already_prepared_is_skipped():
     assert eligibility_reason(record) == "already_prepared"
 
 
+def test_ap0_already_prepared_mp4_still_runs_when_cover_is_drive():
+    record = _eligible(
+        Publish_Asset_URL="https://media.chicagoshining.com/publish/platform-output-42/driveFile123.mp4",
+        Publish_Asset_File_Name="platform-output-42-driveFile123.mp4",
+        Thumbnail_URL="https://drive.google.com/uc?id=13rIboxRJt50N9SWX12vfh2CBc4Jp6pMa",
+    )
+    assert eligibility_reason(record) is None
+
+
 def test_ap0_youtube_short_and_facebook_reel():
     assert is_eligible(_eligible(Platform="YouTube", Platform_Output_Type="YouTube Short"))
     assert is_eligible(_eligible(Platform="Facebook", Platform_Output_Type="Facebook Reel"))

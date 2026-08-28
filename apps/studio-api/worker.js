@@ -161,7 +161,12 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
+<<<<<<< HEAD
           version: "0.10.154-insights-learning-db",
+=======
+          version: "0.10.154-native-cover",
+          studio_native_grid_cover_v1: true,
+>>>>>>> origin/main
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -8650,17 +8655,16 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Thumbnail_URL: (function thumbnailUrl() {
       const parentThumb = studioAiThumbnailUrl(f(parentContentItem, "Thumbnail_URL"));
       const source = item4ThumbnailSource(effective.thumbnail_mode);
-      if (source === "ai" && parentThumb) return parentThumb;
+      if (parentThumb) return parentThumb;
       if (nativePhoto) {
-        return parentThumb
-          || item4CoverStillUrl(requestRecord, outputRow)
+        return item4CoverStillUrl(requestRecord, outputRow)
           || studioClipPublicCdnUrl(clips[0])
           || String(clips[0]?.url || "").trim()
           || null;
       }
       if (source === "none") return null;
       if (source === "frame") return item4CoverStillUrl(requestRecord, outputRow) || null;
-      return parentThumb || null;
+      return null;
     }()),
     Asset_Selection_Status: remotionReady ? "Selected" : null,
     Output_Title: String(f(parentContentItem,"Content_Title") || "").trim(),
@@ -11831,7 +11835,7 @@ function item4P3SingleParentEnrichmentRecord() {
     Output_Title:'{{if(length(102.Studio_Effective_Requested_Title)>0;102.Studio_Effective_Requested_Title;101.Content_Title)}}',
     Output_Caption:'{{if(length(102.Studio_Effective_Requested_Caption)>0;102.Studio_Effective_Requested_Caption;101.Caption)}}',
     Output_Hashtags:"{{101.Hashtags}}",
-    Thumbnail_URL:'{{if(ifempty(102.Studio_Effective_Thumbnail_Mode; "Yes") = "No"; ""; 101.Thumbnail_URL)}}',
+    Thumbnail_URL:"{{101.Thumbnail_URL}}",
     Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
     Output_Status: STUDIO_P3_NATIVE_PHOTO_STATUS_IF,
     Asset_Selection_Status: STUDIO_P3_NATIVE_PHOTO_SELECTION_IF,

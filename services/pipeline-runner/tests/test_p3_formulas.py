@@ -115,7 +115,7 @@ def test_studio_enrichment_skips_media_when_mode_is_no():
         }
     }
     fields = build_studio_enrichment_fields(parent, output)
-    assert fields["Thumbnail_URL"] == ""
+    assert fields["Thumbnail_URL"] == "https://example.com/thumb.png"
     assert fields["Voiceover_URL"] == ""
     assert fields["Output_Status"] == "Ready for Review"
 

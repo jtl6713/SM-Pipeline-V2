@@ -14,6 +14,7 @@ from ap0.constants import ASSET_HOST, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from ap0.eligibility import asset_plan, eligibility_reason
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
+from ap0.public_cover import ensure_public_cover_url
 from ap0.public_mp4 import ensure_public_mp4_url
 from render.fields import field, field_str
 
@@ -99,9 +100,19 @@ def process_request(
     )
     output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
 
+    cover_url = ""
     try:
         public_url = ensure_public_mp4_url(client, output, plan)
-        upload = {"ok": True, "public_url": public_url, "key": plan["r2_object_key"]}
+        try:
+            cover_url = ensure_public_cover_url(client, output)
+        except Exception as cover_exc:
+            cover_url = ""
+            started_notes = _append_notes(
+                field_str(output, "Output_Notes"),
+                f"AP0 native cover staging skipped at {stamp_minutes()}. {cover_exc}",
+            )
+            output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
+        upload = {"ok": True, "public_url": public_url, "cover_url": cover_url, "key": plan["r2_object_key"]}
     except Exception as exc:
         message = f"AP0 Worker/R2 upload failed. {exc}"
         _mark_failed(client, output, message[:1500])
@@ -114,7 +125,8 @@ def process_request(
             f"AP0 publish asset staged at {stamp_minutes()}.\n"
             f"R2 object: {plan['r2_object_key']}\n"
             f"Publish asset file name: {file_name}\n"
-            f"Publish asset URL: {public_url}"
+            f"Publish asset URL: {public_url}\n"
+            f"Native cover URL: {cover_url or 'none'}"
         ),
     )
     response_text = (
