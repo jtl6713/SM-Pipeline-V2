@@ -5,9 +5,10 @@ Run once against the ChicagoShining base after setting:
   export AIRTABLE_PAT=...
   export AIRTABLE_BASE_ID=appe33zkZn35yirTL
 
-Then add the returned table IDs to the Studio API Worker environment:
-  STUDIO_INSIGHTS_OBSERVATIONS_TABLE_ID
-  STUDIO_INSIGHTS_LEARNED_TABLE_ID
+Then add the returned table IDs to the Studio API Worker environment
+(optional — the Worker already defaults to the bootstrap IDs below):
+  STUDIO_INSIGHTS_OBSERVATIONS_TABLE_ID=tblcDNIZs125iVi2B
+  STUDIO_INSIGHTS_LEARNED_TABLE_ID=tblb6LfRv7CemHHN6
 """
 
 from __future__ import annotations
