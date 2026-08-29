@@ -195,3 +195,5 @@ Render label Worker deploy: 2026-08-29 - Studio state badge shows Rendering not 
 Duration 30 Worker deploy: 2026-08-29 - Honor Video_Duration_Seconds including 30. Worker 0.10.167-duration-30.
 Best-times fast Worker deploy: 2026-08-29 - Stop legacy cache migration on schedule suggestions; always return industry fallback. Worker 0.10.168-best-times-fast.
 YouTube scheduled privacy Worker deploy: 2026-08-29 - Scheduled YT posts keep YouTube_Privacy_Status=public; upload coerces to private+publishAt so YouTube releases publicly at schedule time. Worker 0.10.169-yt-scheduled-public.
+
+Production location Worker deploy: 2026-08-29 - Editable Primary location + IG/FB Graph place tags. Worker 0.10.171-production-location.

@@ -269,3 +269,4 @@ Idea library place Pages deploy: 2026-08-29 - Use existing checks only place-mat
 Render label Pages deploy: 2026-08-29 - Pipeline badge shows Rendering not Rendering N/M. UI 0.6.175.
 Schedule suggest Pages deploy: 2026-08-29 - Restore suggested publish times (research/similar) under Open review and Pipeline Time. UI 0.6.176-schedule-suggest.
 Best-times fast Pages deploy: 2026-08-29 - Cap best-times retries so suggestion UI cannot hang on Loading. UI 0.6.177-best-times-fast.
+Production location Pages deploy: 2026-08-29 - Production Primary location field prefilled/editable. UI 0.6.178-production-location.
