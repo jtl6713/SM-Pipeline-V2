@@ -9116,6 +9116,8 @@
       if (makeAdmin) makeAdmin.hidden = !data.can_edit_profiles;
       const refreshSimilar = $("operationsRefreshSimilarTimes");
       if (refreshSimilar) refreshSimilar.hidden = !data.can_edit_profiles;
+      const discoverCreators = $("operationsDiscoverCreators");
+      if (discoverCreators) discoverCreators.hidden = !data.can_edit_profiles;
     } catch (error) {
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
       if (meta) meta.textContent = "Unable to load operations.";
