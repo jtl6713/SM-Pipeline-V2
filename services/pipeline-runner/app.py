@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 from config import StageRequest, load_settings
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
+from audio.backfill import process_request as backfill_audio_leading_silence
 from studio_music.processor import ingest_studio_music
 from studio_produce.processor import resume_job, start_job
 
@@ -290,6 +291,36 @@ def run_studio_music_library():
         result.get("google_drive_file_id"),
     )
     return jsonify(result), 201
+
+
+@app.post("/jobs/studio-audio-leading-silence")
+def run_studio_audio_leading_silence():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    record_ids = payload.get("record_ids") or payload.get("recordIds") or []
+    if isinstance(record_ids, str):
+        record_ids = [record_ids]
+    if not isinstance(record_ids, list):
+        return jsonify({"error": "record_ids must be an array"}), 422
+    try:
+        result = backfill_audio_leading_silence(
+            dry_run=bool(payload.get("dry_run")),
+            force=bool(payload.get("force")),
+            record_ids=[str(item) for item in record_ids],
+        )
+    except Exception as exc:
+        logger.exception("studio-audio-leading-silence failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info(
+        "job=studio-audio-leading-silence dry_run=%s matched=%s capped=%s failed=%s",
+        result.get("dry_run"),
+        result.get("matched"),
+        result.get("capped"),
+        result.get("failed"),
+    )
+    return jsonify(result), 200
 
 
 @app.post("/jobs/studio-produce")

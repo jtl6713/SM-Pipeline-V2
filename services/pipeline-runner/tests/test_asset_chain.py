@@ -69,6 +69,7 @@ def test_a3_mime_and_audio_fallback():
     assert a3_mime_route("image/png") == "image"
     assert a3_mime_route("application/pdf") == "unsupported"
     assert audio_role_fallback("", "ElevenLabs_Kate - English Female Voice With Soft Accent_pvc.mp3") == "Voiceover"
+    assert audio_role_fallback("", "recABC_voice_normalized.mp3") == "Voiceover"
     assert audio_role_fallback("", "background-loop.mp3") == "Music"
     assert audio_role_fallback("Voiceover", "track.mp3") == "Voiceover"
     assert audio_role_fallback("", "untitled.wav") == "Other"

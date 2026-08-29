@@ -53,6 +53,7 @@ export default {
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
       const isOperationsIntakeRoute = url.pathname === "/api/operations/intake";
+      const isOperationsAudioLeadingSilenceRoute = url.pathname === "/api/operations/audio-leading-silence";
       const isInsightsBestTimesRoute = url.pathname === "/api/insights/best-times";
       const isInsightsSimilarTimesRoute = url.pathname === "/api/insights/similar-times";
       const isInsightsCaptionsRoute = url.pathname === "/api/insights/captions";
@@ -97,6 +98,7 @@ export default {
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
       const isOperationsMakeAdminBridgeWrite = isOperationsMakeAdminBridgeRoute && request.method === "POST";
       const isOperationsIntakeWrite = isOperationsIntakeRoute && request.method === "POST";
+      const isOperationsAudioLeadingSilenceWrite = isOperationsAudioLeadingSilenceRoute && request.method === "POST";
       const isInsightsWatchlistWrite = isInsightsWatchlistRoute && (request.method === "POST" || request.method === "PATCH");
       const isInsightsSimilarTimesWrite = isInsightsSimilarTimesRoute && request.method === "POST";
       const isInsightsDiscoverWrite = isInsightsDiscoverRoute && request.method === "POST";
@@ -139,6 +141,7 @@ export default {
         isOperationsRetryAssetSelectionWrite ||
         isOperationsMakeAdminBridgeWrite ||
         isOperationsIntakeWrite ||
+        isOperationsAudioLeadingSilenceWrite ||
         isInsightsWatchlistWrite ||
         isInsightsSimilarTimesWrite ||
         isInsightsDiscoverWrite ||
@@ -187,6 +190,7 @@ export default {
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
           studio_intake_progress_v1: true,
+          studio_audio_leading_silence_v1: true,
           studio_r5_done_callback_v1: true,
           studio_ondemand_publish_orch_v1: true,
           studio_ondemand_smv1_p0202_v1: true,
@@ -480,6 +484,12 @@ export default {
         if (request.method === "GET") return getStudioLibraryIntakeStatus(request, env, url);
         assertWriteRequest(request, env);
         return pulseStudioLibraryIntake(request, env, authorization);
+      }
+
+      if (isOperationsAudioLeadingSilenceRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return pulseAudioLeadingSilence(request, env);
       }
 
       if (isInsightsBestTimesRoute) {
@@ -11269,6 +11279,10 @@ async function promoteStudioMusicToDrive(env, { filename, bytes, contentType }) 
     google_drive_url: driveUrl,
     web_view_link: String(payload.web_view_link || `https://drive.google.com/file/d/${fileId}/view`),
     folder_id: String(payload.folder_id || GDRIVE_MUSIC_FOLDER_ID),
+    file_size_bytes: Number(payload.file_size_bytes || 0) || null,
+    Leading_Silence_Status: payload.Leading_Silence_Status || payload.leading_silence_status || null,
+    Leading_Silence_Removed_Seconds: payload.Leading_Silence_Removed_Seconds ?? payload.leading_silence_removed_seconds ?? null,
+    Leading_Silence_Processed_At: payload.Leading_Silence_Processed_At || null,
   };
 }
 
@@ -11323,7 +11337,10 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
               "Google Drive File ID": drive.google_drive_file_id,
               MIME_Type: "audio/mpeg",
               File_Extension: "mp3",
-              File_Size_Bytes: Number(file.size || 0) || null,
+              File_Size_Bytes: Number(drive.file_size_bytes || file.size || 0) || null,
+              Leading_Silence_Status: drive.Leading_Silence_Status || null,
+              Leading_Silence_Removed_Seconds: drive.Leading_Silence_Removed_Seconds,
+              Leading_Silence_Processed_At: drive.Leading_Silence_Processed_At || null,
               Intake_Status: "Created",
               Intake_Date: new Date().toISOString().slice(0, 10),
               Drive_Access_Status: "Public",
@@ -22082,6 +22099,44 @@ async function pulseMakeAdminBridgeQueue(request, env, ctx) {
       ? "No Pending Make admin command is waiting, so the bridge did not run."
       : "The Make admin bridge is running the oldest Pending command.",
   }, skipped ? 200 : 202);
+}
+
+async function pulseAudioLeadingSilence(request, env) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) throw new HttpError(503, "Pipeline runner is required to trim catalog audio");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  let body = {};
+  try { body = await request.json(); } catch { body = {}; }
+  const response = await fetch(`${runnerUrl}/jobs/studio-audio-leading-silence`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({
+      dry_run: Boolean(body?.dry_run),
+      force: Boolean(body?.force),
+      record_ids: Array.isArray(body?.record_ids) ? body.record_ids : [],
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new HttpError(
+      response.status >= 400 ? response.status : 502,
+      payload?.error || payload?.message || "Leading-silence backfill failed"
+    );
+  }
+  const capped = Number(payload?.capped || 0);
+  const notNeeded = Number(payload?.not_needed || 0);
+  const failed = Number(payload?.failed || 0);
+  const matched = Number(payload?.matched || 0);
+  return respond(request, env, {
+    ok: true,
+    ...payload,
+    message: payload?.dry_run
+      ? `Checked ${matched} catalog audio file${matched === 1 ? "" : "s"} without changing Drive.`
+      : `Capped ${capped}, already short enough ${notNeeded}, failed ${failed}.`,
+  });
 }
 
 async function pulseStudioLibraryIntake(request, env, authorization) {
