@@ -13,7 +13,6 @@ from item4.settings import PipelineSettings
 from p2.constants import THUMBNAIL_DRIVE_FOLDER_ID
 from p2.thumbnail_client import generate_thumbnail_png
 from render.fields import field_str
-from studio_produce.job import utc_now
 from studio_produce.thumbnail_prompt import build_finished_thumbnail_prompt
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
@@ -57,6 +56,7 @@ def ensure_finished_thumbnail(
     url = public or str(thumb_file.get("webContentLink") or "").strip()
     if not url:
         raise RuntimeError("Finished thumbnail generated but no public or Drive URL was returned")
+    # Do not write Updated_At (Airtable rejects it) or clear voiceover fields.
     client.update_record(
         CONTENT_ITEMS_TABLE,
         parent["id"],
@@ -64,12 +64,9 @@ def ensure_finished_thumbnail(
             "Thumbnail_URL": url,
             "Thumbnail_Status": "Generated",
             "Include_Thumbnail": "Yes",
-            "Include_Voiceover": "No",
-            "Voiceover_Status": "Not Needed",
             "Thumbnail_Prompt": prompt,
             "Thumbnail_Google_Drive_File_ID": thumb_file.get("id"),
             "Content_Status": "Thumbnail Ready",
-            "Updated_At": utc_now(),
         },
         typecast=True,
     )
