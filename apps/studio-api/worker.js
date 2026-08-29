@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.162-idea-library-pick",
+          version: "0.10.163-idea-library-match",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -3737,12 +3737,24 @@ const IDEA_LIBRARY_STOPWORDS = new Set([
   "idea", "photo", "photos", "image", "images", "still", "stills",
 ]);
 
+/** Shared city/scene words — rank softly, never enough alone to auto-check another neighborhood. */
+const IDEA_LIBRARY_WEAK_TOKENS = new Set([
+  "chicago", "street", "streets", "neighborhood", "urban", "city", "town",
+  "north", "south", "east", "west", "side", "stroll", "walk", "walking",
+  "scene", "scenes", "local", "color", "colorful", "building", "buildings",
+  "brick", "sidewalk", "tables", "patio", "storefront", "storefronts",
+]);
+
 function ideaLibraryTokens(text) {
   return [...new Set(String(text || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
     .filter((token) => token.length >= 3 && !IDEA_LIBRARY_STOPWORDS.has(token)))];
+}
+
+function ideaLibraryStrongTokens(tokens) {
+  return tokens.filter((token) => !IDEA_LIBRARY_WEAK_TOKENS.has(token) && token.length >= 4);
 }
 
 function ideaLibraryHaystack(record) {
@@ -3809,9 +3821,9 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     f(idea, "Candidate_Title"),
     f(idea, "Idea_Summary"),
     f(idea, "Primary_Location"),
-    query,
   ].filter(Boolean).join(" "));
   const queryTokens = ideaLibraryTokens(query);
+  const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const today = chicagoNowParts().date;
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 80,
@@ -3824,10 +3836,14 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
     const haystack = ideaLibraryHaystack(record);
     if (queryTokens.length && !queryTokens.some((token) => haystack.includes(token))) continue;
-    const overlap = ideaTokens.filter((token) => haystack.includes(token)).length;
+    const strongOverlap = strongIdeaTokens.filter((token) => haystack.includes(token)).length;
+    const weakOverlap = ideaTokens.filter((token) => haystack.includes(token)).length;
     const intakeToday = ideaLibraryIntakeDate(record) === today;
-    const score = overlap + (intakeToday ? 5 : 0);
-    const preselected = score >= 3 || intakeToday;
+    // Same-day intake used to auto-check every still from today, so Pilsen rode along
+    // with Andersonville. Only boost / pre-check when the still shares a strong idea token.
+    if (!queryTokens.length && strongOverlap < 1) continue;
+    const score = strongOverlap * 4 + weakOverlap + (intakeToday && strongOverlap > 0 ? 2 : 0);
+    const preselected = strongOverlap >= 1;
     ranked.push({ record, score, preselected });
   }
   ranked.sort((a, b) => {
