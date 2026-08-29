@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.156-native-cover";
+  const BUILD_ID = "item4-0.6.162-music-upload";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -8780,6 +8780,25 @@
     schedulePipelinePoll();
   }
 
+  function setMusicUploadMessage(text, className = "") {
+    const node = $("musicUploadMessage");
+    if (!node) return;
+    node.textContent = text || "";
+    node.className = `form-message ${className}`.trim();
+  }
+
+  function invalidateMusicCatalog() {
+    productionRequestMusic = [];
+  }
+
+  function bindMusicPlayers(target) {
+    const players = Array.from(target.querySelectorAll("audio.music-preview"));
+    players.forEach((player) => player.load());
+    players.forEach((player) => player.addEventListener("play", () => {
+      players.forEach((other) => { if (other !== player) other.pause(); });
+    }));
+  }
+
   async function loadMusic() {
     const target = $("musicList");
     target.innerHTML = '<div class="empty">Loading music library…</div>';
@@ -8788,16 +8807,78 @@
       if (!records.length) return target.innerHTML = '<div class="empty">No Music assets were returned.</div>';
       target.innerHTML = records.map((r) => {
         const preview = r.preview_url || r.google_drive_url;
-        return `<article class="music-card"><h3>${value(r.display_name || r.name)}</h3>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type)} · ${value(r.file_size_mb)} MB · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span></div></article>`;
+        const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.file_extension || "mp3");
+        return `<article class="music-card"><h3>${value(r.display_name || r.name)}</h3>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type || "audio/mpeg")} · ${sizeLabel} · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url && !r.studio_uploaded ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : (r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : "")}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span></div></article>`;
       }).join("");
-
-      const players = Array.from(target.querySelectorAll("audio.music-preview"));
-      players.forEach((player) => player.load());
-      players.forEach((player) => player.addEventListener("play", () => {
-        players.forEach((other) => { if (other !== player) other.pause(); });
-      }));
+      bindMusicPlayers(target);
     } catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
   }
+
+  async function uploadMusicFiles(fileList) {
+    const files = Array.from(fileList || []).filter((file) => /\.mp3$/i.test(file.name || "") || /audio\/(mpeg|mp3)/i.test(file.type || ""));
+    if (!files.length) {
+      setMusicUploadMessage("Choose one or more MP3 files.", "error-text");
+      return;
+    }
+    const zone = $("musicUploadZone");
+    const choose = $("musicChooseFiles");
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file, file.name));
+    const displayName = String($("musicDisplayName")?.value || "").trim();
+    if (displayName && files.length === 1) form.append("display_name", displayName);
+    if (zone) zone.dataset.busy = "true";
+    if (choose) choose.disabled = true;
+    setMusicUploadMessage(files.length === 1 ? "Adding track…" : `Adding ${files.length} tracks…`, "");
+    try {
+      const result = await api("/api/music", { method: "POST", body: form, timeoutMs: 120000, retries: 0 });
+      if ($("musicDisplayName")) $("musicDisplayName").value = "";
+      if ($("musicFileInput")) $("musicFileInput").value = "";
+      invalidateMusicCatalog();
+      setMusicUploadMessage(result.message || "Track added to the music library.", "success");
+      await loadMusic();
+    } catch (error) {
+      setMusicUploadMessage(error.message, "error-text");
+    } finally {
+      if (zone) delete zone.dataset.busy;
+      if (choose) choose.disabled = false;
+    }
+  }
+
+  function bindMusicUpload() {
+    const zone = $("musicUploadZone");
+    const input = $("musicFileInput");
+    const choose = $("musicChooseFiles");
+    const addButton = $("musicAddButton");
+    if (!input || (zone && zone.dataset.bound)) return;
+    if (zone) zone.dataset.bound = "true";
+    const openPicker = (event) => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      input.click();
+    };
+    addButton?.addEventListener("click", openPicker);
+    choose?.addEventListener("click", openPicker);
+    zone?.addEventListener("click", (event) => {
+      if (event.target === choose || event.target === addButton) return;
+      openPicker(event);
+    });
+    zone?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") openPicker(event);
+    });
+    zone?.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("dragging");
+    });
+    zone?.addEventListener("dragleave", () => zone.classList.remove("dragging"));
+    zone?.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("dragging");
+      uploadMusicFiles(event.dataTransfer?.files);
+    });
+    input.addEventListener("change", () => uploadMusicFiles(input.files));
+  }
+
+  bindMusicUpload();
 
   function setOperationsMessage(text, className = "") {
     const node = $("operationsMessage");

@@ -235,6 +235,7 @@ export default {
           studio_native_photo_brand_on_approve_v1: true,
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
+          studio_music_upload_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
           "0.10.10-elevenlabs-v2-catalog": true,
@@ -753,6 +754,10 @@ export default {
       }
 
       if (url.pathname === "/api/music") {
+        if (request.method === "POST") {
+          assertUploadWriteRequest(request, env);
+          return uploadMusicLibraryTracks(request, env, authorization);
+        }
         return listMusic(request, env, url);
       }
 
@@ -1947,20 +1952,47 @@ function googleDriveDownloadUrl(fileId) {
   return `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`;
 }
 
+function studioMusicLibraryUrlPrefix() {
+  return `${ITEM4_MEDIA_PUBLIC_BASE}/studio/music-library/`;
+}
+
+function isStudioLibraryMusicUrl(urlValue) {
+  return String(urlValue || "").trim().startsWith(studioMusicLibraryUrlPrefix());
+}
+
+function studioMusicR2KeyFromUrl(urlValue) {
+  const value = String(urlValue || "").trim();
+  const prefix = `${ITEM4_MEDIA_PUBLIC_BASE}/`;
+  if (!value.startsWith(prefix)) return null;
+  try {
+    return decodeURIComponent(value.slice(prefix.length));
+  } catch {
+    return value.slice(prefix.length);
+  }
+}
+
+function isMp3MusicFile(file) {
+  const mime = String(file?.type || "").toLowerCase();
+  const ext = item4FileExtension(file?.name);
+  return mime === "audio/mpeg" || mime === "audio/mp3" || ext === "mp3";
+}
+
 function mapMusic(record) {
   const driveFileId = googleDriveFileId(record);
+  const sourceUrl = String(f(record, "Google Drive URL") || "").trim();
+  const studioLibrary = isStudioLibraryMusicUrl(sourceUrl);
   const doNotUse = Boolean(f(record, "Do_Not_Use"));
-  const previewAvailable = Boolean(driveFileId) && !doNotUse;
+  const previewAvailable = !doNotUse && Boolean(driveFileId || studioLibrary);
   return {
     id: record.id,
     name: f(record, "Asset Name"),
     display_name: cleanMusicDisplayName(f(record, "Asset Name")),
-    google_drive_url: f(record, "Google Drive URL"),
+    google_drive_url: sourceUrl || f(record, "Google Drive URL"),
     google_drive_file_id: driveFileId,
     preview_url: previewAvailable ? `/api/music/${record.id}/preview` : null,
     preview_available: previewAvailable,
-    preview_source: previewAvailable ? "google_drive" : null,
-    r2_preview_key: musicPreviewKey(record),
+    preview_source: previewAvailable ? (driveFileId ? "google_drive" : "studio_r2") : null,
+    r2_preview_key: studioLibrary ? studioMusicR2KeyFromUrl(sourceUrl) : musicPreviewKey(record),
     mime_type: f(record, "MIME_Type"),
     file_extension: f(record, "File_Extension"),
     file_size_mb: f(record, "File_Size_MB"),
@@ -1968,6 +2000,7 @@ function mapMusic(record) {
     rights_status: f(record, "Rights_Status"),
     description: f(record, "Asset_Description"),
     do_not_use: doNotUse,
+    studio_uploaded: studioLibrary,
   };
 }
 
@@ -11123,12 +11156,125 @@ async function listOutputs(request, env, url, authorization) {
 }
 
 async function listMusic(request, env, url) {
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: clampLimit(url, 100, 100),
-    view: env.AIRTABLE_MUSIC_VIEW_ID || null,
-  });
+  const limit = clampLimit(url, 100, 100);
+  const [catalog, uploaded] = await Promise.all([
+    listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+      limit,
+      view: env.AIRTABLE_MUSIC_VIEW_ID || null,
+    }),
+    listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+      limit,
+      filterFormula: "AND({Asset_Role}='Music',FIND('studio/music-library',{Google Drive URL}))",
+    }).catch(() => []),
+  ]);
+
+  const seen = new Set();
+  const records = [];
+  for (const record of [...uploaded, ...catalog]) {
+    if (!record?.id || seen.has(record.id)) continue;
+    seen.add(record.id);
+    records.push(record);
+  }
 
   return respond(request, env, { ok: true, records: records.map(mapMusic) });
+}
+
+const MUSIC_LIBRARY_MAX_FILES = 8;
+const MUSIC_LIBRARY_MAX_FILE_BYTES = 40 * 1024 * 1024;
+
+async function uploadMusicLibraryTracks(request, env, authorization) {
+  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+
+  let form;
+  try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded music"); }
+  const files = form.getAll("files").filter((value) => value && typeof value.arrayBuffer === "function");
+  if (!files.length) throw new HttpError(400, "Choose at least one MP3 file");
+  if (files.length > MUSIC_LIBRARY_MAX_FILES) {
+    throw new HttpError(400, `Upload no more than ${MUSIC_LIBRARY_MAX_FILES} MP3 files at once`);
+  }
+
+  const displayName = String(form.get("display_name") || "").trim();
+  const description = String(form.get("description") || "").trim();
+  for (const file of files) {
+    if (!isMp3MusicFile(file)) {
+      throw new HttpError(415, `${file.name || "A file"} is not an MP3. Upload .mp3 files only.`);
+    }
+    if (Number(file.size || 0) > MUSIC_LIBRARY_MAX_FILE_BYTES) {
+      throw new HttpError(413, `${file.name || "A track"} exceeds the 40 MB per-file limit`);
+    }
+  }
+
+  const uploaded = [];
+  const pendingKey = { current: null };
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
+      const safeName = item4SafeFileName(file.name || "track.mp3");
+      const key = `studio/music-library/${id}-${safeName.endsWith(".mp3") ? safeName : `${safeName}.mp3`}`;
+      const body = typeof file.stream === "function" ? file.stream() : await file.arrayBuffer();
+      pendingKey.current = key;
+      await env.STUDIO_MEDIA.put(key, body, {
+        httpMetadata: { contentType: "audio/mpeg" },
+        customMetadata: {
+          originalName: String(file.name || safeName),
+          uploadedBy: String(authorization?.email || authorization?.user?.email || ""),
+          assetId: id,
+        },
+      });
+      const publicUrl = `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
+      const assetName = files.length === 1 && displayName
+        ? displayName
+        : String(file.name || safeName).replace(/\.mp3$/i, "");
+      const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
+        method: "POST",
+        body: JSON.stringify({
+          records: [{
+            fields: {
+              "Asset Name": assetName || "Studio music track",
+              Media_Class: "Audio",
+              "Google Drive URL": publicUrl,
+              MIME_Type: "audio/mpeg",
+              File_Extension: "mp3",
+              File_Size_Bytes: Number(file.size || 0) || null,
+              Intake_Status: "Created",
+              Intake_Date: new Date().toISOString().slice(0, 10),
+              Drive_Access_Status: "Public",
+              Asset_Status: "Available",
+              Active: true,
+              Do_Not_Use: false,
+              Capture_Source: "Client Provided",
+              Rights_Status: "Owned",
+              Asset_Role: "Music",
+              Raw_Source_Eligibility: "Not Applicable",
+              Asset_Description: description || "Studio Music Library upload stored in R2.",
+              Studio_Transfer_ID: `MUSIC-${id}`,
+            },
+          }],
+          typecast: true,
+        }),
+      });
+      const record = Array.isArray(created?.records) ? created.records[0] : null;
+      if (!record?.id) throw new HttpError(502, "Music was stored, but the catalog record was not created");
+      pendingKey.current = null;
+      uploaded.push(mapMusic(record));
+    }
+  } catch (error) {
+    if (pendingKey.current) {
+      try { await env.STUDIO_MEDIA.delete(pendingKey.current); } catch {}
+    }
+    throw error;
+  }
+
+  return respond(request, env, {
+    ok: true,
+    uploaded: uploaded.length,
+    records: uploaded,
+    message: uploaded.length === 1
+      ? "Track added to the music library."
+      : `${uploaded.length} tracks added to the music library.`,
+  }, 201);
 }
 
 async function fetchGoogleDriveAudio(record, request) {
@@ -11182,6 +11328,27 @@ function copyDriveAudioHeaders(upstream, mapped) {
   return headers;
 }
 
+async function studioMusicR2Preview(request, env, mapped) {
+  const key = String(mapped.r2_preview_key || studioMusicR2KeyFromUrl(mapped.google_drive_url) || "").trim();
+  if (!key || !env.STUDIO_MEDIA) throw new HttpError(404, "Studio music preview source is not available");
+
+  const object = await env.STUDIO_MEDIA.get(key);
+  if (!object) throw new HttpError(404, "Studio music file was not found in storage");
+
+  const headers = new Headers();
+  headers.set("Content-Type", object.httpMetadata?.contentType || mapped.mime_type || "audio/mpeg");
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "private, max-age=300");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Studio-Preview-Source", "studio-r2");
+  if (object.size) headers.set("Content-Length", String(object.size));
+
+  if (request.method === "HEAD") {
+    return new Response(null, { status: 200, headers });
+  }
+  return new Response(object.body, { status: 200, headers });
+}
+
 async function musicPreview(request, env, url) {
   const identity = accessIdentity(request);
   if (!identity.email && !identity.jwt_present) {
@@ -11195,6 +11362,9 @@ async function musicPreview(request, env, url) {
   const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
   const mapped = mapMusic(record);
   if (mapped.do_not_use) throw new HttpError(403, "This music asset is marked Do Not Use");
+  if (mapped.preview_source === "studio_r2") {
+    return studioMusicR2Preview(request, env, mapped);
+  }
   if (!mapped.google_drive_file_id) throw new HttpError(404, "Google Drive preview source is not available");
 
   if (request.method === "HEAD") {
