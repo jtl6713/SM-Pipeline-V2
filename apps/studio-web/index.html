@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.164-music-drive">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.172-idea-library-pick">
 </head>
 <body>
  <header class="topbar">
@@ -1049,7 +1049,7 @@
  </li>
  <li>
  <strong>Add photos from the idea drawer.</strong>
- <span>Open the idea, then <em>Add photos</em>. That creates a Production request. Drop in the stills. Studio builds a multi-platform plan from the photo count, not from a content-type picker on the idea.</span>
+ <span>Open the idea, then <em>Add new photos</em> or <em>Use existing</em>. New uploads start an empty Production request. Library stills attach first, then you customize. Studio builds a multi-platform plan from the photo count, not from a content-type picker on the idea.</span>
  </li>
  <li>
  <strong>Confirm platforms and crops in Production.</strong>
@@ -1137,7 +1137,7 @@
  <ul>
  <li><strong>Generate AI ideas</strong> — create 1–10 ideas. Studio waits until they show up in the table.</li>
  <li><strong>New idea</strong> — select an existing unpromoted candidate or enter a title/summary by hand.</li>
- <li><strong>Manage</strong> — edit copy, hold/restore, delete, or <em>Add photos</em> to open Production.</li>
+ <li><strong>Manage</strong> — edit copy, hold/restore, delete, or choose <em>Add new photos</em> / <em>Use existing</em> to open Production.</li>
  <li><strong>Promote without photos</strong> — advanced path when footage already lives in the catalog. Requires a summary. Most work should use Add photos instead.</li>
  </ul>
  <figure class="support-shot">
@@ -1262,14 +1262,29 @@
 
  <div class="production-request-launch" id="productionRequestLaunch">
  <div>
- <strong>Next: add photos</strong>
- <span>This idea is only a brief. Upload stills, leave the rest on defaults, then approve from Production. Reel / Slideshow Reel / TikTok / Short are chosen from the photos — not from a type list here.</span>
+ <strong>This idea is a brief</strong>
+ <span>Choose new uploads or library stills, then customize on Production. Reel / Slideshow Reel / TikTok / Short are chosen from the photos — not from a type list here.</span>
  </div>
- <button type="button" class="primary-button" id="configureProductionButton">Add photos</button>
+ <div class="idea-media-chooser">
+ <button type="button" class="primary-button" id="configureProductionButton">Add new photos</button>
+ <button type="button" class="secondary-button" id="useExistingLibraryButton">Use existing</button>
+ </div>
+ </div>
+
+ <div class="idea-library-picker" id="ideaLibraryPicker" hidden>
+ <label class="form-field">
+ <span>Search library stills</span>
+ <input id="ideaLibrarySearch" type="search" placeholder="Andersonville, Pilsen, neighborhood…">
+ </label>
+ <p class="idea-library-picker-hint" id="ideaLibraryPickerHint">Suggested stills are checked when they match this idea or were ingested today.</p>
+ <div class="idea-library-grid" id="ideaLibraryGrid"></div>
+ <div class="idea-library-picker-actions">
+ <button type="button" class="primary-button" id="ideaLibraryContinueButton" disabled>Continue to Production</button>
+ </div>
  </div>
 
  <details class="idea-library-promote" id="ideaLibraryPromote">
- <summary>Promote without photos</summary>
+ <summary>Promote without photos (advanced)</summary>
  <p class="idea-library-promote-copy">Uses the existing media library and R2. This does not attach photos you upload. Open only if footage already lives in the catalog.</p>
  <div class="promotion-zone" id="ideaPromotionZone">
  <div class="promotion-heading">
@@ -1351,9 +1366,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.170-tooltips"></script>
+ <script src="/assets/config.js?v=0.6.172-idea-library-pick"></script>
  <script src="/assets/ez-plan.js?v=0.6.149-finished-retry"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.170-tooltips"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.170";</script>
+ <script src="/assets/app-item4-0619.js?v=0.6.172-idea-library-pick"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.172";</script>
 </body>
 </html>
