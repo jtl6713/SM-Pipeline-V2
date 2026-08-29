@@ -935,7 +935,7 @@
  <p class="subtle" id="operationsIntakeMeta"></p>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Similar accounts</h2><p>Profile-scoped watchlist for Chicago content research. Instagram and YouTube posts are stored in Studio Insights Observations, then aggregated into a seasonal learned model for posting time and caption guidance. TikTok and Facebook groups stay reference-only. Suggested publish times never auto-apply; Now stays the default.</p></div>
+ <div class="panel-heading"><div><h2>Similar accounts</h2><p>Profile-scoped watchlist for Chicago content research. Instagram and YouTube posts are stored in Studio Insights Observations, then aggregated into a seasonal learned model for posting time and caption guidance. Use Find Chicago creators to search YouTube beyond the seeded handles. TikTok and Facebook groups stay reference-only (no public timing API in Studio yet). Suggested publish times never auto-apply; Now stays the default.</p></div>
  <div class="ops-inline-form">
  <label class="subtle" for="operationsInsightsSeason">Season</label>
  <select id="operationsInsightsSeason"><option value="winter">Winter</option><option value="spring">Spring</option><option value="summer">Summer</option><option value="fall">Fall</option></select>
@@ -944,11 +944,13 @@
  </div>
  <p class="subtle" id="operationsSimilarTimesMeta">Similar-account timing loads with Operations.</p>
  <p class="subtle" id="operationsInsightsCaptionMeta">Caption guidance loads with Operations.</p>
+ <div id="operationsInsightsOverview" class="insights-overview" hidden></div>
  <div id="operationsSimilarHeatmap" class="similar-heatmap"></div>
  <form class="ops-inline-form" id="operationsWatchlistForm">
  <select id="operationsWatchlistPlatform"><option value="instagram">Instagram</option><option value="youtube">YouTube</option><option value="tiktok">TikTok</option><option value="facebook">Facebook</option></select>
  <input type="text" id="operationsWatchlistHandle" placeholder="handle" maxlength="80">
  <button type="submit" class="secondary-button">Add handle</button>
+ <button type="button" class="secondary-button" id="operationsDiscoverCreators">Find Chicago creators</button>
  </form>
  <p class="subtle" id="operationsWatchlistEmpty">No handles yet. Opening Operations seeds the Chicago list Joseph provided, plus researched city/tourism peers.</p>
  <div id="operationsWatchlist" class="ops-profile-list"></div>

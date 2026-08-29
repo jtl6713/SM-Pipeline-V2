@@ -56,6 +56,7 @@ export default {
       const isInsightsBestTimesRoute = url.pathname === "/api/insights/best-times";
       const isInsightsSimilarTimesRoute = url.pathname === "/api/insights/similar-times";
       const isInsightsCaptionsRoute = url.pathname === "/api/insights/captions";
+      const isInsightsDiscoverRoute = url.pathname === "/api/insights/discover";
       const isInsightsWatchlistRoute = url.pathname === "/api/insights/watchlist";
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
@@ -94,6 +95,7 @@ export default {
       const isOperationsIntakeWrite = isOperationsIntakeRoute && request.method === "POST";
       const isInsightsWatchlistWrite = isInsightsWatchlistRoute && (request.method === "POST" || request.method === "PATCH");
       const isInsightsSimilarTimesWrite = isInsightsSimilarTimesRoute && request.method === "POST";
+      const isInsightsDiscoverWrite = isInsightsDiscoverRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
         (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
@@ -133,8 +135,10 @@ export default {
         isOperationsIntakeWrite ||
         isInsightsWatchlistWrite ||
         isInsightsSimilarTimesWrite ||
+        isInsightsDiscoverWrite ||
         (isInsightsBestTimesRoute && request.method === "GET") ||
         (isInsightsSimilarTimesRoute && request.method === "GET") ||
+        (isInsightsCaptionsRoute && request.method === "GET") ||
         (isInsightsWatchlistRoute && request.method === "GET") ||
         (isR5DoneHookRoute && request.method === "POST") ||
         (isRr2HookRoute && (request.method === "GET" || request.method === "POST"));
@@ -161,7 +165,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.155-insights-learning-db",
+          version: "0.10.156-insights-overview-discovery",
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
@@ -170,6 +174,8 @@ export default {
           studio_insights_learning_db_v1: true,
           studio_insights_seasonal_v1: true,
           studio_insights_caption_learning_v1: true,
+          studio_insights_overview_stats_v1: true,
+          studio_insights_youtube_discovery_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
@@ -483,6 +489,12 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "tenant_admin");
         return postInsightsSimilarTimesSweep(request, env, url, authorization);
+      }
+
+      if (isInsightsDiscoverRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return postInsightsDiscover(request, env, url, authorization);
       }
 
       if (isInsightsWatchlistRoute) {
@@ -828,6 +840,12 @@ export default {
         await studioRecomputeInsightsLearned(env, { profile: "chicago" });
       } catch (error) {
         console.warn("insights learned-model recompute failed", error);
+      }
+      try {
+        // Light discovery on cron so the watchlist grows beyond the seeded handles.
+        await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5 });
+      } catch (error) {
+        console.warn("insights youtube discovery cron failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -9538,6 +9556,51 @@ function studioNormalizeSimilarStatus(entry) {
   return status || (entry?.fetched_at ? "ok" : "pending");
 }
 
+function studioInsightsBuildOverview({ posts, accounts, timed, reference, cache, heatmap, season }) {
+  const rows = Array.isArray(posts) ? posts : [];
+  const likes = rows.reduce((sum, post) => sum + (Number(post.likes) || 0), 0);
+  const views = rows.reduce((sum, post) => sum + (Number(post.views) || 0), 0);
+  const comments = rows.reduce((sum, post) => sum + (Number(post.comments) || 0), 0);
+  const withCaption = rows.filter((post) => String(post.caption || "").trim()).length;
+  const byPlatform = {};
+  for (const post of rows) {
+    const key = String(post.platform || "unknown").toLowerCase() || "unknown";
+    byPlatform[key] = (byPlatform[key] || 0) + 1;
+  }
+  const accountStatuses = (timed || []).map((row) => {
+    const entry = cache?.accounts?.[studioSimilarAccountKey(row.platform, row.handle)] || {};
+    return studioNormalizeSimilarStatus(entry);
+  });
+  const timedOk = accountStatuses.filter((status) => status === "ok").length;
+  const top = Array.isArray(heatmap?.buckets) ? heatmap.buckets[0] : null;
+  const earliest = rows
+    .map((post) => Date.parse(post.published_at))
+    .filter((ts) => Number.isFinite(ts))
+    .sort((a, b) => a - b)[0];
+  const latest = rows
+    .map((post) => Date.parse(post.published_at))
+    .filter((ts) => Number.isFinite(ts))
+    .sort((a, b) => b - a)[0];
+  return {
+    posts: rows.length,
+    accounts_timed: (timed || []).length,
+    accounts_timed_ok: timedOk,
+    accounts_reference: (reference || []).length,
+    likes,
+    views,
+    comments,
+    avg_likes: rows.length ? Math.round(likes / rows.length) : 0,
+    avg_views: rows.length ? Math.round(views / rows.length) : 0,
+    captions: withCaption,
+    by_platform: byPlatform,
+    top_window: top ? { day: top.day, window: top.window, posts: top.posts, score: top.score } : null,
+    season,
+    earliest_published_at: Number.isFinite(earliest) ? new Date(earliest).toISOString() : null,
+    latest_published_at: Number.isFinite(latest) ? new Date(latest).toISOString() : null,
+    as_of: cache?.as_of || null,
+  };
+}
+
 function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts: providedPosts }) {
   const timed = studioTimedWatchlistAccounts(accounts, theme, platform);
   const reference = (accounts || []).filter((row) => !STUDIO_SIMILAR_TIMED_PLATFORMS.has(row.platform) && (!theme || (row.profile || "chicago") === theme));
@@ -9560,6 +9623,7 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
   });
   const heatmap = studioBuildSimilarHeatmap(posts);
   const captionLearned = studioInsightsBuildCaptionLearned(posts);
+  const overview = studioInsightsBuildOverview({ posts, accounts, timed, reference, cache, heatmap, season });
   const stale = timed.filter((row) => studioSimilarAccountStale(cache?.accounts?.[studioSimilarAccountKey(row.platform, row.handle)]));
   const label = studioSimilarProfileLabel(theme);
   const seasonLabel = studioSeasonLabel(season);
@@ -9594,6 +9658,7 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
     source: heatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE ? "similar_accounts" : "insufficient",
     storage: posts.length ? "database" : "cache",
     sample_size: heatmap.sample_size,
+    overview,
     accounts: accountViews,
     reference_accounts: reference.map((row) => ({ platform: row.platform, handle: row.handle, source: row.source, profile: row.profile || theme })),
     buckets: heatmap.buckets.slice(0, 16),
@@ -10076,6 +10141,122 @@ async function studioFetchYoutubePublicUploads(handle, creds) {
     }))
     .filter((item) => item.published_at);
   return { status: posts.length ? "ok" : "unavailable", error: posts.length ? null : "No dated public uploads.", posts };
+}
+
+const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
+  chicago: [
+    "Chicago travel vlog",
+    "Chicago city guide",
+    "things to do in Chicago",
+    "Chicago food tour",
+    "Explore Chicago",
+  ],
+  la: [
+    "Los Angeles travel vlog",
+    "things to do in Los Angeles",
+    "LA city guide",
+  ],
+  nyc: [
+    "New York City travel vlog",
+    "things to do in New York",
+    "NYC city guide",
+  ],
+});
+
+async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
+  const theme = studioNormalizeSimilarProfile(options.theme || "chicago");
+  const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
+  const settings = await studioActivePipelineSettings(env, ["YOUTUBE_API_KEY"]).catch(() => ({}));
+  const youtubeKey = settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY;
+  if (!youtubeKey) {
+    return { ok: false, status: "needs_key", added: [], discovered: [], message: "Add YOUTUBE_API_KEY to discover Chicago creators on YouTube." };
+  }
+  const queries = STUDIO_INSIGHTS_DISCOVERY_QUERIES[theme] || STUDIO_INSIGHTS_DISCOVERY_QUERIES.chicago;
+  const query = queries[Math.floor(Math.random() * queries.length)];
+  const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=${encodeURIComponent(String(limit))}&q=${encodeURIComponent(query)}&key=${encodeURIComponent(youtubeKey)}`;
+  const response = await fetch(searchUrl);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body?.error) {
+    return {
+      ok: false,
+      status: "error",
+      added: [],
+      discovered: [],
+      message: studioTruncateInsightError(body?.error || { message: `YouTube discovery HTTP ${response.status}` }),
+    };
+  }
+  const discovered = [];
+  for (const item of body?.items || []) {
+    const channelId = String(item?.snippet?.channelId || item?.id?.channelId || "").trim();
+    const title = String(item?.snippet?.channelTitle || item?.snippet?.title || "").trim();
+    let handle = title.replace(/\s+/g, "");
+    if (channelId) {
+      const channelResponse = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(youtubeKey)}`
+      );
+      const channelBody = await channelResponse.json().catch(() => ({}));
+      const customUrl = String(channelBody?.items?.[0]?.snippet?.customUrl || "").trim().replace(/^@/, "");
+      if (customUrl) handle = customUrl;
+    }
+    handle = studioSanitizeYtHandle(handle);
+    if (!handle) continue;
+    discovered.push({
+      platform: "youtube",
+      handle,
+      source: "discovery",
+      profile: theme,
+      title: title || handle,
+      query,
+    });
+  }
+  const accounts = await studioEnsureSimilarWatchlist(env);
+  const existing = new Set(accounts.map((row) => studioSimilarAccountKey(row.platform, row.handle)));
+  const added = [];
+  for (const row of discovered) {
+    const key = studioSimilarAccountKey(row.platform, row.handle);
+    if (existing.has(key)) continue;
+    accounts.push({
+      platform: row.platform,
+      handle: row.handle,
+      source: "discovery",
+      profile: theme,
+    });
+    existing.add(key);
+    added.push(row);
+  }
+  if (added.length) {
+    await studioUpsertSetting(
+      env,
+      STUDIO_SIMILAR_WATCHLIST_SETTING,
+      JSON.stringify(accounts),
+      "Chicago similar-account watchlist including YouTube discovery results."
+    );
+  }
+  return {
+    ok: true,
+    status: "ok",
+    query,
+    discovered,
+    added,
+    message: added.length
+      ? `Discovered and added ${added.length} YouTube Chicago creator(s) from “${query}”.`
+      : discovered.length
+        ? `Found ${discovered.length} YouTube channel(s) for “${query}”; all were already on the watchlist.`
+        : `No YouTube channels found for “${query}”.`,
+  };
+}
+
+async function postInsightsDiscover(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const theme = payload.profile || payload.theme
+    ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
+    : await studioResolveSimilarTimesTheme(env, url, authorization);
+  const result = await studioDiscoverYoutubeChicagoCreators(env, {
+    theme,
+    limit: payload.limit,
+  });
+  return respond(request, env, { ok: result.ok !== false, ...result, profile: theme });
 }
 
 async function studioSweepSimilarAccountTimes(env, options = {}) {
