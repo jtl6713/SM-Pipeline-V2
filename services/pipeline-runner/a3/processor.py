@@ -6,6 +6,7 @@ from typing import Any
 
 from a3.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, VIDEO_NO_FRAMES_NOTES
 from a3.frames import extract_frames, image_metadata
+from a3.metadata_merge import merge_photo_metadata_fields
 from a3.openai_classify import classify_asset
 from a3.prompt import audio_prompt, image_prompt, video_frames_prompt, video_metadata_prompt
 from airtable.client import AirtableClient
@@ -128,6 +129,7 @@ def _classify_one(client: AirtableClient, record: dict[str, Any]) -> dict[str, A
             result["parsed"],
             overrides={"Frame_Images_Used": True, "Frames_Analyzed_Count": 1, "Classification_Status": "Classified"},
         )
+        fields = merge_photo_metadata_fields(fields, meta, field_str(fresh, "Asset Name"))
         client.update_record(MEDIA_ASSETS_TABLE, fresh["id"], fields, typecast=True)
         return {"id": fresh["id"], "route": route, "status": "classified"}
 

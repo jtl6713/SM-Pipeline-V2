@@ -9,6 +9,8 @@ from urllib.parse import urljoin
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 
+from image_metadata import extract_image_metadata
+
 APP_PORT = int(os.environ.get("PORT", "3334"))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 WORK_DIR = Path(os.environ.get("WORK_DIR", "work")).resolve()
@@ -174,7 +176,8 @@ def health():
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffprobe": shutil.which("ffprobe") is not None,
         "supports_frame_selection_mode": True,
-        "frame_selection_modes": ["even", "scene", "hybrid"]
+        "frame_selection_modes": ["even", "scene", "hybrid"],
+        "supports_image_metadata": True,
     })
 
 
@@ -276,6 +279,49 @@ def extract():
         try:
             if video_path.exists():
                 video_path.unlink()
+        except Exception:
+            pass
+
+
+@app.post("/image-metadata")
+def image_metadata_route():
+    payload = request.get_json(force=True, silent=True) or {}
+    download_url = payload.get("download_url")
+    asset_name = str(payload.get("asset_name") or "").strip()
+    record_id = payload.get("record_id", "unknown")
+
+    if not download_url:
+        meta = extract_image_metadata(b"", asset_name=asset_name)
+        meta["ok"] = False
+        meta["error"] = "Missing download_url"
+        meta["record_id"] = record_id
+        return jsonify(meta), 400
+
+    suffix = ".jpg"
+    if asset_name and "." in asset_name:
+        suffix = Path(asset_name).suffix or suffix
+    job_id = f"{record_id}_{uuid.uuid4().hex[:8]}"
+    image_path = WORK_DIR / f"{job_id}{suffix}"
+
+    try:
+        download_file(download_url, image_path)
+        content = image_path.read_bytes()
+        meta = extract_image_metadata(content, asset_name=asset_name)
+        meta["record_id"] = record_id
+        meta["asset_name"] = asset_name
+        meta["mime_type"] = payload.get("mime_type")
+        meta["file_size_mb"] = payload.get("file_size_mb")
+        return jsonify(meta)
+    except Exception as exc:
+        meta = extract_image_metadata(b"", asset_name=asset_name)
+        meta["ok"] = False
+        meta["error"] = str(exc)
+        meta["record_id"] = record_id
+        return jsonify(meta), 200
+    finally:
+        try:
+            if image_path.exists():
+                image_path.unlink()
         except Exception:
             pass
 

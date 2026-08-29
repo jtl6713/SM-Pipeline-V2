@@ -247,6 +247,12 @@ graphic, or reference image using metadata and the supplied image.
 
 {A3_POLICY}
 
+Filename and embedded metadata are authoritative for tagging:
+- Treat Asset Name / smart filename tokens as reliable location/subject hints when present.
+- Preserve embedded keywords, captions, and descriptions from the image metadata response
+  in Search_Keywords and AI_Tags instead of replacing them with invented synonyms.
+- You may add visual tags the metadata missed, but do not drop filename or embedded tags.
+
 Required classification:
 - Media_Class=Image for ordinary photographic images.
 - Media_Class=Graphic for logos, watermarks, illustrations, designed graphics,
