@@ -255,3 +255,5 @@ Native grid cover Pages deploy: 2026-08-27 — Finished video keeps Thumbnail_Mo
 Insights overview Pages deploy: 2026-08-29 — Operations Similar accounts shows capture numbers above the heatmap, plus Find Chicago creators. UI 0.6.157-insights-overview. Source commit after Worker 0.10.156-insights-overview-discovery.
 
 Blue footer Pages deploy: 2026-08-29 — Restore navy Studio footer with gold accent. UI 0.6.160-blue-footer.
+
+Navy footer force Pages deploy: 2026-08-29 — Hardcode Studio footer to Chicago navy #012559 so theme variables cannot wash it out. UI 0.6.161-navy-footer.
