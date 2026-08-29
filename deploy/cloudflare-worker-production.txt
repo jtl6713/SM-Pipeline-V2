@@ -187,3 +187,5 @@ Music library POST allow Worker deploy: 2026-08-29 - Allow POST /api/music throu
 Music favorites Worker deploy: 2026-08-29 - Persist Studio_Favorite on Media Assets and sort starred tracks first in music pickers. Worker 0.10.158-music-favorites.
 
 Idea library pick Worker deploy: 2026-08-29 - Idea drawer Use existing attaches classified Drive stills; Python intake progress no longer waits on Make logs. Worker 0.10.162-idea-library-pick.
+
+Idea library match Worker deploy: 2026-08-29 - Use existing only auto-checks stills that match strong idea tokens; same-day intake alone no longer pulls in other neighborhoods. Worker 0.10.163-idea-library-match.

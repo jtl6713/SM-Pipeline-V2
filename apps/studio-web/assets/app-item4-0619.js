@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.172-idea-library-pick";
+  const BUILD_ID = "item4-0.6.173-idea-library-match";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -5870,8 +5870,8 @@
     if (hint) {
       const suggested = ideaLibraryPickerItems.filter((item) => item.preselected).length;
       hint.textContent = suggested
-        ? `${suggested} suggested still${suggested === 1 ? "" : "s"} checked. Click to toggle, search for more, then continue.`
-        : "Click stills to select them. Search to pull more classified images.";
+        ? `${suggested} still${suggested === 1 ? "" : "s"} matched this idea and ${suggested === 1 ? "is" : "are"} checked. Click to toggle, or search for another neighborhood.`
+        : "No strong match yet. Search a neighborhood or tag, then click stills to select them.";
     }
     syncIdeaLibraryContinue();
   }
