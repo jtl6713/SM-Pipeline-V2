@@ -259,3 +259,5 @@ Blue footer Pages deploy: 2026-08-29 — Restore navy Studio footer with gold ac
 Navy footer force Pages deploy: 2026-08-29 — Hardcode Studio footer to Chicago navy #012559 so theme variables cannot wash it out. UI 0.6.161-navy-footer.
 
 Music favorites Pages deploy: 2026-08-29 — Star tracks in Music Library so they sit at the top of Production music dropdowns. UI 0.6.163-music-favorites.
+
+Production tooltips Pages deploy: 2026-08-29 — Production and review help use the global tooltip layer so hover is not blank. UI 0.6.170-tooltips.
