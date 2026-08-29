@@ -267,3 +267,4 @@ Idea library pick Pages deploy: 2026-08-29 - Idea drawer chooser: Add new photos
 Idea library match Pages deploy: 2026-08-29 - Clarify Use existing hint: checked stills match the idea; search for other neighborhoods. UI 0.6.173-idea-library-match.
 Idea library place Pages deploy: 2026-08-29 - Use existing checks only place-matched stills; search for other neighborhoods. UI 0.6.174-idea-library-place.
 Render label Pages deploy: 2026-08-29 - Pipeline badge shows Rendering not Rendering N/M. UI 0.6.175.
+Schedule suggest Pages deploy: 2026-08-29 - Restore suggested publish times (research/similar) under Open review and Pipeline Time. UI 0.6.176-schedule-suggest.
