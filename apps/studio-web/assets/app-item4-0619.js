@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.164-music-drive";
+  const BUILD_ID = "item4-0.6.170-tooltips";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -7333,12 +7333,19 @@
   }
 
   function phase6BindTooltipTarget(target, text) {
-    if (!target || !text || target.dataset.phase6TooltipBound === "1") return;
-    target.dataset.phase6TooltipBound = "1";
+    if (!target || !text) return;
     target.dataset.phase6Tooltip = text;
     target.classList.add("phase6-tooltip-target");
-    delete target.dataset.studioTooltip;
     target.removeAttribute("title");
+    if (typeof window.studioLockTooltip === "function") {
+      window.studioLockTooltip(target, text);
+      if (target.dataset.phase6TooltipBound === "1") return;
+      target.dataset.phase6TooltipBound = "1";
+      return;
+    }
+    if (target.dataset.phase6TooltipBound === "1") return;
+    target.dataset.phase6TooltipBound = "1";
+    delete target.dataset.studioTooltip;
     target.addEventListener("mouseenter", () => phase6ShowTooltip(target, text));
     target.addEventListener("mouseleave", phase6HideTooltip);
     target.addEventListener("focus", () => phase6ShowTooltip(target, text));
@@ -7448,9 +7455,14 @@
     dot.tabIndex = 0;
     dot.setAttribute("role", "button");
     dot.setAttribute("aria-label", `Help: ${labelSpan.textContent.trim()}`);
-    dot.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); phase6ShowTooltip(dot, text); });
-    labelSpan.appendChild(dot);
     phase6BindTooltipTarget(dot, text);
+    dot.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window.studioShowGlobalTooltip === "function") window.studioShowGlobalTooltip(dot, e);
+      else phase6ShowTooltip(dot, text);
+    });
+    labelSpan.appendChild(dot);
   }
 
   function phase6DecorateTooltips(root = document) {

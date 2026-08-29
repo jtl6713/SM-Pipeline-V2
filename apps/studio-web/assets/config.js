@@ -234,21 +234,22 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     return "";
   }
 
-  function claimedByPhase6(element) {
-    return Boolean(
-      element?.closest?.(".phase6-tooltip-target, [data-phase6-tooltip], #phase6ControlTooltip")
-    );
-  }
-
   function decorateElement(element) {
     if (!(element instanceof Element)) return;
     if (element.closest?.(`#${TOOLTIP_ID}`)) return;
-    if (claimedByPhase6(element)) {
-      delete element.dataset[TOOLTIP_ATTR];
-      return;
-    }
+    if (element.id === "phase6ControlTooltip") return;
+    if (element.dataset.studioTooltipLocked === "1") return;
     const description = cleanText(descriptionFor(element));
     if (!description) return;
+    element.dataset[TOOLTIP_ATTR] = description;
+    if (element.hasAttribute("title")) element.removeAttribute("title");
+  }
+
+  function lockTooltip(element, text) {
+    if (!(element instanceof Element)) return;
+    const description = cleanText(text);
+    if (!description) return;
+    element.dataset.studioTooltipLocked = "1";
     element.dataset[TOOLTIP_ATTR] = description;
     if (element.hasAttribute("title")) element.removeAttribute("title");
   }
@@ -345,19 +346,18 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     tip.setAttribute("aria-hidden", "true");
   }
 
-  function tooltipsEnabled() {
+  function tooltipsEnabled(event) {
+    if (event?.type === "focusin" || event?.type === "click") return true;
+    if (event?.pointerType === "mouse") return true;
     return !window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
   }
 
-  function showTooltip(target) {
-    if (!tooltipsEnabled()) return;
+  function showTooltip(target, event) {
+    if (!tooltipsEnabled(event)) return;
     if (!(target instanceof Element)) return;
-    if (claimedByPhase6(target)) {
-      hideTooltip();
-      return;
-    }
+    if (target.id === "phase6ControlTooltip" || target.closest?.("#phase6ControlTooltip")) return;
     const described = target.closest?.("[data-studio-tooltip]");
-    if (!described || claimedByPhase6(described)) {
+    if (!described) {
       hideTooltip();
       return;
     }
@@ -382,14 +382,14 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     ensureTooltip();
     decorate(document);
 
-    document.addEventListener("pointerover", (event) => showTooltip(event.target), true);
+    document.addEventListener("pointerover", (event) => showTooltip(event.target, event), true);
     document.addEventListener("pointerout", (event) => {
       if (!activeTarget) return;
       const related = event.relatedTarget;
       if (related instanceof Node && activeTarget.contains(related)) return;
       hideTooltip();
     }, true);
-    document.addEventListener("focusin", (event) => showTooltip(event.target), true);
+    document.addEventListener("focusin", (event) => showTooltip(event.target, event), true);
     document.addEventListener("focusout", (event) => {
       if (activeTarget && !activeTarget.contains(event.relatedTarget)) hideTooltip();
     }, true);
@@ -415,6 +415,8 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
   }
 
   window.studioHideGlobalTooltip = hideTooltip;
+  window.studioShowGlobalTooltip = showTooltip;
+  window.studioLockTooltip = lockTooltip;
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initTooltips, { once: true });
   else initTooltips();
