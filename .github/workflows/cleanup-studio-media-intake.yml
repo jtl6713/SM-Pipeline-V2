@@ -1,18 +1,15 @@
 name: Cleanup Studio Media Intake
 
-# One-shot: delete non-branding images/videos, all voiceovers, all thumbnails,
-# and studio intake Media Assets. Preserves Music, Logo, and Watermark.
+# Manual-only: live Media Assets cleanup already ran from the cloud agent.
+# Push trigger removed because the credential envelope no longer decrypts with
+# the current CLOUDFLARE_API_TOKEN (bad decrypt on merge of #33).
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'deploy/cleanup-studio-media-intake.txt'
   workflow_dispatch:
     inputs:
       apply_deletes:
         description: 'Set to 1 to apply deletes (0 = inventory dry-run only)'
         required: true
-        default: '1'
+        default: '0'
 
 permissions:
   contents: read
