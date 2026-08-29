@@ -214,9 +214,15 @@ async function downloadToFile(url, file) {
 }
 
 function metadataFrom(payload) {
-  const privacy = String(payload.privacyStatus || "public").toLowerCase();
+  let privacy = String(payload.privacyStatus || "public").toLowerCase();
   if (!["private", "unlisted", "public"].includes(privacy)) {
     throw new Error("privacyStatus must be private, unlisted, or public");
+  }
+  // YouTube Data API requires privacyStatus=private whenever publishAt is set.
+  // Scheduled Studio posts keep desired end-state "public"; coerce for upload so
+  // YouTube releases the video publicly at publishAt.
+  if (payload.publishAt && privacy !== "private") {
+    privacy = "private";
   }
   const status = {
     privacyStatus: privacy,
@@ -224,7 +230,6 @@ function metadataFrom(payload) {
     containsSyntheticMedia: Boolean(payload.containsSyntheticMedia),
   };
   if (payload.publishAt) {
-    if (privacy !== "private") throw new Error("Scheduled publish requires privacyStatus=private");
     status.publishAt = payload.publishAt;
   }
   return {

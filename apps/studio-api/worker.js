@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.168-best-times-fast",
+          version: "0.10.169-yt-scheduled-public",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -1463,8 +1463,14 @@ function studioPublishHandoffFields(record) {
   if (!aiThumb && cover && (!existingThumb || item4UrlIsStudioPhotoCrop(existingThumb))) {
     fields.Thumbnail_URL = cover;
   }
-  if (platform === "YouTube" && !current("YouTube_Privacy_Status")) {
-    fields.YouTube_Privacy_Status = "public";
+  if (platform === "YouTube") {
+    // Scheduled YouTube posts always target a public release. Immediate posts
+    // default to public when unset. Upload uses private+publishAt when scheduled.
+    if (current("YouTube_Scheduled_Publish_At") || current("Scheduled_Post_Date")) {
+      fields.YouTube_Privacy_Status = "public";
+    } else if (!current("YouTube_Privacy_Status")) {
+      fields.YouTube_Privacy_Status = "public";
+    }
   }
   if (!current("Asset_Aspect_Family") && (
     /9:16/.test(String(f(record, "Aspect_Ratio") || ""))
@@ -4386,7 +4392,12 @@ function studioPublishScheduleFields(payload = {}, record = null) {
     Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
   };
   const platform = String(f(record, "Platform") || "").trim();
-  if (platform === "YouTube") fields.YouTube_Scheduled_Publish_At = iso;
+  if (platform === "YouTube") {
+    fields.YouTube_Scheduled_Publish_At = iso;
+    // Desired end-state is public. Upload path coerces to private+publishAt for
+    // the YouTube API; the channel releases publicly at the scheduled time.
+    fields.YouTube_Privacy_Status = "public";
+  }
   return fields;
 }
 

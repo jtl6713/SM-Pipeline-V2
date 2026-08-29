@@ -63,13 +63,19 @@ def process_request(
     if reason:
         return {"processed": False, "reason": reason, **result}
 
+    # YouTube requires privacyStatus=private when publishAt is set. Studio keeps
+    # YouTube_Privacy_Status as the desired end-state (public for scheduled posts);
+    # coerce only the upload payload so the channel releases publicly at publishAt.
+    publish_at = field_str(output, "YouTube_Scheduled_Publish_At")
+    desired_privacy = field_str(output, "YouTube_Privacy_Status") or "public"
+    upload_privacy = "private" if publish_at else desired_privacy
     payload = {
         "sourceUrl": source_url,
         "title": field_str(output, "Output_Title"),
         "description": field_str(output, "YouTube_Description_Final"),
         "categoryId": field_str(output, "YouTube_Category_ID"),
-        "privacyStatus": field_str(output, "YouTube_Privacy_Status"),
-        "publishAt": field_str(output, "YouTube_Scheduled_Publish_At"),
+        "privacyStatus": upload_privacy,
+        "publishAt": publish_at,
         "madeForKids": as_bool(field(output, "YouTube_Made_For_Kids"), False),
         "containsSyntheticMedia": as_bool(field(output, "YouTube_Contains_Synthetic_Media"), False),
         "idempotencyKey": field_str(output, "YouTube_Idempotency_Key"),
