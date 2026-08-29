@@ -8828,8 +8828,19 @@
   function renderOperationsInsightsOverview(data) {
     const target = $("operationsInsightsOverview");
     if (!target) return;
-    const overview = data?.overview;
-    if (!overview) {
+    const overview = data?.overview || {
+      posts: 0,
+      accounts_timed: 0,
+      accounts_timed_ok: 0,
+      accounts_reference: 0,
+      likes: 0,
+      views: 0,
+      avg_likes: 0,
+      captions: 0,
+      by_platform: {},
+      top_window: null,
+    };
+    if (data && data.ok === false && !data.overview) {
       target.hidden = true;
       target.innerHTML = "";
       return;
