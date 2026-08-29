@@ -137,6 +137,27 @@ def apply_caption(client: AirtableClient, parent: dict[str, Any], outputs: list[
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], patch, typecast=True)
 
 
+def apply_voiceover_script(client: AirtableClient, parent: dict[str, Any], themes: dict[str, Any] | None) -> None:
+    script = str((themes or {}).get("voiceover_script") or "").strip()
+    if not script or field_str(parent, "Voiceover_URL"):
+        return
+    client.update_record(
+        CONTENT_ITEMS_TABLE,
+        parent["id"],
+        {
+            "Voiceover_Script": script,
+            "Script_Status": "Generated",
+            "Voiceover_Status": "Ready",
+            "Content_Status": "Ready for Voiceover",
+        },
+        typecast=True,
+    )
+    parent.setdefault("fields", {})["Voiceover_Script"] = script
+    parent["fields"]["Script_Status"] = "Generated"
+    parent["fields"]["Voiceover_Status"] = "Ready"
+    parent["fields"]["Content_Status"] = "Ready for Voiceover"
+
+
 def seed_ai_slides(
     client: AirtableClient,
     request: dict[str, Any],
@@ -177,15 +198,39 @@ def seed_ai_slides(
     if created:
         pin_ids = [row["id"] for row in live + created]
         client.update_record(CONTENT_ITEMS_TABLE, parent["id"], {"Carousel Slides": pin_ids}, typecast=True)
-    script = str((themes or {}).get("voiceover_script") or "").strip()
-    if script and not field_str(parent, "Voiceover_URL"):
-        client.update_record(
-            CONTENT_ITEMS_TABLE,
-            parent["id"],
-            {"Voiceover_Script": script, "Script_Status": "Generated"},
-            typecast=True,
-        )
+    apply_voiceover_script(client, parent, themes)
     return live + created
+
+
+def ensure_voiceover_script(client: AirtableClient, request: dict[str, Any], parent: dict[str, Any], themes: dict[str, Any] | None = None) -> dict[str, Any]:
+    """SAI1 for voiceover script when uploaded photos skipped themes (caption already set)."""
+    if field_str(parent, "Voiceover_URL") or field_str(parent, "Voiceover_Script"):
+        return themes or {}
+    if themes and str(themes.get("voiceover_script") or "").strip():
+        apply_voiceover_script(client, parent, themes)
+        return themes
+    from sai1.processor import process_request
+
+    title = theme_title(request, parent)
+    if not title:
+        raise StepBlocked("No title available for voiceover script")
+    assets = master_assets(request)
+    covered = [
+        str(asset.get("caption") or "").strip()
+        for asset in sorted(assets, key=lambda item: int(item.get("order") or 0))
+        if str(asset.get("caption") or "").strip()
+    ]
+    result = process_request(
+        title=title,
+        covered_text="\n".join(f"{index + 1}. {text}" for index, text in enumerate(covered)) or "(none)",
+        needed=0,
+        total=max(1, len(covered)),
+    )
+    next_themes = result.get("themes") or {}
+    if not str(next_themes.get("voiceover_script") or "").strip():
+        raise StepBlocked(result.get("reason") or "SAI1 did not return a voiceover script")
+    apply_voiceover_script(client, parent, next_themes)
+    return next_themes
 
 
 def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
@@ -209,9 +254,9 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
             apply_caption(client, parent, ctx["outputs"], themes)
             parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
             ctx["parent"] = parent
-        from studio_produce.thumbnail import ensure_finished_thumbnail
+        from studio_produce.thumbnail import ensure_platform_thumbnails
 
-        ensure_finished_thumbnail(client, request, parent, ctx.get("outputs") or [])
+        ensure_platform_thumbnails(client, request, parent, ctx.get("outputs") or [])
         ctx["parent"] = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
         return "ingest"
     if not parent:
@@ -222,7 +267,8 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
     expected = expected_photo_count(request, assets)
     needed = max(0, expected - len(assets)) if route in {"ai", "mixed"} else 0
     need_caption = not caption_locked(request) and not field_str(parent, "Caption")
-    if not needed and not need_caption:
+    need_script = voiceover_required(request, parent) and not field_str(parent, "Voiceover_Script") and not field_str(parent, "Voiceover_URL")
+    if not needed and not need_caption and not need_script:
         return "audio"
     from sai1.processor import process_request
 
@@ -246,8 +292,15 @@ def step_themes(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if needed:
         slides = ctx["slides"]
         ctx["slides"] = seed_ai_slides(client, request, parent, slides, needed, themes)
+    else:
+        apply_voiceover_script(client, parent, themes)
     if not caption_locked(request):
         apply_caption(client, parent, ctx["outputs"], themes)
+    if need_script and not field_str(parent, "Voiceover_Script") and not field_str(ctx.get("parent") or parent, "Voiceover_Script"):
+        parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+        ctx["parent"] = parent
+        if not field_str(parent, "Voiceover_Script"):
+            raise StepBlocked("SAI1 did not return a voiceover script")
     return "audio"
 
 
@@ -264,6 +317,28 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     has_thumb = bool(field_str(parent, "Thumbnail_URL"))
     if (not want_voice or has_voice) and (not want_thumb or has_thumb):
         return "images"
+    if want_voice and not has_voice and not field_str(parent, "Voiceover_Script"):
+        ensure_voiceover_script(client, request, parent)
+        parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+        ctx["parent"] = parent
+    if want_voice and not has_voice:
+        # P2 requires Ready for Voiceover + Generated script + Ready VO status.
+        patch = {}
+        if field_str(parent, "Script_Status") != "Generated" and field_str(parent, "Voiceover_Script"):
+            patch["Script_Status"] = "Generated"
+        if field_str(parent, "Voiceover_Status") not in {"Ready", "Generated"}:
+            patch["Voiceover_Status"] = "Ready"
+        if field_str(parent, "Content_Status") != "Ready for Voiceover":
+            patch["Content_Status"] = "Ready for Voiceover"
+        if field_str(parent, "Thumbnail_Status") in {"", "Not Started", "None"} and not want_thumb:
+            patch["Thumbnail_Status"] = "Not Needed"
+        elif field_str(parent, "Thumbnail_Status") in {"", "Not Started", "None"} and want_thumb and not field_str(parent, "Thumbnail_Prompt"):
+            # Cover is generated after VO; do not block P2 voiceover-only on missing prompt.
+            patch["Thumbnail_Status"] = "Not Needed"
+        if patch:
+            client.update_record(CONTENT_ITEMS_TABLE, parent["id"], patch, typecast=True)
+            parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+            ctx["parent"] = parent
     from p2.processor import process_request
 
     result = process_request(
@@ -274,14 +349,24 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     ctx["parent"] = refreshed
     still_voice = want_voice and not field_str(refreshed, "Voiceover_URL")
     still_thumb = want_thumb and not field_str(refreshed, "Thumbnail_URL")
-    if still_voice or still_thumb:
+    if still_voice:
         if result.get("processed"):
-            raise StepWait("Waiting for voiceover or thumbnail")
-        # P2 has no work when VO is Not Needed and the 3D cover is not staged.
-        # Blocking here left 268-273 on fake Rendering with no Remotion job.
-        if result.get("reason") == "no_eligible_p2_route":
-            return "images"
-        raise StepBlocked(result.get("reason") or "P2 did not generate voiceover or thumbnail")
+            raise StepWait("Waiting for voiceover")
+        raise StepBlocked(result.get("reason") or "P2 did not generate voiceover")
+    if still_thumb:
+        # Native grid cover: generate 3D block-letter after VO when P2 skipped thumb.
+        from studio_produce.thumbnail import ensure_platform_thumbnails
+
+        try:
+            ensure_platform_thumbnails(client, request, refreshed, ctx.get("outputs") or [])
+            refreshed = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+            ctx["parent"] = refreshed
+        except Exception as exc:
+            if result.get("reason") == "no_eligible_p2_route":
+                raise StepBlocked(f"Thumbnail required but not generated: {exc}") from exc
+            raise StepWait("Waiting for thumbnail")
+        if not field_str(refreshed, "Thumbnail_URL"):
+            raise StepWait("Waiting for thumbnail")
     return "images"
 
 
@@ -456,9 +541,9 @@ def step_stamp(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if not ctx.get("outputs"):
         raise StepBlocked("No Platform Outputs found for this Production Request")
     if is_finished(ctx) and ctx.get("parent"):
-        from studio_produce.thumbnail import ensure_finished_thumbnail
+        from studio_produce.thumbnail import ensure_platform_thumbnails
 
-        ensure_finished_thumbnail(client, ctx["request"], ctx["parent"], ctx.get("outputs") or [])
+        ensure_platform_thumbnails(client, ctx["request"], ctx["parent"], ctx.get("outputs") or [])
         ctx["parent"] = client.get_record(CONTENT_ITEMS_TABLE, ctx["parent"]["id"])
     result = stamp_outputs(client, ctx["request"], ctx["outputs"], ctx["parent"])
     if result["missing"]:
@@ -533,7 +618,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if all(_output_ready(row) for row in ctx["outputs"]):
         return "done"
     if remaining:
-        raise StepWait(f"Rendering {len(ctx['outputs']) - len(remaining)}/{len(ctx['outputs'])}")
+        raise StepWait("Rendering")
     raise StepBlocked("Outputs are stamped but none are eligible for R3/R4/letter")
 
 

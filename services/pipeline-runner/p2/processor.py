@@ -174,8 +174,8 @@ def process_request(
     content_id = field_str(item, "Content_ID") or item["id"]
     test_run = field_str(item, "Test_Run_ID")
 
-    def _branded_thumbnail(prompt: str) -> bytes:
-        raw = generate_thumbnail_png(prompt)
+    def _branded_thumbnail(prompt: str, *, aspect_ratio: str = "9:16") -> bytes:
+        raw = generate_thumbnail_png(prompt, aspect_ratio=aspect_ratio)
         return apply_watermark_bytes(raw, brand_watermark_bytes(client), output_format="png")
 
     if route == "silent_thumbnail":
