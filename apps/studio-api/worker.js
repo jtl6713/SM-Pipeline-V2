@@ -19656,8 +19656,16 @@ async function dashboard(request, env, url, authorization) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const formula = contentProfileFilterFormula(profile);
   const ideas = (await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, { limit: 100, sortField: "Create_Date", filterFormula: formula })).map(mapIdea);
-  const content = (await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula })).map(mapContent);
+  const contentRows = await listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, { limit: 100, sortField: "Created_At", filterFormula: formula });
   const outputRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 100, filterFormula: formula });
+  const outputsByContent = new Map();
+  for (const output of outputRows) {
+    const contentId = studioFirstLinkedId(f(output, "Content_Item"));
+    if (!contentId) continue;
+    if (!outputsByContent.has(contentId)) outputsByContent.set(contentId, []);
+    outputsByContent.get(contentId).push(output);
+  }
+  const content = contentRows.map((row) => mapContent(row, outputsByContent.get(row.id) || []));
   const outputJobs = await loadStudioProductionJobsForOutputs(env, outputRows);
   const mappedOutputs = outputRows.map((row) => mapOutput(row, outputJobs.get(row)));
   const attentionStates = new Set(["Failed", "Retry Pending", "Manual Action Required"]);
