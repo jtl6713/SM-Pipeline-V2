@@ -251,3 +251,5 @@ Hub mobile Pages deploy: 2026-08-27 — Phone layout for the Hotelify hub: compa
 
 Native grid cover Pages deploy: 2026-08-27 — Finished video keeps Thumbnail_Mode=Yes so the 3D cover is the IG/FB/YT grid image. UI 0.6.156-native-cover.
 
+
+Insights overview Pages deploy: 2026-08-29 — Operations Similar accounts shows capture numbers above the heatmap, plus Find Chicago creators. UI 0.6.157-insights-overview. Source commit after Worker 0.10.156-insights-overview-discovery.

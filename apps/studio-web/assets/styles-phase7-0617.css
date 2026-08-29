@@ -1190,6 +1190,10 @@ html[data-studio-theme="nyc"]{
 .similar-heatmap td[data-heat="3"]{background:#7fb8b0;color:#fff}
 .similar-heatmap td[data-heat="4"]{background:#2f6f68;color:#fff}
 .similar-heatmap-empty{padding:0 20px 12px;font-size:.86rem}
+.insights-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;padding:0 20px 14px}
+.insights-overview-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fbfdfd}
+.insights-overview-card strong{display:block;font-size:1.05rem;line-height:1.2}
+.insights-overview-card span{display:block;margin-top:3px;font-size:.74rem;color:var(--muted)}
 
 /* =========================================================
    Quiet studio chrome — Everlane / Bellroy / Away
