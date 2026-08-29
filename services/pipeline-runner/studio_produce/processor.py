@@ -8,7 +8,7 @@ from typing import Any
 from airtable.client import AirtableClient
 from studio_produce.constants import STEP_LABELS, TERMINAL_STEPS
 from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job
-from studio_produce.job import derive_route, job_is_terminal, new_job, next_step, with_step
+from studio_produce.job import derive_route, job_is_terminal, new_job, next_step, utc_now, with_step
 from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
@@ -40,7 +40,12 @@ def start_job(production_request_record_id: str, *, resume: bool = False) -> dic
     elif resume and job_is_terminal(job):
         route = job.get("route") or derive_route(request.get("fields") or {}, outputs)
         step = pick_resume_step(request, outputs)
-        job = with_step({**job, "route": route, "error": None}, step, error=None)
+        heal = dict(job.get("heal") or {}) if isinstance(job.get("heal"), dict) else {}
+        # Manual/agent resume after escalate clears the escalation latch but keeps history.
+        if str(job.get("step") or "") == "escalated":
+            heal["escalated_at"] = None
+            heal["cleared_at"] = utc_now()
+        job = with_step({**job, "route": route, "error": None, "heal": heal}, step, error=None)
         job["error"] = None
         write_job(client, request_id, job)
     elif not job.get("route"):
@@ -146,6 +151,13 @@ def _run(request_id: str) -> None:
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return
         nxt = nxt or next_step(step)
-        write_job(client, request_id, with_step(job, nxt))
+        next_job = with_step(job, nxt)
+        if nxt == "done" and isinstance(next_job.get("heal"), dict):
+            heal = dict(next_job["heal"])
+            heal["resolved_at"] = utc_now()
+            heal["resume_count"] = 0
+            heal["escalated_at"] = None
+            next_job["heal"] = heal
+        write_job(client, request_id, next_job)
         if nxt in TERMINAL_STEPS:
             return

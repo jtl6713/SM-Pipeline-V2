@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.173-render-timeout-resume",
+          version: "0.10.174-produce-self-heal",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -196,6 +196,7 @@ export default {
           studio_production_location_v1: true,
           studio_production_lifecycle_v1: true,
           studio_render_timeout_resume_v1: true,
+          studio_produce_self_heal_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -5431,6 +5432,9 @@ function parseStudioProductionJob(recordOrRaw) {
 function studioProductionJobLabel(job) {
   if (!job || typeof job !== "object") return null;
   if (String(job.step || "") === "blocked") return String(job.error || job.detail || "Blocked").trim() || "Blocked";
+  if (String(job.step || "") === "escalated") {
+    return String(job.error || job.detail || "Escalated — needs investigation").trim() || "Escalated — needs investigation";
+  }
   const detail = String(job.detail || STUDIO_PRODUCTION_JOB_LABELS[job.step] || job.step || "").trim();
   // Collapse PR-level counters so Pipeline rows never show "Rendering 2/6".
   if (/^Rendering(\s+\d+\/\d+)?$/i.test(detail) || String(job.step || "") === "render") return "Rendering";
@@ -5580,6 +5584,69 @@ async function startOrphanedStudioProductionJobs(env) {
   return pulses;
 }
 
+async function pulseStudioProduceOpsAlert(env, requestId, job) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) {
+    console.warn("studio produce ops-alert skipped: PIPELINE_RUNNER_URL is not set", requestId);
+    return { skipped: "no-runner" };
+  }
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const response = await fetch(`${runnerUrl}/jobs/studio-produce/ops-alert`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({ production_request_record_id: requestId, job }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.warn("studio produce ops-alert failed", requestId, response.status, payload);
+  }
+  const webhook = String(env.PRODUCE_HEAL_WEBHOOK_URL || "").trim();
+  if (webhook) {
+    try {
+      await fetch(webhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "studio_produce_escalated",
+          schema: "studio.produce-heal.1",
+          request_id: requestId,
+          error: job?.error || null,
+          heal: job?.heal || null,
+          route: job?.route || null,
+          studio_url: "https://studio.chicagoshining.com/",
+          instruction:
+            "Investigate this Production Request produce failure, apply a live fix if safe, then resume studio-produce.",
+        }),
+      });
+    } catch (error) {
+      console.warn("studio produce heal webhook failed", requestId, error);
+    }
+  }
+  return { response, payload };
+}
+
+function studioProduceHealState(job) {
+  const raw = job && typeof job.heal === "object" && job.heal ? job.heal : {};
+  const maxResumes = Math.max(1, Math.min(20, Number(raw.max_resumes) || 5));
+  return {
+    schema: "studio.produce-heal.1",
+    resume_count: Math.max(0, Number(raw.resume_count) || 0),
+    max_resumes: maxResumes,
+    last_resume_at: raw.last_resume_at || null,
+    last_block_error: raw.last_block_error || null,
+    last_step: raw.last_step || null,
+    escalated_at: raw.escalated_at || null,
+    notified_at: raw.notified_at || null,
+  };
+}
+
+function isTransientRenderBlockError(blockError) {
+  return /(timed?\s*out|timeout|connectionpool|connection reset|502|503|504)/i.test(String(blockError || ""));
+}
+
 async function resumeStaleStudioProductionJobs(env, options = {}) {
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 25,
@@ -5596,24 +5663,94 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
       const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       const job = parseStudioProductionJob(record);
       const step = String(job?.step || "").trim();
-      if (step === "done") continue;
+      if (step === "done" || step === "escalated") continue;
+
       const blockError = String(job?.error || "");
-      const skippableBlock = step === "blocked" && /no_eligible_p2_route/i.test(blockError);
-      const transientRenderBlock = step === "blocked" && /(timed?\s*out|timeout|connectionpool|connection reset|502|503|504)/i.test(blockError);
-      if (step === "blocked" && !skippableBlock && !transientRenderBlock) continue;
+      const heal = studioProduceHealState(job);
+      const isBlocked = step === "blocked";
+      const transientRenderBlock = isBlocked && isTransientRenderBlockError(blockError);
+      const skippableBlock = isBlocked && /no_eligible_p2_route/i.test(blockError);
+      // Always retry blocked jobs (any failure class) until the heal budget is exhausted.
       const updated = Date.parse(String(job?.updated_at || ""));
-      const stale = skippableBlock || transientRenderBlock || !job?.job_id || !Number.isFinite(updated) || (now - updated) >= staleAfter;
+      const stale =
+        isBlocked ||
+        skippableBlock ||
+        transientRenderBlock ||
+        !job?.job_id ||
+        !Number.isFinite(updated) ||
+        (now - updated) >= staleAfter;
       if (!stale) continue;
-      if (transientRenderBlock) {
-        const resumedJob = {
+
+      if (isBlocked && heal.resume_count >= heal.max_resumes) {
+        const escalatedJob = {
           ...job,
-          step: "render",
+          step: "escalated",
           attempt: 1,
           updated_at: new Date().toISOString(),
-          error: null,
-          detail: "Rendering",
-          percent: Math.max(Number(job?.percent) || 0, 70),
+          error: blockError || "Produce retries exhausted",
+          detail: "Escalated — needs investigation",
+          percent: 5,
+          heal: {
+            ...heal,
+            last_block_error: blockError || heal.last_block_error,
+            last_step: heal.last_step || step,
+            escalated_at: new Date().toISOString(),
+            notified_at: new Date().toISOString(),
+          },
         };
+        await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: { Studio_Production_Job_JSON: JSON.stringify(escalatedJob), Updated_At: new Date().toISOString() },
+            typecast: false,
+          }),
+        });
+        const alert = await pulseStudioProduceOpsAlert(env, requestId, escalatedJob);
+        pulses.push({
+          key: "STUDIO_PRODUCE",
+          request: requestId,
+          escalated: true,
+          resume_count: heal.resume_count,
+          alert_ok: Boolean(alert?.payload?.ok || alert?.skipped),
+        });
+        continue;
+      }
+
+      const nextHeal = isBlocked
+        ? {
+            ...heal,
+            resume_count: heal.resume_count + 1,
+            last_resume_at: new Date().toISOString(),
+            last_block_error: blockError || heal.last_block_error,
+            last_step: step,
+            escalated_at: null,
+          }
+        : heal;
+
+      let resumedJob = {
+        ...job,
+        heal: nextHeal,
+        updated_at: new Date().toISOString(),
+      };
+      if (isBlocked) {
+        if (transientRenderBlock) {
+          resumedJob = {
+            ...resumedJob,
+            step: "render",
+            attempt: 1,
+            error: null,
+            detail: "Rendering",
+            percent: Math.max(Number(job?.percent) || 0, 70),
+          };
+        } else {
+          // Keep step=blocked so the runner resume path runs pick_resume_step.
+          resumedJob = {
+            ...resumedJob,
+            attempt: 1,
+            error: null,
+            detail: "Self-heal resume",
+          };
+        }
         await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
           method: "PATCH",
           body: JSON.stringify({
@@ -5622,12 +5759,15 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
           }),
         });
       }
+
       const { payload } = await item4PulseStudioProduceJob(env, requestId, { resume: true });
       pulses.push({
         key: "STUDIO_PRODUCE",
         request: requestId,
         resumed: true,
-        step: payload?.job?.step || step || "themes",
+        self_heal: isBlocked,
+        resume_count: nextHeal.resume_count,
+        step: payload?.job?.step || resumedJob.step || step || "themes",
       });
     } catch (error) {
       pulses.push({

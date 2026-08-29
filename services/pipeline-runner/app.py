@@ -9,6 +9,7 @@ from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
 from studio_music.processor import ingest_studio_music
+from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
 
 logger = logging.getLogger("pipeline-runner")
@@ -369,6 +370,28 @@ def run_studio_produce_resume():
         (result.get("job") or {}).get("step"),
     )
     return jsonify({"ok": True, **result}), 202
+
+
+@app.post("/jobs/studio-produce/ops-alert")
+def run_studio_produce_ops_alert():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    body = request.get_json(silent=True) or {}
+    record_id = str(body.get("production_request_record_id") or "").strip()
+    job = body.get("job") if isinstance(body.get("job"), dict) else {}
+    outputs = body.get("outputs") if isinstance(body.get("outputs"), list) else None
+    if not record_id.startswith("rec"):
+        return jsonify({"error": "production_request_record_id is required"}), 422
+    result = send_produce_escalation(request_id=record_id, job=job, outputs=outputs)
+    status_code = 200 if result.get("ok") else 502
+    logger.info(
+        "job=studio-produce-ops-alert request=%s ok=%s gmail=%s",
+        record_id,
+        result.get("ok"),
+        result.get("gmail_message_id"),
+    )
+    return jsonify(result), status_code
 
 
 def main() -> None:

@@ -655,6 +655,7 @@
     const job = record?.studio_production_job;
     const step = String(job?.step || "").trim();
     if (step === "blocked") return "Blocked";
+    if (step === "escalated") return "Escalated — needs investigation";
     const state = String(record?.studio_state || "").trim();
     // Per-row badge stays simple. Job counters like "Rendering 2/6" are PR-level,
     // not meaningful on each Platform Output row.
@@ -9082,8 +9083,12 @@
       const timing = studioOutputTimingLabel(r);
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
       const canOpen = Boolean(r.creative_available);
-      const blocked = String(r.studio_production_job?.step || "") === "blocked" || Boolean(r.studio_job_error);
-      const notReadyLabel = blocked ? "Blocked" : "Not ready yet";
+      const blocked = ["blocked", "escalated"].includes(String(r.studio_production_job?.step || "")) || Boolean(r.studio_job_error);
+      const notReadyLabel = String(r.studio_production_job?.step || "") === "escalated"
+        ? "Escalated"
+        : blocked
+          ? "Blocked"
+          : "Not ready yet";
       const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
