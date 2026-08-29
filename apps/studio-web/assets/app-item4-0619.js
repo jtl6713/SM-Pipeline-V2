@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.177-best-times-fast";
+  const BUILD_ID = "item4-0.6.179-production-lifecycle";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -6533,12 +6533,16 @@
     target.innerHTML = '<div class="empty production-empty"><strong>Loading drafts…</strong></div>';
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
-      if (!records.length) {
-        target.innerHTML = '<div class="empty production-empty">No drafts yet.</div>';
+      // Drafts = still editable (or mid-promote). Promoted requests live under
+      // In production / Platform pipeline — not as Continue cards.
+      const draftStatuses = new Set(["Draft", "Ready", "Submitted"]);
+      const drafts = records.filter((record) => draftStatuses.has(String(record?.status || "").trim()));
+      if (!drafts.length) {
+        target.innerHTML = '<div class="empty production-empty">No open drafts. Start from Home, or open Platform pipeline for work already promoted.</div>';
         return;
       }
       await ensureIdeasCache();
-      target.innerHTML = `<div class="production-draft-grid">${records.map(r => {
+      target.innerHTML = `<div class="production-draft-grid">${drafts.map(r => {
         const ideaName = ideaTitleForRequest(r) || "Untitled piece";
         const timing = studioRecordTimingLabel(r);
         const platforms = join(r.platforms);
@@ -6550,7 +6554,7 @@
         </article>`;
       }).join("")}</div>`;
 
-      const byId = new Map(records.map(record => [record.id, record]));
+      const byId = new Map(drafts.map(record => [record.id, record]));
       target.querySelectorAll("[data-pr-id]").forEach(button => {
         button.addEventListener("click", async () => {
           const record = byId.get(button.dataset.prId);
@@ -6776,14 +6780,20 @@
     }
     loadProductionRequests();
     const target = $("contentList");
-    target.innerHTML = '<div class="empty production-empty"><strong>Loading the pipeline…</strong></div>';
+    target.innerHTML = '<div class="empty production-empty"><strong>Loading in-production items…</strong></div>';
     try {
       const { records = [] } = await api("/api/content?limit=100");
-      if (!records.length) {
-        target.innerHTML = '<div class="empty production-empty">Nothing in the pipeline yet.</div>';
+      // Hide pieces whose platform outputs are all published / scheduled / done.
+      // Per-output detail stays on Platform pipeline.
+      const active = records.filter((record) => !record?.lifecycle_complete);
+      if (!active.length) {
+        const hadAny = records.length > 0;
+        target.innerHTML = hadAny
+          ? '<div class="empty production-empty">Nothing actively in production. Published and scheduled pieces are on Platform pipeline.</div>'
+          : '<div class="empty production-empty">Nothing in production yet.</div>';
         return;
       }
-      renderContentItemsTable(target, records);
+      renderContentItemsTable(target, active);
     } catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
   }
 

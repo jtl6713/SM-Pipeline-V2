@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.171-production-location",
+          version: "0.10.172-production-lifecycle",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -194,6 +194,7 @@ export default {
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
           studio_production_location_v1: true,
+          studio_production_lifecycle_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -1756,12 +1757,77 @@ function normalizedOutputState(record) {
   return "Queued";
 }
 
-function normalizedContentStage(record) {
+const CONTENT_OUTPUT_TERMINAL_STATES = new Set([
+  "Published",
+  "Scheduled",
+  "Draft Delivered",
+  "Skipped",
+]);
+
+function contentLifecycleFromOutputs(outputRecords = []) {
+  const list = Array.isArray(outputRecords) ? outputRecords.filter(Boolean) : [];
+  if (!list.length) return null;
+  const states = list.map((record) => normalizedOutputState(record));
+  const counts = {};
+  for (const state of states) counts[state] = (counts[state] || 0) + 1;
+  const allTerminal = states.every((state) => CONTENT_OUTPUT_TERMINAL_STATES.has(state));
+
+  let studioStage = "In Pipeline";
+  if (allTerminal) {
+    if (states.every((state) => state === "Published" || state === "Skipped")) studioStage = "Published";
+    else if (states.some((state) => state === "Scheduled")) studioStage = "Scheduled";
+    else if (states.some((state) => state === "Draft Delivered")) studioStage = "Draft Delivered";
+    else studioStage = "Complete";
+  } else if (states.some((state) => ["Failed", "Manual Action Required", "Retry Pending"].includes(state))) {
+    studioStage = "Needs Attention";
+  } else if (states.some((state) => state === "Ready for Review")) {
+    studioStage = "Review";
+  } else if (states.some((state) => state === "Rendering")) {
+    studioStage = "Rendering";
+  } else if (states.some((state) => ["Uploading", "Platform Processing", "Approved"].includes(state))) {
+    studioStage = states.some((state) => state === "Uploading" || state === "Platform Processing")
+      ? "Publishing"
+      : "Approved";
+  } else if (states.some((state) => state === "Preparing Assets")) {
+    studioStage = "Preparing Assets";
+  }
+
+  const earlyRender = new Set(["Queued", "Preparing Assets", "Rendering"]);
+  let renderStatus = null;
+  if (states.some((state) => state === "Rendering")) renderStatus = "Rendering";
+  else if (states.every((state) => !earlyRender.has(state))) renderStatus = "Ready";
+
+  let reviewStatus = null;
+  if (states.some((state) => state === "Ready for Review")) reviewStatus = "Ready for Review";
+  else if (allTerminal) reviewStatus = "Complete";
+  else if (states.some((state) => ["Approved", "Scheduled", "Published", "Uploading", "Platform Processing", "Draft Delivered"].includes(state))) {
+    reviewStatus = "Approved";
+  }
+
+  return {
+    studio_stage: studioStage,
+    render_status: renderStatus,
+    review_status: reviewStatus,
+    lifecycle_complete: allTerminal,
+    output_state_counts: counts,
+  };
+}
+
+function normalizedContentStage(record, outputRecords = null) {
+  const rollup = contentLifecycleFromOutputs(outputRecords);
+  if (rollup?.studio_stage) return rollup.studio_stage;
+
   const fields = record?.fields || {};
   const value = (name) => String(fields[name] || "").toLowerCase();
   if (value("Review_Status").includes("ready for review") || value("Carousel_Review_Status").includes("ready for review") || value("Carousel_Review_Status").includes("review sent")) return "Review";
   if (value("Render_Status").includes("render")) return value("Render_Status").includes("rendered") ? "Review" : "Rendering";
   if (["needs assets", "partial match"].some((s) => value("Asset_Match_Status").includes(s))) return "Assets Needed";
+
+  // Platform Outputs are the live lifecycle. Leftover Content_Status / Generated
+  // flags on the parent must not freeze the Production table on "Generating".
+  const outputLinks = Array.isArray(fields["Platform Outputs"]) ? fields["Platform Outputs"] : [];
+  if (outputLinks.length) return "In Pipeline";
+
   if (value("Content_Status").includes("ready for") || value("Content_Status").includes("generated") || value("Script_Status").includes("generated") || value("Voiceover_Status").includes("generated") || value("Thumbnail_Status").includes("generated")) return "Generating";
   return "Configuring";
 }
@@ -1799,20 +1865,24 @@ function mapIdea(record) {
   };
 }
 
-function mapContent(record) {
+function mapContent(record, outputRecords = null) {
+  const linkedOutputs = Array.isArray(outputRecords) ? outputRecords : null;
+  const rollup = contentLifecycleFromOutputs(linkedOutputs);
+  const rawRender = f(record, "Render_Status");
+  const rawReview = f(record, "Review_Status");
   return {
     id: record.id,
     content_id: f(record, "Content_ID"),
     title: f(record, "Content_Title"),
     content_type: f(record, "Content_Type"),
     content_status: f(record, "Content_Status"),
-    studio_stage: normalizedContentStage(record),
+    studio_stage: normalizedContentStage(record, linkedOutputs),
     asset_match_status: f(record, "Asset_Match_Status"),
     script_status: f(record, "Script_Status"),
     voiceover_status: f(record, "Voiceover_Status"),
     thumbnail_status: f(record, "Thumbnail_Status"),
-    render_status: f(record, "Render_Status"),
-    review_status: f(record, "Review_Status"),
+    render_status: rollup?.render_status || rawRender,
+    review_status: rollup?.review_status || rawReview,
     carousel_review_status: f(record, "Carousel_Review_Status"),
     duration: f(record, "Content_Duration"),
     music_url: f(record, "Music_URL"),
@@ -1823,6 +1893,8 @@ function mapContent(record) {
     content_profile_links: f(record, "Content_Profile") || [],
     brand_name: f(record, "Brand_Name") || [],
     market_name: f(record, "Market_Name") || [],
+    lifecycle_complete: Boolean(rollup?.lifecycle_complete),
+    output_state_counts: rollup?.output_state_counts || null,
   };
 }
 
@@ -11623,7 +11695,26 @@ async function listContent(request, env, url, authorization) {
     sortField: "Created_At",
     filterFormula: contentProfileFilterFormula(profile),
   });
-  return respond(request, env, { ok: true, records: records.map(mapContent), profile: mapStudioContentProfile(profile) });
+  const outputsByContent = new Map();
+  try {
+    const outputs = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: Math.max(100, clampLimit(url, 200, 200)),
+      filterFormula: contentProfileFilterFormula(profile),
+    });
+    for (const output of outputs) {
+      const contentId = studioFirstLinkedId(f(output, "Content_Item"));
+      if (!contentId) continue;
+      if (!outputsByContent.has(contentId)) outputsByContent.set(contentId, []);
+      outputsByContent.get(contentId).push(output);
+    }
+  } catch (error) {
+    console.warn("content lifecycle output rollup skipped", error);
+  }
+  return respond(request, env, {
+    ok: true,
+    records: records.map((record) => mapContent(record, outputsByContent.get(record.id) || [])),
+    profile: mapStudioContentProfile(profile),
+  });
 }
 
 async function listOutputs(request, env, url, authorization, ctx = null) {
