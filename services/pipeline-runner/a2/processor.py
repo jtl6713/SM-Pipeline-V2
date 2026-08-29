@@ -27,7 +27,7 @@ from integrations.google_drive import GoogleDriveClient
 FOLDER_LABELS = {
     "video": "ChicagoShining / Assets / Video",
     "branding": "ChicagoShining / Assets / Branding",
-    "image": "ChicagoShining / Assets / Photos",
+    "image": "ChicagoShining / Assets / Photos / Ingestion Intake",
     "other": "ChicagoShining / Assets / Misc",
     "audio": "ChicagoShining / Assets / Music",
 }

@@ -7,7 +7,10 @@ Local Python/FFmpeg frame extraction service used by SM Pipeline V2.
 - Permanent route: `https://frames.chicagoshining.com`
 - Runtime folder: `D:\Content Creation\ChicagoShining Pipeline\Services\Frame_Extractor`
 
-Endpoints: `GET /health`, `POST /extract`, `GET /frames/<job>/<frame>.jpg`.
+Endpoints: `GET /health`, `POST /extract`, `POST /image-metadata`, `GET /frames/<job>/<frame>.jpg`.
+
+`/image-metadata` downloads one still, extracts EXIF/XMP keywords and captions, and parses
+smart filename tokens from `asset_name` for A3 classification.
 
 Runtime-only `.venv/`, `work/` and `public/frames/` are intentionally excluded from Git. The obsolete Quick Tunnel launcher from the historical source archive is not promoted to current authority because production uses the permanent route.
 
