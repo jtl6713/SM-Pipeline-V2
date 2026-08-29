@@ -563,6 +563,24 @@ def _output_ready(output: dict[str, Any]) -> bool:
     return False
 
 
+def _is_transient_render_error(exc: BaseException) -> bool:
+    text = str(exc or "").lower()
+    needles = (
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "connection reset",
+        "connection aborted",
+        "remote disconnected",
+        "connectionpool",
+        "read timed out",
+        "503",
+        "502",
+        "504",
+    )
+    return any(n in text for n in needles)
+
+
 def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if is_finished(ctx):
         return "done"
@@ -575,6 +593,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
         raise StepBlocked("No Platform Outputs found for this Production Request")
     test_run_id = field_str(ctx["request"], "Test_Run_ID") or None
     remaining = []
+    transient = False
     for output in ctx["outputs"]:
         fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
         if _output_ready(fresh):
@@ -585,39 +604,48 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
             field_str(fresh, "Studio_Output_Type") or field_str(fresh, "Output_Type"),
             field_str(fresh, "Platform_Output_Type"),
         )
-        if native or render_status == "Native Photo Route":
-            if render_status != "Native Photo Route":
+        try:
+            if native or render_status == "Native Photo Route":
+                if render_status != "Native Photo Route":
+                    remaining.append(fresh["id"])
+                    continue
+                process_letter(output_record_id=fresh["id"], test_run_id=test_run_id)
+                if field_str(fresh, "Output_Status") != "Ready for Review":
+                    client.update_record(
+                        PLATFORM_OUTPUTS_TABLE,
+                        fresh["id"],
+                        {"Output_Status": "Ready for Review", "Render_Status": "Native Photo Route"},
+                        typecast=True,
+                    )
+                continue
+            # Failed + Remotion_Job_ID usually means harvest timed out after Remotion
+            # already finished — keep polling R5 instead of abandoning the package.
+            if render_status.lower() in {"rendering", "failed"} and field_str(fresh, "Remotion_Job_ID"):
+                result = process_r5(output_record_id=fresh["id"], test_run_id=test_run_id)
+                if result.get("processed") and _output_ready(client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])):
+                    continue
                 remaining.append(fresh["id"])
                 continue
-            process_letter(output_record_id=fresh["id"], test_run_id=test_run_id)
-            if field_str(fresh, "Output_Status") != "Ready for Review":
-                client.update_record(
-                    PLATFORM_OUTPUTS_TABLE,
-                    fresh["id"],
-                    {"Output_Status": "Ready for Review", "Render_Status": "Native Photo Route"},
-                    typecast=True,
-                )
-            continue
-        if render_status.lower() == "rendering" and field_str(fresh, "Remotion_Job_ID"):
-            result = process_r5(output_record_id=fresh["id"], test_run_id=test_run_id)
-            if result.get("processed") and _output_ready(client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])):
+            if render_status == "Ready for Render":
+                process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
+                remaining.append(fresh["id"])
+                continue
+            if field_str(fresh, "Asset_Selection_Status") == "Selected" and not render_status:
+                process_r3(output_record_id=fresh["id"], test_run_id=test_run_id)
+                process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
+                remaining.append(fresh["id"])
                 continue
             remaining.append(fresh["id"])
-            continue
-        if render_status == "Ready for Render":
-            process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
-            remaining.append(fresh["id"])
-            continue
-        if field_str(fresh, "Asset_Selection_Status") == "Selected" and not render_status:
-            process_r3(output_record_id=fresh["id"], test_run_id=test_run_id)
-            process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
-            remaining.append(fresh["id"])
-            continue
-        remaining.append(fresh["id"])
+        except Exception as exc:
+            if _is_transient_render_error(exc):
+                transient = True
+                remaining.append(fresh["id"])
+                continue
+            raise
     ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
     if all(_output_ready(row) for row in ctx["outputs"]):
         return "done"
-    if remaining:
+    if remaining or transient:
         raise StepWait("Rendering")
     raise StepBlocked("Outputs are stamped but none are eligible for R3/R4/letter")
 

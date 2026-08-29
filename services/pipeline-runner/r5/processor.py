@@ -224,12 +224,30 @@ def process_one_output(
             },
         )
     except Exception as exc:
+        message = str(exc) or "Render completed, but final Google Drive upload did not complete."
+        transient = any(
+            needle in message.lower()
+            for needle in (
+                "timed out",
+                "timeout",
+                "connection reset",
+                "connection aborted",
+                "remote disconnected",
+                "connectionpool",
+                "temporarily unavailable",
+                "502",
+                "503",
+                "504",
+            )
+        )
+        # Keep Remotion's completed job harvestable. A read-timeout while copying
+        # the MP4 must not permanently mark the output Failed / Blocked.
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             output["id"],
             {
-                "Render_Status": "Failed",
-                "Final_File_Error_Message": str(exc) or "Render completed, but final Google Drive upload did not complete.",
+                "Render_Status": "Rendering" if transient else "Failed",
+                "Final_File_Error_Message": message,
                 "Output_Status": "In Production",
             },
         )
