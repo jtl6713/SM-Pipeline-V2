@@ -3,4 +3,5 @@ Cleanup Studio Media Assets + intake (Airtable).
 Keep: Music, Logo, Watermark.
 Delete: non-branding images/videos, all Voiceover, all Thumbnail, and studio intake rows.
 Triggered: 2026-08-29.
-Attempt: 1.
+Attempt: 2 — field-name fix only; live cleanup already applied from cloud agent with corrected PAT.
+Note: push trigger still runs APPLY_DELETES=1 (safe no-op if already clean).
