@@ -61,6 +61,8 @@ export default {
       const isR5DoneHookRoute = url.pathname === "/api/hooks/r5-done";
       const isRr2HookRoute = url.pathname === "/api/hooks/rr2";
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
+      const isMusicLibraryRoute = url.pathname === "/api/music";
+      const isMusicLibraryUploadWrite = isMusicLibraryRoute && request.method === "POST";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
@@ -111,6 +113,7 @@ export default {
         isProductionRequestSyncDirectivesWrite ||
         isProductionRequestOutputsSyncWrite ||
         isItem4AssetsUploadWrite ||
+        isMusicLibraryUploadWrite ||
         isItem4AssetDeleteWrite ||
         isItem4PlanWrite ||
         isItem4VariantsWrite ||
@@ -165,7 +168,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.156-insights-overview-discovery",
+          version: "0.10.157-music-upload-allow",
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,

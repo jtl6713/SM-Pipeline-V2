@@ -181,3 +181,5 @@ Native grid cover Worker deploy: 2026-08-27 - Keep the 3D thumbnail on Platform 
 
 
 Insights overview Worker deploy: 2026-08-29 - Return overview stats with similar-times and discover Chicago YouTube creators beyond the seeded watchlist. Worker 0.10.156-insights-overview-discovery.
+
+Music library POST allow Worker deploy: 2026-08-29 - Allow POST /api/music through the Phase 2A method gate so Music Library uploads can write Media Assets. Worker 0.10.157-music-upload-allow.
