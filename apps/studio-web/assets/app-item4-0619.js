@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.179-production-lifecycle";
+  const BUILD_ID = "item4-0.6.180-review-thumbnail-link";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -7002,6 +7002,15 @@
     return "";
   }
 
+  function phase6ThumbnailDownloadUrl(output = activeCreativeOutput) {
+    const raw = String(output?.thumbnail_url || "").trim();
+    if (!raw) return "";
+    if (/media\.chicagoshining\.com\//i.test(raw)) return raw;
+    const id = phase6DriveFileId(raw);
+    if (id) return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`;
+    return raw;
+  }
+
   function phase6IsNativeStillPreview(output = activeCreativeOutput) {
     if (!output) return false;
     if (/story/i.test(String(output.studio_output_type || output.platform_output_type || output.format || ""))) return false;
@@ -7089,6 +7098,7 @@
         ["Ratio", output?.aspect_ratio || "9:16"],
         ["Voiceover", creativeVoiceoverOn(output) ? "On" : "Off"],
         ["Music", creativeMusicLabel(output, kind)],
+        ["Cover", output?.thumbnail_url ? "Download cover in details below" : "Missing — generate before TikTok"],
         ["Change mix", "Use Audio below, then Apply mix & rerender"],
       ],
       short: [
@@ -7097,6 +7107,7 @@
         ["Ratio", output?.aspect_ratio || "9:16"],
         ["Voiceover", creativeVoiceoverOn(output) ? "On" : "Off"],
         ["Music", creativeMusicLabel(output, kind)],
+        ["Cover", output?.thumbnail_url ? "Download cover in details below" : "Missing"],
         ["Change mix", "Use Audio below, then Apply mix & rerender"],
       ],
       still: [
@@ -7159,8 +7170,8 @@
       story: ["This Story", "Fixed 15-second teaser. Music volume is the useful control."],
       reel: ["This Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
       slideshow: ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
-      tiktok: ["This TikTok video", "Finished file saved as a TikTok draft. Set the cover in TikTok from the 3D thumbnail."],
-      short: ["This YouTube Short", "Photo sequence with your audio settings. Music volume is the useful control."],
+      tiktok: ["This TikTok video", "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok."],
+      short: ["This YouTube Short", "Photo sequence with your audio settings. Download the cover from Thumbnail in the details panel if YouTube needs a custom thumb."],
       still: ["This photo post", "These photos publish as stills. There is no video mix to edit."],
       video: [`This ${String(output?.platform || "video").trim()} ${creativeOutputTypeLabel(output) || "output"}`.replace(/\s+/g, " ").trim(), "Play the render. Music volume is the useful control."],
     };
@@ -7809,6 +7820,8 @@
   function renderCreativeOutputMeta(output) {
     const target = $("creativeOutputMeta");
     const watchUrl = output.studio_preview_url || output.final_file_url || output.output_url || "";
+    const thumbUrl = phase6ThumbnailDownloadUrl(output);
+    const coverPreview = phase6CoverStillUrl(output);
     const rows = [
       ["Platform", output.platform || "—"],
       ["Output type", output.platform_output_type || output.format || "—"],
@@ -7823,8 +7836,19 @@
     if (output.studio_preview_updated_at) rows.push(["Preview updated", formatStudioDateTime(output.studio_preview_updated_at)]);
     if (output.output_caption) rows.push(["Caption", output.output_caption]);
     if (output.output_hashtags) rows.push(["Hashtags", output.output_hashtags]);
-    target.innerHTML = rows.map(([label, v]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(v)}</b></div>`).join("")
-      + (watchUrl ? `<div><span>File</span><b><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(watchUrl)}">Open rendered file ↗</a></b></div>` : "");
+    let html = rows.map(([label, v]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(v)}</b></div>`).join("");
+    if (watchUrl) {
+      html += `<div><span>File</span><b><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(watchUrl)}">Open rendered file ↗</a></b></div>`;
+    }
+    if (thumbUrl) {
+      html += `<div><span>Thumbnail</span><b><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(thumbUrl)}">Download cover ↗</a></b></div>`;
+      if (coverPreview) {
+        html += `<div class="creative-thumb-preview"><span>Cover</span><b><a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(thumbUrl)}"><img src="${escapeHtml(coverPreview)}" alt="Output cover thumbnail" width="120" height="213" loading="lazy"></a></b></div>`;
+      }
+    } else {
+      html += `<div><span>Thumbnail</span><b>Not set</b></div>`;
+    }
+    target.innerHTML = html;
   }
 
   function renderCreativeRatioPanel() {
