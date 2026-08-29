@@ -90,16 +90,27 @@ class FacebookReelClient:
             )
         return data
 
-    def finish(self, *, video_id: str, description: str, title: str) -> dict[str, Any]:
+    def finish(
+        self,
+        *,
+        video_id: str,
+        description: str,
+        title: str,
+        place: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "upload_phase": "finish",
+            "video_id": video_id,
+            "video_state": "PUBLISHED",
+            "description": description,
+            "title": title,
+        }
+        place_id = str(place or "").strip()
+        if place_id.isdigit():
+            params["place"] = place_id
         response = requests.post(
             self._url(f"{self.page_id}/video_reels"),
-            params={
-                "upload_phase": "finish",
-                "video_id": video_id,
-                "video_state": "PUBLISHED",
-                "description": description,
-                "title": title,
-            },
+            params=params,
             headers={"Authorization": f"Bearer {self._token}"},
             timeout=60,
         )

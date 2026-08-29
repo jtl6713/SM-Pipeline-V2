@@ -9,6 +9,7 @@ from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from carousel.timeutil import iso_utc, stamp_minutes
 from integrations.gmail import GmailClient
 from item4.settings import PipelineSettings
+from publish.location import resolve_publish_location
 from render.fields import field_str
 from ttd.common import append_note, preview, response_json, retry_at, unlock_fields, valid_record_id
 from ttd.constants import (
@@ -76,7 +77,9 @@ def process_request(
     )
 
     subject = handoff_email_subject(output)
-    html_body = handoff_email_html(output)
+    location = resolve_publish_location(client, output, settings=settings)
+    result["location"] = location.as_dict() if location else None
+    html_body = handoff_email_html(output, location=location)
     result["subject"] = subject
     try:
         send = GmailClient().send_html(to=to_addr, subject=subject, html_body=html_body)

@@ -26,6 +26,7 @@ from fb.constants import (
 from fb.eligibility import fb2_eligibility_reason
 from fb.graph import FacebookPhotoClient, FacebookPhotoError, load_facebook_page_settings
 from item4.settings import PipelineSettings
+from publish.location import resolve_publish_location
 from render.fields import field, field_str
 
 
@@ -107,13 +108,31 @@ def process_request(
 
     message = facebook_message(output)
     fingerprint = post_fingerprint(message, ids)
+    page_settings = None
+    try:
+        page_settings = load_facebook_page_settings(settings)
+    except FacebookPhotoError:
+        page_settings = None
+    location = resolve_publish_location(
+        client,
+        output,
+        settings=settings,
+        token=(page_settings or {}).get("token", ""),
+        version=(page_settings or {}).get("version", "v25.0"),
+    )
+    result["location"] = location.as_dict() if location else None
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         record_id,
         {
             "FB_Post_Fingerprint": fingerprint,
             "Platform_Publish_Response_JSON": response_json(
-                {"prepared_at": now, "photo_count": len(ids), "fingerprint": fingerprint}
+                {
+                    "prepared_at": now,
+                    "photo_count": len(ids),
+                    "fingerprint": fingerprint,
+                    "location": result["location"],
+                }
             ),
         },
         typecast=True,
@@ -122,16 +141,21 @@ def process_request(
     single = _ci(field_str(output, "FB_Resolved_Publish_Mode")) == _ci(MODE_SINGLE)
 
     try:
-        creds = load_facebook_page_settings(settings)
+        creds = page_settings or load_facebook_page_settings(settings)
         graph = FacebookPhotoClient(**creds)
+        place_id = location.page_id if location else None
         if single:
             source_url = field_str(photos[0], "Asset_4x5_Public_URL")
             image, filename = graph.download_image(source_url)
-            status_code, data = graph.publish_single_photo(image=image, filename=filename, caption=message)
+            status_code, data = graph.publish_single_photo(
+                image=image, filename=filename, caption=message, place=place_id
+            )
             post_id = str(data.get("post_id") or "").strip()
             media_id = str(data.get("id") or "").strip()
         else:
-            status_code, data = graph.publish_attached_media(message=message, photo_ids=ids)
+            status_code, data = graph.publish_attached_media(
+                message=message, photo_ids=ids, place=place_id
+            )
             post_id = str(data.get("id") or "").strip()
             media_id = post_id
     except FacebookPhotoError as exc:

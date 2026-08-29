@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 from carousel.timeutil import iso_utc, utc_now
 from config import load_settings
+from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str
 from ttd.constants import (
     DEFAULT_TITLE,
@@ -21,10 +22,16 @@ def photo_title(record: dict[str, Any]) -> str:
     return (field_str(record, "Output_Title") or DEFAULT_TITLE)[:TITLE_LIMIT]
 
 
-def photo_description(record: dict[str, Any]) -> str:
+def photo_description(
+    record: dict[str, Any],
+    *,
+    location: PublishLocation | None = None,
+) -> str:
     caption = field_str(record, "Output_Caption")
     hashtags = field_str(record, "Output_Hashtags")
     raw = f"{caption}\n\n{hashtags}".strip() if hashtags else caption
+    # TikTok Content Posting API has no place/POI field; keep location in caption text.
+    raw = append_location_line(raw, location)
     return raw[:DESCRIPTION_LIMIT]
 
 
@@ -77,12 +84,18 @@ def image_count_label(record: dict[str, Any]) -> str:
     return str(field(record, "Image_Count") or field(record, "Assets_Ready_Count") or "1")
 
 
-def handoff_email_html(record: dict[str, Any]) -> str:
+def handoff_email_html(record: dict[str, Any], *, location: PublishLocation | None = None) -> str:
     output_id = html.escape(str(field(record, "Output_ID") or ""))
     title = html.escape(field_str(record, "Output_Title") or "TikTok draft")
     draft_type = html.escape(field_str(record, "TikTok_Draft_Type") or "")
     caption = html.escape(field_str(record, "Output_Caption"))
     hashtags = html.escape(field_str(record, "Output_Hashtags"))
+    location_label = html.escape(location.label if location else "")
+    location_block = (
+        f"<p><b>Suggested TikTok location (tag manually in app):</b> {location_label}</p>"
+        if location_label
+        else ""
+    )
     assets = html.escape(field_str(record, "TikTok_Draft_Assets_JSON"))
     publish_id = html.escape(field_str(record, "TikTok_Draft_Publish_ID"))
     completion = html.escape(field_str(record, "TikTok_Manual_Completion_URL"))
@@ -95,12 +108,14 @@ def handoff_email_html(record: dict[str, Any]) -> str:
         '<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the <b>@chicago.shining</b> inbox. It has not been marked Published in Airtable.</p>'
         f'<div style="border:1px solid #ddd;border-radius:10px;padding:16px;"><h3 style="margin-top:0;">Output #{output_id} — {title}</h3>'
         f"<p><b>Draft type:</b> {draft_type}<br><b>Number of images:</b> {count}<br><b>Recommended publishing time:</b> {when}</p>"
+        f"{location_block}"
         '<p><b>Caption and hashtags — copyable block:</b></p>'
         f'<div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{caption}\n\n{hashtags}</div>'
         '<p><b>Ordered asset manifest:</b></p>'
         f'<div style="white-space:pre-wrap;word-break:break-word;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{assets}</div>'
         "<ol><li>Open the TikTok inbox notification from <b>SM Pipeline Social Publisher</b>.</li>"
         "<li>Review and edit the images/video and caption.</li>"
+        "<li>Add the suggested location tag in TikTok when available.</li>"
         "<li>Add music in TikTok before posting when music is requested.</li>"
         "<li>Post manually.</li>"
         "<li>Use the button below to record the final TikTok URL.</li></ol>"

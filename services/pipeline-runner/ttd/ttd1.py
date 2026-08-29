@@ -9,6 +9,7 @@ from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
+from publish.location import resolve_publish_location
 from render.fields import field, field_str
 from ttd.assets import is_video_route, parse_photo_images, pending_manual_share_count, video_source_url
 from ttd.client import (
@@ -123,6 +124,8 @@ def process_request(
     try:
         worker = load_tiktok_settings(settings)
         api = TikTokDraftClient(base_url=worker["url"], secret=worker["secret"])
+        location = resolve_publish_location(client, output, settings=settings)
+        result["location"] = location.as_dict() if location else None
         if is_video_route(output) or field_str(output, "TikTok_Draft_Type").casefold() == DRAFT_TYPE_VIDEO.casefold():
             source_url = video_source_url(output)
             result["draft_kind"] = "video"
@@ -136,7 +139,7 @@ def process_request(
             status_code, body = api.init_photo(
                 {
                     "title": photo_title(output),
-                    "description": photo_description(output),
+                    "description": photo_description(output, location=location),
                     "photo_images": images,
                     "photo_cover_index": 0,
                 }

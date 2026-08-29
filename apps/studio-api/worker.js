@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.169-yt-scheduled-public",
+          version: "0.10.170-publish-location",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -192,6 +192,7 @@ export default {
           studio_insights_overview_stats_v1: true,
           studio_insights_youtube_discovery_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
+          studio_publish_location_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -17453,6 +17454,140 @@ async function studioPublishInstagramFeedPhoto(env, record) {
   }
 }
 
+const STUDIO_CHICAGO_PLACE_PAGE_IDS = {
+  andersonville: "213085162",
+  bridgeport: "215445468",
+  bronzeville: "215445484",
+  bucktown: "215445475",
+  chicago: "212988662",
+  chinatown: "212926558",
+  "clark street": "240095110",
+  edgewater: "215331155",
+  "fulton market": "1022618899",
+  "garfield park": "215331179",
+  "gold coast": "215331191",
+  "grant park": "213370358",
+  "humboldt park": "215331208",
+  "hyde park": "220153895",
+  lakeview: "215331247",
+  "lincoln park": "213116558",
+  "lincoln square": "215331278",
+  "logan square": "215331288",
+  loop: "219126758",
+  "the loop": "219126758",
+  "magnificent mile": "213370385",
+  "millennium park": "213370402",
+  "museum campus": "1022620361",
+  "navy pier": "215331224",
+  "near north side": "1022620545",
+  "old town": "215331371",
+  pilsen: "214844790",
+  "printers row": "1022619648",
+  ravenswood: "215445547",
+  "river north": "215445508",
+  "rogers park": "215445556",
+  "south loop": "215445599",
+  streeterville: "215445616",
+  "ukrainian village": "220153978",
+  uptown: "220153990",
+  "west loop": "215445650",
+  "wicker park": "212926625",
+};
+
+function studioNormPlaceText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function studioMarketName(record) {
+  const raw = f(record, "Market_Name");
+  if (Array.isArray(raw)) {
+    const first = raw.map((item) => String(item || "").trim()).find(Boolean);
+    return first || "";
+  }
+  return String(raw || "").trim();
+}
+
+function studioMatchKnownPlace(text) {
+  const hay = ` ${studioNormPlaceText(text)} `;
+  const names = Object.keys(STUDIO_CHICAGO_PLACE_PAGE_IDS).sort((a, b) => b.length - a.length);
+  for (const name of names) {
+    if (hay.includes(` ${name} `)) return name;
+  }
+  return "";
+}
+
+function studioLookupPlacePageId(name) {
+  const key = studioNormPlaceText(name);
+  if (!key) return null;
+  if (STUDIO_CHICAGO_PLACE_PAGE_IDS[key]) {
+    return { page_id: STUDIO_CHICAGO_PLACE_PAGE_IDS[key], source: "chicago_places" };
+  }
+  for (const placeName of Object.keys(STUDIO_CHICAGO_PLACE_PAGE_IDS).sort((a, b) => b.length - a.length)) {
+    if (key.includes(placeName) || placeName.includes(key)) {
+      return { page_id: STUDIO_CHICAGO_PLACE_PAGE_IDS[placeName], source: "chicago_places_fuzzy" };
+    }
+  }
+  return null;
+}
+
+async function studioResolvePublishLocation(env, outputRecord) {
+  const contentId = studioFirstLinkedId(f(outputRecord, "Content_Item"));
+  let content = null;
+  if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
+    content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+  }
+  const market = studioMarketName(content) || studioMarketName(outputRecord);
+  const primary = String(f(content, "Primary_Location") || "").trim();
+  const area = String(f(content, "Neighborhood_or_Area") || "").trim();
+  let name = "";
+  let source = "";
+  if (primary) {
+    name = primary;
+    source = "content.Primary_Location";
+  } else if (area) {
+    name = area;
+    source = "content.Neighborhood_or_Area";
+  } else {
+    const blob = [
+      f(content, "Content_Title"),
+      f(content, "Idea_Summary"),
+      f(content, "Hook"),
+      f(content, "Caption"),
+      f(outputRecord, "Output_Title"),
+      f(outputRecord, "Title_Text"),
+      f(outputRecord, "Output_Caption"),
+    ].filter(Boolean).join(" ");
+    const matched = studioMatchKnownPlace(blob);
+    if (matched) {
+      name = matched.split(" ").map((part) => (part === "the" ? "The" : part.charAt(0).toUpperCase() + part.slice(1))).join(" ");
+      if (matched === "the loop") name = "The Loop";
+      source = "copy_match";
+    } else if (market) {
+      name = market;
+      source = "market_fallback";
+    }
+  }
+  if (!name) return null;
+  const looked = studioLookupPlacePageId(name) || (market && studioNormPlaceText(name) !== studioNormPlaceText(market)
+    ? studioLookupPlacePageId(market)
+    : null);
+  const label = market && !name.toLowerCase().includes(market.toLowerCase())
+    ? `${name}, ${market}`
+    : name;
+  return {
+    name,
+    market,
+    label,
+    page_id: looked?.page_id || null,
+    source: looked ? `${source}|${looked.source}` : source,
+    query: market ? `${name}, ${market}` : name,
+  };
+}
+
 async function studioPublishInstagramFeedPhotoInner(env, record) {
   const prepared = await studioEnsurePublicJpegForPublish(env, record);
   record = prepared.record;
@@ -17471,16 +17606,31 @@ async function studioPublishInstagramFeedPhotoInner(env, record) {
   if (!igUserId || !token) return { ok: false, skipped: "missing-instagram-settings", target: "IG-FEED-GRAPH" };
 
   const caption = studioGraphCaption(record);
-  const createResponse = await fetch(`https://graph.facebook.com/${version}/${igUserId}/media`, {
+  const location = await studioResolvePublishLocation(env, record);
+  const createParams = {
+    image_url: imageUrl,
+    caption,
+    access_token: token,
+  };
+  if (location?.page_id) createParams.location_id = String(location.page_id);
+  let createResponse = await fetch(`https://graph.facebook.com/${version}/${igUserId}/media`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      image_url: imageUrl,
-      caption,
-      access_token: token,
-    }),
+    body: new URLSearchParams(createParams),
   });
-  const created = await createResponse.json().catch(() => ({}));
+  let created = await createResponse.json().catch(() => ({}));
+  if ((!createResponse.ok || !created.id) && createParams.location_id) {
+    const msg = String(created?.error?.message || "").toUpperCase();
+    if (msg.includes("LOCATION")) {
+      delete createParams.location_id;
+      createResponse = await fetch(`https://graph.facebook.com/${version}/${igUserId}/media`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(createParams),
+      });
+      created = await createResponse.json().catch(() => ({}));
+    }
+  }
   const creationId = String(created.id || "").trim();
   if (!createResponse.ok || !creationId) {
     console.warn("instagram feed photo create failed", createResponse.status, created?.error?.message || "");
@@ -17538,7 +17688,7 @@ async function studioPublishInstagramFeedPhotoInner(env, record) {
       },
     }),
   });
-  return { ok: true, target: "IG-FEED-GRAPH", post_id: mediaId, permalink };
+  return { ok: true, target: "IG-FEED-GRAPH", post_id: mediaId, permalink, location: location || null };
 }
 
 async function studioPublishFacebookPageStory(env, record) {
@@ -17556,6 +17706,7 @@ async function studioPublishFacebookPageStory(env, record) {
   const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
   if (!pageId || !token) return { ok: false, skipped: "missing-facebook-settings" };
 
+  const location = await studioResolvePublishLocation(env, record);
   const storiesUrl = `https://graph.facebook.com/${version}/${pageId}/video_stories`;
   const startResponse = await fetch(storiesUrl, {
     method: "POST",
@@ -17587,12 +17738,27 @@ async function studioPublishFacebookPageStory(env, record) {
     return { ok: false, error: upload?.debug_info?.message || upload?.error?.message || `upload ${uploadResponse.status}` };
   }
 
-  const finishResponse = await fetch(storiesUrl, {
+  const finishParams = {
+    upload_phase: "finish",
+    video_id: String(start.video_id),
+    access_token: token,
+  };
+  if (location?.page_id) finishParams.place = String(location.page_id);
+  let finishResponse = await fetch(storiesUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ upload_phase: "finish", video_id: String(start.video_id), access_token: token }),
+    body: new URLSearchParams(finishParams),
   });
-  const finish = await finishResponse.json().catch(() => ({}));
+  let finish = await finishResponse.json().catch(() => ({}));
+  if ((!finishResponse.ok || finish.success !== true) && finishParams.place) {
+    delete finishParams.place;
+    finishResponse = await fetch(storiesUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(finishParams),
+    });
+    finish = await finishResponse.json().catch(() => ({}));
+  }
   if (!finishResponse.ok || finish.success !== true) {
     console.warn("facebook story finish failed", finishResponse.status, finish?.error?.message || "");
     return { ok: false, error: finish?.error?.message || `finish ${finishResponse.status}` };
@@ -17618,7 +17784,7 @@ async function studioPublishFacebookPageStory(env, record) {
       },
     }),
   });
-  return { ok: true, post_id: postId };
+  return { ok: true, post_id: postId, location: location || null };
 }
 
 async function studioPulseAp0PublicAsset(env, record) {

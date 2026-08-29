@@ -21,6 +21,7 @@ from ap1_igs.eligibility import create_eligibility_reason
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
+from publish.location import resolve_publish_location
 from render.fields import field, field_str
 
 RECORD_ID_PREFIX = "rec"
@@ -70,9 +71,23 @@ def process_request(
         replace_fingerprint=replace_fingerprint,
     )
     video_url = cache_busted_story_url(output)
+    pipeline_settings = PipelineSettings(client)
+    graph_settings = None
+    try:
+        graph_settings = load_instagram_graph_settings(pipeline_settings)
+    except InstagramGraphError:
+        graph_settings = None
+    location = resolve_publish_location(
+        client,
+        output,
+        settings=pipeline_settings,
+        token=(graph_settings or {}).get("token", ""),
+        version=(graph_settings or {}).get("version", "v25.0"),
+    )
     preview["eligibility_reason"] = reason
     preview["video_url"] = video_url
     preview["story_asset_url"] = story_asset_url(output)
+    preview["location"] = location.as_dict() if location else None
     preview["replace_transaction_id"] = field_str(output, "Replace_Transaction_ID")
     if reason:
         return {"processed": False, "reason": reason, **preview}
@@ -107,13 +122,21 @@ def process_request(
     output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
 
     try:
-        settings = load_instagram_graph_settings(PipelineSettings(client))
+        settings = graph_settings or load_instagram_graph_settings(pipeline_settings)
         graph = InstagramReelClient(
             ig_user_id=settings["ig_user_id"],
             token=settings["token"],
             version=settings["version"],
         )
-        created = graph.create_story(video_url)
+        location_id = location.page_id if location else None
+        try:
+            created = graph.create_story(video_url, location_id=location_id)
+        except InstagramGraphError as exc:
+            if location_id and "LOCATION" in str(exc).upper():
+                preview["location_tag_dropped"] = str(exc)
+                created = graph.create_story(video_url)
+            else:
+                raise
         container_id = str(created.get("id") or "").strip()
         if not container_id:
             raise InstagramGraphError("container create returned no id", status_code="unknown", status="No container ID")
