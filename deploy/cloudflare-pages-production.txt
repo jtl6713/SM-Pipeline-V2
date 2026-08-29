@@ -263,3 +263,5 @@ Music favorites Pages deploy: 2026-08-29 — Star tracks in Music Library so the
 Production tooltips Pages deploy: 2026-08-29 — Production and review help use the global tooltip layer so hover is not blank. UI 0.6.170-tooltips.
 
 Idea library pick Pages deploy: 2026-08-29 - Idea drawer chooser: Add new photos vs Use existing library stills. UI 0.6.172-idea-library-pick.
+
+Idea library match Pages deploy: 2026-08-29 - Clarify Use existing hint: checked stills match the idea; search for other neighborhoods. UI 0.6.173-idea-library-match.
