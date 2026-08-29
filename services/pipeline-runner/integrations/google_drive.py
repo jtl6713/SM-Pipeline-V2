@@ -193,6 +193,25 @@ class GoogleDriveClient:
         metadata_response.raise_for_status()
         return metadata_response.json()
 
+    def update_media(self, file_id: str, content: bytes, mime_type: str) -> dict[str, Any]:
+        token = self.access_token()
+        response = requests.patch(
+            f"https://www.googleapis.com/upload/drive/v3/files/{file_id}",
+            params={
+                "uploadType": "media",
+                "supportsAllDrives": "true",
+                "fields": "id,size,mimeType,webContentLink,webViewLink",
+            },
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": mime_type or "application/octet-stream",
+            },
+            data=content or b"",
+            timeout=300,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def upload_and_share(
         self,
         folder_id: str,

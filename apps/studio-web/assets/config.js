@@ -47,6 +47,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     pipelineFilterClear: "Remove the current Pipeline filter and show all platform-output rows again.",
     operationsRunDailyIdeas: "Run today's enabled daily-idea batches immediately. Only profiles whose Daily Ideas toggle is enabled are included.",
     operationsRunIntake: "Start the library intake chain for files waiting in the configured Drive intake folder. This can classify, reconcile, or compress eligible assets.",
+    operationsCapAudioSilence: "Rewrite existing catalog audio on Google Drive so leading silence is no longer than 0.5 seconds. Already processed tracks are skipped.",
     operationsResetRenderUrls: "Repair stale Remotion render URLs on eligible failed/waiting records. Use this after the renderer URL or tunnel has changed.",
     operationsRetryAssetSelection: "Retry asset selection for outputs that previously failed at the asset-selection stage. It does not rerun healthy outputs.",
     operationsMakeAdminBridge: "Run the pending Make admin queue now. Use this only for commands intentionally placed in that queue.",

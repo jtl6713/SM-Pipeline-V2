@@ -407,6 +407,23 @@
     intakePollDeadline = Date.now() + 90000;
     intakePollTimer = setInterval(pollIntakeStatus, 400);
   }
+  $("operationsCapAudioSilence")?.addEventListener("click", async () => {
+    const button = $("operationsCapAudioSilence");
+    try {
+      if (button) button.disabled = true;
+      setOperationsMessage("Capping leading silence on catalog audio…");
+      const result = await api("/api/operations/audio-leading-silence", {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: 180000,
+      });
+      setOperationsMessage(result.message || "Leading silence pass finished.");
+    } catch (error) {
+      setOperationsMessage(error.message || "Leading silence pass failed.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
   $("operationsRunIntake")?.addEventListener("click", async () => {
     const button = $("operationsRunIntake");
     const clientStartedAt = new Date().toISOString();
@@ -9267,6 +9284,8 @@
       if (run) run.hidden = !data.can_edit_profiles;
       const intake = $("operationsRunIntake");
       if (intake) intake.hidden = !data.can_edit_profiles;
+      const capSilence = $("operationsCapAudioSilence");
+      if (capSilence) capSilence.hidden = !data.can_edit_profiles;
       const resetUrls = $("operationsResetRenderUrls");
       if (resetUrls) resetUrls.hidden = !data.can_edit_profiles;
       const retryAssets = $("operationsRetryAssetSelection");

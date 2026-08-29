@@ -1,3 +1,4 @@
+from audio.leading_silence import LeadingSilenceResult, STATUS_NOT_NEEDED
 from studio_music.processor import drive_music_url, ingest_studio_music
 
 
@@ -15,6 +16,10 @@ def test_drive_music_url():
 
 
 def test_ingest_studio_music_uploads_shared_file(monkeypatch):
+    monkeypatch.setattr(
+        "studio_music.processor.cap_leading_silence",
+        lambda content, filename: LeadingSilenceResult(STATUS_NOT_NEEDED, 0.1, 0.0, content, False),
+    )
     monkeypatch.setattr("studio_music.processor.GoogleDriveClient", lambda: _FakeDrive())
     result = ingest_studio_music(content=b"ID3fake", filename="Sunset drone bed")
     assert result["google_drive_file_id"] == "driveMusic1"

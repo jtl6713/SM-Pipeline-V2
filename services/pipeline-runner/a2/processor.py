@@ -18,6 +18,7 @@ from asset.constants import (
 )
 from asset.helpers import as_bool, parse_bytes
 from asset.routing import a2_route_fields, classify_intake_file
+from audio.leading_silence import STATUS_FAILED, apply_drive_leading_silence, is_voiceover_audio
 from carousel.timeutil import chicago_now, iso_ms
 from config import load_settings
 from integrations.gmail import GmailClient
@@ -115,6 +116,16 @@ def process_request(
             moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
             moved_id = str(moved.get("id") or file_id)
             overlay = a2_route_fields(route, name, moved_id)
+            if route == "audio" and not is_voiceover_audio(filename=name, role=str(overlay.get("Asset_Role") or "")):
+                try:
+                    silence = apply_drive_leading_silence(drive, moved_id, filename=name, mime_type=mime)
+                    overlay.update(silence.airtable_fields())
+                    if silence.content:
+                        overlay["File_Size_Bytes"] = len(silence.content)
+                        size = len(silence.content)
+                except Exception:
+                    overlay["Leading_Silence_Status"] = STATUS_FAILED
+                    overlay["Leading_Silence_Removed_Seconds"] = 0
             client.update_record(MEDIA_ASSETS_TABLE, record_id, overlay, typecast=True)
             size_mb = round(size / 1048576, 2)
             gmail.send_html(

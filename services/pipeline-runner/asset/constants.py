@@ -95,6 +95,9 @@ VOICEOVER_FILENAME_HINTS = (
     "english male voice",
     "soft accent",
     "_pvc_",
+    "_voice_normalized",
+    "_voice.mp3",
+    "voice_normalized",
 )
 MUSIC_FILENAME_HINTS = (
     "music",

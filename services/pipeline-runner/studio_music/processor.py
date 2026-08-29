@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from asset.constants import GDRIVE_MUSIC_FOLDER
+from audio.leading_silence import LeadingSilenceResult, STATUS_NOT_NEEDED, cap_leading_silence, is_voiceover_audio
 from integrations.google_drive import GoogleDriveClient
 
 MAX_FILE_BYTES = 40 * 1024 * 1024
@@ -30,6 +31,15 @@ def ingest_studio_music(*, content: bytes, filename: str) -> dict[str, Any]:
     if len(payload) > MAX_FILE_BYTES:
         raise ValueError(f"Music file exceeds the {MAX_FILE_BYTES} byte limit")
 
+    trimmed = (
+        LeadingSilenceResult(STATUS_NOT_NEEDED, 0.0, 0.0, payload, False, "voiceover skipped")
+        if is_voiceover_audio(filename=name)
+        else cap_leading_silence(payload, name)
+    )
+    payload = trimmed.content
+    if not payload:
+        raise ValueError("Music file is empty after leading-silence processing")
+
     drive = GoogleDriveClient()
     uploaded = drive.upload_and_share(GDRIVE_MUSIC_FOLDER, name, payload, "audio/mpeg")
     file_id = str(uploaded.get("id") or "").strip()
@@ -42,4 +52,6 @@ def ingest_studio_music(*, content: bytes, filename: str) -> dict[str, Any]:
         "web_view_link": uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{file_id}/view",
         "folder_id": GDRIVE_MUSIC_FOLDER,
         "filename": name,
+        **trimmed.public_dict(),
+        **trimmed.airtable_fields(),
     }
