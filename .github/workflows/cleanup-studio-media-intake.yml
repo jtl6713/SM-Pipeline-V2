@@ -1,0 +1,128 @@
+name: Cleanup Studio Media Intake
+
+# One-shot: delete non-branding images/videos, all voiceovers, all thumbnails,
+# and studio intake Media Assets. Preserves Music, Logo, and Watermark.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/cleanup-studio-media-intake.txt'
+  workflow_dispatch:
+    inputs:
+      apply_deletes:
+        description: 'Set to 1 to apply deletes (0 = inventory dry-run only)'
+        required: true
+        default: '1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cleanup-studio-media-intake
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AIRTABLE_BASE_ID: appe33zkZn35yirTL
+      MEDIA_ASSETS_TABLE: tblSITCujCsJTNcDe
+      APPLY_DELETES: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_deletes || '1' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Decrypt Airtable PAT (envelope + optional pipeline setting)
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -s deploy/credential-envelope/private.pem.enc
+          test -s deploy/credential-envelope/airtable_pat.ciphertext.b64
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/airtable-envelope-private.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/airtable-pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/airtable-envelope-private.pem \
+            -in /tmp/airtable-pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/bootstrap-pat.txt
+          BOOT=$(tr -d '\n\r' </tmp/bootstrap-pat.txt)
+          if [[ ! "$BOOT" =~ ^pat ]] || [[ ${#BOOT} -lt 40 ]]; then
+            echo "Bootstrap Airtable PAT failed structural validation" >&2
+            exit 1
+          fi
+          # Prefer active Pipeline Settings PAT when present and valid; else bootstrap.
+          code=$(curl -sS -o /tmp/pipeline-pat-record.json -w '%{http_code}' \
+            "https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/tblpHPWeEkyJaF7ql?$(python3 - <<'PY'
+          import urllib.parse
+          print(urllib.parse.urlencode([
+            ('filterByFormula', "{Setting_Name}='Airtable_Personal_Access_Token'"),
+            ('fields[]', 'Setting_Value'),
+            ('fields[]', 'Active'),
+          ]))
+          PY
+          )" -H "Authorization: Bearer $BOOT" || true)
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request
+          boot = pathlib.Path("/tmp/bootstrap-pat.txt").read_text().strip()
+          chosen = boot
+          source = "bootstrap_envelope"
+          try:
+              data = json.loads(pathlib.Path("/tmp/pipeline-pat-record.json").read_text())
+              vals = [
+                  str(r.get("fields", {}).get("Setting_Value") or "").strip()
+                  for r in data.get("records", [])
+                  if r.get("fields", {}).get("Active") and r.get("fields", {}).get("Setting_Value")
+              ]
+              if len(vals) == 1 and vals[0].startswith("pat") and len(vals[0]) >= 40:
+                  # Validate pipeline PAT before preferring it.
+                  req = urllib.request.Request(
+                      f"https://api.airtable.com/v0/meta/bases/{os.environ['AIRTABLE_BASE_ID']}/tables",
+                      headers={"Authorization": f"Bearer {vals[0]}"},
+                  )
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      if resp.status == 200:
+                          chosen = vals[0]
+                          source = "pipeline_settings"
+          except Exception:
+              pass
+          pathlib.Path("/tmp/airtable-pat.txt").write_text(chosen)
+          pathlib.Path("/tmp/airtable-pat-source.txt").write_text(source)
+          print(f"using_pat_source={source}")
+          PY
+
+      - name: Inventory and delete Media Assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          export AIRTABLE_PAT="$(tr -d '\n\r' </tmp/airtable-pat.txt)"
+          export CLEANUP_REPORT_PATH=/tmp/studio-media-cleanup-report.json
+          python3 scripts/cleanup_studio_media_intake.py
+
+      - name: Destroy credentials
+        if: always()
+        shell: bash
+        run: |
+          for f in /tmp/airtable-envelope-private.pem /tmp/airtable-pat.enc /tmp/bootstrap-pat.txt /tmp/airtable-pat.txt /tmp/pipeline-pat-record.json; do
+            [[ ! -e "$f" ]] || shred -u "$f" 2>/dev/null || rm -f "$f"
+          done
+
+      - name: Upload cleanup report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-media-cleanup-${{ github.run_id }}
+          path: |
+            /tmp/studio-media-cleanup-report.json
+            /tmp/studio-media-cleanup-result.json
+            /tmp/airtable-pat-source.txt
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,0 +1,6 @@
+Cleanup Studio Media Assets + intake (Airtable).
+
+Keep: Music, Logo, Watermark.
+Delete: non-branding images/videos, all Voiceover, all Thumbnail, and studio intake rows.
+Triggered: 2026-08-29.
+Attempt: 1.
