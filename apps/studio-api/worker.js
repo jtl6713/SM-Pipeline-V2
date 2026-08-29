@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.164-idea-library-place",
+          version: "0.10.165-produce-owner",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -650,7 +650,7 @@ export default {
       }
 
       if (isItem4StatusRoute) {
-        return getItem4WorkspaceStatus(request, env, url, authorization);
+        return getItem4WorkspaceStatus(request, env, url, authorization, ctx);
       }
 
       if (isProductionRequestOutputsRoute) {
@@ -741,7 +741,7 @@ export default {
       }
 
       if (url.pathname === "/api/outputs") {
-        const response = await listOutputs(request, env, url, authorization);
+        const response = await listOutputs(request, env, url, authorization, ctx);
         cadenceScheduleSync(ctx, env);
         return response;
       }
@@ -817,6 +817,11 @@ export default {
     // starved MX cover stamps plus P2 pulses. Daily ideas stay on a separate
     // waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
+      try {
+        await startOrphanedStudioProductionJobs(env);
+      } catch (error) {
+        console.warn("studio produce orphan kick failed", error);
+      }
       try {
         await resumeStaleStudioProductionJobs(env);
       } catch (error) {
@@ -1739,6 +1744,7 @@ function normalizedOutputState(record) {
   const publisherAssetPrep = has("TikTok_Draft_Status", "ready for assets") || has("TikTok_Draft_Status", "preparing assets") || has("FB_Publish_Status", "ready for assets") || has("FB_Publish_Status", "preparing assets");
   if (studioAssetPrep || (!studioOutputHasReviewableDeliverable(record) && publisherAssetPrep)) return "Preparing Assets";
   if (has("Output_Status", "skipped")) return "Skipped";
+  if (inProduction) return "Preparing Assets";
   return "Queued";
 }
 
@@ -5437,6 +5443,46 @@ async function loadStudioProductionJobsForOutputs(env, records) {
   };
 }
 
+async function startOrphanedStudioProductionJobs(env) {
+  const orphans = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 25,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Remotion_Job_ID}="",{Published_At}=BLANK())',
+  }).catch(() => []);
+  const requestIds = [];
+  for (const po of orphans || []) {
+    let requestId = studioOutputProductionRequestId(po);
+    if (!requestId) {
+      const contentId = studioFirstLinkedId(f(po, "Content_Item"));
+      if (!contentId) continue;
+      try {
+        const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+        requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+          || studioFirstLinkedId(f(parent, "Production Requests"));
+      } catch {
+        continue;
+      }
+    }
+    if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
+  }
+  const pulses = [];
+  for (const requestId of requestIds.slice(0, 6)) {
+    try {
+      await enqueueStudioProductionJob(env, requestId);
+      pulses.push({ key: "STUDIO_PRODUCE_ORPHAN", request: requestId, started: true });
+    } catch (error) {
+      pulses.push({
+        key: "STUDIO_PRODUCE_ORPHAN",
+        request: requestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (pulses.length) console.log("Studio produce orphan kick", JSON.stringify({ count: pulses.length, pulses }));
+  return pulses;
+}
+
 async function resumeStaleStudioProductionJobs(env, options = {}) {
   const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 25,
@@ -6384,7 +6430,7 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   };
 }
 
-async function getItem4WorkspaceStatus(request, env, url, authorization) {
+async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = null) {
   const recordId = item4RequestIdFromPath(url);
 
   // Workspace GET is a read of this request. Make blueprint hardening and
@@ -6457,6 +6503,17 @@ async function getItem4WorkspaceStatus(request, env, url, authorization) {
   const variantStatus = studioIsFinishedPassthrough(record)
     ? (String(f(record, "Studio_Variant_Status") || "") === "Ready" ? "Ready" : "Not Needed")
     : (f(record, "Studio_Variant_Status") || "None");
+  if (
+    ctx
+    && typeof ctx.waitUntil === "function"
+    && assetsStatus === "Ready"
+    && (variantStatus === "Ready" || variantStatus === "Not Needed")
+    && String(f(record, "Request_Status") || "").trim() === "Promoted"
+  ) {
+    ctx.waitUntil(enqueueStudioProductionJob(env, recordId).catch((error) => {
+      console.warn("Item 4 produce enqueue after variants ready failed", recordId, error);
+    }));
+  }
   const previewSelfHealState = assetsStatus === "Error" || variantStatus === "Error"
     ? "error"
     : assetsStatus === "Uploading"
@@ -10869,6 +10926,11 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     } catch (error) {
       console.warn("Studio promote media pulse failed", error);
     }
+    if (Number(outputFanout?.routed_count || 0) > 0) {
+      try { await enqueueStudioProductionJob(env, requestRecordId); } catch (error) {
+        console.warn("Studio produce enqueue after output fanout failed", requestRecordId, error);
+      }
+    }
   }
 
   return { requestRecord, contentItemId, directiveBridge, outputFanout };
@@ -11488,7 +11550,7 @@ async function listContent(request, env, url, authorization) {
   return respond(request, env, { ok: true, records: records.map(mapContent), profile: mapStudioContentProfile(profile) });
 }
 
-async function listOutputs(request, env, url, authorization) {
+async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: clampLimit(url, 100, 100),
@@ -11499,6 +11561,37 @@ async function listOutputs(request, env, url, authorization) {
     healed.push(await phase6RestoreProductionReviewReady(env, record));
   }
   const jobs = await loadStudioProductionJobsForOutputs(env, healed);
+  if (ctx && typeof ctx.waitUntil === "function") {
+    const stalled = healed.filter((record) =>
+      /^in production$/i.test(String(f(record, "Output_Status") || ""))
+      && !String(f(record, "Remotion_Job_ID") || "").trim()
+    );
+    if (stalled.length) {
+      ctx.waitUntil((async () => {
+        const requestIds = [];
+        for (const record of stalled) {
+          let requestId = studioOutputProductionRequestId(record);
+          if (!requestId) {
+            const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+            if (!contentId) continue;
+            try {
+              const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+              requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+                || studioFirstLinkedId(f(parent, "Production Requests"));
+            } catch {
+              continue;
+            }
+          }
+          if (requestId && !requestIds.includes(requestId)) requestIds.push(requestId);
+        }
+        for (const requestId of requestIds.slice(0, 4)) {
+          try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
+            console.warn("Pipeline produce enqueue failed", requestId, error);
+          }
+        }
+      })());
+    }
+  }
   return respond(request, env, {
     ok: true,
     records: healed.map((record) => mapOutput(record, jobs.get(record))),
