@@ -21,8 +21,29 @@ def youtube_defaults(settings: PipelineSettings) -> dict[str, str]:
     }
 
 
+def strip_leading_title(body: str, title: str) -> str:
+    """Remove a duplicated title line from caption body for YouTube descriptions.
+
+    Studio captions are often stored as ``title\\nbody``. YouTube already has a
+    separate title field, so the description should not repeat that title.
+    """
+    text = str(body or "").strip()
+    heading = str(title or "").strip()
+    if not text or not heading:
+        return text
+    lines = text.splitlines()
+    first = lines[0].strip() if lines else ""
+    if first.casefold() == heading.casefold():
+        return "\n".join(lines[1:]).lstrip("\n").strip()
+    return text
+
+
 def description_final(record: dict[str, Any]) -> str:
-    body = field_str(record, "YouTube_Description_Final") or field_str(record, "Output_Caption")
+    title = field_str(record, "Output_Title")
+    # Prefer Output_Caption so a previously stored YouTube_Description_Final that
+    # still includes the title can be corrected on the next YT0 prepare.
+    body = field_str(record, "Output_Caption") or field_str(record, "YouTube_Description_Final")
+    body = strip_leading_title(body, title)
     hashtags = field_str(record, "Output_Hashtags")
     if hashtags:
         return f"{body}\n\n{hashtags}".strip()

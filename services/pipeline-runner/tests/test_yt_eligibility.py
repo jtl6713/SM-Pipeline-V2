@@ -76,3 +76,27 @@ def test_package_helpers():
     assert upload_source_url(record) == "https://media.chicagoshining.com/pub.mp4"
     assert description_final(record) == "Caption\n\n#Chicago"
     assert idempotency_key(record) == "YT-233-recABCDEFGHIJKLMN-BASE"
+
+
+def test_youtube_description_strips_duplicate_title():
+    record = _record(
+        Output_Title="A North Side stroll through Andersonville",
+        Output_Caption=(
+            "A North Side stroll through Andersonville\n"
+            "A North Side stroll through Andersonville—wander Clark Street’s indie shops."
+        ),
+        Output_Hashtags="#Andersonville #Chicago",
+    )
+    assert description_final(record) == (
+        "A North Side stroll through Andersonville—wander Clark Street’s indie shops.\n\n"
+        "#Andersonville #Chicago"
+    )
+    # Already-correct captions stay unchanged.
+    clean = _record(
+        Output_Title="A North Side stroll through Andersonville",
+        Output_Caption="Wander Clark Street’s indie shops, cafes, and the Swedish American Museum.",
+        Output_Hashtags="#Chicago",
+    )
+    assert description_final(clean) == (
+        "Wander Clark Street’s indie shops, cafes, and the Swedish American Museum.\n\n#Chicago"
+    )
