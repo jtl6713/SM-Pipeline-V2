@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.170-tooltips";
+  const BUILD_ID = "item4-0.6.172-idea-library-pick";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -405,12 +405,14 @@
   function startIntakePoll() {
     stopIntakePoll();
     intakePollDeadline = Date.now() + 90000;
-    intakePollTimer = setInterval(pollIntakeStatus, 400);
+    intakePollTimer = setInterval(pollIntakeStatus, 2500);
   }
   $("operationsCapAudioSilence")?.addEventListener("click", async () => {
     const button = $("operationsCapAudioSilence");
     try {
       if (button) button.disabled = true;
+      stopIntakePoll();
+      hideIntakeProgress();
       setOperationsMessage("Capping leading silence on catalog audio…");
       const result = await api("/api/operations/audio-leading-silence", {
         method: "POST",
@@ -440,7 +442,7 @@
       ] });
       let result = null;
       try {
-        result = await api("/api/operations/intake", { method: "POST", body: JSON.stringify({}), timeoutMs: 15000 });
+        result = await api("/api/operations/intake", { method: "POST", body: JSON.stringify({}), timeoutMs: 180000 });
       } catch (error) {
         setOperationsMessage("Checking A2…");
       }
@@ -1296,8 +1298,14 @@
     const configureButton = $("configureProductionButton");
     if (configureButton) {
       configureButton.disabled = promoted || Boolean(idea?.is_on_hold);
-      configureButton.textContent = promoted ? "Production locked" : "Add photos";
+      configureButton.textContent = promoted ? "Production locked" : "Add new photos";
     }
+    const useExistingButton = $("useExistingLibraryButton");
+    if (useExistingButton) {
+      useExistingButton.disabled = promoted || Boolean(idea?.is_on_hold);
+      useExistingButton.hidden = promoted;
+    }
+    resetIdeaLibraryPicker();
     $("holdIdeaButton").hidden = Boolean(idea?.is_on_hold);
     $("restoreIdeaButton").hidden = !idea?.is_on_hold;
     $("holdIdeaButton").disabled = !modifiable;
@@ -5806,7 +5814,140 @@
     } finally {
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
-        button.textContent = "Add photos";
+        button.textContent = "Add new photos";
+      }
+    }
+  }
+
+  let ideaLibraryPickerItems = [];
+  let ideaLibrarySelected = new Set();
+  let ideaLibrarySearchTimer = 0;
+
+  function resetIdeaLibraryPicker() {
+    ideaLibraryPickerItems = [];
+    ideaLibrarySelected = new Set();
+    const picker = $("ideaLibraryPicker");
+    const grid = $("ideaLibraryGrid");
+    const search = $("ideaLibrarySearch");
+    const continueButton = $("ideaLibraryContinueButton");
+    if (picker) picker.hidden = true;
+    if (grid) grid.innerHTML = "";
+    if (search) search.value = "";
+    if (continueButton) continueButton.disabled = true;
+  }
+
+  function ideaLibraryPreviewUrl(item) {
+    const path = String(item?.preview_path || "").trim();
+    if (path.startsWith("http")) return path;
+    if (path) return `${apiBase}${path}`;
+    const id = String(item?.id || "").trim();
+    return id ? `${apiBase}/api/media-assets/${encodeURIComponent(id)}/preview` : "";
+  }
+
+  function syncIdeaLibraryContinue() {
+    const button = $("ideaLibraryContinueButton");
+    if (button) button.disabled = ideaLibrarySelected.size < 1;
+  }
+
+  function renderIdeaLibraryPicker() {
+    const grid = $("ideaLibraryGrid");
+    const hint = $("ideaLibraryPickerHint");
+    if (!grid) return;
+    if (!ideaLibraryPickerItems.length) {
+      grid.innerHTML = `<p class="idea-library-picker-hint">No classified library stills matched. Search a neighborhood or tag, or add new photos instead.</p>`;
+      syncIdeaLibraryContinue();
+      return;
+    }
+    grid.innerHTML = ideaLibraryPickerItems.map((item) => {
+      const checked = ideaLibrarySelected.has(item.id);
+      const preview = ideaLibraryPreviewUrl(item);
+      return `<button type="button" class="idea-library-card" data-library-id="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
+        <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
+        ${preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`}
+        <span>${escapeHtml(item.name || item.id)}</span>
+      </button>`;
+    }).join("");
+    if (hint) {
+      const suggested = ideaLibraryPickerItems.filter((item) => item.preselected).length;
+      hint.textContent = suggested
+        ? `${suggested} suggested still${suggested === 1 ? "" : "s"} checked. Click to toggle, search for more, then continue.`
+        : "Click stills to select them. Search to pull more classified images.";
+    }
+    syncIdeaLibraryContinue();
+  }
+
+  async function loadIdeaLibrarySuggestions(query = "") {
+    if (!activeIdea?.id) return;
+    const grid = $("ideaLibraryGrid");
+    const hint = $("ideaLibraryPickerHint");
+    if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library stills…</p>`;
+    if (hint) hint.textContent = "Matching classified library images to this idea.";
+    const q = String(query || "").trim();
+    const path = `/api/ideas/${encodeURIComponent(activeIdea.id)}/library-suggestions${q ? `?q=${encodeURIComponent(q)}` : ""}`;
+    const result = await api(path, { timeoutMs: 20000 });
+    const suggested = Array.isArray(result?.suggested) ? result.suggested : [];
+    const matches = Array.isArray(result?.matches) ? result.matches : [];
+    ideaLibraryPickerItems = [...suggested, ...matches];
+    ideaLibrarySelected = new Set(suggested.filter((item) => item?.preselected !== false).map((item) => item.id));
+    renderIdeaLibraryPicker();
+  }
+
+  async function openIdeaLibraryPicker() {
+    const picker = $("ideaLibraryPicker");
+    if (picker) picker.hidden = false;
+    picker?.scrollIntoView({ block: "nearest" });
+    try {
+      await loadIdeaLibrarySuggestions($("ideaLibrarySearch")?.value || "");
+    } catch (error) {
+      setManageMessage(error.message || "Could not load library suggestions.", "error-text");
+      const grid = $("ideaLibraryGrid");
+      if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">${escapeHtml(error.message || "Could not load library suggestions.")}</p>`;
+    }
+  }
+
+  async function openProductionRequestWithLibrary(idea, mediaAssetIds) {
+    if (!idea?.id) return;
+    const continueButton = $("ideaLibraryContinueButton");
+    if (continueButton) {
+      continueButton.disabled = true;
+      continueButton.textContent = "Attaching…";
+    }
+    setManageMessage("Attaching library stills and opening Production…", "");
+    try {
+      await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
+      const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      const requestId = result?.record?.id;
+      if (!requestId) throw new Error("Production Request was not created.");
+      await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/library`, {
+        method: "POST",
+        body: JSON.stringify({ media_asset_ids: mediaAssetIds }),
+        timeoutMs: 45000,
+      });
+      await closeIdeaDrawer({ save: false });
+      activeIdea = idea;
+      ezEntryPath = "configure";
+      switchToPage("content");
+      populateProductionRequestForm(result.record);
+      showProductionRequestWorkspace();
+      await loadProductionRequestOutputs(result.record);
+      await loadItem4Workspace(result.record);
+      const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
+      selectPrMediaKind(assetCount > 1 ? "multiple-photos" : "single-photo", { quiet: true });
+      await loadProductionRequests();
+      setEzAdvancedOpen(false);
+      setRequestMessage(
+        `${assetCount} library still${assetCount === 1 ? "" : "s"} attached. Add more or change platforms, then approve.`,
+        "success"
+      );
+    } catch (e) {
+      setManageMessage(e.message, "error-text");
+    } finally {
+      if (continueButton) {
+        continueButton.textContent = "Continue to Production";
+        syncIdeaLibraryContinue();
       }
     }
   }
@@ -5848,8 +5989,54 @@
       setManageMessage(error.message || "Could not save the idea before opening production.", "error-text");
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
-        button.textContent = "Add photos";
+        button.textContent = "Add new photos";
       }
+    }
+  });
+
+  $("useExistingLibraryButton")?.addEventListener("click", async () => {
+    if (!activeIdea) return;
+    const button = $("useExistingLibraryButton");
+    try {
+      if (button) button.disabled = true;
+      const idea = await saveManagedIdeaIdentity({ quiet: true, reloadList: true });
+      if (idea) activeIdea = idea;
+      await openIdeaLibraryPicker();
+    } catch (error) {
+      setManageMessage(error.message || "Could not save the idea before loading library stills.", "error-text");
+    } finally {
+      if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
+        button.disabled = false;
+      }
+    }
+  });
+
+  $("ideaLibraryGrid")?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-library-id]");
+    if (!card) return;
+    const id = String(card.dataset.libraryId || "").trim();
+    if (!id) return;
+    if (ideaLibrarySelected.has(id)) ideaLibrarySelected.delete(id);
+    else ideaLibrarySelected.add(id);
+    renderIdeaLibraryPicker();
+  });
+
+  $("ideaLibrarySearch")?.addEventListener("input", () => {
+    window.clearTimeout(ideaLibrarySearchTimer);
+    ideaLibrarySearchTimer = window.setTimeout(() => {
+      loadIdeaLibrarySuggestions($("ideaLibrarySearch")?.value || "").catch((error) => {
+        setManageMessage(error.message || "Library search failed.", "error-text");
+      });
+    }, 280);
+  });
+
+  $("ideaLibraryContinueButton")?.addEventListener("click", async () => {
+    if (!activeIdea || ideaLibrarySelected.size < 1) return;
+    try {
+      const idea = await saveManagedIdeaIdentity({ quiet: true, reloadList: true });
+      await openProductionRequestWithLibrary(idea || activeIdea, [...ideaLibrarySelected]);
+    } catch (error) {
+      setManageMessage(error.message || "Could not attach library stills.", "error-text");
     }
   });
 
@@ -9338,6 +9525,11 @@
         ? `Waiting on classification: ${names.join(", ")}${intake.needing_classification.length > 5 ? "…" : ""}`
         : "Classification queue is empty. Oversized videos still appear in the list below.";
     }
+  }
+
+  function hideIntakeProgress() {
+    const wrap = $("operationsIntakeProgress");
+    if (wrap) wrap.hidden = true;
   }
 
   function showIntakeProgress(status) {

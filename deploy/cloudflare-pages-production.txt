@@ -261,3 +261,5 @@ Navy footer force Pages deploy: 2026-08-29 — Hardcode Studio footer to Chicago
 Music favorites Pages deploy: 2026-08-29 — Star tracks in Music Library so they sit at the top of Production music dropdowns. UI 0.6.163-music-favorites.
 
 Production tooltips Pages deploy: 2026-08-29 — Production and review help use the global tooltip layer so hover is not blank. UI 0.6.170-tooltips.
+
+Idea library pick Pages deploy: 2026-08-29 - Idea drawer chooser: Add new photos vs Use existing library stills. UI 0.6.172-idea-library-pick.

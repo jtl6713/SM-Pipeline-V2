@@ -20,6 +20,7 @@ export default {
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
       const isIdeaPromoteRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
+      const isIdeaLibrarySuggestionsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/library-suggestions$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
       const isIdeaGenerateStatusRoute = /^\/api\/ideas\/generate\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -30,7 +31,9 @@ export default {
       const isProductionRequestCollectionRoute = url.pathname === "/api/production-requests";
       const isProductionRequestOutputsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/outputs$/.test(url.pathname);
       const isItem4AssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets$/.test(url.pathname);
-      const isItem4AssetRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+$/.test(url.pathname);
+      const isItem4LibraryAssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/library$/.test(url.pathname);
+      const isItem4AssetRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+$/.test(url.pathname)
+        && !isItem4LibraryAssetsRoute;
       const isItem4PlanRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/plan$/.test(url.pathname);
       const isItem4StatusRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/item4$/.test(url.pathname);
       const isItem4VariantsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/variants$/.test(url.pathname);
@@ -79,6 +82,7 @@ export default {
       const isProductionRequestSyncDirectivesWrite = isProductionRequestSyncDirectivesRoute && request.method === "POST";
       const isProductionRequestOutputsSyncWrite = isProductionRequestOutputsRoute && request.method === "PUT";
       const isItem4AssetsUploadWrite = isItem4AssetsRoute && request.method === "POST";
+      const isItem4LibraryAssetsWrite = isItem4LibraryAssetsRoute && request.method === "POST";
       const isItem4AssetDeleteWrite = isItem4AssetRecordRoute && request.method === "DELETE";
       const isItem4PlanWrite = isItem4PlanRoute && request.method === "POST";
       const isItem4VariantsWrite = isItem4VariantsRoute && request.method === "POST";
@@ -117,6 +121,7 @@ export default {
         isProductionRequestSyncDirectivesWrite ||
         isProductionRequestOutputsSyncWrite ||
         isItem4AssetsUploadWrite ||
+        isItem4LibraryAssetsWrite ||
         isMusicLibraryUploadWrite ||
         isMusicFavoriteWrite ||
         isItem4AssetDeleteWrite ||
@@ -174,7 +179,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.159-music-drive",
+          version: "0.10.162-idea-library-pick",
+          studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
@@ -576,6 +582,11 @@ export default {
         return restoreIdea(request, env, url, authorization);
       }
 
+      if (isIdeaLibrarySuggestionsRoute) {
+        requirePermission(authorization, "production_configure");
+        return getIdeaLibrarySuggestions(request, env, url, authorization);
+      }
+
       if (isIdeaProductionRequestRoute) {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
@@ -596,6 +607,13 @@ export default {
           console.warn("Item 4 Make hardening deferred from Production Request collection open", error);
         }
         return listProductionRequests(request, env, url, authorization);
+      }
+
+      if (isItem4LibraryAssetsRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return attachItem4LibraryAssets(request, env, url, authorization);
       }
 
       if (isItem4AssetsRoute) {
@@ -3710,6 +3728,212 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
     Studio_Item4_State: remaining.length ? "Assets Ready" : "Draft",
   });
   return respond(request, env, { ok: true, deleted: true, assets: remaining, record: mapProductionRequest(updated) });
+}
+
+const IDEA_LIBRARY_STOPWORDS = new Set([
+  "the", "and", "for", "with", "from", "this", "that", "into", "over", "onto",
+  "your", "their", "about", "then", "than", "when", "what", "where", "there",
+  "here", "have", "has", "had", "are", "was", "were", "will", "can", "our",
+  "idea", "photo", "photos", "image", "images", "still", "stills",
+]);
+
+function ideaLibraryTokens(text) {
+  return [...new Set(String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !IDEA_LIBRARY_STOPWORDS.has(token)))];
+}
+
+function ideaLibraryHaystack(record) {
+  const tags = f(record, "AI_Tags");
+  const keywords = f(record, "Search_Keywords");
+  return [
+    f(record, "Asset Name"),
+    f(record, "Topic"),
+    f(record, "Subtopic"),
+    f(record, "Location"),
+    f(record, "Asset_Description"),
+    Array.isArray(tags) ? tags.join(" ") : tags,
+    Array.isArray(keywords) ? keywords.join(" ") : keywords,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function ideaLibraryIntakeDate(record) {
+  const raw = String(f(record, "Intake_Date") || "").trim();
+  return raw.slice(0, 10);
+}
+
+function ideaLibraryFileBytes(record) {
+  const bytes = Number(f(record, "File_Size_Bytes") || 0);
+  if (Number.isFinite(bytes) && bytes > 0) return bytes;
+  const mb = Number(f(record, "File_Size_MB") || 0);
+  if (Number.isFinite(mb) && mb > 0) return Math.round(mb * 1024 * 1024);
+  return 0;
+}
+
+function ideaLibraryIsEligibleImage(record) {
+  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
+  const classification = String(f(record, "Classification_Status") || "").trim().toLowerCase();
+  const eligibility = String(f(record, "Raw_Source_Eligibility") || "").trim().toLowerCase();
+  const status = String(f(record, "Asset_Status") || "").trim().toLowerCase();
+  if (mediaClass && mediaClass !== "image" && mediaClass !== "graphic") return false;
+  if (mime.startsWith("video/")) return false;
+  if (classification && classification !== "classified") return false;
+  if (Boolean(f(record, "Do_Not_Use"))) return false;
+  if (f(record, "Active") === false) return false;
+  if (eligibility === "ineligible") return false;
+  if (status && status !== "available") return false;
+  return Boolean(googleDriveFileId(record));
+}
+
+function mapIdeaLibraryAsset(record, { score = 0, preselected = false } = {}) {
+  return {
+    id: record.id,
+    name: f(record, "Asset Name"),
+    google_drive_file_id: googleDriveFileId(record),
+    preview_path: `/api/media-assets/${record.id}/preview`,
+    score,
+    preselected,
+    intake_date: ideaLibraryIntakeDate(record) || null,
+  };
+}
+
+async function getIdeaLibrarySuggestions(request, env, url, authorization) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const ideaId = ideaRecordIdFromPath(url);
+  const idea = await loadAuthorizedIdea(env, ideaId, authorization);
+  const query = String(url.searchParams.get("q") || "").trim();
+  const ideaTokens = ideaLibraryTokens([
+    f(idea, "Candidate_Title"),
+    f(idea, "Idea_Summary"),
+    f(idea, "Primary_Location"),
+    query,
+  ].filter(Boolean).join(" "));
+  const queryTokens = ideaLibraryTokens(query);
+  const today = chicagoNowParts().date;
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: 80,
+    sortField: "Intake_Date",
+    sortDirection: "desc",
+    filterFormula: "AND(OR({Media_Class}='Image',{Media_Class}='Graphic'),{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}))",
+  });
+  const ranked = [];
+  for (const record of records) {
+    if (!ideaLibraryIsEligibleImage(record)) continue;
+    const haystack = ideaLibraryHaystack(record);
+    if (queryTokens.length && !queryTokens.some((token) => haystack.includes(token))) continue;
+    const overlap = ideaTokens.filter((token) => haystack.includes(token)).length;
+    const intakeToday = ideaLibraryIntakeDate(record) === today;
+    const score = overlap + (intakeToday ? 5 : 0);
+    const preselected = score >= 3 || intakeToday;
+    ranked.push({ record, score, preselected });
+  }
+  ranked.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.preselected !== b.preselected) return a.preselected ? -1 : 1;
+    return String(f(a.record, "Asset Name") || "").localeCompare(String(f(b.record, "Asset Name") || ""));
+  });
+  const capped = ranked.slice(0, 40).map((row) => mapIdeaLibraryAsset(row.record, row));
+  return respond(request, env, {
+    ok: true,
+    idea_id: ideaId,
+    query: query || null,
+    suggested: capped.filter((row) => row.preselected),
+    matches: capped.filter((row) => !row.preselected),
+  });
+}
+
+function ideaLibraryRejectReason(record) {
+  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
+  const name = String(f(record, "Asset Name") || record.id);
+  if (Boolean(f(record, "Do_Not_Use"))) return `${name} is marked Do Not Use`;
+  if (mediaClass === "video" || mime.startsWith("video/")) return `${name} is a video; this picker attaches stills only`;
+  if (!ideaLibraryIsEligibleImage(record)) return `${name} is not a classified eligible library image`;
+  if (ideaLibraryFileBytes(record) > ITEM4_MAX_FILE_BYTES) return `${name} exceeds the 25 MB per-image limit`;
+  return null;
+}
+
+async function attachItem4LibraryAssets(request, env, url, authorization) {
+  const recordId = item4RequestIdFromPath(url);
+  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const ids = [...new Set((Array.isArray(payload?.media_asset_ids) ? payload.media_asset_ids : [])
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  if (!ids.length) throw new HttpError(400, "Choose at least one library still");
+  const existing = item4AssetManifest(record);
+  if (existing.length + ids.length > ITEM4_MAX_FILES) {
+    throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
+  }
+  const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
+  const appended = [];
+  for (const mediaId of ids) {
+    if (already.has(mediaId)) continue;
+    const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    const reject = ideaLibraryRejectReason(media);
+    if (reject) throw new HttpError(409, reject);
+    const driveId = googleDriveFileId(media);
+    const driveUrl = String(f(media, "Google Drive URL") || "").trim()
+      || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : "");
+    const mime = String(f(media, "MIME_Type") || "image/jpeg").trim() || "image/jpeg";
+    const name = String(f(media, "Asset Name") || "photo");
+    const assetId = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
+    appended.push({
+      id: assetId,
+      order: existing.length + appended.length + 1,
+      name,
+      mime_type: mime,
+      source_format: String(f(media, "File_Extension") || item4FileExtension(name) || "").toUpperCase() || null,
+      browser_preview_compatible: true,
+      size_bytes: ideaLibraryFileBytes(media) || null,
+      focal_point: "center",
+      google_drive_file_id: driveId,
+      google_drive_url: driveUrl || null,
+      media_asset_record_id: media.id,
+      preview_url: `/api/media-assets/${media.id}/preview`,
+      authoritative_storage: "google_drive",
+      staging_deleted: true,
+      r2_key: null,
+      url: driveUrl || null,
+      uploaded_at: new Date().toISOString(),
+      source: "library",
+    });
+    already.add(media.id);
+  }
+  const assets = [...existing, ...appended];
+  const allReady = assets.length > 0 && assets.every((asset) =>
+    String(asset?.google_drive_file_id || "").trim() && String(asset?.media_asset_record_id || "").trim()
+  );
+  const mediaAssetIds = [...new Set(assets.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean))];
+  const updated = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Assets_JSON: JSON.stringify(assets),
+    Studio_Master_Asset_Count: assets.length,
+    Studio_Master_Asset_Status: allReady ? "Ready" : (assets.length ? "Uploading" : "None"),
+    Studio_Master_Media_Assets: mediaAssetIds,
+    Studio_Output_Plan_Status: "Needs Plan",
+    Studio_Output_Plan_JSON: null,
+    Studio_Variant_Manifest_JSON: null,
+    Studio_Variant_Status: "None",
+    Studio_Variant_Updated_At: null,
+    Studio_Variant_Error: null,
+    Studio_Item4_State: allReady ? "Assets Ready" : (assets.length ? "Draft" : "Draft"),
+  });
+  return respond(request, env, {
+    ok: true,
+    attached: appended.length,
+    status: allReady ? "Ready" : "Uploading",
+    count: assets.length,
+    assets,
+    record: mapProductionRequest(updated),
+    message: appended.length
+      ? `${appended.length} library still${appended.length === 1 ? "" : "s"} attached from Google Drive.`
+      : "Selected library stills were already attached.",
+  }, 201);
 }
 
 
@@ -22287,6 +22511,31 @@ async function listMakeIntakeExecutions(env, scenarioId) {
   return makeExecutionList(body);
 }
 
+function pythonIntakeRun(startedAt, operations) {
+  return {
+    id: "python",
+    timestamp: startedAt || new Date().toISOString(),
+    duration_ms: 0,
+    operations,
+    state: "success",
+    status_code: 1,
+  };
+}
+
+async function pythonA2RunSince(env, startedAt) {
+  if (!startedAt) return null;
+  const startMs = Date.parse(startedAt);
+  const iso = Number.isFinite(startMs) ? new Date(startMs - 15000).toISOString() : String(startedAt);
+  const safe = iso.replace(/'/g, "");
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: 10,
+    filterFormula: `IS_AFTER(CREATED_TIME(), DATETIME_PARSE('${safe}'))`,
+  }).catch(() => []);
+  if (records.length) return pythonIntakeRun(startedAt, 20);
+  if (Number.isFinite(startMs) && Date.now() - startMs > 25000) return pythonIntakeRun(startedAt, 2);
+  return null;
+}
+
 function firstRunSince(runs, startedAt) {
   if (!runs.length) return null;
   if (!startedAt) return runs[0];
@@ -22313,18 +22562,25 @@ function describeA2Run(run) {
 }
 
 async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
+  const a2Python = pipelineStageBackend(env, "A2").mode === "python";
+  const a2bPython = pipelineStageBackend(env, "A2B").mode === "python";
+  const a3Python = pipelineStageBackend(env, "A3").mode === "python";
+  const a4Python = pipelineStageBackend(env, "A4").mode === "python";
+  let inferredA2 = knownA2;
+  if (!inferredA2 && a2Python) inferredA2 = await pythonA2RunSince(env, startedAt);
   const [a2Runs, a2bRuns, a3Runs, a4Runs, needingClassification, oversized] = await Promise.all([
-    knownA2 ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A2_SCENARIO_ID).catch(() => []),
-    listMakeIntakeExecutions(env, STUDIO_A2B_SCENARIO_ID).catch(() => []),
-    listMakeIntakeExecutions(env, STUDIO_A3_SCENARIO_ID).catch(() => []),
-    listMakeIntakeExecutions(env, STUDIO_A4_SCENARIO_ID).catch(() => []),
+    inferredA2 || a2Python ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A2_SCENARIO_ID).catch(() => []),
+    a2bPython ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A2B_SCENARIO_ID).catch(() => []),
+    a3Python ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A3_SCENARIO_ID).catch(() => []),
+    a4Python ? Promise.resolve([]) : listMakeIntakeExecutions(env, STUDIO_A4_SCENARIO_ID).catch(() => []),
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
     listOversizedMedia(env).catch(() => []),
   ]);
-  const a2 = knownA2 || firstRunSince(a2Runs, startedAt);
-  const a2b = firstRunSince(a2bRuns, startedAt);
-  const a3 = firstRunSince(a3Runs, startedAt);
-  const a4 = firstRunSince(a4Runs, startedAt);
+  const a2 = inferredA2 || firstRunSince(a2Runs, startedAt);
+  const a2ResultPreview = describeA2Run(a2);
+  const a2b = firstRunSince(a2bRuns, startedAt) || (a2 && a2bPython ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
+  const a3 = firstRunSince(a3Runs, startedAt) || (a2 && a3Python ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
+  const a4 = firstRunSince(a4Runs, startedAt) || (a2 && a4Python ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
   const a2Result = describeA2Run(a2);
   const skipped = a2Result.files_found === false ? "Skipped — no files to intake." : null;
   const stages = [
