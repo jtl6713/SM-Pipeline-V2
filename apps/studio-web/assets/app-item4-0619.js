@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.162-music-upload";
+  const BUILD_ID = "item4-0.6.163-music-favorites";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -5090,15 +5090,48 @@
   $("prVideoClipMode")?.addEventListener("change", syncAllStructureControls);
   $("prCarouselSlideMode")?.addEventListener("change", syncAllStructureControls);
 
+  function musicOptionLabel(record) {
+    const name = record.display_name || record.name || record.id;
+    return record.favorite ? `★ ${name}` : name;
+  }
+
+  function musicPreviewUrl(record) {
+    return record.preview_url || (record.preview_available ? `/api/music/${record.id}/preview` : "");
+  }
+
+  function musicOptionHtml(record) {
+    return `<option value="${escapeHtml(record.id)}" data-preview="${escapeHtml(musicPreviewUrl(record))}" data-favorite="${record.favorite ? "true" : "false"}">${escapeHtml(musicOptionLabel(record))}</option>`;
+  }
+
+  function sortClientMusic(records) {
+    return [...records].sort((left, right) => {
+      if (Boolean(left.favorite) !== Boolean(right.favorite)) return left.favorite ? -1 : 1;
+      return String(left.display_name || left.name || "").localeCompare(String(right.display_name || right.name || ""), undefined, { sensitivity: "base" });
+    });
+  }
+
+  function fillMusicDropdowns() {
+    const options = productionRequestMusic.map(musicOptionHtml).join("");
+    const blank = '<option value="">AI / profile chooses track</option>';
+    const pr = $("prMusicAsset");
+    const ez = $("ezAudioTrack");
+    const prValue = pr?.value || "";
+    const ezValue = ez?.value || "";
+    if (pr) {
+      pr.innerHTML = blank + options;
+      if (prValue) pr.value = prValue;
+    }
+    if (ez) {
+      ez.innerHTML = blank + options;
+      if (ezValue) ez.value = ezValue;
+    }
+  }
+
   async function ensureProductionRequestMusic() {
     if (productionRequestMusic.length) return productionRequestMusic;
     const { records = [] } = await api("/api/music?limit=100");
-    productionRequestMusic = records.filter(record => !record.do_not_use);
-    const select = $("prMusicAsset");
-    select.innerHTML = '<option value="">AI / profile chooses track</option>' + productionRequestMusic.map(record => {
-      const preview = record.preview_url || (record.preview_available ? `/api/music/${record.id}/preview` : "");
-      return `<option value="${escapeHtml(record.id)}" data-preview="${escapeHtml(preview)}">${escapeHtml(record.display_name || record.name || record.id)}</option>`;
-    }).join("");
+    productionRequestMusic = sortClientMusic(records.filter((record) => !record.do_not_use));
+    fillMusicDropdowns();
     return productionRequestMusic;
   }
 
@@ -5259,8 +5292,8 @@
     if (!select) return;
     const selected = Array.isArray(row?.selected_music_asset_override_links) && row.selected_music_asset_override_links.length
       ? row.selected_music_asset_override_links[0] : "";
-    select.innerHTML = '<option value="">Inherit master track</option>' + productionRequestMusic.map(track =>
-      `<option value="${escapeHtml(track.id)}">${escapeHtml(track.display_name || track.name || track.id)}</option>`
+    select.innerHTML = '<option value="">Inherit master track</option>' + productionRequestMusic.map((track) =>
+      `<option value="${escapeHtml(track.id)}" data-favorite="${track.favorite ? "true" : "false"}">${escapeHtml(musicOptionLabel(track))}</option>`
     ).join("");
     select.value = selected || "";
   }
@@ -8791,6 +8824,22 @@
     productionRequestMusic = [];
   }
 
+  async function setMusicFavorite(recordId, favorite) {
+    const result = await api(`/api/music/${encodeURIComponent(recordId)}/favorite`, {
+      method: "PATCH",
+      body: JSON.stringify({ favorite }),
+    });
+    const updated = result.record;
+    if (updated?.id) {
+      const next = productionRequestMusic.some((track) => track.id === updated.id)
+        ? productionRequestMusic.map((track) => (track.id === updated.id ? { ...track, ...updated } : track))
+        : [...productionRequestMusic, updated];
+      productionRequestMusic = sortClientMusic(next.filter((track) => !track.do_not_use));
+      fillMusicDropdowns();
+    }
+    return updated;
+  }
+
   function bindMusicPlayers(target) {
     const players = Array.from(target.querySelectorAll("audio.music-preview"));
     players.forEach((player) => player.load());
@@ -8805,12 +8854,30 @@
     try {
       const { records = [] } = await api("/api/music?limit=100");
       if (!records.length) return target.innerHTML = '<div class="empty">No Music assets were returned.</div>';
-      target.innerHTML = records.map((r) => {
+      const sorted = sortClientMusic(records);
+      productionRequestMusic = sorted.filter((record) => !record.do_not_use);
+      fillMusicDropdowns();
+      target.innerHTML = sorted.map((r) => {
         const preview = r.preview_url || r.google_drive_url;
         const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.file_extension || "mp3");
-        return `<article class="music-card"><h3>${value(r.display_name || r.name)}</h3>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type || "audio/mpeg")} · ${sizeLabel} · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url && !r.studio_uploaded ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : (r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : "")}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span></div></article>`;
+        const favored = Boolean(r.favorite);
+        return `<article class="music-card${favored ? " is-favorite" : ""}"><div class="music-card-head"><h3>${value(r.display_name || r.name)}</h3><button type="button" class="music-favorite-button" data-music-favorite="${escapeHtml(r.id)}" data-favorite="${favored ? "true" : "false"}" aria-pressed="${favored ? "true" : "false"}" aria-label="${favored ? "Remove from favorites" : "Add to favorites"}">${favored ? "★" : "☆"}</button></div>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type || "audio/mpeg")} · ${sizeLabel} · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url && !r.studio_uploaded ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : (r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : "")}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span></div></article>`;
       }).join("");
       bindMusicPlayers(target);
+      target.querySelectorAll("[data-music-favorite]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = button.dataset.musicFavorite;
+          const next = button.dataset.favorite !== "true";
+          button.disabled = true;
+          try {
+            await setMusicFavorite(id, next);
+            await loadMusic();
+          } catch (error) {
+            setMusicUploadMessage(error.message, "error-text");
+            button.disabled = false;
+          }
+        });
+      });
     } catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
   }
 

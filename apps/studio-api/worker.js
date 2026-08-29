@@ -63,6 +63,8 @@ export default {
       const isVoiceCatalogRoute = url.pathname === "/api/voices";
       const isMusicLibraryRoute = url.pathname === "/api/music";
       const isMusicLibraryUploadWrite = isMusicLibraryRoute && request.method === "POST";
+      const isMusicFavoriteRoute = /^\/api\/music\/rec[A-Za-z0-9]+\/favorite$/.test(url.pathname);
+      const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
@@ -114,6 +116,7 @@ export default {
         isProductionRequestOutputsSyncWrite ||
         isItem4AssetsUploadWrite ||
         isMusicLibraryUploadWrite ||
+        isMusicFavoriteWrite ||
         isItem4AssetDeleteWrite ||
         isItem4PlanWrite ||
         isItem4VariantsWrite ||
@@ -168,7 +171,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.157-music-upload-allow",
+          version: "0.10.158-music-favorites",
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
@@ -239,6 +242,7 @@ export default {
           studio_idea_chain_python_gates_v1: true,
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
+          studio_music_favorites_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
           "0.10.10-elevenlabs-v2-catalog": true,
@@ -750,6 +754,11 @@ export default {
 
       if (url.pathname.startsWith("/api/outputs/")) {
         return getOutputRoute(request, env, url);
+      }
+
+      if (isMusicFavoriteRoute) {
+        assertWriteRequest(request, env);
+        return toggleMusicFavorite(request, env, url);
       }
 
       if (isMusicPreviewRoute) {
@@ -2004,6 +2013,7 @@ function mapMusic(record) {
     description: f(record, "Asset_Description"),
     do_not_use: doNotUse,
     studio_uploaded: studioLibrary,
+    favorite: Boolean(f(record, "Studio_Favorite")),
   };
 }
 
@@ -7547,6 +7557,7 @@ async function catalogFallbackMusic(env) {
   const score = (record) => {
     const name = String(f(record, "Asset Name") || "").toLowerCase();
     let value = 0;
+    if (Boolean(f(record, "Studio_Favorite"))) value += 200;
     if (name.includes("cinematic")) value += 80;
     if (name.includes("drone")) value += 40;
     if (name.includes("epic")) value += 30;
@@ -11179,7 +11190,43 @@ async function listMusic(request, env, url) {
     records.push(record);
   }
 
-  return respond(request, env, { ok: true, records: records.map(mapMusic) });
+  return respond(request, env, { ok: true, records: sortMusicRecords(records).map(mapMusic) });
+}
+
+function musicSortName(record) {
+  return String(cleanMusicDisplayName(f(record, "Asset Name")) || f(record, "Asset Name") || "").toLowerCase();
+}
+
+function sortMusicRecords(records) {
+  return [...records].sort((left, right) => {
+    const favoriteLeft = Boolean(f(left, "Studio_Favorite"));
+    const favoriteRight = Boolean(f(right, "Studio_Favorite"));
+    if (favoriteLeft !== favoriteRight) return favoriteLeft ? -1 : 1;
+    return musicSortName(left).localeCompare(musicSortName(right));
+  });
+}
+
+async function toggleMusicFavorite(request, env, url) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const recordId = String(url.pathname.split("/")[3] || "");
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "Invalid music record");
+
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  if (String(f(record, "Asset_Role") || "") !== "Music") {
+    throw new HttpError(409, "Only music assets can be favorited");
+  }
+
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const favorite = Object.prototype.hasOwnProperty.call(payload || {}, "favorite")
+    ? Boolean(payload.favorite)
+    : !Boolean(f(record, "Studio_Favorite"));
+
+  const updated = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: { Studio_Favorite: favorite }, typecast: true }),
+  });
+  return respond(request, env, { ok: true, record: mapMusic(updated) });
 }
 
 const MUSIC_LIBRARY_MAX_FILES = 8;
