@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.170-publish-location",
+          version: "0.10.171-production-location",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -193,6 +193,7 @@ export default {
           studio_insights_youtube_discovery_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
+          studio_production_location_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -1789,6 +1790,8 @@ function mapIdea(record) {
     content_profile_links: f(record, "Content_Profile") || [],
     brand_name: f(record, "Brand_Name") || [],
     market_name: f(record, "Market_Name") || [],
+    primary_location: String(f(record, "Primary_Location") || "").trim() || null,
+    neighborhood_or_area: String(f(record, "Neighborhood_or_Area") || "").trim() || null,
     studio_pre_hold_status: f(record, "Studio_PreHold_Status"),
     studio_hold_at: f(record, "Studio_Hold_At"),
     studio_hold_by: f(record, "Studio_Hold_By"),
@@ -2375,12 +2378,14 @@ function assertIdeaNotApproved(record, actionLabel) {
 function cleanIdeaUpdatePayload(payload) {
   const title = String(payload?.title ?? "").trim();
   const summary = String(payload?.summary ?? "").trim();
+  const primaryLocation = String(payload?.primary_location ?? "").trim();
 
   if (!title) throw new HttpError(400, "Idea title is required");
   if (title.length > 160) throw new HttpError(400, "Idea title must be 160 characters or fewer");
   if (summary.length > 5000) throw new HttpError(400, "Idea summary must be 5000 characters or fewer");
+  if (primaryLocation.length > 200) throw new HttpError(400, "Primary location must be 200 characters or fewer");
 
-  return { title, summary };
+  return { title, summary, primary_location: primaryLocation };
 }
 
 async function updateIdea(request, env, url, authorization) {
@@ -2397,13 +2402,17 @@ async function updateIdea(request, env, url, authorization) {
   assertIdeaNotApproved(record, "Editing");
 
   const input = cleanIdeaUpdatePayload(payload);
+  const fields = {
+    Candidate_Title: input.title,
+    Idea_Summary: input.summary || null,
+  };
+  if (Object.prototype.hasOwnProperty.call(payload || {}, "primary_location")) {
+    fields.Primary_Location = input.primary_location || null;
+  }
   const updated = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, recordId, {
     method: "PATCH",
     body: JSON.stringify({
-      fields: {
-        Candidate_Title: input.title,
-        Idea_Summary: input.summary || null,
-      },
+      fields,
       typecast: false,
     }),
   });
@@ -6645,6 +6654,7 @@ function mapProductionRequest(record, ideaTitle = null) {
     requested_caption: f(record, "Requested_Caption"),
     script_mode: f(record, "Script_Mode"),
     requested_script: f(record, "Requested_Script"),
+    primary_location: String(f(record, "Primary_Location") || "").trim() || null,
     production_notes: f(record, "Production_Notes"),
     created_at: f(record, "Created_At"),
     updated_at: f(record, "Updated_At"),
@@ -6817,11 +6827,13 @@ async function cleanProductionRequestPayload(payload, env) {
   let requestedCaption = String(payload?.requested_caption || "").trim();
   let requestedScript = String(payload?.requested_script || "").trim();
   const productionNotes = String(payload?.production_notes || "").trim();
+  const primaryLocation = String(payload?.primary_location || "").trim();
 
   if (requestedTitle.length > 500) throw new HttpError(400, "Requested title must be 500 characters or fewer");
   if (requestedCaption.length > 10000) throw new HttpError(400, "Requested caption must be 10000 characters or fewer");
   if (requestedScript.length > 25000) throw new HttpError(400, "Requested script must be 25000 characters or fewer");
   if (productionNotes.length > 10000) throw new HttpError(400, "Production notes must be 10000 characters or fewer");
+  if (primaryLocation.length > 200) throw new HttpError(400, "Primary location must be 200 characters or fewer");
 
   if (titleMode === "Force exact" && !requestedTitle) throw new HttpError(400, "Enter a title when Title mode is Force exact");
   if (captionMode === "Force exact" && !requestedCaption) throw new HttpError(400, "Enter a caption when Caption mode is Force exact");
@@ -6861,6 +6873,7 @@ async function cleanProductionRequestPayload(payload, env) {
     requested_caption: requestedCaption,
     script_mode: scriptMode,
     requested_script: requestedScript,
+    primary_location: primaryLocation,
     production_notes: productionNotes,
   };
 }
@@ -6895,6 +6908,7 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
     Requested_Caption: input.requested_caption || null,
     Script_Mode: input.script_mode,
     Requested_Script: input.requested_script || null,
+    Primary_Location: input.primary_location || null,
     Production_Notes: input.production_notes || null,
     Updated_At: nowIso,
     Active: true,
@@ -6928,8 +6942,30 @@ function productionRequestDefaultsFromIdea(idea) {
     requested_caption: "",
     script_mode: "AI decides",
     requested_script: "",
+    primary_location: suggestPrimaryLocationFromIdea(idea).name || "",
     production_notes: "",
   };
+}
+
+function suggestPrimaryLocationFromIdea(idea) {
+  const primary = String(f(idea, "Primary_Location") || "").trim();
+  if (primary) return { name: primary, source: "idea.Primary_Location" };
+  const area = String(f(idea, "Neighborhood_or_Area") || "").trim();
+  if (area) return { name: area, source: "idea.Neighborhood_or_Area" };
+  const blob = [
+    f(idea, "Candidate_Title"),
+    f(idea, "Idea_Summary"),
+    f(idea, "Hook"),
+  ].filter(Boolean).join(" ");
+  const matched = studioMatchKnownPlace(blob);
+  if (matched) {
+    let name = matched.split(" ").map((part) => (part === "the" ? "The" : part.charAt(0).toUpperCase() + part.slice(1))).join(" ");
+    if (matched === "the loop") name = "The Loop";
+    return { name, source: "idea_copy_match" };
+  }
+  const market = studioMarketName(idea);
+  if (market) return { name: market, source: "idea.Market_Name" };
+  return { name: "", source: "" };
 }
 
 async function existingDraftForIdea(env, ideaRecordId, authorization) {
@@ -6949,7 +6985,11 @@ async function existingDraftForIdea(env, ideaRecordId, authorization) {
 
 async function createDraftForIdea(env, idea, authorization, input = null) {
   const now = new Date().toISOString();
-  const cleaned = input || await cleanProductionRequestPayload(productionRequestDefaultsFromIdea(idea), env);
+  const defaults = productionRequestDefaultsFromIdea(idea);
+  const cleaned = input || await cleanProductionRequestPayload(defaults, env);
+  if (!String(cleaned.primary_location || "").trim() && defaults.primary_location) {
+    cleaned.primary_location = defaults.primary_location;
+  }
   const ideaProfileId = arrayOrEmpty(f(idea, "Content_Profile"))[0];
   let brandId = authorization.brand.record_id;
   if (ideaProfileId) {
@@ -7116,6 +7156,19 @@ async function updateProductionRequest(request, env, url, authorization) {
       typecast: true,
     }),
   });
+
+  // Keep the Content Item location in sync when this request already has a parent.
+  const contentId = studioFirstLinkedId(f(updated, "Promoted_Content_Item"));
+  const location = String(f(updated, "Primary_Location") || "").trim();
+  if (contentId && Object.prototype.hasOwnProperty.call(fields, "Primary_Location")) {
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Primary_Location: location || null },
+        typecast: true,
+      }),
+    }).catch((error) => console.warn("primary location content sync failed", contentId, error));
+  }
 
   return respond(request, env, {
     ok: true,
@@ -7691,6 +7744,7 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
     Requested_Script_Mode: String(f(requestRecord, "Script_Mode") || "AI decides"),
     Requested_Script: String(f(requestRecord, "Requested_Script") || "").trim() || null,
     Production_Request_Notes: String(f(requestRecord, "Production_Notes") || "").trim() || null,
+    Primary_Location: String(f(requestRecord, "Primary_Location") || "").trim() || null,
     Requested_Video_Clip_Count_Mode: String(f(requestRecord, "Video_Clip_Count_Mode") || "AI decides"),
     Requested_Video_Clip_Count_Min: f(requestRecord, "Video_Clip_Count_Min") ?? null,
     Requested_Video_Clip_Count_Max: f(requestRecord, "Video_Clip_Count_Max") ?? null,

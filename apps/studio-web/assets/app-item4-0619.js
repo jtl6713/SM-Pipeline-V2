@@ -38,6 +38,72 @@
   let productionOutputMatrixLoaded = false;
   let item4Workspace = null;
   let item4BridgePreflight = null;
+  let primaryLocationUserEdited = false;
+
+  const CHICAGO_PLACE_SUGGESTIONS = [
+    "Andersonville", "Bridgeport", "Bronzeville", "Bucktown", "Chicago", "Chinatown",
+    "Clark Street", "Edgewater", "Fulton Market", "Garfield Park", "Gold Coast",
+    "Grant Park", "Humboldt Park", "Hyde Park", "Lakeview", "Lincoln Park",
+    "Lincoln Square", "Logan Square", "The Loop", "Magnificent Mile", "Millennium Park",
+    "Museum Campus", "Navy Pier", "Near North Side", "Old Town", "Pilsen",
+    "Printers Row", "Ravenswood", "River North", "Rogers Park", "South Loop",
+    "Streeterville", "Ukrainian Village", "Uptown", "West Loop", "Wicker Park",
+  ];
+
+  function suggestPrimaryLocationFromCopy({ title = "", summary = "", primary = "", area = "", market = "" } = {}) {
+    const stored = String(primary || "").trim();
+    if (stored) return { name: stored, source: "stored" };
+    const neighborhood = String(area || "").trim();
+    if (neighborhood) return { name: neighborhood, source: "neighborhood" };
+    const hay = ` ${String(`${title} ${summary}` || "").toLowerCase().replace(/[^a-z0-9\s]+/g, " ").replace(/\s+/g, " ").trim()} `;
+    const names = [...CHICAGO_PLACE_SUGGESTIONS].sort((a, b) => b.length - a.length);
+    for (const name of names) {
+      if (hay.includes(` ${name.toLowerCase()} `)) return { name, source: "copy_match" };
+    }
+    const marketName = Array.isArray(market) ? String(market[0] || "").trim() : String(market || "").trim();
+    if (marketName) return { name: marketName, source: "market" };
+    return { name: "", source: "" };
+  }
+
+  function syncPrimaryLocationFields(value) {
+    const text = String(value || "").trim();
+    if ($("ezPrimaryLocation")) $("ezPrimaryLocation").value = text;
+    if ($("prPrimaryLocation")) $("prPrimaryLocation").value = text;
+  }
+
+  function hydratePrimaryLocationFromSources({ record = activeProductionRequest, idea = activeIdea, force = false } = {}) {
+    const stored = String(record?.primary_location || "").trim();
+    if (stored) {
+      syncPrimaryLocationFields(stored);
+      primaryLocationUserEdited = false;
+      const hint = $("ezPrimaryLocationHint");
+      if (hint) hint.textContent = "Saved publish location. Overwrite anytime before promote.";
+      return stored;
+    }
+    if (!force && primaryLocationUserEdited) {
+      return String($("ezPrimaryLocation")?.value || $("prPrimaryLocation")?.value || "").trim();
+    }
+    const suggested = suggestPrimaryLocationFromCopy({
+      title: idea?.title || $("ezIdeaTitle")?.value || record?.requested_title || "",
+      summary: idea?.summary || $("ezIdeaSummary")?.value || "",
+      primary: idea?.primary_location || "",
+      area: idea?.neighborhood_or_area || "",
+      market: idea?.market_name || record?.market_name || "",
+    });
+    syncPrimaryLocationFields(suggested.name);
+    primaryLocationUserEdited = false;
+    const hint = $("ezPrimaryLocationHint");
+    if (hint) {
+      hint.textContent = suggested.name
+        ? `Suggested from ${suggested.source.replace(/_/g, " ")}. Overwrite anytime before promote.`
+        : "Used as the publish location tag. Prefills when we recognize a place in the title.";
+    }
+    return suggested.name;
+  }
+
+  function currentPrimaryLocationValue() {
+    return String($("ezPrimaryLocation")?.value || $("prPrimaryLocation")?.value || activeProductionRequest?.primary_location || "").trim();
+  }
   let item4WorkspaceRetryTimer = 0;
   let item4PlanOverrides = {};
   let ezIntakeKind = null;
@@ -2284,6 +2350,9 @@
       if ($("prCarouselSlideMax")) $("prCarouselSlideMax").value = $("ezCarouselSlideMax")?.value || "";
       copySelectValue("ezCarouselImageMode", "prCarouselImageMode");
     }
+    if (take("ezPrimaryLocation") && $("prPrimaryLocation") && $("ezPrimaryLocation")) {
+      $("prPrimaryLocation").value = $("ezPrimaryLocation").value;
+    }
     if (force || ezFieldDirty("ezProductionNotes") || usingEzPlatforms() || ezEntryPath === "content") {
       mergeEzProductionNotes();
     }
@@ -2363,6 +2432,7 @@
     if ($("ezCarouselSlideMax")) $("ezCarouselSlideMax").value = record.carousel_slide_count_max ?? "";
     if ($("ezCarouselImageMode")) setSelectValue("ezCarouselImageMode", record.carousel_image_mode, "Manual Upload");
     if ($("ezProductionNotes")) $("ezProductionNotes").value = userNotesFromProductionNotes(record.production_notes);
+    hydratePrimaryLocationFromSources({ record, idea: activeIdea, force: false });
     syncEzStructureCounts();
     hydrateEzOutputsFromMatrix();
   }
@@ -2671,6 +2741,7 @@
       requested_caption: captionFields.requested_caption || "",
       script_mode: ezControlValue("prScriptMode", captionFields.script_mode || record.script_mode || "AI decides"),
       requested_script: String($("prRequestedScript")?.value || captionFields.requested_script || record.requested_script || ""),
+      primary_location: currentPrimaryLocationValue() || record.primary_location || "",
       production_notes: mergeEzProductionNotes() || captionFields.production_notes || record.production_notes || "",
       ...selectedRequestVoice(),
     };
@@ -3028,6 +3099,14 @@
       requested_caption: ezCaptionIsCustomized() ? String($("ezRequestedCaption")?.value || "").trim() : (captionFields.requested_caption || ""),
       script_mode: ezScriptIsCustomized() ? ($("ezScriptMode")?.value || "AI decides") : (captionFields.script_mode || "AI decides"),
       requested_script: ezScriptIsCustomized() ? String($("ezRequestedScript")?.value || "") : (captionFields.requested_script || ""),
+      primary_location: currentPrimaryLocationValue()
+        || suggestPrimaryLocationFromCopy({
+          title: ezIdeaTitleValue(),
+          summary: ezIdeaSummaryValue(),
+          primary: activeIdea?.primary_location || "",
+          area: activeIdea?.neighborhood_or_area || "",
+          market: activeIdea?.market_name || "",
+        }).name,
       carousel_image_mode: helpers?.ezImageModeFromWizard?.((ezWizardPending || ezWizardAnswers)?.inputKind)
         || $("ezCarouselImageMode")?.value
         || "Manual Upload",
@@ -3563,6 +3642,7 @@
       if ($("ezIdeaSummary") && !String($("ezIdeaSummary").value || "").trim()) {
         $("ezIdeaSummary").value = userIdeaSummaryFromStored(activeIdea.summary);
       }
+      hydratePrimaryLocationFromSources({ record: activeProductionRequest, idea: activeIdea, force: true });
       syncEzIdeaIdentityFields();
       setEzIdeaIdentityHint("Saved. You can keep editing.");
       const requestPayload = ezWizardRequestPayload(planned, { fileCount: photoCount });
@@ -3638,6 +3718,9 @@
       ezCaptionDrafts.clear();
       if ($("ezIdeaTitle")) $("ezIdeaTitle").value = "";
       if ($("ezIdeaSummary")) $("ezIdeaSummary").value = "";
+      if ($("ezPrimaryLocation")) $("ezPrimaryLocation").value = "";
+      if ($("prPrimaryLocation")) $("prPrimaryLocation").value = "";
+      primaryLocationUserEdited = false;
       if ($("ezTitle")) $("ezTitle").value = "";
       setEzIdeaIdentityHint("You can edit these anytime. Photos do not lock the name.");
       document.querySelectorAll("[data-ez-input]").forEach((button) => button.classList.remove("selected"));
@@ -3649,7 +3732,20 @@
     ["ezIdeaTitle", "ezIdeaSummary"].forEach((id) => {
       const el = $(id);
       if (!el) return;
-      el.addEventListener("input", queueEzIdeaIdentitySave);
+      el.addEventListener("input", () => {
+        queueEzIdeaIdentitySave();
+        if (!primaryLocationUserEdited) {
+          hydratePrimaryLocationFromSources({
+            record: activeProductionRequest,
+            idea: {
+              ...(activeIdea || {}),
+              title: $("ezIdeaTitle")?.value || activeIdea?.title || "",
+              summary: $("ezIdeaSummary")?.value || activeIdea?.summary || "",
+            },
+            force: true,
+          });
+        }
+      });
       el.addEventListener("change", queueEzIdeaIdentitySave);
     });
     $("ezAudioTrack")?.addEventListener("change", () => {
@@ -3673,22 +3769,39 @@
       "ezThumbnail", "ezVoiceoverTail", "ezVideoDuration", "ezVideoClipMode",
       "ezVideoClipExact", "ezVideoClipMin", "ezVideoClipMax", "ezCarouselSlideMode",
       "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax",
-      "ezCarouselImageMode", "ezProductionNotes",
+      "ezCarouselImageMode", "ezProductionNotes", "ezPrimaryLocation",
     ].forEach((id) => {
       const el = $(id);
       if (!el) return;
       el.addEventListener("change", (event) => {
         if (event.isTrusted === false) return;
+        if (id === "ezPrimaryLocation") {
+          primaryLocationUserEdited = true;
+          if ($("prPrimaryLocation")) $("prPrimaryLocation").value = el.value;
+        }
         ezDirty.add(id);
         queueEzConfigSave();
       });
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
         el.addEventListener("input", (event) => {
           if (event.isTrusted === false) return;
+          if (id === "ezPrimaryLocation") {
+            primaryLocationUserEdited = true;
+            if ($("prPrimaryLocation")) $("prPrimaryLocation").value = el.value;
+          }
           ezDirty.add(id);
           queueEzConfigSave();
         });
       }
+    });
+    $("prPrimaryLocation")?.addEventListener("input", () => {
+      primaryLocationUserEdited = true;
+      if ($("ezPrimaryLocation")) $("ezPrimaryLocation").value = $("prPrimaryLocation").value;
+    });
+    $("prPrimaryLocation")?.addEventListener("change", () => {
+      primaryLocationUserEdited = true;
+      if ($("ezPrimaryLocation")) $("ezPrimaryLocation").value = $("prPrimaryLocation").value;
+      if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
     });
     document.querySelectorAll("[data-ez-output]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -5575,7 +5688,7 @@
 
     if (form) {
       form.querySelectorAll("input, select, textarea").forEach((control) => {
-        if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode], #ezIdeaTitle, #ezIdeaSummary")) return;
+        if (control.matches("[data-ez-asset-caption], [data-ez-caption-mode], #ezIdeaTitle, #ezIdeaSummary, #ezPrimaryLocation, #prPrimaryLocation")) return;
         control.disabled = !editable;
       });
     }
@@ -5726,6 +5839,7 @@
     setSelectValue("prScriptMode", record.script_mode, "AI decides");
     $("prRequestedScript").value = record.requested_script || "";
     $("prProductionNotes").value = record.production_notes || "";
+    hydratePrimaryLocationFromSources({ record, idea: activeIdea, force: true });
     const musicId = Array.isArray(record.selected_music_asset_links) ? record.selected_music_asset_links[0] : "";
     $("prMusicAsset").value = musicId || "";
     syncAllStructureControls();
@@ -6122,6 +6236,7 @@
       requested_caption: $("prRequestedCaption").value.trim(),
       script_mode: $("prScriptMode").value,
       requested_script: $("prRequestedScript").value.trim(),
+      primary_location: currentPrimaryLocationValue(),
       production_notes: $("prProductionNotes").value.trim(),
       slide_captions: collectEzSlideCaptionRecords(),
     };
@@ -7365,6 +7480,8 @@
   const PRODUCTION_CONTROL_HELP = {
     ezIdeaTitle: "Name this content. You can change it later — dropping photos does not lock the title.",
     ezIdeaSummary: "Optional description for the idea. Helps the pipeline write captions and scripts.",
+    ezPrimaryLocation: "Neighborhood or place used when publishing. Prefills from the idea or title when recognized. You can overwrite it.",
+    prPrimaryLocation: "Publish location tag for Instagram / Facebook. Same value as Primary location on the Production form.",
     ezAudioVoiceover: "Turn spoken narration on or off. Voiceover is used on video outputs, not native still carousels.",
     ezAudioVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
     ezAudioMusic: "Turn background music on or off. Music is used on video outputs, not native still carousels.",
