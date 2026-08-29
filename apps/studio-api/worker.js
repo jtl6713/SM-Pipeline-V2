@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.163-idea-library-match",
+          version: "0.10.164-idea-library-place",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -3730,6 +3730,16 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
   return respond(request, env, { ok: true, deleted: true, assets: remaining, record: mapProductionRequest(updated) });
 }
 
+/**
+ * Idea ↔ library still matching.
+ *
+ * Contract for future automation (auto-ideas from new photos):
+ * - high  → safe to auto-attach (A3 Location or Asset Name shares a place key)
+ * - medium → show in picker unchecked; do not auto-attach
+ * - low/none → omit unless the operator searched
+ *
+ * Same-day intake alone is never enough — that mixed Andersonville with Pilsen.
+ */
 const IDEA_LIBRARY_STOPWORDS = new Set([
   "the", "and", "for", "with", "from", "this", "that", "into", "over", "onto",
   "your", "their", "about", "then", "than", "when", "what", "where", "there",
@@ -3737,12 +3747,12 @@ const IDEA_LIBRARY_STOPWORDS = new Set([
   "idea", "photo", "photos", "image", "images", "still", "stills",
 ]);
 
-/** Shared city/scene words — rank softly, never enough alone to auto-check another neighborhood. */
 const IDEA_LIBRARY_WEAK_TOKENS = new Set([
   "chicago", "street", "streets", "neighborhood", "urban", "city", "town",
   "north", "south", "east", "west", "side", "stroll", "walk", "walking",
   "scene", "scenes", "local", "color", "colorful", "building", "buildings",
   "brick", "sidewalk", "tables", "patio", "storefront", "storefronts",
+  "museum", "american", "commercial", "outdoor", "dining", "public",
 ]);
 
 function ideaLibraryTokens(text) {
@@ -3755,6 +3765,17 @@ function ideaLibraryTokens(text) {
 
 function ideaLibraryStrongTokens(tokens) {
   return tokens.filter((token) => !IDEA_LIBRARY_WEAK_TOKENS.has(token) && token.length >= 4);
+}
+
+/** Place keys drive auto-attach. Prefer Primary_Location, then strong title/summary tokens. */
+function ideaLibraryPlaceKeys(idea, query = "") {
+  const fromLocation = ideaLibraryStrongTokens(ideaLibraryTokens(f(idea, "Primary_Location")));
+  const fromCopy = ideaLibraryStrongTokens(ideaLibraryTokens([
+    f(idea, "Candidate_Title"),
+    f(idea, "Idea_Summary"),
+  ].filter(Boolean).join(" ")));
+  const fromQuery = ideaLibraryStrongTokens(ideaLibraryTokens(query));
+  return [...new Set([...fromLocation, ...fromCopy, ...fromQuery])];
 }
 
 function ideaLibraryHaystack(record) {
@@ -3800,15 +3821,67 @@ function ideaLibraryIsEligibleImage(record) {
   return Boolean(googleDriveFileId(record));
 }
 
-function mapIdeaLibraryAsset(record, { score = 0, preselected = false } = {}) {
+function ideaLibraryRankAsset(record, { placeKeys, strongIdeaTokens, ideaTokens, queryTokens, today }) {
+  const location = String(f(record, "Location") || "").toLowerCase();
+  const name = String(f(record, "Asset Name") || "").toLowerCase();
+  const batchId = String(f(record, "Intake_Batch_ID") || "").trim();
+  const haystack = ideaLibraryHaystack(record);
+  if (queryTokens.length && !queryTokens.some((token) => haystack.includes(token))) {
+    return null;
+  }
+  const locationHits = placeKeys.filter((key) => location.includes(key));
+  const nameHits = placeKeys.filter((key) => name.includes(key));
+  const strongOverlap = strongIdeaTokens.filter((token) => haystack.includes(token)).length;
+  const weakOverlap = ideaTokens.filter((token) => haystack.includes(token)).length;
+  const intakeToday = ideaLibraryIntakeDate(record) === today;
+  const reasons = [];
+  if (locationHits.length) reasons.push(`location:${locationHits[0]}`);
+  if (nameHits.length) reasons.push(`asset_name:${nameHits[0]}`);
+  if (strongOverlap >= 2 && !locationHits.length && !nameHits.length) reasons.push("topic_overlap");
+  if (intakeToday && (locationHits.length || nameHits.length)) reasons.push("intake_today");
+
+  let confidence = "none";
+  if (locationHits.length || nameHits.length) confidence = "high";
+  else if (strongOverlap >= 2) confidence = "medium";
+  else if (strongOverlap >= 1) confidence = "low";
+
+  // Default browse: only place-linked stills. Search can surface medium/low.
+  if (!queryTokens.length && confidence !== "high") return null;
+  if (queryTokens.length && confidence === "none") {
+    confidence = "low";
+    reasons.push("search_hit");
+  }
+
+  const score = (locationHits.length ? 40 : 0)
+    + (nameHits.length ? 30 : 0)
+    + strongOverlap * 4
+    + weakOverlap
+    + (intakeToday && confidence === "high" ? 2 : 0);
+
+  return {
+    record,
+    score,
+    confidence,
+    match_reasons: reasons,
+    intake_batch_id: batchId || null,
+    // Auto-check / future auto-attach only at high confidence.
+    preselected: confidence === "high",
+  };
+}
+
+function mapIdeaLibraryAsset(record, row = {}) {
   return {
     id: record.id,
     name: f(record, "Asset Name"),
     google_drive_file_id: googleDriveFileId(record),
     preview_path: `/api/media-assets/${record.id}/preview`,
-    score,
-    preselected,
+    location: f(record, "Location") || null,
+    score: row.score || 0,
+    confidence: row.confidence || "none",
+    match_reasons: Array.isArray(row.match_reasons) ? row.match_reasons : [],
+    preselected: Boolean(row.preselected),
     intake_date: ideaLibraryIntakeDate(record) || null,
+    intake_batch_id: row.intake_batch_id || String(f(record, "Intake_Batch_ID") || "").trim() || null,
   };
 }
 
@@ -3824,9 +3897,10 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   ].filter(Boolean).join(" "));
   const queryTokens = ideaLibraryTokens(query);
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
+  const placeKeys = ideaLibraryPlaceKeys(idea, query);
   const today = chicagoNowParts().date;
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: 80,
+    limit: 120,
     sortField: "Intake_Date",
     sortDirection: "desc",
     filterFormula: "AND(OR({Media_Class}='Image',{Media_Class}='Graphic'),{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}))",
@@ -3834,19 +3908,19 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const ranked = [];
   for (const record of records) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
-    const haystack = ideaLibraryHaystack(record);
-    if (queryTokens.length && !queryTokens.some((token) => haystack.includes(token))) continue;
-    const strongOverlap = strongIdeaTokens.filter((token) => haystack.includes(token)).length;
-    const weakOverlap = ideaTokens.filter((token) => haystack.includes(token)).length;
-    const intakeToday = ideaLibraryIntakeDate(record) === today;
-    // Same-day intake used to auto-check every still from today, so Pilsen rode along
-    // with Andersonville. Only boost / pre-check when the still shares a strong idea token.
-    if (!queryTokens.length && strongOverlap < 1) continue;
-    const score = strongOverlap * 4 + weakOverlap + (intakeToday && strongOverlap > 0 ? 2 : 0);
-    const preselected = strongOverlap >= 1;
-    ranked.push({ record, score, preselected });
+    const row = ideaLibraryRankAsset(record, {
+      placeKeys,
+      strongIdeaTokens,
+      ideaTokens,
+      queryTokens,
+      today,
+    });
+    if (row) ranked.push(row);
   }
   ranked.sort((a, b) => {
+    const confidenceRank = { high: 3, medium: 2, low: 1, none: 0 };
+    const confDiff = (confidenceRank[b.confidence] || 0) - (confidenceRank[a.confidence] || 0);
+    if (confDiff) return confDiff;
     if (b.score !== a.score) return b.score - a.score;
     if (a.preselected !== b.preselected) return a.preselected ? -1 : 1;
     return String(f(a.record, "Asset Name") || "").localeCompare(String(f(b.record, "Asset Name") || ""));
@@ -3856,6 +3930,13 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     ok: true,
     idea_id: ideaId,
     query: query || null,
+    place_keys: placeKeys,
+    match_policy: {
+      auto_attach_confidence: "high",
+      high: "A3 Location or Asset Name shares a place key from the idea",
+      medium: "topic/description overlap only — show, do not auto-attach",
+      low: "weak/search hit — operator choice only",
+    },
     suggested: capped.filter((row) => row.preselected),
     matches: capped.filter((row) => !row.preselected),
   });

@@ -265,3 +265,4 @@ Production tooltips Pages deploy: 2026-08-29 — Production and review help use 
 Idea library pick Pages deploy: 2026-08-29 - Idea drawer chooser: Add new photos vs Use existing library stills. UI 0.6.172-idea-library-pick.
 
 Idea library match Pages deploy: 2026-08-29 - Clarify Use existing hint: checked stills match the idea; search for other neighborhoods. UI 0.6.173-idea-library-match.
+Idea library place Pages deploy: 2026-08-29 - Use existing checks only place-matched stills; search for other neighborhoods. UI 0.6.174-idea-library-place.
