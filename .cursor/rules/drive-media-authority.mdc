@@ -1,0 +1,25 @@
+---
+description: Google Drive is the only durable media store; do not keep assets on R2
+alwaysApply: true
+---
+
+# Drive media authority
+
+Google Drive is the DAM. Media Assets are Drive files. **Do not persist photos, video, music, voiceovers, or thumbnails on R2.**
+
+## Intake
+
+- Browser → Studio Worker → Google Drive (pipeline-runner Drive client). Then write the Media Asset (`Google Drive File ID` + `Google Drive URL`).
+- Do not `STUDIO_MEDIA.put` originals, library tracks, or “temporary” copies that stay after the request.
+- Do not store catalog URLs as `https://media.chicagoshining.com/studio/...` on Media Assets.
+
+## Allowed R2 exception
+
+R2 may host a **short-lived public HTTP copy** only when a platform API cannot fetch Drive (`uc?id=` / `webContentLink` is not a Graph/YouTube `cover_url`). That copy is derived from Drive. Drive remains authority. See native grid covers.
+
+## Wrong
+
+```js
+await env.STUDIO_MEDIA.put(`studio/music-library/${id}.mp3`, body);
+fields["Google Drive URL"] = `https://media.chicagoshining.com/studio/music-library/${id}.mp3`;
+```

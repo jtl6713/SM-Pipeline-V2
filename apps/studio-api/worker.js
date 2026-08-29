@@ -171,7 +171,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.158-music-favorites",
+          version: "0.10.159-music-drive",
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
@@ -243,6 +243,7 @@ export default {
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
           studio_music_favorites_v1: true,
+          studio_music_drive_authority_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
           "0.10.10-elevenlabs-v2-catalog": true,
@@ -1989,12 +1990,17 @@ function isMp3MusicFile(file) {
   return mime === "audio/mpeg" || mime === "audio/mp3" || ext === "mp3";
 }
 
+function isStudioLibraryMusicRecord(record, sourceUrl = "") {
+  const transferId = String(f(record, "Studio_Transfer_ID") || "");
+  return transferId.startsWith("MUSIC-") || isStudioLibraryMusicUrl(sourceUrl);
+}
+
 function mapMusic(record) {
   const driveFileId = googleDriveFileId(record);
   const sourceUrl = String(f(record, "Google Drive URL") || "").trim();
-  const studioLibrary = isStudioLibraryMusicUrl(sourceUrl);
+  const studioLibrary = isStudioLibraryMusicRecord(record, sourceUrl);
   const doNotUse = Boolean(f(record, "Do_Not_Use"));
-  const previewAvailable = !doNotUse && Boolean(driveFileId || studioLibrary);
+  const previewAvailable = !doNotUse && Boolean(driveFileId || isStudioLibraryMusicUrl(sourceUrl));
   return {
     id: record.id,
     name: f(record, "Asset Name"),
@@ -2004,7 +2010,7 @@ function mapMusic(record) {
     preview_url: previewAvailable ? `/api/music/${record.id}/preview` : null,
     preview_available: previewAvailable,
     preview_source: previewAvailable ? (driveFileId ? "google_drive" : "studio_r2") : null,
-    r2_preview_key: studioLibrary ? studioMusicR2KeyFromUrl(sourceUrl) : musicPreviewKey(record),
+    r2_preview_key: isStudioLibraryMusicUrl(sourceUrl) ? studioMusicR2KeyFromUrl(sourceUrl) : musicPreviewKey(record),
     mime_type: f(record, "MIME_Type"),
     file_extension: f(record, "File_Extension"),
     file_size_mb: f(record, "File_Size_MB"),
@@ -11178,7 +11184,7 @@ async function listMusic(request, env, url) {
     }),
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
       limit,
-      filterFormula: "AND({Asset_Role}='Music',FIND('studio/music-library',{Google Drive URL}))",
+      filterFormula: "AND({Asset_Role}='Music',OR(FIND('studio/music-library',{Google Drive URL}),FIND('MUSIC-',{Studio_Transfer_ID})))",
     }).catch(() => []),
   ]);
 
@@ -11231,10 +11237,46 @@ async function toggleMusicFavorite(request, env, url) {
 
 const MUSIC_LIBRARY_MAX_FILES = 8;
 const MUSIC_LIBRARY_MAX_FILE_BYTES = 40 * 1024 * 1024;
+const GDRIVE_MUSIC_FOLDER_ID = "1mzNHcVmeXb6I2WybJD5iOTrJUDRQJIN3";
+
+async function promoteStudioMusicToDrive(env, { filename, bytes, contentType }) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) {
+    throw new HttpError(503, "Pipeline runner is required to store music in Google Drive");
+  }
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const form = new FormData();
+  form.set("filename", filename);
+  form.set("file", new Blob([bytes], { type: contentType || "audio/mpeg" }), filename);
+  const response = await fetch(`${runnerUrl}/jobs/studio-music-library`, {
+    method: "POST",
+    headers: {
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: form,
+  });
+  const payload = await response.json().catch(() => ({}));
+  const fileId = String(payload?.google_drive_file_id || "").trim();
+  const driveUrl = String(payload?.google_drive_url || "").trim();
+  if (!response.ok || !fileId || !driveUrl) {
+    throw new HttpError(
+      response.status >= 400 ? response.status : 502,
+      payload?.error || payload?.message || "Google Drive music upload failed"
+    );
+  }
+  return {
+    google_drive_file_id: fileId,
+    google_drive_url: driveUrl,
+    web_view_link: String(payload.web_view_link || `https://drive.google.com/file/d/${fileId}/view`),
+    folder_id: String(payload.folder_id || GDRIVE_MUSIC_FOLDER_ID),
+  };
+}
 
 async function uploadMusicLibraryTracks(request, env, authorization) {
-  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  if (!String(env.PIPELINE_RUNNER_URL || "").trim()) {
+    throw new HttpError(503, "Pipeline runner is required to store music in Google Drive");
+  }
 
   let form;
   try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded music"); }
@@ -11256,27 +11298,20 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
   }
 
   const uploaded = [];
-  const pendingKey = { current: null };
-  try {
-    for (let i = 0; i < files.length; i++) {
+  for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
       const safeName = item4SafeFileName(file.name || "track.mp3");
-      const key = `studio/music-library/${id}-${safeName.endsWith(".mp3") ? safeName : `${safeName}.mp3`}`;
-      const body = typeof file.stream === "function" ? file.stream() : await file.arrayBuffer();
-      pendingKey.current = key;
-      await env.STUDIO_MEDIA.put(key, body, {
-        httpMetadata: { contentType: "audio/mpeg" },
-        customMetadata: {
-          originalName: String(file.name || safeName),
-          uploadedBy: String(authorization?.email || authorization?.user?.email || ""),
-          assetId: id,
-        },
-      });
-      const publicUrl = `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
       const assetName = files.length === 1 && displayName
         ? displayName
         : String(file.name || safeName).replace(/\.mp3$/i, "");
+      const driveName = `${assetName || "Studio music track"}.mp3`;
+      const bytes = await file.arrayBuffer();
+      const drive = await promoteStudioMusicToDrive(env, {
+        filename: driveName,
+        bytes,
+        contentType: "audio/mpeg",
+      });
       const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
         method: "POST",
         body: JSON.stringify({
@@ -11284,13 +11319,15 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
             fields: {
               "Asset Name": assetName || "Studio music track",
               Media_Class: "Audio",
-              "Google Drive URL": publicUrl,
+              "Google Drive URL": drive.google_drive_url,
+              "Google Drive File ID": drive.google_drive_file_id,
               MIME_Type: "audio/mpeg",
               File_Extension: "mp3",
               File_Size_Bytes: Number(file.size || 0) || null,
               Intake_Status: "Created",
               Intake_Date: new Date().toISOString().slice(0, 10),
               Drive_Access_Status: "Public",
+              Classification_Status: "Classified",
               Asset_Status: "Available",
               Active: true,
               Do_Not_Use: false,
@@ -11298,7 +11335,7 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
               Rights_Status: "Owned",
               Asset_Role: "Music",
               Raw_Source_Eligibility: "Not Applicable",
-              Asset_Description: description || "Studio Music Library upload stored in R2.",
+              Asset_Description: description || "Studio Music Library upload stored in Google Drive Assets/Music.",
               Studio_Transfer_ID: `MUSIC-${id}`,
             },
           }],
@@ -11307,14 +11344,7 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
       });
       const record = Array.isArray(created?.records) ? created.records[0] : null;
       if (!record?.id) throw new HttpError(502, "Music was stored, but the catalog record was not created");
-      pendingKey.current = null;
       uploaded.push(mapMusic(record));
-    }
-  } catch (error) {
-    if (pendingKey.current) {
-      try { await env.STUDIO_MEDIA.delete(pendingKey.current); } catch {}
-    }
-    throw error;
   }
 
   return respond(request, env, {
