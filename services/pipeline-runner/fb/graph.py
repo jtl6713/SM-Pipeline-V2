@@ -70,12 +70,23 @@ class FacebookPhotoClient:
         name = url.rsplit("/", 1)[-1].split("?")[0] or "facebook-photo.jpg"
         return response.content, name
 
-    def publish_single_photo(self, *, image: bytes, filename: str, caption: str) -> tuple[int, dict[str, Any]]:
+    def publish_single_photo(
+        self,
+        *,
+        image: bytes,
+        filename: str,
+        caption: str,
+        place: str | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        form: dict[str, Any] = {"caption": caption, "published": "true"}
+        place_id = str(place or "").strip()
+        if place_id.isdigit():
+            form["place"] = place_id
         try:
             response = requests.post(
                 self._url(f"{self.page_id}/photos"),
                 headers=self._headers(),
-                data={"caption": caption, "published": "true"},
+                data=form,
                 files={"source": (filename, image, "image/jpeg")},
                 timeout=120,
             )
@@ -88,12 +99,25 @@ class FacebookPhotoClient:
         data = response.json() if response.content else {}
         return response.status_code, data if isinstance(data, dict) else {"raw": data}
 
-    def publish_attached_media(self, *, message: str, photo_ids: list[str]) -> tuple[int, dict[str, Any]]:
+    def publish_attached_media(
+        self,
+        *,
+        message: str,
+        photo_ids: list[str],
+        place: str | None = None,
+    ) -> tuple[int, dict[str, Any]]:
         attached = [{"media_fbid": photo_id} for photo_id in photo_ids]
+        params: dict[str, Any] = {
+            "message": message,
+            "attached_media": json.dumps(attached, separators=(",", ":")),
+        }
+        place_id = str(place or "").strip()
+        if place_id.isdigit():
+            params["place"] = place_id
         try:
             response = requests.post(
                 self._url(f"{self.page_id}/feed"),
-                params={"message": message, "attached_media": json.dumps(attached, separators=(",", ":"))},
+                params=params,
                 headers=self._headers(),
                 timeout=60,
             )

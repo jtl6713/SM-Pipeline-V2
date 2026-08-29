@@ -26,6 +26,7 @@ from ap1_ig.graph import InstagramGraphError, InstagramReelClient, load_instagra
 from asset.helpers import parse_int
 from carousel.timeutil import chicago_now, iso_utc, stamp_minutes, utc_now
 from item4.settings import PipelineSettings
+from publish.location import resolve_publish_location
 from render.fields import field, field_str
 
 RECORD_ID_PREFIX = "rec"
@@ -79,11 +80,25 @@ def process_request(
             ensure_public_cover_url(client, output)
         except Exception:
             pass
-    body = reel_create_body(output)
+    pipeline_settings = PipelineSettings(client)
+    graph_settings = None
+    try:
+        graph_settings = load_instagram_graph_settings(pipeline_settings)
+    except InstagramGraphError:
+        graph_settings = None
+    location = resolve_publish_location(
+        client,
+        output,
+        settings=pipeline_settings,
+        token=(graph_settings or {}).get("token", ""),
+        version=(graph_settings or {}).get("version", "v25.0"),
+    )
+    body = reel_create_body(output, location_id=(location.page_id if location else None))
     preview["eligibility_reason"] = reason
     preview["video_url"] = body.get("video_url")
     preview["has_cover_url"] = bool(body.get("cover_url"))
     preview["cover_url"] = body.get("cover_url") or ""
+    preview["location"] = location.as_dict() if location else None
     preview["replace_transaction_id"] = field_str(output, "Replace_Transaction_ID")
     if reason:
         return {"processed": False, "reason": reason, **preview}
@@ -119,13 +134,22 @@ def process_request(
     output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
 
     try:
-        settings = load_instagram_graph_settings(PipelineSettings(client))
+        settings = graph_settings or load_instagram_graph_settings(pipeline_settings)
         graph = InstagramReelClient(
             ig_user_id=settings["ig_user_id"],
             token=settings["token"],
             version=settings["version"],
         )
-        created = graph.create_reel(body)
+        try:
+            created = graph.create_reel(body)
+        except InstagramGraphError as exc:
+            # Invalid curated/search place IDs must not block the publish.
+            if body.get("location_id") and "LOCATION" in str(exc).upper():
+                body = {k: v for k, v in body.items() if k != "location_id"}
+                preview["location_tag_dropped"] = str(exc)
+                created = graph.create_reel(body)
+            else:
+                raise
         creation_id = str(created.get("id") or "").strip()
         graph.wait_for_container(creation_id)
         published = graph.publish(creation_id)
@@ -164,7 +188,16 @@ def process_request(
             f"Instagram response ID: {creation_id}\n"
             f"Instagram permalink: {permalink}\n"
             f"Published from: {field_str(output, 'Publish_Asset_URL')}\n"
-            "Cover handling: native 3D thumbnail as Instagram Reel cover_url when a public cover exists."
+            + (
+                f"Location tag: {location.label} (page_id={location.page_id}, source={location.source}).\n"
+                if location and location.page_id and not preview.get("location_tag_dropped")
+                else (
+                    f"Location resolved as {location.label} but Meta rejected the place tag; published without it.\n"
+                    if location and preview.get("location_tag_dropped")
+                    else (f"Location text: {location.label} (no Meta page id).\n" if location else "")
+                )
+            )
+            + "Cover handling: native 3D thumbnail as Instagram Reel cover_url when a public cover exists."
         ),
     )
     client.update_record(

@@ -4,6 +4,7 @@ from typing import Any
 
 from asset.helpers import as_bool
 from item4.settings import PipelineSettings
+from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str
 from yt.constants import DEFAULT_CATEGORY_ID, DEFAULT_PRIVACY, THUMB_NOT_NEEDED, THUMB_PENDING
 
@@ -38,7 +39,11 @@ def strip_leading_title(body: str, title: str) -> str:
     return text
 
 
-def description_final(record: dict[str, Any]) -> str:
+def description_final(
+    record: dict[str, Any],
+    *,
+    location: PublishLocation | None = None,
+) -> str:
     title = field_str(record, "Output_Title")
     # Prefer Output_Caption so a previously stored YouTube_Description_Final that
     # still includes the title can be corrected on the next YT0 prepare.
@@ -46,8 +51,11 @@ def description_final(record: dict[str, Any]) -> str:
     body = strip_leading_title(body, title)
     hashtags = field_str(record, "Output_Hashtags")
     if hashtags:
-        return f"{body}\n\n{hashtags}".strip()
-    return body
+        text = f"{body}\n\n{hashtags}".strip()
+    else:
+        text = body
+    # YouTube Data API recordingDetails.location* is deprecated; keep place as text.
+    return append_location_line(text, location)
 
 
 def idempotency_key(record: dict[str, Any]) -> str:
@@ -64,7 +72,14 @@ def thumbnail_status(record: dict[str, Any]) -> str:
     return THUMB_PENDING if field_str(record, "Thumbnail_URL") else THUMB_NOT_NEEDED
 
 
-def package_fields(record: dict[str, Any], defaults: dict[str, str], *, source_url: str, prepared_at: str) -> dict[str, Any]:
+def package_fields(
+    record: dict[str, Any],
+    defaults: dict[str, str],
+    *,
+    source_url: str,
+    prepared_at: str,
+    location: PublishLocation | None = None,
+) -> dict[str, Any]:
     made_for_kids = field(record, "YouTube_Made_For_Kids")
     if made_for_kids is None or made_for_kids == "":
         made_for_kids = setting_is_true(defaults.get("made_for_kids", ""))
@@ -80,7 +95,7 @@ def package_fields(record: dict[str, Any], defaults: dict[str, str], *, source_u
         or DEFAULT_PRIVACY,
         "YouTube_Made_For_Kids": as_bool(made_for_kids, False),
         "YouTube_Contains_Synthetic_Media": as_bool(synthetic, False),
-        "YouTube_Description_Final": description_final(record),
+        "YouTube_Description_Final": description_final(record, location=location),
         "YouTube_Idempotency_Key": field_str(record, "YouTube_Idempotency_Key") or idempotency_key(record),
         "YouTube_Thumbnail_Status": thumbnail_status(record),
         "YouTube_Response_JSON": (

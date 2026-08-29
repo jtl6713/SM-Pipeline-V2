@@ -149,6 +149,24 @@
  <label class="form-field"><span>Idea description <em>optional</em></span>
  <textarea id="ezIdeaSummary" maxlength="5000" rows="3" placeholder="What should this content be about?"></textarea>
  </label>
+ <label class="form-field"><span>Primary location <em>optional</em></span>
+ <input id="ezPrimaryLocation" maxlength="200" placeholder="e.g. Andersonville" autocomplete="off" list="ezPrimaryLocationSuggestions">
+ </label>
+ <datalist id="ezPrimaryLocationSuggestions">
+  <option value="Andersonville"></option>
+  <option value="Wicker Park"></option>
+  <option value="Logan Square"></option>
+  <option value="Lincoln Park"></option>
+  <option value="The Loop"></option>
+  <option value="Millennium Park"></option>
+  <option value="Navy Pier"></option>
+  <option value="River North"></option>
+  <option value="Pilsen"></option>
+  <option value="Hyde Park"></option>
+  <option value="West Loop"></option>
+  <option value="Chicago"></option>
+ </datalist>
+ <em class="ez-option-hint" id="ezPrimaryLocationHint">Used as the publish location tag. Prefills from the idea or title when we recognize a place. You can overwrite it anytime before promote.</em>
  <em class="ez-option-hint" id="ezIdeaIdentityHint">You can edit these anytime. Photos do not lock the name.</em>
  </div>
  <div class="ez-card-grid" id="ezCardGrid">
@@ -722,6 +740,12 @@
 
  <div class="request-section">
  <div class="request-section-heading"><h3>7. Text direction</h3><p>Let AI decide, force exact wording, or ask AI to improve your wording.</p></div>
+ <div class="text-control">
+ <label class="form-field grow"><span>Primary location</span>
+ <input id="prPrimaryLocation" maxlength="200" placeholder="e.g. Andersonville" list="ezPrimaryLocationSuggestions">
+ </label>
+ </div>
+ <em class="ez-option-hint" id="prPrimaryLocationHint">Publish location tag for Instagram / Facebook. Prefills from the idea or title when recognized. Overwrite anytime before promote.</em>
  <div class="text-control">
  <label class="form-field"><span>Title control</span><select id="prTitleMode"><option>AI decides</option><option>Force exact</option><option>AI improve</option></select></label>
  <label class="form-field grow"><span>Title</span><input id="prRequestedTitle" maxlength="500" placeholder="Optional unless forcing exact wording"></label>
@@ -1367,9 +1391,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.177-best-times-fast"></script>
+ <script src="/assets/config.js?v=0.6.178-production-location"></script>
  <script src="/assets/ez-plan.js?v=0.6.149-finished-retry"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.177-best-times-fast"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.177";</script>
+ <script src="/assets/app-item4-0619.js?v=0.6.178-production-location"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.178";</script>
 </body>
 </html>

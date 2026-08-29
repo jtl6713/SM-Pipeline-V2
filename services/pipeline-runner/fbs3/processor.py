@@ -30,6 +30,7 @@ from fbs3.constants import (
 from fbs3.eligibility import create_eligibility_reason
 from fbs3.graph import FacebookReelClient, FacebookReelError, load_facebook_reel_settings
 from item4.settings import PipelineSettings
+from publish.location import resolve_publish_location
 from render.fields import field, field_str
 
 RECORD_ID_PREFIX = "rec"
@@ -105,9 +106,23 @@ def process_request(
 
     reason = create_eligibility_reason(output)
     video_url = cache_busted_public_url(output)
+    pipeline_settings = PipelineSettings(client)
+    reel_settings = None
+    try:
+        reel_settings = load_facebook_reel_settings(pipeline_settings)
+    except FacebookReelError:
+        reel_settings = None
+    location = resolve_publish_location(
+        client,
+        output,
+        settings=pipeline_settings,
+        token=(reel_settings or {}).get("token", ""),
+        version=(reel_settings or {}).get("version", "v25.0"),
+    )
     preview["eligibility_reason"] = reason
     preview["video_url"] = video_url
     preview["resume"] = bool(field_str(output, "FB_Slideshow_Meta_Video_ID"))
+    preview["location"] = location.as_dict() if location else None
     if reason:
         return {"processed": False, "reason": reason, **preview}
     if dry_run:
@@ -132,7 +147,7 @@ def process_request(
     video_id = field_str(output, "FB_Slideshow_Meta_Video_ID")
     upload_url = field_str(output, "FB_Slideshow_Meta_Upload_URL")
     try:
-        settings = load_facebook_reel_settings(PipelineSettings(client))
+        settings = reel_settings or load_facebook_reel_settings(pipeline_settings)
         graph = FacebookReelClient(
             page_id=settings["page_id"],
             token=settings["token"],
@@ -163,11 +178,24 @@ def process_request(
             )
         payload = graph.download_mp4(video_url)
         graph.upload_mp4(upload_url, payload)
-        finished = graph.finish(
-            video_id=video_id,
-            description=reel_description(output),
-            title=reel_title(output),
-        )
+        place_id = location.page_id if location else None
+        try:
+            finished = graph.finish(
+                video_id=video_id,
+                description=reel_description(output),
+                title=reel_title(output),
+                place=place_id,
+            )
+        except FacebookReelError as exc:
+            if place_id and "place" in str(exc).casefold():
+                preview["location_tag_dropped"] = str(exc)
+                finished = graph.finish(
+                    video_id=video_id,
+                    description=reel_description(output),
+                    title=reel_title(output),
+                )
+            else:
+                raise
     except FacebookReelError as exc:
         return _mark_graph_failed(client, output, exc, video_id=video_id, preview=preview, attempt=attempt)
 

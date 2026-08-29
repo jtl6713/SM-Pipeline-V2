@@ -37,7 +37,12 @@ def cover_url(record: dict[str, Any]) -> str:
     return graph_fetchable_cover_url(field_str(record, "Thumbnail_URL"))
 
 
-def reel_create_body(record: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+def reel_create_body(
+    record: dict[str, Any],
+    now: datetime | None = None,
+    *,
+    location_id: str | None = None,
+) -> dict[str, Any]:
     body: dict[str, Any] = {
         "media_type": "REELS",
         "video_url": cache_busted_video_url(record, now),
@@ -49,4 +54,7 @@ def reel_create_body(record: dict[str, Any], now: datetime | None = None) -> dic
         body["cover_url"] = cover
     else:
         body["thumb_offset"] = THUMB_OFFSET_MS
+    place = str(location_id or "").strip()
+    if place.isdigit():
+        body["location_id"] = place
     return body

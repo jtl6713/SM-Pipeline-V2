@@ -9,6 +9,7 @@ from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
 from item4.settings import PipelineSettings
+from publish.location import resolve_publish_location
 from render.fields import field, field_str
 from yt.common import preview, valid_record_id
 from yt.constants import (
@@ -109,9 +110,16 @@ def process_request(
         return {"processed": True, "terminal": True, "reason": "invalid_package", **result}
 
     defaults = youtube_defaults(PipelineSettings(client))
+    settings = PipelineSettings(client)
+    location = resolve_publish_location(client, output, settings=settings)
+    result["location"] = location.as_dict() if location else None
     notes = field_str(output, "Output_Notes")
     stamp = f"YT0 YouTube package validated at {stamp_minutes()}."
-    fields = package_fields(output, defaults, source_url=source_url, prepared_at=now)
+    if location:
+        stamp = f"{stamp} Location in description: {location.label}."
+    fields = package_fields(
+        output, defaults, source_url=source_url, prepared_at=now, location=location
+    )
     fields.update(
         {
             "Output_Notes": f"{notes}\n\n{stamp}".strip() if notes else stamp,

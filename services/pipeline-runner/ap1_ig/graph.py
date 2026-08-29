@@ -46,10 +46,18 @@ class InstagramReelClient:
         response = requests.post(self._url(f"{self.ig_user_id}/media"), data=payload, timeout=60)
         return self._require_creation(response)
 
-    def create_story(self, video_url: str) -> dict[str, Any]:
+    def create_story(self, video_url: str, *, location_id: str | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "media_type": "STORIES",
+            "video_url": video_url,
+            "access_token": self._token,
+        }
+        place = str(location_id or "").strip()
+        if place.isdigit():
+            params["location_id"] = place
         response = requests.post(
             self._url(f"{self.ig_user_id}/media"),
-            params={"media_type": "STORIES", "video_url": video_url, "access_token": self._token},
+            params=params,
             timeout=60,
         )
         return self._require_creation(response)
