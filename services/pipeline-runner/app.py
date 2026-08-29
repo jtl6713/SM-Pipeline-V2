@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request
 from config import StageRequest, load_settings
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
+from studio_music.processor import ingest_studio_music
 from studio_produce.processor import resume_job, start_job
 
 logger = logging.getLogger("pipeline-runner")
@@ -264,6 +265,31 @@ def _studio_produce_body() -> tuple[str, bool]:
     ).strip()
     resume = bool(payload.get("resume"))
     return record_id, resume
+
+
+@app.post("/jobs/studio-music-library")
+def run_studio_music_library():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    upload = request.files.get("file")
+    filename = str(request.form.get("filename") or getattr(upload, "filename", "") or "").strip()
+    content = upload.read() if upload else b""
+    if not content:
+        return jsonify({"error": "file is required"}), 422
+    try:
+        result = ingest_studio_music(content=content, filename=filename)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-music-library ingest failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info(
+        "job=studio-music-library file=%s drive=%s",
+        result.get("filename"),
+        result.get("google_drive_file_id"),
+    )
+    return jsonify(result), 201
 
 
 @app.post("/jobs/studio-produce")
