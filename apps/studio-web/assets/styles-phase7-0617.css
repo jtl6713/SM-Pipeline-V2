@@ -1255,9 +1255,9 @@ html[data-studio-theme="nyc"]{
   justify-content:space-between;
   gap:24px;
   padding:22px 32px 28px;
-  border-top:3px solid var(--gold,#d8aa45);
-  background:var(--topbar-bg,#012559);
-  color:rgba(255,255,255,.72);
+  border-top:3px solid #d8aa45;
+  background:#012559;
+  color:rgba(255,255,255,.78);
 }
 .studio-footer-links{
   display:flex;
@@ -1332,9 +1332,9 @@ body:has(#page-content.active) .main{
   padding:48px 56px 72px;
 }
 body:has(#page-content.active) .studio-footer{
-  background:var(--prod-navy);
-  border-top:3px solid var(--prod-gold);
-  color:rgba(255,255,255,.72);
+  background:#012559;
+  border-top:3px solid #d8aa45;
+  color:rgba(255,255,255,.78);
 }
 body:has(#page-content.active) .studio-footer-links button,
 body:has(#page-content.active) .studio-footer .topbar-status,
@@ -1941,9 +1941,9 @@ body{
   }
 }
 .studio-footer{
-  background:var(--topbar-bg,#012559);
-  border-top:3px solid var(--gold,#d8aa45);
-  color:rgba(255,255,255,.72);
+  background:#012559;
+  border-top:3px solid #d8aa45;
+  color:rgba(255,255,255,.78);
 }
 
 .main:has(#page-home.active):has(#page-dashboard.active){
@@ -2114,9 +2114,9 @@ body:has(#page-content.active) .main{
   padding:28px 28px 48px;
 }
 body:has(#page-content.active) .studio-footer{
-  background:var(--prod-navy, var(--topbar-bg,#012559));
-  border-top:3px solid var(--prod-gold, var(--gold,#d8aa45));
-  color:rgba(255,255,255,.72);
+  background:#012559;
+  border-top:3px solid #d8aa45;
+  color:rgba(255,255,255,.78);
 }
 body:has(#page-content.active) .studio-footer-links button,
 body:has(#page-content.active) .studio-footer .topbar-status,
