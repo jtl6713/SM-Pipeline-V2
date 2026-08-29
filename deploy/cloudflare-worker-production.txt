@@ -197,3 +197,4 @@ Best-times fast Worker deploy: 2026-08-29 - Stop legacy cache migration on sched
 YouTube scheduled privacy Worker deploy: 2026-08-29 - Scheduled YT posts keep YouTube_Privacy_Status=public; upload coerces to private+publishAt so YouTube releases publicly at schedule time. Worker 0.10.169-yt-scheduled-public.
 
 Production location Worker deploy: 2026-08-29 - Editable Primary location + IG/FB Graph place tags. Worker 0.10.171-production-location.
+Production lifecycle Worker deploy: 2026-08-29 - Content list rolls up Platform Output publish/schedule state; hide completed rows from Production In production. Worker 0.10.172-production-lifecycle.
