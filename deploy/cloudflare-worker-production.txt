@@ -200,3 +200,5 @@ Production location Worker deploy: 2026-08-29 - Editable Primary location + IG/F
 Production lifecycle Worker deploy: 2026-08-29 - Content list rolls up Platform Output publish/schedule state; hide completed rows from Production In production. Worker 0.10.172-production-lifecycle.
 
 Render timeout resume Worker deploy: 2026-08-29 - Remotion harvest timeouts no longer permanently Block/Fail; watchdog resumes timeout-blocked produce jobs. Worker 0.10.173-render-timeout-resume.
+
+Produce self-heal Worker deploy: 2026-08-29 - Any blocked produce job auto-retries (capped); after budget exhaustion escalate + ops email + optional investigate webhook. Worker 0.10.174-produce-self-heal.

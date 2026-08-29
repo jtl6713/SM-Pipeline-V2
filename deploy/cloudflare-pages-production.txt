@@ -273,3 +273,5 @@ Production location Pages deploy: 2026-08-29 - Production Primary location field
 Production lifecycle Pages deploy: 2026-08-29 - Drafts hide Promoted cards; Pipeline renamed In production and hides completed content. UI 0.6.179-production-lifecycle.
 
 Review thumbnail link Pages deploy: 2026-08-29 - Open Review shows Download cover; RR1 email includes cover preview + direct download link. UI 0.6.180-review-thumbnail-link.
+
+Produce self-heal Pages deploy: 2026-08-29 - Show Escalated produce state when auto-retries are exhausted. UI 0.6.181-produce-self-heal.

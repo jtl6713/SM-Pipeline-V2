@@ -18,7 +18,7 @@ STEPS = (
     "done",
 )
 
-TERMINAL_STEPS = frozenset({"done", "blocked"})
+TERMINAL_STEPS = frozenset({"done", "blocked", "escalated"})
 
 STEP_LABELS = {
     "themes": "Writing slide themes",
@@ -31,6 +31,7 @@ STEP_LABELS = {
     "render": "Rendering previews",
     "done": "Ready for Review",
     "blocked": "Blocked",
+    "escalated": "Escalated — needs investigation",
 }
 
 STEP_PERCENT = {
@@ -44,7 +45,12 @@ STEP_PERCENT = {
     "render": 62,
     "done": 65,
     "blocked": 5,
+    "escalated": 5,
 }
+
+# Cap for Worker/watchdog auto-resumes before catastrophic escalate + notify.
+HEAL_MAX_RESUMES = 5
+HEAL_SCHEMA = "studio.produce-heal.1"
 
 NATIVE_OUTPUT_TYPES = frozenset({
     "Single Image",
