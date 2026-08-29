@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.167-duration-30",
+          version: "0.10.168-best-times-fast",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -9783,11 +9783,13 @@ function studioInsightsResolveSeason(url) {
   return studioNormalizeInsightsSeason(url?.searchParams?.get("season") || url?.searchParams?.get("seasonal"));
 }
 
-async function studioInsightsPostsForView(env, { accounts, theme, platform, season, cache }) {
+async function studioInsightsPostsForView(env, { accounts, theme, platform, season, cache, migrate = false }) {
   let posts = [];
   if (studioInsightsDbEnabled(env)) {
     try {
-      await studioInsightsMigrateCacheToDb(env);
+      // Migration is one-shot/admin work. Never run it on schedule suggestion reads —
+      // re-upserting legacy cache posts from every Pipeline row 500s the Worker.
+      if (migrate) await studioInsightsMigrateCacheToDb(env);
       posts = await studioInsightsLoadObservations(env, {
         profile: theme,
         platform,
@@ -10154,134 +10156,134 @@ async function getInsightsBestTimes(request, env, url, authorization) {
   const outputType = String(url.searchParams.get("output_type") || "").trim();
   const season = studioInsightsResolveSeason(url);
   const industry = studioIndustryBestWindows(platform, outputType);
-  const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
-  let firstParty = [];
-  try {
-    firstParty = await studioInsightsLoadObservations(env, {
-      profile: theme,
-      platform,
-      output_type: outputType,
-      season,
-      source: "first_party",
-      limit: 120,
-    });
-    if (!firstParty.length) {
-      const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-        limit: 80,
-        sortField: "Published_At",
-        sortDirection: "desc",
-        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}!="",{Do_Not_Publish}=0)',
-      });
-      firstParty = rows
-        .filter((row) => {
-          if (platform && String(f(row, "Platform") || "") !== platform) return false;
-          if (outputType && String(f(row, "Platform_Output_Type") || f(row, "Studio_Output_Type") || "") !== outputType) return false;
-          const publishedAt = f(row, "Published_At");
-          if (!publishedAt) return false;
-          if (studioChicagoSeason(publishedAt) !== season) return false;
-          return true;
-        })
-        .map((row) => ({
-          id: row.id,
-          published_at: f(row, "Published_At"),
-          views: Number(f(row, "Insights_Views") || 0) || 0,
-          likes: Number(f(row, "Insights_Likes") || 0) || 0,
-          comments: Number(f(row, "Insights_Comments") || 0) || 0,
-          caption: String(f(row, "Output_Caption") || "").trim(),
-          platform,
-          output_type: outputType,
-          source: "first_party",
-        }));
-    }
-  } catch (error) {
-    console.warn("best-times first-party read failed", error);
-  }
-  const sample = firstParty.filter((row) => row.views > 0 || row.likes > 0);
-  let similar = null;
-  try {
-    similar = await studioLoadSimilarTimesView(env, url, authorization);
-  } catch (error) {
-    console.warn("best-times similar read failed", error);
-  }
-  let learned = null;
-  try {
-    learned = await studioInsightsLoadLearned(env, {
-      profile: theme,
-      platform,
-      output_type: outputType,
-      season,
-      metric_type: "post_time",
-    });
-  } catch (error) {
-    console.warn("best-times learned read failed", error);
-  }
-  const firstHeatmap = studioBuildSimilarHeatmap(sample);
-  const firstSuggested = firstHeatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE ? firstHeatmap.suggested : null;
-  const useFirstParty = Boolean(firstSuggested);
-  const useLearned = !useFirstParty && learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE;
-  const useSimilar = !useFirstParty && !useLearned && similar?.source === "similar_accounts" && similar.suggested;
-  const chosen = useFirstParty
-    ? { ...firstSuggested, label: `${studioSeasonLabel(season)} · your posts · ${firstSuggested.label}` }
-    : useLearned
-      ? { days: learned.days, windows: learned.windows, label: learned.label || `${studioSeasonLabel(season)} learned model` }
-      : useSimilar
-        ? similar.suggested
-        : industry;
-  const source = useFirstParty ? "first_party" : useLearned ? learned.source || "learned_model" : useSimilar ? "similar_accounts" : "industry_default";
-  let captionLearned = null;
-  try {
-    captionLearned = await studioInsightsLoadLearned(env, {
-      profile: theme,
-      platform,
-      output_type: outputType,
-      season,
-      metric_type: "caption",
-    });
-  } catch (error) {
-    console.warn("best-times caption learned read failed", error);
-  }
-  if (!captionLearned?.caption_patterns) {
-    captionLearned = studioInsightsBuildCaptionLearned([...sample, ...(similar ? await studioInsightsPostsForView(env, {
-      accounts: await studioEnsureSimilarWatchlist(env),
-      theme,
-      platform,
-      season,
-      cache: await studioLoadSimilarAccountStatusCache(env),
-    }) : [])]);
-  }
-  return respond(request, env, {
+  const seasonLabel = studioSeasonLabel(season);
+  const industryPayload = (theme = null, note = null) => ({
     ok: true,
     timezone: "America/Chicago",
     platform,
     output_type: outputType,
     season,
-    season_label: studioSeasonLabel(season),
-    source,
-    sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
-    suggested: chosen,
-    suggested_iso: studioSuggestedLocalDatetime(chosen.windows),
-    similar: similar?.suggested || null,
-    similar_sample_size: similar?.sample_size || 0,
-    similar_profile: similar?.profile || theme,
-    caption: captionLearned?.caption_patterns ? {
-      label: captionLearned.label,
-      patterns: captionLearned.caption_patterns,
-      sample_size: captionLearned.sample_size,
-      source: captionLearned.source || "historical",
-    } : captionLearned ? {
-      label: captionLearned.label,
-      patterns: captionLearned.patterns,
-      sample_size: captionLearned.sample_size,
-      source: "historical",
-    } : null,
-    note: useFirstParty
-      ? `${studioSeasonLabel(season)} suggestion uses your published posts with insights stored in Studio Insights Observations.`
-      : useLearned
-        ? `${studioSeasonLabel(season)} suggestion uses the learned historical model for ${platform || "this platform"}. Now stays selected unless you pick a time.`
-        : useSimilar
-          ? `Suggestion uses public posts from similar ${similar.profile_label} accounts for ${studioSeasonLabel(season).toLowerCase()}. Now stays selected unless you pick a time.`
-          : `Not enough ${studioSeasonLabel(season).toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time.`,
+    season_label: seasonLabel,
+    source: "industry_default",
+    sample_size: 0,
+    suggested: industry,
+    suggested_iso: studioSuggestedLocalDatetime(industry.windows),
+    similar: null,
+    similar_sample_size: 0,
+    similar_profile: theme,
+    caption: null,
+    note: note || `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time.`,
   });
+
+  try {
+    const theme = await studioResolveSimilarTimesTheme(env, url, authorization);
+    // Keep this route cheap: Pipeline fires one request per Ready row.
+    // No Airtable output dump, no legacy-cache migration, no second similar-posts pass for captions.
+    const [firstParty, learned, similar, captionLearned] = await Promise.all([
+      studioInsightsLoadObservations(env, {
+        profile: theme,
+        platform,
+        output_type: outputType,
+        season,
+        source: "first_party",
+        limit: 120,
+      }).catch((error) => {
+        console.warn("best-times first-party read failed", error);
+        return [];
+      }),
+      studioInsightsLoadLearned(env, {
+        profile: theme,
+        platform,
+        output_type: outputType,
+        season,
+        metric_type: "post_time",
+      }).catch((error) => {
+        console.warn("best-times learned read failed", error);
+        return null;
+      }),
+      studioLoadSimilarTimesView(env, url, authorization).catch((error) => {
+        console.warn("best-times similar read failed", error);
+        return null;
+      }),
+      studioInsightsLoadLearned(env, {
+        profile: theme,
+        platform,
+        output_type: outputType,
+        season,
+        metric_type: "caption",
+      }).catch((error) => {
+        console.warn("best-times caption learned read failed", error);
+        return null;
+      }),
+    ]);
+
+    const sample = (firstParty || []).filter((row) => row.views > 0 || row.likes > 0);
+    const firstHeatmap = studioBuildSimilarHeatmap(sample);
+    const firstSuggested = firstHeatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE ? firstHeatmap.suggested : null;
+    const useFirstParty = Boolean(firstSuggested);
+    const useLearned = !useFirstParty && learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE;
+    const useSimilar = !useFirstParty && !useLearned && similar?.source === "similar_accounts" && similar.suggested;
+    const chosen = useFirstParty
+      ? { ...firstSuggested, label: `${seasonLabel} · your posts · ${firstSuggested.label}` }
+      : useLearned
+        ? { days: learned.days, windows: learned.windows, label: learned.label || `${seasonLabel} learned model` }
+        : useSimilar
+          ? similar.suggested
+          : industry;
+    const source = useFirstParty ? "first_party" : useLearned ? learned.source || "learned_model" : useSimilar ? "similar_accounts" : "industry_default";
+    const captionFromSample = (!captionLearned?.caption_patterns && !captionLearned?.patterns)
+      ? studioInsightsBuildCaptionLearned(sample)
+      : null;
+    const caption = captionLearned?.caption_patterns
+      ? {
+          label: captionLearned.label,
+          patterns: captionLearned.caption_patterns,
+          sample_size: captionLearned.sample_size,
+          source: captionLearned.source || "historical",
+        }
+      : captionLearned?.patterns
+        ? {
+            label: captionLearned.label,
+            patterns: captionLearned.patterns,
+            sample_size: captionLearned.sample_size,
+            source: "historical",
+          }
+        : captionFromSample
+          ? {
+              label: captionFromSample.label,
+              patterns: captionFromSample.patterns,
+              sample_size: captionFromSample.sample_size,
+              source: "historical",
+            }
+          : null;
+
+    return respond(request, env, {
+      ok: true,
+      timezone: "America/Chicago",
+      platform,
+      output_type: outputType,
+      season,
+      season_label: seasonLabel,
+      source,
+      sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
+      suggested: chosen,
+      suggested_iso: studioSuggestedLocalDatetime(chosen.windows),
+      similar: similar?.suggested || null,
+      similar_sample_size: similar?.sample_size || 0,
+      similar_profile: similar?.profile || theme,
+      caption,
+      note: useFirstParty
+        ? `${seasonLabel} suggestion uses your published posts with insights stored in Studio Insights Observations.`
+        : useLearned
+          ? `${seasonLabel} suggestion uses the learned historical model for ${platform || "this platform"}. Now stays selected unless you pick a time.`
+          : useSimilar
+            ? `Suggestion uses public posts from similar ${similar.profile_label} accounts for ${seasonLabel.toLowerCase()}. Now stays selected unless you pick a time.`
+            : `Not enough ${seasonLabel.toLowerCase()} historical data yet. Showing travel/city industry defaults in Chicago time.`,
+    });
+  } catch (error) {
+    console.warn("best-times failed; industry default", error);
+    return respond(request, env, industryPayload(null, `Suggestion service hiccuped; showing industry defaults in Chicago time.`));
+  }
 }
 
 async function getInsightsCaptions(request, env, url, authorization) {
@@ -10360,6 +10362,11 @@ async function getInsightsSimilarTimes(request, env, url, authorization, ctx) {
 async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
+  try {
+    await studioInsightsMigrateCacheToDb(env);
+  } catch (error) {
+    console.warn("similar-times legacy migrate failed", error);
+  }
   const theme = payload.profile || payload.theme
     ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
     : await studioResolveSimilarTimesTheme(env, url, authorization);

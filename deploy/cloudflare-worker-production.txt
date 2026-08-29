@@ -193,3 +193,4 @@ Idea library place Worker deploy: 2026-08-29 - Place-key matching with high/medi
 Produce owner Worker deploy: 2026-08-29 - Cron and Pipeline poll start studio-produce for In Production orphans with no Remotion job; Promote awaits enqueue after fanout. Worker 0.10.165-produce-owner.
 Render label Worker deploy: 2026-08-29 - Studio state badge shows Rendering not Rendering N/M. Worker 0.10.166-render-label.
 Duration 30 Worker deploy: 2026-08-29 - Honor Video_Duration_Seconds including 30. Worker 0.10.167-duration-30.
+Best-times fast Worker deploy: 2026-08-29 - Stop legacy cache migration on schedule suggestions; always return industry fallback. Worker 0.10.168-best-times-fast.

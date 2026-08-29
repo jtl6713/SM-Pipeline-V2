@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.176-schedule-suggest";
+  const BUILD_ID = "item4-0.6.177-best-times-fast";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -8619,7 +8619,10 @@
     const season = studioInsightsSeason();
     const key = `${selectedProfileId || ""}|${platform}|${outputType}|${season}`;
     if (pipelineBestTimesCache.has(key)) return pipelineBestTimesCache.get(key);
-    const pending = api(`/api/insights/best-times?platform=${encodeURIComponent(platform)}&output_type=${encodeURIComponent(outputType)}&season=${encodeURIComponent(season)}`)
+    const pending = api(
+      `/api/insights/best-times?platform=${encodeURIComponent(platform)}&output_type=${encodeURIComponent(outputType)}&season=${encodeURIComponent(season)}`,
+      { timeoutMs: 12000, retries: 1 }
+    )
       .then((data) => {
         pipelineBestTimesCache.set(key, data);
         return data;
