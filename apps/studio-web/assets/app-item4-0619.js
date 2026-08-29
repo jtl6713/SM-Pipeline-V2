@@ -138,7 +138,7 @@
     if (!selectedProfileId) return path;
     const qIndex = String(path || "").indexOf("?");
     const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
-    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests", "/api/insights/best-times", "/api/insights/similar-times", "/api/insights/captions"].includes(pathname)) return path;
+    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests", "/api/insights/best-times", "/api/insights/similar-times", "/api/insights/captions", "/api/insights/discover"].includes(pathname)) return path;
     const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1));
     params.set("profile", selectedProfileId);
     return `${pathname}?${params.toString()}`;
@@ -332,6 +332,33 @@
   });
   $("operationsInsightsSeason")?.addEventListener("change", () => {
     loadOperations(true);
+  });
+  $("operationsDiscoverCreators")?.addEventListener("click", async () => {
+    const button = $("operationsDiscoverCreators");
+    try {
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Searching…";
+      }
+      setOperationsMessage("Searching YouTube for Chicago content creators…");
+      const result = await api("/api/insights/discover", {
+        method: "POST",
+        body: JSON.stringify({
+          profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
+          limit: 8,
+        }),
+        timeoutMs: 60000,
+      });
+      setOperationsMessage(result.message || "Discovery finished.");
+      loadOperations(true);
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not discover creators.", "error-text");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Find Chicago creators";
+      }
+    }
   });
   $("operationsWatchlistForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -8793,10 +8820,49 @@
     return 1;
   }
 
+  function formatInsightsCount(value) {
+    const n = Number(value) || 0;
+    return n.toLocaleString("en-US");
+  }
+
+  function renderOperationsInsightsOverview(data) {
+    const target = $("operationsInsightsOverview");
+    if (!target) return;
+    const overview = data?.overview;
+    if (!overview) {
+      target.hidden = true;
+      target.innerHTML = "";
+      return;
+    }
+    const platformBits = Object.entries(overview.by_platform || {})
+      .map(([platform, count]) => `${platform} ${formatInsightsCount(count)}`)
+      .join(" · ");
+    const top = overview.top_window
+      ? `${overview.top_window.day} ${overview.top_window.window} (${formatInsightsCount(overview.top_window.posts)} posts)`
+      : "—";
+    const cards = [
+      ["Posts captured", formatInsightsCount(overview.posts)],
+      ["Accounts timed", `${formatInsightsCount(overview.accounts_timed_ok)} / ${formatInsightsCount(overview.accounts_timed)}`],
+      ["Reference only", formatInsightsCount(overview.accounts_reference)],
+      ["Total likes", formatInsightsCount(overview.likes)],
+      ["Total views", formatInsightsCount(overview.views)],
+      ["Avg likes / post", formatInsightsCount(overview.avg_likes)],
+      ["Captions stored", formatInsightsCount(overview.captions)],
+      ["Top window", top],
+    ];
+    target.hidden = false;
+    target.innerHTML = cards.map(([label, value]) => `
+      <div class="insights-overview-card"><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>
+    `).join("") + (platformBits
+      ? `<div class="insights-overview-card"><strong>${escapeHtml(platformBits)}</strong><span>Posts by platform</span></div>`
+      : "");
+  }
+
   function renderOperationsSimilarTimes(data) {
     const meta = $("operationsSimilarTimesMeta");
     const caption = $("operationsInsightsCaptionMeta");
     const target = $("operationsSimilarHeatmap");
+    renderOperationsInsightsOverview(data);
     if (meta) {
       const parts = [
         data?.profile_label || "Chicago",
