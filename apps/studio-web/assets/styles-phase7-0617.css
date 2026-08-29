@@ -2290,3 +2290,16 @@ body:has(#page-content.active) .studio-footer-links button:hover{
     padding:16px 12px max(20px,env(safe-area-inset-bottom));
   }
 }
+
+/* Review thumbnail download in Open Review details */
+.creative-thumb-preview b{display:block}
+.creative-thumb-preview img{
+  display:block;
+  width:120px;
+  height:auto;
+  max-height:213px;
+  object-fit:cover;
+  border-radius:10px;
+  border:1px solid var(--line);
+  background:#0c1c33;
+}

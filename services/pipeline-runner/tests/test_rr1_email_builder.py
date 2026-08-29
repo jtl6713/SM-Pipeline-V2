@@ -34,6 +34,42 @@ def test_review_card_includes_decision_links():
     assert "recTEST123" in card
     assert "decision=approved" in card
     assert "Output #999" in card
+    assert "Download cover image" in card
+    assert "https://example.com/thumb.jpg" in card
+    assert 'alt="Output cover thumbnail"' in card
+
+
+def test_thumbnail_download_url_normalizes_drive_links():
+    from rr1.email_builder import thumbnail_download_url
+
+    assert thumbnail_download_url(
+        "https://drive.google.com/uc?id=1ABC_def-123&export=download"
+    ) == "https://drive.google.com/uc?export=download&id=1ABC_def-123"
+    assert thumbnail_download_url(
+        "https://drive.google.com/file/d/1ABC_def-123/view"
+    ) == "https://drive.google.com/uc?export=download&id=1ABC_def-123"
+    cdn = "https://media.chicagoshining.com/studio/previews/thumbnails/recX/cover-9x16.png"
+    assert thumbnail_download_url(cdn) == cdn
+    assert thumbnail_download_url("") == ""
+
+
+def test_review_card_notes_missing_thumbnail():
+    output = {
+        "id": "recTEST456",
+        "fields": {
+            "Output_ID": "1000",
+            "Output_Title": "No Thumb",
+            "Platform": "TikTok",
+            "Format": "Vertical Short Video",
+            "Platform_Output_Type": "TikTok Video",
+            "Aspect_Ratio": "9:16",
+        },
+    }
+    card = build_review_card(
+        output,
+        decision_webhook_url="https://hook.example.com/decision",
+    )
+    assert "Not set on this output" in card
 
 
 def test_review_email_html_wraps_cards():

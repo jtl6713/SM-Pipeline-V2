@@ -271,3 +271,5 @@ Schedule suggest Pages deploy: 2026-08-29 - Restore suggested publish times (res
 Best-times fast Pages deploy: 2026-08-29 - Cap best-times retries so suggestion UI cannot hang on Loading. UI 0.6.177-best-times-fast.
 Production location Pages deploy: 2026-08-29 - Production Primary location field prefilled/editable. UI 0.6.178-production-location.
 Production lifecycle Pages deploy: 2026-08-29 - Drafts hide Promoted cards; Pipeline renamed In production and hides completed content. UI 0.6.179-production-lifecycle.
+
+Review thumbnail link Pages deploy: 2026-08-29 - Open Review shows Download cover; RR1 email includes cover preview + direct download link. UI 0.6.180-review-thumbnail-link.
