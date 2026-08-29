@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.174-idea-library-place";
+  const BUILD_ID = "item4-0.6.175-render-label";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -589,9 +589,14 @@
     const job = record?.studio_production_job;
     const step = String(job?.step || "").trim();
     if (step === "blocked") return "Blocked";
-    const label = String(record?.studio_job_label || "").trim();
     const state = String(record?.studio_state || "").trim();
-    if (label && ["Queued", "In Production", "Preparing Assets", "Rendering", ""].includes(state)) {
+    // Per-row badge stays simple. Job counters like "Rendering 2/6" are PR-level,
+    // not meaningful on each Platform Output row.
+    if (state === "Rendering" || /^Rendering(\s+\d+\/\d+)?$/i.test(String(record?.studio_job_label || "").trim())) {
+      return "Rendering";
+    }
+    const label = String(record?.studio_job_label || "").trim();
+    if (label && ["Queued", "In Production", "Preparing Assets", ""].includes(state)) {
       return label;
     }
     return state;

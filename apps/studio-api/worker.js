@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.165-produce-owner",
+          version: "0.10.166-render-label",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -5337,7 +5337,10 @@ function parseStudioProductionJob(recordOrRaw) {
 function studioProductionJobLabel(job) {
   if (!job || typeof job !== "object") return null;
   if (String(job.step || "") === "blocked") return String(job.error || job.detail || "Blocked").trim() || "Blocked";
-  return String(job.detail || STUDIO_PRODUCTION_JOB_LABELS[job.step] || job.step || "").trim() || null;
+  const detail = String(job.detail || STUDIO_PRODUCTION_JOB_LABELS[job.step] || job.step || "").trim();
+  // Collapse PR-level counters so Pipeline rows never show "Rendering 2/6".
+  if (/^Rendering(\s+\d+\/\d+)?$/i.test(detail) || String(job.step || "") === "render") return "Rendering";
+  return detail || null;
 }
 
 async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}) {

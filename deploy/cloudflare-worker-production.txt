@@ -191,3 +191,4 @@ Idea library pick Worker deploy: 2026-08-29 - Idea drawer Use existing attaches 
 Idea library match Worker deploy: 2026-08-29 - Use existing only auto-checks stills that match strong idea tokens; same-day intake alone no longer pulls in other neighborhoods. Worker 0.10.163-idea-library-match.
 Idea library place Worker deploy: 2026-08-29 - Place-key matching with high/medium/low confidence; auto-attach only on A3 Location or filename place match. Worker 0.10.164-idea-library-place.
 Produce owner Worker deploy: 2026-08-29 - Cron and Pipeline poll start studio-produce for In Production orphans with no Remotion job; Promote awaits enqueue after fanout. Worker 0.10.165-produce-owner.
+Render label Worker deploy: 2026-08-29 - Studio state badge shows Rendering not Rendering N/M. Worker 0.10.166-render-label.
