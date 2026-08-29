@@ -38,15 +38,13 @@ INTAKE_STATUSES_DELETE = {
 
 FIELDS = [
     "Asset Name",
-    "Asset_Name",
     "Asset_Role",
     "Media_Class",
     "MIME_Type",
     "Intake_Status",
     "Do_Not_Use",
-    "Google_Drive_File_ID",
-    "Drive_File_ID",
-    "File_ID",
+    "Google Drive File ID",
+    "Classification_Status",
 ]
 
 
@@ -120,7 +118,7 @@ def intake_of(record: dict) -> str:
 
 
 def name_of(record: dict) -> str:
-    return str(field(record, "Asset Name", "Asset_Name") or "").strip() or record.get("id", "")
+    return str(field(record, "Asset Name") or "").strip() or record.get("id", "")
 
 
 def inferred_image_or_video(record: dict) -> bool:
