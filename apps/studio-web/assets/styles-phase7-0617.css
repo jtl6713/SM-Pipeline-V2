@@ -1194,6 +1194,52 @@ html[data-studio-theme="nyc"]{
 .insights-overview-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fbfdfd}
 .insights-overview-card strong{display:block;font-size:1.05rem;line-height:1.2}
 .insights-overview-card span{display:block;margin-top:3px;font-size:.74rem;color:var(--muted)}
+.ops-analytics-panel{padding:0;overflow:hidden}
+.ops-collapse{border:0;margin:0}
+.ops-collapse > summary.ops-collapse-summary{
+  list-style:none;
+  cursor:pointer;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  padding:18px 20px;
+  border-bottom:1px solid transparent;
+}
+.ops-collapse > summary.ops-collapse-summary::-webkit-details-marker{display:none}
+.ops-collapse > summary.ops-collapse-summary::after{
+  content:"Show";
+  flex:0 0 auto;
+  margin-top:4px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:6px 12px;
+  font-size:.72rem;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--teal-dark);
+  background:#fff;
+}
+.ops-collapse[open] > summary.ops-collapse-summary{
+  border-bottom-color:var(--line);
+}
+.ops-collapse[open] > summary.ops-collapse-summary::after{content:"Hide"}
+.ops-collapse-summary h2,
+.ops-collapse-summary h3{margin:0 0 4px;font-size:1.05rem}
+.ops-collapse-summary p{margin:0;color:var(--muted);font-size:.84rem;line-height:1.45;max-width:62ch}
+.ops-analytics-body{padding:0 0 8px}
+.ops-analytics-toolbar{padding:12px 20px 4px}
+.ops-collapse-nested{
+  margin:8px 16px 16px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:#fbfdfd;
+}
+.ops-collapse-nested > summary.ops-collapse-summary{padding:14px 16px}
+.ops-collapse-nested .ops-inline-form{padding:0 16px 12px}
+.ops-collapse-nested .ops-profile-list{padding:0 16px 16px}
+.ops-collapse-nested #operationsWatchlistEmpty{padding:0 16px 12px}
 
 /* =========================================================
    Quiet studio chrome — Everlane / Bellroy / Away
