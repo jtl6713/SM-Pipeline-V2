@@ -83,7 +83,8 @@ def duration_seconds(*, story: bool, clip_count: int, effective: dict[str, Any],
         stored_n = float(stored)
     except (TypeError, ValueError):
         stored_n = 0
-    if stored_n > 0 and stored_n != 30:
+    # Owner-set duration on the Production Request (including 30) is authoritative.
+    if stored_n > 0:
         return stored_n
     if clip_count <= 1:
         return SINGLE_STILL_SECONDS

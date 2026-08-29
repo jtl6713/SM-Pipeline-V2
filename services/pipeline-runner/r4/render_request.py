@@ -60,7 +60,17 @@ def voiceover_is_required(output: dict[str, Any], content_item: dict[str, Any] |
 
 def duration_is_explicit(output: dict[str, Any]) -> bool:
     override = field(output, "Video_Duration_Seconds_Override")
-    return override is not None and str(override).strip() != ""
+    if override is not None and str(override).strip() != "":
+        return True
+    # Owner-set PR duration (Studio_Effective / request copy) must pad to full length
+    # even when voiceover is shorter — otherwise Remotion collapses to VO+tail (~10s).
+    effective = field(output, "Studio_Effective_Video_Duration_Seconds")
+    try:
+        if effective is not None and str(effective).strip() != "" and float(effective) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return False
 
 
 def attach_voiceover(

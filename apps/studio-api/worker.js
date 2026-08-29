@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.166-render-label",
+          version: "0.10.167-duration-30",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -4568,8 +4568,8 @@ function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, 
       : Math.min(15, clipCount * ITEM4_SINGLE_STILL_SECONDS);
   }
   const stored = Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 0);
-  // Profile default 30 is a pad, not an owner override.
-  if (Number.isFinite(stored) && stored > 0 && stored !== 30) return stored;
+  // Owner-set duration on the Production Request (including 30) is authoritative.
+  if (Number.isFinite(stored) && stored > 0) return stored;
   if (clipCount <= 1) return ITEM4_SINGLE_STILL_SECONDS;
   return Math.min(30, Math.max(clipCount * 3, 9));
 }
