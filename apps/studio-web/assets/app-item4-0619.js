@@ -110,7 +110,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.175-render-label";
+  const BUILD_ID = "item4-0.6.176-schedule-suggest";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -8587,28 +8587,108 @@
     return map;
   }
 
+  const pipelineBestTimesCache = new Map();
+  let creativeSuggestedIso = "";
+
+  function formatBestTimesSuggestion(data) {
+    const suggested = data?.suggested;
+    if (!suggested || typeof suggested !== "object") return "";
+    const days = Array.isArray(suggested.days) ? suggested.days.filter(Boolean) : [];
+    const windows = Array.isArray(suggested.windows) ? suggested.windows.filter(Boolean) : [];
+    if (!days.length || !windows.length) return "";
+    const sourceLabel = data.source === "first_party"
+      ? "your posts"
+      : data.source === "similar_accounts"
+        ? "similar accounts"
+        : data.source === "learned_model" || data.source === "blended"
+          ? "learned model"
+          : "industry default";
+    const similar = data?.similar;
+    const similarDays = Array.isArray(similar?.days) ? similar.days.filter(Boolean) : [];
+    const similarWindows = Array.isArray(similar?.windows) ? similar.windows.filter(Boolean) : [];
+    const similarNote = similar?.label && data.source !== "similar_accounts" && similarDays.length && similarWindows.length
+      ? ` Similar accounts: ${similarDays.join(", ")} · ${similarWindows.join(" or ")}.`
+      : "";
+    const captionNote = data?.caption?.label ? ` ${data.caption.label}.` : "";
+    return `Suggested: ${days.join(", ")} · ${windows.join(" or ")} (${data.season_label || studioInsightsSeasonLabel(studioInsightsSeason())} · ${sourceLabel}).${similarNote}${captionNote} Now stays selected unless you pick a time.`;
+  }
+
+  async function fetchBestTimesForOutput(record) {
+    const platform = String(record?.platform || "").trim();
+    const outputType = String(record?.platform_output_type || record?.studio_output_type || "").trim();
+    const season = studioInsightsSeason();
+    const key = `${selectedProfileId || ""}|${platform}|${outputType}|${season}`;
+    if (pipelineBestTimesCache.has(key)) return pipelineBestTimesCache.get(key);
+    const pending = api(`/api/insights/best-times?platform=${encodeURIComponent(platform)}&output_type=${encodeURIComponent(outputType)}&season=${encodeURIComponent(season)}`)
+      .then((data) => {
+        pipelineBestTimesCache.set(key, data);
+        return data;
+      })
+      .catch((error) => {
+        pipelineBestTimesCache.delete(key);
+        throw error;
+      });
+    pipelineBestTimesCache.set(key, pending);
+    return pending;
+  }
+
+  function applySuggestedIsoToScheduleInput(input, iso) {
+    if (!input || !iso) return false;
+    const local = formatDateTimeLocalInput(iso);
+    if (!local) return false;
+    input.value = local;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
+
   async function refreshCreativeScheduleHint(record) {
     const hint = $("creativeScheduleSuggest");
+    const useButton = $("creativeUseSuggestedTime");
     if (!hint) return;
+    creativeSuggestedIso = "";
+    if (useButton) useButton.hidden = true;
+    hint.textContent = "Loading suggested publish time…";
     try {
-      const data = await api(`/api/insights/best-times?platform=${encodeURIComponent(record?.platform || "")}&output_type=${encodeURIComponent(record?.platform_output_type || record?.studio_output_type || "")}&season=${encodeURIComponent(studioInsightsSeason())}`);
-      const sourceLabel = data.source === "first_party"
-        ? "your posts"
-        : data.source === "similar_accounts"
-          ? "similar accounts"
-          : data.source === "learned_model" || data.source === "blended"
-            ? "learned model"
-            : "industry default";
-      const similarNote = data?.similar?.label && data.source !== "similar_accounts"
-        ? ` Similar accounts: ${data.similar.days.join(", ")} · ${data.similar.windows.join(" or ")}.`
-        : "";
-      const captionNote = data?.caption?.label ? ` ${data.caption.label}.` : "";
-      hint.textContent = data?.suggested?.label
-        ? `Suggested: ${data.suggested.days.join(", ")} · ${data.suggested.windows.join(" or ")} (${data.season_label || studioInsightsSeasonLabel(studioInsightsSeason())} · ${sourceLabel}).${similarNote}${captionNote} Now stays selected unless you pick a time.`
-        : "";
-    } catch {
-      hint.textContent = "";
+      const data = await fetchBestTimesForOutput(record);
+      const text = formatBestTimesSuggestion(data);
+      creativeSuggestedIso = String(data?.suggested_iso || "").trim();
+      hint.textContent = text || String(data?.note || "No suggested time available yet.");
+      if (useButton) useButton.hidden = !creativeSuggestedIso;
+    } catch (error) {
+      hint.textContent = error?.message
+        ? `Could not load suggested time (${error.message}).`
+        : "Could not load suggested time.";
     }
+  }
+
+  async function refreshPipelineScheduleSuggestions(records) {
+    const ready = (Array.isArray(records) ? records : []).filter((record) =>
+      /ready for review/i.test(String(record?.studio_state || record?.output_status || record?.review_status || ""))
+    );
+    const byId = new Map(ready.map((record) => [record.id, record]));
+    const nodes = Array.from(document.querySelectorAll("[data-pipeline-schedule-suggest]"));
+    await Promise.all(nodes.map(async (suggestEl) => {
+      const id = suggestEl.getAttribute("data-pipeline-schedule-suggest");
+      const record = byId.get(id);
+      if (!record) return;
+      const useBtn = document.querySelector(`[data-pipeline-use-suggested="${id}"]`);
+      suggestEl.hidden = false;
+      suggestEl.textContent = "Loading suggestion…";
+      if (useBtn) useBtn.hidden = true;
+      try {
+        const data = await fetchBestTimesForOutput(record);
+        const text = formatBestTimesSuggestion(data);
+        const iso = String(data?.suggested_iso || "").trim();
+        suggestEl.textContent = text || String(data?.note || "No suggestion yet.");
+        suggestEl.dataset.suggestedIso = iso;
+        if (useBtn) {
+          useBtn.hidden = !iso;
+          useBtn.dataset.suggestedIso = iso;
+        }
+      } catch (error) {
+        suggestEl.textContent = error?.message ? `Suggestion unavailable (${error.message}).` : "Suggestion unavailable.";
+      }
+    }));
   }
 
   function updatePipelineApproveAllButton() {
@@ -8854,7 +8934,7 @@
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
       const scheduleCell = isPipeline && ready
-        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Leave empty to publish now"> ${scheduleValue ? "" : "Now"}</div>`
+        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Leave empty to publish now"> ${scheduleValue ? "" : "Now"}<div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
         : "";
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
@@ -8916,6 +8996,16 @@
         });
       });
       bindPipelineScheduleInputs(target);
+      target.querySelectorAll("[data-pipeline-use-suggested]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const id = button.dataset.pipelineUseSuggested;
+          const iso = button.dataset.suggestedIso || "";
+          const input = target.querySelector(`[data-pipeline-schedule="${id}"]`);
+          applySuggestedIsoToScheduleInput(input, iso);
+        });
+      });
+      refreshPipelineScheduleSuggestions(source);
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
           if (event.target.closest("a, button, input, select, textarea, label, .pipeline-schedule-cell")) return;
@@ -9640,6 +9730,13 @@
     pipelineOpenSingleOnLoad = false;
     const target = $("outputsList");
     if (target) renderOutputsTable(target, pipelineOutputs);
+  });
+  $("creativeUseSuggestedTime")?.addEventListener("click", () => {
+    const input = $("creativeScheduleAt");
+    if (!applySuggestedIsoToScheduleInput(input, creativeSuggestedIso)) return;
+    document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
+      radio.checked = radio.value === "schedule";
+    });
   });
   $("creativeApprovePreview")?.addEventListener("click", () => {
     if (creativeWatchOnly()) {
