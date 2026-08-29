@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-08-20-public-16x9-thumb";
+const SERVICE_VERSION = "2026-08-29-snippet-update-no-title-desc";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -450,6 +450,34 @@ async function updatePrivacy(videoId, privacyStatus) {
   return data;
 }
 
+async function updateSnippet(videoId, { title, description, categoryId, tags } = {}) {
+  const token = await accessToken();
+  const url = new URL("https://www.googleapis.com/youtube/v3/videos");
+  url.searchParams.set("part", "snippet");
+  url.searchParams.set("id", String(videoId || "").trim());
+  const current = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const currentData = await current.json();
+  if (!current.ok) throw new Error(`videos.list failed ${current.status}: ${JSON.stringify(currentData)}`);
+  const item = (currentData.items || [])[0];
+  if (!item) throw new Error("YouTube video not found");
+  const snippet = { ...(item.snippet || {}) };
+  if (title !== undefined) snippet.title = String(title || "").slice(0, 100);
+  if (description !== undefined) snippet.description = String(description || "").slice(0, 5000);
+  if (categoryId !== undefined) snippet.categoryId = String(categoryId || snippet.categoryId || "22");
+  if (tags !== undefined) snippet.tags = Array.isArray(tags) ? tags.slice(0, 500) : [];
+  const response = await fetch("https://www.googleapis.com/youtube/v3/videos?part=snippet", {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id: videoId, snippet }),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`videos.update snippet failed ${response.status}: ${JSON.stringify(data)}`);
+  return data;
+}
+
 async function handler(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -513,6 +541,16 @@ async function handler(req, res) {
         return json(res, 400, { error: "videoId and privacyStatus are required" });
       }
       return json(res, 200, await updatePrivacy(payload.videoId, payload.privacyStatus));
+    }
+    if (req.method === "POST" && url.pathname === "/youtube/snippet") {
+      const payload = await readJson(req);
+      if (!payload.videoId) {
+        return json(res, 400, { error: "videoId is required" });
+      }
+      if (payload.title === undefined && payload.description === undefined && payload.categoryId === undefined && payload.tags === undefined) {
+        return json(res, 400, { error: "at least one of title, description, categoryId, tags is required" });
+      }
+      return json(res, 200, await updateSnippet(payload.videoId, payload));
     }
     return json(res, 404, { error: "Not found" });
   } catch (error) {
