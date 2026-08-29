@@ -127,6 +127,21 @@ def _run(request_id: str) -> None:
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return
         except Exception as exc:
+            from studio_produce.steps import _is_transient_render_error
+
+            if step == "render" and _is_transient_render_error(exc):
+                logger.warning(
+                    "studio produce render transient request=%s error=%s",
+                    request_id,
+                    exc,
+                )
+                write_job(
+                    client,
+                    request_id,
+                    with_step(job, "render", detail="Rendering", bump_attempt=False),
+                )
+                time.sleep(RENDER_WAIT_SECONDS)
+                continue
             logger.exception("studio produce step failed request=%s step=%s", request_id, step)
             write_job(client, request_id, with_step(job, "blocked", error=str(exc)))
             return

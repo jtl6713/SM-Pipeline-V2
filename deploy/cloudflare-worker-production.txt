@@ -198,3 +198,5 @@ YouTube scheduled privacy Worker deploy: 2026-08-29 - Scheduled YT posts keep Yo
 
 Production location Worker deploy: 2026-08-29 - Editable Primary location + IG/FB Graph place tags. Worker 0.10.171-production-location.
 Production lifecycle Worker deploy: 2026-08-29 - Content list rolls up Platform Output publish/schedule state; hide completed rows from Production In production. Worker 0.10.172-production-lifecycle.
+
+Render timeout resume Worker deploy: 2026-08-29 - Remotion harvest timeouts no longer permanently Block/Fail; watchdog resumes timeout-blocked produce jobs. Worker 0.10.173-render-timeout-resume.

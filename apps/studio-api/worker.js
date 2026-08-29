@@ -179,7 +179,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.172-production-lifecycle",
+          version: "0.10.173-render-timeout-resume",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -195,6 +195,7 @@ export default {
           studio_publish_location_v1: true,
           studio_production_location_v1: true,
           studio_production_lifecycle_v1: true,
+          studio_render_timeout_resume_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -5596,11 +5597,31 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
       const job = parseStudioProductionJob(record);
       const step = String(job?.step || "").trim();
       if (step === "done") continue;
-      const skippableBlock = step === "blocked" && /no_eligible_p2_route/i.test(String(job?.error || ""));
-      if (step === "blocked" && !skippableBlock) continue;
+      const blockError = String(job?.error || "");
+      const skippableBlock = step === "blocked" && /no_eligible_p2_route/i.test(blockError);
+      const transientRenderBlock = step === "blocked" && /(timed?\s*out|timeout|connectionpool|connection reset|502|503|504)/i.test(blockError);
+      if (step === "blocked" && !skippableBlock && !transientRenderBlock) continue;
       const updated = Date.parse(String(job?.updated_at || ""));
-      const stale = skippableBlock || !job?.job_id || !Number.isFinite(updated) || (now - updated) >= staleAfter;
+      const stale = skippableBlock || transientRenderBlock || !job?.job_id || !Number.isFinite(updated) || (now - updated) >= staleAfter;
       if (!stale) continue;
+      if (transientRenderBlock) {
+        const resumedJob = {
+          ...job,
+          step: "render",
+          attempt: 1,
+          updated_at: new Date().toISOString(),
+          error: null,
+          detail: "Rendering",
+          percent: Math.max(Number(job?.percent) || 0, 70),
+        };
+        await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: { Studio_Production_Job_JSON: JSON.stringify(resumedJob), Updated_At: new Date().toISOString() },
+            typecast: false,
+          }),
+        });
+      }
       const { payload } = await item4PulseStudioProduceJob(env, requestId, { resume: true });
       pulses.push({
         key: "STUDIO_PRODUCE",
