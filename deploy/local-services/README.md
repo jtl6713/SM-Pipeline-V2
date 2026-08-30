@@ -26,7 +26,7 @@ For the complete operator and AI-handoff procedure, read:
 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 |
 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 |
 
-The numbered operational tab contract is preserved: `1 LOC` through `6 LOC`.
+The numbered operational tab contract is `1 LOC` through `8 LOC` (Video Compressor is 7; Timing Engine is 8).
 
 ## Safety contract
 

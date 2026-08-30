@@ -102,7 +102,10 @@ def create_timeline(body: TimelineRequest) -> dict[str, Any]:
             transition=body.default_transition,
             extra_events=events,
         )
-        timeline["metadata"] = {**timeline.get("metadata") or {}, **source_meta, **analysis["metadata"]}
+        metadata = dict(timeline.get("metadata") or {})
+        metadata.update(source_meta)
+        metadata.update(analysis["metadata"])
+        timeline["metadata"] = metadata
         return {
             "schema_version": "timing.response.1",
             "bpm": analysis["bpm"],
