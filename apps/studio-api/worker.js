@@ -53,6 +53,7 @@ export default {
       const isOperationsAutonomousRoute = url.pathname === "/api/operations/ideas/run-autonomous";
       const isOperationsOutputScheduleRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/schedule$/.test(url.pathname);
       const isOperationsOutputPublishedRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/published$/.test(url.pathname);
+      const isOperationsOutputPublishKickRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/publish-kick$/.test(url.pathname);
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
@@ -102,6 +103,7 @@ export default {
       const isOperationsAutonomousWrite = isOperationsAutonomousRoute && request.method === "POST";
       const isOperationsOutputScheduleWrite = isOperationsOutputScheduleRoute && request.method === "POST";
       const isOperationsOutputPublishedWrite = isOperationsOutputPublishedRoute && request.method === "POST";
+      const isOperationsOutputPublishKickWrite = isOperationsOutputPublishKickRoute && request.method === "POST";
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
       const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
@@ -148,6 +150,7 @@ export default {
         isOperationsAutonomousWrite ||
         isOperationsOutputScheduleWrite ||
         isOperationsOutputPublishedWrite ||
+        isOperationsOutputPublishKickWrite ||
         isOperationsCompressWrite ||
         isOperationsResetRenderUrlsWrite ||
         isOperationsRetryAssetSelectionWrite ||
@@ -186,8 +189,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.192-autonomous-resume-before-pick",
+          version: "0.10.193-ig-carousel-due-publish",
           studio_autonomous_produce_v1: true,
+          studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
@@ -481,6 +485,12 @@ export default {
         requirePermission(authorization, "publishing_control");
         assertWriteRequest(request, env);
         return markStudioOutputPublished(request, env, url, authorization);
+      }
+
+      if (isOperationsOutputPublishKickRoute) {
+        requirePermission(authorization, "publishing_control");
+        assertWriteRequest(request, env);
+        return kickStudioOutputPublish(request, env, url, authorization, ctx);
       }
 
       if (isOperationsCompressRoute) {
@@ -875,6 +885,13 @@ export default {
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
       }
+      // Due IG carousels (Parent Ready) must publish before heavier platform polls
+      // burn the isolate subrequest budget — 304 sat ~3h past schedule otherwise.
+      try {
+        await studioReconcileInstagramCarousels(env);
+      } catch (error) {
+        console.warn("instagram carousel reconcile cron failed", error);
+      }
       try {
         await studioReconcilePublishingInstagramStories(env);
       } catch (error) {
@@ -904,11 +921,6 @@ export default {
         await studioReconcileFacebookPhotos(env);
       } catch (error) {
         console.warn("facebook photo reconcile cron failed", error);
-      }
-      try {
-        await studioReconcileInstagramCarousels(env);
-      } catch (error) {
-        console.warn("instagram carousel reconcile cron failed", error);
       }
       try {
         await syncProductionCadence(env, { skipRenderPulse: true });
@@ -20406,7 +20418,24 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
   if (pipelineStageBackend(env, "AP0C").mode !== "python") return [];
   const limit = Number(options.limit || 3);
   const results = [];
+  // Publish/finalize stages first so a due Parent Ready row cannot starve behind
+  // asset/child prep work for other carousels in the same cron budget.
   const scans = [
+    {
+      stage: "ap4c",
+      pulse: studioPulseAp4c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Parent_Container_ID}!="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))',
+    },
+    {
+      stage: "ap4r",
+      pulse: studioPulseAp4r,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}="",{IG_Carousel_Error_Stage}="AP4C Parent Publishing")',
+    },
+    {
+      stage: "ap5c",
+      pulse: studioPulseAp5c,
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}!="",{Platform_Post_URL}="")',
+    },
     {
       stage: "ap0c",
       pulse: studioPulseAp0c,
@@ -20431,21 +20460,6 @@ async function studioReconcileInstagramCarousels(env, options = {}) {
       stage: "ap3p",
       pulse: studioPulseAp3p,
       formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Parent Processing",{IG_Carousel_Parent_Container_ID}!="")',
-    },
-    {
-      stage: "ap4c",
-      pulse: studioPulseAp4c,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Platform_Post_ID}="",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Parent_Container_ID}!="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())))',
-    },
-    {
-      stage: "ap4r",
-      pulse: studioPulseAp4r,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}="",{IG_Carousel_Error_Stage}="AP4C Parent Publishing")',
-    },
-    {
-      stage: "ap5c",
-      pulse: studioPulseAp5c,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{IG_Carousel_Status}="Publishing",{IG_Carousel_Published_Media_ID}!="",{Platform_Post_URL}="")',
     },
   ];
   for (const scan of scans) {
@@ -24993,6 +25007,38 @@ async function runStudioDailyIdeas(request, env, authorization, ctx, options = {
   const result = await executeStudioDailyIdeas(env, ctx, options);
   if (!request) return result;
   return respond(request, env, { ok: true, ...result }, result.started ? 202 : 200);
+}
+
+async function kickStudioOutputPublish(request, env, url, authorization, ctx = null) {
+  const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/publish-kick$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  if (Boolean(f(existing, "Do_Not_Publish"))) {
+    throw new HttpError(409, "Do_Not_Publish outputs cannot be publish-kicked");
+  }
+  if (String(f(existing, "Output_Status") || "").trim() !== "Approved for Publishing") {
+    throw new HttpError(409, "Only Approved for Publishing outputs can be publish-kicked");
+  }
+  const dispatch = await studioDispatchApprovedPublishNow(env, existing);
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(studioDispatchApprovedPublishTail(env, existing, dispatch).catch((error) => {
+      console.warn("publish-kick tail failed", match[1], error);
+    }));
+  }
+  return respond(request, env, {
+    ok: true,
+    output_id: match[1],
+    dispatch: {
+      ok: dispatch?.ok !== false,
+      skipped: dispatch?.skipped || null,
+      target: dispatch?.target || dispatch?.plan?.target || null,
+      held_until: dispatch?.held_until || null,
+      message: dispatch?.message || null,
+    },
+    record: mapOperationsOutput(
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]).catch(() => existing)
+    ),
+  });
 }
 
 async function scheduleStudioPublishOutput(request, env, url, authorization, ctx = null) {

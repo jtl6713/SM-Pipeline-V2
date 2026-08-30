@@ -232,3 +232,5 @@ Autonomous through-approve Worker deploy: 2026-08-30 - Promote when plan crops a
 Autonomous skip-reprepare Worker deploy: 2026-08-30 - Do not reset Ready crops to Preparing on resume; promote immediately when the plan is complete. Worker 0.10.191-autonomous-skip-reprepare.
 
 Autonomous resume-before-pick Worker deploy: 2026-08-30 - Never harvest a second idea while the last request is still Draft; return when the waiting record is gone. Worker 0.10.192-autonomous-resume-before-pick.
+
+IG carousel due publish Worker deploy: 2026-08-30 - Run due Parent Ready AP4C before other platform polls; add operations publish-kick. Worker 0.10.193-ig-carousel-due-publish.
