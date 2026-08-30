@@ -189,7 +189,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.193-ig-carousel-due-publish",
+          version: "0.10.194-autonomous-dedupe",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -24260,6 +24260,59 @@ function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
 }
 
+function parseAutonomousNotedMediaIds(notes) {
+  const match = String(notes || "").match(/media_asset_ids=([^\n]+)/i);
+  if (!match) return [];
+  return [...new Set(match[1].split(",").map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+const AUTONOMOUS_TOPIC_STOP = new Set([
+  "chicago", "chicagoshining", "street", "walk", "color", "right", "now", "this", "that",
+  "with", "from", "into", "over", "after", "before", "today", "weekend", "quick", "save",
+]);
+
+function autonomousTopicTokens(text) {
+  return new Set(
+    String(text || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]+/g, " ")
+      .split(/\s+/)
+      .filter((word) => word.length >= 4 && !AUTONOMOUS_TOPIC_STOP.has(word))
+  );
+}
+
+function autonomousIdeaConflictsOccupied(pick, occupied = []) {
+  const pickMedia = new Set(pick?.media_asset_ids || []);
+  const pickTokens = autonomousTopicTokens([
+    pick?.candidate_title,
+    pick?.primary_location,
+    pick?.neighborhood_or_area,
+    pick?.idea_summary,
+  ].filter(Boolean).join(" "));
+  for (const row of occupied) {
+    const otherMedia = new Set(row?.media_asset_ids || []);
+    const sharedMedia = [...pickMedia].filter((id) => otherMedia.has(id));
+    const mediaRatio = pickMedia.size ? sharedMedia.length / pickMedia.size : 0;
+    if (sharedMedia.length >= 3 || (sharedMedia.length >= 2 && mediaRatio >= 0.5)) {
+      return {
+        conflict: true,
+        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
+        match: String(row.title || "").trim() || "occupied idea",
+      };
+    }
+    const otherTokens = autonomousTopicTokens([row?.title, row?.location].filter(Boolean).join(" "));
+    const sharedTokens = [...pickTokens].filter((token) => otherTokens.has(token));
+    if (sharedTokens.length >= 2) {
+      return {
+        conflict: true,
+        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
+        match: String(row.title || "").trim() || "occupied idea",
+      };
+    }
+  }
+  return { conflict: false };
+}
+
 function firstLinkedRecordId(value) {
   if (Array.isArray(value) && value.length) {
     const first = value[0];
@@ -24290,7 +24343,7 @@ function autonomousIncomingMediaIds(existingAssets, mediaAssetIds, max = AUTONOM
   return incoming;
 }
 
-function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles }) {
+function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas }) {
   const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
   const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
   const voice = profile?.brand_voice || profile?.Brand_Voice || "";
@@ -24298,7 +24351,7 @@ function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles }) 
 
 Return ONLY one raw JSON object. No markdown.
 
-Skip unless a listed library asset clearly matches a listed trend. Do not invent events, dates, prices, or rankings that are not in the harvest. Do not pick generic skyline filler.
+Skip unless a listed library asset clearly matches a listed trend. Do not invent events, dates, prices, or rankings that are not in the harvest. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
 
 ACTIVE PROFILE
 Name: ${profileName}
@@ -24311,10 +24364,10 @@ ${JSON.stringify(trends, null, 2)}
 LIBRARY STILLS (use only these media_asset_ids)
 ${JSON.stringify(assets, null, 2)}
 
-RECENTLY PUBLISHED TITLES (do not duplicate)
-${JSON.stringify(recentTitles || [], null, 2)}
+IN FLIGHT OR RECENT IDEAS (do not repeat these subjects, places, or stills)
+${JSON.stringify(occupiedIdeas || recentTitles || [], null, 2)}
 
-If nothing is both timely and producible, return:
+If nothing is both timely and producible, or every timely subject is already in flight or recently published, return:
 {"skip":true,"reason":"no_asset_backed_trend"}
 
 Otherwise return:
@@ -24444,6 +24497,39 @@ async function harvestAutonomousRecentTitles(env) {
     .map((row) => String(f(row, "Output_Title") || f(row, "Output_Caption") || "").trim())
     .filter(Boolean)
     .slice(0, 8);
+}
+
+function autonomousRecordIsRecent(record, nowMs = Date.now(), maxAgeMs = 14 * 24 * 60 * 60 * 1000) {
+  const ts = Date.parse(record?.createdTime || "");
+  if (!Number.isFinite(ts)) return true;
+  return nowMs - ts <= maxAgeMs;
+}
+
+async function harvestAutonomousOccupiedTopics(env) {
+  const ideas = (await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: 25,
+    sortField: "Created_At",
+    sortDirection: "desc",
+  }).catch(() => [])) || [];
+  const occupied = [];
+  for (const row of ideas) {
+    const status = String(f(row, "Candidate_Status") || "").trim();
+    if (status === "On Hold") continue;
+    if (!["Generated", "Promoted"].includes(status)) continue;
+    if (!autonomousRecordIsRecent(row)) continue;
+    occupied.push({
+      source: status === "Generated" ? "in_flight" : "recent",
+      title: String(f(row, "Candidate_Title") || "").trim(),
+      location: String(f(row, "Primary_Location") || f(row, "Neighborhood_or_Area") || "").trim(),
+      media_asset_ids: parseAutonomousNotedMediaIds(f(row, "Production_Config_Notes")),
+    });
+  }
+  const published = await harvestAutonomousRecentTitles(env);
+  for (const title of published) {
+    if (occupied.some((row) => row.title === title)) continue;
+    occupied.push({ source: "recent", title, location: "", media_asset_ids: [] });
+  }
+  return occupied.filter((row) => row.title);
 }
 
 async function studioAutonomousOpenAiPick(env, prompt) {
@@ -24830,18 +24916,20 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profiles[0].id);
   const observations = await studioInsightsLoadObservations(env, { profile: "chicago", limit: 80 }).catch(() => []);
   const similar = summarizeObservations(observations);
-  const [news, youtube, recentTitles] = await Promise.all([
+  const [news, youtube, occupiedIdeas] = await Promise.all([
     harvestAutonomousNewsHeadlines(),
     harvestAutonomousYoutube(env),
-    harvestAutonomousRecentTitles(env),
+    harvestAutonomousOccupiedTopics(env),
   ]);
+  const recentTitles = occupiedIdeas.map((row) => row.title);
   const trendText = [
     ...similar.map((row) => row.caption),
     ...news.map((row) => row.title),
     ...youtube.map((row) => row.title),
   ].filter(Boolean).join(" ");
   const assets = await harvestAutonomousLibraryStills(env, trendText || "Chicago");
-  const highAssets = assets.filter((row) => row.confidence === "high");
+  const occupiedMedia = new Set(occupiedIdeas.flatMap((row) => row.media_asset_ids || []));
+  const highAssets = assets.filter((row) => row.confidence === "high" && !occupiedMedia.has(row.id));
   const trends = { similar, news, youtube };
   if (!highAssets.length) {
     const result = {
@@ -24871,6 +24959,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       score: row.score,
     })),
     recentTitles,
+    occupiedIdeas,
   });
 
   if (options.dry_run) {
@@ -24905,6 +24994,19 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       slot,
       status: "skipped",
       skip_reason: "picker_assets_not_in_harvest",
+    };
+    await studioSaveAutonomousLastRun(env, result);
+    return result;
+  }
+
+  const conflict = autonomousIdeaConflictsOccupied(pick, occupiedIdeas);
+  if (conflict.conflict) {
+    const result = {
+      skipped: conflict.reason,
+      chicago_date: chicago.date,
+      slot,
+      status: "skipped",
+      skip_reason: `${conflict.reason}:${conflict.match}`.slice(0, 180),
     };
     await studioSaveAutonomousLastRun(env, result);
     return result;

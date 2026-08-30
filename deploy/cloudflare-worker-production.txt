@@ -235,4 +235,6 @@ Autonomous resume-before-pick Worker deploy: 2026-08-30 - Never harvest a second
 
 IG carousel due publish Worker deploy: 2026-08-30 - Run due Parent Ready AP4C before other platform polls; add operations publish-kick. Worker 0.10.193-ig-carousel-due-publish.
 
+Autonomous dedupe Worker deploy: 2026-08-30 - Do not mint an idea that shares stills or the same place/subject as an in-flight or recently published piece. Worker 0.10.194-autonomous-dedupe.
+
 IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline carousel statuses are eligible on the first publish reconcile sweep; AP4C respects Scheduled_Post_Date. Worker 0.10.193-ig-carousel-due-publish.
