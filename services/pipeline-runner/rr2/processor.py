@@ -46,7 +46,11 @@ def process_request(
             "make_scenario_id": MAKE_SCENARIO_ID,
         }
 
-    fields = decision_fields(normalized, field_str(output, "Output_Notes"))
+    fields = decision_fields(
+        normalized,
+        field_str(output, "Output_Notes"),
+        platform=field_str(output, "Platform"),
+    )
     preview = {
         "processed": False,
         "make_scenario_id": MAKE_SCENARIO_ID,

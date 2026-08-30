@@ -44,19 +44,21 @@ def decision_fields(
     existing_notes: str,
     *,
     now: datetime | None = None,
+    platform: str | None = None,
 ) -> dict[str, Any]:
     stamp = decision_stamp(now)
     notes = append_decision_note(existing_notes, decision, now=stamp)
     decided_at = stamp.isoformat()
     if decision == DECISION_APPROVED:
+        facebook = str(platform or "").strip().casefold() == "facebook"
         return {
-            "Auto_Publish_Enabled": True,
+            "Auto_Publish_Enabled": not facebook,
             "Review_Status": "Approved",
             "Publish_Status": "Ready to Publish",
             "Output_Status": "Approved for Publishing",
             "Output_Notes": notes,
             "Review_Decision_At": decided_at,
-            "Publish_Method": "Automated",
+            "Publish_Method": "Manual" if facebook else "Automated",
         }
     if decision == DECISION_CHANGES:
         return {

@@ -403,6 +403,7 @@ export default {
           item4_facebook_photo_object: "reel",
           item4_facebook_slideshow_reel_opt_in: true,
           item4_facebook_slideshow_voiceover_hardening: true,
+          facebook_graph_publish_held: studioFacebookGraphPublishHeld(env),
           item4_ratio_authority: "platform-output-mappings",
           item4_publish_locked_until_bridge_validation: false,
           item4_source_to_production_bridge: "validated-preflight-v1",
@@ -5397,6 +5398,10 @@ const STUDIO_FB2_SCENARIO_ID = 5813487;
 const STUDIO_FB2R_SCENARIO_ID = 5813511;
 const STUDIO_FB3_SCENARIO_ID = 5813534;
 const STUDIO_FB_ORCH_SCENARIO_ID = 5813561;
+function studioFacebookGraphPublishHeld(env) {
+  const raw = String(env?.FACEBOOK_AUTO_PUBLISH || "").trim().toLowerCase();
+  return !["1", "true", "yes", "on"].includes(raw);
+}
 const STUDIO_AP0C_SCENARIO_ID = 5786899;
 const STUDIO_AP1C_SCENARIO_ID = 5790745;
 const STUDIO_AP2C_SCENARIO_ID = 5791231;
@@ -20056,6 +20061,9 @@ async function studioEnsureOutputCaption(env, record) {
 // after it is recoverable on a later pass, so it is split off: this half runs on the request
 // path where it cannot be dropped by a cancelled background task or an exhausted invocation.
 async function studioDispatchApprovedPublishNow(env, record) {
+  if (studioFacebookGraphPublishHeld(env) && String(f(record, "Platform") || "").trim() === "Facebook") {
+    return { ok: true, skipped: "facebook-manual-publish", record };
+  }
   if (!studioPublishCanDispatchNow(record)) {
     return {
       ok: true,
@@ -20364,6 +20372,7 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
 }
 
 async function studioReconcileFacebookPhotos(env, options = {}) {
+  if (studioFacebookGraphPublishHeld(env)) return [];
   if (pipelineStageBackend(env, "FB0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
   const results = [];
@@ -20593,6 +20602,7 @@ async function studioReconcileFacebookSlideshows(env, options = {}) {
 }
 
 async function studioReconcileFacebookReels(env, options = {}) {
+  if (studioFacebookGraphPublishHeld(env)) return [];
   if (pipelineStageBackend(env, "FBS3").mode !== "python") return [];
   const limit = Number(options.limit || 3);
   const results = [];
@@ -20661,15 +20671,18 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     occupiedMs = occupied[platform] || [];
   }
   const scheduleFields = studioPublishScheduleFields(payload || {}, record, { occupiedMs });
+  const facebookManual = studioFacebookGraphPublishHeld(env) && platform === "Facebook";
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
     Publish_Status: "Ready to Schedule",
-    Publish_Method: "Automated",
-    Auto_Publish_Enabled: true,
+    Publish_Method: facebookManual ? "Manual" : "Automated",
+    Auto_Publish_Enabled: !facebookManual,
     Review_Decision_At: stamp,
     Do_Not_Publish: false,
-    Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+    Review_Notes: [existingNotes, note, facebookManual
+      ? `Studio Pipeline approved the Facebook render at ${stamp}. Graph publish is held — post this in Business Suite until the Meta app is live.`
+      : `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
     ...studioPublishHandoffFields(record),
     ...scheduleFields,
   };

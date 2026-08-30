@@ -23,12 +23,19 @@ def test_approve_fields_match_make_4a():
     fields = decision_fields("approved", "existing note", now=now)
     assert fields["Auto_Publish_Enabled"] is True
     assert fields["Review_Status"] == "Approved"
-    assert fields["Publish_Status"] == "Ready to Schedule"
+    assert fields["Publish_Status"] == "Ready to Publish"
     assert fields["Output_Status"] == "Approved for Publishing"
     assert fields["Publish_Method"] == "Automated"
     assert fields["Review_Decision_At"].startswith("2026-08-23T21:05")
     assert "RR2 render review decision: Approved for Publishing at 2026-08-23 21:05." in fields["Output_Notes"]
     assert fields["Output_Notes"].startswith("existing note")
+
+
+def test_facebook_approve_holds_auto_publish():
+    fields = decision_fields("approved", "", platform="Facebook")
+    assert fields["Auto_Publish_Enabled"] is False
+    assert fields["Publish_Method"] == "Manual"
+    assert fields["Output_Status"] == "Approved for Publishing"
 
 
 def test_changes_reject_and_skip_fields_match_make():

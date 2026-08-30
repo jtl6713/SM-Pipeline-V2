@@ -1,4 +1,9 @@
+import os
+
+os.environ["FACEBOOK_AUTO_PUBLISH"] = "1"
+
 from fb.assets import facebook_message, package_revision, photo_needs_create, post_fingerprint, resolved_publish_mode
+from fb.graph import public_feed_url
 from fb.eligibility import (
     fb0_eligibility_reason,
     fb1_eligibility_reason,
@@ -11,6 +16,18 @@ from stages.registry import STAGE_NAMES, is_implemented
 
 def _record(**fields):
     return {"id": "recABCDEFGHIJKLMN", "fields": fields}
+
+
+def test_facebook_graph_publish_hold():
+    os.environ["FACEBOOK_AUTO_PUBLISH"] = "0"
+    try:
+        ready = _record(Platform="Facebook", Auto_Publish_Enabled=True, Image_Output_Selected=True, FB_Publish_Status="Ready for Assets")
+        assert fb0_eligibility_reason(ready) == "facebook_manual_publish"
+        assert fb1_eligibility_reason(_record(Platform="Facebook", FB_Publish_Status="Ready for Photo Media")) == (
+            "facebook_manual_publish"
+        )
+    finally:
+        os.environ["FACEBOOK_AUTO_PUBLISH"] = "1"
 
 
 def test_facebook_photo_stages_are_registered():
@@ -74,3 +91,18 @@ def test_asset_helpers():
     assert photo_needs_create({"fields": {}}, package_rev="abc") is True
     assert photo_needs_create({"fields": {"FB_Photo_ID": "p", "FB_Photo_Status": "Ready", "FB_Photo_Package_Revision": "abc"}}, package_rev="abc") is False
     assert photo_needs_create({"fields": {"FB_Photo_ID": "p", "FB_Photo_Status": "Ready", "FB_Photo_Package_Revision": "old"}}, package_rev="abc") is True
+
+
+def test_public_feed_url_prefers_vanity_over_new_pages_profile_id():
+    npe = "https://www.facebook.com/122141526753022170/posts/122143898307022170"
+    assert public_feed_url(
+        page_id="831080826745798",
+        page_username="ChicagoShining",
+        post_id="831080826745798_122143898307022170",
+        permalink_url=npe,
+    ) == "https://www.facebook.com/ChicagoShining/posts/122143898307022170"
+    assert public_feed_url(
+        page_id="831080826745798",
+        post_id="831080826745798_122143898307022170",
+        permalink_url=npe,
+    ) == "https://www.facebook.com/831080826745798/posts/122143898307022170"

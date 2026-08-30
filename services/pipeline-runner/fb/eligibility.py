@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from asset.helpers import as_bool, parse_int
@@ -30,6 +31,13 @@ def replace_mismatch(
     )
 
 
+def facebook_graph_publish_held_reason() -> str | None:
+    raw = os.environ.get("FACEBOOK_AUTO_PUBLISH", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return None
+    return "facebook_manual_publish"
+
+
 def error_stage_contains(record: dict[str, Any], prefix: str) -> bool:
     return _ci(prefix) in _ci(field_str(record, "Publish_Error_Stage"))
 
@@ -43,6 +51,9 @@ def fb0_eligibility_reason(record: dict[str, Any]) -> str | None:
         return "missing_record_id"
     if _ci(field_str(record, "Platform")) != "facebook":
         return "not_facebook"
+    held = facebook_graph_publish_held_reason()
+    if held:
+        return held
     if not as_bool(field(record, "Auto_Publish_Enabled"), False):
         return "auto_publish_disabled"
     if as_bool(field(record, "Do_Not_Publish"), False):
@@ -69,6 +80,9 @@ def fb1_eligibility_reason(
         return "missing_record_id"
     if _ci(field_str(record, "Platform")) != "facebook":
         return "not_facebook"
+    held = facebook_graph_publish_held_reason()
+    if held:
+        return held
     if field_str(record, "Platform_Post_ID"):
         return "already_has_platform_post"
     if as_bool(field(record, "Do_Not_Publish"), False):
@@ -93,6 +107,9 @@ def fb2_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = facebook_graph_publish_held_reason()
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if field_str(record, "Platform_Post_ID"):
@@ -121,6 +138,9 @@ def fb2r_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = facebook_graph_publish_held_reason()
+    if held:
+        return held
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
     if field_str(record, "Platform_Post_ID"):
@@ -144,6 +164,9 @@ def fb3_eligibility_reason(
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = facebook_graph_publish_held_reason()
+    if held:
+        return held
     if not field_str(record, "Platform_Post_ID"):
         return "missing_platform_post_id"
     if _ci(field_str(record, "Publish_Status")) == "published":
