@@ -220,3 +220,5 @@ Autonomous continue Worker deploy: 2026-08-30 - After plan, keep preparing frame
 Autonomous fresh Worker deploy: 2026-08-30 - Re-attach does not recount already-linked stills or wipe a Ready plan; harvest a new idea unless a Draft is in flight; a failed slot can retry. Worker 0.10.185-autonomous-fresh.
 
 Autonomous one-idea Worker deploy: 2026-08-30 - Claim picking before harvest; ignore force when the slot is already in flight so cron plus Run now cannot mint two ideas. Worker 0.10.186-autonomous-one-idea.
+
+Autonomous originals Worker deploy: 2026-08-30 - Do not attach fill-crop derivatives as master stills, which left frames stuck at 7/11. Worker 0.10.187-autonomous-originals.
