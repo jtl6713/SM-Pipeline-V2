@@ -1,11 +1,10 @@
 {
-  "correlation_id": "IG-CAROUSEL-304-PUBLISH-KICK-20260830",
+  "correlation_id": "MX1-GET-227-AFTER-GRAPH-20260824",
   "requests": [
     {
-      "name": "kick-output-304-ap4c",
-      "method": "POST",
-      "path": "/api/operations/outputs/recT9FrkNLTlMQCjW/publish-kick",
-      "body": {}
+      "name": "get-227-creative-after-graph",
+      "method": "GET",
+      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative"
     }
   ]
 }
