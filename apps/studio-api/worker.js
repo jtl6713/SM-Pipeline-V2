@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.185-autonomous-fresh",
+          version: "0.10.186-autonomous-one-idea",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -23997,6 +23997,19 @@ function autonomousInWindow(chicago, cron = "") {
   return cron === "0 13 * * *" || cron === "0 21 * * *";
 }
 
+function autonomousRunIsBusy(last, nowMs = Date.now(), maxAgeMs = 15 * 60 * 1000) {
+  const status = String(last?.status || "").trim();
+  if (!["picking", "resuming"].includes(status)) return false;
+  const at = Date.parse(last?.at || "");
+  if (!Number.isFinite(at)) return true;
+  return nowMs - at < maxAgeMs;
+}
+
+function autonomousSlotAlreadyClaimed(last, slot) {
+  if (!slot || String(last?.slot || "") !== slot) return false;
+  return ["picking", "resuming", "waiting_variants", "producing", "promoted"].includes(String(last?.status || "").trim());
+}
+
 function parseAutonomousLastRun(raw) {
   const text = String(raw || "").trim();
   if (!text) return {};
@@ -24607,18 +24620,31 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     }
   }
 
+  if (autonomousRunIsBusy(last)) {
+    return { skipped: "in_flight", chicago_date: chicago.date, slot, last };
+  }
+
   const pendingDrafts = await listAutonomousDraftRequests(env);
   if (pendingDrafts.length) {
     return resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot);
   }
 
-  if (!options.force && options.scheduled) {
+  if (options.scheduled) {
     if (!autonomousInWindow(chicago, options.cron)) {
       return { skipped: "outside_chicago_windows", chicago_date: chicago.date, chicago_hour: chicago.hour };
     }
-    if (slot && last.slot === slot && last.status === "promoted") {
-      return { skipped: "already_ran_slot", chicago_date: chicago.date, slot };
-    }
+  }
+  if (autonomousSlotAlreadyClaimed(last, slot)) {
+    return { skipped: "already_ran_slot", chicago_date: chicago.date, slot, last };
+  }
+
+  if (!options.dry_run) {
+    await studioSaveAutonomousLastRun(env, {
+      status: "picking",
+      skip_reason: null,
+      chicago_date: chicago.date,
+      slot,
+    });
   }
 
   const profiles = (await listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, {

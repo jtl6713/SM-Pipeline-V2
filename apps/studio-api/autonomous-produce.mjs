@@ -43,6 +43,19 @@ export function autonomousInWindow(chicago, cron = "") {
   return cron === "0 13 * * *" || cron === "0 21 * * *";
 }
 
+export function autonomousRunIsBusy(last, nowMs = Date.now(), maxAgeMs = 15 * 60 * 1000) {
+  const status = String(last?.status || "").trim();
+  if (!["picking", "resuming"].includes(status)) return false;
+  const at = Date.parse(last?.at || "");
+  if (!Number.isFinite(at)) return true;
+  return nowMs - at < maxAgeMs;
+}
+
+export function autonomousSlotAlreadyClaimed(last, slot) {
+  if (!slot || String(last?.slot || "") !== slot) return false;
+  return ["picking", "resuming", "waiting_variants", "producing", "promoted"].includes(String(last?.status || "").trim());
+}
+
 export function parseAutonomousLastRun(raw) {
   const text = String(raw || "").trim();
   if (!text) return {};
