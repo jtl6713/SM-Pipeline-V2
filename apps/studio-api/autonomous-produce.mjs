@@ -159,6 +159,8 @@ export function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
 }
 
+export const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
+
 export function autonomousMasterMediaIds(assets) {
   const rows = Array.isArray(assets) ? assets : [];
   const originals = rows.filter((row) => !/__\d+x\d+__/i.test(String(row?.name || "")));
@@ -166,6 +168,18 @@ export function autonomousMasterMediaIds(assets) {
   return [...new Set(use
     .map((row) => String(row?.media_asset_record_id || "").trim())
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+export function autonomousIncomingMediaIds(existingAssets, mediaAssetIds, max = AUTONOMOUS_MAX_MASTER_ASSETS) {
+  const already = new Set(autonomousMasterMediaIds(existingAssets));
+  const incoming = [];
+  for (const raw of mediaAssetIds || []) {
+    const id = String(raw || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || already.has(id) || incoming.includes(id)) continue;
+    if (already.size + incoming.length >= max) break;
+    incoming.push(id);
+  }
+  return incoming;
 }
 
 export function autonomousPlanOverrides(contentType) {

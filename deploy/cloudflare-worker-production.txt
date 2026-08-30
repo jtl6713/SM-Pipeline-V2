@@ -216,3 +216,5 @@ Autonomous I1 key Worker deploy: 2026-08-30 - Picker calls pipeline-runner /jobs
 Autonomous resume Worker deploy: 2026-08-30 - Finish existing origin=autonomous drafts before picking a new idea. Worker 0.10.182-autonomous-resume.
 
 Autonomous continue Worker deploy: 2026-08-30 - After plan, keep preparing frames in waitUntil; reuse the kept idea; default VO/thumb/NEJ-paro. Worker 0.10.183-autonomous-continue.
+
+Autonomous fresh Worker deploy: 2026-08-30 - Re-attach does not recount already-linked stills or wipe a Ready plan; harvest a new idea unless a Draft is in flight; a failed slot can retry. Worker 0.10.185-autonomous-fresh.

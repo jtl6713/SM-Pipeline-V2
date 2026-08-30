@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   autonomousInWindow,
+  autonomousIncomingMediaIds,
   autonomousMasterMediaIds,
   autonomousPlanOverrides,
   autonomousSlot,
@@ -73,6 +74,13 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     { name: "Pilsen Murals 1.jpg", media_asset_record_id: "recfgniLGTG1tTviX" },
     { name: "Pilsen-Murals-9__9x16__fill-crop-v2.jpg", media_asset_record_id: "rec95rcrMXUBXJryK" },
   ]), ["recfgniLGTG1tTviX"]);
+  assert.deepEqual(autonomousIncomingMediaIds([
+    { name: "Pilsen Murals 1.jpg", media_asset_record_id: "recfgniLGTG1tTviX" },
+  ], ["recfgniLGTG1tTviX", "recAsset1234567890"]), ["recAsset1234567890"]);
+  assert.deepEqual(autonomousIncomingMediaIds(
+    Array.from({ length: 12 }, (_, i) => ({ name: `still-${i}.jpg`, media_asset_record_id: `recAlready${String(i).padStart(10, "0")}` })),
+    ["recAsset1234567890"]
+  ), []);
 });
 
 test("JSON fences unwrap and last-run notes stay readable", () => {
