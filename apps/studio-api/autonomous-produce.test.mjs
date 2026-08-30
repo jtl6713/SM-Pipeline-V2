@@ -6,7 +6,9 @@ import {
   autonomousIncomingMediaIds,
   autonomousMasterMediaIds,
   autonomousPlanOverrides,
+  autonomousRunIsBusy,
   autonomousSlot,
+  autonomousSlotAlreadyClaimed,
   isAutonomousOrigin,
   extractJsonObject,
   mapYoutubeSearchItems,
@@ -28,6 +30,10 @@ test("slot keys are once per morning and afternoon", () => {
   assert.equal(autonomousSlot({ date: "2026-08-30", hour: 8 }), "2026-08-30:am");
   assert.equal(autonomousSlot({ date: "2026-08-30", hour: 16 }), "2026-08-30:pm");
   assert.equal(autonomousSlot({ date: "2026-08-30", hour: 9 }), null);
+  assert.equal(autonomousRunIsBusy({ status: "picking", at: "2026-08-30T13:27:00Z" }, Date.parse("2026-08-30T13:27:14Z")), true);
+  assert.equal(autonomousRunIsBusy({ status: "reset" }), false);
+  assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "waiting_variants" }, "2026-08-30:am"), true);
+  assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "reset" }, "2026-08-30:am"), false);
 });
 
 test("RSS parser reads CDATA titles", () => {
