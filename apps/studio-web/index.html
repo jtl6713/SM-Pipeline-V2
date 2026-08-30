@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.190-heatmap-schedule">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.191-autonomous-produce">
 </head>
 <body>
  <header class="topbar">
@@ -951,7 +951,7 @@
 
  <section id="page-operations" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, library intake, publish queues, oversized compression, and render retries.</p></div>
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, autonomous produce, library intake, publish queues, oversized compression, and render retries.</p></div>
  <button class="secondary-button" data-refresh="operations">Refresh</button>
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
@@ -961,6 +961,12 @@
  </div>
  <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
  <div id="operationsProfiles" class="ops-profile-list"></div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Autonomous produce</h2><p>When a profile toggle is on, Studio harvests Chicago trends, picks one idea the library can shoot, produces the standard template, and stops at Ready for Review. Nothing publishes. Runs around 8:00 a.m. and 4:00 p.m. Chicago.</p></div>
+ <button type="button" class="secondary-button" id="operationsRunAutonomous">Run autonomous now</button>
+ </div>
+ <p class="subtle" id="operationsAutonomousMeta">Loading autonomous status…</p>
  </section>
  <section class="panel">
  <div class="panel-heading"><div><h2>Library intake</h2><p>Opening this tab checks Airtable for assets that need classification or compression. Process intake only when you want A2 to scan the Drive folder.</p></div>
@@ -1400,9 +1406,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.190-heatmap-schedule"></script>
- <script src="/assets/ez-plan.js?v=0.6.190-heatmap-schedule"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.190-heatmap-schedule"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.190";</script>
+ <script src="/assets/config.js?v=0.6.191-autonomous-produce"></script>
+ <script src="/assets/ez-plan.js?v=0.6.191-autonomous-produce"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.191-autonomous-produce"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.191";</script>
 </body>
 </html>

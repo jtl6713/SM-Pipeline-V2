@@ -279,3 +279,5 @@ Produce self-heal Pages deploy: 2026-08-29 - Show Escalated produce state when a
 Default schedules Pages deploy: 2026-08-29 - Pipeline Use default schedules next to Approve All; same-platform times stay 90 minutes apart. UI 0.6.188-schedule-gap.
 
 Insights heatmap + watchlist Pages deploy: 2026-08-29 - Full-week similar-times calendar with gold scheduled-post overlay; Handles copy for timed vs review-only. UI 0.6.190-heatmap-schedule.
+
+Autonomous produce Pages deploy: 2026-08-30 - Operations toggle and Run autonomous now for the twice-daily trend-to-review path. UI 0.6.191-autonomous-produce.

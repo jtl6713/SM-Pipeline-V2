@@ -208,3 +208,5 @@ Idea library + approve prep Worker deploy: 2026-08-29 - Keyword/place matching s
 Schedule spacing Worker deploy: 2026-08-29 - Approve and Approve All keep same-platform posts at least 90 minutes apart when a slot is already taken. Worker 0.10.176-schedule-spacing.
 
 Insights watchlist + review-ready Worker deploy: 2026-08-29 - Seed official Instagram and YouTube handles, overlay occupied schedules on similar-times, and show Ready for Review only when the file, lettering, and 3D cover are actually reviewable. Worker 0.10.179-review-ready.
+
+Autonomous produce Worker deploy: 2026-08-30 - Twice-daily Chicago trend harvest, asset-backed idea pick, Item 4 / studio-produce to Ready for Review only. Worker 0.10.180-autonomous-produce.
