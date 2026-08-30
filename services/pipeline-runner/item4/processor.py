@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
@@ -143,20 +145,55 @@ def _claim_row(client: AirtableClient, record_id: str, fields: dict[str, Any]) -
     client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id, patch)
 
 
-def select_next_row(
+def select_eligible_rows(
     client: AirtableClient,
     *,
     production_request_record_id: str | None = None,
     test_run_id: str | None = None,
-) -> dict | None:
+    max_records: int = 40,
+) -> list[dict]:
     if production_request_record_id:
         formula = smv1_exact_request_formula(production_request_record_id, test_run_id or "")
     else:
         from item4.constants import SMV1_PRODUCTION_FORMULA
 
         formula = SMV1_PRODUCTION_FORMULA
-    rows = client.list_records(MEDIA_TRANSFER_QUEUE_TABLE, formula=formula, max_records=1)
+    return client.list_records(
+        MEDIA_TRANSFER_QUEUE_TABLE,
+        formula=formula,
+        max_records=max(1, min(int(max_records or 1), 40)),
+    )
+
+
+def select_next_row(
+    client: AirtableClient,
+    *,
+    production_request_record_id: str | None = None,
+    test_run_id: str | None = None,
+) -> dict | None:
+    rows = select_eligible_rows(
+        client,
+        production_request_record_id=production_request_record_id,
+        test_run_id=test_run_id,
+        max_records=1,
+    )
     return rows[0] if rows else None
+
+
+def group_pending_variant_rows(rows: list[dict]) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Group Platform Variant Pending rows by source Drive file so one download can crop all ratios."""
+    groups: dict[str, list[dict]] = {}
+    leftover: list[dict] = []
+    for row in rows or []:
+        fields = row.get("fields") or {}
+        kind = str(fields.get("Asset_Kind") or "").strip()
+        status = str(fields.get("Transfer_Status") or "").strip()
+        source_id = str(fields.get("Source_Drive_File_ID") or "").strip()
+        if kind == "Platform Variant" and status == "Pending" and source_id:
+            groups.setdefault(source_id, []).append(row)
+            continue
+        leftover.append(row)
+    return groups, leftover
 
 
 def _gravity_token(fields: dict[str, Any]) -> str:
@@ -209,45 +246,49 @@ def _process_master_pending(
     }
 
 
-def _process_variant_pending(
+def _complete_variant_upload(
     client: AirtableClient,
     drive: GoogleDriveClient,
-    variant: VariantServiceClient,
     row: dict,
+    rendered: bytes,
+    *,
+    airtable_lock: threading.Lock | None = None,
 ) -> dict[str, Any]:
     record_id = row["id"]
     fields = row.get("fields", {})
     transfer_id = str(fields.get("Transfer_ID") or "").strip()
     folder_id = str(fields.get("Target_Drive_Folder_ID") or "").strip()
     filename = str(fields.get("Target_File_Name") or "variant.jpg")
-    source_drive_id = str(fields.get("Source_Drive_File_ID") or "").strip()
     ratio = str(fields.get("Aspect_Ratio") or "").strip()
-    if not folder_id or not source_drive_id or not ratio:
-        raise RuntimeError("Platform variant row is missing folder, source drive id, or aspect ratio")
-
-    _claim_row(client, record_id, fields)
-    source_bytes, _ = drive.download_file(source_drive_id)
-    rendered = variant.render(source_bytes, ratio, _gravity_token(fields))
     uploaded = drive.upload_file(folder_id, filename, rendered, "image/jpeg")
     drive_id = str(uploaded.get("id") or "")
     drive_url = str(uploaded.get("webViewLink") or f"https://drive.google.com/file/d/{drive_id}/view")
-    media_asset_id = ensure_media_asset(
-        client, fields, drive_id, drive_url, transfer_id, kind="Platform Variant"
-    )
-    client.update_record(
-        MEDIA_TRANSFER_QUEUE_TABLE,
-        record_id,
-        {
-            "Transfer_Status": "Ready",
-            "Drive_File_ID": drive_id,
-            "Drive_URL": drive_url,
-            "Media_Asset_Record_ID": media_asset_id,
-            "Generated_Media_Asset": [media_asset_id],
-            "Completed_At": _now_iso(),
-            "Error_Message": None,
-            "Preview_Status": "Pending",
-        },
-    )
+
+    def _write() -> str:
+        media_asset_id = ensure_media_asset(
+            client, fields, drive_id, drive_url, transfer_id, kind="Platform Variant"
+        )
+        client.update_record(
+            MEDIA_TRANSFER_QUEUE_TABLE,
+            record_id,
+            {
+                "Transfer_Status": "Ready",
+                "Drive_File_ID": drive_id,
+                "Drive_URL": drive_url,
+                "Media_Asset_Record_ID": media_asset_id,
+                "Generated_Media_Asset": [media_asset_id],
+                "Completed_At": _now_iso(),
+                "Error_Message": None,
+                "Preview_Status": "Pending",
+            },
+        )
+        return media_asset_id
+
+    if airtable_lock:
+        with airtable_lock:
+            media_asset_id = _write()
+    else:
+        media_asset_id = _write()
     return {
         "route": "variant_pending",
         "queue_record_id": record_id,
@@ -257,6 +298,89 @@ def _process_variant_pending(
         "recipe": VARIANT_RECIPE_VERSION,
         "ratio": ratio,
     }
+
+
+def _process_variant_pending(
+    client: AirtableClient,
+    drive: GoogleDriveClient,
+    variant: VariantServiceClient,
+    row: dict,
+) -> dict[str, Any]:
+    record_id = row["id"]
+    fields = row.get("fields", {})
+    folder_id = str(fields.get("Target_Drive_Folder_ID") or "").strip()
+    source_drive_id = str(fields.get("Source_Drive_File_ID") or "").strip()
+    ratio = str(fields.get("Aspect_Ratio") or "").strip()
+    if not folder_id or not source_drive_id or not ratio:
+        raise RuntimeError("Platform variant row is missing folder, source drive id, or aspect ratio")
+
+    _claim_row(client, record_id, fields)
+    source_bytes, _ = drive.download_file(source_drive_id)
+    rendered = variant.render(source_bytes, ratio, _gravity_token(fields))
+    return _complete_variant_upload(client, drive, row, rendered)
+
+
+def process_variant_group(
+    client: AirtableClient,
+    drive: GoogleDriveClient,
+    variant: VariantServiceClient,
+    rows: list[dict],
+    *,
+    airtable_lock: threading.Lock | None = None,
+) -> list[dict[str, Any]]:
+    """Download a master once, then crop and upload every pending ratio for that photo."""
+    if not rows:
+        return []
+    source_drive_id = str((rows[0].get("fields") or {}).get("Source_Drive_File_ID") or "").strip()
+    if not source_drive_id:
+        raise RuntimeError("Platform variant group is missing Source_Drive_File_ID")
+
+    for row in rows:
+        fields = row.get("fields") or {}
+        folder_id = str(fields.get("Target_Drive_Folder_ID") or "").strip()
+        ratio = str(fields.get("Aspect_Ratio") or "").strip()
+        if not folder_id or not ratio:
+            raise RuntimeError("Platform variant row is missing folder or aspect ratio")
+        if airtable_lock:
+            with airtable_lock:
+                _claim_row(client, row["id"], fields)
+        else:
+            _claim_row(client, row["id"], fields)
+
+    source_bytes, _ = drive.download_file(source_drive_id)
+    results: list[dict[str, Any]] = []
+    first_error: Exception | None = None
+    for row in rows:
+        fields = row.get("fields") or {}
+        ratio = str(fields.get("Aspect_Ratio") or "").strip()
+        try:
+            rendered = variant.render(source_bytes, ratio, _gravity_token(fields))
+            results.append(
+                _complete_variant_upload(client, drive, row, rendered, airtable_lock=airtable_lock)
+            )
+        except Exception as exc:
+            first_error = first_error or exc
+            try:
+                if airtable_lock:
+                    with airtable_lock:
+                        _fail_row(
+                            client,
+                            row["id"],
+                            str(exc),
+                            retryable=is_retryable_master_error(exc),
+                        )
+                else:
+                    _fail_row(
+                        client,
+                        row["id"],
+                        str(exc),
+                        retryable=is_retryable_master_error(exc),
+                    )
+            except Exception:
+                pass
+    if first_error and not results:
+        raise first_error
+    return results
 
 
 def _process_variant_drive_uploaded(
@@ -437,3 +561,106 @@ def process_one(
         except Exception:
             pass
         raise
+
+
+def process_drain(
+    *,
+    production_request_record_id: str | None = None,
+    test_run_id: str | None = None,
+    photo_workers: int = 4,
+    max_followup: int = 8,
+) -> dict[str, Any]:
+    """Process pending variant photos in parallel (one Drive download per photo)."""
+    client = AirtableClient()
+    if production_request_record_id and test_run_id:
+        _assert_test_mode_boundary(client, production_request_record_id, test_run_id)
+
+    requeue_stale_processing(
+        client,
+        production_request_record_id=production_request_record_id,
+        test_run_id=test_run_id,
+    )
+
+    airtable_lock = threading.Lock()
+    results: list[dict[str, Any]] = []
+    settings = pipeline_settings(client)
+    groups: dict[str, list[dict]] = {}
+
+    def _run_group(group_rows: list[dict]) -> list[dict[str, Any]]:
+        drive = GoogleDriveClient()
+        variant = VariantServiceClient(settings)
+        return process_variant_group(
+            client,
+            drive,
+            variant,
+            group_rows,
+            airtable_lock=airtable_lock,
+        )
+
+    for _wave in range(3):
+        rows = select_eligible_rows(
+            client,
+            production_request_record_id=production_request_record_id,
+            test_run_id=test_run_id,
+            max_records=40,
+        )
+        if not rows:
+            if results:
+                break
+            return {"processed": False, "reason": "no_eligible_queue_row", "processed_count": 0}
+
+        groups, leftover = group_pending_variant_rows(rows)
+        if not groups and not leftover:
+            break
+
+        workers = max(1, min(int(photo_workers or 1), 5, max(1, len(groups))))
+        if groups:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(_run_group, group_rows) for group_rows in groups.values()]
+                first_error: Exception | None = None
+                for future in as_completed(futures):
+                    try:
+                        results.extend(future.result() or [])
+                    except Exception as exc:
+                        first_error = first_error or exc
+                if first_error and not results:
+                    raise first_error
+
+        for row in leftover:
+            try:
+                results.append(process_queue_row(client, row))
+            except Exception as exc:
+                preview = (
+                    str(field(row, "Transfer_Status") or "") == "Ready"
+                    and str(field(row, "Preview_Status") or "") == "Pending"
+                )
+                try:
+                    _fail_row(
+                        client,
+                        row["id"],
+                        str(exc),
+                        preview=preview,
+                        retryable=not preview and is_retryable_master_error(exc),
+                    )
+                except Exception:
+                    pass
+                raise
+
+    followup = 0
+    while followup < max(0, int(max_followup or 0)):
+        nxt = process_one(
+            production_request_record_id=production_request_record_id,
+            test_run_id=test_run_id,
+        )
+        if not nxt.get("processed"):
+            break
+        results.append(nxt)
+        followup += 1
+
+    return {
+        "processed": bool(results),
+        "processed_count": len(results),
+        "route": "variant_drain",
+        "photo_groups": len(groups),
+        "results": results,
+    }

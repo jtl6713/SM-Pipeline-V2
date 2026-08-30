@@ -6,7 +6,7 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from studio_produce.constants import CAROUSEL_SLIDES_TABLE, CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE, PRODUCTION_REQUESTS_TABLE
-from item4.processor import process_one as process_smv1
+from item4.processor import process_drain as process_smv1_drain
 from render.fields import field, field_str
 from studio_produce.context import (
     expected_photo_count,
@@ -90,16 +90,13 @@ def theme_title(request: dict[str, Any], parent: dict[str, Any] | None) -> str:
 
 
 def drain_smv1(request_id: str, test_run_id: str | None, max_runs: int = 8) -> int:
-    processed = 0
-    for _ in range(max(1, min(max_runs, 20))):
-        result = process_smv1(
-            production_request_record_id=request_id,
-            test_run_id=test_run_id or None,
-        )
-        if not result.get("processed"):
-            break
-        processed += 1
-    return processed
+    result = process_smv1_drain(
+        production_request_record_id=request_id,
+        test_run_id=test_run_id or None,
+        photo_workers=4,
+        max_followup=max(1, min(max_runs, 20)),
+    )
+    return int(result.get("processed_count") or 0)
 
 
 def persist_masters(client: AirtableClient, request_id: str, assets: list[dict[str, Any]]) -> dict[str, Any]:
@@ -502,11 +499,12 @@ def step_queue_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
         assets,
         ratios,
         test_run_id=field_str(request, "Test_Run_ID"),
+        plan=plan,
     )
     from studio_produce.context import load_queue_rows
 
     rows = load_queue_rows(client, request_id)
-    manifest = rebuild_variant_manifest(request_id, assets, ratios, rows)
+    manifest = rebuild_variant_manifest(request_id, assets, ratios, rows, plan=plan)
     persist_variant_manifest(client, request_id, manifest)
     ctx["request"] = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
     return "crops"
@@ -524,7 +522,7 @@ def step_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
     ratios = required_ratios(plan)
     drain_smv1(request_id, field_str(request, "Test_Run_ID"), max_runs=8)
     rows = load_queue_rows(client, request_id)
-    manifest = rebuild_variant_manifest(request_id, assets, ratios, rows)
+    manifest = rebuild_variant_manifest(request_id, assets, ratios, rows, plan=plan)
     persist_variant_manifest(client, request_id, manifest)
     ctx["request"] = client.get_record(PRODUCTION_REQUESTS_TABLE, request_id)
     ready = int(manifest.get("plan_ready_count") or 0)
