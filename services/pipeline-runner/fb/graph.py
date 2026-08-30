@@ -51,7 +51,10 @@ class FacebookPhotoClient:
     def create_unpublished_photo(self, image_url: str) -> tuple[int, dict[str, Any]]:
         response = requests.post(
             self._url(f"{self.page_id}/photos"),
-            params={"url": image_url, "published": "false", "temporary": "true"},
+            # Unpublished Page photos for /feed attached_media. Do not send
+            # temporary=true — those objects are for ads and Graph often
+            # returns OAuthException code 1 when a Page post attaches them.
+            params={"url": image_url, "published": "false"},
             headers=self._headers(),
             timeout=60,
         )
@@ -106,14 +109,13 @@ class FacebookPhotoClient:
         photo_ids: list[str],
         place: str | None = None,
     ) -> tuple[int, dict[str, Any]]:
+        del place  # City Page IDs are not Graph places; tagging them returns code 1.
         attached = [{"media_fbid": photo_id} for photo_id in photo_ids]
         params: dict[str, Any] = {
             "message": message,
             "attached_media": json.dumps(attached, separators=(",", ":")),
+            "published": "true",
         }
-        place_id = str(place or "").strip()
-        if place_id.isdigit():
-            params["place"] = place_id
         try:
             response = requests.post(
                 self._url(f"{self.page_id}/feed"),
@@ -149,7 +151,50 @@ class FacebookPhotoClient:
             timeout=60,
         )
         data = response.json() if response.content else {}
-        return response.status_code, data if isinstance(data, dict) else {"raw": data}
+        if not isinstance(data, dict):
+            data = {"raw": data}
+        if 200 <= response.status_code <= 299:
+            page = {}
+            try:
+                page_resp = requests.get(
+                    self._url(self.page_id),
+                    params={"fields": "id,username"},
+                    headers=self._headers(),
+                    timeout=30,
+                )
+                page = page_resp.json() if page_resp.content else {}
+            except requests.RequestException:
+                page = {}
+            public = public_feed_url(
+                page_id=self.page_id,
+                page_username=str((page or {}).get("username") or ""),
+                post_id=str(data.get("id") or post_id),
+                permalink_url=str(data.get("permalink_url") or ""),
+            )
+            if public:
+                data["permalink_url"] = public
+        return response.status_code, data
+
+
+def public_feed_url(
+    *,
+    page_id: str,
+    page_username: str = "",
+    post_id: str,
+    permalink_url: str = "",
+) -> str:
+    """Prefer facebook.com/{vanity}/posts/{story} over New Pages profile IDs.
+
+    Graph permalink_url often uses the 122… Page-profile id. That path only
+    resolves when the viewer is logged in as a Page admin.
+    """
+    story = str(post_id or "").strip()
+    if "_" in story:
+        story = story.split("_", 1)[1]
+    handle = str(page_username or page_id or "").strip().lstrip("@/")
+    if handle and story and story.isdigit():
+        return f"https://www.facebook.com/{handle}/posts/{story}"
+    return str(permalink_url or "").strip()
 
 
 def feed_since(started_at: str | None) -> datetime:
