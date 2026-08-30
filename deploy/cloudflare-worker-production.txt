@@ -210,3 +210,5 @@ Schedule spacing Worker deploy: 2026-08-29 - Approve and Approve All keep same-p
 Insights watchlist + review-ready Worker deploy: 2026-08-29 - Seed official Instagram and YouTube handles, overlay occupied schedules on similar-times, and show Ready for Review only when the file, lettering, and 3D cover are actually reviewable. Worker 0.10.179-review-ready.
 
 Autonomous produce Worker deploy: 2026-08-30 - Twice-daily Chicago trend harvest, asset-backed idea pick, Item 4 / studio-produce to Ready for Review only. Worker 0.10.180-autonomous-produce.
+
+Autonomous I1 key Worker deploy: 2026-08-30 - Picker calls pipeline-runner /jobs/autonomous-pick so it uses the same OPENAI_API_KEY as I1. Worker 0.10.181-autonomous-i1-key.

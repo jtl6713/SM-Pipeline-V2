@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.180-autonomous-produce",
+          version: "0.10.181-autonomous-i1-key",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -24251,31 +24251,26 @@ async function harvestAutonomousRecentTitles(env) {
 }
 
 async function studioAutonomousOpenAiPick(env, prompt) {
-  const settings = await studioActivePipelineSettings(env, ["OPENAI_API_KEY", "OPENAI_I1_MODEL", "OPENAI_SAI1_MODEL"]).catch(() => ({}));
-  const apiKey = settings.OPENAI_API_KEY || env.OPENAI_API_KEY;
-  if (!apiKey) throw new HttpError(503, "OPENAI_API_KEY is required for autonomous produce");
-  const model = settings.OPENAI_I1_MODEL || settings.OPENAI_SAI1_MODEL || env.OPENAI_I1_MODEL || "gpt-5";
-  const response = await fetch("https://api.openai.com/v1/responses", {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) throw new HttpError(503, "Pipeline runner is required for autonomous produce");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const response = await fetch(`${runnerUrl}/jobs/autonomous-pick`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
     },
-    body: JSON.stringify({
-      model,
-      input: prompt,
-      store: false,
-      reasoning: { effort: "low" },
-      text: { format: { type: "json_object" } },
-    }),
+    body: JSON.stringify({ prompt }),
   });
-  const body = await response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new HttpError(502, body?.error?.message || `OpenAI autonomous pick failed (${response.status})`);
+    throw new HttpError(
+      response.status >= 400 ? response.status : 502,
+      payload?.error || payload?.message || "I1 OpenAI pick failed"
+    );
   }
-  const text = String(body?.output_text || "")
-    || (body?.output || []).flatMap((item) => (item?.content || []).map((part) => part?.text || part?.output_text || "")).join("\n");
-  return parseAutonomousPick(extractJsonObject(text));
+  const parsed = payload?.parsed && typeof payload.parsed === "object" ? payload.parsed : payload;
+  return parseAutonomousPick(parsed);
 }
 
 async function createAutonomousIdea(env, profile, pick) {
