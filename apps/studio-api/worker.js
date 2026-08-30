@@ -183,8 +183,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.176-schedule-spacing",
+          version: "0.10.177-insights-watchlist",
           studio_schedule_spacing_v1: true,
+          studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -910,7 +911,7 @@ export default {
         console.warn("insights sweep cron failed", error);
       }
       try {
-        await studioSweepSimilarAccountTimes(env, { limit: 3 });
+        await studioSweepSimilarAccountTimes(env, { limit: 6 });
       } catch (error) {
         console.warn("similar-account times sweep cron failed", error);
       }
@@ -10499,7 +10500,7 @@ async function studioInsightsPostsForView(env, { accounts, theme, platform, seas
 }
 
 const STUDIO_HEATMAP_DAYS = Object.freeze(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
-const STUDIO_CHICAGO_SIMILAR_SEED = Object.freeze([
+const STUDIO_SIMILAR_SEEDS = Object.freeze([
   { platform: "instagram", handle: "tatiana.pesotskaya", source: "joseph", profile: "chicago" },
   { platform: "instagram", handle: "charmaine.sky", source: "joseph", profile: "chicago" },
   { platform: "instagram", handle: "layne_ferd", source: "joseph", profile: "chicago" },
@@ -10517,9 +10518,44 @@ const STUDIO_CHICAGO_SIMILAR_SEED = Object.freeze([
   { platform: "instagram", handle: "alanainwanderland", source: "research", profile: "chicago" },
   { platform: "instagram", handle: "timeoutchicago", source: "research", profile: "chicago" },
   { platform: "instagram", handle: "chicagoarchitecturecenter", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "secretlychicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "thisischicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "artinstitutechi", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "mcachicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "navypierchicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "lincolnparkzoo", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "shedd_aquarium", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "fieldmuseum", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "blockclubchi", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "chicagomag", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "eaterchicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "wttwchicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "hiddenchicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "enjoyillinois", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "thesecondcity", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "officialwrigleyfield", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "adlerplanet", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "msichicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "chicago_riverwalk", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "millennium_park", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "360chicago", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "cubs", source: "research", profile: "chicago" },
   { platform: "youtube", handle: "ChooseChicago", source: "research", profile: "chicago" },
   { platform: "youtube", handle: "TimeOutChicago", source: "research", profile: "chicago" },
   { platform: "youtube", handle: "ChicagoArchitectureCenter", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "WTTW", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "NBCChicago", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "TheArtInstituteofChicago", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "FieldMuseum", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "SheddAquarium", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "Fox32Chicago", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "ABC7Chicago", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "CBSChicago", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "WGNTV", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "NavyPier", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "EnjoyIllinois", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "LincolnParkZoo", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "AdlerPlanetarium", source: "research", profile: "chicago" },
   { platform: "tiktok", handle: "chicago.mp4", source: "joseph", profile: "chicago" },
   { platform: "tiktok", handle: "ChooseChicago", source: "joseph", profile: "chicago" },
   { platform: "tiktok", handle: "Chicago.by.desi", source: "joseph", profile: "chicago" },
@@ -10527,9 +10563,69 @@ const STUDIO_CHICAGO_SIMILAR_SEED = Object.freeze([
   { platform: "tiktok", handle: "anuchicago", source: "joseph", profile: "chicago" },
   { platform: "tiktok", handle: "chibucketlist", source: "joseph", profile: "chicago" },
   { platform: "tiktok", handle: "only_chicago", source: "joseph", profile: "chicago" },
+  { platform: "tiktok", handle: "timeoutchicago", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "lincolnparkzoo", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "sheddaquarium", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "fieldmuseum", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "navypierchicago", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "artinstitutechi", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "blockclubchi", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "secretlychicago", source: "research", profile: "chicago" },
+  { platform: "tiktok", handle: "thisischicago", source: "research", profile: "chicago" },
   { platform: "facebook", handle: "groups/1589897138463791", source: "joseph", profile: "chicago" },
   { platform: "facebook", handle: "groups/951998221479788", source: "joseph", profile: "chicago" },
   { platform: "facebook", handle: "chicagoepic", source: "joseph", profile: "chicago" },
+  { platform: "facebook", handle: "ChooseChicago", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "TimeOutChicago", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "ChicagoArchitectureCenter", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "LincolnParkZoo", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "SheddAquarium", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "FieldMuseum", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "NavyPierChicago", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "artinstituteofchicago", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "BlockClubChicago", source: "research", profile: "chicago" },
+  { platform: "facebook", handle: "ChicagoMagazine", source: "research", profile: "chicago" },
+  { platform: "instagram", handle: "discoverla", source: "research", profile: "la" },
+  { platform: "instagram", handle: "timeoutla", source: "research", profile: "la" },
+  { platform: "instagram", handle: "visitcalifornia", source: "research", profile: "la" },
+  { platform: "instagram", handle: "lacma", source: "research", profile: "la" },
+  { platform: "instagram", handle: "thegetty", source: "research", profile: "la" },
+  { platform: "instagram", handle: "griffithobservatory", source: "research", profile: "la" },
+  { platform: "instagram", handle: "dtla", source: "research", profile: "la" },
+  { platform: "instagram", handle: "laist", source: "research", profile: "la" },
+  { platform: "instagram", handle: "eater_la", source: "research", profile: "la" },
+  { platform: "instagram", handle: "hollywoodbowl", source: "research", profile: "la" },
+  { platform: "instagram", handle: "nbcla", source: "research", profile: "la" },
+  { platform: "youtube", handle: "DiscoverLA", source: "research", profile: "la" },
+  { platform: "youtube", handle: "LACMA", source: "research", profile: "la" },
+  { platform: "youtube", handle: "VisitCalifornia", source: "research", profile: "la" },
+  { platform: "youtube", handle: "KTLA", source: "research", profile: "la" },
+  { platform: "youtube", handle: "NBCLA", source: "research", profile: "la" },
+  { platform: "tiktok", handle: "discoverla", source: "research", profile: "la" },
+  { platform: "tiktok", handle: "timeoutla", source: "research", profile: "la" },
+  { platform: "tiktok", handle: "lacma", source: "research", profile: "la" },
+  { platform: "facebook", handle: "DiscoverLosAngeles", source: "research", profile: "la" },
+  { platform: "facebook", handle: "LACMA", source: "research", profile: "la" },
+  { platform: "facebook", handle: "VisitCalifornia", source: "research", profile: "la" },
+  { platform: "instagram", handle: "nycgo", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "timeoutnewyork", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "moma", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "metmuseum", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "centralparknyc", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "nypl", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "eater_ny", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "nyctourism", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "bryantparknyc", source: "research", profile: "nyc" },
+  { platform: "youtube", handle: "NYCGo", source: "research", profile: "nyc" },
+  { platform: "youtube", handle: "TheMet", source: "research", profile: "nyc" },
+  { platform: "youtube", handle: "MoMAvideos", source: "research", profile: "nyc" },
+  { platform: "youtube", handle: "NYCTourism", source: "research", profile: "nyc" },
+  { platform: "tiktok", handle: "nycgo", source: "research", profile: "nyc" },
+  { platform: "tiktok", handle: "timeoutnewyork", source: "research", profile: "nyc" },
+  { platform: "tiktok", handle: "metmuseum", source: "research", profile: "nyc" },
+  { platform: "facebook", handle: "nycgo", source: "research", profile: "nyc" },
+  { platform: "facebook", handle: "metmuseum", source: "research", profile: "nyc" },
+  { platform: "facebook", handle: "MoMATheMuseumofModernArt", source: "research", profile: "nyc" },
 ]);
 
 function studioNormalizeSimilarProfile(value) {
@@ -10637,16 +10733,24 @@ function studioBuildSimilarHeatmap(posts) {
   return { buckets, suggested, sample_size: (posts || []).length };
 }
 
+function studioMergeSeedWatchlist(accounts) {
+  const have = new Set((accounts || []).map((row) => studioSimilarAccountKey(row.platform, row.handle)));
+  const extra = STUDIO_SIMILAR_SEEDS.filter((row) => !have.has(studioSimilarAccountKey(row.platform, row.handle)));
+  return extra.length ? [...accounts, ...extra.map((item) => ({ ...item }))] : accounts;
+}
+
 async function studioEnsureSimilarWatchlist(env) {
   const row = await studioSettingsByName(env, STUDIO_SIMILAR_WATCHLIST_SETTING);
-  let accounts = parseSimilarWatchlist(f(row, "Setting_Value"));
-  if (!accounts.length) {
-    accounts = STUDIO_CHICAGO_SIMILAR_SEED.map((item) => ({ ...item }));
+  const existing = parseSimilarWatchlist(f(row, "Setting_Value"));
+  const accounts = existing.length
+    ? studioMergeSeedWatchlist(existing)
+    : STUDIO_SIMILAR_SEEDS.map((item) => ({ ...item }));
+  if (!existing.length || accounts.length !== existing.length) {
     await studioUpsertSetting(
       env,
       STUDIO_SIMILAR_WATCHLIST_SETTING,
       JSON.stringify(accounts),
-      "Chicago similar-account watchlist. Joseph handles plus researched city/tourism peers. TikTok/Facebook stored for reference; official competitor sweeps use IG/YouTube only."
+      "Similar-account watchlist. Instagram and YouTube are swept for public post times. TikTok and Facebook stay on the list for operator review; those platforms have no public competitor post-time API we can call."
     );
   }
   return accounts;
@@ -10761,14 +10865,14 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
   const seasonLabel = studioSeasonLabel(season);
   let message;
   if (!timed.length) {
-    message = `No Instagram or YouTube handles for ${label} yet. Add some on Operations. TikTok and Facebook stay reference-only.`;
+    message = `No Instagram or YouTube handles for ${label} yet. Add some on Operations. TikTok and Facebook handles stay listed for review; we cannot read their post times.`;
   } else if (!heatmap.sample_size) {
     const needPerm = accountViews.some((row) => row.status === "needs_permission");
     const needKey = accountViews.some((row) => row.status === "needs_key");
     if (needPerm && needKey) {
-      message = `${label} watchlist is saved. Instagram needs Meta business_discovery permission. YouTube needs YOUTUBE_API_KEY. TikTok and Facebook stay reference-only.`;
+      message = `${label} watchlist is saved. Instagram needs Meta business_discovery permission. YouTube needs YOUTUBE_API_KEY. TikTok and Facebook handles stay on the list for review; those apps do not give us other accounts' post times.`;
     } else if (needPerm) {
-      message = `${label} Instagram lookups are blocked by Meta permission #10 (business_discovery). TikTok and Facebook stay reference-only.`;
+      message = `${label} Instagram lookups are blocked by Meta permission #10 (business_discovery). TikTok and Facebook handles stay listed for review; we cannot read their post times.`;
     } else if (needKey) {
       message = `${label} YouTube timing needs YOUTUBE_API_KEY in Pipeline Settings or the Worker.`;
     } else {
@@ -10822,7 +10926,7 @@ async function putInsightsWatchlist(request, env) {
     env,
     STUDIO_SIMILAR_WATCHLIST_SETTING,
     JSON.stringify(accounts),
-    "Chicago similar-account watchlist. Editable. TikTok/Facebook stored for reference; official competitor sweeps use IG/YouTube only."
+    "Similar-account watchlist. Editable. Instagram and YouTube are swept for public post times. TikTok and Facebook stay listed for review; those apps have no public competitor post-time API."
   );
   return respond(request, env, { ok: true, accounts });
 }
@@ -11397,12 +11501,23 @@ async function postInsightsDiscover(request, env, url, authorization) {
 }
 
 async function studioSweepSimilarAccountTimes(env, options = {}) {
-  const limit = Math.max(1, Math.min(6, Number(options.limit) || 3));
+  const limit = Math.max(1, Math.min(10, Number(options.limit) || 3));
   const force = Boolean(options.force);
   const accounts = await studioEnsureSimilarWatchlist(env);
   const timed = studioTimedWatchlistAccounts(accounts, options.theme || null);
   const cache = await studioLoadSimilarAccountStatusCache(env);
   const stale = timed.filter((row) => force || studioSimilarAccountStale(cache.accounts[studioSimilarAccountKey(row.platform, row.handle)]));
+  const sweepRank = (row) => {
+    const entry = cache.accounts[studioSimilarAccountKey(row.platform, row.handle)];
+    const status = studioNormalizeSimilarStatus(entry);
+    const unseen = !entry?.fetched_at || status === "pending";
+    if (row.platform === "youtube" && unseen) return 0;
+    if (row.platform === "youtube") return 1;
+    if (unseen) return 2;
+    if (status === "needs_permission") return 4;
+    return 3;
+  };
+  stale.sort((a, b) => sweepRank(a) - sweepRank(b));
   const batch = stale.slice(0, limit);
   if (!batch.length) return { scanned: 0, updated: 0, remaining: 0, cache };
   const settings = await studioActivePipelineSettings(env, [
