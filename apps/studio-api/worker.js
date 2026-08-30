@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.190-autonomous-through-approve",
+          version: "0.10.191-autonomous-skip-reprepare",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -24539,11 +24539,14 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
   }
 
   const continueAfterPlan = async () => {
-    const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
-    await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
-    let current = await waitAutonomousVariantsReady(env, requestId, ctx);
+    let current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
     if (!autonomousPlanVariantsReady(current)) {
-      return { waiting: true, production_request_id: requestId, idea_id: idea.id };
+      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
+      await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+      current = await waitAutonomousVariantsReady(env, requestId, ctx);
+      if (!autonomousPlanVariantsReady(current)) {
+        return { waiting: true, production_request_id: requestId, idea_id: idea.id };
+      }
     }
     const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
     if (!preflight.ready) {
@@ -24726,9 +24729,19 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     if (!pick.media_asset_ids.length) {
       return studioSaveAutonomousLastRun(env, { ...last, status: "skipped", skip_reason: "waiting_variants_lost_assets" });
     }
-    const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, {
-      awaitFinish: true,
-    });
+    let finished;
+    try {
+      finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, {
+        awaitFinish: true,
+      });
+    } catch (error) {
+      return studioSaveAutonomousLastRun(env, {
+        ...last,
+        status: "skipped",
+        skip_reason: String(error?.message || error).slice(0, 180),
+        chicago_date: chicago.date,
+      });
+    }
     if (finished.waiting) {
       return studioSaveAutonomousLastRun(env, {
         ...last,
