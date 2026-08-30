@@ -19,8 +19,10 @@ import {
   observationIsRecent,
   parseAutonomousLastRun,
   parseAutonomousPick,
+  parseAutonomousNotedMediaIds,
   parseRssItemTitles,
   summarizeObservations,
+  autonomousIdeaConflictsOccupied,
 } from "./autonomous-produce.mjs";
 
 test("Chicago 8am and 4pm are autonomous windows", () => {
@@ -99,6 +101,34 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     Array.from({ length: 12 }, (_, i) => ({ name: `still-${i}.jpg`, media_asset_record_id: `recAlready${String(i).padStart(10, "0")}` })),
     ["recAsset1234567890"]
   ), []);
+});
+
+test("occupied ideas block the same stills or the same place and subject", () => {
+  assert.deepEqual(
+    parseAutonomousNotedMediaIds("origin=autonomous\nmedia_asset_ids=recfgniLGTG1tTviX,rec1nTwk171jxI4sA\n"),
+    ["recfgniLGTG1tTviX", "rec1nTwk171jxI4sA"]
+  );
+  const occupied = [{
+    source: "in_flight",
+    title: "Pilsen Murals: Color on 18th Street",
+    location: "18th Street, Pilsen",
+    media_asset_ids: ["recfgniLGTG1tTviX", "rec1nTwk171jxI4sA", "recCKj0QBKLwnqlpL"],
+  }];
+  const sameStills = autonomousIdeaConflictsOccupied({
+    candidate_title: "Pilsen’s 18th Street Murals, Right Now",
+    idea_summary: "Walk the walls before the weekend crowd.",
+    primary_location: "18th Street, Pilsen",
+    media_asset_ids: ["recfgniLGTG1tTviX", "rec1nTwk171jxI4sA", "recVEPxw7nJTcXvbH"],
+  }, occupied);
+  assert.equal(sameStills.conflict, true);
+  assert.equal(sameStills.reason, "similar_to_in_flight");
+  const different = autonomousIdeaConflictsOccupied({
+    candidate_title: "Navy Pier sunset sail",
+    idea_summary: "Catch the lake light after work.",
+    primary_location: "Navy Pier",
+    media_asset_ids: ["recPierAsset000001"],
+  }, occupied);
+  assert.equal(different.conflict, false);
 });
 
 test("JSON fences unwrap and last-run notes stay readable", () => {

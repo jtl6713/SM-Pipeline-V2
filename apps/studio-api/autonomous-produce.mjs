@@ -224,7 +224,60 @@ export function autonomousDefaultVoiceoverSeconds(videoSeconds = AUTONOMOUS_DEFA
   return Math.max(1, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
 }
 
-export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles }) {
+export function parseAutonomousNotedMediaIds(notes) {
+  const match = String(notes || "").match(/media_asset_ids=([^\n]+)/i);
+  if (!match) return [];
+  return [...new Set(match[1].split(",").map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+const AUTONOMOUS_TOPIC_STOP = new Set([
+  "chicago", "chicagoshining", "street", "walk", "color", "right", "now", "this", "that",
+  "with", "from", "into", "over", "after", "before", "today", "weekend", "quick", "save",
+]);
+
+export function autonomousTopicTokens(text) {
+  return new Set(
+    String(text || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]+/g, " ")
+      .split(/\s+/)
+      .filter((word) => word.length >= 4 && !AUTONOMOUS_TOPIC_STOP.has(word))
+  );
+}
+
+export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
+  const pickMedia = new Set(pick?.media_asset_ids || []);
+  const pickTokens = autonomousTopicTokens([
+    pick?.candidate_title,
+    pick?.primary_location,
+    pick?.neighborhood_or_area,
+    pick?.idea_summary,
+  ].filter(Boolean).join(" "));
+  for (const row of occupied) {
+    const otherMedia = new Set(row?.media_asset_ids || []);
+    const sharedMedia = [...pickMedia].filter((id) => otherMedia.has(id));
+    const mediaRatio = pickMedia.size ? sharedMedia.length / pickMedia.size : 0;
+    if (sharedMedia.length >= 3 || (sharedMedia.length >= 2 && mediaRatio >= 0.5)) {
+      return {
+        conflict: true,
+        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
+        match: String(row.title || "").trim() || "occupied idea",
+      };
+    }
+    const otherTokens = autonomousTopicTokens([row?.title, row?.location].filter(Boolean).join(" "));
+    const sharedTokens = [...pickTokens].filter((token) => otherTokens.has(token));
+    if (sharedTokens.length >= 2) {
+      return {
+        conflict: true,
+        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
+        match: String(row.title || "").trim() || "occupied idea",
+      };
+    }
+  }
+  return { conflict: false };
+}
+
+export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas }) {
   const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
   const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
   const voice = profile?.brand_voice || profile?.Brand_Voice || "";
@@ -232,7 +285,7 @@ export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTit
 
 Return ONLY one raw JSON object. No markdown.
 
-Skip unless a listed library asset clearly matches a listed trend. Do not invent events, dates, prices, or rankings that are not in the harvest. Do not pick generic skyline filler.
+Skip unless a listed library asset clearly matches a listed trend. Do not invent events, dates, prices, or rankings that are not in the harvest. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
 
 ACTIVE PROFILE
 Name: ${profileName}
@@ -245,10 +298,10 @@ ${JSON.stringify(trends, null, 2)}
 LIBRARY STILLS (use only these media_asset_ids)
 ${JSON.stringify(assets, null, 2)}
 
-RECENTLY PUBLISHED TITLES (do not duplicate)
-${JSON.stringify(recentTitles || [], null, 2)}
+IN FLIGHT OR RECENT IDEAS (do not repeat these subjects, places, or stills)
+${JSON.stringify(occupiedIdeas || recentTitles || [], null, 2)}
 
-If nothing is both timely and producible, return:
+If nothing is both timely and producible, or every timely subject is already in flight or recently published, return:
 {"skip":true,"reason":"no_asset_backed_trend"}
 
 Otherwise return:
