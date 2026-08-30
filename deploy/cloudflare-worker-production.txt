@@ -224,3 +224,5 @@ Autonomous one-idea Worker deploy: 2026-08-30 - Claim picking before harvest; ig
 Autonomous originals Worker deploy: 2026-08-30 - Do not attach fill-crop derivatives as master stills, which left frames stuck at 7/11. Worker 0.10.187-autonomous-originals.
 
 Autonomous through Worker deploy: 2026-08-30 - When frames are Ready, promote and enqueue in the same run instead of parking on waiting_variants. Worker 0.10.188-autonomous-through.
+
+Autonomous defaults Worker deploy: 2026-08-30 - Six-output autonomous plan (Reel, Stories, FB Slideshow Reel, TikTok draft, YT slideshow), CKay + Kate, 30s video / 15s VO, music in-point. Worker 0.10.189-autonomous-defaults.

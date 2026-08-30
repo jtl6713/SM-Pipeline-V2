@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.188-autonomous-through",
+          version: "0.10.189-autonomous-defaults",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -7383,6 +7383,8 @@ function mapProductionRequest(record, ideaTitle = null) {
     background_music_mode: f(record, "Background_Music_Mode"),
     thumbnail_mode: f(record, "Thumbnail_Mode"),
     video_duration_seconds: f(record, "Video_Duration_Seconds"),
+    voiceover_duration_seconds: f(record, "Voiceover_Duration_Seconds"),
+    music_start_seconds: f(record, "Music_Start_Seconds"),
     video_clip_count_mode: f(record, "Video_Clip_Count_Mode"),
     video_clip_count_exact: f(record, "Video_Clip_Count_Exact"),
     video_clip_count_min: f(record, "Video_Clip_Count_Min"),
@@ -7526,7 +7528,16 @@ async function cleanProductionRequestPayload(payload, env) {
   const carouselSlideCountMode = normalizeChoice(payload?.carousel_slide_count_mode, PR_COUNT_MODES, "AI decides", "Carousel slide count mode");
 
   const videoDurationSeconds = nullableInt(payload?.video_duration_seconds, 5, 600, "Video duration");
-  const voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 10, "Voiceover tail");
+  const voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
+  const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
+  let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");
+  if (
+    voiceoverTailSeconds == null
+    && voiceoverDurationSeconds != null
+    && videoDurationSeconds != null
+  ) {
+    voiceoverTailSeconds = Math.max(0, Number(videoDurationSeconds) - Number(voiceoverDurationSeconds));
+  }
 
   let videoClipCountExact = nullableInt(payload?.video_clip_count_exact, 1, 30, "Exact video clip count");
   let videoClipCountMin = nullableInt(payload?.video_clip_count_min, 1, 30, "Minimum video clip count");
@@ -7600,6 +7611,8 @@ async function cleanProductionRequestPayload(payload, env) {
     background_music_mode: backgroundMusicMode,
     thumbnail_mode: thumbnailMode,
     video_duration_seconds: videoDurationSeconds,
+    voiceover_duration_seconds: voiceoverDurationSeconds,
+    music_start_seconds: musicStartSeconds,
     video_clip_count_mode: videoClipCountMode,
     video_clip_count_exact: videoClipCountExact,
     video_clip_count_min: videoClipCountMin,
@@ -7635,6 +7648,8 @@ function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
       ? "Yes"
       : input.thumbnail_mode,
     Video_Duration_Seconds: input.video_duration_seconds,
+    Voiceover_Duration_Seconds: input.voiceover_duration_seconds,
+    Music_Start_Seconds: input.music_start_seconds,
     Video_Clip_Count_Mode: input.video_clip_count_mode,
     Video_Clip_Count_Exact: input.video_clip_count_exact,
     Video_Clip_Count_Min: input.video_clip_count_min,
@@ -7669,6 +7684,9 @@ function productionRequestDefaultsFromIdea(idea) {
     background_music_mode: String(f(idea, "Production_Include_Background_Music") || "Yes").trim() || "Yes",
     thumbnail_mode: String(f(idea, "Production_Include_Thumbnail") || "Yes").trim() || "Yes",
     video_duration_seconds: f(idea, "Production_Video_Duration") || 30,
+    voiceover_duration_seconds: f(idea, "Voiceover_Duration_Seconds")
+      ?? autonomousDefaultVoiceoverSeconds(f(idea, "Production_Video_Duration") || 30),
+    music_start_seconds: f(idea, "Music_Start_Seconds") ?? 0,
     video_clip_count_mode: f(idea, "Production_Video_Clip_Count") ? "Exact" : "AI decides",
     video_clip_count_exact: f(idea, "Production_Video_Clip_Count") || null,
     video_clip_count_min: null,
@@ -8445,6 +8463,8 @@ function productionRequestDirectiveSnapshot(requestRecord, music) {
     background_music_mode: f(requestRecord, "Background_Music_Mode"),
     thumbnail_mode: f(requestRecord, "Thumbnail_Mode"),
     video_duration_seconds: f(requestRecord, "Video_Duration_Seconds"),
+    voiceover_duration_seconds: f(requestRecord, "Voiceover_Duration_Seconds"),
+    music_start_seconds: f(requestRecord, "Music_Start_Seconds"),
     video_clip_count_mode: f(requestRecord, "Video_Clip_Count_Mode"),
     video_clip_count_exact: f(requestRecord, "Video_Clip_Count_Exact"),
     video_clip_count_min: f(requestRecord, "Video_Clip_Count_Min"),
@@ -8487,6 +8507,10 @@ async function syncProductionRequestDirectivesToContentItem(env, requestRecord, 
     Include_Voiceover: item4StudioDirectiveYes(f(requestRecord, "Voiceover_Mode")) ? "Yes" : "No",
     Include_Background_Music: item4StudioDirectiveYes(f(requestRecord, "Background_Music_Mode")) ? "Yes" : "No",
     Carousel_Image_Mode: String(f(requestRecord, "Carousel_Image_Mode") || "").trim() || null,
+    Content_Duration: f(requestRecord, "Video_Duration_Seconds") ?? null,
+    Voiceover_Duration_Seconds: f(requestRecord, "Voiceover_Duration_Seconds") ?? null,
+    Music_Start_Seconds: f(requestRecord, "Music_Start_Seconds") ?? 0,
+    Voiceover_Tail_Seconds: f(requestRecord, "Voiceover_Tail_Seconds") ?? null,
     Carousel_Slide_Count: f(requestRecord, "Carousel_Slide_Count_Exact") ?? null,
     Requested_Script_Mode: String(f(requestRecord, "Script_Mode") || "AI decides"),
     Requested_Script: String(f(requestRecord, "Requested_Script") || "").trim() || null,
@@ -8912,6 +8936,28 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
       requestRecord,
       "Video_Duration_Seconds",
       profileDefaults.default_duration
+    ),
+    voiceover_duration_seconds: outputEffectiveNumber(
+      outputRow,
+      "Voiceover_Duration_Seconds",
+      requestRecord,
+      "Voiceover_Duration_Seconds",
+      Number(f(parentContentItem, "Voiceover_Duration_Seconds") || 0) || autonomousDefaultVoiceoverSeconds(
+        outputEffectiveNumber(
+          outputRow,
+          "Video_Duration_Seconds_Override",
+          requestRecord,
+          "Video_Duration_Seconds",
+          profileDefaults.default_duration
+        )
+      )
+    ),
+    music_start_seconds: outputEffectiveNumber(
+      outputRow,
+      "Music_Start_Seconds",
+      requestRecord,
+      "Music_Start_Seconds",
+      Number(f(parentContentItem, "Music_Start_Seconds") || 0)
     ),
     voiceover_tail_seconds: outputEffectiveNumber(
       outputRow,
@@ -9775,6 +9821,8 @@ function outputWorkItemFields(parentContentItem, requestRecord, outputRow, effec
     background_music_mode: effective.background_music_mode,
     thumbnail_mode: effective.thumbnail_mode,
     video_duration_seconds: effective.video_duration_seconds,
+    voiceover_duration_seconds: effective.voiceover_duration_seconds,
+    music_start_seconds: effective.music_start_seconds,
     voiceover_tail_seconds: effective.voiceover_tail_seconds,
     video_clip_count_mode: effective.video_clip_count_mode,
     video_clip_count_exact: effective.video_clip_count_exact,
@@ -9812,6 +9860,8 @@ function outputWorkItemFields(parentContentItem, requestRecord, outputRow, effec
     Include_Voiceover: effective.voiceover_mode,
     Include_Background_Music: effective.background_music_mode,
     Include_Thumbnail: effective.thumbnail_mode,
+    Voiceover_Duration_Seconds: effective.voiceover_duration_seconds,
+    Music_Start_Seconds: effective.music_start_seconds ?? 0,
     Voiceover_Tail_Seconds: effective.voiceover_tail_seconds,
 
     Voiceover_Status: effective.voiceover_mode === "Yes" ? "Not Started" : "Not Needed",
@@ -9910,6 +9960,8 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     background_music_mode: effective.background_music_mode,
     thumbnail_mode: effective.thumbnail_mode,
     video_duration_seconds: effective.video_duration_seconds,
+    voiceover_duration_seconds: effective.voiceover_duration_seconds,
+    music_start_seconds: effective.music_start_seconds,
     voiceover_tail_seconds: effective.voiceover_tail_seconds,
     applied_at: new Date().toISOString(),
   };
@@ -9985,6 +10037,10 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Studio_Effective_Voiceover_Mode: effective.voiceover_mode,
     Studio_Effective_Background_Music_Mode: effective.background_music_mode,
     Studio_Effective_Video_Duration_Seconds: effective.video_duration_seconds,
+    Studio_Effective_Voiceover_Duration_Seconds: effective.voiceover_duration_seconds,
+    Studio_Effective_Music_Start_Seconds: effective.music_start_seconds ?? 0,
+    Voiceover_Duration_Seconds: effective.voiceover_duration_seconds,
+    Music_Start_Seconds: effective.music_start_seconds ?? 0,
     Studio_Effective_Voiceover_Tail_Seconds: effective.voiceover_tail_seconds,
     Studio_Output_Directives_JSON: JSON.stringify(snapshot),
     Requested_Video_Clip_Count_Mode: effective.video_clip_count_mode,
@@ -23981,7 +24037,9 @@ async function patchStudioOperationsProfile(request, env, url, authorization) {
 const AUTONOMOUS_NEWS_FEEDS = Object.freeze(["https://blockclubchicago.org/feed/"]);
 const AUTONOMOUS_YOUTUBE_QUERIES = Object.freeze(["Chicago", "Chicago news today", "things to do in Chicago"]);
 const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze(["Instagram", "Facebook", "TikTok", "YouTube"]);
-const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "receQJXFhy6T5Q2XT";
+const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "recT49crfrhMVfZAQ";
+const AUTONOMOUS_DEFAULT_VIDEO_SECONDS = 30;
+const AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION = 0.5;
 const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
 const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
   Instagram: "Reel",
@@ -23995,6 +24053,10 @@ const AUTONOMOUS_CAROUSEL_OVERRIDES = Object.freeze({
   TikTok: "Video Draft",
   YouTube: "Slideshow Video",
 });
+const AUTONOMOUS_PLAN_EXTRAS = Object.freeze([
+  { platform: "Instagram", output_type: "Story" },
+  { platform: "Facebook", output_type: "Story" },
+]);
 
 function autonomousSlot(chicago) {
   const date = String(chicago?.date || "").trim();
@@ -24141,6 +24203,16 @@ function autonomousPlanOverrides(contentType) {
     return { ...AUTONOMOUS_CAROUSEL_OVERRIDES };
   }
   return { ...AUTONOMOUS_REEL_OVERRIDES };
+}
+
+function autonomousPlanExtras() {
+  return AUTONOMOUS_PLAN_EXTRAS.map((row) => ({ ...row }));
+}
+
+function autonomousDefaultVoiceoverSeconds(videoSeconds = AUTONOMOUS_DEFAULT_VIDEO_SECONDS) {
+  const duration = Number(videoSeconds);
+  const base = Number.isFinite(duration) && duration > 0 ? duration : AUTONOMOUS_DEFAULT_VIDEO_SECONDS;
+  return Math.max(1, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
 }
 
 function isAutonomousOrigin(text) {
@@ -24421,6 +24493,7 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
     const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
       platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
       overrides: autonomousPlanOverrides(pick.content_type),
+      extras: autonomousPlanExtras(),
       skip_fbs1_guard: true,
     });
     await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
@@ -24775,6 +24848,10 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     voiceover_mode: "Yes",
     background_music_mode: "Yes",
     thumbnail_mode: "Yes",
+    video_duration_seconds: AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
+    voiceover_duration_seconds: autonomousDefaultVoiceoverSeconds(AUTONOMOUS_DEFAULT_VIDEO_SECONDS),
+    voiceover_tail_seconds: AUTONOMOUS_DEFAULT_VIDEO_SECONDS - autonomousDefaultVoiceoverSeconds(AUTONOMOUS_DEFAULT_VIDEO_SECONDS),
+    music_start_seconds: 0,
     selected_music_asset_id: AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
     voice_id: PHASE6_DEFAULT_VOICE_ID,
     voice_name: "Kate",

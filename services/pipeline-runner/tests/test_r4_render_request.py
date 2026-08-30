@@ -99,6 +99,13 @@ def test_r4_voiceover_required_when_effective_mode_is_yes():
     assert voiceover_is_required(_photo_output(Studio_Effective_Voiceover_Mode="No"), parent) is False
 
 
+def test_r4_music_start_seconds_pass_through():
+    output = _photo_output(Music_URL="https://example.com/track.mp3", Music_Start_Seconds=12.5)
+    route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
+    assert route == "no_voiceover"
+    assert payload["music"]["startFromSeconds"] == 12.5
+
+
 def test_r4_p020_merges_parent_voiceover():
     output = _photo_output(Creative_Render_Manifest_JSON="{}")
     parent = {"fields": {"Voiceover_URL": "https://example.com/parent-vo.mp3"}}

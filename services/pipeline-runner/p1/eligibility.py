@@ -87,7 +87,17 @@ def effective_options(item: dict[str, Any], production: dict[str, Any]) -> dict[
             duration_n = float(duration or 0)
         except (TypeError, ValueError):
             duration_n = 0
-        target_vo = duration_n - tail
+        vo_raw = field(item, "Voiceover_Duration_Seconds")
+        try:
+            explicit_vo = float(vo_raw) if vo_raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            explicit_vo = 0
+        if explicit_vo > 0:
+            target_vo = explicit_vo
+            if tail_raw in (None, "") and duration_n > 0:
+                tail = max(0, int(round(duration_n - explicit_vo)))
+        else:
+            target_vo = duration_n - tail
         if target_vo <= 1:
             target_vo = 1
     return {

@@ -283,3 +283,5 @@ Insights heatmap + watchlist Pages deploy: 2026-08-29 - Full-week similar-times 
 Autonomous produce Pages deploy: 2026-08-30 - Operations toggle and Run autonomous now for the twice-daily trend-to-review path. UI 0.6.191-autonomous-produce.
 
 Autonomous running button Pages deploy: 2026-08-30 - Run autonomous now shows Running… and resumes existing drafts instead of looking idle. UI 0.6.192-autonomous-running.
+
+Autonomous defaults Pages deploy: 2026-08-30 - Section 6 sets video duration, voiceover duration, and music start; frame previews use crop CDN first. UI 0.6.193-autonomous-defaults.

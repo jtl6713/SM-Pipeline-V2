@@ -102,6 +102,7 @@ export type PhotoSequenceMusic = {
   url?: string;
   src?: string;
   volume?: number;
+  startFromSeconds?: number;
   duckingEnabled?: boolean;
   duckingMultiplier?: number;
   duckFadeFrames?: number;
@@ -1416,6 +1417,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
       {musicEnabled && musicSource ? (
         <Audio
           src={musicSource}
+          startFrom={Math.max(0, Math.round(Number(music?.startFromSeconds || 0) * fps))}
           loop={music?.loop !== false}
           volume={(frame) =>
             getMusicVolume({
