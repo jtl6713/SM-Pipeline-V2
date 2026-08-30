@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.189-insights-watchlist";
+  const BUILD_ID = "item4-0.6.190-heatmap-schedule";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -9863,7 +9863,7 @@
       ? `${overview.top_window.day} ${overview.top_window.window} (${formatInsightsCount(overview.top_window.posts)} posts)`
       : "—";
     const cards = [
-      ["Posts captured", formatInsightsCount(overview.posts)],
+      ["Similar posts found", formatInsightsCount(overview.posts)],
       ["Accounts timed", `${formatInsightsCount(overview.accounts_timed_ok)} / ${formatInsightsCount(overview.accounts_timed)}`],
       ["Reference only", formatInsightsCount(overview.accounts_reference)],
       ["Total likes", formatInsightsCount(overview.likes)],
@@ -9904,23 +9904,60 @@
     }
     if (!target) return;
     const buckets = data?.buckets || [];
-    if (!buckets.length) {
+    const ownBuckets = data?.own_schedule?.buckets || [];
+    const windows = Array.isArray(data?.windows) && data.windows.length
+      ? data.windows
+      : ["00:00-06:00", "06:00-08:00", "08:00-10:00", "10:00-12:00", "12:00-14:00", "14:00-16:00", "16:00-18:00", "18:00-20:00", "20:00-22:00", "22:00-00:00"];
+    if (!windows.length) {
       target.innerHTML = `<p class="similar-heatmap-empty">${escapeHtml(data?.message || "No similar-account times yet for this profile.")}</p>`;
       return;
     }
-    const windows = [...new Set(buckets.map((row) => row.window))].sort();
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const maxPosts = Math.max(...buckets.map((row) => Number(row.posts) || 0), 1);
     const lookup = new Map(buckets.map((row) => [`${row.day}|${row.window}`, row]));
+    const yours = new Map(ownBuckets.map((row) => [`${row.day}|${row.window}`, row]));
+    const yoursTotal = Number(data?.own_schedule?.total) || ownBuckets.reduce((sum, row) => sum + (Number(row.count) || 0), 0);
     const body = days.map((day) => {
       const cells = windows.map((window) => {
         const row = lookup.get(`${day}|${window}`);
+        const mine = yours.get(`${day}|${window}`);
         const posts = Number(row?.posts || 0);
-        return `<td data-heat="${similarHeatLevel(posts, maxPosts)}">${posts || "·"}</td>`;
+        const mineCount = Number(mine?.count || 0);
+        const platforms = mine?.platforms?.length ? ` · ${mine.platforms.join(", ")}` : "";
+        const title = posts || mineCount
+          ? `${posts} similar-account post${posts === 1 ? "" : "s"} found${mineCount ? ` · ${mineCount} of yours scheduled${platforms}` : ""}`
+          : "No similar-account posts found in this window";
+        return `<td class="similar-heat-cell${mineCount ? " has-yours" : ""}" data-heat="${similarHeatLevel(posts, maxPosts)}" data-yours="${mineCount ? "1" : "0"}" title="${escapeHtml(title)}"><span class="similar-heat-count">${posts || "·"}</span>${mineCount ? `<span class="similar-heat-yours">${mineCount}</span>` : ""}</td>`;
       }).join("");
       return `<tr><th>${day}</th>${cells}</tr>`;
     }).join("");
-    target.innerHTML = `<table><thead><tr><th></th>${windows.map((window) => `<th>${escapeHtml(window)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>`;
+    target.innerHTML = `
+      <div class="similar-heatmap-head">
+        <p class="similar-heatmap-lead">Each teal number is how many <strong>similar-account posts</strong> we have stored for that weekday and two-hour window in Chicago time. Darker teal means more of those found posts, not more of yours.</p>
+        <div class="similar-heatmap-legend" aria-label="Heatmap legend">
+          <span><i class="similar-legend-swatch" data-heat="1"></i> Fewer found</span>
+          <span><i class="similar-legend-swatch" data-heat="4"></i> More found</span>
+          <span><i class="similar-legend-yours"></i> Your scheduled posts${yoursTotal ? ` · ${yoursTotal}` : ""}</span>
+        </div>
+      </div>
+      <div class="similar-heatmap-scroll">
+        <table>
+          <thead><tr><th></th>${windows.map((window) => `<th>${escapeHtml(similarWindowLabel(window))}</th>`).join("")}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function similarWindowLabel(window) {
+    const match = String(window || "").match(/^(\d{2}):00-(\d{2}):00$/);
+    if (!match) return String(window || "");
+    const fmt = (hour) => {
+      const n = Number(hour);
+      if (n === 0 || n === 24) return "12a";
+      if (n === 12) return "12p";
+      return n > 12 ? `${n - 12}p` : `${n}a`;
+    };
+    return `${fmt(match[1])}–${fmt(match[2])}`;
   }
 
   function similarAccountStatusLabel(status) {
