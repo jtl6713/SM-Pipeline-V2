@@ -118,7 +118,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     "schedule": "Set or update the post date/time used by the publishing queue.",
     "compress": "Start compression for this oversized library video only; it does not scan the entire intake folder.",
     "mark published": "Use only after this output was posted manually. This records it as published without posting it again.",
-    "approve all": "Approve all review-ready outputs in this content group. Eligible public platforms can enter publishing queues; TikTok remains a draft where required."
+    "approve all": "Approve all review-ready outputs in this content group. Turn on Use default schedules next to Approve All to apply suggested times to empty rows; TikTok remains a draft where required."
   };
 
   const actionContains = [

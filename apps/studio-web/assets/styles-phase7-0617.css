@@ -2291,6 +2291,21 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   }
 }
 
+.heading-actions .pipeline-default-schedule-toggle{
+  flex:0 0 auto;
+  margin:0;
+  white-space:nowrap;
+  font-size:.82rem;
+  font-weight:700;
+}
+@media(max-width:760px){
+  .heading-actions .pipeline-default-schedule-toggle{
+    width:100%;
+    justify-content:flex-start;
+    white-space:normal;
+  }
+}
+
 /* Review thumbnail download in Open Review details */
 .creative-thumb-preview b{display:block}
 .creative-thumb-preview img{
