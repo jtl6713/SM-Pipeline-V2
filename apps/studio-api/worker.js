@@ -692,7 +692,7 @@ export default {
         requirePermission(authorization, "ideas_promote");
         requirePermission(authorization, "production_configure");
         const requestId = productionRequestPromotionRecordIdFromPath(url);
-        const response = await promoteProductionRequestViaI3I4(request, env, url, authorization);
+        const response = await promoteProductionRequestViaI3I4(request, env, url, authorization, ctx);
         continueParkedProductionAfterPromote(ctx, env, requestId);
         return response;
       }
@@ -2385,6 +2385,14 @@ async function createIdea(request, env, authorization) {
     Production_Include_Thumbnail: "Yes",
   };
   if (input.summary) fields.Idea_Summary = input.summary;
+  const inferredLocation = suggestPrimaryLocationFromIdea({
+    fields: {
+      Candidate_Title: input.title,
+      Idea_Summary: input.summary || "",
+      Primary_Location: "",
+    },
+  });
+  if (inferredLocation.name) fields.Primary_Location = inferredLocation.name;
 
   const created = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
@@ -2482,6 +2490,16 @@ async function updateIdea(request, env, url, authorization) {
   };
   if (Object.prototype.hasOwnProperty.call(payload || {}, "primary_location")) {
     fields.Primary_Location = input.primary_location || null;
+  } else if (!String(f(record, "Primary_Location") || "").trim()) {
+    const inferredLocation = suggestPrimaryLocationFromIdea({
+      fields: {
+        Candidate_Title: input.title,
+        Idea_Summary: input.summary || "",
+        Primary_Location: "",
+        Neighborhood_or_Area: f(record, "Neighborhood_or_Area"),
+      },
+    });
+    if (inferredLocation.name) fields.Primary_Location = inferredLocation.name;
   }
   const updated = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, recordId, {
     method: "PATCH",
@@ -3874,6 +3892,19 @@ function ideaLibraryPlaceKeys(idea, query = "") {
   return [...new Set([...fromLocation, ...fromCopy, ...fromQuery])];
 }
 
+function ideaLibraryAirtableEscape(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function ideaLibraryFilterFormula(placeKeys) {
+  const base = "AND(OR({Media_Class}='Image',{Media_Class}='Graphic'),{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}))";
+  const keys = (placeKeys || []).filter(Boolean).slice(0, 10);
+  if (!keys.length) return base;
+  const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic}))";
+  const clauses = keys.map((key) => `FIND("${ideaLibraryAirtableEscape(String(key).toLowerCase())}", ${hay})`);
+  return `AND(${base},OR(${clauses.join(",")}))`;
+}
+
 function ideaLibraryHaystack(record) {
   const tags = f(record, "AI_Tags");
   const keywords = f(record, "Search_Keywords");
@@ -3927,21 +3958,23 @@ function ideaLibraryRankAsset(record, { placeKeys, strongIdeaTokens, ideaTokens,
   }
   const locationHits = placeKeys.filter((key) => location.includes(key));
   const nameHits = placeKeys.filter((key) => name.includes(key));
+  const keywordHits = placeKeys.filter((key) => haystack.includes(key));
   const strongOverlap = strongIdeaTokens.filter((token) => haystack.includes(token)).length;
   const weakOverlap = ideaTokens.filter((token) => haystack.includes(token)).length;
   const intakeToday = ideaLibraryIntakeDate(record) === today;
   const reasons = [];
   if (locationHits.length) reasons.push(`location:${locationHits[0]}`);
   if (nameHits.length) reasons.push(`asset_name:${nameHits[0]}`);
-  if (strongOverlap >= 2 && !locationHits.length && !nameHits.length) reasons.push("topic_overlap");
-  if (intakeToday && (locationHits.length || nameHits.length)) reasons.push("intake_today");
+  if (keywordHits.length) reasons.push(`keywords:${keywordHits[0]}`);
+  if (strongOverlap >= 2 && !locationHits.length && !nameHits.length && !keywordHits.length) reasons.push("topic_overlap");
+  if (intakeToday && (locationHits.length || nameHits.length || keywordHits.length)) reasons.push("intake_today");
 
   let confidence = "none";
-  if (locationHits.length || nameHits.length) confidence = "high";
+  if (locationHits.length || nameHits.length || keywordHits.length) confidence = "high";
   else if (strongOverlap >= 2) confidence = "medium";
   else if (strongOverlap >= 1) confidence = "low";
 
-  // Default browse: only place-linked stills. Search can surface medium/low.
+  // Default browse: high-confidence place/keyword matches. Search can surface medium/low.
   if (!queryTokens.length && confidence !== "high") return null;
   if (queryTokens.length && confidence === "none") {
     confidence = "low";
@@ -3950,6 +3983,7 @@ function ideaLibraryRankAsset(record, { placeKeys, strongIdeaTokens, ideaTokens,
 
   const score = (locationHits.length ? 40 : 0)
     + (nameHits.length ? 30 : 0)
+    + (keywordHits.length ? 25 : 0)
     + strongOverlap * 4
     + weakOverlap
     + (intakeToday && confidence === "high" ? 2 : 0);
@@ -3995,11 +4029,12 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const placeKeys = ideaLibraryPlaceKeys(idea, query);
   const today = chicagoNowParts().date;
+  const scanLimit = placeKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: 120,
+    limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: "AND(OR({Media_Class}='Image',{Media_Class}='Graphic'),{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}))",
+    filterFormula: ideaLibraryFilterFormula(placeKeys),
   });
   const ranked = [];
   for (const record of records) {
@@ -4029,9 +4064,11 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     place_keys: placeKeys,
     match_policy: {
       auto_attach_confidence: "high",
-      high: "A3 Location or Asset Name shares a place key from the idea",
+      high: "Location, Asset Name, Search_Keywords, or AI_Tags shares a place key from the idea",
       medium: "topic/description overlap only — show, do not auto-attach",
       low: "weak/search hit — operator choice only",
+      scan_limit: scanLimit,
+      place_filter_active: placeKeys.length > 0,
     },
     suggested: capped.filter((row) => row.preselected),
     matches: capped.filter((row) => !row.preselected),
@@ -4939,6 +4976,9 @@ const ITEM4_VARIANT_RECIPE_VERSION = "fill-crop-v2";
 const ITEM4_DRAIN_POST_BUDGET_MS = 20000;
 const ITEM4_DRAIN_STATUS_BUDGET_MS = 12000;
 const ITEM4_DRAIN_BACKGROUND_BUDGET_MS = 90000;
+const ITEM4_DRAIN_PROMOTE_BUDGET_MS = 180000;
+const IDEA_LIBRARY_SCAN_LIMIT = 500;
+const IDEA_LIBRARY_PLACE_FILTER_LIMIT = 250;
 const ITEM4_DRAIN_CRON_BUDGET_MS = 90000;
 const ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA = 'OR(AND({Asset_Kind}="Master Original",{Transfer_Status}="Pending"),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending"))';
 const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BASE_ELIGIBILITY_FORMULA})`;
@@ -6391,15 +6431,16 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   return { record: updated, status, error, manifest, queue_rows: scoped };
 }
 
-async function prepareItem4Variants(request, env, url, authorization, ctx = null) {
-  let payload = {};
-  try { payload = await request.json(); } catch { payload = {}; }
+async function runItem4VariantPrepareCore(env, recordId, authorization, options = {}) {
+  const {
+    cropsPayload = {},
+    ctx = null,
+    syncBudgetMs = ITEM4_DRAIN_POST_BUDGET_MS,
+    syncRunCap = 8,
+    allowBackground = true,
+  } = options;
 
-  const recordId = item4RequestIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
-  assertEditableProductionRequest(record);
-
-  const cropsPayload = payload?.crops && typeof payload.crops === "object" ? payload.crops : {};
   let assets = item4MergeAssetCrops(item4AssetManifest(record), cropsPayload)
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   if (!assets.length) throw new HttpError(409, "Upload master photos before preparing platform media");
@@ -6432,8 +6473,8 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
       await item4DrainVariantWorker(
         env,
         recordId,
-        Math.min(8, Math.max(2, missingDrive.length + 2)),
-        { maxMs: ITEM4_DRAIN_POST_BUDGET_MS }
+        Math.min(syncRunCap, Math.max(2, missingDrive.length + 2)),
+        { maxMs: syncBudgetMs }
       );
     } catch (error) {
       console.warn("Item 4 master-media drain deferred during platform prepare", error);
@@ -6470,8 +6511,8 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
       const executionIds = await item4DrainVariantWorker(
         env,
         recordId,
-        Math.min(8, Math.max(2, expected.length + 2)),
-        { maxMs: ITEM4_DRAIN_POST_BUDGET_MS }
+        Math.min(syncRunCap, Math.max(2, expected.length + 2)),
+        { maxMs: syncBudgetMs }
       );
       reconciled = await item4ReconcileVariants(env, recordId);
       reconciled.execution_ids = executionIds;
@@ -6480,7 +6521,7 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
     }
   }
 
-  if (reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
+  if (allowBackground && reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
     ctx.waitUntil((async () => {
       try {
         await item4DrainVariantWorker(
@@ -6510,6 +6551,56 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
       console.warn("Platform browser preview-cache creation failed without affecting Drive authority", error);
     }
   }
+
+  return { record, reconciled, authoritativeAssets, expected };
+}
+
+async function ensureItem4VariantsReadyForPromotion(env, recordId, record, authorization, ctx = null) {
+  if (studioIsFinishedPassthrough(record) || studioFinishedVariantsSkipped(record)) return record;
+  if (String(f(record, "Studio_Variant_Status") || "").trim() === "Ready") return record;
+  if (String(f(record, "Studio_Output_Plan_Status") || "").trim() !== "Ready") return record;
+  if (!item4AssetManifest(record).length) return record;
+
+  const { reconciled } = await runItem4VariantPrepareCore(env, recordId, authorization, {
+    ctx,
+    syncBudgetMs: ITEM4_DRAIN_PROMOTE_BUDGET_MS,
+    syncRunCap: 20,
+    allowBackground: true,
+  });
+
+  let current = reconciled.record;
+  if (reconciled.status === "Preparing") {
+    const resumed = await item4ResumePendingVariants(env, recordId, current);
+    current = resumed.record || current;
+    const again = await item4ReconcileVariants(env, recordId, current);
+    if (again.status === "Ready") return again.record;
+    if (again.status === "Error") {
+      throw new HttpError(409, again.error || "Platform media preparation failed before promotion.");
+    }
+    throw new HttpError(409, "Platform media preparation is still running. Wait a moment and Approve again.");
+  }
+  if (reconciled.status === "Error") {
+    throw new HttpError(409, reconciled.error || "Platform media preparation failed before promotion.");
+  }
+  return reconciled.record;
+}
+
+async function prepareItem4Variants(request, env, url, authorization, ctx = null) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+
+  const recordId = item4RequestIdFromPath(url);
+  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+
+  const cropsPayload = payload?.crops && typeof payload.crops === "object" ? payload.crops : {};
+  const { reconciled } = await runItem4VariantPrepareCore(env, recordId, authorization, {
+    cropsPayload,
+    ctx,
+    syncBudgetMs: ITEM4_DRAIN_POST_BUDGET_MS,
+    syncRunCap: 8,
+    allowBackground: true,
+  });
 
   const ready = reconciled.status === "Ready";
   const failed = reconciled.status === "Error";
@@ -11455,7 +11546,7 @@ async function pulseStudioC2Handoff(env, contentItemId, requestRecord = null) {
   return { ok: true, status: response.status };
 }
 
-async function promoteProductionRequestViaI3I4(request, env, url, authorization) {
+async function promoteProductionRequestViaI3I4(request, env, url, authorization, ctx = null) {
   // Keep the write contract consistent even though the saved request itself is
   // the authoritative payload.
   try { await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
@@ -11477,6 +11568,13 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization)
 
   if (hasItem4Source) {
     requestRecord = await item4ReconcileEnabledPlanOutputs(env, requestRecord);
+    requestRecord = await ensureItem4VariantsReadyForPromotion(
+      env,
+      requestRecordId,
+      requestRecord,
+      authorization,
+      ctx
+    );
     const bridgePreflight = await item4SourceToProductionBridgePreflight(env, requestRecord, ideaRecord);
     if (!bridgePreflight.ready) {
       throw new HttpError(
