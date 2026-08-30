@@ -1362,13 +1362,19 @@
 
  <div class="promotion-subpanel" id="carouselPromotionOptions" hidden>
  <div class="promotion-grid">
- <label class="form-field"><span>Slide count</span><input id="promoteCarouselSlideCount" type="number" min="1" max="20" value="5"></label>
- <label class="form-field"><span>Image mode</span><select id="promoteCarouselImageMode"><option value="Make AI Generated">Make AI Generated</option><option value="Manual Upload">Manual Upload</option></select></label>
+ <label class="form-field"><span>Slide count mode</span><select id="promoteCarouselSlideMode"><option value="Exact">Exact</option><option value="Target range">Target range</option></select></label>
+ <label class="form-field" id="promoteCarouselExactWrap"><span>Slide count</span><input id="promoteCarouselSlideCount" type="number" min="1" max="20" value="5"></label>
+ <label class="form-field range-count" id="promoteCarouselMinWrap" hidden><span>Minimum photos</span><input id="promoteCarouselSlideMin" type="number" min="1" max="20" value="3"></label>
+ <label class="form-field range-count" id="promoteCarouselMaxWrap" hidden><span>Maximum photos</span><input id="promoteCarouselSlideMax" type="number" min="1" max="20" value="10"></label>
+ <label class="form-field"><span>Image mode</span><select id="promoteCarouselImageMode"><option value="Make AI Generated">Make AI Generated</option><option value="Manual Upload">Manual Upload</option><option value="Wait for matching photos">Wait for matching photos</option></select></label>
  </div>
+ <p class="subtle" id="promotePhotoWaitHint" hidden>Approve keeps this idea waiting. Studio attaches every high-confidence still up to the maximum once the minimum is met. You still set production rules and approve rendering later.</p>
  </div>
 
  <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction for approval and promotion."></textarea></label>
  <button type="button" class="promote-button" id="promoteIdeaButton">Approve &amp; Promote</button>
+ <button type="button" class="secondary-button" id="matchIdeaPhotosButton" hidden>Match photos now</button>
+ <button type="button" class="secondary-button" id="openIdeaProductionButton" hidden>Open Production</button>
  </div>
  </details>
 
@@ -1391,9 +1397,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.181-produce-self-heal"></script>
+ <script src="/assets/config.js?v=0.6.182-idea-photo-wait"></script>
  <script src="/assets/ez-plan.js?v=0.6.149-finished-retry"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.181-produce-self-heal"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.181";</script>
+ <script src="/assets/app-item4-0619.js?v=0.6.182-idea-photo-wait"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.182";</script>
 </body>
 </html>

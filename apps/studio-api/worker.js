@@ -20,6 +20,7 @@ export default {
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
       const isIdeaPromoteRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/promote$/.test(url.pathname);
+      const isIdeaMatchPhotosRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/match-photos$/.test(url.pathname);
       const isIdeaLibrarySuggestionsRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/library-suggestions$/.test(url.pathname);
       const isIdeaProductionRequestRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/production-request$/.test(url.pathname);
       const isIdeaGenerateRoute = url.pathname === "/api/ideas/generate";
@@ -587,6 +588,12 @@ export default {
         return restoreIdea(request, env, url, authorization);
       }
 
+      if (isIdeaMatchPhotosRoute) {
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return matchIdeaPhotosRoute(request, env, url, authorization);
+      }
+
       if (isIdeaLibrarySuggestionsRoute) {
         requirePermission(authorization, "production_configure");
         return getIdeaLibrarySuggestions(request, env, url, authorization);
@@ -826,6 +833,11 @@ export default {
         await startOrphanedStudioProductionJobs(env);
       } catch (error) {
         console.warn("studio produce orphan kick failed", error);
+      }
+      try {
+        await runWaitingIdeaPhotoMatches(env, { limit: 8 });
+      } catch (error) {
+        console.warn("idea photo-wait matcher failed", error);
       }
       try {
         await resumeStaleStudioProductionJobs(env);
@@ -1845,7 +1857,14 @@ function mapIdea(record) {
     content_type: f(record, "Production_Content_Type"),
     platforms: f(record, "Production_Target_Platforms") || [],
     carousel_slide_count: f(record, "Production_Carousel_Slide_Count"),
+    carousel_slide_count_mode: f(record, "Production_Carousel_Slide_Count_Mode") || null,
+    carousel_slide_count_min: f(record, "Production_Carousel_Slide_Count_Min"),
+    carousel_slide_count_max: f(record, "Production_Carousel_Slide_Count_Max"),
     carousel_image_mode: f(record, "Production_Carousel_Image_Mode"),
+    photo_wait_status: f(record, "Studio_Photo_Wait_Status") || null,
+    photo_match: parseIdeaPhotoMatchJson(f(record, "Studio_Photo_Match_JSON")),
+    matched_media_asset_links: f(record, "Studio_Matched_Media_Assets") || [],
+    production_request_links: f(record, "Production Requests") || f(record, "Production_Request") || [],
     video_clip_count: f(record, "Production_Video_Clip_Count"),
     include_voiceover: f(record, "Production_Include_Voiceover"),
     include_background_music: f(record, "Production_Include_Background_Music"),
@@ -1864,6 +1883,71 @@ function mapIdea(record) {
     studio_hold_at: f(record, "Studio_Hold_At"),
     studio_hold_by: f(record, "Studio_Hold_By"),
     is_on_hold: String(f(record, "Candidate_Status") || "").trim() === "On Hold",
+    production_request_id: firstIdeaProductionRequestId(record),
+  };
+}
+
+function parseIdeaPhotoMatchJson(raw) {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function firstIdeaProductionRequestId(record) {
+  const links = Array.isArray(f(record, "Production Requests"))
+    ? f(record, "Production Requests")
+    : (Array.isArray(f(record, "Production_Request")) ? f(record, "Production_Request") : []);
+  return String(links[0] || "").trim() || null;
+}
+
+const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post"]);
+
+function ideaPhotoWaitApplies(input = {}) {
+  const contentType = String(input.content_type || "").trim();
+  const mode = String(input.carousel_slide_count_mode || "").trim();
+  const imageMode = String(input.carousel_image_mode || "").trim();
+  return IDEA_PHOTO_WAIT_TYPES.has(contentType)
+    && mode === "Target range"
+    && imageMode !== "Make AI Generated";
+}
+
+function sortHighConfidenceMatches(matches) {
+  return [...(matches || [])]
+    .filter((row) => String(row?.confidence || "") === "high" && row?.id)
+    .sort((a, b) => {
+      const dateA = String(a.intake_date || "");
+      const dateB = String(b.intake_date || "");
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      const scoreDiff = Number(b.score || 0) - Number(a.score || 0);
+      if (scoreDiff) return scoreDiff;
+      return String(a.id).localeCompare(String(b.id));
+    });
+}
+
+function selectMatchedPhotos({ matches, min, max, pendingBatchIds, force = false } = {}) {
+  const floor = Math.max(1, Number(min) || 0);
+  const cap = Math.max(floor, Number(max) || floor);
+  const high = sortHighConfidenceMatches(matches);
+  const pending = new Set(Array.isArray(pendingBatchIds) ? pendingBatchIds.filter(Boolean) : []);
+  if (high.length < floor) {
+    return { action: "wait", high_count: high.length, selected: [], reason: "below_min" };
+  }
+  if (!force) {
+    const blocked = high.some((row) => row.intake_batch_id && pending.has(row.intake_batch_id));
+    if (blocked) {
+      return { action: "wait_batch", high_count: high.length, selected: [], reason: "intake_batch_in_progress" };
+    }
+  }
+  return {
+    action: "ready",
+    high_count: high.length,
+    selected: high.slice(0, cap),
+    reason: "min_met_take_all_up_to_max",
   };
 }
 
@@ -7251,10 +7335,11 @@ function productionRequestDefaultsFromIdea(idea) {
     video_clip_count_exact: f(idea, "Production_Video_Clip_Count") || null,
     video_clip_count_min: null,
     video_clip_count_max: null,
-    carousel_slide_count_mode: f(idea, "Production_Carousel_Slide_Count") ? "Exact" : "AI decides",
+    carousel_slide_count_mode: f(idea, "Production_Carousel_Slide_Count_Mode")
+      || (f(idea, "Production_Carousel_Slide_Count") ? "Exact" : "AI decides"),
     carousel_slide_count_exact: f(idea, "Production_Carousel_Slide_Count") || null,
-    carousel_slide_count_min: null,
-    carousel_slide_count_max: null,
+    carousel_slide_count_min: f(idea, "Production_Carousel_Slide_Count_Min") || null,
+    carousel_slide_count_max: f(idea, "Production_Carousel_Slide_Count_Max") || null,
     carousel_image_mode: String(f(idea, "Production_Carousel_Image_Mode") || "Make AI Generated").trim() || "Make AI Generated",
     voiceover_tail_seconds: f(idea, "Voiceover_Tail_Seconds") ?? 2,
     selected_music_asset_id: null,
@@ -11779,9 +11864,35 @@ function cleanPromotionPayload(payload) {
     throw new HttpError(400, "Carousel slide count must be between 1 and 20");
   }
 
-  const carouselImageMode = String(payload?.carousel_image_mode || "Make AI Generated").trim();
+  const carouselImageModeRaw = String(payload?.carousel_image_mode || "Make AI Generated").trim();
+  const carouselImageMode = carouselImageModeRaw === "Wait for matching photos"
+    ? "Manual Upload"
+    : carouselImageModeRaw;
   if (!["Make AI Generated", "Manual Upload"].includes(carouselImageMode)) {
-    throw new HttpError(400, "Carousel image mode must be Make AI Generated or Manual Upload");
+    throw new HttpError(400, "Carousel image mode must be Make AI Generated, Manual Upload, or Wait for matching photos");
+  }
+
+  let carouselSlideCountMode = String(payload?.carousel_slide_count_mode || "").trim();
+  if (carouselImageModeRaw === "Wait for matching photos" && !carouselSlideCountMode) {
+    carouselSlideCountMode = "Target range";
+  }
+  if (!carouselSlideCountMode) carouselSlideCountMode = "Exact";
+  if (!["Exact", "Target range"].includes(carouselSlideCountMode)) {
+    throw new HttpError(400, "Carousel slide count mode must be Exact or Target range");
+  }
+
+  let carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, 20, "Minimum photo count");
+  let carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, 20, "Maximum photo count");
+  if (carouselSlideCountMode === "Target range") {
+    if (carouselSlideCountMin === null || carouselSlideCountMax === null) {
+      throw new HttpError(400, "Enter both minimum and maximum photo counts");
+    }
+    if (carouselSlideCountMin > carouselSlideCountMax) {
+      throw new HttpError(400, "Minimum photo count cannot exceed maximum");
+    }
+  } else {
+    carouselSlideCountMin = null;
+    carouselSlideCountMax = null;
   }
 
   return {
@@ -11794,6 +11905,9 @@ function cleanPromotionPayload(payload) {
     video_clip_count: videoClipCount,
     voiceover_tail_seconds: voiceoverTailSeconds,
     carousel_slide_count: carouselSlideCount,
+    carousel_slide_count_mode: carouselSlideCountMode,
+    carousel_slide_count_min: carouselSlideCountMin,
+    carousel_slide_count_max: carouselSlideCountMax,
     carousel_image_mode: carouselImageMode,
     production_notes: productionNotes,
   };
@@ -11921,6 +12035,9 @@ async function promoteIdeaViaI3I4(request, env, url, authorization) {
   if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate; add a summary before promoting");
 
   const input = cleanPromotionPayload(payload);
+  if (ideaPhotoWaitApplies(input) || String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting") {
+    return approveIdeaAndWaitForPhotos(request, env, record, input, authorization);
+  }
   const webhook = promotionWebhookUrl(env, recordId, input);
   await fetchPromotionHandoff(env, webhook);
 
@@ -11944,6 +12061,301 @@ async function getAuthorizedIdeaRoute(request, env, url, authorization) {
   const recordId = ideaRecordIdFromPath(url);
   const record = await loadAuthorizedIdea(env, recordId, authorization);
   return respond(request, env, { ok: true, record: mapIdea(record) });
+}
+
+async function approveIdeaAndWaitForPhotos(request, env, record, input, authorization) {
+  if (!ideaPhotoWaitApplies(input) && String(f(record, "Studio_Photo_Wait_Status") || "").trim() !== "Waiting") {
+    throw new HttpError(400, "Photo wait requires a target range and real photos, not AI-generated slides");
+  }
+  const now = new Date().toISOString();
+  const fields = {
+    Candidate_Status: "Approved",
+    Approved_At: f(record, "Approved_At") || now,
+    Production_Content_Type: input.content_type,
+    Production_Target_Platforms: input.platforms,
+    Production_Include_Voiceover: input.include_voiceover,
+    Production_Include_Background_Music: input.include_background_music,
+    Production_Include_Thumbnail: input.include_thumbnail,
+    Production_Carousel_Image_Mode: "Manual Upload",
+    Production_Carousel_Slide_Count_Mode: "Target range",
+    Production_Carousel_Slide_Count_Min: input.carousel_slide_count_min,
+    Production_Carousel_Slide_Count_Max: input.carousel_slide_count_max,
+    Production_Carousel_Slide_Count: input.carousel_slide_count_max,
+    Production_Config_Notes: input.production_notes || null,
+    Voiceover_Tail_Seconds: input.voiceover_tail_seconds,
+    Studio_Photo_Wait_Status: String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Ready"
+      ? "Ready"
+      : "Waiting",
+  };
+  const updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+  const draft = await existingDraftForIdea(env, record.id, authorization)
+    || await createDraftForIdea(env, updatedIdea, authorization);
+  const match = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, updatedIdea, {
+    authorization,
+    force: false,
+    productionRequest: draft,
+  });
+  return respond(request, env, {
+    ok: true,
+    promoted: false,
+    waiting: match.action !== "ready",
+    photo_wait: match,
+    promotion_state: match.action === "ready" ? "production_ready" : "waiting_for_photos",
+    handoff: "photo-wait",
+    message: match.action === "ready"
+      ? `Matched ${match.selected.length} photo${match.selected.length === 1 ? "" : "s"}. Production is ready for content rules; rendering is not started.`
+      : `Approved. Waiting for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
+    record: mapIdea(match.idea || updatedIdea),
+    production_request: match.production_request ? mapProductionRequest(match.production_request) : mapProductionRequest(draft),
+  }, match.action === "ready" ? 200 : 202);
+}
+
+async function matchIdeaPhotosRoute(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const recordId = ideaRecordIdFromPath(url);
+  const idea = await loadAuthorizedIdea(env, recordId, authorization);
+  const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+  if (waitStatus !== "Waiting" && waitStatus !== "Ready") {
+    throw new HttpError(409, "This idea is not waiting for matching photos");
+  }
+  const result = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
+    authorization,
+    force: Boolean(payload?.force),
+  });
+  return respond(request, env, {
+    ok: true,
+    photo_wait: result,
+    record: mapIdea(result.idea || idea),
+    production_request: result.production_request ? mapProductionRequest(result.production_request) : null,
+  });
+}
+
+async function findDraftProductionRequestForIdea(env, ideaRecordId) {
+  const records = await listRecords(env, PRODUCTION_REQUEST_TABLE, { limit: 100 });
+  return records.find((record) => {
+    const ideaLinks = Array.isArray(f(record, "Idea_Candidate")) ? f(record, "Idea_Candidate") : [];
+    const status = String(f(record, "Request_Status") || "").trim();
+    return ideaLinks.includes(ideaRecordId)
+      && ["Draft", "Ready"].includes(status)
+      && Boolean(f(record, "Active"));
+  }) || null;
+}
+
+async function rankStillsForIdeaPhotoWait(env, idea) {
+  const ideaTokens = ideaLibraryTokens([
+    f(idea, "Candidate_Title"),
+    f(idea, "Idea_Summary"),
+    f(idea, "Primary_Location"),
+  ].filter(Boolean).join(" "));
+  const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
+  const placeKeys = ideaLibraryPlaceKeys(idea, "");
+  const today = chicagoNowParts().date;
+  const scanLimit = placeKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+    limit: scanLimit,
+    sortField: "Intake_Date",
+    sortDirection: "desc",
+    filterFormula: ideaLibraryFilterFormula(placeKeys),
+  });
+  const ranked = [];
+  for (const record of records) {
+    if (!ideaLibraryIsEligibleImage(record)) continue;
+    const row = ideaLibraryRankAsset(record, {
+      placeKeys,
+      strongIdeaTokens,
+      ideaTokens,
+      queryTokens: [],
+      today,
+    });
+    if (!row) continue;
+    ranked.push({
+      id: record.id,
+      record,
+      score: row.score,
+      confidence: row.confidence,
+      match_reasons: row.match_reasons,
+      intake_date: ideaLibraryIntakeDate(record) || null,
+      intake_batch_id: row.intake_batch_id || String(f(record, "Intake_Batch_ID") || "").trim() || null,
+    });
+  }
+  return ranked;
+}
+
+async function unfinishedIntakeBatchIds(env, batchIds) {
+  const unique = [...new Set((batchIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  const pending = [];
+  for (const batchId of unique.slice(0, 20)) {
+    const rows = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
+      limit: 5,
+      filterFormula: `AND({Intake_Batch_ID}="${ideaLibraryAirtableEscape(batchId)}",OR({Classification_Status}='Needs Classification',{Classification_Status}='Processing'))`,
+    });
+    if (rows.length) pending.push(batchId);
+  }
+  return pending;
+}
+
+async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds) {
+  const existing = item4AssetManifest(requestRecord);
+  const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
+  const appended = [];
+  for (const mediaId of mediaIds) {
+    if (already.has(mediaId)) continue;
+    const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
+    const reject = ideaLibraryRejectReason(media);
+    if (reject) continue;
+    const driveId = googleDriveFileId(media);
+    const driveUrl = String(f(media, "Google Drive URL") || "").trim()
+      || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : "");
+    const mime = String(f(media, "MIME_Type") || "image/jpeg").trim() || "image/jpeg";
+    const name = String(f(media, "Asset Name") || "photo");
+    appended.push({
+      id: crypto.randomUUID().replace(/-/g, "").slice(0, 18),
+      order: existing.length + appended.length + 1,
+      name,
+      mime_type: mime,
+      source_format: String(f(media, "File_Extension") || item4FileExtension(name) || "").toUpperCase() || null,
+      browser_preview_compatible: true,
+      size_bytes: ideaLibraryFileBytes(media) || null,
+      focal_point: "center",
+      google_drive_file_id: driveId,
+      google_drive_url: driveUrl || null,
+      media_asset_record_id: media.id,
+      preview_url: `/api/media-assets/${media.id}/preview`,
+      authoritative_storage: "google_drive",
+      staging_deleted: true,
+      r2_key: null,
+      url: driveUrl || null,
+      uploaded_at: new Date().toISOString(),
+      source: "idea_photo_wait",
+    });
+    already.add(media.id);
+  }
+  const assets = [...existing, ...appended];
+  const allReady = assets.length > 0 && assets.every((asset) =>
+    String(asset?.google_drive_file_id || "").trim() && String(asset?.media_asset_record_id || "").trim()
+  );
+  const mediaAssetIds = [...new Set(assets.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean))];
+  const updated = await item4UpdateRequestState(env, requestRecord.id, {
+    Studio_Master_Assets_JSON: JSON.stringify(assets),
+    Studio_Master_Asset_Count: assets.length,
+    Studio_Master_Asset_Status: allReady ? "Ready" : (assets.length ? "Uploading" : "None"),
+    Studio_Master_Media_Assets: mediaAssetIds,
+    Studio_Output_Plan_Status: "Needs Plan",
+    Studio_Output_Plan_JSON: null,
+    Studio_Variant_Manifest_JSON: null,
+    Studio_Variant_Status: "None",
+    Studio_Variant_Updated_At: null,
+    Studio_Variant_Error: null,
+    Studio_Item4_State: allReady ? "Assets Ready" : (assets.length ? "Draft" : "Draft"),
+    Carousel_Image_Mode: "Manual Upload",
+    Carousel_Slide_Count_Mode: "Target range",
+    Carousel_Slide_Count_Min: f(requestRecord, "Carousel_Slide_Count_Min"),
+    Carousel_Slide_Count_Max: f(requestRecord, "Carousel_Slide_Count_Max"),
+    Carousel_Slide_Count_Exact: assets.length || f(requestRecord, "Carousel_Slide_Count_Exact") || null,
+  });
+  return { record: updated, assets, appended: appended.length };
+}
+
+async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorization = null, force = false, productionRequest = null } = {}) {
+  const min = Number(f(idea, "Production_Carousel_Slide_Count_Min") || 0);
+  const max = Number(f(idea, "Production_Carousel_Slide_Count_Max") || 0);
+  const matches = await rankStillsForIdeaPhotoWait(env, idea);
+  const pendingBatchIds = await unfinishedIntakeBatchIds(env, matches.map((row) => row.intake_batch_id));
+  const decision = selectMatchedPhotos({ matches, min, max, pendingBatchIds, force });
+  const evaluatedAt = new Date().toISOString();
+  const matchJson = {
+    evaluated_at: evaluatedAt,
+    action: decision.action,
+    reason: decision.reason,
+    high_count: decision.high_count,
+    min,
+    max,
+    selected: decision.selected.map((row) => ({
+      id: row.id,
+      score: row.score,
+      confidence: row.confidence,
+      match_reasons: row.match_reasons,
+      intake_date: row.intake_date,
+      intake_batch_id: row.intake_batch_id || null,
+    })),
+  };
+
+  let requestRecord = productionRequest
+    || (authorization ? await existingDraftForIdea(env, idea.id, authorization) : null)
+    || await findDraftProductionRequestForIdea(env, idea.id);
+
+  if (decision.action === "ready") {
+    if (!requestRecord && authorization) {
+      requestRecord = await createDraftForIdea(env, idea, authorization);
+    }
+    if (!requestRecord) {
+      matchJson.action = "wait";
+      matchJson.reason = "missing_production_request";
+      const ideaOnly = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Studio_Photo_Wait_Status: "Waiting",
+            Studio_Photo_Match_JSON: JSON.stringify(matchJson),
+          },
+          typecast: true,
+        }),
+      });
+      return { ...decision, action: "wait", idea: ideaOnly, production_request: null };
+    }
+    const attached = await applyLibraryAssetsToProductionRequest(
+      env,
+      requestRecord,
+      decision.selected.map((row) => row.id)
+    );
+    requestRecord = attached.record;
+    const ideaReady = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Studio_Photo_Wait_Status: "Ready",
+          Studio_Photo_Match_JSON: JSON.stringify(matchJson),
+          Studio_Matched_Media_Assets: decision.selected.map((row) => row.id),
+          Production_Carousel_Slide_Count: decision.selected.length,
+        },
+        typecast: true,
+      }),
+    });
+    return { ...decision, idea: ideaReady, production_request: requestRecord, match: matchJson };
+  }
+
+  const ideaWaiting = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Studio_Photo_Wait_Status: "Waiting",
+        Studio_Photo_Match_JSON: JSON.stringify(matchJson),
+      },
+      typecast: true,
+    }),
+  });
+  return { ...decision, idea: ideaWaiting, production_request: requestRecord, match: matchJson };
+}
+
+async function runWaitingIdeaPhotoMatches(env, { limit = 8 } = {}) {
+  const records = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: Math.max(1, Number(limit) || 8),
+    filterFormula: "AND({Candidate_Status}='Approved',{Studio_Photo_Wait_Status}='Waiting',{Promoted_Content_Record_ID}=BLANK())",
+  });
+  const results = [];
+  for (const idea of records) {
+    try {
+      results.push(await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { force: false }));
+    } catch (error) {
+      console.warn("idea photo-wait evaluate failed", idea.id, error);
+      results.push({ action: "error", idea_id: idea.id, error: error?.message || String(error) });
+    }
+  }
+  return { evaluated: results.length, ready: results.filter((row) => row.action === "ready").length };
 }
 
 
