@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ToolsRoot = Join-Path $PipelineRoot 'Production Start-Stop-Verify Services'
+$ToolsRoot = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services'
 $VerifyPs1 = Join-Path $ToolsRoot 'verify-chicagoshining-local-services.ps1'
 $BackupRoot = Join-Path $ToolsRoot ('_backups\Video_Compressor_PublicVerify_' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $PublicUrl = 'https://compress.chicagoshining.com/health'

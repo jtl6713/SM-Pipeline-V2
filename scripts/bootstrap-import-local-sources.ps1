@@ -43,7 +43,7 @@ if (-not (Test-Path -LiteralPath $RepoRoot)) {
 
 $Sources = @(
     @{ Source = (Join-Path $PipelineRoot 'Remotion_Renderer'); Destination = 'services\remotion-renderer'; Required = $true },
-    @{ Source = (Join-Path $PipelineRoot 'Production Start-Stop-Verify Services'); Destination = 'scripts\production-services'; Required = $true },
+    @{ Source = (Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services'); Destination = 'scripts\production-services'; Required = $true },
     @{ Source = (Join-Path $PipelineRoot 'chicagoshining-local-frame-extractor'); Destination = 'services\frame-extractor'; Required = $false },
     @{ Source = (Join-Path $PipelineRoot 'Services\voiceover-normalizer\service'); Destination = 'services\voiceover-normalizer'; Required = $false },
     @{ Source = (Join-Path $PipelineRoot 'Services\youtube-uploader\service'); Destination = 'services\youtube-uploader'; Required = $false }

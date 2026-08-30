@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Join-Path $PipelineRoot 'Source Control\SM-Pipeline-V2'
 }
 
-$ToolsRoot = Join-Path $PipelineRoot 'Production Start-Stop-Verify Services'
+$ToolsRoot = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services'
 $BackupBase = Join-Path $PipelineRoot 'Deployment Backups\Local Services'
 $LogBase = Join-Path $PipelineRoot 'Deployment Logs\Local Services'
 $HelperBase = Join-Path $ToolsRoot '_deployment_helpers'

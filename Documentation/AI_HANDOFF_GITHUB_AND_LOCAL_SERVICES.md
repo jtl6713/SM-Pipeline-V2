@@ -11,7 +11,7 @@ Use this file as the compact starting point for a new AI assistant.
 - Live runtime root:
   `D:\Content Creation\ChicagoShining Pipeline\Services`
 - Operational control folder:
-  `D:\Content Creation\ChicagoShining Pipeline\Production Start-Stop-Verify Services`
+  `D:\Content Creation\ChicagoShining Pipeline\Source Control\Production-Start-Stop-Verify-Services`
 
 **GitHub `main` is source authority.**  
 **The local Git checkout is not production.**  

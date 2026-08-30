@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Join-Path $PipelineRoot 'Source Control\SM-Pipeline-V2'
 $DeployScript = Join-Path $RepoRoot 'deploy\local-services\Deploy-SMService.ps1'
-$ToolsRoot = Join-Path $PipelineRoot 'Production Start-Stop-Verify Services'
+$ToolsRoot = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services'
 
 if (-not (Test-Path -LiteralPath $DeployScript -PathType Leaf)) {
     throw "Deployment script not found. Pull GitHub main first:`n$DeployScript"

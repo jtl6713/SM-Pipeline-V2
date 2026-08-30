@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ToolsRoot = Join-Path $PipelineRoot 'Production Start-Stop-Verify Services'
+$ToolsRoot = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services'
 $RuntimeRoot = Join-Path $PipelineRoot 'Services\Video_Compressor'
 $HelperRoot = Join-Path $ToolsRoot '_startup_helpers'
 $BackupRoot = Join-Path $ToolsRoot ('_backups\Video_Compressor_StartStopVerify_' + (Get-Date -Format 'yyyyMMdd-HHmmss'))

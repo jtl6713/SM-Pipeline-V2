@@ -66,7 +66,7 @@ Framework commits:
 
 ## Friendly launchers
 
-Installed under `Production Start-Stop-Verify Services`:
+Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo; legacy junction at `Production Start-Stop-Verify Services`):
 
 - `PLAN Local Service Deployment.bat`
 - `DEPLOY Local Service.bat`

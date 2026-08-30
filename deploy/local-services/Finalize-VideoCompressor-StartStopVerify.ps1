@@ -3,7 +3,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ToolsRoot = Join-Path $PipelineRoot 'Production Start-Stop-Verify Services'
+$ToolsRoot = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services'
 $RuntimeRoot = Join-Path $PipelineRoot 'Services\Video_Compressor'
 $VerifyPs1 = Join-Path $ToolsRoot 'verify-chicagoshining-local-services.ps1'
 $HelperRoot = Join-Path $ToolsRoot '_startup_helpers'

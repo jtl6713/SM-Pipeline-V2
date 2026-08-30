@@ -4,7 +4,9 @@
 **Primary branch:** `main`  
 **Local Git checkout:** `D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2`  
 **Live service root:** `D:\Content Creation\ChicagoShining Pipeline\Services`  
-**Operational controls:** `D:\Content Creation\ChicagoShining Pipeline\Production Start-Stop-Verify Services`  
+**Operational controls:** `D:\Content Creation\ChicagoShining Pipeline\Source Control\Production-Start-Stop-Verify-Services`
+
+Legacy junction (existing shortcuts): `D:\Content Creation\ChicagoShining Pipeline\Production Start-Stop-Verify Services`  
 **Deployment framework:** `deploy\local-services\`  
 **Framework version proven on Windows PowerShell 5.1:** `1.0.1-ps51-collections`
 

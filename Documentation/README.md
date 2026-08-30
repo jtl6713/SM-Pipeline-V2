@@ -19,7 +19,7 @@ This folder is the durable operational documentation for the SM Pipeline V2 repo
 - Approved source branch: `main`
 - Local Git checkout: `D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2`
 - Live runtime root: `D:\Content Creation\ChicagoShining Pipeline\Services`
-- Operational control folder: `D:\Content Creation\ChicagoShining Pipeline\Production Start-Stop-Verify Services`
+- Operational control folder: `D:\Content Creation\ChicagoShining Pipeline\Source Control\Production-Start-Stop-Verify-Services`
 
 ## Current operating model
 
