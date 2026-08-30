@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.183-autonomous-continue",
+          version: "0.10.185-autonomous-fresh",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -4369,13 +4369,24 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   if (!ids.length) throw new HttpError(400, "Choose at least one library still");
   const existing = item4AssetManifest(record);
-  if (existing.length + ids.length > ITEM4_MAX_FILES) {
+  const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
+  const incoming = ids.filter((id) => !already.has(id));
+  if (!incoming.length) {
+    return respond(request, env, {
+      ok: true,
+      attached: 0,
+      status: existing.length ? "Ready" : "None",
+      count: existing.length,
+      assets: existing,
+      record: mapProductionRequest(record),
+      message: "Selected library stills were already attached.",
+    });
+  }
+  if (existing.length + incoming.length > ITEM4_MAX_FILES) {
     throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
   }
-  const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
   const appended = [];
-  for (const mediaId of ids) {
-    if (already.has(mediaId)) continue;
+  for (const mediaId of incoming) {
     const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
     const reject = ideaLibraryRejectReason(media);
     if (reject) throw new HttpError(409, reject);
@@ -23957,6 +23968,7 @@ const AUTONOMOUS_NEWS_FEEDS = Object.freeze(["https://blockclubchicago.org/feed/
 const AUTONOMOUS_YOUTUBE_QUERIES = Object.freeze(["Chicago", "Chicago news today", "things to do in Chicago"]);
 const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze(["Instagram", "Facebook", "TikTok", "YouTube"]);
 const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "receQJXFhy6T5Q2XT";
+const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
 const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
   Instagram: "Reel",
   Facebook: "Slideshow Reel",
@@ -24124,6 +24136,18 @@ function autonomousMasterMediaIds(assets) {
   return [...new Set(use
     .map((row) => String(row?.media_asset_record_id || "").trim())
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+function autonomousIncomingMediaIds(existingAssets, mediaAssetIds, max = AUTONOMOUS_MAX_MASTER_ASSETS) {
+  const already = new Set(autonomousMasterMediaIds(existingAssets));
+  const incoming = [];
+  for (const raw of mediaAssetIds || []) {
+    const id = String(raw || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || already.has(id) || incoming.includes(id)) continue;
+    if (already.size + incoming.length >= max) break;
+    incoming.push(id);
+  }
+  return incoming;
 }
 
 function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles }) {
@@ -24357,13 +24381,23 @@ async function waitAutonomousVariantsReady(env, recordId, ctx, maxMs = 80000) {
 
 async function finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick) {
   const requestId = requestRecord.id;
-  await attachItem4LibraryAssetIds(env, requestId, pick.media_asset_ids, authorization);
-  const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
-    platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
-    overrides: autonomousPlanOverrides(pick.content_type),
-    skip_fbs1_guard: true,
-  });
-  await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+  let current = requestRecord;
+  const incoming = autonomousIncomingMediaIds(
+    item4ParseJson(f(current, "Studio_Master_Assets_JSON"), []),
+    pick.media_asset_ids
+  );
+  if (incoming.length) {
+    await attachItem4LibraryAssetIds(env, requestId, incoming, authorization);
+    current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  }
+  if (String(f(current, "Studio_Output_Plan_Status") || "").trim() !== "Ready") {
+    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
+      platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+      overrides: autonomousPlanOverrides(pick.content_type),
+      skip_fbs1_guard: true,
+    });
+    await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+  }
 
   const continueAfterPlan = async () => {
     const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
@@ -24392,8 +24426,16 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
         idea_id: idea.id,
         production_request_id: requestId,
       });
-    }).catch((error) => {
+    }).catch(async (error) => {
       console.warn("autonomous continue after plan failed", requestId, error);
+      try {
+        await studioSaveAutonomousLastRun(env, {
+          status: "skipped",
+          skip_reason: String(error?.message || error).slice(0, 180),
+          idea_id: idea.id,
+          production_request_id: requestId,
+        });
+      } catch {}
     }));
     return { waiting: true, production_request_id: requestId, idea_id: idea.id };
   }
@@ -24410,66 +24452,12 @@ async function listAutonomousDraftRequests(env) {
   });
 }
 
-async function listAutonomousGeneratedIdeas(env) {
-  return listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
-    limit: 3,
-    filterFormula: "AND({Candidate_Status}='Generated',FIND('origin=autonomous',{Production_Config_Notes}&'')>0)",
-    sortField: "Create_Date",
-    sortDirection: "asc",
-  });
-}
-
 async function alignAutonomousDraftContentType(env, requestRecord, contentType) {
   const current = String(f(requestRecord, "Master_Content_Type") || "").trim();
   if (!contentType || current === contentType) return requestRecord;
   return airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestRecord.id, {
     method: "PATCH",
     body: JSON.stringify({ fields: { Master_Content_Type: contentType }, typecast: true }),
-  });
-}
-
-async function startAutonomousFromExistingIdea(env, authorization, ctx, idea, chicago, slot) {
-  const title = String(f(idea, "Candidate_Title") || "");
-  const summary = String(f(idea, "Idea_Summary") || "");
-  const assets = await harvestAutonomousLibraryStills(env, `${title} ${summary}`.trim() || "Chicago");
-  const mediaAssetIds = assets.filter((row) => row.confidence === "high").slice(0, 12).map((row) => row.id);
-  if (!mediaAssetIds.length) {
-    return studioSaveAutonomousLastRun(env, {
-      status: "skipped",
-      skip_reason: "no_high_confidence_assets",
-      chicago_date: chicago.date,
-      slot,
-      idea_id: idea.id,
-    });
-  }
-  const defaults = productionRequestDefaultsFromIdea(idea);
-  const input = await cleanProductionRequestPayload({
-    ...defaults,
-    content_type: "Vertical Short Video",
-    platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
-    voiceover_mode: "Yes",
-    background_music_mode: "Yes",
-    thumbnail_mode: "Yes",
-    selected_music_asset_id: AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
-    voice_id: PHASE6_DEFAULT_VOICE_ID,
-    voice_name: "Kate",
-    carousel_image_mode: "Manual Upload",
-    production_notes: "origin=autonomous cited_trend=Pilsen murals — color on 18th Street",
-    primary_location: String(f(idea, "Primary_Location") || defaults.primary_location || "").trim(),
-  }, env);
-  const requestRecord = await createDraftForIdea(env, idea, authorization, input);
-  const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
-    content_type: "Vertical Short Video",
-    media_asset_ids: mediaAssetIds,
-  });
-  return studioSaveAutonomousLastRun(env, {
-    status: finished.waiting ? "waiting_variants" : "producing",
-    skip_reason: finished.waiting ? "variants_still_preparing" : null,
-    chicago_date: chicago.date,
-    slot,
-    idea_id: idea.id,
-    production_request_id: finished.production_request_id,
-    reused_idea: true,
   });
 }
 
@@ -24585,9 +24573,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     } else {
     const pick = {
       content_type: String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim() || "Vertical Short Video",
-      media_asset_ids: item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), [])
-        .map((asset) => String(asset?.media_asset_record_id || "").trim())
-        .filter(Boolean),
+      media_asset_ids: autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), [])),
     };
     if (!pick.media_asset_ids.length) {
       return studioSaveAutonomousLastRun(env, { ...last, status: "skipped", skip_reason: "waiting_variants_lost_assets" });
@@ -24626,16 +24612,11 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot);
   }
 
-  const reusableIdeas = await listAutonomousGeneratedIdeas(env);
-  if (reusableIdeas.length) {
-    return startAutonomousFromExistingIdea(env, authorization, ctx, reusableIdeas[0], chicago, slot);
-  }
-
   if (!options.force && options.scheduled) {
     if (!autonomousInWindow(chicago, options.cron)) {
       return { skipped: "outside_chicago_windows", chicago_date: chicago.date, chicago_hour: chicago.hour };
     }
-    if (slot && last.slot === slot && (last.status === "promoted" || last.status === "skipped")) {
+    if (slot && last.slot === slot && last.status === "promoted") {
       return { skipped: "already_ran_slot", chicago_date: chicago.date, slot };
     }
   }
@@ -24720,7 +24701,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   const allowed = new Set(highAssets.map((row) => row.id));
-  pick.media_asset_ids = pick.media_asset_ids.filter((id) => allowed.has(id));
+  pick.media_asset_ids = pick.media_asset_ids.filter((id) => allowed.has(id)).slice(0, AUTONOMOUS_MAX_MASTER_ASSETS);
   if (!pick.media_asset_ids.length) {
     const result = {
       skipped: "picker_assets_not_in_harvest",
