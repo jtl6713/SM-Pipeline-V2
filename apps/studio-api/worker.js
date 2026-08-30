@@ -20239,14 +20239,16 @@ async function studioDispatchApprovedPublishAndSchedule(ctx, env, record) {
 }
 
 // Redispatching an output whose publisher already started can post it to the platform twice, so
-// every platform status is matched against an allowlist of states that mean "no publisher has
-// begun". The allowlist is deliberately fail-closed: an unrecognised status is left alone and
-// handled by the orchestrator pollers in pulseOnDemandPublishChain, which only ever read state.
+ // most platform statuses are matched against an allowlist of states that mean "no publisher has
+ // begun". Instagram carousels are the exception: EnsureInstagramCarouselPublish is stage-gated and
+ // safe to re-enter through Parent Ready / Publishing, and parked cadence does not run APCAR orch
+ // unless force/startPublish — so due Parent Ready rows must be eligible on this first sweep or
+ // they sit past schedule until a later pass still has subrequest budget (304 sat ~3h).
 const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),'
   + '{Output_Status}="Approved for Publishing",'
   + 'OR({Publish_Status}=BLANK(),{Publish_Status}="Not Ready",{Publish_Status}="Ready",{Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish"),'
   + 'OR({IG_Story_Status}=BLANK(),{IG_Story_Status}="Not Needed",{IG_Story_Status}="Ready"),'
-  + 'OR({IG_Carousel_Status}=BLANK(),{IG_Carousel_Status}="Not Selected",{IG_Carousel_Status}="Ready for Asset Prep"),'
+  + 'OR({IG_Carousel_Status}=BLANK(),{IG_Carousel_Status}="Not Selected",{IG_Carousel_Status}="Ready for Asset Prep",{IG_Carousel_Status}="Assets Ready",{IG_Carousel_Status}="Children Processing",{IG_Carousel_Status}="Children Ready",{IG_Carousel_Status}="Parent Processing",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Status}="Publishing"),'
   + 'OR({TikTok_Draft_Status}=BLANK(),{TikTok_Draft_Status}="Not Selected",{TikTok_Draft_Status}="Ready for Assets"),'
   + 'OR({FB_Slideshow_Status}=BLANK(),{FB_Slideshow_Status}="Not Required",{FB_Slideshow_Status}="Ready to Render"),'
   + 'OR({FB_Publish_Status}=BLANK(),{FB_Publish_Status}="Ready for Assets"),'

@@ -64,6 +64,14 @@ def is_due(record: dict[str, Any]) -> bool:
     return stamp <= utc_now()
 
 
+def schedule_hold(record: dict[str, Any]) -> bool:
+    """True when Scheduled_Post_Date is still in the future (do not media_publish yet)."""
+    stamp = parse_utc(field(record, "Scheduled_Post_Date"))
+    if stamp is None:
+        return False
+    return stamp > utc_now()
+
+
 def expected_child_count(record: dict[str, Any], ready_count: int = 0) -> int:
     for name in ("IG_Carousel_Child_Count", "Image_Count", "Selected_Clip_Count"):
         count = parse_int(field(record, name), 0) or 0
