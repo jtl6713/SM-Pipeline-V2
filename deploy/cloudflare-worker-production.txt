@@ -206,3 +206,5 @@ Produce self-heal Worker deploy: 2026-08-29 - Any blocked produce job auto-retri
 Idea library + approve prep Worker deploy: 2026-08-29 - Keyword/place matching scans 500 stills with tag filter; ideas backfill Primary_Location; Approve auto-prepares platform variants before promote. Worker 0.10.175-idea-library-approve-prep.
 
 Schedule spacing Worker deploy: 2026-08-29 - Approve and Approve All keep same-platform posts at least 90 minutes apart when a slot is already taken. Worker 0.10.176-schedule-spacing.
+
+Insights watchlist + review-ready Worker deploy: 2026-08-29 - Seed official Instagram and YouTube handles, overlay occupied schedules on similar-times, and show Ready for Review only when the file, lettering, and 3D cover are actually reviewable. Worker 0.10.179-review-ready.
