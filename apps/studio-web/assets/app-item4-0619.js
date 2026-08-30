@@ -472,7 +472,7 @@
       });
       if (result.skipped) setOperationsMessage(`Skipped: ${result.skipped}`);
       else if (result.status === "resuming") setOperationsMessage(`Resuming ${(result.resumed || []).length || "existing"} autonomous draft(s). No new idea will be picked.`);
-      else if (result.status === "waiting_variants") setOperationsMessage("Autonomous request is waiting for platform crops. Cron will finish promotion.");
+      else if (result.status === "waiting_variants") setOperationsMessage("Plan is ready. Preparing platform frames in the background.");
       else if (result.status === "producing" || result.status === "promoted") setOperationsMessage("Autonomous piece is in production and will stop at Ready for Review.");
       else setOperationsMessage("Autonomous produce started.");
       loadOperations();

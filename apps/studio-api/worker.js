@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.182-autonomous-resume",
+          version: "0.10.183-autonomous-continue",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -5266,7 +5266,7 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   }
   const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items};
 
-  if (items.some(item =>
+  if (!payload.skip_fbs1_guard && items.some(item =>
     item.platform === "Facebook" &&
     item.output_type === "Slideshow Reel"
   )) {
@@ -23947,6 +23947,7 @@ async function patchStudioOperationsProfile(request, env, url, authorization) {
 const AUTONOMOUS_NEWS_FEEDS = Object.freeze(["https://blockclubchicago.org/feed/"]);
 const AUTONOMOUS_YOUTUBE_QUERIES = Object.freeze(["Chicago", "Chicago news today", "things to do in Chicago"]);
 const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze(["Instagram", "Facebook", "TikTok", "YouTube"]);
+const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "receQJXFhy6T5Q2XT";
 const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
   Instagram: "Reel",
   Facebook: "Slideshow Reel",
@@ -24096,6 +24097,15 @@ function autonomousPlanOverrides(contentType) {
 
 function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
+}
+
+function firstLinkedRecordId(value) {
+  if (Array.isArray(value) && value.length) {
+    const first = value[0];
+    if (typeof first === "string") return first;
+    if (first && typeof first === "object") return String(first.id || "").trim();
+  }
+  return typeof value === "string" ? value : "";
 }
 
 function autonomousMasterMediaIds(assets) {
@@ -24342,31 +24352,60 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
   const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
     platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
     overrides: autonomousPlanOverrides(pick.content_type),
+    skip_fbs1_guard: true,
   });
   await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
-  const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
-  await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
-  let current = await waitAutonomousVariantsReady(env, requestId, ctx);
-  if (String(f(current, "Studio_Variant_Status") || "").trim() !== "Ready") {
+
+  const continueAfterPlan = async () => {
+    const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
+    await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+    let current = await waitAutonomousVariantsReady(env, requestId, ctx);
+    if (String(f(current, "Studio_Variant_Status") || "").trim() !== "Ready") {
+      return { waiting: true, production_request_id: requestId, idea_id: idea.id };
+    }
+    const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
+    if (!preflight.ready) {
+      throw new HttpError(409, `Autonomous bridge not ready: ${(preflight.issues || []).join(" ")}`);
+    }
+    const promoteCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
+    await promoteProductionRequestViaI3I4(promoteCall.request, env, promoteCall.url, authorization, ctx);
+    try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
+      console.warn("autonomous studio-produce enqueue failed", requestId, error);
+    }
+    return { waiting: false, production_request_id: requestId, idea_id: idea.id };
+  };
+
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(continueAfterPlan().then(async (finished) => {
+      await studioSaveAutonomousLastRun(env, {
+        status: finished.waiting ? "waiting_variants" : "producing",
+        skip_reason: finished.waiting ? "variants_still_preparing" : null,
+        idea_id: idea.id,
+        production_request_id: requestId,
+      });
+    }).catch((error) => {
+      console.warn("autonomous continue after plan failed", requestId, error);
+    }));
     return { waiting: true, production_request_id: requestId, idea_id: idea.id };
   }
-  const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
-  if (!preflight.ready) {
-    throw new HttpError(409, `Autonomous bridge not ready: ${(preflight.issues || []).join(" ")}`);
-  }
-  const promoteCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
-  await promoteProductionRequestViaI3I4(promoteCall.request, env, promoteCall.url, authorization, ctx);
-  try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
-    console.warn("autonomous studio-produce enqueue failed", requestId, error);
-  }
-  return { waiting: false, production_request_id: requestId, idea_id: idea.id };
+
+  return continueAfterPlan();
 }
 
 async function listAutonomousDraftRequests(env) {
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 10,
+    limit: 1,
     filterFormula: "AND({Request_Status}='Draft',FIND('origin=autonomous',{Production_Notes}&'')>0)",
     sortField: "Created_At",
+    sortDirection: "asc",
+  });
+}
+
+async function listAutonomousGeneratedIdeas(env) {
+  return listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+    limit: 3,
+    filterFormula: "AND({Candidate_Status}='Generated',FIND('origin=autonomous',{Production_Config_Notes}&'')>0)",
+    sortField: "Create_Date",
     sortDirection: "asc",
   });
 }
@@ -24380,18 +24419,59 @@ async function alignAutonomousDraftContentType(env, requestRecord, contentType) 
   });
 }
 
+async function startAutonomousFromExistingIdea(env, authorization, ctx, idea, chicago, slot) {
+  const title = String(f(idea, "Candidate_Title") || "");
+  const summary = String(f(idea, "Idea_Summary") || "");
+  const assets = await harvestAutonomousLibraryStills(env, `${title} ${summary}`.trim() || "Chicago");
+  const mediaAssetIds = assets.filter((row) => row.confidence === "high").slice(0, 12).map((row) => row.id);
+  if (!mediaAssetIds.length) {
+    return studioSaveAutonomousLastRun(env, {
+      status: "skipped",
+      skip_reason: "no_high_confidence_assets",
+      chicago_date: chicago.date,
+      slot,
+      idea_id: idea.id,
+    });
+  }
+  const defaults = productionRequestDefaultsFromIdea(idea);
+  const input = await cleanProductionRequestPayload({
+    ...defaults,
+    content_type: "Vertical Short Video",
+    platforms: [...AUTONOMOUS_STANDARD_PLATFORMS],
+    voiceover_mode: "Yes",
+    background_music_mode: "Yes",
+    thumbnail_mode: "Yes",
+    selected_music_asset_id: AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+    voice_id: PHASE6_DEFAULT_VOICE_ID,
+    voice_name: "Kate",
+    carousel_image_mode: "Manual Upload",
+    production_notes: "origin=autonomous cited_trend=Pilsen murals — color on 18th Street",
+    primary_location: String(f(idea, "Primary_Location") || defaults.primary_location || "").trim(),
+  }, env);
+  const requestRecord = await createDraftForIdea(env, idea, authorization, input);
+  const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
+    content_type: "Vertical Short Video",
+    media_asset_ids: mediaAssetIds,
+  });
+  return studioSaveAutonomousLastRun(env, {
+    status: finished.waiting ? "waiting_variants" : "producing",
+    skip_reason: finished.waiting ? "variants_still_preparing" : null,
+    chicago_date: chicago.date,
+    slot,
+    idea_id: idea.id,
+    production_request_id: finished.production_request_id,
+    reused_idea: true,
+  });
+}
+
 async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, slot) {
   const ids = drafts.map((row) => row.id);
-  const ideaIds = drafts.map((row) => {
-    const links = f(row, "Idea_Candidate");
-    return Array.isArray(links) && links.length ? links[0] : (typeof links === "string" ? links : "");
-  }).filter(Boolean);
+  const ideaIds = drafts.map((row) => firstLinkedRecordId(f(row, "Idea_Candidate"))).filter(Boolean);
 
   const runAll = async () => {
     const results = [];
     for (const requestRecord of drafts) {
-      const ideaLink = f(requestRecord, "Idea_Candidate");
-      const ideaId = Array.isArray(ideaLink) && ideaLink.length ? ideaLink[0] : (typeof ideaLink === "string" ? ideaLink : "");
+      const ideaId = firstLinkedRecordId(f(requestRecord, "Idea_Candidate"));
       if (!ideaId) {
         results.push({ production_request_id: requestRecord.id, status: "skipped", skip_reason: "missing_idea" });
         continue;
@@ -24409,16 +24489,26 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         });
         continue;
       }
-      await alignAutonomousDraftContentType(env, requestRecord, contentType);
-      const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
-        content_type: contentType,
-        media_asset_ids: mediaAssetIds,
-      });
-      results.push({
-        production_request_id: finished.production_request_id,
-        idea_id: finished.idea_id,
-        status: finished.waiting ? "waiting_variants" : "producing",
-      });
+      try {
+        await alignAutonomousDraftContentType(env, requestRecord, contentType);
+        const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
+          content_type: contentType,
+          media_asset_ids: mediaAssetIds,
+        });
+        results.push({
+          production_request_id: finished.production_request_id,
+          idea_id: finished.idea_id,
+          status: finished.waiting ? "waiting_variants" : "producing",
+        });
+      } catch (error) {
+        console.warn("autonomous draft resume failed", requestRecord.id, error);
+        results.push({
+          production_request_id: requestRecord.id,
+          idea_id: ideaId,
+          status: "skipped",
+          skip_reason: String(error?.message || error).slice(0, 180),
+        });
+      }
     }
     const waiting = results.some((row) => row.status === "waiting_variants");
     const producing = results.some((row) => row.status === "producing");
@@ -24479,8 +24569,11 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   }
 
   if (last.status === "waiting_variants" && last.production_request_id && last.idea_id) {
-    const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, last.idea_id);
-    const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, last.production_request_id);
+    const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, last.idea_id).catch(() => null);
+    const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, last.production_request_id).catch(() => null);
+    if (!idea || !requestRecord) {
+      await studioSaveAutonomousLastRun(env, { ...last, status: "reset", skip_reason: "waiting_record_gone" });
+    } else {
     const pick = {
       content_type: String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim() || "Vertical Short Video",
       media_asset_ids: item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), [])
@@ -24507,6 +24600,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       idea_id: finished.idea_id,
       production_request_id: finished.production_request_id,
     });
+    }
   }
 
   if (last.status === "producing" && last.production_request_id) {
@@ -24521,6 +24615,11 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const pendingDrafts = await listAutonomousDraftRequests(env);
   if (pendingDrafts.length) {
     return resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot);
+  }
+
+  const reusableIdeas = await listAutonomousGeneratedIdeas(env);
+  if (reusableIdeas.length) {
+    return startAutonomousFromExistingIdea(env, authorization, ctx, reusableIdeas[0], chicago, slot);
   }
 
   if (!options.force && options.scheduled) {
@@ -24634,6 +24733,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     voiceover_mode: "Yes",
     background_music_mode: "Yes",
     thumbnail_mode: "Yes",
+    selected_music_asset_id: AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+    voice_id: PHASE6_DEFAULT_VOICE_ID,
+    voice_name: "Kate",
     carousel_image_mode: "Manual Upload",
     production_notes: `origin=autonomous cited_trend=${pick.cited_trend || ""}`.slice(0, 3000),
     primary_location: pick.primary_location || defaults.primary_location,
