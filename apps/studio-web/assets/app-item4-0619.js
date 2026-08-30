@@ -1269,7 +1269,10 @@
 
 
   function ideaStatusLabel(idea) {
-    return idea?.is_on_hold ? "On Hold" : (idea?.status || "Unknown");
+    if (idea?.is_on_hold) return "On Hold";
+    if (String(idea?.photo_wait_status || "") === "Waiting") return "Waiting for photos";
+    if (String(idea?.photo_wait_status || "") === "Ready" && !ideaIsPromoted(idea)) return "Photos ready";
+    return idea?.status || "Unknown";
   }
 
   function ideaIsPromoted(idea) {
@@ -1284,11 +1287,33 @@
   }
 
   function ideaCanPromote(idea) {
-    return !ideaIsPromoted(idea) && !idea?.is_on_hold;
+    const wait = String(idea?.photo_wait_status || "").trim();
+    return !ideaIsPromoted(idea) && !idea?.is_on_hold && wait !== "Waiting" && wait !== "Ready";
+  }
+
+  function ideaPhotoWaitActive(idea) {
+    const wait = String(idea?.photo_wait_status || "").trim();
+    return wait === "Waiting" || wait === "Ready";
+  }
+
+  function ideaPhotoWaitPayload() {
+    const contentType = $("promoteContentType")?.value || "";
+    const imageMode = $("promoteCarouselImageMode")?.value || "";
+    let slideMode = $("promoteCarouselSlideMode")?.value || "Exact";
+    if (imageMode === "Wait for matching photos") slideMode = "Target range";
+    return {
+      content_type: contentType,
+      slide_mode: slideMode,
+      image_mode: imageMode,
+      waits: ["Carousel", "Photo Set", "Feed Post"].includes(contentType)
+        && slideMode === "Target range"
+        && imageMode !== "Make AI Generated",
+    };
   }
 
   function setSelectValue(id, value, fallback) {
     const el = $(id);
+    if (!el) return;
     const desired = String(value || fallback || "");
     const exists = Array.from(el.options).some((option) => option.value === desired);
     el.value = exists ? desired : (fallback || "");
@@ -1297,7 +1322,21 @@
   function syncPromotionPanels() {
     const contentType = $("promoteContentType").value;
     $("videoPromotionOptions").hidden = !["Vertical Short Video", "Longform Video"].includes(contentType);
-    $("carouselPromotionOptions").hidden = contentType !== "Carousel";
+    const imageFamily = ["Carousel", "Photo Set", "Feed Post"].includes(contentType);
+    $("carouselPromotionOptions").hidden = !imageFamily;
+    const wait = ideaPhotoWaitPayload();
+    const range = wait.slide_mode === "Target range";
+    if ($("promoteCarouselExactWrap")) $("promoteCarouselExactWrap").hidden = range;
+    if ($("promoteCarouselMinWrap")) $("promoteCarouselMinWrap").hidden = !range;
+    if ($("promoteCarouselMaxWrap")) $("promoteCarouselMaxWrap").hidden = !range;
+    if ($("promotePhotoWaitHint")) $("promotePhotoWaitHint").hidden = !wait.waits;
+    const promoteButton = $("promoteIdeaButton");
+    if (promoteButton && !ideaIsPromoted(activeIdea) && !activeIdea?.is_on_hold && !ideaPhotoWaitActive(activeIdea)) {
+      promoteButton.textContent = wait.waits ? "Approve and wait for photos" : "Approve & Promote";
+    }
+    if (wait.image_mode === "Wait for matching photos" && $("promoteCarouselSlideMode")) {
+      $("promoteCarouselSlideMode").value = "Target range";
+    }
   }
 
   function selectedPromotionPlatforms() {
@@ -1338,14 +1377,24 @@
     setSelectValue("promoteVideoClipCount", idea?.video_clip_count ? String(idea.video_clip_count) : "Auto", "Auto");
     setSelectValue("promoteVoiceoverTail", idea?.voiceover_tail_seconds !== null && idea?.voiceover_tail_seconds !== undefined ? String(idea.voiceover_tail_seconds) : "2", "2");
     $("promoteCarouselSlideCount").value = idea?.carousel_slide_count || 5;
-    setSelectValue("promoteCarouselImageMode", idea?.carousel_image_mode, "Make AI Generated");
+    if ($("promoteCarouselSlideMin")) $("promoteCarouselSlideMin").value = idea?.carousel_slide_count_min || 3;
+    if ($("promoteCarouselSlideMax")) $("promoteCarouselSlideMax").value = idea?.carousel_slide_count_max || 10;
+    setSelectValue("promoteCarouselSlideMode", idea?.carousel_slide_count_mode, "Exact");
+    const waitImageMode = String(idea?.photo_wait_status || "") && idea?.carousel_slide_count_mode === "Target range"
+      ? "Wait for matching photos"
+      : idea?.carousel_image_mode;
+    setSelectValue("promoteCarouselImageMode", waitImageMode, "Make AI Generated");
     $("promoteProductionNotes").value = "";
     syncPromotionPanels();
 
     const snapshot = [
       ["Type", idea?.content_type],
       ["Platforms", Array.isArray(idea?.platforms) && idea.platforms.length ? idea.platforms.join(", ") : null],
-      ["Slides", idea?.carousel_slide_count],
+      ["Slides", ideaPhotoWaitActive(idea) || idea?.carousel_slide_count_mode === "Target range"
+        ? `${idea?.carousel_slide_count_min || "?"}–${idea?.carousel_slide_count_max || "?"} photos`
+        : idea?.carousel_slide_count],
+      ["Photo wait", idea?.photo_wait_status],
+      ["Matched", idea?.photo_match?.high_count != null ? `${idea.photo_match.high_count} high-confidence` : null],
       ["Clips", idea?.video_clip_count],
       ["Voiceover", idea?.include_voiceover],
       ["Music", idea?.include_background_music],
@@ -1370,7 +1419,9 @@
     const configureButton = $("configureProductionButton");
     if (configureButton) {
       configureButton.disabled = promoted || Boolean(idea?.is_on_hold);
-      configureButton.textContent = promoted ? "Production locked" : "Add new photos";
+      configureButton.textContent = promoted
+        ? "Production locked"
+        : (String(idea?.photo_wait_status || "") === "Ready" ? "Open Production" : "Add new photos");
     }
     const useExistingButton = $("useExistingLibraryButton");
     if (useExistingButton) {
@@ -1384,25 +1435,44 @@
     $("restoreIdeaButton").disabled = ideaIsPromoted(idea);
 
     const promotable = ideaCanPromote(idea);
-    const waitingForI4 = idea?.status === "Approved" && !promoted;
+    const waitingForI4 = idea?.status === "Approved" && !promoted && !ideaPhotoWaitActive(idea);
     const libraryPromote = $("ideaLibraryPromote");
     if (libraryPromote) {
       libraryPromote.hidden = Boolean(idea?.is_on_hold) || promoted;
-      libraryPromote.open = waitingForI4;
+      libraryPromote.open = waitingForI4 || ideaPhotoWaitActive(idea);
     }
     $("promoteIdeaButton").disabled = !promotable;
     $("ideaPromotionZone").classList.toggle("promotion-disabled", !promotable);
     $("ideaPromotionZone").querySelectorAll("select,input,textarea").forEach((control) => { control.disabled = !promotable; });
+    const matchButton = $("matchIdeaPhotosButton");
+    if (matchButton) {
+      matchButton.hidden = !ideaPhotoWaitActive(idea) || promoted || Boolean(idea?.is_on_hold);
+      matchButton.disabled = String(idea?.photo_wait_status || "") === "Ready";
+    }
+    const openProd = $("openIdeaProductionButton");
+    if (openProd) {
+      openProd.hidden = String(idea?.photo_wait_status || "") !== "Ready" || promoted;
+    }
 
     if (ideaIsPromoted(idea)) {
       $("promoteIdeaButton").textContent = "Already promoted";
       setManageMessage("Promotion is complete. This Idea Candidate is intentionally locked; there is no background save or promotion task running.", "success");
     } else if (idea?.is_on_hold) {
       setManageMessage("Restore this idea before approving and promoting it.", "");
+    } else if (String(idea?.photo_wait_status || "") === "Waiting") {
+      const high = Number(idea?.photo_match?.high_count || 0);
+      const min = Number(idea?.carousel_slide_count_min || 0);
+      const max = Number(idea?.carousel_slide_count_max || 0);
+      $("promoteIdeaButton").textContent = "Waiting for photos";
+      setManageMessage(`Approved and waiting. ${high} / ${min || "?"} high-confidence matches so far. When it runs it will take up to ${max || "?"} photos, then you set production rules.`, "");
+    } else if (String(idea?.photo_wait_status || "") === "Ready") {
+      $("promoteIdeaButton").textContent = "Photos ready";
+      const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || 0);
+      setManageMessage(`${count || "Matched"} photo${count === 1 ? "" : "s"} attached. Open Production to set content rules, then approve rendering there.`, "success");
     } else if (idea?.status === "Approved") {
       setManageMessage("This idea is approved but not yet linked to a content item. Open Promote without photos to retry.", "");
     } else {
-      $("promoteIdeaButton").textContent = "Approve & Promote";
+      syncPromotionPanels();
       setManageMessage();
     }
   }
@@ -1556,6 +1626,41 @@
 
 
   $("promoteContentType").addEventListener("change", syncPromotionPanels);
+  $("promoteCarouselSlideMode")?.addEventListener("change", syncPromotionPanels);
+  $("promoteCarouselImageMode")?.addEventListener("change", syncPromotionPanels);
+
+  $("matchIdeaPhotosButton")?.addEventListener("click", async () => {
+    if (!activeIdea?.id) return;
+    const button = $("matchIdeaPhotosButton");
+    button.disabled = true;
+    button.textContent = "Matching…";
+    try {
+      const result = await api(`/api/ideas/${encodeURIComponent(activeIdea.id)}/match-photos`, {
+        method: "POST",
+        body: JSON.stringify({ force: true }),
+      });
+      updateIdeaDrawer(result.record);
+      await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
+      setManageMessage(result.photo_wait?.action === "ready"
+        ? `Matched ${result.photo_wait.selected?.length || 0} photos. Open Production to set rules.`
+        : `Still waiting. ${result.photo_wait?.high_count || 0} high-confidence matches so far.`,
+        result.photo_wait?.action === "ready" ? "success" : "");
+    } catch (error) {
+      setManageMessage(error.message || "Could not match photos.", "error-text");
+    } finally {
+      button.textContent = "Match photos now";
+      if (activeIdea && String(activeIdea.photo_wait_status || "") === "Waiting") button.disabled = false;
+    }
+  });
+
+  $("openIdeaProductionButton")?.addEventListener("click", async () => {
+    if (!activeIdea) return;
+    try {
+      await openProductionRequestForIdea(activeIdea);
+    } catch (error) {
+      setManageMessage(error.message || "Could not open Production.", "error-text");
+    }
+  });
 
   $("promoteIdeaButton").addEventListener("click", async () => {
     if (!activeIdea?.id || !ideaCanPromote(activeIdea)) return;
@@ -1576,15 +1681,18 @@
     }
 
     const label = activeIdea.title || `Candidate ${activeIdea.candidate_id || activeIdea.id}`;
+    const wait = ideaPhotoWaitPayload();
     const confirmed = window.confirm(
-      `Approve and promote "${label}"?\n\nStudio will submit this production setup for approval and create the content item.`
+      wait.waits
+        ? `Approve "${label}" and wait for photos?\n\nStudio will not create a Content Item yet. When at least ${$("promoteCarouselSlideMin")?.value || 3} high-confidence stills exist, it will attach all of them up to ${$("promoteCarouselSlideMax")?.value || 10} and open Production for rules.`
+        : `Approve and promote "${label}"?\n\nStudio will submit this production setup for approval and create the content item.`
     );
     if (!confirmed) return;
 
     const button = $("promoteIdeaButton");
     button.disabled = true;
-    button.textContent = "Promoting…";
-    setManageMessage("Sending for approval…", "");
+    button.textContent = wait.waits ? "Approving…" : "Promoting…";
+    setManageMessage(wait.waits ? "Approving and waiting for photos…" : "Sending for approval…", "");
 
     const payload = {
       content_type: contentType,
@@ -1596,6 +1704,9 @@
       video_clip_count: $("promoteVideoClipCount").value,
       voiceover_tail_seconds: Number($("promoteVoiceoverTail").value || 2),
       carousel_slide_count: Number($("promoteCarouselSlideCount").value || 5),
+      carousel_slide_count_mode: wait.slide_mode,
+      carousel_slide_count_min: $("promoteCarouselSlideMin")?.value || "",
+      carousel_slide_count_max: $("promoteCarouselSlideMax")?.value || "",
       carousel_image_mode: $("promoteCarouselImageMode").value,
       production_notes: $("promoteProductionNotes").value.trim(),
     };
@@ -1607,6 +1718,16 @@
       });
 
       let record = result.record;
+      if (result.photo_wait || result.waiting || result.handoff === "photo-wait") {
+        updateIdeaDrawer(record);
+        await Promise.all([loadIdeas(), loadDashboard(), loadProductionRequests()]);
+        if (result.photo_wait?.action === "ready" && result.production_request) {
+          setManageMessage(result.message || "Photos matched. Open Production to set rules.", "success");
+        } else {
+          setManageMessage(result.message || "Approved. Waiting for high-confidence photos.", "success");
+        }
+        return;
+      }
       if (!ideaIsPromoted(record)) {
         setManageMessage("Approved. Waiting for the content item to finish…", "");
         for (let attempt = 0; attempt < 8 && !ideaIsPromoted(record); attempt += 1) {
@@ -6605,6 +6726,19 @@
 
 
   function ideaStructureLabel(record) {
+    const wait = String(record?.photo_wait_status || "").trim();
+    if (wait === "Waiting") {
+      const high = Number(record?.photo_match?.high_count || 0);
+      const min = Number(record?.carousel_slide_count_min || 0);
+      return `${high} / ${min || "?"} photos`;
+    }
+    if (wait === "Ready") {
+      const count = Array.isArray(record?.matched_media_asset_links) ? record.matched_media_asset_links.length : (record?.photo_match?.selected?.length || 0);
+      return `${count || record.carousel_slide_count || 0} photos ready`;
+    }
+    if (record?.carousel_slide_count_mode === "Target range") {
+      return `${record.carousel_slide_count_min || "?"}–${record.carousel_slide_count_max || "?"} photos`;
+    }
     if (record?.carousel_slide_count) return `${record.carousel_slide_count} slides`;
     if (record?.video_clip_count) return `${record.video_clip_count} clips`;
     return "AI / default";
