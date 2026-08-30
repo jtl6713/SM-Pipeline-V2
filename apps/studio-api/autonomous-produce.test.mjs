@@ -7,6 +7,9 @@ import {
   isDerivedLibraryStillName,
   autonomousMasterMediaIds,
   autonomousPlanOverrides,
+  autonomousPlanExtras,
+  autonomousDefaultVoiceoverSeconds,
+  AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
@@ -76,6 +79,12 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.equal(picked.media_asset_ids[0], "recAsset1234567890");
   assert.deepEqual(autonomousPlanOverrides("Vertical Short Video").Instagram, "Reel");
   assert.deepEqual(autonomousPlanOverrides("Carousel").Instagram, "Carousel");
+  assert.deepEqual(autonomousPlanExtras(), [
+    { platform: "Instagram", output_type: "Story" },
+    { platform: "Facebook", output_type: "Story" },
+  ]);
+  assert.equal(autonomousDefaultVoiceoverSeconds(30), 15);
+  assert.equal(AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID, "recT49crfrhMVfZAQ");
   assert.equal(isAutonomousOrigin("origin=autonomous cited_trend=Pilsen"), true);
   assert.equal(isDerivedLibraryStillName("Pilsen-Murals-9__9x16__fill-crop-v2.jpg"), true);
   assert.equal(isDerivedLibraryStillName("Pilsen Murals 1.jpg"), false);

@@ -51,8 +51,10 @@ def native_grid_cover_required(record: dict[str, Any]) -> bool:
     return mapping in {
         "instagram reel",
         "facebook reel",
+        "facebook slideshow reel",
         "youtube short",
         "youtube video",
+        "youtube slideshow video",
     }
 
 

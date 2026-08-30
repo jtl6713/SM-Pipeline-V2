@@ -29,6 +29,17 @@ def build_render_payload(output: dict[str, Any], slides: list[dict[str, Any]]) -
         volume = float(music_volume) if music_volume not in (None, "") else DEFAULT_MUSIC_VOLUME
     except (TypeError, ValueError):
         volume = DEFAULT_MUSIC_VOLUME
+    try:
+        start_raw = field(output, "Music_Start_Seconds") or field(output, "Studio_Effective_Music_Start_Seconds")
+        music_start = max(0.0, float(start_raw)) if start_raw not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        music_start = 0.0
+    target_duration = field(output, "Studio_Effective_Video_Duration_Seconds") or field(output, "Video_Duration_Seconds")
+    try:
+        duration_seconds = float(target_duration) if target_duration not in (None, "") and float(target_duration) > 0 else count * 3 + 1
+    except (TypeError, ValueError):
+        duration_seconds = count * 3 + 1
+    duration_in_frames = int(round(duration_seconds * FPS))
     return {
         "filename": f"facebook-slideshow-output-{output_id}.mp4",
         "compositionId": COMPOSITION_ID,
@@ -39,11 +50,11 @@ def build_render_payload(output: dict[str, Any], slides: list[dict[str, Any]]) -
         "fps": FPS,
         "width": WIDTH,
         "height": HEIGHT,
-        "durationInFrames": count * CLIP_DURATION_FRAMES + END_HOLD_FRAMES,
-        "durationSeconds": count * 3 + 1,
+        "durationInFrames": duration_in_frames,
+        "durationSeconds": duration_seconds,
         "transitionFrames": TRANSITION_FRAMES,
         "endHoldFrames": END_HOLD_FRAMES,
-        "music": {"url": music_url, "volume": volume},
+        "music": {"url": music_url, "volume": volume, "startFromSeconds": music_start},
         "voiceover": {"url": field_str(output, "Voiceover_URL"), "volume": 1},
         "clips": clips,
     }

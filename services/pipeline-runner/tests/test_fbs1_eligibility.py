@@ -101,6 +101,7 @@ def test_fbs1_payload_and_slide_formula():
     assert payload["durationSeconds"] == 7
     assert payload["voiceover"]["url"] == "https://media.chicagoshining.com/vo.mp3"
     assert payload["music"]["volume"] == 0.08
+    assert payload["music"]["startFromSeconds"] == 0
     assert len(payload["clips"]) == 2
     assert slide_clip(slides[0])["url"] == "https://cdn/a.jpg"
     assert 'FIND("233",ARRAYJOIN({PO_Output_ID}))>0' in slide_formula("233")

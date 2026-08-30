@@ -63,6 +63,8 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
         "thumbnail_mode": field_str(output, "Studio_Effective_Thumbnail_Mode") or field_str(request, "Thumbnail_Mode") or "Yes",
         "background_music_mode": field_str(output, "Studio_Effective_Background_Music_Mode") or field_str(request, "Background_Music_Mode") or "Yes",
         "video_duration_seconds": field(output, "Studio_Effective_Video_Duration_Seconds") or field(request, "Video_Duration_Seconds") or 0,
+        "voiceover_duration_seconds": field(output, "Studio_Effective_Voiceover_Duration_Seconds") or field(request, "Voiceover_Duration_Seconds") or field(parent or {}, "Voiceover_Duration_Seconds") or 0,
+        "music_start_seconds": field(output, "Studio_Effective_Music_Start_Seconds") or field(request, "Music_Start_Seconds") or field(parent or {}, "Music_Start_Seconds") or 0,
         "requested_title": field_str(output, "Studio_Effective_Requested_Title") or field_str(request, "Requested_Title") or field_str(parent or {}, "Content_Title"),
         "requested_caption": field_str(output, "Studio_Effective_Requested_Caption") or field_str(request, "Requested_Caption") or field_str(parent or {}, "Caption"),
         "music_url": field_str(output, "Music_URL") or field_str(output, "Preferred_Music_URL") or field_str(parent or {}, "Selected_Music_URL"),
@@ -427,6 +429,8 @@ def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict
         "Music_URL": package.get("effective", {}).get("music_url") or None,
         "Preferred_Music_URL": package.get("effective", {}).get("music_url") or None,
         "Music_Volume": 1.0 if package.get("effective", {}).get("music_url") else 0,
+        "Music_Start_Seconds": package.get("effective", {}).get("music_start_seconds") or 0,
+        "Voiceover_Duration_Seconds": package.get("effective", {}).get("voiceover_duration_seconds") or None,
     }
     if thumb:
         fields["Thumbnail_URL"] = thumb

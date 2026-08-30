@@ -27,6 +27,13 @@ export const AUTONOMOUS_CAROUSEL_OVERRIDES = Object.freeze({
   TikTok: "Video Draft",
   YouTube: "Slideshow Video",
 });
+export const AUTONOMOUS_PLAN_EXTRAS = Object.freeze([
+  { platform: "Instagram", output_type: "Story" },
+  { platform: "Facebook", output_type: "Story" },
+]);
+export const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "recT49crfrhMVfZAQ";
+export const AUTONOMOUS_DEFAULT_VIDEO_SECONDS = 30;
+export const AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION = 0.5;
 
 export function autonomousSlot(chicago) {
   const date = String(chicago?.date || "").trim();
@@ -205,6 +212,16 @@ export function autonomousPlanOverrides(contentType) {
     return { ...AUTONOMOUS_CAROUSEL_OVERRIDES };
   }
   return { ...AUTONOMOUS_REEL_OVERRIDES };
+}
+
+export function autonomousPlanExtras() {
+  return AUTONOMOUS_PLAN_EXTRAS.map((row) => ({ ...row }));
+}
+
+export function autonomousDefaultVoiceoverSeconds(videoSeconds = AUTONOMOUS_DEFAULT_VIDEO_SECONDS) {
+  const duration = Number(videoSeconds);
+  const base = Number.isFinite(duration) && duration > 0 ? duration : AUTONOMOUS_DEFAULT_VIDEO_SECONDS;
+  return Math.max(1, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
 }
 
 export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles }) {

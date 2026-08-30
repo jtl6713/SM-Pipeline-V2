@@ -31,6 +31,7 @@ export type FacebookImageSlideshowProps = {
     url?: string;
     src?: string;
     volume?: number;
+    startFromSeconds?: number;
   };
 };
 
@@ -289,6 +290,7 @@ export const FacebookImageSlideshow9x16: React.FC<
       {musicSource ? (
         <Audio
           src={musicSource}
+          startFrom={Math.max(0, Math.round(Number(music?.startFromSeconds || 0) * fps))}
           volume={Math.max(0, Math.min(1, music?.volume ?? 0.07))}
         />
       ) : null}

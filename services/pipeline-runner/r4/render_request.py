@@ -29,6 +29,29 @@ def _num(value: Any, default: float = 0) -> float:
         return default
 
 
+def music_start_seconds(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> float:
+    for record in (output, content_item or {}):
+        raw = field(record, "Music_Start_Seconds")
+        if raw in (None, ""):
+            raw = field(record, "Studio_Effective_Music_Start_Seconds")
+        try:
+            if raw not in (None, "") and float(raw) >= 0:
+                return float(raw)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _with_music_start(
+    music: dict[str, Any],
+    output: dict[str, Any],
+    content_item: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(music or {})
+    payload["startFromSeconds"] = music_start_seconds(output, content_item)
+    return payload
+
+
 def _music_volume(output: dict[str, Any], default_music: float) -> float:
     music_url = field_str(output, "Music_URL")
     if not music_url:
@@ -133,7 +156,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
         "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
         "durationIsExplicit": duration_is_explicit(output),
         "clips": _clip_list_json(output),
-        "music": {
+        "music": _with_music_start({
             "enabled": music_enabled,
             "url": music_url,
             "volume": music_volume,
@@ -143,7 +166,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
             "fadeInFrames": 15,
             "fadeOutFrames": 15,
             "loop": True,
-        },
+        }, output),
     }
 
 
@@ -183,7 +206,7 @@ def build_voiceover_request(
         "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
         "durationIsExplicit": duration_is_explicit(output),
         "clips": _clip_list_json(output),
-        "music": {"url": music_url, "volume": music_volume},
+        "music": _with_music_start({"url": music_url, "volume": music_volume}, output, content_item),
         "voiceover": {
             "url": voiceover_url(output, content_item),
             "volume": voice_volume,
@@ -214,7 +237,7 @@ def build_no_voiceover_request(output: dict[str, Any], *, default_music: float) 
         "durationInFrames": total_frames,
         "durationSeconds": round(total_frames / 30),
         "clips": _clip_list_json(output),
-        "music": {"url": music_url, "volume": music_volume},
+        "music": _with_music_start({"url": music_url, "volume": music_volume}, output),
     }
 
 

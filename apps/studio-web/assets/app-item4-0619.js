@@ -176,7 +176,11 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.192-autonomous-running";
+  const BUILD_ID = "item4-0.6.193-autonomous-defaults";
+  function defaultVoiceoverDuration(videoSeconds) {
+    const n = Number(videoSeconds);
+    return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
+  }
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -2488,6 +2492,12 @@
     if (take("ezVideoDuration") && $("prVideoDuration") && $("ezVideoDuration")) {
       $("prVideoDuration").value = $("ezVideoDuration").value;
     }
+    if (take("ezVoiceoverDuration") && $("prVoiceoverDuration") && $("ezVoiceoverDuration")) {
+      $("prVoiceoverDuration").value = $("ezVoiceoverDuration").value;
+    }
+    if (take("ezMusicStart") && $("prMusicStart") && $("ezMusicStart")) {
+      $("prMusicStart").value = $("ezMusicStart").value;
+    }
     if (take("ezVideoClipMode", "ezVideoClipExact", "ezVideoClipMin", "ezVideoClipMax")) {
       copySelectValue("ezVideoClipMode", "prVideoClipMode");
       if ($("prVideoClipExact")) $("prVideoClipExact").value = $("ezVideoClipExact")?.value || "";
@@ -2571,7 +2581,9 @@
     if ($("ezScriptMode")) setSelectValue("ezScriptMode", record.script_mode, "AI decides");
     if ($("ezRequestedScript")) $("ezRequestedScript").value = record.requested_script || "";
     if ($("ezThumbnail")) setSelectValue("ezThumbnail", record.thumbnail_mode, "Yes");
-    if ($("ezVoiceoverTail")) $("ezVoiceoverTail").value = record.voiceover_tail_seconds ?? 2;
+    if ($("ezVoiceoverTail")) $("ezVoiceoverTail").value = record.voiceover_tail_seconds ?? 15;
+    if ($("ezVoiceoverDuration")) $("ezVoiceoverDuration").value = record.voiceover_duration_seconds ?? defaultVoiceoverDuration(record.video_duration_seconds ?? 30);
+    if ($("ezMusicStart")) $("ezMusicStart").value = record.music_start_seconds ?? 0;
     if ($("ezVideoDuration")) $("ezVideoDuration").value = record.video_duration_seconds ?? 30;
     if ($("ezVideoClipMode")) setSelectValue("ezVideoClipMode", record.video_clip_count_mode, "AI decides");
     if ($("ezVideoClipExact")) $("ezVideoClipExact").value = record.video_clip_count_exact ?? "";
@@ -2881,7 +2893,9 @@
       carousel_slide_count_min: ezControlValue("prCarouselSlideMin", record.carousel_slide_count_min ?? ""),
       carousel_slide_count_max: ezControlValue("prCarouselSlideMax", record.carousel_slide_count_max ?? ""),
       carousel_image_mode: ezControlValue("prCarouselImageMode", record.carousel_image_mode || "Manual Upload"),
-      voiceover_tail_seconds: ezControlValue("prVoiceoverTail", record.voiceover_tail_seconds ?? 2),
+      voiceover_tail_seconds: ezControlValue("prVoiceoverTail", record.voiceover_tail_seconds ?? 15),
+      voiceover_duration_seconds: ezControlValue("prVoiceoverDuration", record.voiceover_duration_seconds ?? defaultVoiceoverDuration(record.video_duration_seconds ?? 30)),
+      music_start_seconds: ezControlValue("prMusicStart", record.music_start_seconds ?? 0),
       selected_music_asset_id: ezControlValue(
         "prMusicAsset",
         Array.isArray(record.selected_music_asset_links) ? (record.selected_music_asset_links[0] || "") : ""
@@ -3249,7 +3263,9 @@
       video_clip_count_exact: $("ezVideoClipExact")?.value || "",
       video_clip_count_min: $("ezVideoClipMin")?.value || "",
       video_clip_count_max: $("ezVideoClipMax")?.value || "",
-      voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 2,
+      voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 15,
+      voiceover_duration_seconds: $("ezVoiceoverDuration")?.value || defaultVoiceoverDuration($("ezVideoDuration")?.value || 30),
+      music_start_seconds: $("ezMusicStart")?.value || 0,
       title_mode: ezTitleIsCustomized() ? ($("ezTitleMode")?.value || "AI decides") : (captionFields.title_mode || "AI decides"),
       requested_title: ezTitleIsCustomized() ? String($("ezRequestedTitle")?.value || "").trim() : (captionFields.requested_title || ""),
       caption_mode: ezCaptionIsCustomized() ? ($("ezCaptionMode")?.value || "AI decides") : (captionFields.caption_mode || "AI decides"),
@@ -4681,9 +4697,21 @@
     }, { passive: false });
   }
 
+  function item4VariantPreviewCandidates(row) {
+    const master = row?.asset || {};
+    const chain = [];
+    const variantUrl = item4VariantPreviewUrl(row?.variant);
+    if (variantUrl) chain.push(variantUrl);
+    for (const url of item4AssetPreviewCandidates(master)) {
+      if (url && !chain.includes(url)) chain.push(url);
+    }
+    return chain;
+  }
+
   function item4VariantThumb(row, ratio) {
     const master = item4MasterAsset(row.asset?.id) || row.asset;
-    const previewUrl = item4AssetPreviewUrl(master) || item4VariantPreviewUrl(row.variant);
+    const candidates = item4VariantPreviewCandidates({ asset: master, variant: row.variant });
+    const previewUrl = candidates[0] || "";
     const cssRatio = String(ratio || "4:5").replace(":", " / ");
     const safe = ratio === "9:16" ? '<span class="item4-safe-overlay" title="Centered 4:5 critical-content safe zone"></span>' : "";
     const assetId = master?.id || row.asset?.id || "";
@@ -4794,7 +4822,10 @@
       const assetId = frame?.dataset.item4CropAsset;
       const master = item4MasterAsset(assetId) || {};
       item4BindPreviewImage(img, {
-        candidates: item4AssetPreviewCandidates(master),
+        candidates: [...new Set([
+          String(img.dataset.previewSrc || "").trim(),
+          ...item4AssetPreviewCandidates(master),
+        ].filter(Boolean))],
         failureKey: String(assetId || img.dataset.previewFailureKey || "").trim(),
         placeholder: () => item4AssetPlaceholder(master, "Preview unavailable"),
       });
@@ -6062,6 +6093,8 @@
     }
     syncRequestVoiceUi();
     $("prVideoDuration").value = record.video_duration_seconds ?? 30;
+    if ($("prVoiceoverDuration")) $("prVoiceoverDuration").value = record.voiceover_duration_seconds ?? defaultVoiceoverDuration(record.video_duration_seconds ?? 30);
+    if ($("prMusicStart")) $("prMusicStart").value = record.music_start_seconds ?? 0;
     setSelectValue("prVideoClipMode", record.video_clip_count_mode, "AI decides");
     $("prVideoClipExact").value = record.video_clip_count_exact ?? "";
     $("prVideoClipMin").value = record.video_clip_count_min ?? "";
@@ -6071,7 +6104,7 @@
     $("prCarouselSlideMin").value = record.carousel_slide_count_min ?? "";
     $("prCarouselSlideMax").value = record.carousel_slide_count_max ?? "";
     setSelectValue("prCarouselImageMode", record.carousel_image_mode, "Make AI Generated");
-    $("prVoiceoverTail").value = record.voiceover_tail_seconds ?? 2;
+    $("prVoiceoverTail").value = record.voiceover_tail_seconds ?? 15;
     setSelectValue("prTitleMode", record.title_mode, "AI decides");
     $("prRequestedTitle").value = record.requested_title || "";
     setSelectValue("prCaptionMode", record.caption_mode, "AI decides");
@@ -6470,6 +6503,8 @@
       carousel_slide_count_max: $("prCarouselSlideMax").value,
       carousel_image_mode: $("prCarouselImageMode").value,
       voiceover_tail_seconds: $("prVoiceoverTail").value,
+      voiceover_duration_seconds: $("prVoiceoverDuration")?.value || defaultVoiceoverDuration($("prVideoDuration")?.value || 30),
+      music_start_seconds: $("prMusicStart")?.value || 0,
       selected_music_asset_id: $("prMusicAsset").value,
       ...selectedRequestVoice(),
       title_mode: $("prTitleMode").value,
@@ -7781,7 +7816,9 @@
     ezCarouselSlideMax: "Maximum slide count when using a target range.",
     ezCarouselImageMode: "Use the photos you uploaded, or let Make generate additional images.",
     ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
-    prVideoDuration: "Requested video length in seconds for video outputs.",
+    prVideoDuration: "Requested video length in seconds for slideshows and rendered video outputs. Autonomous runs stay at 30 seconds.",
+    prVoiceoverDuration: "Spoken voiceover length in seconds. Autonomous runs use half the video duration (15 seconds of a 30-second slideshow).",
+    prMusicStart: "Seconds into the selected track where the bed should begin.",
     prVideoClipMode: "How many clips Studio should aim for in a video.",
     prVideoClipExact: "Exact number of clips to use in the video.",
     prVideoClipMin: "Minimum clip count when using a target range.",
@@ -7796,7 +7833,7 @@
     prVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
     prMusicAsset: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
     prThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover. Carousel is a separate still post, not the Reel cover.",
-    prVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
+    prVoiceoverTail: "Seconds of picture and music after narration ends. For a 30-second video with a 15-second voiceover, this is 15.",
     prTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     prRequestedTitle: "The on-post title. Separate from the idea name.",
     prCaptionMode: "This is the post caption on Instagram, Facebook, TikTok, and YouTube. It is separate from the on-photo labels under each crop.",
