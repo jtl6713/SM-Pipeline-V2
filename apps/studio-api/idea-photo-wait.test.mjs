@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ideaPhotoWaitApplies, selectMatchedPhotos } from "./idea-photo-wait.mjs";
+import {
+  buildIdeaLibraryKeys,
+  ideaPhotoWaitApplies,
+  rankIdeaLibraryFields,
+  selectMatchedPhotos,
+} from "./idea-photo-wait.mjs";
 
 test("wait-range applies only to real-photo image ideas", () => {
   assert.equal(ideaPhotoWaitApplies({
@@ -99,4 +104,69 @@ test("same intake batch still classifying does not lock the set", () => {
   });
   assert.equal(forced.action, "ready");
   assert.equal(forced.selected.length, 3);
+});
+
+test("CTA idea keys ignore cars/ride and keep train subject words", () => {
+  const keys = buildIdeaLibraryKeys({
+    primaryLocation: "Chicago",
+    title: "Ride the CTA: Chicago trains from the platform",
+    summary: "Show visitors how Chicago’s trains actually look — CTA cars at the station, tracks, and the platform crush.",
+  });
+  assert.ok(!keys.placeKeys.includes("chicago"));
+  assert.ok(!keys.subjectKeys.includes("cars"));
+  assert.ok(!keys.subjectKeys.includes("ride"));
+  assert.ok(keys.subjectKeys.includes("trains") || keys.subjectKeys.includes("train"));
+  assert.ok(keys.subjectKeys.includes("platform"));
+  assert.ok(keys.subjectKeys.includes("cta"));
+});
+
+test("parked-car Andersonville still is not high for a CTA idea", () => {
+  const keys = buildIdeaLibraryKeys({
+    primaryLocation: "Chicago",
+    title: "Ride the CTA: Chicago trains from the platform",
+    summary: "CTA cars at the station and the platform crush",
+  });
+  const patio = rankIdeaLibraryFields({
+    location: "Andersonville",
+    name: "Andersonville 3.jpg",
+    haystack: "andersonville restaurant patio parked cars chicago street scene",
+    ...keys,
+    strongIdeaTokens: keys.subjectKeys,
+    ideaTokens: ["chicago", "trains", "platform", "cars"],
+    queryTokens: [],
+  });
+  assert.equal(patio, null);
+
+  const train = rankIdeaLibraryFields({
+    location: "Chicago",
+    name: "CTA Train 14.jpeg",
+    haystack: "cta train 14 chicago commuter train rail station train platform public transit",
+    ...keys,
+    strongIdeaTokens: keys.subjectKeys,
+    ideaTokens: ["chicago", "trains", "platform"],
+    queryTokens: [],
+    today: "2026-08-29",
+    intakeDate: "2026-08-29",
+  });
+  assert.equal(train.confidence, "high");
+  assert.ok(train.match_reasons.some((reason) => reason.startsWith("asset_name:") || reason.startsWith("subject:")));
+});
+
+test("neighborhood place on Location or Asset Name stays high", () => {
+  const keys = buildIdeaLibraryKeys({
+    primaryLocation: "Pilsen",
+    title: "Pilsen murals — color on 18th Street",
+    summary: "Color on 18th Street",
+  });
+  const mural = rankIdeaLibraryFields({
+    location: "Pilsen",
+    name: "Pilsen mural 4.jpg",
+    haystack: "pilsen mural 18th street chicago",
+    ...keys,
+    strongIdeaTokens: keys.subjectKeys,
+    ideaTokens: ["pilsen", "murals", "color"],
+    queryTokens: [],
+  });
+  assert.equal(mural.confidence, "high");
+  assert.ok(mural.match_reasons.includes("location:pilsen"));
 });

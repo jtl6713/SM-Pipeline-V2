@@ -3935,11 +3935,13 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
  * Idea ↔ library still matching.
  *
  * Contract for future automation (auto-ideas from new photos):
- * - high  → safe to auto-attach (A3 Location or Asset Name shares a place key)
+ * - high  → safe to auto-attach: named place on Location/Asset Name, or a
+ *   subject word on Location/Asset Name, or two subject words in metadata
  * - medium → show in picker unchecked; do not auto-attach
  * - low/none → omit unless the operator searched
  *
  * Same-day intake alone is never enough — that mixed Andersonville with Pilsen.
+ * One generic summary noun (cars, ride) is never enough — that mixed CTA with Andersonville.
  */
 const IDEA_LIBRARY_STOPWORDS = new Set([
   "the", "and", "for", "with", "from", "this", "that", "into", "over", "onto",
@@ -3954,7 +3956,23 @@ const IDEA_LIBRARY_WEAK_TOKENS = new Set([
   "scene", "scenes", "local", "color", "colorful", "building", "buildings",
   "brick", "sidewalk", "tables", "patio", "storefront", "storefronts",
   "museum", "american", "commercial", "outdoor", "dining", "public",
+  "car", "cars", "ride", "rides", "riding", "look", "looks", "looking",
+  "visitor", "visitors", "actually", "crush", "picture", "pictures",
+  "show", "they", "tap", "before", "first", "timer", "station", "stations",
+  "people", "person", "parked", "traffic",
 ]);
+
+const IDEA_LIBRARY_SHORT_SUBJECTS = new Set(["cta"]);
+
+const IDEA_LIBRARY_NAMED_PLACES = [
+  "andersonville", "bridgeport", "bronzeville", "bucktown", "chinatown",
+  "edgewater", "fulton market", "garfield park", "gold coast", "grant park",
+  "humboldt park", "hyde park", "lakeview", "lincoln park", "lincoln square",
+  "logan square", "the loop", "magnificent mile", "millennium park",
+  "museum campus", "navy pier", "near north side", "old town", "pilsen",
+  "printers row", "ravenswood", "river north", "rogers park", "south loop",
+  "streeterville", "ukrainian village", "uptown", "west loop", "wicker park",
+];
 
 function ideaLibraryTokens(text) {
   return [...new Set(String(text || "")
@@ -3965,18 +3983,67 @@ function ideaLibraryTokens(text) {
 }
 
 function ideaLibraryStrongTokens(tokens) {
-  return tokens.filter((token) => !IDEA_LIBRARY_WEAK_TOKENS.has(token) && token.length >= 4);
+  return tokens.filter((token) => {
+    if (IDEA_LIBRARY_WEAK_TOKENS.has(token)) return false;
+    if (token.length >= 4) return true;
+    return IDEA_LIBRARY_SHORT_SUBJECTS.has(token);
+  });
 }
 
-/** Place keys drive auto-attach. Prefer Primary_Location, then strong title/summary tokens. */
-function ideaLibraryPlaceKeys(idea, query = "") {
-  const fromLocation = ideaLibraryStrongTokens(ideaLibraryTokens(f(idea, "Primary_Location")));
-  const fromCopy = ideaLibraryStrongTokens(ideaLibraryTokens([
-    f(idea, "Candidate_Title"),
-    f(idea, "Idea_Summary"),
-  ].filter(Boolean).join(" ")));
+function ideaLibraryHasToken(text, token) {
+  const hay = String(text || "").toLowerCase();
+  const key = String(token || "").toLowerCase();
+  if (!key) return false;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`).test(hay);
+}
+
+function ideaLibraryTokenForms(token) {
+  const value = String(token || "").toLowerCase();
+  if (!value) return [];
+  const forms = new Set([value]);
+  if (value.endsWith("ies") && value.length > 4) forms.add(`${value.slice(0, -3)}y`);
+  else if (value.endsWith("s") && !value.endsWith("ss") && value.length >= 4) forms.add(value.slice(0, -1));
+  else forms.add(`${value}s`);
+  return [...forms];
+}
+
+function ideaLibraryFieldHits(text, keys) {
+  return (keys || []).filter((key) =>
+    ideaLibraryTokenForms(key).some((form) => ideaLibraryHasToken(text, form))
+  );
+}
+
+function ideaLibraryNamedPlaceKeys(text) {
+  const hay = String(text || "").toLowerCase();
+  const keys = [];
+  for (const place of IDEA_LIBRARY_NAMED_PLACES) {
+    if (!hay.includes(place)) continue;
+    keys.push(...ideaLibraryStrongTokens(ideaLibraryTokens(place)));
+  }
+  return [...new Set(keys)];
+}
+
+function ideaLibraryMatchKeys(idea, query = "") {
+  const primaryLocation = f(idea, "Primary_Location");
+  const title = f(idea, "Candidate_Title");
+  const summary = f(idea, "Idea_Summary");
+  const fromLocation = ideaLibraryStrongTokens(ideaLibraryTokens(primaryLocation));
+  const fromNamed = ideaLibraryNamedPlaceKeys(`${primaryLocation} ${title} ${summary}`);
   const fromQuery = ideaLibraryStrongTokens(ideaLibraryTokens(query));
-  return [...new Set([...fromLocation, ...fromCopy, ...fromQuery])];
+  const placeKeys = [...new Set([...fromLocation, ...fromNamed, ...fromQuery])];
+  const subjectKeys = ideaLibraryStrongTokens(ideaLibraryTokens(`${title} ${summary}`))
+    .filter((token) => !placeKeys.includes(token));
+  return {
+    placeKeys,
+    subjectKeys,
+    scanKeys: [...new Set([...placeKeys, ...subjectKeys])],
+  };
+}
+
+/** Named places plus operator search. Title nouns like cars/ride are subjects, not places. */
+function ideaLibraryPlaceKeys(idea, query = "") {
+  return ideaLibraryMatchKeys(idea, query).placeKeys;
 }
 
 function ideaLibraryAirtableEscape(value) {
@@ -4035,42 +4102,51 @@ function ideaLibraryIsEligibleImage(record) {
   return Boolean(googleDriveFileId(record));
 }
 
-function ideaLibraryRankAsset(record, { placeKeys, strongIdeaTokens, ideaTokens, queryTokens, today }) {
+function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIdeaTokens, ideaTokens, queryTokens, today }) {
   const location = String(f(record, "Location") || "").toLowerCase();
   const name = String(f(record, "Asset Name") || "").toLowerCase();
   const batchId = String(f(record, "Intake_Batch_ID") || "").trim();
   const haystack = ideaLibraryHaystack(record);
-  if (queryTokens.length && !queryTokens.some((token) => haystack.includes(token))) {
+  if (queryTokens.length && !queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) {
     return null;
   }
-  const locationHits = placeKeys.filter((key) => location.includes(key));
-  const nameHits = placeKeys.filter((key) => name.includes(key));
-  const keywordHits = placeKeys.filter((key) => haystack.includes(key));
-  const strongOverlap = strongIdeaTokens.filter((token) => haystack.includes(token)).length;
-  const weakOverlap = ideaTokens.filter((token) => haystack.includes(token)).length;
+  const locationPlaceHits = ideaLibraryFieldHits(location, placeKeys);
+  const namePlaceHits = ideaLibraryFieldHits(name, placeKeys);
+  const locationSubjectHits = ideaLibraryFieldHits(location, subjectKeys);
+  const nameSubjectHits = ideaLibraryFieldHits(name, subjectKeys);
+  const haySubjectHits = ideaLibraryFieldHits(haystack, subjectKeys);
+  const placeAnchor = locationPlaceHits.length > 0 || namePlaceHits.length > 0;
+  const subjectAnchor = locationSubjectHits.length > 0 || nameSubjectHits.length > 0;
+  const subjectTopic = haySubjectHits.length >= 2;
+  const strongOverlap = strongIdeaTokens.filter((token) =>
+    ideaLibraryTokenForms(token).some((form) => ideaLibraryHasToken(haystack, form))
+  ).length;
+  const weakOverlap = ideaTokens.filter((token) => ideaLibraryHasToken(haystack, token)).length;
   const intakeToday = ideaLibraryIntakeDate(record) === today;
   const reasons = [];
-  if (locationHits.length) reasons.push(`location:${locationHits[0]}`);
-  if (nameHits.length) reasons.push(`asset_name:${nameHits[0]}`);
-  if (keywordHits.length) reasons.push(`keywords:${keywordHits[0]}`);
-  if (strongOverlap >= 2 && !locationHits.length && !nameHits.length && !keywordHits.length) reasons.push("topic_overlap");
-  if (intakeToday && (locationHits.length || nameHits.length || keywordHits.length)) reasons.push("intake_today");
+  if (locationPlaceHits.length) reasons.push(`location:${locationPlaceHits[0]}`);
+  if (namePlaceHits.length) reasons.push(`asset_name:${namePlaceHits[0]}`);
+  if (locationSubjectHits.length) reasons.push(`location_subject:${locationSubjectHits[0]}`);
+  if (nameSubjectHits.length) reasons.push(`asset_name:${nameSubjectHits[0]}`);
+  if (subjectTopic) reasons.push(`subject:${haySubjectHits.slice(0, 2).join("+")}`);
+  if (intakeToday && (placeAnchor || subjectAnchor || subjectTopic)) reasons.push("intake_today");
 
   let confidence = "none";
-  if (locationHits.length || nameHits.length || keywordHits.length) confidence = "high";
-  else if (strongOverlap >= 2) confidence = "medium";
+  if (placeAnchor || subjectAnchor || subjectTopic) confidence = "high";
+  else if (haySubjectHits.length === 1 || strongOverlap >= 2) confidence = "medium";
   else if (strongOverlap >= 1) confidence = "low";
 
-  // Default browse: high-confidence place/keyword matches. Search can surface medium/low.
   if (!queryTokens.length && confidence !== "high") return null;
   if (queryTokens.length && confidence === "none") {
     confidence = "low";
     reasons.push("search_hit");
   }
 
-  const score = (locationHits.length ? 40 : 0)
-    + (nameHits.length ? 30 : 0)
-    + (keywordHits.length ? 25 : 0)
+  const score = (locationPlaceHits.length ? 40 : 0)
+    + (namePlaceHits.length ? 30 : 0)
+    + (subjectAnchor ? 30 : 0)
+    + (subjectTopic ? 25 : 0)
+    + (haySubjectHits.length === 1 && !subjectAnchor ? 8 : 0)
     + strongOverlap * 4
     + weakOverlap
     + (intakeToday && confidence === "high" ? 2 : 0);
@@ -4081,7 +4157,6 @@ function ideaLibraryRankAsset(record, { placeKeys, strongIdeaTokens, ideaTokens,
     confidence,
     match_reasons: reasons,
     intake_batch_id: batchId || null,
-    // Auto-check / future auto-attach only at high confidence.
     preselected: confidence === "high",
   };
 }
@@ -4114,20 +4189,21 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   ].filter(Boolean).join(" "));
   const queryTokens = ideaLibraryTokens(query);
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
-  const placeKeys = ideaLibraryPlaceKeys(idea, query);
+  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, query);
   const today = chicagoNowParts().date;
-  const scanLimit = placeKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const scanLimit = scanKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(placeKeys),
+    filterFormula: ideaLibraryFilterFormula(scanKeys),
   });
   const ranked = [];
   for (const record of records) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
+      subjectKeys,
       strongIdeaTokens,
       ideaTokens,
       queryTokens,
@@ -4149,13 +4225,14 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     idea_id: ideaId,
     query: query || null,
     place_keys: placeKeys,
+    subject_keys: subjectKeys,
     match_policy: {
       auto_attach_confidence: "high",
-      high: "Location, Asset Name, Search_Keywords, or AI_Tags shares a place key from the idea",
-      medium: "topic/description overlap only — show, do not auto-attach",
+      high: "Location or Asset Name shares a named place, or a subject word on name/location, or two subject words in metadata",
+      medium: "one subject/topic overlap only — show, do not auto-attach",
       low: "weak/search hit — operator choice only",
       scan_limit: scanLimit,
-      place_filter_active: placeKeys.length > 0,
+      place_filter_active: scanKeys.length > 0,
     },
     suggested: capped.filter((row) => row.preselected),
     matches: capped.filter((row) => !row.preselected),
@@ -12155,20 +12232,21 @@ async function rankStillsForIdeaPhotoWait(env, idea) {
     f(idea, "Primary_Location"),
   ].filter(Boolean).join(" "));
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
-  const placeKeys = ideaLibraryPlaceKeys(idea, "");
+  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
   const today = chicagoNowParts().date;
-  const scanLimit = placeKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const scanLimit = scanKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
     limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(placeKeys),
+    filterFormula: ideaLibraryFilterFormula(scanKeys),
   });
   const ranked = [];
   for (const record of records) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
+      subjectKeys,
       strongIdeaTokens,
       ideaTokens,
       queryTokens: [],
@@ -12201,8 +12279,11 @@ async function unfinishedIntakeBatchIds(env, batchIds) {
   return pending;
 }
 
-async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds) {
-  const existing = item4AssetManifest(requestRecord);
+async function applyLibraryAssetsToProductionRequest(env, requestRecord, mediaIds, { replaceWaitAssets = false } = {}) {
+  const existingAll = item4AssetManifest(requestRecord);
+  const existing = replaceWaitAssets
+    ? existingAll.filter((asset) => String(asset?.source || "") !== "idea_photo_wait")
+    : existingAll;
   const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
   const appended = [];
   for (const mediaId of mediaIds) {
@@ -12313,7 +12394,8 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
     const attached = await applyLibraryAssetsToProductionRequest(
       env,
       requestRecord,
-      decision.selected.map((row) => row.id)
+      decision.selected.map((row) => row.id),
+      { replaceWaitAssets: true }
     );
     requestRecord = attached.record;
     const ideaReady = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
@@ -12331,12 +12413,18 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
     return { ...decision, idea: ideaReady, production_request: requestRecord, match: matchJson };
   }
 
+  const keepHighIds = sortHighConfidenceMatches(matches).map((row) => row.id);
+  if (requestRecord) {
+    const stripped = await applyLibraryAssetsToProductionRequest(env, requestRecord, keepHighIds, { replaceWaitAssets: true });
+    requestRecord = stripped.record;
+  }
   const ideaWaiting = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
     method: "PATCH",
     body: JSON.stringify({
       fields: {
         Studio_Photo_Wait_Status: "Waiting",
         Studio_Photo_Match_JSON: JSON.stringify(matchJson),
+        Studio_Matched_Media_Assets: keepHighIds,
       },
       typecast: true,
     }),
