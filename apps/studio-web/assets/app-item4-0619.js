@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.188-schedule-gap";
+  const BUILD_ID = "item4-0.6.189-insights-watchlist";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -375,7 +375,7 @@
         method: "POST",
         body: JSON.stringify({
           force: true,
-          limit: 6,
+          limit: 10,
           profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
           season: selectedInsightsSeason(),
         }),
@@ -431,7 +431,7 @@
     const platform = String($("operationsWatchlistPlatform")?.value || "instagram").trim();
     const handle = String($("operationsWatchlistHandle")?.value || "").trim().replace(/^@/, "");
     if (!handle) {
-      setOperationsMessage("Enter a handle. Instagram and YouTube are used for timing. TikTok and Facebook are stored for reference.", "error-text");
+      setOperationsMessage("Enter a handle. Instagram and YouTube are timed from public posts. TikTok and Facebook stay on the list for review only.", "error-text");
       return;
     }
     try {
@@ -9944,12 +9944,26 @@
       target.innerHTML = "";
       return;
     }
-    target.innerHTML = accounts.map((account, index) => `
+    const order = ["instagram", "youtube", "tiktok", "facebook"];
+    const groups = new Map();
+    accounts.forEach((account, index) => {
+      const platform = String(account.platform || "other").toLowerCase();
+      if (!groups.has(platform)) groups.set(platform, []);
+      groups.get(platform).push({ account, index });
+    });
+    const sections = order.filter((platform) => groups.has(platform)).concat(
+      [...groups.keys()].filter((platform) => !order.includes(platform))
+    );
+    target.innerHTML = sections.map((platform) => {
+      const rows = groups.get(platform) || [];
+      const timed = platform === "instagram" || platform === "youtube";
+      const cards = rows.map(({ account, index }) => `
       <article class="ops-profile-card">
-        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.platform)}${account.profile ? ` · ${escapeHtml(account.profile)}` : ""}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
+        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
-      </article>
-    `).join("");
+      </article>`).join("");
+      return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)}${timed ? " · timed" : " · review only"} · ${rows.length}</h4>${cards}</section>`;
+    }).join("");
     target.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (!canEdit) return;

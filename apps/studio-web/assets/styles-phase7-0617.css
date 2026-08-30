@@ -2291,6 +2291,10 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   }
 }
 
+.ops-watchlist-group{display:grid;gap:8px;margin:0 0 16px}
+.ops-watchlist-group h4{margin:0;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#4b5d73}
+.ops-watchlist-group .ops-profile-card{margin:0}
+
 .heading-actions .pipeline-default-schedule-toggle{
   flex:0 0 auto;
   margin:0;
