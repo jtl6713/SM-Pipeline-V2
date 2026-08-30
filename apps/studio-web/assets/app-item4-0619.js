@@ -9558,7 +9558,10 @@
           }
           button.disabled = true;
           try {
-            await api(`/api/music/${encodeURIComponent(id)}`, { method: "DELETE" });
+            await api(`/api/music/${encodeURIComponent(id)}`, {
+              method: "DELETE",
+              body: JSON.stringify({}),
+            });
             invalidateMusicCatalog();
             setMusicUploadMessage(`Deleted ${name}.`, "success");
             await loadMusic();
