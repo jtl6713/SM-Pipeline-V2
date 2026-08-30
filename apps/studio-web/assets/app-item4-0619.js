@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.193-autonomous-defaults";
+  const BUILD_ID = "item4-0.6.194-autonomous-through";
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
     return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
@@ -7818,7 +7818,7 @@
     ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
     prVideoDuration: "Requested video length in seconds for slideshows and rendered video outputs. Autonomous runs stay at 30 seconds.",
     prVoiceoverDuration: "Spoken voiceover length in seconds. Autonomous runs use half the video duration (15 seconds of a 30-second slideshow).",
-    prMusicStart: "Seconds into the selected track where the bed should begin.",
+    prMusicStart: "Seconds into the song file to skip before playback. The video still starts at 0:00; this only fast-forwards the track so you can skip the intro.",
     prVideoClipMode: "How many clips Studio should aim for in a video.",
     prVideoClipExact: "Exact number of clips to use in the video.",
     prVideoClipMin: "Minimum clip count when using a target range.",

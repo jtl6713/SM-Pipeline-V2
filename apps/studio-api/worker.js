@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.189-autonomous-defaults",
+          version: "0.10.190-autonomous-through-approve",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -6823,9 +6823,10 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
       .filter(Boolean)
       .join(" | ")
       .slice(0, 10000);
-  } else if (manifest.plan_complete && !planPending.length) {
+  } else if (manifest.plan_complete) {
     // Plan ratios (usually 9:16) are enough for packaging / Remotion.
-    // Extra cover ratios such as YouTube 16:9 may keep finishing in the background.
+    // Extra cover ratios such as YouTube 16:9, or leftover plan rebuild jobs,
+    // may stay Pending in the background. Do not block Ready / Approve on them.
     status = "Ready";
   } else if (manifest.complete) {
     status = "Ready";
@@ -6969,7 +6970,7 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
 
 async function ensureItem4VariantsReadyForPromotion(env, recordId, record, authorization, ctx = null) {
   if (studioIsFinishedPassthrough(record) || studioFinishedVariantsSkipped(record)) return record;
-  if (String(f(record, "Studio_Variant_Status") || "").trim() === "Ready") return record;
+  if (autonomousPlanVariantsReady(record)) return record;
   if (String(f(record, "Studio_Output_Plan_Status") || "").trim() !== "Ready") return record;
   if (!item4AssetManifest(record).length) return record;
 
@@ -24456,15 +24457,25 @@ async function createAutonomousIdea(env, profile, pick) {
   });
 }
 
+function autonomousPlanVariantsReady(record, reconciled = null) {
+  const current = reconciled?.record || record;
+  if (String(f(current, "Studio_Variant_Status") || "").trim() === "Ready") return true;
+  if (reconciled?.status === "Ready") return true;
+  const manifest = reconciled?.manifest || item4ParseJson(f(current, "Studio_Variant_Manifest_JSON"), null);
+  const plan = item4ParseJson(f(current, "Studio_Output_Plan_JSON"), null);
+  return item4VariantManifestPlanComplete(manifest, plan, item4AssetManifest(current));
+}
+
 async function waitAutonomousVariantsReady(env, recordId, ctx, maxMs = 80000) {
   const deadline = Date.now() + maxMs;
   let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   while (Date.now() < deadline) {
-    const status = String(f(record, "Studio_Variant_Status") || "").trim();
-    if (status === "Ready") return record;
-    if (status === "Error") {
-      throw new HttpError(409, String(f(record, "Studio_Variant_Error") || "Platform variants failed"));
+    const reconciled = await item4ReconcileVariants(env, recordId, record).catch(() => null);
+    if (reconciled?.record) record = reconciled.record;
+    if (String(f(record, "Studio_Variant_Status") || "").trim() === "Error" || reconciled?.status === "Error") {
+      throw new HttpError(409, String(f(record, "Studio_Variant_Error") || reconciled?.error || "Platform variants failed"));
     }
+    if (autonomousPlanVariantsReady(record, reconciled)) return record;
     try { await item4ResumePendingVariants(env, recordId, record); } catch {}
     try { await item4DrainAllPendingWork(env, { maxMs: 15000 }); } catch {}
     await new Promise((resolve) => setTimeout(resolve, 4000));
@@ -24507,12 +24518,15 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
     const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
     await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
     let current = await waitAutonomousVariantsReady(env, requestId, ctx);
-    if (String(f(current, "Studio_Variant_Status") || "").trim() !== "Ready") {
+    if (!autonomousPlanVariantsReady(current)) {
       return { waiting: true, production_request_id: requestId, idea_id: idea.id };
     }
     const preflight = await item4SourceToProductionBridgePreflight(env, current, idea);
     if (!preflight.ready) {
-      throw new HttpError(409, `Autonomous bridge not ready: ${(preflight.issues || []).join(" ")}`);
+      const blockers = (preflight.issues || []).filter((issue) => !/preview image is still catching up/i.test(String(issue || "")));
+      if (blockers.length) {
+        throw new HttpError(409, `Autonomous bridge not ready: ${blockers.join(" ")}`);
+      }
     }
     const promoteCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
     await promoteProductionRequestViaI3I4(promoteCall.request, env, promoteCall.url, authorization, ctx);
@@ -24523,7 +24537,7 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
   };
 
   current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
-  const variantsReady = String(f(current, "Studio_Variant_Status") || "").trim() === "Ready";
+  const variantsReady = autonomousPlanVariantsReady(current);
   if (variantsReady || options.awaitFinish || !ctx?.waitUntil) {
     return continueAfterPlan();
   }
