@@ -930,7 +930,7 @@
  </section>
 
  <section id="page-music" class="page">
- <div class="page-heading"><div><span class="eyebrow">Background audio</span><h1>Music library</h1><p>Add MP3 tracks, star favorites so they sit at the top of Production music dropdowns, then preview a bed before you pick it.</p></div><div class="heading-actions"><button type="button" class="primary-button" id="musicAddButton">+ Add MP3</button><button class="secondary-button" data-refresh="music">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow">Background audio</span><h1>Music library</h1><p>Add MP3 tracks, star favorites so they sit at the top of Production music dropdowns, preview a bed, or delete a track that nothing still uses.</p></div><div class="heading-actions"><button type="button" class="primary-button" id="musicAddButton">+ Add MP3</button><button class="secondary-button" data-refresh="music">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="musicUploadPanel">
  <div class="panel-heading"><div><h2>Add tracks</h2><p>Drop MP3 files here. They are stored in Google Drive Assets/Music, registered as Media Assets, and become selectable in Production.</p></div></div>
  <div class="music-upload-body">
@@ -1214,6 +1214,7 @@
  <ul>
  <li>Browse and preview tracks before or during Production.</li>
  <li>Use + Add MP3 or drop files on this page. New tracks show up in Production music pickers.</li>
+ <li>Delete removes the Airtable row and trashes the Drive file. Studio blocks delete if a Production Request or Content Item still selects that track.</li>
  <li>It does not start a render. Production still decides Include background music Yes/No and the mix in Pipeline review.</li>
  </ul>
  <button type="button" class="primary-button" data-open-page="music">Go to Music Library</button>
@@ -1397,9 +1398,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.183-idea-photo-range"></script>
- <script src="/assets/ez-plan.js?v=0.6.183-idea-photo-range"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.183-idea-photo-range"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.183";</script>
+ <script src="/assets/config.js?v=0.6.184-music-delete"></script>
+ <script src="/assets/ez-plan.js?v=0.6.184-music-delete"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.184-music-delete"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.184";</script>
 </body>
 </html>

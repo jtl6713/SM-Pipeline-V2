@@ -55,3 +55,16 @@ def ingest_studio_music(*, content: bytes, filename: str) -> dict[str, Any]:
         **trimmed.public_dict(),
         **trimmed.airtable_fields(),
     }
+
+
+def trash_studio_music(*, file_id: str) -> dict[str, Any]:
+    drive_id = str(file_id or "").strip()
+    if not drive_id:
+        raise ValueError("google_drive_file_id is required")
+    drive = GoogleDriveClient()
+    result = drive.trash_file(drive_id)
+    return {
+        "ok": True,
+        "google_drive_file_id": drive_id,
+        "trashed": bool(result.get("trashed")),
+    }

@@ -9532,7 +9532,7 @@
         const preview = r.preview_url || r.google_drive_url;
         const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.file_extension || "mp3");
         const favored = Boolean(r.favorite);
-        return `<article class="music-card${favored ? " is-favorite" : ""}"><div class="music-card-head"><h3>${value(r.display_name || r.name)}</h3><button type="button" class="music-favorite-button" data-music-favorite="${escapeHtml(r.id)}" data-favorite="${favored ? "true" : "false"}" aria-pressed="${favored ? "true" : "false"}" aria-label="${favored ? "Remove from favorites" : "Add to favorites"}">${favored ? "★" : "☆"}</button></div>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type || "audio/mpeg")} · ${sizeLabel} · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url && !r.studio_uploaded ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : (r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : "")}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span></div></article>`;
+        return `<article class="music-card${favored ? " is-favorite" : ""}"><div class="music-card-head"><h3>${value(r.display_name || r.name)}</h3><button type="button" class="music-favorite-button" data-music-favorite="${escapeHtml(r.id)}" data-favorite="${favored ? "true" : "false"}" aria-pressed="${favored ? "true" : "false"}" aria-label="${favored ? "Remove from favorites" : "Add to favorites"}">${favored ? "★" : "☆"}</button></div>${r.display_name && r.display_name !== r.name ? `<div class="raw-filename">${value(r.name)}</div>` : ""}<div class="music-meta">${value(r.mime_type || "audio/mpeg")} · ${sizeLabel} · ${value(r.rights_status)}</div><div class="subtle">${value(r.description, "No description yet")}</div>${preview ? `<audio class="music-preview" controls preload="metadata" src="${escapeHtml(preview)}"></audio>` : `<div class="subtle">No preview URL available.</div>`}<div class="music-actions">${r.google_drive_url && !r.studio_uploaded ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open source</a>` : (r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : "")}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button music-delete-button" data-music-delete="${escapeHtml(r.id)}" data-music-name="${escapeHtml(r.display_name || r.name || "this track")}">Delete</button></div></article>`;
       }).join("");
       bindMusicPlayers(target);
       target.querySelectorAll("[data-music-favorite]").forEach((button) => {
@@ -9542,6 +9542,25 @@
           button.disabled = true;
           try {
             await setMusicFavorite(id, next);
+            await loadMusic();
+          } catch (error) {
+            setMusicUploadMessage(error.message, "error-text");
+            button.disabled = false;
+          }
+        });
+      });
+      target.querySelectorAll("[data-music-delete]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = button.dataset.musicDelete;
+          const name = button.dataset.musicName || "this track";
+          if (!window.confirm(`Delete “${name}” from the music library and Google Drive?\n\nThis is permanent. If a Production Request or Content Item still has this track selected, Studio will refuse and you should unpick it first.`)) {
+            return;
+          }
+          button.disabled = true;
+          try {
+            await api(`/api/music/${encodeURIComponent(id)}`, { method: "DELETE" });
+            invalidateMusicCatalog();
+            setMusicUploadMessage(`Deleted ${name}.`, "success");
             await loadMusic();
           } catch (error) {
             setMusicUploadMessage(error.message, "error-text");

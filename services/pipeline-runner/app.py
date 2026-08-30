@@ -8,7 +8,7 @@ from config import StageRequest, load_settings
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
-from studio_music.processor import ingest_studio_music
+from studio_music.processor import ingest_studio_music, trash_studio_music
 from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
 
@@ -292,6 +292,24 @@ def run_studio_music_library():
         result.get("google_drive_file_id"),
     )
     return jsonify(result), 201
+
+
+@app.post("/jobs/studio-music-library-delete")
+def run_studio_music_library_delete():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    file_id = str(payload.get("google_drive_file_id") or payload.get("file_id") or "").strip()
+    try:
+        result = trash_studio_music(file_id=file_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-music-library-delete failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info("job=studio-music-library-delete drive=%s", result.get("google_drive_file_id"))
+    return jsonify(result), 200
 
 
 @app.post("/jobs/studio-audio-leading-silence")
