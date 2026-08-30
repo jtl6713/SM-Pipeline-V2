@@ -2441,12 +2441,14 @@ async function listStudioContentProfiles(request, env, authorization) {
 function cleanIdeaCreatePayload(payload) {
   const title = String(payload?.title || "").trim();
   const summary = String(payload?.summary || "").trim();
+  const primaryLocation = String(payload?.primary_location || "").trim();
 
   if (!title) throw new HttpError(400, "Idea title is required");
   if (title.length > 160) throw new HttpError(400, "Idea title must be 160 characters or fewer");
   if (summary.length > 5000) throw new HttpError(400, "Idea summary must be 5000 characters or fewer");
+  if (primaryLocation.length > 200) throw new HttpError(400, "Primary location must be 200 characters or fewer");
 
-  return { title, summary };
+  return { title, summary, primary_location: primaryLocation };
 }
 
 async function createIdea(request, env, authorization) {
@@ -2473,10 +2475,11 @@ async function createIdea(request, env, authorization) {
     fields: {
       Candidate_Title: input.title,
       Idea_Summary: input.summary || "",
-      Primary_Location: "",
+      Primary_Location: input.primary_location || "",
     },
   });
-  if (inferredLocation.name) fields.Primary_Location = inferredLocation.name;
+  if (input.primary_location) fields.Primary_Location = input.primary_location;
+  else if (inferredLocation.name) fields.Primary_Location = inferredLocation.name;
 
   const created = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",

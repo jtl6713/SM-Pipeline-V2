@@ -192,12 +192,15 @@
     }
     const n = Math.max(0, Number(answers.photoCount) || 0);
     if (n) return n;
+    const max = Math.max(0, Number(answers.photoCountMax) || 0);
+    if (max) return max;
     if (kind === EZ_INPUTS.MULTIPLE_PHOTOS || kind === EZ_INPUTS.MULTIPLE_AI) return 4;
     return 1;
   }
 
   function ezWizardExpectedUploads(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
+    if (answers.photoWait) return 0;
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
     if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO) return 1;
     if (kind === EZ_INPUTS.FINISHED_STILLS) return Math.max(1, Number(answers.photoCount) || 1);
