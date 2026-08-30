@@ -3120,7 +3120,9 @@
     else if (answers.start === "mixed") bits.push("Mixed photos + AI");
     if (answers.inputKind === "single-photo") bits.push("1 photo");
     if (answers.inputKind === "single-ai") bits.push("1 AI image");
-    if (answers.inputKind === "multiple-photos" && answers.photoCount) bits.push(`${answers.photoCount} photos`);
+    if (answers.inputKind === "multiple-photos" && answers.photoWait && answers.photoCountMin && answers.photoCountMax) {
+      bits.push(`wait ${answers.photoCountMin}–${answers.photoCountMax} photos`);
+    } else if (answers.inputKind === "multiple-photos" && answers.photoCount) bits.push(`${answers.photoCount} photos`);
     if (answers.inputKind === "multiple-ai" && answers.photoCount) bits.push(`${answers.photoCount} AI images`);
     if (answers.inputKind === "mixed") bits.push(`${answers.manualCount || 0} yours · ${answers.aiCount || 0} AI`);
     if (answers.packageId) {
@@ -3164,10 +3166,14 @@
       input.checked = planned.platforms.includes(input.value);
     });
     syncEzYouTubeAvailability(false);
-    if ($("ezCarouselImageMode")) $("ezCarouselImageMode").value = helpers.ezImageModeFromWizard(answers.inputKind);
-    if ($("ezCarouselSlideMode")) $("ezCarouselSlideMode").value = "Exact";
-    if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = String(count);
-    ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact"].forEach((id) => ezDirty.add(id));
+    if ($("ezCarouselImageMode")) $("ezCarouselImageMode").value = answers.photoWait
+      ? "Manual Upload"
+      : helpers.ezImageModeFromWizard(answers.inputKind);
+    if ($("ezCarouselSlideMode")) $("ezCarouselSlideMode").value = answers.photoWait ? "Target range" : "Exact";
+    if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = answers.photoWait ? "" : String(count);
+    if ($("ezCarouselSlideMin")) $("ezCarouselSlideMin").value = answers.photoWait ? String(answers.photoCountMin || "") : "";
+    if ($("ezCarouselSlideMax")) $("ezCarouselSlideMax").value = answers.photoWait ? String(answers.photoCountMax || "") : "";
+    ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax"].forEach((id) => ezDirty.add(id));
     ezPinnedExtraOutputs = planned.extras || [];
     applyEzExtraOutputs(ezPinnedExtraOutputs);
     const expected = helpers.ezWizardExpectedUploads(answers);
@@ -3232,10 +3238,10 @@
       carousel_image_mode: helpers?.ezImageModeFromWizard?.((ezWizardPending || ezWizardAnswers)?.inputKind)
         || $("ezCarouselImageMode")?.value
         || "Manual Upload",
-      carousel_slide_count_mode: slideMode,
+      carousel_slide_count_mode: (ezWizardPending || ezWizardAnswers)?.photoWait ? "Target range" : slideMode,
       carousel_slide_count_exact: $("ezCarouselSlideExact")?.value || (slideMode === "Exact" ? count : ""),
-      carousel_slide_count_min: $("ezCarouselSlideMin")?.value || "",
-      carousel_slide_count_max: $("ezCarouselSlideMax")?.value || "",
+      carousel_slide_count_min: (ezWizardPending || ezWizardAnswers)?.photoCountMin || $("ezCarouselSlideMin")?.value || "",
+      carousel_slide_count_max: (ezWizardPending || ezWizardAnswers)?.photoCountMax || $("ezCarouselSlideMax")?.value || "",
       selected_music_asset_id: $("ezAudioTrack")?.value || "",
       production_notes: mergeEzProductionNotes(),
       ...selectedRequestVoice(),
@@ -3285,6 +3291,7 @@
       ideaKind: "What images should this idea use?",
       photoKind: "Single photo, or several?",
       photoCount: "How many photos do you prefer?",
+      photoRange: "What is the minimum and maximum number of photos?",
       aiKind: "Single AI image, or several?",
       aiCount: "How many AI images do you prefer?",
       mixManual: "How many of your photos?",
@@ -3382,9 +3389,11 @@
       prompt.textContent = "What’s the idea?";
       renderEzWizardChips([]);
       ezWizardShowForm(
-        `<label>Title<input name="title" maxlength="160" required placeholder="e.g. Chicago Theatre marquee at dusk"></label>
+        `<label>Title<input name="title" maxlength="160" required placeholder="e.g. Ride the CTA: Chicago trains from the platform"></label>
          <label>Summary <span style="text-transform:none;letter-spacing:0;font-weight:600;opacity:.7">(optional)</span>
          <textarea name="summary" maxlength="5000" placeholder="What should this content be about?"></textarea></label>
+         <label>Primary location <span style="text-transform:none;letter-spacing:0;font-weight:600;opacity:.7">(optional)</span>
+         <input name="location" maxlength="200" placeholder="e.g. Chicago"></label>
          <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
         (data) => {
           const title = String(data.get("title") || "").trim();
@@ -3392,7 +3401,11 @@
             ezWizardSetMessage("Enter an idea title.", "error-text");
             return;
           }
-          ezWizardPick(title, { ideaTitle: title, ideaSummary: String(data.get("summary") || "").trim() }, "ideaKind");
+          ezWizardPick(title, {
+            ideaTitle: title,
+            ideaSummary: String(data.get("summary") || "").trim(),
+            ideaLocation: String(data.get("location") || "").trim(),
+          }, "ideaKind");
         }
       );
       return;
@@ -3402,7 +3415,8 @@
       prompt.textContent = "What images should this idea use?";
       renderEzWizardChips([
         { label: "Single photo I’ll upload", onClick: () => ezWizardPick("Single photo I’ll upload", { inputKind: "single-photo", photoCount: 1 }, "package") },
-        { label: "Multiple photos I’ll upload", onClick: () => ezWizardPick("Multiple photos I’ll upload", { inputKind: "multiple-photos" }, "photoCount") },
+        { label: "Multiple photos I’ll upload", onClick: () => ezWizardPick("Multiple photos I’ll upload", { inputKind: "multiple-photos", photoWait: false }, "photoCount") },
+        { label: "Wait for matching library photos", onClick: () => ezWizardPick("Wait for matching library photos", { inputKind: "multiple-photos", photoWait: true }, "photoRange") },
         { label: "Single AI image", onClick: () => ezWizardPick("Single AI image", { inputKind: "single-ai", photoCount: 1 }, "package") },
         { label: "Multiple AI images", onClick: () => ezWizardPick("Multiple AI images", { inputKind: "multiple-ai" }, "aiCount") },
         { label: "Mix of my photos and AI", onClick: () => ezWizardPick("Mix of my photos and AI", { inputKind: "mixed" }, "mixManual") },
@@ -3427,6 +3441,30 @@
         { label: "Single AI image", onClick: () => ezWizardPick("Single AI image", { inputKind: "single-ai", photoCount: 1 }, "package") },
         { label: "Multiple AI images", onClick: () => ezWizardPick("Multiple AI images", { inputKind: "multiple-ai" }, "aiCount") },
       ]);
+      return;
+    }
+
+    if (ezWizardStep === "photoRange") {
+      prompt.textContent = "What is the minimum and maximum number of photos?";
+      renderEzWizardChips([
+        { label: "2–5", onClick: () => ezWizardPick("2–5", { photoWait: true, photoCountMin: 2, photoCountMax: 5, photoCount: 5 }, "package") },
+        { label: "3–8", onClick: () => ezWizardPick("3–8", { photoWait: true, photoCountMin: 3, photoCountMax: 8, photoCount: 8 }, "package") },
+        { label: "3–10", onClick: () => ezWizardPick("3–10", { photoWait: true, photoCountMin: 3, photoCountMax: 10, photoCount: 10 }, "package") },
+      ]);
+      ezWizardShowForm(
+        `<label>Minimum<input name="min" type="number" min="1" max="20" step="1" value="2" required></label>
+         <label>Maximum<input name="max" type="number" min="1" max="20" step="1" value="5" required></label>
+         <div class="ez-wizard-form-actions"><button type="submit">Use this range</button></div>`,
+        (data) => {
+          const min = Math.round(Number(data.get("min")));
+          const max = Math.round(Number(data.get("max")));
+          if (!Number.isFinite(min) || !Number.isFinite(max) || min < 1 || max > 20 || min > max) {
+            ezWizardSetMessage("Enter a minimum and maximum between 1 and 20, with min at or below max.", "error-text");
+            return;
+          }
+          ezWizardPick(`${min}–${max}`, { photoWait: true, photoCountMin: min, photoCountMax: max, photoCount: max }, "package");
+        }
+      );
       return;
     }
 
@@ -3591,7 +3629,11 @@
         } else if (answers.ideaTitle) {
           const result = await api("/api/ideas", {
             method: "POST",
-            body: JSON.stringify({ title: answers.ideaTitle, summary: answers.ideaSummary || "" }),
+            body: JSON.stringify({
+              title: answers.ideaTitle,
+              summary: answers.ideaSummary || "",
+              primary_location: answers.ideaLocation || "",
+            }),
           });
           await loadIdeas();
           idea = result.record;
@@ -3599,6 +3641,31 @@
         if (!idea?.id) {
           enterEzIdeaPath();
           setIdeaFormOpen(true, { mode: "manual" });
+          return;
+        }
+        if (answers.photoWait && answers.photoCountMin && answers.photoCountMax) {
+          const planned = applyEzWizardAnswersToIntake();
+          const platforms = planned?.platforms?.length ? planned.platforms : ["Instagram", "Facebook", "TikTok", "YouTube"];
+          const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/promote`, {
+            method: "POST",
+            body: JSON.stringify({
+              content_type: planned?.master_content_type || "Photo Set",
+              platforms,
+              include_voiceover: $("ezAudioVoiceover")?.value || "Use Profile Default",
+              include_background_music: $("ezAudioMusic")?.value || "Use Profile Default",
+              include_thumbnail: $("ezThumbnail")?.value || "Use Profile Default",
+              carousel_slide_count_mode: "Target range",
+              carousel_slide_count_min: answers.photoCountMin,
+              carousel_slide_count_max: answers.photoCountMax,
+              carousel_image_mode: "Wait for matching photos",
+            }),
+          });
+          resetEzWizard({ silent: true });
+          switchToPage("ideas");
+          updateIdeaDrawer(result.record || idea);
+          openIdeaDrawer(result.record || idea);
+          setManageMessage(result.message || `Approved. Waiting for ${answers.photoCountMin}–${answers.photoCountMax} matching photos.`, "success");
+          await loadIdeas();
           return;
         }
         await openProductionRequestForIdea(idea);
