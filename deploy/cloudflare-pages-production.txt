@@ -285,3 +285,5 @@ Autonomous produce Pages deploy: 2026-08-30 - Operations toggle and Run autonomo
 Autonomous running button Pages deploy: 2026-08-30 - Run autonomous now shows Running… and resumes existing drafts instead of looking idle. UI 0.6.192-autonomous-running.
 
 Autonomous defaults Pages deploy: 2026-08-30 - Section 6 sets video duration, voiceover duration, and music start; frame previews use crop CDN first. UI 0.6.193-autonomous-defaults.
+
+Autonomous through Pages deploy: 2026-08-30 - Relabel music skip-into-song; video still starts at 0:00. UI 0.6.194-autonomous-through.

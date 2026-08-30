@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.193-autonomous-defaults">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.194-autonomous-through">
 </head>
 <body>
  <header class="topbar">
@@ -279,7 +279,7 @@
  <label class="form-field"><span>Voiceover duration (seconds)</span>
  <input id="ezVoiceoverDuration" type="number" min="1" max="600" step=".5" value="15">
  </label>
- <label class="form-field"><span>Music starts at (seconds)</span>
+ <label class="form-field"><span>Skip into song (seconds)</span>
  <input id="ezMusicStart" type="number" min="0" max="3600" step=".1" value="0">
  </label>
  <label class="form-field"><span>Video after voiceover</span>
@@ -741,10 +741,10 @@
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Video duration (seconds)</span><input type="number" id="prVideoDuration" min="5" max="600" value="30"></label>
  <label class="form-field"><span>Voiceover duration (seconds)</span><input type="number" id="prVoiceoverDuration" min="1" max="600" step=".5" value="15"></label>
- <label class="form-field"><span>Music starts at (seconds)</span><input type="number" id="prMusicStart" min="0" max="3600" step=".1" value="0"></label>
+ <label class="form-field"><span>Skip into song (seconds)</span><input type="number" id="prMusicStart" min="0" max="3600" step=".1" value="0"></label>
  <label class="form-field"><span>Video after voiceover</span><input type="number" id="prVoiceoverTail" min="0" max="300" step=".5" value="15"></label>
  </div>
- <em class="ez-option-hint">Autonomous photo slideshows are 30 seconds. Voiceover defaults to half of that (15 seconds). Music start is the in-point in the selected track. The leftover length stays picture and music after narration.</em>
+ <em class="ez-option-hint">Autonomous photo slideshows are 30 seconds. Voiceover defaults to half of that (15 seconds). Skip into song jumps forward in the track while the video still starts at 0:00, so you can skip a long intro. The leftover length stays picture and music after narration.</em>
  <div class="ez-audio-toggles">
  <label class="form-field"><span>Thumbnail / cover</span><select id="prThumbnail"><option>Use Profile Default</option><option value="Yes" selected>AI generated</option><option value="Use photo frame">Use a photo frame</option><option value="No">No</option></select></label>
  <em class="ez-option-hint">Rendered Reels, Shorts, Slideshow videos, and video drafts get the 3D still as the platform grid cover where the API allows it. Stories and TikTok drafts do not accept a separate cover.</em>
@@ -1417,9 +1417,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.193-autonomous-defaults"></script>
- <script src="/assets/ez-plan.js?v=0.6.193-autonomous-defaults"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.193-autonomous-defaults"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.193";</script>
+ <script src="/assets/config.js?v=0.6.194-autonomous-through"></script>
+ <script src="/assets/ez-plan.js?v=0.6.194-autonomous-through"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.194-autonomous-through"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.194";</script>
 </body>
 </html>
