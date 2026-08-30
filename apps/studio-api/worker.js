@@ -183,7 +183,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.177-insights-watchlist",
+          version: "0.10.179-review-ready",
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
@@ -1389,12 +1389,35 @@ function studioNativeStillsNeedLettering(record) {
   });
 }
 
+function studioOutputNeedsGridCoverForReview(record) {
+  const platform = String(f(record, "Platform") || "").trim();
+  const type = String(f(record, "Studio_Output_Type") || f(record, "Platform_Output_Type") || "").trim();
+  if (/story/i.test(type)) return false;
+  if (platform === "Instagram" && /single image|instagram feed post/i.test(type) && !/carousel|reel/i.test(type)) return false;
+  if (platform === "Facebook" && /single image|facebook post/i.test(type) && !/reel|multi-image|photo set/i.test(type)) return false;
+  return true;
+}
+
+function studioOutputHasReviewCover(record) {
+  if (!studioOutputNeedsGridCoverForReview(record)) return true;
+  return Boolean(studioAiThumbnailUrl(f(record, "Thumbnail_URL")));
+}
+
 function studioOutputHasReviewableDeliverable(record) {
-  if (studioOutputIsNativePhoto(record)) return true;
-  if (String(f(record, "Final_File_URL") || "").trim()) return true;
-  // A stamped AI cover or leftover preview is not a Remotion deliverable.
-  // Video routes stay incomplete until Final_File_URL exists.
-  return false;
+  if (studioOutputIsNativePhoto(record)) {
+    const slides = (f(record, "Carousel Slides") || []).length;
+    const clips = selectedVisualClips(record);
+    if (!slides && !clips.length) return false;
+    if (studioNativeStillsNeedLettering(record)) return false;
+    if (!studioOutputHasReviewCover(record)) return false;
+    const preview = String(f(record, "Studio_Preview_URL") || "").trim();
+    const firstClip = studioClipPublicCdnUrl(clips[0]);
+    if (!slides && !preview && !firstClip && !studioNativeClipsArePublicCdn(record)) return false;
+    return true;
+  }
+  if (!String(f(record, "Final_File_URL") || "").trim()) return false;
+  if (!studioOutputHasReviewCover(record)) return false;
+  return true;
 }
 
 function studioClipPublicCdnUrl(clipOrUrl) {
@@ -1724,8 +1747,19 @@ function normalizedOutputState(record) {
   const readyForReviewIntent = has("Output_Status", "ready for review")
     || has("Review_Status", "pending")
     || has("Review_Status", "review sent");
+  const inProductionEarly = has("Output_Status", "in production");
+  const hasFinishedFileEarly = Boolean(String(f(record, "Final_File_URL") || "").trim());
+  const remotionFinishedEarly = has("Render_Status", "rendered") && (hasFinishedFileEarly || Boolean(String(f(record, "Studio_Preview_URL") || "").trim()));
   // Review-ready native stills / finished files beat leftover retry flags and stale error text.
-  if (readyForReviewIntent && studioOutputHasReviewableDeliverable(record) && !outputDeadEarly && !publishDeadEarly) {
+  // Stale Review Sent must not win while Remotion is still In Production, or while
+  // lettering / the 3D cover is still missing.
+  if (
+    readyForReviewIntent
+    && studioOutputHasReviewableDeliverable(record)
+    && !outputDeadEarly
+    && !publishDeadEarly
+    && (!inProductionEarly || remotionFinishedEarly || studioOutputIsNativePhoto(record))
+  ) {
     return "Ready for Review";
   }
 
@@ -1774,6 +1808,10 @@ function normalizedOutputState(record) {
     if (has("Render_Status", "rendered") && studioOutputHasReviewableDeliverable(record)) return "Ready for Review";
   }
   if (has("Render_Status", "rendering") || has("FB_Slideshow_Status", "rendering") || has("FB_Slideshow_Status", "starting render")) return "Rendering";
+  if (studioNativeStillsNeedLettering(record)) return "Rendering";
+  if ((readyForReviewIntent || has("Render_Status", "rendered") || has("Render_Status", "native photo route")) && !studioOutputHasReviewableDeliverable(record)) {
+    return "Preparing Assets";
+  }
   if (inProduction && !remotionFinished && !studioOutputIsNativePhoto(record)) {
     const remotionStarted = Boolean(String(f(record, "Remotion_Job_ID") || "").trim());
     if (has("Render_Status", "ready for render") || remotionStarted) return "Rendering";
@@ -10500,6 +10538,18 @@ async function studioInsightsPostsForView(env, { accounts, theme, platform, seas
 }
 
 const STUDIO_HEATMAP_DAYS = Object.freeze(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
+const STUDIO_HEATMAP_WINDOWS = Object.freeze([
+  "00:00-06:00",
+  "06:00-08:00",
+  "08:00-10:00",
+  "10:00-12:00",
+  "12:00-14:00",
+  "14:00-16:00",
+  "16:00-18:00",
+  "18:00-20:00",
+  "20:00-22:00",
+  "22:00-00:00",
+]);
 const STUDIO_SIMILAR_SEEDS = Object.freeze([
   { platform: "instagram", handle: "tatiana.pesotskaya", source: "joseph", profile: "chicago" },
   { platform: "instagram", handle: "charmaine.sky", source: "joseph", profile: "chicago" },
@@ -10733,6 +10783,25 @@ function studioBuildSimilarHeatmap(posts) {
   return { buckets, suggested, sample_size: (posts || []).length };
 }
 
+function studioOwnScheduleHeatmap(byPlatform) {
+  const map = new Map();
+  let total = 0;
+  for (const [platform, times] of Object.entries(byPlatform || {})) {
+    for (const ms of times || []) {
+      const parts = studioChicagoWeekdayHour(new Date(ms).toISOString());
+      if (!parts) continue;
+      const window = studioHeatmapWindow(parts.hour);
+      const key = `${parts.day}|${window}`;
+      const current = map.get(key) || { day: parts.day, window, count: 0, platforms: [] };
+      current.count += 1;
+      if (!current.platforms.includes(platform)) current.platforms.push(platform);
+      map.set(key, current);
+      total += 1;
+    }
+  }
+  return { total, buckets: [...map.values()] };
+}
+
 function studioMergeSeedWatchlist(accounts) {
   const have = new Set((accounts || []).map((row) => studioSimilarAccountKey(row.platform, row.handle)));
   const extra = STUDIO_SIMILAR_SEEDS.filter((row) => !have.has(studioSimilarAccountKey(row.platform, row.handle)));
@@ -10837,7 +10906,7 @@ function studioInsightsBuildOverview({ posts, accounts, timed, reference, cache,
   };
 }
 
-function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts: providedPosts }) {
+function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts: providedPosts, own_schedule: providedOwn }) {
   const timed = studioTimedWatchlistAccounts(accounts, theme, platform);
   const reference = (accounts || []).filter((row) => !STUDIO_SIMILAR_TIMED_PLATFORMS.has(row.platform) && (!theme || (row.profile || "chicago") === theme));
   const posts = Array.isArray(providedPosts) ? providedPosts : [];
@@ -10897,7 +10966,11 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
     overview,
     accounts: accountViews,
     reference_accounts: reference.map((row) => ({ platform: row.platform, handle: row.handle, source: row.source, profile: row.profile || theme })),
-    buckets: heatmap.buckets.slice(0, 16),
+    buckets: heatmap.buckets,
+    windows: STUDIO_HEATMAP_WINDOWS,
+    own_schedule: providedOwn && typeof providedOwn === "object"
+      ? { total: Number(providedOwn.total) || 0, buckets: Array.isArray(providedOwn.buckets) ? providedOwn.buckets : [] }
+      : { total: 0, buckets: [] },
     suggested: heatmap.suggested,
     suggested_iso: heatmap.suggested ? studioSuggestedLocalDatetime(heatmap.suggested.windows) : null,
     caption: captionLearned,
@@ -10937,8 +11010,22 @@ async function studioLoadSimilarTimesView(env, url, authorization) {
   const season = studioInsightsResolveSeason(url);
   const accounts = await studioEnsureSimilarWatchlist(env);
   const cache = await studioLoadSimilarAccountStatusCache(env);
-  const posts = await studioInsightsPostsForView(env, { accounts, theme, platform, season, cache });
-  return studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts });
+  const [posts, occupiedByPlatform] = await Promise.all([
+    studioInsightsPostsForView(env, { accounts, theme, platform, season, cache }),
+    studioLoadOccupiedSchedules(env).catch((error) => {
+      console.warn("similar-times own schedule overlay failed", error);
+      return {};
+    }),
+  ]);
+  return studioBuildSimilarTimesView({
+    accounts,
+    cache,
+    theme,
+    platform,
+    season,
+    posts,
+    own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
+  });
 }
 
 async function getInsightsBestTimes(request, env, url, authorization) {
@@ -11175,6 +11262,10 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     season: studioInsightsResolveSeason(url),
     cache,
   });
+  const occupiedByPlatform = await studioLoadOccupiedSchedules(env).catch((error) => {
+    console.warn("similar-times own schedule overlay failed", error);
+    return {};
+  });
   const view = studioBuildSimilarTimesView({
     accounts,
     cache,
@@ -11182,6 +11273,7 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
     season,
     posts,
+    own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
   });
   try {
     await studioRecomputeInsightsLearned(env, {
