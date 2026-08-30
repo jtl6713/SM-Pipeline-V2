@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from a2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
+from a2.dedupe import intake_duplicate_formulas
 from a2.email_builder import intake_email_html, intake_subject
 from airtable.client import AirtableClient
 from airtable.constants import MEDIA_ASSETS_TABLE
@@ -31,6 +32,26 @@ FOLDER_LABELS = {
     "other": "ChicagoShining / Assets / Misc",
     "audio": "ChicagoShining / Assets / Music",
 }
+
+
+def existing_intake_record(
+    client: AirtableClient,
+    *,
+    file_id: str,
+    name: str,
+    size: int | None,
+) -> dict[str, Any] | None:
+    fields = ["Asset Name", "Google Drive File ID", "File_Size_Bytes"]
+    for formula in intake_duplicate_formulas(file_id, name, size):
+        rows = client.list_records(
+            MEDIA_ASSETS_TABLE,
+            formula=formula,
+            max_records=1,
+            fields=fields,
+        )
+        if rows:
+            return rows[0]
+    return None
 
 
 def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> dict[str, Any]:
@@ -90,6 +111,7 @@ def process_request(
 
     intaken: list[str] = []
     skipped_oversize: list[str] = []
+    skipped_existing: list[str] = []
     if files:
         client = AirtableClient()
         gmail = GmailClient()
@@ -100,6 +122,15 @@ def process_request(
             name = str(item.get("name") or "")
             mime = str(item.get("mimeType") or "")
             size = parse_bytes(item.get("size"))
+            existing = existing_intake_record(client, file_id=file_id, name=name, size=size)
+            if existing:
+                skipped_existing.append(file_id)
+                if file_id:
+                    try:
+                        drive.trash_file(file_id)
+                    except Exception:
+                        pass
+                continue
             shared = drive.share_anyone_reader(file_id)
             share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
             if size >= MAX_FILE_BYTES:
@@ -149,6 +180,7 @@ def process_request(
 
     preview["intaken_ids"] = intaken
     preview["skipped_oversize_ids"] = skipped_oversize
+    preview["skipped_existing_ids"] = skipped_existing
     next_result = None
     if trigger_a2b:
         from a2b.processor import process_request as process_a2b
@@ -169,6 +201,7 @@ def process_request(
         "files_found": bool(files),
         "intaken_count": len(intaken),
         "skipped_oversize_count": len(skipped_oversize),
+        "skipped_existing_count": len(skipped_existing),
         "a2b": next_result,
         **preview,
     }
