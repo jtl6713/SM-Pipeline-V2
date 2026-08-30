@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   autonomousInWindow,
+  autonomousMasterMediaIds,
   autonomousPlanOverrides,
   autonomousSlot,
+  isAutonomousOrigin,
   extractJsonObject,
   mapYoutubeSearchItems,
   observationIsRecent,
@@ -66,6 +68,11 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.equal(picked.media_asset_ids[0], "recAsset1234567890");
   assert.deepEqual(autonomousPlanOverrides("Vertical Short Video").Instagram, "Reel");
   assert.deepEqual(autonomousPlanOverrides("Carousel").Instagram, "Carousel");
+  assert.equal(isAutonomousOrigin("origin=autonomous cited_trend=Pilsen"), true);
+  assert.deepEqual(autonomousMasterMediaIds([
+    { name: "Pilsen Murals 1.jpg", media_asset_record_id: "recfgniLGTG1tTviX" },
+    { name: "Pilsen-Murals-9__9x16__fill-crop-v2.jpg", media_asset_record_id: "rec95rcrMXUBXJryK" },
+  ]), ["recfgniLGTG1tTviX"]);
 });
 
 test("JSON fences unwrap and last-run notes stay readable", () => {

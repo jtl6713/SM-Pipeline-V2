@@ -212,3 +212,5 @@ Insights watchlist + review-ready Worker deploy: 2026-08-29 - Seed official Inst
 Autonomous produce Worker deploy: 2026-08-30 - Twice-daily Chicago trend harvest, asset-backed idea pick, Item 4 / studio-produce to Ready for Review only. Worker 0.10.180-autonomous-produce.
 
 Autonomous I1 key Worker deploy: 2026-08-30 - Picker calls pipeline-runner /jobs/autonomous-pick so it uses the same OPENAI_API_KEY as I1. Worker 0.10.181-autonomous-i1-key.
+
+Autonomous resume Worker deploy: 2026-08-30 - Finish existing origin=autonomous drafts before picking a new idea. Worker 0.10.182-autonomous-resume.

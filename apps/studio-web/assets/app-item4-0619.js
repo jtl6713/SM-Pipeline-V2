@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.191-autonomous-produce";
+  const BUILD_ID = "item4-0.6.192-autonomous-running";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -457,16 +457,32 @@
     }
   });
   $("operationsRunAutonomous")?.addEventListener("click", async () => {
+    const button = $("operationsRunAutonomous");
+    const idleLabel = button?.textContent || "Run autonomous now";
     try {
-      setOperationsMessage("Starting autonomous produce…");
-      const result = await api("/api/operations/ideas/run-autonomous", { method: "POST", body: JSON.stringify({}) });
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Running…";
+      }
+      setOperationsMessage("Starting autonomous produce… this can take a minute.");
+      const result = await api("/api/operations/ideas/run-autonomous", {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: 180000,
+      });
       if (result.skipped) setOperationsMessage(`Skipped: ${result.skipped}`);
+      else if (result.status === "resuming") setOperationsMessage(`Resuming ${(result.resumed || []).length || "existing"} autonomous draft(s). No new idea will be picked.`);
       else if (result.status === "waiting_variants") setOperationsMessage("Autonomous request is waiting for platform crops. Cron will finish promotion.");
       else if (result.status === "producing" || result.status === "promoted") setOperationsMessage("Autonomous piece is in production and will stop at Ready for Review.");
       else setOperationsMessage("Autonomous produce started.");
       loadOperations();
     } catch (error) {
       setOperationsMessage(error.message || "Autonomous produce failed.", "error-text");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = idleLabel;
+      }
     }
   });
   let intakePollTimer = null;

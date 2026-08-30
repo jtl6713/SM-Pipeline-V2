@@ -155,6 +155,19 @@ export function parseAutonomousPick(parsed) {
   };
 }
 
+export function isAutonomousOrigin(text) {
+  return String(text || "").includes("origin=autonomous");
+}
+
+export function autonomousMasterMediaIds(assets) {
+  const rows = Array.isArray(assets) ? assets : [];
+  const originals = rows.filter((row) => !/__\d+x\d+__/i.test(String(row?.name || "")));
+  const use = originals.length ? originals : rows;
+  return [...new Set(use
+    .map((row) => String(row?.media_asset_record_id || "").trim())
+    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
 export function autonomousPlanOverrides(contentType) {
   if (contentType === "Carousel" || contentType === "Photo Set" || contentType === "Feed Post") {
     return { ...AUTONOMOUS_CAROUSEL_OVERRIDES };
