@@ -70,6 +70,8 @@ export default {
       const isMusicLibraryUploadWrite = isMusicLibraryRoute && request.method === "POST";
       const isMusicFavoriteRoute = /^\/api\/music\/rec[A-Za-z0-9]+\/favorite$/.test(url.pathname);
       const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
+      const isMusicRecordRoute = /^\/api\/music\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isMusicDeleteWrite = isMusicRecordRoute && request.method === "DELETE";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
@@ -125,6 +127,7 @@ export default {
         isItem4LibraryAssetsWrite ||
         isMusicLibraryUploadWrite ||
         isMusicFavoriteWrite ||
+        isMusicDeleteWrite ||
         isItem4AssetDeleteWrite ||
         isItem4PlanWrite ||
         isItem4VariantsWrite ||
@@ -259,6 +262,7 @@ export default {
           studio_music_catalog_fallback_v1: true,
           studio_music_upload_v1: true,
           studio_music_favorites_v1: true,
+          studio_music_delete_v1: true,
           studio_music_drive_authority_v1: true,
           studio_music_item_voiceover_v1: true,
           studio_review_audio_mix_v1: true,
@@ -800,6 +804,11 @@ export default {
       if (isMusicFavoriteRoute) {
         assertWriteRequest(request, env);
         return toggleMusicFavorite(request, env, url);
+      }
+
+      if (isMusicDeleteWrite) {
+        assertWriteRequest(request, env);
+        return deleteMusicLibraryTrack(request, env, url);
       }
 
       if (isMusicPreviewRoute) {
@@ -12588,6 +12597,94 @@ async function toggleMusicFavorite(request, env, url) {
   return respond(request, env, { ok: true, record: mapMusic(updated) });
 }
 
+async function findMusicLibraryUsages(env, recordId) {
+  const needle = ideaLibraryAirtableEscape(recordId);
+  const [requests, outputs, content] = await Promise.all([
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 10,
+      filterFormula: `FIND("${needle}", ARRAYJOIN({Selected_Music_Asset}))`,
+    }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
+      limit: 10,
+      filterFormula: `FIND("${needle}", ARRAYJOIN({Selected_Music_Asset_Override}))`,
+    }).catch(() => []),
+    env.AIRTABLE_CONTENT_TABLE_ID
+      ? listRecords(env, env.AIRTABLE_CONTENT_TABLE_ID, {
+          limit: 10,
+          filterFormula: `FIND("${needle}", ARRAYJOIN({Preferred_Music_Asset}))`,
+        }).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  return {
+    production_requests: requests,
+    production_request_outputs: outputs,
+    content_items: content,
+  };
+}
+
+async function trashStudioMusicOnDrive(env, fileId) {
+  const driveId = String(fileId || "").trim();
+  if (!driveId) return { ok: false, skipped: true, reason: "no_drive_file" };
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) return { ok: false, skipped: true, reason: "no_runner" };
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const response = await fetch(`${runnerUrl}/jobs/studio-music-library-delete`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({ google_drive_file_id: driveId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, error: payload?.error || payload?.message || `Drive trash failed (${response.status})` };
+  }
+  return { ok: true, trashed: Boolean(payload?.trashed), google_drive_file_id: driveId };
+}
+
+async function deleteMusicLibraryTrack(request, env, url) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const recordId = String(url.pathname.split("/")[3] || "");
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "Invalid music record");
+
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  if (String(f(record, "Asset_Role") || "") !== "Music") {
+    throw new HttpError(409, "Only music assets can be deleted from the music library");
+  }
+
+  const usages = await findMusicLibraryUsages(env, recordId);
+  const usedBy = [
+    usages.production_requests.length ? `${usages.production_requests.length} Production Request${usages.production_requests.length === 1 ? "" : "s"}` : "",
+    usages.production_request_outputs.length ? `${usages.production_request_outputs.length} output override${usages.production_request_outputs.length === 1 ? "" : "s"}` : "",
+    usages.content_items.length ? `${usages.content_items.length} Content Item${usages.content_items.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  if (usedBy.length) {
+    throw new HttpError(
+      409,
+      `Cannot delete this track. It is still selected on ${usedBy.join(", ")}. Unpick it there first. Marking Do Not Use in Airtable hides it from new picks without breaking remakes.`
+    );
+  }
+
+  const driveId = googleDriveFileId(record);
+  const drive = await trashStudioMusicOnDrive(env, driveId).catch((error) => ({
+    ok: false,
+    error: error?.message || String(error),
+  }));
+
+  const deleted = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, {
+    method: "DELETE",
+  });
+
+  return respond(request, env, {
+    ok: true,
+    deleted: Boolean(deleted?.deleted),
+    record_id: recordId,
+    name: f(record, "Asset Name"),
+    drive,
+  });
+}
+
 const MUSIC_LIBRARY_MAX_FILES = 8;
 const MUSIC_LIBRARY_MAX_FILE_BYTES = 40 * 1024 * 1024;
 const GDRIVE_MUSIC_FOLDER_ID = "1mzNHcVmeXb6I2WybJD5iOTrJUDRQJIN3";
@@ -23846,10 +23943,14 @@ function firstRunSince(runs, startedAt) {
 
 function describeA2Run(run) {
   if (!run) return { files_found: null, result: "waiting", detail: "Starting A2…" };
-  if (run.state === "error") return { files_found: null, result: "error", detail: "A2 failed. Check Make for the error." };
+  const python = String(run.id || "").startsWith("python");
+  if (run.state === "error") {
+    return { files_found: null, result: "error", detail: python ? "A2 failed." : "A2 failed. Check Make for the error." };
+  }
   if (run.operations <= STUDIO_A2_EMPTY_MAX_OPERATIONS) {
     return { files_found: false, result: "empty", detail: "A2 completed with no assets to process" };
   }
+  if (python) return { files_found: true, result: "processed", detail: "A2 found files to intake." };
   return { files_found: true, result: "processed", detail: `A2 found files to intake (${run.operations} Make operations).` };
 }
 
