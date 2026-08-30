@@ -275,3 +275,5 @@ Production lifecycle Pages deploy: 2026-08-29 - Drafts hide Promoted cards; Pipe
 Review thumbnail link Pages deploy: 2026-08-29 - Open Review shows Download cover; RR1 email includes cover preview + direct download link. UI 0.6.180-review-thumbnail-link.
 
 Produce self-heal Pages deploy: 2026-08-29 - Show Escalated produce state when auto-retries are exhausted. UI 0.6.181-produce-self-heal.
+
+Default schedules Pages deploy: 2026-08-29 - Pipeline Use default schedules next to Approve All; same-platform times stay 90 minutes apart. UI 0.6.188-schedule-gap.

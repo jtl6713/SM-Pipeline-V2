@@ -183,7 +183,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.174-produce-self-heal",
+          version: "0.10.176-schedule-spacing",
+          studio_schedule_spacing_v1: true,
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -4677,14 +4678,69 @@ function studioFinishedVariantsSkipped(record) {
   return status === "Ready" || status === "Not Needed" || status === "None";
 }
 
-function studioPublishScheduleFields(payload = {}, record = null) {
-  const raw = payload?.scheduled_post_date;
-  if (raw === undefined || raw === null || String(raw).trim() === "" || String(raw).trim().toLowerCase() === "immediate") {
-    return {};
+const STUDIO_SCHEDULE_GAP_MS = 90 * 60 * 1000;
+
+function studioScheduleMs(value) {
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function studioScheduleConflicts(ms, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS) {
+  if (!Number.isFinite(ms)) return false;
+  return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
+}
+
+function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHEDULE_GAP_MS) {
+  let ms = studioScheduleMs(candidateIso);
+  if (ms == null) ms = Date.now();
+  let guard = 0;
+  while (studioScheduleConflicts(ms, occupiedMs, gapMs) && guard < 36) {
+    ms += gapMs;
+    guard += 1;
   }
-  const value = String(raw).trim();
-  if (Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
-  const iso = new Date(value).toISOString();
+  return new Date(ms).toISOString();
+}
+
+async function studioLoadOccupiedSchedules(env, { excludeIds = [] } = {}) {
+  const skip = new Set((excludeIds || []).filter(Boolean));
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 100,
+    sortField: "Scheduled_Post_Date",
+    sortDirection: "asc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))',
+  });
+  const byPlatform = {};
+  for (const row of rows) {
+    if (skip.has(row.id)) continue;
+    const platform = String(f(row, "Platform") || "").trim();
+    if (!platform) continue;
+    const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At");
+    const status = String(f(row, "Publish_Status") || "").trim();
+    const ms = raw
+      ? studioScheduleMs(raw)
+      : (status === "Publishing" || status === "Ready to Publish" ? Date.now() : null);
+    if (ms == null) continue;
+    (byPlatform[platform] ||= []).push(ms);
+  }
+  return byPlatform;
+}
+
+function studioPublishScheduleFields(payload = {}, record = null, options = {}) {
+  const occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs : null;
+  const raw = payload?.scheduled_post_date;
+  const immediate = raw === undefined || raw === null || String(raw).trim() === "" || String(raw).trim().toLowerCase() === "immediate";
+  let requestedIso = "";
+  if (immediate) {
+    requestedIso = new Date().toISOString();
+  } else {
+    const value = String(raw).trim();
+    if (Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
+    requestedIso = new Date(value).toISOString();
+  }
+  const resolvedIso = occupiedMs ? studioNextOpenScheduleIso(requestedIso, occupiedMs) : requestedIso;
+  const bumped = Date.parse(resolvedIso) - Date.parse(requestedIso) >= 60 * 1000;
+  if (immediate && !bumped) return {};
+  const iso = resolvedIso;
   const due = Date.parse(iso) <= Date.now() + 120000;
   const fields = {
     Scheduled_Post_Date: iso,
@@ -20189,7 +20245,7 @@ async function studioReconcileFacebookReels(env, options = {}) {
   return results;
 }
 
-async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}) {
+async function approveOutputRecordForPublishing(env, existing, note, stamp, payload = {}, options = {}) {
   const id = existing.id;
   if (Boolean(f(existing, "Do_Not_Publish"))) {
     throw new HttpError(409, "Do_Not_Publish outputs cannot be approved for live publishing");
@@ -20205,7 +20261,13 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     });
     record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
   }
-  const scheduleFields = studioPublishScheduleFields(payload || {}, record);
+  const platform = String(f(record, "Platform") || "").trim();
+  let occupiedMs = Array.isArray(options.occupiedMs) ? options.occupiedMs.slice() : null;
+  if (!occupiedMs) {
+    const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [id] });
+    occupiedMs = occupied[platform] || [];
+  }
+  const scheduleFields = studioPublishScheduleFields(payload || {}, record, { occupiedMs });
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
@@ -20252,12 +20314,19 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   const approved = [];
   const failed = [];
   const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};
+  const occupiedByPlatform = await studioLoadOccupiedSchedules(env, {
+    excludeIds: eligible.map((record) => record.id),
+  });
   for (const record of eligible) {
     try {
+      const platform = String(f(record, "Platform") || "").trim();
+      const occupiedMs = occupiedByPlatform[platform] || [];
       const rowSchedule = schedules[record.id] !== undefined ? schedules[record.id] : payload?.scheduled_post_date;
       const updated = await approveOutputRecordForPublishing(env, record, note, stamp, {
         scheduled_post_date: rowSchedule,
-      });
+      }, { occupiedMs });
+      const booked = studioScheduleMs(f(updated, "Scheduled_Post_Date")) ?? Date.now();
+      (occupiedByPlatform[platform] ||= []).push(booked);
       approved.push(mapApprovedOutputSummary(updated));
     } catch (error) {
       failed.push({
@@ -23657,7 +23726,10 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const value = String(payload?.scheduled_post_date || "").trim();
   if (!value || Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
-  const iso = new Date(value).toISOString();
+  const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  const platform = String(f(existing, "Platform") || "").trim();
+  const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [match[1]] });
+  const iso = studioNextOpenScheduleIso(new Date(value).toISOString(), occupied[platform] || []);
   const due = Date.parse(iso) <= Date.now() + 120000;
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
