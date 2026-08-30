@@ -174,9 +174,14 @@ export function isAutonomousOrigin(text) {
 
 export const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
 
+export function isDerivedLibraryStillName(name) {
+  const text = String(name || "");
+  return /__\d+x\d+__/i.test(text) || /fill-crop-v\d+/i.test(text);
+}
+
 export function autonomousMasterMediaIds(assets) {
   const rows = Array.isArray(assets) ? assets : [];
-  const originals = rows.filter((row) => !/__\d+x\d+__/i.test(String(row?.name || "")));
+  const originals = rows.filter((row) => !isDerivedLibraryStillName(row?.name));
   const use = originals.length ? originals : rows;
   return [...new Set(use
     .map((row) => String(row?.media_asset_record_id || "").trim())

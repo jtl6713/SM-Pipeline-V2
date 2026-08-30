@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   autonomousInWindow,
   autonomousIncomingMediaIds,
+  isDerivedLibraryStillName,
   autonomousMasterMediaIds,
   autonomousPlanOverrides,
   autonomousRunIsBusy,
@@ -76,6 +77,8 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.deepEqual(autonomousPlanOverrides("Vertical Short Video").Instagram, "Reel");
   assert.deepEqual(autonomousPlanOverrides("Carousel").Instagram, "Carousel");
   assert.equal(isAutonomousOrigin("origin=autonomous cited_trend=Pilsen"), true);
+  assert.equal(isDerivedLibraryStillName("Pilsen-Murals-9__9x16__fill-crop-v2.jpg"), true);
+  assert.equal(isDerivedLibraryStillName("Pilsen Murals 1.jpg"), false);
   assert.deepEqual(autonomousMasterMediaIds([
     { name: "Pilsen Murals 1.jpg", media_asset_record_id: "recfgniLGTG1tTviX" },
     { name: "Pilsen-Murals-9__9x16__fill-crop-v2.jpg", media_asset_record_id: "rec95rcrMXUBXJryK" },

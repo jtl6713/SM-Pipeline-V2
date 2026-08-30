@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.186-autonomous-one-idea",
+          version: "0.10.187-autonomous-originals",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -4200,6 +4200,8 @@ function ideaLibraryIsEligibleImage(record) {
   const classification = String(f(record, "Classification_Status") || "").trim().toLowerCase();
   const eligibility = String(f(record, "Raw_Source_Eligibility") || "").trim().toLowerCase();
   const status = String(f(record, "Asset_Status") || "").trim().toLowerCase();
+  const name = String(f(record, "Asset Name") || "");
+  if (/__\d+x\d+__/i.test(name) || /fill-crop-v\d+/i.test(name)) return false;
   if (mediaClass && mediaClass !== "image" && mediaClass !== "graphic") return false;
   if (mime.startsWith("video/")) return false;
   if (classification && classification !== "classified") return false;
@@ -4395,6 +4397,7 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
       || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : "");
     const mime = String(f(media, "MIME_Type") || "image/jpeg").trim() || "image/jpeg";
     const name = String(f(media, "Asset Name") || "photo");
+    if (/__\d+x\d+__/i.test(name) || /fill-crop-v\d+/i.test(name)) continue;
     const assetId = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
     appended.push({
       id: assetId,
@@ -4417,6 +4420,17 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
       source: "library",
     });
     already.add(media.id);
+  }
+  if (!appended.length) {
+    return respond(request, env, {
+      ok: true,
+      attached: 0,
+      status: existing.length ? "Ready" : "None",
+      count: existing.length,
+      assets: existing,
+      record: mapProductionRequest(record),
+      message: "Selected library stills were already attached.",
+    });
   }
   const assets = [...existing, ...appended];
   const allReady = assets.length > 0 && assets.every((asset) =>
@@ -24144,7 +24158,7 @@ function firstLinkedRecordId(value) {
 
 function autonomousMasterMediaIds(assets) {
   const rows = Array.isArray(assets) ? assets : [];
-  const originals = rows.filter((row) => !/__\d+x\d+__/i.test(String(row?.name || "")));
+  const originals = rows.filter((row) => !(/__\d+x\d+__/i.test(String(row?.name || "")) || /fill-crop-v\d+/i.test(String(row?.name || ""))));
   const use = originals.length ? originals : rows;
   return [...new Set(use
     .map((row) => String(row?.media_asset_record_id || "").trim())
