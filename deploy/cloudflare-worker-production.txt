@@ -204,3 +204,5 @@ Render timeout resume Worker deploy: 2026-08-29 - Remotion harvest timeouts no l
 Produce self-heal Worker deploy: 2026-08-29 - Any blocked produce job auto-retries (capped); after budget exhaustion escalate + ops email + optional investigate webhook. Worker 0.10.174-produce-self-heal.
 
 Idea library + approve prep Worker deploy: 2026-08-29 - Keyword/place matching scans 500 stills with tag filter; ideas backfill Primary_Location; Approve auto-prepares platform variants before promote. Worker 0.10.175-idea-library-approve-prep.
+
+Variant drain cron Worker deploy: 2026-08-30 - Cron always drains pending Item4 master/variant queue rows; workspace status resumes Preparing crops. Worker 0.10.176-variant-drain-cron.

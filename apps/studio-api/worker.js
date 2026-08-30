@@ -183,7 +183,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.174-produce-self-heal",
+          version: "0.10.176-variant-drain-cron",
           studio_idea_library_pick_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -201,6 +201,7 @@ export default {
           studio_production_lifecycle_v1: true,
           studio_render_timeout_resume_v1: true,
           studio_produce_self_heal_v1: true,
+          studio_variant_drain_cron_v1: true,
           studio_manual_idea_generation_v1: true,
           studio_operations_v1: true,
           studio_a0_daisychain_v1: true,
@@ -852,6 +853,13 @@ export default {
         await resumeStaleStudioProductionJobs(env);
       } catch (error) {
         console.warn("studio produce watchdog failed", error);
+      }
+      // Parked cadence no longer force-pulses media every tick (subrequest starvation).
+      // Without this dedicated drain, a single leftover Pending crop stays at N-1 forever.
+      try {
+        await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
+      } catch (error) {
+        console.warn("item4 pending master/variant queue drain failed", error);
       }
       try {
         await studioReconcileApprovedPublishes(env);
@@ -6995,6 +7003,12 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
     try {
       let reconciled = await item4ReconcileVariants(env, recordId, record, { skipSanitize: true });
       record = reconciled.record;
+      // Preparing + leftover Pending queue rows must resume here too: parked
+      // cadence no longer drains media on every cron unless force=true.
+      if (reconciled.status === "Preparing") {
+        variantResume = await item4ResumePendingVariants(env, recordId, record);
+        record = variantResume.record || record;
+      }
     } catch (error) {
       variantResume = {
         attempted: false,

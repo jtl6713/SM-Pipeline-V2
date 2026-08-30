@@ -1,10 +1,16 @@
 {
-  "correlation_id": "MX1-GET-227-AFTER-GRAPH-20260824",
+  "correlation_id": "RIDE-CTA-DRAIN-LAST-4X5-20260830",
   "requests": [
     {
-      "name": "get-227-creative-after-graph",
+      "name": "ride-cta-prepare-variants-drain",
+      "method": "POST",
+      "path": "/api/production-requests/recQOu1eRJVmIKeoB/variants",
+      "body": {}
+    },
+    {
+      "name": "ride-cta-item4-status",
       "method": "GET",
-      "path": "/api/outputs/rec6Wk2Sel4frhWSm/creative"
+      "path": "/api/production-requests/recQOu1eRJVmIKeoB/item4"
     }
   ]
 }
