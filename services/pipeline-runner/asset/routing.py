@@ -27,13 +27,14 @@ def is_branding_name(name: str) -> bool:
 def classify_intake_file(name: str, mime: str) -> str:
     """A2 router 8 — first match wins: video, branding, image, other, audio."""
     mime_l = (mime or "").strip().casefold()
+    name_l = (name or "").strip().casefold()
     if mime_l.startswith("video"):
         return "video"
     if is_branding_name(name):
         return "branding"
     if mime_l.startswith("image"):
         return "image"
-    if mime_l.startswith("audio"):
+    if mime_l.startswith("audio") or name_l.endswith((".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg")):
         return "audio"
     return "other"
 

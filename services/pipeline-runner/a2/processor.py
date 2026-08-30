@@ -20,6 +20,7 @@ from asset.constants import (
 from asset.helpers import as_bool, parse_bytes
 from asset.routing import a2_route_fields, classify_intake_file
 from audio.leading_silence import STATUS_FAILED, apply_drive_leading_silence, is_voiceover_audio
+from audio.wav_to_mp3 import apply_drive_wav_to_mp3
 from carousel.timeutil import chicago_now, iso_ms
 from config import load_settings
 from integrations.gmail import GmailClient
@@ -147,6 +148,19 @@ def process_request(
             moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
             moved_id = str(moved.get("id") or file_id)
             overlay = a2_route_fields(route, name, moved_id)
+            if route == "audio":
+                try:
+                    converted = apply_drive_wav_to_mp3(drive, moved_id, filename=name, mime_type=mime)
+                    if converted.changed:
+                        name = converted.filename
+                        mime = converted.mime_type
+                        overlay["Asset Name"] = name
+                        overlay["MIME_Type"] = converted.mime_type
+                        overlay["File_Extension"] = "mp3"
+                        overlay["File_Size_Bytes"] = converted.file_size_bytes
+                        size = converted.file_size_bytes
+                except Exception:
+                    pass
             if route == "audio" and not is_voiceover_audio(filename=name, role=str(overlay.get("Asset_Role") or "")):
                 try:
                     silence = apply_drive_leading_silence(drive, moved_id, filename=name, mime_type=mime)

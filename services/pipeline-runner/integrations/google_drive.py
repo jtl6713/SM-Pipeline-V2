@@ -212,6 +212,34 @@ class GoogleDriveClient:
         response.raise_for_status()
         return response.json()
 
+    def update_metadata(
+        self,
+        file_id: str,
+        *,
+        name: str | None = None,
+        mime_type: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if name:
+            body["name"] = name
+        if mime_type:
+            body["mimeType"] = mime_type
+        if not body:
+            return {}
+        token = self.access_token()
+        response = requests.patch(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            params={
+                "supportsAllDrives": "true",
+                "fields": "id,name,mimeType,size,webContentLink,webViewLink",
+            },
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=body,
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def upload_and_share(
         self,
         folder_id: str,

@@ -9774,9 +9774,9 @@
   }
 
   async function uploadMusicFiles(fileList) {
-    const files = Array.from(fileList || []).filter((file) => /\.mp3$/i.test(file.name || "") || /audio\/(mpeg|mp3)/i.test(file.type || ""));
+    const files = Array.from(fileList || []).filter((file) => /\.(mp3|wav)$/i.test(file.name || "") || /audio\/(mpeg|mp3|wav|x-wav|wave)/i.test(file.type || ""));
     if (!files.length) {
-      setMusicUploadMessage("Choose one or more MP3 files.", "error-text");
+      setMusicUploadMessage("Choose one or more MP3 or WAV files.", "error-text");
       return;
     }
     const zone = $("musicUploadZone");

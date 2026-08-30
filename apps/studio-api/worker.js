@@ -2286,10 +2286,18 @@ function studioMusicR2KeyFromUrl(urlValue) {
   }
 }
 
-function isMp3MusicFile(file) {
+function isMusicLibraryFile(file) {
   const mime = String(file?.type || "").toLowerCase();
   const ext = item4FileExtension(file?.name);
-  return mime === "audio/mpeg" || mime === "audio/mp3" || ext === "mp3";
+  return (
+    mime === "audio/mpeg" ||
+    mime === "audio/mp3" ||
+    mime === "audio/wav" ||
+    mime === "audio/x-wav" ||
+    mime === "audio/wave" ||
+    ext === "mp3" ||
+    ext === "wav"
+  );
 }
 
 function isStudioLibraryMusicRecord(record, sourceUrl = "") {
@@ -13119,16 +13127,16 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
   let form;
   try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded music"); }
   const files = form.getAll("files").filter((value) => value && typeof value.arrayBuffer === "function");
-  if (!files.length) throw new HttpError(400, "Choose at least one MP3 file");
+  if (!files.length) throw new HttpError(400, "Choose at least one MP3 or WAV file");
   if (files.length > MUSIC_LIBRARY_MAX_FILES) {
-    throw new HttpError(400, `Upload no more than ${MUSIC_LIBRARY_MAX_FILES} MP3 files at once`);
+    throw new HttpError(400, `Upload no more than ${MUSIC_LIBRARY_MAX_FILES} audio files at once`);
   }
 
   const displayName = String(form.get("display_name") || "").trim();
   const description = String(form.get("description") || "").trim();
   for (const file of files) {
-    if (!isMp3MusicFile(file)) {
-      throw new HttpError(415, `${file.name || "A file"} is not an MP3. Upload .mp3 files only.`);
+    if (!isMusicLibraryFile(file)) {
+      throw new HttpError(415, `${file.name || "A file"} is not an MP3 or WAV. Upload .mp3 or .wav files.`);
     }
     if (Number(file.size || 0) > MUSIC_LIBRARY_MAX_FILE_BYTES) {
       throw new HttpError(413, `${file.name || "A track"} exceeds the 40 MB per-file limit`);
@@ -13140,15 +13148,16 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
       const file = files[i];
       const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
       const safeName = item4SafeFileName(file.name || "track.mp3");
+      const sourceExt = item4FileExtension(file.name) === "wav" ? "wav" : "mp3";
       const assetName = files.length === 1 && displayName
         ? displayName
-        : String(file.name || safeName).replace(/\.mp3$/i, "");
-      const driveName = `${assetName || "Studio music track"}.mp3`;
+        : String(file.name || safeName).replace(/\.(mp3|wav)$/i, "");
+      const sourceName = `${assetName || "Studio music track"}.${sourceExt}`;
       const bytes = await file.arrayBuffer();
       const drive = await promoteStudioMusicToDrive(env, {
-        filename: driveName,
+        filename: sourceName,
         bytes,
-        contentType: "audio/mpeg",
+        contentType: sourceExt === "wav" ? "audio/wav" : "audio/mpeg",
       });
       const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
         method: "POST",
