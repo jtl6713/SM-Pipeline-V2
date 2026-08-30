@@ -7,7 +7,7 @@ from typing import Any
 
 from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
-from ap0.public_cover import ensure_public_cover_url
+from ap0.public_cover import ensure_public_cover_url, graph_fetchable_cover_url, native_grid_cover_required
 from ap1_ig.caption import reel_create_body
 from ap1_ig.constants import (
     MAKE_SCENARIO_ID,
@@ -78,8 +78,18 @@ def process_request(
     if not reason and not dry_run:
         try:
             ensure_public_cover_url(client, output)
-        except Exception:
-            pass
+        except Exception as exc:
+            if native_grid_cover_required(output):
+                return {
+                    "processed": False,
+                    "reason": "missing_native_cover",
+                    "error": str(exc),
+                    **preview,
+                }
+        if native_grid_cover_required(output) and not graph_fetchable_cover_url(
+            field_str(output, "Thumbnail_URL")
+        ):
+            return {"processed": False, "reason": "missing_native_cover", **preview}
     pipeline_settings = PipelineSettings(client)
     graph_settings = None
     try:
@@ -111,7 +121,7 @@ def process_request(
         (
             f"AP1-IG publish lock set at {stamp_minutes()}. "
             f"Publish asset URL: {field_str(output, 'Publish_Asset_URL')}. "
-            "Cover source: public Thumbnail_URL as cover_url when Graph-fetchable; thumb_offset only if no cover."
+            "Cover source: public Thumbnail_URL sent as Graph cover_url (no thumb_offset)."
         ),
     )
     now = iso_utc()
@@ -179,7 +189,7 @@ def process_request(
         f"Get Post Timestamp: {meta.get('timestamp') or ''}\n"
         f"Published at: {stamp_minutes()}\n"
         f"Source URL: {field_str(output, 'Publish_Asset_URL')}\n"
-        "Cover handling: AP1-IG sent the public thumbnail as cover_url without thumb_offset when a cover exists."
+        "Cover handling: AP1-IG sent the public thumbnail as Graph cover_url so Instagram uses it on the grid."
     )
     ready_notes = _append_notes(
         field_str(output, "Output_Notes"),
@@ -197,7 +207,7 @@ def process_request(
                     else (f"Location text: {location.label} (no Meta page id).\n" if location else "")
                 )
             )
-            + "Cover handling: native 3D thumbnail as Instagram Reel cover_url when a public cover exists."
+            + "Cover handling: native 3D thumbnail sent as Instagram Reel cover_url for the profile grid."
         ),
     )
     client.update_record(

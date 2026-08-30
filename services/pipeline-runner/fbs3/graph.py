@@ -141,4 +141,15 @@ class FacebookReelClient:
             headers={"Authorization": f"Bearer {self._token}"},
             timeout=60,
         )
-        return response.json() if response.content else {}
+        data = response.json() if response.content else {}
+        if not response.ok or (isinstance(data, dict) and data.get("error")):
+            message = ""
+            if isinstance(data, dict) and isinstance(data.get("error"), dict):
+                message = str(data["error"].get("message") or "")
+            raise FacebookReelError(
+                message or f"thumbnail attach {response.status_code}",
+                status_code=response.status_code,
+                payload=data,
+                stage="FBS3_THUMBNAIL",
+            )
+        return data

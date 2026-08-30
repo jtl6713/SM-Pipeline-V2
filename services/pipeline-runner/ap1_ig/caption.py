@@ -42,6 +42,7 @@ def reel_create_body(
     now: datetime | None = None,
     *,
     location_id: str | None = None,
+    require_native_cover: bool = True,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "media_type": "REELS",
@@ -52,7 +53,7 @@ def reel_create_body(
     cover = cover_url(record)
     if cover:
         body["cover_url"] = cover
-    else:
+    elif not require_native_cover:
         body["thumb_offset"] = THUMB_OFFSET_MS
     place = str(location_id or "").strip()
     if place.isdigit():

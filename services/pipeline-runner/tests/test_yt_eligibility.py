@@ -8,7 +8,8 @@ from yt.eligibility import (
     yts2_eligibility_reason,
     yts3_eligibility_reason,
 )
-from yt.package import description_final, idempotency_key
+from yt.constants import THUMB_NOT_NEEDED, THUMB_PENDING
+from yt.package import description_final, idempotency_key, thumbnail_status
 
 
 def _record(**fields):
@@ -100,3 +101,8 @@ def test_youtube_description_strips_duplicate_title():
     assert description_final(clean) == (
         "Wander Clark Street’s indie shops, cafes, and the Swedish American Museum.\n\n#Chicago"
     )
+
+
+def test_youtube_short_thumbnail_status_stays_pending():
+    assert thumbnail_status(_record(Platform_Output_Type="YouTube Short")) == THUMB_PENDING
+    assert thumbnail_status(_record(Studio_Output_Type="Carousel")) == THUMB_NOT_NEEDED

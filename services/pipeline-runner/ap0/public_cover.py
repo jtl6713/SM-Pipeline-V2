@@ -29,6 +29,33 @@ def looks_like_image_url(url: str) -> bool:
     return "/thumbnails/" in path or "/cover." in path
 
 
+# Surfaces whose APIs accept a cover. TikTok Content Posting cannot; Video Draft is TikTok.
+NATIVE_GRID_COVER_OUTPUTS = {
+    "Reel",
+    "Short",
+    "Standard Video",
+    "Slideshow Reel",
+    "Slideshow Video",
+}
+
+
+def native_grid_cover_required(record: dict[str, Any]) -> bool:
+    """True when publish must tell the platform to use the 3D still as the grid cover."""
+    platform = field_str(record, "Platform").casefold()
+    mapping = field_str(record, "Platform_Output_Type").casefold()
+    if platform == "tiktok" or "tiktok" in mapping:
+        return False
+    kind = field_str(record, "Studio_Output_Type") or field_str(record, "Output_Type")
+    if kind in NATIVE_GRID_COVER_OUTPUTS:
+        return True
+    return mapping in {
+        "instagram reel",
+        "facebook reel",
+        "youtube short",
+        "youtube video",
+    }
+
+
 def graph_fetchable_cover_url(url: str) -> str:
     href = str(url or "").strip()
     if not is_public_publish_url(href):

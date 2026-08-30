@@ -14,7 +14,7 @@ from ap0.constants import ASSET_HOST, MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from ap0.eligibility import asset_plan, eligibility_reason
 from asset.helpers import parse_int
 from carousel.timeutil import iso_utc, stamp_minutes
-from ap0.public_cover import ensure_public_cover_url
+from ap0.public_cover import ensure_public_cover_url, native_grid_cover_required
 from ap0.public_mp4 import ensure_public_mp4_url
 from render.fields import field, field_str
 
@@ -105,7 +105,13 @@ def process_request(
         public_url = ensure_public_mp4_url(client, output, plan)
         try:
             cover_url = ensure_public_cover_url(client, output)
+            if native_grid_cover_required(output) and not cover_url:
+                raise RuntimeError(
+                    "Native grid cover required but Thumbnail_URL is not a public image Graph/YouTube can fetch"
+                )
         except Exception as cover_exc:
+            if native_grid_cover_required(output):
+                raise
             cover_url = ""
             started_notes = _append_notes(
                 field_str(output, "Output_Notes"),

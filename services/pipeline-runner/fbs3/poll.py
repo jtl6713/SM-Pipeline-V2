@@ -132,6 +132,21 @@ def process_request(
 
     if reel_is_ready(data):
         thumbnail_ok = _attach_thumbnail(graph, client, output, video_id)
+        if not thumbnail_ok:
+            _mark_still_processing(
+                client,
+                output,
+                {"error": "native grid cover attach pending", "payload": data},
+                attempt,
+                status_code=status_code,
+            )
+            return {
+                "processed": True,
+                "still_processing": True,
+                "reason": "missing_native_cover",
+                "video_id": video_id,
+                **preview,
+            }
         permalink = reel_permalink(data, video_id)
         _mark_published(client, output, video_id, data, permalink=permalink, thumbnail_ok=thumbnail_ok)
         return {"processed": True, "video_id": video_id, "permalink": permalink, **preview}
@@ -144,13 +159,13 @@ def process_request(
 
 
 def _attach_thumbnail(graph: FacebookReelClient, client: AirtableClient, output: dict[str, Any], video_id: str) -> bool:
-    try:
-        from ap0.public_cover import ensure_public_cover_url
+    from ap0.public_cover import ensure_public_cover_url, graph_fetchable_cover_url
 
+    try:
         ensure_public_cover_url(client, output)
     except Exception:
-        pass
-    thumbnail_url = field_str(output, "Thumbnail_URL")
+        return False
+    thumbnail_url = graph_fetchable_cover_url(field_str(output, "Thumbnail_URL"))
     if not thumbnail_url:
         return False
     try:
@@ -203,7 +218,7 @@ def _mark_published(
             "FB_Slideshow_Error_Message": "",
             "FB_Slideshow_Meta_Video_ID": post_id,
             "FB_Slideshow_Response_JSON": (
-                f"{data} Thumbnail attach: {'ok' if thumbnail_ok else 'skipped or failed (best-effort)'}."
+                f"{data} Native grid cover attach: {'ok' if thumbnail_ok else 'failed'}."
             ),
         },
         typecast=True,

@@ -77,4 +77,6 @@ def test_ap1_ig_drive_thumbnail_is_not_graph_cover():
     record = _eligible(Thumbnail_URL="https://drive.google.com/uc?id=13rIboxRJt50N9SWX12vfh2CBc4Jp6pMa")
     body = reel_create_body(record)
     assert "cover_url" not in body
-    assert body["thumb_offset"] == 1500
+    assert "thumb_offset" not in body
+    optional = reel_create_body(record, require_native_cover=False)
+    assert optional["thumb_offset"] == 1500
