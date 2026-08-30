@@ -56,6 +56,10 @@ def test_later_stage_gates():
     assert ap3c_eligibility_reason(_record(IG_Carousel_Status="Children Ready", IG_Carousel_Parent_Container_ID="1")) == "parent_already_created"
     assert ap3p_eligibility_reason(_record(IG_Carousel_Status="Parent Processing", IG_Carousel_Parent_Container_ID="1")) is None
     assert ap4c_eligibility_reason(_record(IG_Carousel_Status="Parent Ready", IG_Carousel_Parent_Container_ID="1")) is None
+    future_sched = iso_utc(utc_now() + timedelta(hours=2))
+    past_sched = iso_utc(utc_now() - timedelta(minutes=5))
+    assert ap4c_eligibility_reason(_record(IG_Carousel_Status="Parent Ready", IG_Carousel_Parent_Container_ID="1", Scheduled_Post_Date=future_sched)) == "schedule_hold"
+    assert ap4c_eligibility_reason(_record(IG_Carousel_Status="Parent Ready", IG_Carousel_Parent_Container_ID="1", Scheduled_Post_Date=past_sched)) is None
     assert ap4c_eligibility_reason(_record(IG_Carousel_Status="Parent Ready", IG_Carousel_Parent_Container_ID="1"), replace_transaction_id="txn") == "replace_address_mismatch"
     assert ap4r_eligibility_reason(_record(IG_Carousel_Status="Publishing", IG_Carousel_Error_Stage="AP4C Parent Publishing")) is None
     assert ap4r_eligibility_reason(_record(IG_Carousel_Status="Publishing", IG_Carousel_Published_Media_ID="1", IG_Carousel_Error_Stage="AP4C Parent Publishing")) == "already_has_published_media"

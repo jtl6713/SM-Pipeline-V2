@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from apc.common import ci, is_due
+from apc.common import ci, is_due, schedule_hold
 from apc.constants import (
     ERROR_AP4C,
     STATUS_ASSETS_READY,
@@ -134,6 +134,9 @@ def ap4c_eligibility_reason(
         return "already_has_platform_post"
     if as_bool(field(record, "Do_Not_Publish"), False):
         return "do_not_publish"
+    # Parent containers are warmed before schedule; media_publish must wait.
+    if schedule_hold(record):
+        return "schedule_hold"
     if replace_mismatch(
         record,
         replace_transaction_id=replace_transaction_id,
