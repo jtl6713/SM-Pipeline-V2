@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fbs3.caption import public_mp4_url
@@ -15,10 +16,20 @@ def video_id(record: dict[str, Any]) -> str:
     return field_str(record, "FB_Slideshow_Meta_Video_ID") or field_str(record, "Platform_Post_ID")
 
 
+def facebook_graph_publish_held_reason() -> str | None:
+    raw = os.environ.get("FACEBOOK_AUTO_PUBLISH", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return None
+    return "facebook_manual_publish"
+
+
 def create_eligibility_reason(record: dict[str, Any]) -> str | None:
     """Return a skip reason, or None when Make FBS3 would lock the output."""
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
+    held = facebook_graph_publish_held_reason()
+    if held:
+        return held
     status = field_str(record, "FB_Slideshow_Status")
     if _ci(status) == _ci(STATUS_VIDEO_READY) and public_mp4_url(record):
         return None

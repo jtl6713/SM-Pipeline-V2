@@ -1,4 +1,7 @@
+import os
 from datetime import datetime
+
+os.environ["FACEBOOK_AUTO_PUBLISH"] = "1"
 
 from fbs3.caption import cache_busted_public_url, public_mp4_url, reel_description, reel_title
 from fbs3.eligibility import create_eligibility_reason, poll_eligibility_reason
@@ -29,6 +32,14 @@ def _processing(**overrides):
     }
     fields.update(overrides)
     return _record(**fields)
+
+
+def test_fbs3_create_holds_when_facebook_auto_publish_off():
+    os.environ["FACEBOOK_AUTO_PUBLISH"] = "0"
+    try:
+        assert create_eligibility_reason(_ready()) == "facebook_manual_publish"
+    finally:
+        os.environ["FACEBOOK_AUTO_PUBLISH"] = "1"
 
 
 def test_fbs3_is_registered():
