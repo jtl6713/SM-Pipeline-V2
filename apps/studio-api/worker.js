@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.191-autonomous-skip-reprepare",
+          version: "0.10.192-autonomous-resume-before-pick",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -24716,12 +24716,16 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     authorization = await resolveStudioCronAuthorization(env);
   }
 
-  if (last.status === "waiting_variants" && last.production_request_id && last.idea_id) {
+  if (last.production_request_id && last.idea_id) {
     const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, last.idea_id).catch(() => null);
     const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, last.production_request_id).catch(() => null);
-    if (!idea || !requestRecord) {
-      await studioSaveAutonomousLastRun(env, { ...last, status: "reset", skip_reason: "waiting_record_gone" });
-    } else {
+    const requestStatus = String(f(requestRecord, "Request_Status") || "").trim();
+    const lastNeedsResume = ["waiting_variants", "skipped", "reset", "picking", "resuming"].includes(String(last.status || "").trim())
+      || ["Draft", "Ready"].includes(requestStatus);
+    if (last.status === "waiting_variants" && (!idea || !requestRecord)) {
+      return studioSaveAutonomousLastRun(env, { ...last, status: "reset", skip_reason: "waiting_record_gone" });
+    }
+    if (idea && requestRecord && lastNeedsResume && ["Draft", "Ready"].includes(requestStatus)) {
     const pick = {
       content_type: String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim() || "Vertical Short Video",
       media_asset_ids: autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), [])),

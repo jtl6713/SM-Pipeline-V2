@@ -230,3 +230,5 @@ Autonomous defaults Worker deploy: 2026-08-30 - Six-output autonomous plan (Reel
 Autonomous through-approve Worker deploy: 2026-08-30 - Promote when plan crops are ready instead of parking on Production Approve while extra ratios stay Preparing. Worker 0.10.190-autonomous-through-approve.
 
 Autonomous skip-reprepare Worker deploy: 2026-08-30 - Do not reset Ready crops to Preparing on resume; promote immediately when the plan is complete. Worker 0.10.191-autonomous-skip-reprepare.
+
+Autonomous resume-before-pick Worker deploy: 2026-08-30 - Never harvest a second idea while the last request is still Draft; return when the waiting record is gone. Worker 0.10.192-autonomous-resume-before-pick.
