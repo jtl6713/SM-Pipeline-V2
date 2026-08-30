@@ -6,6 +6,7 @@ from asset.helpers import as_bool
 from item4.settings import PipelineSettings
 from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str
+from ap0.public_cover import native_grid_cover_required
 from yt.constants import DEFAULT_CATEGORY_ID, DEFAULT_PRIVACY, THUMB_NOT_NEEDED, THUMB_PENDING
 
 
@@ -69,6 +70,8 @@ def thumbnail_status(record: dict[str, Any]) -> str:
     current = field_str(record, "YouTube_Thumbnail_Status")
     if current:
         return current
+    if native_grid_cover_required(record):
+        return THUMB_PENDING
     return THUMB_PENDING if field_str(record, "Thumbnail_URL") else THUMB_NOT_NEEDED
 
 

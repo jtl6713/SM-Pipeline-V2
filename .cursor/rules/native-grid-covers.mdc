@@ -12,6 +12,7 @@ The generated 3D block-letter thumbnail is the **grid cover** wherever a platfor
 - Generate the thumbnail for finished video passthrough (`Thumbnail_Mode=Yes`). Do not skip covers because Remotion, VO, or crops are skipped.
 - Keep `Thumbnail_URL` on Platform Outputs even when `Studio_Effective_Thumbnail_Mode` is `No`. Mode `No` skips **lettering on the video**, not the native cover.
 - Stage covers onto `https://media.chicagoshining.com/publish/` or `studio/previews/` before Graph/YouTube fetch. Drive `uc?id=` / `webContentLink` is not a cover_url.
+- **Publish must attach the cover.** Creating the still is not enough. Instagram Reels send Graph `cover_url`, Facebook Reels call `/{video-id}/thumbnails?is_preferred=true`, YouTube Shorts call `thumbnails.set`. Do not mark those outputs Published if the platform was never told to use the 3D still. Do not send `thumb_offset` as a fallback when a native cover is required (offset wins and shows a video frame).
 
 ## Platform behavior
 

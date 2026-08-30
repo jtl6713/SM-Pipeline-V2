@@ -81,13 +81,37 @@ def process_request(
     now = iso_utc()
     thumb_status = field_str(output, "YouTube_Thumbnail_Status")
     thumb_url = field_str(output, "Thumbnail_URL")
-    if 200 <= status_code <= 299 and status == "succeeded" and thumb_url and thumb_status.casefold() != "uploaded":
-        try:
-            from ap0.public_cover import ensure_public_cover_url
+    from ap0.public_cover import ensure_public_cover_url, graph_fetchable_cover_url, native_grid_cover_required
 
+    cover_required = native_grid_cover_required(output)
+    if 200 <= status_code <= 299 and status == "succeeded" and thumb_status.casefold() != "uploaded" and (
+        cover_required or thumb_url
+    ):
+        try:
             thumb_url = ensure_public_cover_url(client, output) or thumb_url
         except Exception:
-            pass
+            thumb_url = field_str(output, "Thumbnail_URL")
+        if cover_required and not graph_fetchable_cover_url(thumb_url):
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                {
+                    "YouTube_Stage": STAGE_YT2,
+                    "Publish_Locked_At": None,
+                    "Publish_Locked_By": "",
+                    "Publish_Error_Stage": "YTS2_THUMBNAIL",
+                    "Publish_Error_Message": "YouTube Short needs a public native grid cover before thumbnails.set.",
+                    "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+                    "YouTube_Error_Message": "YTS2 missing Graph/YouTube-fetchable Thumbnail_URL.",
+                    "YouTube_Response_JSON": response_json(body),
+                    "Publish_Retry_Eligible": True,
+                    "YouTube_Last_Checked_At": now,
+                    "YouTube_Thumbnail_Status": THUMB_PENDING,
+                    "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+                },
+            )
+            result["still_processing"] = True
+            return {"processed": True, "retry": True, "reason": "missing_native_cover", **result}
         thumb_code, thumb_body = uploader.set_thumbnail(
             video_id=video_id,
             source_url=thumb_url,
@@ -154,7 +178,7 @@ def process_request(
         return {"processed": True, "retry": True, **result}
 
     if 200 <= status_code <= 299 and status == "succeeded" and (
-        thumb_status.casefold() == "uploaded" or not thumb_url
+        thumb_status.casefold() == "uploaded" or (not cover_required and not thumb_url)
     ):
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,

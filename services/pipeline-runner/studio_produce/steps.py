@@ -61,8 +61,38 @@ def voiceover_required(request: dict[str, Any], parent: dict[str, Any] | None) -
     return directive_yes(field_str(request, "Voiceover_Mode"))
 
 
-def thumbnail_required(request: dict[str, Any]) -> bool:
-    return field_str(request, "Thumbnail_Mode") not in {"No", "Use Photo Frame", "Photo Frame"}
+RENDERED_VIDEO_OUTPUTS = {
+    "Reel",
+    "Short",
+    "Video Draft",
+    "Standard Video",
+    "Slideshow Reel",
+    "Slideshow Video",
+}
+
+
+def _output_type(row: dict[str, Any]) -> str:
+    fields = row.get("fields") if isinstance(row, dict) and "fields" in row else row
+    return field_str(fields or {}, "Studio_Output_Type") or field_str(fields or {}, "Output_Type")
+
+
+def has_rendered_video(request: dict[str, Any] | None = None, outputs: list[dict[str, Any]] | None = None) -> bool:
+    for row in outputs or []:
+        if _output_type(row) in RENDERED_VIDEO_OUTPUTS:
+            return True
+    plan = parse_json(field(request or {}, "Studio_Output_Plan_JSON"), {}) or {}
+    for item in plan.get("items") or []:
+        kind = str((item or {}).get("output_type") or (item or {}).get("studio_output_type") or "").strip()
+        if kind in RENDERED_VIDEO_OUTPUTS:
+            return True
+    return False
+
+
+def thumbnail_required(request: dict[str, Any], outputs: list[dict[str, Any]] | None = None) -> bool:
+    if has_rendered_video(request, outputs):
+        return True
+    mode = field_str(request, "Thumbnail_Mode")
+    return mode not in {"No", "Use Photo Frame", "Photo Frame", "Use photo frame"}
 
 
 def pick_resume_step(request: dict[str, Any], outputs: list[dict[str, Any]] | None = None) -> str:
@@ -309,7 +339,7 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if not parent:
         return "images"
     want_voice = voiceover_required(request, parent)
-    want_thumb = thumbnail_required(request)
+    want_thumb = thumbnail_required(request, ctx.get("outputs"))
     has_voice = bool(field_str(parent, "Voiceover_URL"))
     has_thumb = bool(field_str(parent, "Thumbnail_URL"))
     if (not want_voice or has_voice) and (not want_thumb or has_thumb):
@@ -328,9 +358,6 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
         if field_str(parent, "Content_Status") != "Ready for Voiceover":
             patch["Content_Status"] = "Ready for Voiceover"
         if field_str(parent, "Thumbnail_Status") in {"", "Not Started", "None"} and not want_thumb:
-            patch["Thumbnail_Status"] = "Not Needed"
-        elif field_str(parent, "Thumbnail_Status") in {"", "Not Started", "None"} and want_thumb and not field_str(parent, "Thumbnail_Prompt"):
-            # Cover is generated after VO; do not block P2 voiceover-only on missing prompt.
             patch["Thumbnail_Status"] = "Not Needed"
         if patch:
             client.update_record(CONTENT_ITEMS_TABLE, parent["id"], patch, typecast=True)

@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.180-review-thumbnail-link";
+  const BUILD_ID = "item4-0.6.186-video-grid-cover";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -5526,6 +5526,29 @@
       ? `${outputs.length} requested output${outputs.length === 1 ? "" : "s"}: ${outputs.map(o => `${o.platform} ${o.output_type}`).join(" · ")}`
       : "No custom outputs selected. Studio will use the recommended output for each selected platform.";
     hydrateEzOutputsFromMatrix();
+    syncNativeVideoCoverRule();
+  }
+
+  function item4SelectedHasRenderedVideo() {
+    const types = new Set(["Reel", "Video Draft", "Short", "Standard Video", "Slideshow Reel", "Slideshow Video"]);
+    const fromMatrix = selectedOutputMatrix().some((row) => types.has(row.output_type));
+    if (fromMatrix) return true;
+    return Array.from(document.querySelectorAll("[data-ez-output]:checked")).some((input) => types.has(input.value));
+  }
+
+  function syncNativeVideoCoverRule() {
+    const lock = item4SelectedHasRenderedVideo();
+    ["prThumbnail", "ezThumbnail"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      if (lock) {
+        el.value = "Yes";
+        el.disabled = true;
+        el.title = "Rendered video always uses the 3D grid cover.";
+      } else {
+        el.title = "";
+      }
+    });
   }
 
   function outputRecordKey(row) {
@@ -5881,6 +5904,7 @@
         control.disabled = !editable;
       });
     }
+    syncNativeVideoCoverRule();
     syncEzIdeaIdentityFields();
     syncEzCaptionLock();
 
@@ -7715,7 +7739,7 @@
     ezRequestedCaption: "Write the post caption here. Force exact uses this wording. On-photo labels stay on each photo.",
     ezScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     ezRequestedScript: "Paste spoken words here only if you want to control the voiceover. Leave blank to let AI write it.",
-    ezThumbnail: "AI generated creates a colorful 3D-letter ChicagoShining cover. Use a photo frame only if you want a still from your uploads instead.",
+    ezThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover on Instagram Reels, Facebook Reels, and YouTube Shorts. You do not add Carousel for that. This control only applies to still-only posts.",
     ezVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
     ezVideoDuration: "Requested video length in seconds for video outputs.",
     ezVideoClipMode: "How many clips Studio should aim for in a video. AI decides unless you force a count or range.",
@@ -7742,7 +7766,7 @@
     prMusicMode: "Turn background music on or off for video outputs. Native stills ignore this.",
     prVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
     prMusicAsset: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
-    prThumbnail: "AI generated creates a colorful 3D-letter ChicagoShining cover. Use a photo frame only if you want a still from your uploads instead.",
+    prThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover. Carousel is a separate still post, not the Reel cover.",
     prVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
     prTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     prRequestedTitle: "The on-post title. Separate from the idea name.",
@@ -7921,7 +7945,7 @@
       phase6BindTooltipTarget(card, "One photo. Studio plans Instagram 4:5, Facebook image, and TikTok photo draft from that original.");
     });
     searchRoot.querySelectorAll?.("[data-ez-input='multiple-photos'], [data-pr-input='multiple-photos']").forEach((card) => {
-      phase6BindTooltipTarget(card, "A set of photos. Studio plans carousel, album, TikTok photo draft, or YouTube Short from the same originals.");
+      phase6BindTooltipTarget(card, "A set of photos. Studio plans Reels, a Facebook slideshow Reel, TikTok video draft, and YouTube Short. The 3D thumbnail is the grid cover on those videos.");
     });
     searchRoot.querySelectorAll?.("[data-item4-platform], [data-ez-platform]").forEach((input) => {
       const label = input.closest("label") || input;

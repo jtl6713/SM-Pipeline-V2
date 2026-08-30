@@ -3,6 +3,7 @@ from ap0.public_cover import (
     cover_r2_key,
     drive_file_id_from_url,
     graph_fetchable_cover_url,
+    native_grid_cover_required,
 )
 
 
@@ -46,3 +47,14 @@ def test_cover_needs_stage_for_drive_but_not_cdn():
     assert cover_needs_public_stage(drive) is True
     assert cover_needs_public_stage(public) is False
     assert cover_r2_key(drive, "png") == "publish/platform-output-281/cover.png"
+
+
+def test_native_grid_cover_required_for_rendered_video():
+    assert native_grid_cover_required({"fields": {"Studio_Output_Type": "Reel"}})
+    assert native_grid_cover_required({"fields": {"Platform_Output_Type": "YouTube Short"}})
+    assert native_grid_cover_required({"fields": {"Platform_Output_Type": "Facebook Reel"}})
+    assert not native_grid_cover_required({"fields": {"Studio_Output_Type": "Single Image"}})
+    assert not native_grid_cover_required(
+        {"fields": {"Studio_Output_Type": "Video Draft", "Platform": "TikTok"}}
+    )
+    assert not native_grid_cover_required({"fields": {"Platform_Output_Type": "TikTok Video Draft"}})

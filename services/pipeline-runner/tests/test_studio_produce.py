@@ -193,6 +193,13 @@ def test_voiceover_not_needed_does_not_require_p2():
     assert voiceover_required({"fields": {"Voiceover_Mode": "Yes"}}, {"fields": {"Voiceover_Status": "Ready"}}) is True
     assert thumbnail_required({"fields": {"Thumbnail_Mode": "Yes"}}) is True
     assert thumbnail_required({"fields": {"Thumbnail_Mode": "Use Photo Frame"}}) is False
+    assert thumbnail_required(
+        {"fields": {"Thumbnail_Mode": "No"}},
+        [{"fields": {"Studio_Output_Type": "Reel"}}],
+    ) is True
+    assert thumbnail_required(
+        {"fields": {"Studio_Output_Plan_JSON": '{"items":[{"output_type":"Short","platform":"YouTube"}]}', "Thumbnail_Mode": "Use photo frame"}},
+    ) is True
 
 
 def test_pick_resume_step_jumps_to_stamp_when_selected():
