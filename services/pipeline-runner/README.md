@@ -18,6 +18,7 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **LETTER** | Native JPEG lower-third compositor (`POST /stages/letter`) | Worker pulses Python directly; no Make scenario |
 | **R2** | Full (`5569495` replacement, OpenAI module 7 port) | `STAGE_BACKEND_R2=python` |
 | **R3** | Full (`5557966` — render prep from `Selected_Assets_JSON`, batch 10) | Make until `STAGE_BACKEND_R3=python` |
+| **T1** | Timing Engine — beat-aware transition timeline before Remotion | `STAGE_BACKEND_T1=python` (also runs when R4 is Python) |
 | **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Make until `STAGE_BACKEND_R4=python` |
 | **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | `STAGE_BACKEND_R5=python` |
 | **RR1** | Full (`5576363` — batched review email, max 10) | Make until `STAGE_BACKEND_RR1=python` |
@@ -121,6 +122,10 @@ One `POST /stages/r3` processes up to **10** Platform Outputs where `Asset_Selec
 
 Shared helpers: `render/fields.py`, music fallback catalog URL in `r3/render_prep.py`.
 
+## T1 behavior (Timing Engine)
+
+One `POST /stages/t1` claims up to **5** Remotion-bound outputs that are `Ready for Render` with music and `Timing_Status` blank or `Pending`. Downloads the selected track from Drive, calls the Timing Engine `POST /timeline`, rewrites `Render_Clip_List_JSON` durations, and writes `Timing_Timeline_JSON` / `Timing_Analysis_JSON` / `Music_BPM`. No music or a single clip sets `Timing_Status=Skipped`. R4 waits while status is `Pending` or `Failed`.
+
 ## R4 behavior (start Remotion render)
 
 One `POST /stages/r4` claims **1** output with `Render_Status=Ready for Render` and required clip/composition fields. Loads render server URL + music/voice volumes from Pipeline Settings, clears stale render job fields, then routes:
@@ -177,6 +182,7 @@ PIPELINE_RUNNER_SHARED_SECRET=<shared secret>
 STAGE_BACKEND_SMV1=python
 STAGE_BACKEND_R2=python
 STAGE_BACKEND_R3=python
+STAGE_BACKEND_T1=python
 STAGE_BACKEND_R4=python
 STAGE_BACKEND_R5=python
 STAGE_BACKEND_RR1=python
@@ -205,6 +211,7 @@ Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-dema
 | `POST` | `/stages/smv1/drain` | Process up to N queue rows for one Production Request |
 | `POST` | `/stages/r2/drain` | Process up to N eligible Platform Outputs |
 | `POST` | `/stages/r3` | Render prep batch (max 10) |
+| `POST` | `/stages/t1` | Timing Engine batch (max 5) |
 | `POST` | `/stages/r4` | Start one Remotion render |
 | `POST` | `/stages/r5` | Poll/upload batch (max 5) |
 | `POST` | `/stages/rr1` | Review email batch (max 10) |

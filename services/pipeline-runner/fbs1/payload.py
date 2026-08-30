@@ -16,7 +16,8 @@ from fbs1.constants import (
     WIDTH,
 )
 from fbs1.slides import slide_clip
-from render.fields import field, field_str
+from render.fields import field, field_str, parse_json_field
+from t1.apply import apply_timeline
 
 
 def build_render_payload(output: dict[str, Any], slides: list[dict[str, Any]]) -> dict[str, Any]:
@@ -40,6 +41,11 @@ def build_render_payload(output: dict[str, Any], slides: list[dict[str, Any]]) -
     except (TypeError, ValueError):
         duration_seconds = count * 3 + 1
     duration_in_frames = int(round(duration_seconds * FPS))
+    timeline = parse_json_field(field(output, "Timing_Timeline_JSON"))
+    if isinstance(timeline, dict) and timeline.get("clips") and len(clips) > 1:
+        clips = apply_timeline(clips, {"timeline": timeline} if "clips" in timeline else timeline)
+        duration_in_frames = int(timeline.get("duration_frames") or duration_in_frames)
+        duration_seconds = duration_in_frames / FPS
     return {
         "filename": f"facebook-slideshow-output-{output_id}.mp4",
         "compositionId": COMPOSITION_ID,

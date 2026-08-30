@@ -430,6 +430,11 @@ def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict
         "Preferred_Music_URL": package.get("effective", {}).get("music_url") or None,
         "Music_Volume": 1.0 if package.get("effective", {}).get("music_url") else 0,
         "Music_Start_Seconds": package.get("effective", {}).get("music_start_seconds") or 0,
+        "Timing_Status": (
+            "Pending"
+            if (not native and package.get("effective", {}).get("music_url") and (package.get("clip_count") or 0) > 1)
+            else ("Skipped" if not native else None)
+        ),
         "Voiceover_Duration_Seconds": package.get("effective", {}).get("voiceover_duration_seconds") or None,
     }
     if thumb:

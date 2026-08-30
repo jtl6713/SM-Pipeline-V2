@@ -14,6 +14,7 @@ This directory contains **source code and reproducible configuration only** for 
 | Service | GitHub path | Local runtime path | Port | Status |
 | --- | --- | --- | ---: | --- |
 | Frame Extractor | `services/frame-extractor/` | `Services\Frame_Extractor` | 3334 | Source captured and controlled deployment validated. |
+| Timing Engine | `services/timing-engine/` | `Services\timing-engine\service` | 3336 | FastAPI + Librosa; `POST /timeline` returns a Remotion edit plan. |
 | Remotion Renderer | `services/remotion-renderer/` | `Services\Remotion_Renderer` | 3333 | Authoritative source captured after Item 3 native-overlap acceptance; controlled deployment validated. |
 | Watermark | `services/watermark/` | `Services\Watermark` | 3011 | Source captured; PLAN/deploy/rollback/redeploy proof completed. |
 | Voiceover Normalizer | `services/voiceover-normalizer/` | `Services\voiceover-normalizer\service` | 3012 | Source captured and controlled deployment validated. |

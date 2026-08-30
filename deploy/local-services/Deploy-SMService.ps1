@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','pipeline-runner')]
+    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','pipeline-runner','timing-engine')]
     [string]$Service,
 
     [string]$Commit = '',
@@ -101,6 +101,18 @@ $ServiceMap = @{
         DependencyKind = 'python'
         RuntimeDirs = @('.venv','venv','__pycache__','logs','tmp','temp')
     }
+    'timing-engine' = @{
+        DisplayName = 'Timing Engine'
+        RepoPath = 'services\timing-engine'
+        RuntimePath = 'Services\timing-engine\service'
+        Port = 3336
+        PublicUrl = 'https://timing.chicagoshining.com'
+        WindowTitle = '7 LOC Timing Engine :3336'
+        StartKind = 'batch'
+        StartFile = 'start-timing-engine.bat'
+        DependencyKind = 'python'
+        RuntimeDirs = @('.venv','venv','__pycache__','work','logs','tmp','temp')
+    }
 }
 
 function Write-Step([string]$Text) {
@@ -157,8 +169,9 @@ function Select-Service {
     Write-Host '  4  Voiceover Normalizer'
     Write-Host '  5  YouTube Uploader'
     Write-Host '  6  Pipeline Runner'
+    Write-Host '  7  Timing Engine'
     Write-Host ''
-    $choice = Read-Host 'Enter 1-6'
+    $choice = Read-Host 'Enter 1-7'
     switch ($choice) {
         '1' { return 'frame-extractor' }
         '2' { return 'remotion-renderer' }
@@ -166,6 +179,7 @@ function Select-Service {
         '4' { return 'voiceover-normalizer' }
         '5' { return 'youtube-uploader' }
         '6' { return 'pipeline-runner' }
+        '7' { return 'timing-engine' }
         default { throw "Invalid service selection: $choice" }
     }
 }

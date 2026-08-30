@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 from config import StageRequest, StageResult
-from stages import a1m, a1p, a1s, a2, a2b, a3, a4, ap0, ap0c, ap1_ig, ap1_igs, ap1_igs_poll, ap1c, ap2c, ap3c, ap3p, ap4c, ap4r, ap5c, c2, c3, c3b, c4, c5, c6, c7, c8, c9, fb0, fb1, fb2, fb2r, fb3, fbs1, fbs2, fbs3, fbs4, i1, i2, i3, i4, m1, p1, p0202, p2, p3, p4, p5, publish_fb, publish_ig, publish_igrs, publish_tt, publish_yt, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1, ttd0, ttd1, ttd2, ttd3, ttd4, yt0, ytp1, yts1, yts2, yts3
+from stages import a1m, a1p, a1s, a2, a2b, a3, a4, ap0, ap0c, ap1_ig, ap1_igs, ap1_igs_poll, ap1c, ap2c, ap3c, ap3p, ap4c, ap4r, ap5c, c2, c3, c3b, c4, c5, c6, c7, c8, c9, fb0, fb1, fb2, fb2r, fb3, fbs1, fbs2, fbs3, fbs4, i1, i2, i3, i4, m1, p1, p0202, p2, p3, p4, p5, publish_fb, publish_ig, publish_igrs, publish_tt, publish_yt, r2, r2b, r3, r4, r5, rr1, rr2, sai1, smv1, t1, ttd0, ttd1, ttd2, ttd3, ttd4, yt0, ytp1, yts1, yts2, yts3
 from stages.letter import run as run_letter
 from stages._stub import run_stub
 
@@ -14,6 +14,7 @@ STAGE_NAMES: tuple[str, ...] = (
     "r2",
     "r2b",
     "r3",
+    "t1",
     "r4",
     "r5",
     "rr1",
@@ -91,6 +92,7 @@ _IMPLEMENTED_STAGES = frozenset(
         "r2",
         "r2b",
         "r3",
+        "t1",
         "r4",
         "r5",
         "rr1",
@@ -168,6 +170,7 @@ _HANDLERS: dict[str, StageHandler] = {
     "r2": r2.run,
     "r2b": r2b.run,
     "r3": r3.run,
+    "t1": t1.run,
     "r4": r4.run,
     "r5": r5.run,
     "rr1": rr1.run,

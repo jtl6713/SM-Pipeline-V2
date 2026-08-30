@@ -19,6 +19,7 @@ For the complete operator and AI-handoff procedure, read:
 | Selection | Git source | Live runtime | Port |
 |---|---|---|---:|
 | Frame Extractor | `services/frame-extractor` | `Services\Frame_Extractor` | 3334 |
+| Timing Engine | `services/timing-engine` | `Services\timing-engine\service` | 3336 |
 | Remotion Renderer | `services/remotion-renderer` | `Services\Remotion_Renderer` | 3333 |
 | Watermark | `services/watermark` | `Services\Watermark` | 3011 |
 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 |

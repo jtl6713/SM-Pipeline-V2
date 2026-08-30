@@ -71,6 +71,8 @@ These folders contain the running services and runtime-only material. The deploy
 | 3 | Watermark | `services/watermark` | `Services\Watermark` | 3011 | `https://watermark.chicagoshining.com` | `3 LOC Watermark :3011` |
 | 4 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 | `https://voiceover.chicagoshining.com` | `4 LOC Voiceover Normalizer :3012` |
 | 5 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 | `https://youtube-upload.chicagoshining.com` | `5 LOC YouTube Uploader :3340` |
+| 6 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 | `https://pipeline.chicagoshining.com` | `6 LOC Pipeline Runner :3350` |
+| 7 | Timing Engine | `services/timing-engine` | `Services\timing-engine\service` | 3336 | `https://timing.chicagoshining.com` | `7 LOC Timing Engine :3336` |
 
 All five services were captured from the authoritative live Windows sources and placed under Git source control on 2026-08-17.
 

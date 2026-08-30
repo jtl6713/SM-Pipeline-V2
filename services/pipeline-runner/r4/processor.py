@@ -9,7 +9,7 @@ from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE, PLATFORM_OUTPUTS_TABLE
 from r4.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, MAX_RECORDS, R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
-from r4.render_request import choose_render_request, voiceover_is_required, voiceover_url
+from r4.render_request import choose_render_request, timing_blocks_render, voiceover_is_required, voiceover_url
 from render.fields import field_str, first_linked_id
 from render.remotion_client import RemotionClient
 from render.settings import get_render_server_url, get_render_volumes
@@ -88,6 +88,16 @@ def process_one(
     content_item_id = first_linked_id(output.get("fields", {}).get("Content_Item"))
     if content_item_id:
         content_item = client.get_record(CONTENT_ITEMS_TABLE, content_item_id)
+
+    if timing_blocks_render(output):
+        return {
+            "processed": False,
+            "reason": "waiting_for_timing",
+            "output_record_id": output["id"],
+            "output_id": field_str(output, "Output_ID"),
+            "make_scenario_id": MAKE_SCENARIO_ID,
+            "make_scenario_name": MAKE_SCENARIO_NAME,
+        }
 
     vo = voiceover_url(output, content_item)
     if voiceover_is_required(output, content_item) and not vo:

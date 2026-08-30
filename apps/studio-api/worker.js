@@ -6314,6 +6314,23 @@ async function item4PulseR3Python(env, options = {}) {
   return payload;
 }
 
+async function item4PulseT1Python(env, options = {}) {
+  const body = {
+    extra: { max_runs: Number(options.maxRuns || 5) },
+  };
+  if (options.outputRecordId) body.output_record_id = options.outputRecordId;
+  if (options.testRunId) body.test_run_id = options.testRunId;
+  if (options.dryRun) body.extra.dry_run = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "t1", body, "T1");
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.message || payload?.error || `Python T1 failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
 async function item4PulseR4Python(env, options = {}) {
   const body = { extra: {} };
   if (options.outputRecordId) body.output_record_id = options.outputRecordId;
@@ -17148,6 +17165,7 @@ async function phase6EnsureScenarioActive(env, scenarioId) {
 
 const STUDIO_R2_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),NOT({Do_Not_Publish}),{Content_Item}!=BLANK(),{Output_Status}="Ready for Review",OR({Asset_Need_Status}="Not Needed",{Asset_Need_Status}="Fulfilled"),{Asset_Selection_Status}=BLANK(),{Render_Status}=BLANK(),{Remotion_Job_ID}=BLANK(),{Final_File_URL}="")';
 const STUDIO_R3_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Asset_Selection_Status}="Selected",{Selected_Assets_JSON}!="",{Render_Status}=BLANK(),{Format}!="Story",{Studio_Output_Type}!="Story",OR({Format}="Vertical Short Video",{Format}="Longform Video",{Format}="Feed Post",{Format}="Reel",{Format}="Slideshow Reel",{Format}="Video Draft",{Format}="Short",{Format}="Standard Video",{Format}="Slideshow Video")))';
+const STUDIO_T1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story",OR({Timing_Status}=BLANK(),{Timing_Status}="Pending"),OR({Music_URL}!="",{Selected_Music_URL}!=""))';
 const STUDIO_R4_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),AND({Render_Status}="Ready for Render",{Composition_ID}!="",{Output_Filename}!="",{Render_Clip_List_JSON}!="",{Render_Total_Frames}>0,{Format}!="Story",{Studio_Output_Type}!="Story"))';
 const STUDIO_RR1_WORK_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Review_Email_Sent_At}=BLANK(),OR({Review_Status}=BLANK(),{Review_Status}=""),OR(AND({Render_Status}="Rendered",{Final_File_URL}!=""),AND({Render_Status}="Native Photo Route",OR({Studio_Preview_URL}!="",{Thumbnail_URL}!="",{Selected_Assets_JSON}!="")),AND({Platform}="TikTok",{Studio_Output_Type}="Multi-Photo",{Composition_ID}="",{Render_Clip_List_JSON}!=""),AND({Platform}="Instagram",{Studio_Output_Type}="Carousel",{Composition_ID}="",{Selected_Assets_JSON}!=""),AND({Platform}="Facebook",{Studio_Output_Type}="Multi-Image Post",{Composition_ID}="",{Selected_Assets_JSON}!="")))';
 const STUDIO_CONTINUATION_CANDIDATE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Production_Request_Output}!=BLANK(),{Published_At}=BLANK(),NOT({Output_Status}="Published"),NOT({Output_Status}="Approved for Publishing"))';
@@ -17837,6 +17855,7 @@ async function pulseStudioContinuationJobs(env, options = {}) {
   const contentTable = env.AIRTABLE_CONTENT_TABLE_ID;
   const jobs = [
     { id: PHASE6_R5_SCENARIO_ID, key: "R5", table: outputTable, view: "R5 - Rendering Jobs to Poll", formula: "{Test_Run_ID}=BLANK()" },
+    { id: PHASE6_R4_SCENARIO_ID, key: "T1", table: outputTable, formula: STUDIO_T1_WORK_FORMULA, skipStories: true },
     { id: PHASE6_R4_SCENARIO_ID, key: "R4", table: outputTable, formula: STUDIO_R4_WORK_FORMULA, skipStories: true },
     { id: PHASE6_R3_SCENARIO_ID, key: "R3", table: outputTable, formula: STUDIO_R3_WORK_FORMULA, skipStories: true },
     { id: PHASE6_RR1_SCENARIO_ID, key: "RR1", table: outputTable, formula: STUDIO_RR1_WORK_FORMULA },
@@ -17908,6 +17927,11 @@ async function pulseStudioContinuationJobs(env, options = {}) {
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
         continue;
       }
+      if (job.key === "T1" && (pipelineStageBackend(env, "T1").mode === "python" || pipelineStageBackend(env, "R4").mode === "python")) {
+        await item4PulseT1Python(env, { maxRuns: 5 });
+        pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
+        break;
+      }
       if (job.key === "R4" && pipelineStageBackend(env, "R4").mode === "python") {
         await item4PulseR4Python(env);
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
@@ -17935,7 +17959,7 @@ async function pulseStudioContinuationJobs(env, options = {}) {
       }
       await phase6PulseOnDemandScenario(env, job.id, { waitMs });
       pulses.push({ key: job.key, pulsed: true, matched: eligible.length });
-      if (job.key === "R3" || job.key === "R4") break;
+      if (job.key === "R3" || job.key === "R4" || job.key === "T1") break;
     } catch (error) {
       pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
       break;

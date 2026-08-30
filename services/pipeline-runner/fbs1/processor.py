@@ -67,6 +67,13 @@ def process_request(
 
     slides = list_ready_slides(client, field_str(output, "Output_ID"))
     expected = expected_image_count(output)
+    from t1.apply import music_is_enabled
+    from t1.constants import DONE_STATUSES
+    from t1.processor import process_one as process_t1
+
+    if music_is_enabled(output) and field_str(output, "Timing_Status") not in DONE_STATUSES:
+        process_t1(output_record_id=record_id, test_run_id=test_run_id, dry_run=dry_run, client=client)
+        output = client.get_record(PLATFORM_OUTPUTS_TABLE, record_id)
     payload = build_render_payload(output, slides)
     preview["slide_count"] = len(slides)
     preview["expected_image_count"] = expected

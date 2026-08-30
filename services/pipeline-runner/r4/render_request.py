@@ -29,6 +29,26 @@ def _num(value: Any, default: float = 0) -> float:
         return default
 
 
+def timing_blocks_render(output: dict[str, Any]) -> bool:
+    from t1.apply import music_is_enabled
+    from t1.constants import DONE_STATUSES, STATUS_FAILED
+
+    status = field_str(output, "Timing_Status")
+    if status == STATUS_FAILED:
+        return True
+    if not music_is_enabled(output):
+        return False
+    return status not in DONE_STATUSES
+
+
+def attach_timing_plan(payload: dict[str, Any], output: dict[str, Any]) -> dict[str, Any]:
+    plan = parse_json_field(field(output, "Timing_Timeline_JSON"))
+    if isinstance(plan, dict) and plan:
+        payload["timingPlan"] = plan
+        payload["durationIsExplicit"] = True
+    return payload
+
+
 def music_start_seconds(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> float:
     for record in (output, content_item or {}):
         raw = field(record, "Music_Start_Seconds")
@@ -259,12 +279,15 @@ def choose_render_request(
                 default_voice=default_voice,
                 url=vo,
             )
-        return "p020_manifest", payload
+        return "p020_manifest", attach_timing_plan(payload, output)
     if vo:
-        return "voiceover", build_voiceover_request(
+        return "voiceover", attach_timing_plan(build_voiceover_request(
             output,
             content_item,
             default_music=default_music,
             default_voice=default_voice,
-        )
-    return "no_voiceover", build_no_voiceover_request(output, default_music=default_music)
+        ), output)
+    return "no_voiceover", attach_timing_plan(
+        build_no_voiceover_request(output, default_music=default_music),
+        output,
+    )

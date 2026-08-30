@@ -739,10 +739,30 @@ async function buildRewrittenProps({ body, jobId, job }) {
         );
     }
 
-    const adjustedClips = redistributeClipDurations(
-        rewrittenClips,
-        finalDurationFrames
-    );
+    const hasTimingPlan = Boolean(body.timingPlan && typeof body.timingPlan === 'object');
+    const adjustedClips = hasTimingPlan
+        ? rewrittenClips.map((clip) => ({
+            ...clip,
+            durationFrames: Math.max(1, Math.round(toFiniteNumber(clip.durationFrames, 1))),
+        }))
+        : redistributeClipDurations(
+            rewrittenClips,
+            finalDurationFrames
+        );
+    if (hasTimingPlan) {
+        const timedTotal = adjustedClips.reduce(
+            (sum, clip) => sum + Math.max(1, Math.round(toFiniteNumber(clip.durationFrames, 1))),
+            0
+        );
+        if (finalDurationFrames > timedTotal && adjustedClips.length) {
+            const last = adjustedClips[adjustedClips.length - 1];
+            last.durationFrames = Math.max(1, Math.round(toFiniteNumber(last.durationFrames, 1)))
+                + (finalDurationFrames - timedTotal);
+            appendLog(job, `Timing plan present; held last clip to ${finalDurationFrames} frames.`);
+        } else {
+            appendLog(job, 'Timing plan present; keeping authored clip durations.');
+        }
+    }
 
     const baseMusicVolume = rewrittenMusic
         ? clamp(

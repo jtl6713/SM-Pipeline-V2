@@ -38,6 +38,28 @@ def get_render_volumes(client: AirtableClient) -> tuple[float, float]:
     return music, voice
 
 
+def get_timing_defaults(client: AirtableClient) -> tuple[str, dict]:
+    import json
+
+    from t1.constants import DEFAULT_RULES
+
+    settings = PipelineSettings(client)
+    url = (
+        settings.get("TIMING_ENGINE_URL")
+        or str(load_settings().get("timing_engine_url") or "http://127.0.0.1:3336")
+    ).rstrip("/")
+    raw = settings.get("DEFAULT_TIMING_RULES_JSON")
+    rules = DEFAULT_RULES
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and parsed.get("rules"):
+                rules = parsed
+        except json.JSONDecodeError:
+            pass
+    return url, rules
+
+
 def get_google_drive_folder_id(client: AirtableClient) -> str:
     settings = PipelineSettings(client)
     for name in (

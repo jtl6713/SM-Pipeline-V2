@@ -612,6 +612,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     from r3.processor import process_one as process_r3
     from r4.processor import process_one as process_r4
     from r5.processor import process_one as process_r5
+    from t1.processor import process_one as process_t1
     from lettering.processor import process_one as process_letter
 
     if not ctx.get("outputs"):
@@ -652,11 +653,13 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 remaining.append(fresh["id"])
                 continue
             if render_status == "Ready for Render":
+                process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
                 process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
                 remaining.append(fresh["id"])
                 continue
             if field_str(fresh, "Asset_Selection_Status") == "Selected" and not render_status:
                 process_r3(output_record_id=fresh["id"], test_run_id=test_run_id)
+                process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
                 process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
                 remaining.append(fresh["id"])
                 continue

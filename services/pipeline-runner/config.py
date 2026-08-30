@@ -25,6 +25,7 @@ def load_settings() -> dict[str, Any]:
         "airtable_pat": os.environ.get("AIRTABLE_PAT", ""),
         "airtable_base_id": os.environ.get("AIRTABLE_BASE_ID", "appe33zkZn35yirTL"),
         "remotion_renderer_url": os.environ.get("REMOTION_RENDERER_URL", "http://127.0.0.1:3333"),
+        "timing_engine_url": os.environ.get("TIMING_ENGINE_URL", "http://127.0.0.1:3336"),
         "voiceover_normalizer_url": os.environ.get("VOICEOVER_NORMALIZER_URL", "http://127.0.0.1:3012"),
         "youtube_uploader_url": os.environ.get("YOUTUBE_UPLOADER_URL", "http://127.0.0.1:3340"),
         "variant_service_url": os.environ.get("VARIANT_SERVICE_URL", ""),
