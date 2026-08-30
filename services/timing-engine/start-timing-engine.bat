@@ -1,8 +1,8 @@
 @echo off
-cd /d %~dp0
+cd /d "%~dp0"
 set PORT=3336
-python -m venv .venv
-call .venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-pause
+if not exist ".venv\Scripts\python.exe" (
+  python -m venv .venv
+  ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r requirements.txt
+)
+".venv\Scripts\python.exe" app.py

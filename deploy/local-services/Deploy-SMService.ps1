@@ -107,10 +107,11 @@ $ServiceMap = @{
         RuntimePath = 'Services\timing-engine\service'
         Port = 3336
         PublicUrl = 'https://timing.chicagoshining.com'
-        WindowTitle = '7 LOC Timing Engine :3336'
+        WindowTitle = '8 LOC Timing Engine :3336'
         StartKind = 'batch'
         StartFile = 'start-timing-engine.bat'
         DependencyKind = 'python'
+        PublicHealthRequired = $false
         RuntimeDirs = @('.venv','venv','__pycache__','work','logs','tmp','temp')
     }
 }
@@ -307,6 +308,11 @@ function Wait-ServiceHealth {
         throw "Local service did not become healthy within $Seconds seconds: $localUrl"
     }
 
+    $requirePublic = $true
+    if ($Config.ContainsKey('PublicHealthRequired') -and -not [bool]$Config.PublicHealthRequired) {
+        $requirePublic = $false
+    }
+
     $publicDeadline = (Get-Date).AddSeconds(45)
     $publicOk = $false
     do {
@@ -318,11 +324,16 @@ function Wait-ServiceHealth {
     } while ((Get-Date) -lt $publicDeadline)
 
     if (-not $publicOk) {
-        throw "Permanent public service route did not become healthy: $publicUrl"
+        if ($requirePublic) {
+            throw "Permanent public service route did not become healthy: $publicUrl"
+        }
+        Write-Host "WARN public health not required yet: $publicUrl" -ForegroundColor Yellow
     }
 
     Write-Host "PASS local health:  $localUrl" -ForegroundColor Green
-    Write-Host "PASS public health: $publicUrl" -ForegroundColor Green
+    if ($publicOk) {
+        Write-Host "PASS public health: $publicUrl" -ForegroundColor Green
+    }
 }
 
 function Stop-LocalService {
@@ -593,8 +604,10 @@ Write-Host "Runtime:      $RuntimeRoot"
 Write-Host "Git checkout: $RepoRoot"
 Write-Host ''
 
-if (-not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)) {
-    throw "Live runtime folder not found: $RuntimeRoot"
+$FirstInstall = -not (Test-Path -LiteralPath $RuntimeRoot -PathType Container)
+if ($FirstInstall) {
+    Write-Host "First install: creating live runtime folder $RuntimeRoot" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 }
 if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot '.git') -PathType Container)) {
     throw "Git checkout not found: $RepoRoot"
@@ -753,10 +766,22 @@ try {
 
     $localBefore = Test-HttpHealth -Url ("http://localhost:$($Config.Port)/health") -ReturnBoolean
     $publicBefore = Test-HttpHealth -Url ($Config.PublicUrl.TrimEnd('/') + '/health') -ReturnBoolean
-    if (-not $localBefore -or -not $publicBefore) {
+    $requirePublicBaseline = $true
+    if ($Config.ContainsKey('PublicHealthRequired') -and -not [bool]$Config.PublicHealthRequired) {
+        $requirePublicBaseline = $false
+    }
+    if ($FirstInstall -or -not $PriorCommit) {
+        Write-Host 'First managed deploy: skipping baseline health (service is not live yet).' -ForegroundColor Yellow
+    }
+    elseif (-not $localBefore -or ($requirePublicBaseline -and -not $publicBefore)) {
         throw 'Baseline local/public health is not green. Refusing to modify a service that is already unhealthy.'
     }
-    Write-Host 'PASS baseline local/public health.' -ForegroundColor Green
+    else {
+        Write-Host 'PASS baseline local/public health.' -ForegroundColor Green
+        if (-not $requirePublicBaseline -and -not $publicBefore) {
+            Write-Host 'WARN baseline public health skipped for this service.' -ForegroundColor Yellow
+        }
+    }
 
     if ($PlanOnly) {
         Write-Host ''

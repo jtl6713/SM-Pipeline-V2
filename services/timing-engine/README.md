@@ -6,6 +6,7 @@ Local FastAPI + Librosa service that turns music (and later other timing sources
 - Local health: `http://localhost:3336/health`
 - Planned public route: `https://timing.chicagoshining.com`
 - Runtime folder: `D:\Content Creation\ChicagoShining Pipeline\Services\timing-engine\service`
+- START / STOP / VERIFY tab: `8 LOC Timing Engine :3336` (operator scripts live in `Source Control\Production-Start-Stop-Verify-Services`, not under `Services\`)
 
 Endpoints: `GET /health`, `POST /timeline`.
 
