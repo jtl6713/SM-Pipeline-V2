@@ -5,7 +5,7 @@ from render.fields import first_linked_id, linked_ids
 from studio_produce.constants import STEP_LABELS, STEP_PERCENT
 from studio_produce.context import outputs_formula
 from studio_produce.job import derive_route, finished_origin_kind, is_finished_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
-from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, variant_transfer_id
+from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
 from studio_produce.stamp import finished_source_package, is_native_photo, stamp_fields
 from studio_produce.steps import pick_resume_step, thumbnail_required, voiceover_required
 from studio_produce.thumbnail_prompt import COLORFUL_3D_RULE, build_finished_thumbnail_prompt
@@ -117,6 +117,17 @@ def test_transfer_ids_and_ratios():
     assert master_transfer_id("recPR", "photo1") == "ITEM4-MASTER-recPR-photo1"
     assert required_ratios({"items": [{"aspect_ratio": "9:16", "platform": "Instagram"}]}) == ["9:16"]
     assert "16:9" in required_ratios({"items": [{"aspect_ratio": "9:16", "platform": "YouTube"}]})
+    youtube_plan = {
+        "items": [
+            {"aspect_ratio": "9:16", "platform": "Instagram"},
+            {"aspect_ratio": "4:5", "platform": "Facebook"},
+            {"aspect_ratio": "9:16", "platform": "YouTube"},
+        ]
+    }
+    assets = [{"id": "hero", "order": 1}, {"id": "two", "order": 2}, {"id": "three", "order": 3}]
+    assert ratios_for_asset(youtube_plan, assets[0], assets) == ["9:16", "4:5", "16:9"]
+    assert ratios_for_asset(youtube_plan, assets[1], assets) == ["9:16", "4:5"]
+    assert ratios_for_asset(youtube_plan, assets[2], assets) == ["9:16", "4:5"]
 
 
 def test_rebuild_manifest_ready_count():
@@ -139,6 +150,27 @@ def test_rebuild_manifest_ready_count():
     assert manifest["plan_ready_count"] == 1
     assert manifest["plan_complete"] is True
     assert manifest["assets"][0]["variants"]["9:16"]["preview_url"].startswith("https://media.")
+
+
+def test_rebuild_manifest_youtube_cover_only_on_hero():
+    request_id = "recPR"
+    assets = [
+        {"id": "hero", "order": 1, "name": "one.jpg"},
+        {"id": "two", "order": 2, "name": "two.jpg"},
+        {"id": "three", "order": 3, "name": "three.jpg"},
+    ]
+    plan = {
+        "items": [
+            {"aspect_ratio": "9:16", "platform": "Instagram"},
+            {"aspect_ratio": "4:5", "platform": "Facebook"},
+            {"aspect_ratio": "9:16", "platform": "YouTube"},
+        ]
+    }
+    ratios = required_ratios(plan)
+    manifest = rebuild_variant_manifest(request_id, assets, ratios, [], plan=plan)
+    assert "16:9" in ratios
+    assert manifest["plan_target_count"] == 6
+    assert manifest["target_count"] == 7
 
 
 def test_first_linked_id_accepts_record_objects():

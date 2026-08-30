@@ -854,6 +854,11 @@ export default {
         console.warn("studio produce watchdog failed", error);
       }
       try {
+        await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
+      } catch (error) {
+        console.warn("item4 pending crop drain cron failed", error);
+      }
+      try {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
@@ -5268,6 +5273,30 @@ function item4RequiredRatios(plan) {
   return [...item4PlanRatios(plan), ...item4CoverExtraRatios(plan)];
 }
 
+function item4CoverHeroAsset(assets) {
+  return [...(assets || [])]
+    .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))[0] || null;
+}
+
+function item4RatiosForAsset(plan, asset, assets) {
+  const planRatios = item4PlanRatios(plan || {});
+  const extras = item4CoverExtraRatios(plan || {});
+  const hero = item4CoverHeroAsset(assets);
+  const isHero = Boolean(hero?.id) && String(asset?.id || "") === String(hero.id);
+  if (!isHero) return planRatios;
+  return [...planRatios, ...extras.filter((ratio) => !planRatios.includes(ratio))];
+}
+
+function item4ExpectedVariantKeys(recordId, assets, plan) {
+  return (assets || []).flatMap((asset) =>
+    item4RatiosForAsset(plan, asset, assets).map((ratio) => ({
+      asset,
+      ratio,
+      transfer_id: item4QueueTransferId(recordId, asset.id, ratio, asset),
+    }))
+  );
+}
+
 function item4VariantRatioKey(ratio) {
   return String(ratio || "").replace(":", "x");
 }
@@ -5462,7 +5491,8 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
       throw new HttpError(409, `${asset?.name || "Master photo"} is missing its authoritative Media Asset link`);
     }
 
-    for (const ratio of ratios) {
+    const assetRatios = plan ? item4RatiosForAsset(plan, asset, assets) : (ratios || []);
+    for (const ratio of assetRatios) {
       const spec = ITEM4_RATIO_SPECS[ratio];
       if (!spec) throw new HttpError(400, `Unsupported platform ratio ${ratio}`);
 
@@ -5530,6 +5560,27 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
         target_file_name: targetFileName,
         queue_record_id: row?.id || current?.id || null,
       });
+    }
+  }
+  const keep = new Set(expected.map((row) => row.transfer_id));
+  for (const row of existingRows) {
+    const transferId = String(f(row, "Transfer_ID") || "").trim();
+    const status = item4QueueStatus(row);
+    if (!transferId || keep.has(transferId)) continue;
+    if (!["Pending", "Processing"].includes(status)) continue;
+    try {
+      await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Transfer_Status: "Error",
+            Error_Message: "Dropped — this ratio is not required for the current plan or cover.",
+          },
+          typecast: true,
+        }),
+      });
+    } catch (error) {
+      console.warn("Item 4 unused variant row drop failed", row.id, error);
     }
   }
   return expected;
@@ -6423,7 +6474,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
     source_asset_count: assets.length,
     required_ratios: ratios,
     plan_ratios: [...planSet],
-    target_count: assets.length * ratios.length,
+    target_count: 0,
     plan_target_count: assets.length * planSet.size,
     ready_count: 0,
     plan_ready_count: 0,
@@ -6431,7 +6482,12 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
     assets: [],
   };
 
+  const extras = (ratios || []).filter((ratio) => !planSet.has(ratio));
+  const hero = item4CoverHeroAsset(assets);
   for (const asset of assets) {
+    const isHero = Boolean(hero?.id) && String(asset?.id || "") === String(hero.id);
+    const assetRatios = [...planSet, ...(isHero ? extras : [])];
+    manifest.target_count += assetRatios.length;
     const row = {
       id: asset.id,
       order: asset.order,
@@ -6444,7 +6500,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
       variants: {},
     };
 
-    for (const ratio of ratios) {
+    for (const ratio of assetRatios) {
       const transferId = item4QueueTransferId(recordId, asset.id, ratio, asset);
       const q = queueById.get(transferId);
       if (!q || item4QueueStatus(q) !== "Ready") continue;
@@ -6514,7 +6570,7 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   let queueRows = await item4VariantQueueRows(env, recordId);
   queueRows = await item4RequeueStaleProcessing(env, queueRows);
   const expectedIds = new Set(
-    assets.flatMap((asset) => ratios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio, asset)))
+    item4ExpectedVariantKeys(recordId, assets, plan || {}).map((row) => row.transfer_id)
   );
   const scoped = queueRows.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
 
@@ -6918,7 +6974,7 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   // explicit state-transition correction.
   const queueRows = await item4VariantQueueRows(env, recordId);
   const expectedIds = new Set(
-    assets.flatMap((asset) => ratios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio, asset)))
+    item4ExpectedVariantKeys(recordId, assets, plan || {}).map((row) => row.transfer_id)
   );
   const scoped = queueRows.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
   if (!scoped.length) {
@@ -6954,8 +7010,8 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
 async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = null) {
   const recordId = item4RequestIdFromPath(url);
 
-  // Workspace GET is a read of this request. Make blueprint hardening and
-  // SMV1 drain belong on cron / waitUntil, not on every status poll or Approve.
+  // Workspace GET stays a fast read. If crops are still Preparing, waitUntil
+  // resumes SMV1 so leftover Pending rows cannot sit at 14/15 until a human pulses.
   let makeHardening = { skipped: "workspace-read" };
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   let assets = item4AssetManifest(record).sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
@@ -6995,6 +7051,16 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
     try {
       let reconciled = await item4ReconcileVariants(env, recordId, record, { skipSanitize: true });
       record = reconciled.record;
+      if (reconciled.status === "Preparing" && ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil((async () => {
+          try {
+            await item4ResumePendingVariants(env, recordId, reconciled.record);
+          } catch (error) {
+            console.warn("Item 4 workspace variant resume deferred", error);
+          }
+        })());
+        variantResume = { attempted: true, reason: "preparing-waituntil", execution_ids: [] };
+      }
     } catch (error) {
       variantResume = {
         attempted: false,

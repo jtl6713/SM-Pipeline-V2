@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from config import StageRequest, StageResult, load_settings
 from item4.formulas import smv1_exact_request_formula
-from item4.processor import process_one
+from item4.processor import process_drain
 
 
 def run(request: StageRequest) -> StageResult:
     """
-    SMV1 — process one Studio Media Transfer Queue row (Make scenario 5894885).
+    SMV1 — drain Studio Media Transfer Queue rows (Make scenario 5894885).
 
-    One POST == one queue row, matching Make Module 1 maxRecords=1 behavior.
-    The Studio Worker drain loop calls this repeatedly until no eligible rows remain.
+    Pending platform variants for the same photo share one Drive download.
+    Up to four photos crop in parallel. Follow-up rows (previews, masters)
+    still run one at a time.
     """
     production_request_record_id = request.production_request_record_id
     test_run_id = (request.test_run_id or "").strip() or None
@@ -27,16 +28,13 @@ def run(request: StageRequest) -> StageResult:
     if isinstance(request.extra.get("max_runs"), int):
         max_runs = max(1, min(int(request.extra["max_runs"]), 20))
 
-    runs: list[dict] = []
     try:
-        for _ in range(max_runs):
-            result = process_one(
-                production_request_record_id=production_request_record_id,
-                test_run_id=test_run_id,
-            )
-            runs.append(result)
-            if not result.get("processed"):
-                break
+        result = process_drain(
+            production_request_record_id=production_request_record_id,
+            test_run_id=test_run_id,
+            photo_workers=4,
+            max_followup=max_runs,
+        )
     except Exception as exc:
         return StageResult(
             stage="smv1",
@@ -46,11 +44,10 @@ def run(request: StageRequest) -> StageResult:
                 "make_scenario_id": 5894885,
                 "production_request_record_id": production_request_record_id,
                 "test_run_id": test_run_id,
-                "runs": runs,
             },
         )
 
-    processed_count = sum(1 for item in runs if item.get("processed"))
+    processed_count = int(result.get("processed_count") or 0)
     if processed_count == 0:
         return StageResult(
             stage="smv1",
@@ -63,7 +60,7 @@ def run(request: StageRequest) -> StageResult:
                     if production_request_record_id
                     else None
                 ),
-                "runs": runs,
+                "runs": [result],
             },
         )
 
@@ -76,7 +73,8 @@ def run(request: StageRequest) -> StageResult:
             "production_request_record_id": production_request_record_id,
             "test_run_id": test_run_id,
             "processed_count": processed_count,
-            "runs": runs,
+            "photo_groups": result.get("photo_groups"),
+            "runs": [result],
             "service_version": settings["service_version"],
         },
     )

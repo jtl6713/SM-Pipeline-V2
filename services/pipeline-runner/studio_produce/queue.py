@@ -30,7 +30,7 @@ def pipeline_setting(client: AirtableClient, name: str) -> str:
     return str(rows[0].get("fields", {}).get("Setting_Value") or "").strip()
 
 
-def required_ratios(plan: dict[str, Any] | None) -> list[str]:
+def plan_ratios(plan: dict[str, Any] | None) -> list[str]:
     items = plan.get("items") if isinstance(plan, dict) else []
     ratios: list[str] = []
     for item in items or []:
@@ -39,10 +39,44 @@ def required_ratios(plan: dict[str, Any] | None) -> list[str]:
             ratios.append(ratio)
     if "9:16" not in ratios:
         ratios.insert(0, "9:16")
-    platforms = [str((item or {}).get("platform") or "") for item in (items or [])]
-    if any(name.lower() == "youtube" for name in platforms) and "16:9" not in ratios:
-        ratios.append("16:9")
     return ratios
+
+
+def cover_extra_ratios(plan: dict[str, Any] | None) -> list[str]:
+    extras: list[str] = []
+    items = plan.get("items") if isinstance(plan, dict) else []
+    platforms = [str((item or {}).get("platform") or "") for item in (items or [])]
+    if any(name.lower() == "youtube" for name in platforms) and "16:9" not in plan_ratios(plan):
+        extras.append("16:9")
+    return extras
+
+
+def required_ratios(plan: dict[str, Any] | None) -> list[str]:
+    ratios = plan_ratios(plan)
+    for extra in cover_extra_ratios(plan):
+        if extra not in ratios:
+            ratios.append(extra)
+    return ratios
+
+
+def cover_hero_asset(assets: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not assets:
+        return None
+    return sorted(assets, key=lambda asset: int(asset.get("order") or 0))[0]
+
+
+def ratios_for_asset(
+    plan: dict[str, Any] | None,
+    asset: dict[str, Any],
+    assets: list[dict[str, Any]],
+) -> list[str]:
+    planned = plan_ratios(plan)
+    extras = [ratio for ratio in cover_extra_ratios(plan) if ratio not in planned]
+    hero = cover_hero_asset(assets)
+    is_hero = bool(hero and str(asset.get("id") or "") == str(hero.get("id") or ""))
+    if is_hero:
+        return [*planned, *extras]
+    return planned
 
 
 def variant_transfer_id(request_id: str, asset_id: str, ratio: str) -> str:
@@ -110,6 +144,7 @@ def upsert_variant_queue(
     ratios: list[str],
     *,
     test_run_id: str = "",
+    plan: dict[str, Any] | None = None,
 ) -> int:
     folder = pipeline_setting(client, "STUDIO_VARIANT_DRIVE_FOLDER_ID")
     if not folder:
@@ -128,7 +163,8 @@ def upsert_variant_queue(
         media_id = str(asset.get("media_asset_record_id") or "").strip()
         if not drive_id or not media_id:
             raise RuntimeError(f"{asset.get('name') or 'Master photo'} is missing Drive authority")
-        for ratio in ratios:
+        asset_ratios = ratios_for_asset(plan, asset, assets) if plan is not None else ratios
+        for ratio in asset_ratios:
             spec = RATIO_SPECS.get(ratio)
             if not spec:
                 continue
@@ -164,6 +200,26 @@ def upsert_variant_queue(
                 continue
             client.create_records(MEDIA_TRANSFER_QUEUE_TABLE, [fields], typecast=True)
             created += 1
+    keep = set()
+    for asset in assets:
+        asset_ratios = ratios_for_asset(plan, asset, assets) if plan is not None else ratios
+        for ratio in asset_ratios:
+            keep.add(variant_transfer_id(request_id, str(asset.get("id")), ratio))
+    for transfer_id, row in existing.items():
+        if transfer_id in keep:
+            continue
+        status = field_str(row, "Transfer_Status")
+        if status not in {"Pending", "Processing"}:
+            continue
+        client.update_record(
+            MEDIA_TRANSFER_QUEUE_TABLE,
+            row["id"],
+            {
+                "Transfer_Status": "Error",
+                "Error_Message": "Dropped — this ratio is not required for the current plan or cover.",
+            },
+            typecast=True,
+        )
     return created
 
 
@@ -176,9 +232,12 @@ def rebuild_variant_manifest(
     assets: list[dict[str, Any]],
     ratios: list[str],
     queue_rows: list[dict[str, Any]],
+    plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     by_transfer = {field_str(row, "Transfer_ID"): row for row in queue_rows}
-    plan_set = set(ratios)
+    plan_list = plan_ratios(plan) if plan is not None else [ratio for ratio in ratios if ratio != "16:9"] or list(ratios)
+    extras = [ratio for ratio in (cover_extra_ratios(plan) if plan is not None else ratios) if ratio not in plan_list]
+    hero = cover_hero_asset(assets)
     manifest = {
         "schema_version": "item4.variant-manifest.2",
         "recipe_version": VARIANT_RECIPE_VERSION,
@@ -186,9 +245,9 @@ def rebuild_variant_manifest(
         "authoritative_storage": "google_drive",
         "source_asset_count": len(assets),
         "required_ratios": ratios,
-        "plan_ratios": [ratio for ratio in ratios if ratio != "16:9"] or ratios,
-        "target_count": len(assets) * len(ratios),
-        "plan_target_count": len(assets) * max(1, len([ratio for ratio in ratios if ratio != "16:9"])),
+        "plan_ratios": plan_list,
+        "target_count": 0,
+        "plan_target_count": len(assets) * max(1, len(plan_list)),
         "ready_count": 0,
         "plan_ready_count": 0,
         "assets": [],
@@ -196,6 +255,9 @@ def rebuild_variant_manifest(
         "complete": False,
     }
     for asset in assets:
+        is_hero = bool(hero and str(asset.get("id") or "") == str(hero.get("id") or ""))
+        asset_ratios = [*plan_list, *(extras if is_hero else [])]
+        manifest["target_count"] += len(asset_ratios)
         row = {
             "id": asset.get("id"),
             "order": asset.get("order"),
@@ -206,7 +268,7 @@ def rebuild_variant_manifest(
             "caption": asset.get("caption") or "",
             "variants": {},
         }
-        for ratio in ratios:
+        for ratio in asset_ratios:
             transfer_id = variant_transfer_id(request_id, str(asset.get("id")), ratio)
             queue = by_transfer.get(transfer_id)
             if not queue or field_str(queue, "Transfer_Status") != "Ready":
@@ -232,7 +294,7 @@ def rebuild_variant_manifest(
                 "file_name": field_str(queue, "Target_File_Name"),
             }
             manifest["ready_count"] += 1
-            if ratio in plan_set:
+            if ratio in plan_list:
                 manifest["plan_ready_count"] += 1
         manifest["assets"].append(row)
     plan_target = int(manifest["plan_target_count"] or 0)
