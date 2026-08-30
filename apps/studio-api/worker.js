@@ -186,7 +186,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.187-autonomous-originals",
+          version: "0.10.188-autonomous-through",
           studio_autonomous_produce_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -24406,7 +24406,7 @@ async function waitAutonomousVariantsReady(env, recordId, ctx, maxMs = 80000) {
   return record;
 }
 
-async function finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick) {
+async function finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, options = {}) {
   const requestId = requestRecord.id;
   let current = requestRecord;
   const incoming = autonomousIncomingMediaIds(
@@ -24424,6 +24424,10 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
       skip_fbs1_guard: true,
     });
     await buildItem4OutputPlan(planCall.request, env, planCall.url, authorization);
+    current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  }
+  if (pick.content_type) {
+    current = await alignAutonomousDraftContentType(env, current, pick.content_type);
   }
 
   const continueAfterPlan = async () => {
@@ -24444,6 +24448,12 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
     }
     return { waiting: false, production_request_id: requestId, idea_id: idea.id };
   };
+
+  current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const variantsReady = String(f(current, "Studio_Variant_Status") || "").trim() === "Ready";
+  if (variantsReady || options.awaitFinish || !ctx?.waitUntil) {
+    return continueAfterPlan();
+  }
 
   if (ctx?.waitUntil) {
     ctx.waitUntil(continueAfterPlan().then(async (finished) => {
@@ -24518,7 +24528,7 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
           content_type: contentType,
           media_asset_ids: mediaAssetIds,
-        });
+        }, { awaitFinish: true });
         results.push({
           production_request_id: finished.production_request_id,
           idea_id: finished.idea_id,
@@ -24605,7 +24615,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     if (!pick.media_asset_ids.length) {
       return studioSaveAutonomousLastRun(env, { ...last, status: "skipped", skip_reason: "waiting_variants_lost_assets" });
     }
-    const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick);
+    const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, {
+      awaitFinish: true,
+    });
     if (finished.waiting) {
       return studioSaveAutonomousLastRun(env, {
         ...last,
