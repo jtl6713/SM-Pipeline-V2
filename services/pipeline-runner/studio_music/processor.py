@@ -6,6 +6,7 @@ from typing import Any
 
 from asset.constants import GDRIVE_MUSIC_FOLDER
 from audio.leading_silence import LeadingSilenceResult, STATUS_NOT_NEEDED, cap_leading_silence, is_voiceover_audio
+from audio.wav_to_mp3 import convert_wav_if_needed
 from integrations.google_drive import GoogleDriveClient
 
 MAX_FILE_BYTES = 40 * 1024 * 1024
@@ -24,12 +25,17 @@ def _normalize_mp3_name(filename: str) -> str:
 
 
 def ingest_studio_music(*, content: bytes, filename: str) -> dict[str, Any]:
-    name = _normalize_mp3_name(filename)
     payload = content or b""
     if not payload:
         raise ValueError("Music file is empty")
     if len(payload) > MAX_FILE_BYTES:
         raise ValueError(f"Music file exceeds the {MAX_FILE_BYTES} byte limit")
+
+    converted = convert_wav_if_needed(payload, filename or "track.mp3")
+    payload = converted.content
+    name = _normalize_mp3_name(converted.filename)
+    if not payload:
+        raise ValueError("Music file is empty after WAV conversion")
 
     trimmed = (
         LeadingSilenceResult(STATUS_NOT_NEEDED, 0.0, 0.0, payload, False, "voiceover skipped")

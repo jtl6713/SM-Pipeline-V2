@@ -26,6 +26,8 @@ def test_a2_mime_routing_order():
     assert classify_intake_file("ChicagoShining", "application/pdf") == "branding"
     assert classify_intake_file("skyline.jpg", "image/jpeg") == "image"
     assert classify_intake_file("bed.mp3", "audio/mpeg") == "audio"
+    assert classify_intake_file("bed.wav", "audio/wav") == "audio"
+    assert classify_intake_file("bed.wav", "application/octet-stream") == "audio"
     assert classify_intake_file("notes.txt", "text/plain") == "other"
     assert branding_asset_role("final-watermark.png") == "Watermark"
     assert branding_asset_role("logo-lockup.png") == "Logo"

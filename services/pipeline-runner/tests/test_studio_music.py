@@ -1,4 +1,5 @@
 from audio.leading_silence import LeadingSilenceResult, STATUS_NOT_NEEDED
+from audio.wav_to_mp3 import WavConvertResult
 from studio_music.processor import drive_music_url, ingest_studio_music
 
 
@@ -24,4 +25,26 @@ def test_ingest_studio_music_uploads_shared_file(monkeypatch):
     result = ingest_studio_music(content=b"ID3fake", filename="Sunset drone bed")
     assert result["google_drive_file_id"] == "driveMusic1"
     assert result["google_drive_url"].endswith("id=driveMusic1")
+    assert result["filename"] == "Sunset drone bed.mp3"
+
+
+def test_ingest_studio_music_converts_wav_before_drive(monkeypatch):
+    class _WavDrive:
+        def upload_and_share(self, folder_id, filename, content, mime_type):
+            assert filename == "Sunset drone bed.mp3"
+            assert mime_type == "audio/mpeg"
+            assert content == b"ID3fromwav"
+            return {"id": "driveMusic2", "webViewLink": "https://drive.google.com/file/d/driveMusic2/view"}
+
+    monkeypatch.setattr(
+        "studio_music.processor.convert_wav_if_needed",
+        lambda content, filename: WavConvertResult(True, "Sunset drone bed.mp3", b"ID3fromwav", "audio/mpeg", 10),
+    )
+    monkeypatch.setattr(
+        "studio_music.processor.cap_leading_silence",
+        lambda content, filename: LeadingSilenceResult(STATUS_NOT_NEEDED, 0.0, 0.0, content, False),
+    )
+    monkeypatch.setattr("studio_music.processor.GoogleDriveClient", lambda: _WavDrive())
+    result = ingest_studio_music(content=b"RIFFwav", filename="Sunset drone bed.wav")
+    assert result["google_drive_file_id"] == "driveMusic2"
     assert result["filename"] == "Sunset drone bed.mp3"

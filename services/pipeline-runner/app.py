@@ -8,6 +8,7 @@ from config import StageRequest, load_settings
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
 from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
+from i1.openai_ideas import generate_ideas
 from studio_music.processor import ingest_studio_music, trash_studio_music
 from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
@@ -310,6 +311,27 @@ def run_studio_music_library_delete():
         return jsonify({"error": str(exc)}), 502
     logger.info("job=studio-music-library-delete drive=%s", result.get("google_drive_file_id"))
     return jsonify(result), 200
+
+
+@app.post("/jobs/autonomous-pick")
+def run_autonomous_pick():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    prompt = str(payload.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 422
+    try:
+        generated = generate_ideas(prompt)
+    except Exception as exc:
+        logger.exception("autonomous-pick failed")
+        return jsonify({"error": str(exc)}), 502
+    parsed = generated.get("parsed") if isinstance(generated, dict) else None
+    if not isinstance(parsed, dict):
+        return jsonify({"error": "I1 OpenAI response was not a JSON object"}), 502
+    logger.info("job=autonomous-pick keys=%s", sorted(parsed.keys()))
+    return jsonify({"ok": True, "parsed": parsed}), 200
 
 
 @app.post("/jobs/studio-audio-leading-silence")

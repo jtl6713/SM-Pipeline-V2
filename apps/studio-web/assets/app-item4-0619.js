@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.190-heatmap-schedule";
+  const BUILD_ID = "item4-0.6.192-autonomous-running";
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
@@ -454,6 +454,35 @@
       loadOperations();
     } catch (error) {
       setOperationsMessage(error.message || "Daily idea run failed.", "error-text");
+    }
+  });
+  $("operationsRunAutonomous")?.addEventListener("click", async () => {
+    const button = $("operationsRunAutonomous");
+    const idleLabel = button?.textContent || "Run autonomous now";
+    try {
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Running…";
+      }
+      setOperationsMessage("Starting autonomous produce… this can take a minute.");
+      const result = await api("/api/operations/ideas/run-autonomous", {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: 180000,
+      });
+      if (result.skipped) setOperationsMessage(`Skipped: ${result.skipped}`);
+      else if (result.status === "resuming") setOperationsMessage(`Resuming ${(result.resumed || []).length || "existing"} autonomous draft(s). No new idea will be picked.`);
+      else if (result.status === "waiting_variants") setOperationsMessage("Plan is ready. Preparing platform frames in the background.");
+      else if (result.status === "producing" || result.status === "promoted") setOperationsMessage("Autonomous piece is in production and will stop at Ready for Review.");
+      else setOperationsMessage("Autonomous produce started.");
+      loadOperations();
+    } catch (error) {
+      setOperationsMessage(error.message || "Autonomous produce failed.", "error-text");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = idleLabel;
+      }
     }
   });
   let intakePollTimer = null;
@@ -9745,9 +9774,9 @@
   }
 
   async function uploadMusicFiles(fileList) {
-    const files = Array.from(fileList || []).filter((file) => /\.mp3$/i.test(file.name || "") || /audio\/(mpeg|mp3)/i.test(file.type || ""));
+    const files = Array.from(fileList || []).filter((file) => /\.(mp3|wav)$/i.test(file.name || "") || /audio\/(mpeg|mp3|wav|x-wav|wave)/i.test(file.type || ""));
     if (!files.length) {
-      setMusicUploadMessage("Choose one or more MP3 files.", "error-text");
+      setMusicUploadMessage("Choose one or more MP3 or WAV files.", "error-text");
       return;
     }
     const zone = $("musicUploadZone");
@@ -10030,6 +10059,7 @@
           <div class="subtle">${profile.active ? "Active profile" : "Inactive profile"}</div>
         </div>
         <label><input type="checkbox" data-ops-idea-toggle ${profile.idea_generation_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Daily ideas</label>
+        <label><input type="checkbox" data-ops-autonomous-toggle ${profile.autonomous_produce_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Autonomous produce</label>
         <label>Limit <input type="number" min="1" max="10" step="1" value="${escapeHtml(String(profile.daily_idea_limit || 5))}" data-ops-idea-limit ${canEdit ? "" : "disabled"}></label>
       </article>
     `).join("");
@@ -10041,6 +10071,7 @@
             method: "PATCH",
             body: JSON.stringify({
               idea_generation_enabled: Boolean(card.querySelector("[data-ops-idea-toggle]")?.checked),
+              autonomous_produce_enabled: Boolean(card.querySelector("[data-ops-autonomous-toggle]")?.checked),
               daily_idea_limit: Number(card.querySelector("[data-ops-idea-limit]")?.value || 5),
             }),
           });
@@ -10050,6 +10081,7 @@
         }
       };
       card.querySelector("[data-ops-idea-toggle]")?.addEventListener("change", save);
+      card.querySelector("[data-ops-autonomous-toggle]")?.addEventListener("change", save);
       card.querySelector("[data-ops-idea-limit]")?.addEventListener("change", save);
     });
   }
@@ -10158,6 +10190,17 @@
           : "not yet";
         meta.textContent = `Today: ${today}. Last daily ideas run: ${lastRun}. Times shown in ${studioTimezoneLabel(tz)}.`;
       }
+      const autonomousMeta = $("operationsAutonomousMeta");
+      if (autonomousMeta) {
+        const lastAuto = data.last_autonomous_run || {};
+        const parts = [];
+        if (lastAuto.status) parts.push(lastAuto.status.replace(/_/g, " "));
+        if (lastAuto.skip_reason) parts.push(lastAuto.skip_reason.replace(/_/g, " "));
+        if (lastAuto.slot) parts.push(`slot ${lastAuto.slot}`);
+        autonomousMeta.textContent = parts.length
+          ? `Last autonomous run: ${parts.join(" · ")}.`
+          : "Autonomous produce has not run yet. Enable a profile toggle, then wait for 8:00 a.m. / 4:00 p.m. Chicago or run now.";
+      }
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
       const watchlist = data.similar_accounts || [];
       renderOperationsWatchlist(watchlist, Boolean(data.can_edit_profiles));
@@ -10179,6 +10222,8 @@
       renderLibraryIntakeNotice(data.library_intake || {});
       const run = $("operationsRunDailyIdeas");
       if (run) run.hidden = !data.can_edit_profiles;
+      const runAuto = $("operationsRunAutonomous");
+      if (runAuto) runAuto.hidden = !data.can_edit_profiles;
       const intake = $("operationsRunIntake");
       if (intake) intake.hidden = !data.can_edit_profiles;
       const capSilence = $("operationsCapAudioSilence");

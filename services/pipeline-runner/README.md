@@ -215,6 +215,7 @@ Until R3/R4/R5 vars are set, Worker continuation cron keeps pulsing Make on-dema
 | `POST` | `/stages/p4` | Asset-need coverage for one Output_ID / record |
 | `POST` | `/stages/p5` | Open-shot reminder email (max 200) |
 | `GET`/`POST` | `/hooks/rr2/<token>` | Email-button entry (token required; no pipeline secret) |
+| `POST` | `/jobs/autonomous-pick` | Studio autonomous picker — same OpenAI key/model as I1 |
 
 POST body fields: `output_record_id`, `production_request_record_id`, `test_run_id`, `intended_stage`, `idempotency_key`, `extra.max_runs`, `extra.dry_run`, etc.
 
