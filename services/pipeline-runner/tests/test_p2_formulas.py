@@ -1,5 +1,5 @@
 from p2.elevenlabs_client import voice_id_for_name
-from p2.processor import _trigger_p3
+from p2.processor import _trigger_p3, can_commit_generated_media, item_wants_ai_thumbnail
 from p2.formulas import (
     p2_exact_content_formula,
     recheck_silent_thumbnail,
@@ -54,6 +54,30 @@ def test_stale_media_run_clears_thumbnail_residue():
     }
     clears = stale_media_run_clears(parent)
     assert clears == {"Thumbnail_Google_Drive_File_ID": None}
+    generated = stale_media_run_clears({
+        "fields": {
+            "Thumbnail_Status": "Generated",
+            "Thumbnail_URL": "",
+            "Thumbnail_Google_Drive_File_ID": "thumb456",
+        }
+    })
+    assert generated == {"Thumbnail_Google_Drive_File_ID": None}
+
+
+def test_p2_commits_cover_when_status_is_generated_without_url():
+    item = {
+        "fields": {
+            "Include_Thumbnail": "Yes",
+            "Thumbnail_Status": "Generated",
+            "Thumbnail_Prompt": "3D heat wave vs snow CTA",
+            "Thumbnail_URL": "",
+            "Voiceover_URL": "",
+        }
+    }
+    assert item_wants_ai_thumbnail(item) is True
+    assert can_commit_generated_media(item, generated_thumb=True) is True
+    already = {"fields": {**item["fields"], "Voiceover_URL": "https://drive.example/vo.mp3"}}
+    assert can_commit_generated_media(already, generated_thumb=True) is False
 
 
 def test_voice_id_mapping():

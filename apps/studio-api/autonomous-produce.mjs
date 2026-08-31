@@ -295,32 +295,40 @@ export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
   return { conflict: false };
 }
 
+export function autonomousUnusedLibraryAssets(assets, occupied = []) {
+  const used = new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []));
+  return (assets || []).filter((row) => {
+    const id = String(row?.id || row?.media_asset_id || "").trim();
+    return /^rec[A-Za-z0-9]+$/.test(id) && !used.has(id);
+  });
+}
+
 export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas }) {
   const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
   const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
   const voice = profile?.brand_voice || profile?.Brand_Voice || "";
-  return `You are ChicagoShining's autonomous producer. Pick ONE idea that is both timely and shootable from the library stills listed.
+  return `You are ChicagoShining's autonomous producer. Start from the library stills. Review those photos and pick ONE unused set that can become a short.
 
 Return ONLY one raw JSON object. No markdown.
 
-Skip unless a listed library asset clearly matches a listed trend. Do not invent events, dates, prices, or rankings that are not in the harvest. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
+A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
 
 ACTIVE PROFILE
 Name: ${profileName}
 Voice: ${voice}
 Avoid topics: ${avoid}
 
-TREND HARVEST (last 48 hours)
-${JSON.stringify(trends, null, 2)}
-
-LIBRARY STILLS (use only these media_asset_ids)
+LIBRARY STILLS (review these; use only these media_asset_ids)
 ${JSON.stringify(assets, null, 2)}
+
+OPTIONAL TREND HARVEST (cite only if it actually fits the stills you picked)
+${JSON.stringify(trends, null, 2)}
 
 IN FLIGHT OR RECENT IDEAS (do not repeat these subjects, places, or stills)
 ${JSON.stringify(occupiedIdeas || recentTitles || [], null, 2)}
 
-If nothing is both timely and producible, or every timely subject is already in flight or recently published, return:
-{"skip":true,"reason":"no_asset_backed_trend"}
+If every listed still conflicts with an in-flight or recent idea, return:
+{"skip":true,"reason":"no_unused_library_stills"}
 
 Otherwise return:
 {
@@ -332,7 +340,7 @@ Otherwise return:
   "suggested_visuals": "max 14 words",
   "required_assets": "max 12 words",
   "why_this_should_work": "max 12 words",
-  "cited_trend": "which harvest item this follows",
+  "cited_trend": "matching harvest item, or library",
   "suggested_format": "Vertical Short Video or Carousel",
   "media_asset_ids": ["rec..."]
 }`;

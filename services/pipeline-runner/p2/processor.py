@@ -90,6 +90,24 @@ def _voiceover_fields_ready(item: dict[str, Any]) -> bool:
     )
 
 
+def item_wants_ai_thumbnail(item: dict[str, Any]) -> bool:
+    if field_str(item, "Include_Thumbnail") == "No":
+        return False
+    if field_str(item, "Thumbnail_URL"):
+        return False
+    return bool(field_str(item, "Thumbnail_Prompt"))
+
+
+def can_commit_generated_media(item: dict[str, Any], *, generated_thumb: bool) -> bool:
+    if field_str(item, "Do_Not_Produce") in {"1", "true", "True", "checked"}:
+        return False
+    if field_str(item, "Voiceover_URL"):
+        return False
+    if generated_thumb and field_str(item, "Thumbnail_URL"):
+        return False
+    return True
+
+
 def _route_for_item(item: dict[str, Any]) -> str | None:
     if _voiceover_fields_ready(item):
         return "voiceover"
@@ -231,7 +249,7 @@ def process_request(
     )
     norm_details = normalization_details(norm_payload)
     sent_at = _now_iso()
-    want_thumbnail = field_str(item, "Thumbnail_Status") == "Ready" and bool(field_str(item, "Thumbnail_Prompt"))
+    want_thumbnail = item_wants_ai_thumbnail(item)
 
     thumb_file: dict[str, Any] | None = None
     if want_thumbnail:
@@ -242,14 +260,15 @@ def process_request(
             png_bytes,
             "image/png",
         )
-        rechecked = _recheck(client, recheck_voiceover_and_thumbnail(item["id"]))
-        if not rechecked:
-            return {
-                **preview,
-                "reason": "voiceover_thumbnail_recheck_failed",
-                "voiceover_drive_file_id": voice_file.get("id"),
-                "thumbnail_drive_file_id": thumb_file.get("id"),
-            }
+    latest = client.get_record(CONTENT_ITEMS_TABLE, item["id"])
+    if not can_commit_generated_media(latest, generated_thumb=want_thumbnail):
+        return {
+            **preview,
+            "reason": "voiceover_thumbnail_recheck_failed" if want_thumbnail else "voiceover_only_recheck_failed",
+            "voiceover_drive_file_id": voice_file.get("id"),
+            "thumbnail_drive_file_id": (thumb_file or {}).get("id"),
+        }
+    if want_thumbnail:
         update_fields = {
             "Thumbnail_URL": thumb_file.get("webContentLink"),
             "Voiceover_URL": voice_file.get("webContentLink"),
@@ -265,13 +284,6 @@ def process_request(
         }
         p3_source = "P-series daisy chain (python)"
     else:
-        rechecked = _recheck(client, recheck_voiceover_only(item["id"]))
-        if not rechecked:
-            return {
-                **preview,
-                "reason": "voiceover_only_recheck_failed",
-                "voiceover_drive_file_id": voice_file.get("id"),
-            }
         update_fields = {
             "Voiceover_URL": voice_file.get("webContentLink"),
             "Content_Status": "Thumbnail Ready",
@@ -285,8 +297,8 @@ def process_request(
         }
         p3_source = "P2 optional-thumbnail branch (python)"
 
-    client.update_record(CONTENT_ITEMS_TABLE, rechecked["id"], update_fields, typecast=True)
-    p3 = _trigger_p3(content_record_id=rechecked["id"], test_run_id=test_run, source=p3_source)
+    client.update_record(CONTENT_ITEMS_TABLE, latest["id"], update_fields, typecast=True)
+    p3 = _trigger_p3(content_record_id=latest["id"], test_run_id=test_run, source=p3_source)
     return {
         "processed": True,
         "route": "voiceover_thumbnail" if want_thumbnail else "voiceover_only",

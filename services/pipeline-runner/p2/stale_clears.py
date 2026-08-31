@@ -20,8 +20,9 @@ def stale_media_run_clears(parent: dict[str, Any]) -> dict[str, Any]:
             clears["Voiceover_Normalization_Details"] = None
         if fields.get("Voiceover_Normalized_At"):
             clears["Voiceover_Normalized_At"] = None
+    thumb_status = field_str(parent, "Thumbnail_Status")
     if (
-        field_str(parent, "Thumbnail_Status") == "Ready"
+        thumb_status in {"Ready", "Generated"}
         and not field_str(parent, "Thumbnail_URL")
         and field_str(parent, "Thumbnail_Google_Drive_File_ID")
     ):
