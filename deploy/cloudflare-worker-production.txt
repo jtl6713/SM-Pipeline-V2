@@ -255,4 +255,6 @@ Library browse Worker deploy: 2026-08-31 - Operators browse classified Google Dr
 
 Variant authority heal Worker deploy: 2026-08-31 - Error crops that already have Drive + Media Asset count as Ready; Prepare retries Error without files. Worker 0.10.202-variant-authority-heal.
 
-Python default Worker deploy: 2026-08-31 - Unset STAGE_BACKEND flags no longer fall back to Make. Stages pulse the local Python runner. Worker 0.10.203-python-default.
+Scheduled waiting status Worker deploy: 2026-08-31 - Future-dated TikTok/approve handoffs stamp Ready to Schedule / Waiting for Schedule instead of Ready for Assets. Worker 0.10.203-scheduled-waiting-status.
+
+Python default Worker deploy: 2026-08-31 - Unset STAGE_BACKEND flags no longer fall back to Make. Stages pulse the local Python runner. Worker 0.10.204-python-default.

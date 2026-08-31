@@ -50,7 +50,7 @@
  </p>
  <p class="ez-path-hook">QA Multi-Platform Social Media Publishing</p>
  <h1>Start a post</h1>
- <p>Answer a few questions. Studio fills the plan. Open Ideas or Production if you already know the path.</p>
+ <p>Start from an idea or from media. Then pick Vertical video (Reels, Stories, Short, thumbnail) or Scrollable slides (carousel / album). YouTube slides become a rendered video.</p>
  </div>
  <div class="ez-wizard" id="ezWizard">
  <div class="ez-wizard-toolbar">
@@ -142,7 +142,7 @@
  <div>
  <button type="button" class="text-button" id="ezStartOver">← Home</button>
  <h2>Start with content</h2>
- <p>Name it, pick the media you have, then drop it in.</p>
+ <p>Name it, pick Vertical video or Scrollable slides, then drop the media you have.</p>
  </div>
  </div>
  <div class="ez-idea-fields">
@@ -172,21 +172,31 @@
  <em class="ez-option-hint" id="ezPrimaryLocationHint">Used as the publish location tag. Prefills from the idea or title when we recognize a place. You can overwrite it anytime before promote.</em>
  <em class="ez-option-hint" id="ezIdeaIdentityHint">You can edit these anytime. Photos do not lock the name.</em>
  </div>
+ <div class="ez-card-grid" id="ezPackageGrid">
+ <button type="button" class="ez-card" data-ez-package="video">
+ <strong>Vertical video</strong>
+ <span>Instagram Reel, Facebook Reel, TikTok, YouTube Short, plus Stories and a grid thumbnail. Voiceover and music stay on.</span>
+ </button>
+ <button type="button" class="ez-card" data-ez-package="slides">
+ <strong>Scrollable slides</strong>
+ <span>Instagram carousel, Facebook album, TikTok photos. YouTube is a rendered video — not an image post. First slide can be the overview; the rest are the details.</span>
+ </button>
+ </div>
  <div class="ez-card-grid" id="ezCardGrid">
  <button type="button" class="ez-card" data-ez-input="single-photo">
  <strong>Single photo</strong>
- <span>Instagram 4:5, Facebook image, TikTok photo draft.</span>
+ <span>One still. Video turns it into Reels and a Short; slides keep it as a single image post.</span>
  </button>
  <button type="button" class="ez-card" data-ez-input="multiple-photos">
  <strong>Multiple photos</strong>
- <span>Carousel, album, TikTok photo draft, YouTube Short.</span>
+ <span>Event sets and multi-day recaps. Video renders them; slides stay swipeable.</span>
  </button>
  <button type="button" class="ez-card" data-ez-input="photos-and-clips">
  <strong>Photos and clips</strong>
- <span>Mix stills and raw clips into one Reel, Short, or TikTok draft.</span>
+ <span>Mix stills and raw clips into the vertical video package.</span>
  </button>
  </div>
- <p class="ez-coming-later">Finished video (publish as-is) is in the New content wizard.</p>
+ <p class="ez-coming-later">Finished video (publish as-is) is in the Home wizard and always uses Vertical video.</p>
  <div class="ez-composer" id="ezComposer" hidden>
  <input id="ezTitle" maxlength="160" hidden>
  <fieldset class="ez-platform-fieldset" hidden>
@@ -1124,7 +1134,7 @@
  </li>
  <li>
  <strong>Confirm platforms and crops in Production.</strong>
- <span>Default multi-photo packages: Instagram Reel, Facebook Slideshow Reel, TikTok Video Draft, YouTube Short. Instagram and Facebook also keep silent 9:16 Story companions. Single-photo work plans feed/still packages instead. Reframe crops, write or AI-fill captions, leave Voiceover and Music on Yes unless you want a silent cut, then Save.</span>
+ <span>Two default packages. Vertical video: Instagram Reel, Facebook Reel, TikTok draft, YouTube Short, plus Instagram and Facebook 9:16 Stories and a grid thumbnail. Voiceover and music stay on. Scrollable slides: Instagram carousel, Facebook album, TikTok photos; YouTube is a rendered Slideshow Video (no image post). First slide can introduce a multi-day event; later slides hold the details. Reframe crops, write or AI-fill captions, then Save.</span>
  <figure class="support-shot">
  <img src="/assets/support/production.jpg?v=0.6.102" alt="Production start-with-content screen with photo drop zone" width="1440" height="920">
  <figcaption>Production — name the piece, choose single or multiple photos, drop stills, then set platforms and audio.</figcaption>
@@ -1445,8 +1455,8 @@
  </aside>
 
  <script src="/assets/config.js?v=0.6.199-library-suggest"></script>
- <script src="/assets/ez-plan.js?v=0.6.194-autonomous-through"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.199-library-suggest"></script>
+ <script src="/assets/ez-plan.js?v=0.6.198-two-packages"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.201-wizard-wait"></script>
  <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.199";</script>
 </body>
 </html>

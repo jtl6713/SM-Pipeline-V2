@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.203-python-default",
+          version: "0.10.204-python-default",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -1580,13 +1580,34 @@ function studioPreviewKind(record) {
   return still ? "still" : "none";
 }
 
-function studioPublishHandoffFields(record) {
+// Approve used to stamp every platform "Ready to Publish" / TikTok "Ready for Assets"
+// even when Scheduled_Post_Date is still in the future. That reads like unfinished
+ // asset work when the render is already done and the only wait is the schedule window.
+function studioArmedPublishStatus(record, scheduledPostDate = null) {
+  const raw = String(scheduledPostDate || f(record, "Scheduled_Post_Date") || "").trim();
+  if (!raw) return "Ready to Publish";
+  const ms = Date.parse(raw);
+  if (Number.isNaN(ms)) return "Ready to Publish";
+  return ms <= Date.now() + 120000 ? "Ready to Publish" : "Ready to Schedule";
+}
+
+function studioTikTokArmedDraftStatus(record, scheduledPostDate = null) {
+  return studioArmedPublishStatus(record, scheduledPostDate) === "Ready to Schedule"
+    ? "Waiting for Schedule"
+    : "Ready for Assets";
+}
+
+function studioPublishHandoffFields(record, options = {}) {
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || "").trim();
   const mapping = String(f(record, "Platform_Output_Type") || "").trim();
   const preview = String(f(record, "Studio_Preview_URL") || "").trim();
   const clipCount = selectedVisualClips(record).length || Number(f(record, "Selected_Clip_Count") || 0) || 0;
   const current = (name) => String(f(record, name) || "").trim();
+  const scheduledPostDate = options.scheduledPostDate != null
+    ? options.scheduledPostDate
+    : current("Scheduled_Post_Date");
+  const armedPublish = studioArmedPublishStatus(record, scheduledPostDate);
   const cdnReady = studioNativeClipsArePublicCdn(record);
   const cover = studioPublicJpegCoverUrl(record);
   const existingThumb = current("Thumbnail_URL");
@@ -1598,7 +1619,7 @@ function studioPublishHandoffFields(record) {
   if (platform === "YouTube") {
     // Scheduled YouTube posts always target a public release. Immediate posts
     // default to public when unset. Upload uses private+publishAt when scheduled.
-    if (current("YouTube_Scheduled_Publish_At") || current("Scheduled_Post_Date")) {
+    if (current("YouTube_Scheduled_Publish_At") || scheduledPostDate || current("Scheduled_Post_Date")) {
       fields.YouTube_Privacy_Status = "public";
     } else if (!current("YouTube_Privacy_Status")) {
       fields.YouTube_Privacy_Status = "public";
@@ -1614,25 +1635,25 @@ function studioPublishHandoffFields(record) {
   if (platform === "Instagram" && (outputType === "Reel" || mapping === "Instagram Reel") && outputType !== "Carousel" && mapping !== "Instagram Carousel") {
     if (preview.startsWith("https://media.chicagoshining.com/")) {
       fields.Publish_Asset_URL = preview;
-      fields.Publish_Status = "Ready to Publish";
+      fields.Publish_Status = armedPublish;
     }
   }
   if (platform === "Instagram" && (outputType === "Story" || mapping === "Instagram Story")) {
     if (preview.startsWith("https://media.chicagoshining.com/")) {
       fields.Publish_Asset_URL = preview;
-      fields.Publish_Status = "Ready to Publish";
+      fields.Publish_Status = armedPublish;
     }
   }
   if (platform === "Facebook" && (outputType === "Story" || mapping === "Facebook Story")) {
     if (preview.startsWith("https://media.chicagoshining.com/")) {
       fields.Publish_Asset_URL = preview;
-      fields.Publish_Status = "Ready to Publish";
+      fields.Publish_Status = armedPublish;
     }
   }
   if (platform === "Instagram" && (outputType === "Carousel" || mapping === "Instagram Carousel")) {
     if (cdnReady) fields.IG_Carousel_Status = "Assets Ready";
     else if (!current("IG_Carousel_Status")) fields.IG_Carousel_Status = "Ready for Asset Prep";
-    fields.Publish_Status = "Ready to Publish";
+    fields.Publish_Status = armedPublish;
     fields.Image_Output_Selected = true;
     if (clipCount) {
       fields.Image_Count = clipCount;
@@ -1645,7 +1666,7 @@ function studioPublishHandoffFields(record) {
       fields.Publish_Asset_URL = cover;
       if (!preview.startsWith("https://media.chicagoshining.com/")) fields.Studio_Preview_URL = cover;
     }
-    fields.Publish_Status = "Ready to Publish";
+    fields.Publish_Status = armedPublish;
     fields.Image_Output_Selected = true;
     fields.Image_Count = clipCount || 1;
   }
@@ -1655,7 +1676,7 @@ function studioPublishHandoffFields(record) {
       fields.FB_Publish_Status = "Ready for Assets";
     }
     fields.FB_Image_Publish_Mode = "Single Photo";
-    fields.Publish_Status = "Ready to Publish";
+    fields.Publish_Status = armedPublish;
     fields.Image_Count = clipCount || 1;
   }
   if (platform === "Facebook" && (outputType === "Multi-Image Post" || mapping === "Facebook Photo Set")) {
@@ -1664,7 +1685,7 @@ function studioPublishHandoffFields(record) {
       fields.FB_Publish_Status = "Ready for Assets";
     }
     fields.FB_Image_Publish_Mode = "Multi-Photo Collage";
-    fields.Publish_Status = "Ready to Publish";
+    fields.Publish_Status = armedPublish;
     if (clipCount) fields.Image_Count = clipCount;
   }
   if (platform === "Facebook" && (outputType === "Slideshow Reel" || mapping === "Facebook Reel") && outputType !== "Multi-Image Post" && mapping !== "Facebook Photo Set") {
@@ -1673,17 +1694,20 @@ function studioPublishHandoffFields(record) {
         fields.FB_Slideshow_Status = "Video Ready";
       }
       fields.FB_Slideshow_Public_URL = preview;
-      fields.Publish_Status = "Ready to Publish";
+      fields.Publish_Status = armedPublish;
     }
   }
   if (platform === "YouTube") {
     if (preview.startsWith("https://media.chicagoshining.com/")) {
       fields.Publish_Asset_URL = preview;
     }
-    fields.Publish_Status = "Ready to Publish";
+    fields.Publish_Status = armedPublish;
   }
   if (platform === "TikTok") {
-    if (!current("TikTok_Draft_Status")) fields.TikTok_Draft_Status = "Ready for Assets";
+    const draft = current("TikTok_Draft_Status");
+    if (!draft || draft === "Ready for Assets" || draft === "Waiting for Schedule" || draft === "Not Selected") {
+      fields.TikTok_Draft_Status = studioTikTokArmedDraftStatus(record, scheduledPostDate);
+    }
     if (outputType === "Video Draft" || mapping === "TikTok Video") {
       fields.TikTok_Draft_Type = "Video";
       if (preview.startsWith("https://media.chicagoshining.com/")) fields.Publish_Asset_URL = preview;
@@ -1695,7 +1719,7 @@ function studioPublishHandoffFields(record) {
       fields.Image_Output_Selected = true;
       fields.Image_Publish_Mode = "TikTok Draft";
     }
-    fields.Publish_Status = "Ready to Publish";
+    fields.Publish_Status = armedPublish;
   }
   return fields;
 }
@@ -1870,6 +1894,8 @@ function normalizedOutputState(record) {
   if (has("TikTok_Draft_Status", "draft delivered")) return "Draft Delivered";
   if (has("YouTube_Upload_Status", "uploading") || has("FB_Slideshow_Status", "uploading") || has("Publish_Status", "publishing")) return "Uploading";
   if (has("YouTube_Processing_Status", "processing") || has("FB_Slideshow_Status", "processing") || has("TikTok_Draft_Status", "processing") || has("IG_Carousel_Status", "processing")) return "Platform Processing";
+  // "Ready to Schedule" must win over Approved — future-dated posts are armed, not incomplete.
+  if (has("Publish_Status", "ready to schedule") || text("Publish_Status").toLowerCase() === "scheduled" || has("TikTok_Draft_Status", "waiting for schedule")) return "Scheduled";
   if (has("Publish_Status", "scheduled")) return "Scheduled";
   // Publisher "Ready for Assets" is the start of upload, not a rewind to Studio
   // asset selection. Approved/reviewable work must win or Approve drops 65% → 30%.
@@ -2035,7 +2061,7 @@ function firstIdeaProductionRequestId(record) {
   return String(links[0] || "").trim() || null;
 }
 
-const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post"]);
+const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post", "Vertical Short Video"]);
 
 function ideaPhotoWaitApplies(input = {}) {
   const contentType = String(input.content_type || "").trim();
@@ -2177,7 +2203,17 @@ function outputProgressPercent(record, state, job = null) {
 function platformPublishStatus(record) {
   const platform = String(f(record, "Platform") || "").toLowerCase();
   if (platform === "facebook") return f(record, "FB_Publish_Status") || f(record, "FB_Slideshow_Status") || f(record, "Publish_Status");
-  if (platform === "tiktok") return f(record, "TikTok_Draft_Status") || f(record, "Publish_Status");
+  if (platform === "tiktok") {
+    const draft = String(f(record, "TikTok_Draft_Status") || "").trim();
+    const publish = String(f(record, "Publish_Status") || "").trim();
+    // Future-dated TikTok drafts keep an internal arming status, but the Pipeline
+    // publish column should say the post is waiting on schedule — not asset work.
+    if (/waiting for schedule/i.test(draft)) return draft;
+    if (/ready to schedule/i.test(publish) || (!studioPublishIsDue(record) && /ready for assets/i.test(draft))) {
+      return "Waiting for Schedule";
+    }
+    return draft || publish;
+  }
   if (platform === "youtube") return f(record, "Publish_Status") || f(record, "YouTube_Processing_Status") || f(record, "YouTube_Upload_Status");
   return f(record, "Publish_Status");
 }
@@ -5085,6 +5121,12 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
     // the YouTube API; the channel releases publicly at the scheduled time.
     fields.YouTube_Privacy_Status = "public";
   }
+  if (platform === "TikTok") {
+    const draft = String(f(record, "TikTok_Draft_Status") || "").trim();
+    if (!draft || draft === "Ready for Assets" || draft === "Waiting for Schedule" || draft === "Not Selected") {
+      fields.TikTok_Draft_Status = due ? "Ready for Assets" : "Waiting for Schedule";
+    }
+  }
   return fields;
 }
 
@@ -5234,7 +5276,26 @@ function item4SlideImageUrl(row) {
   return String(f(row, "Final Image URL") || f(row, "AI Image URL") || f(row, "Current Image URL") || "").trim();
 }
 
-function item4DefaultOutputType(platform, photoCount, { hasVideo = false } = {}) {
+function item4PackageOverrides(packageId, photoCount, { hasVideo = false } = {}) {
+  const pkg = String(packageId || "").trim().toLowerCase();
+  if (pkg === "video") {
+    return hasVideo
+      ? { ...ITEM4_VIDEO_DEFAULTS }
+      : { Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" };
+  }
+  if (pkg === "slides") {
+    if (hasVideo) return { ...ITEM4_VIDEO_DEFAULTS };
+    if (Math.max(0, Number(photoCount) || 0) <= 1) {
+      return { Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" };
+    }
+    return { Instagram: "Carousel", Facebook: "Multi-Image Post", TikTok: "Multi-Photo", YouTube: "Slideshow Video" };
+  }
+  return null;
+}
+
+function item4DefaultOutputType(platform, photoCount, { hasVideo = false, packageId = "" } = {}) {
+  const packaged = item4PackageOverrides(packageId, photoCount, { hasVideo });
+  if (packaged) return packaged[platform] || null;
   if (hasVideo) return ITEM4_VIDEO_DEFAULTS[platform] || null;
   const n = Math.max(0, Number(photoCount) || 0);
   const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" });
@@ -5315,12 +5376,12 @@ function item4NormalizePlanExtras(payloadExtras, platforms, existingItems = []) 
   return extras;
 }
 
-function item4PlanChoice(platform, requestedOutputType, photoCount, { hasVideo = false } = {}) {
+function item4PlanChoice(platform, requestedOutputType, photoCount, { hasVideo = false, packageId = "" } = {}) {
   const spec = ITEM4_PLAN_SPECS[platform];
   if (!spec) throw new HttpError(400, `Item 4 does not support ${platform}`);
   let requested = item4CanonicalOutputType(platform, String(requestedOutputType || "").trim());
   if (hasVideo && item4IsNativeStillOutput(platform, requested)) requested = "";
-  const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo }) || spec.default_output_type;
+  const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo, packageId }) || spec.default_output_type;
   const outputType = requested || fallback;
   const selected = spec.options[outputType];
   if (!selected) throw new HttpError(400, `${platform} output type ${outputType} is not supported by the Item 4 planner`);
@@ -5491,19 +5552,24 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const requestedPlatforms=Array.isArray(payload.platforms)&&payload.platforms.length?payload.platforms:["Instagram","Facebook","TikTok","YouTube"];
   const platforms=[...new Set(requestedPlatforms.map(x=>String(x||"").trim()).filter(Boolean))];
   const overrides=payload.overrides&&typeof payload.overrides==="object"?payload.overrides:{};
+  const packageId=String(payload.package || payload.package_id || "").trim().toLowerCase();
   const mappingIndex=await item4MappingIndex(env);
   const items=[];
   let needsReview=false;
   for (const platform of platforms) {
     const requestedRaw = item4CanonicalOutputType(platform, overrides[platform] || "");
     const requested = item4IsCompanionOutputType(requestedRaw) ? "" : requestedRaw;
-    const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo });
+    const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo, packageId });
     if (!requested && !fallback) continue;
-    const chosen = item4PlanChoice(platform, requested || fallback, photoCount, { hasVideo });
+    const chosen = item4PlanChoice(platform, requested || fallback, photoCount, { hasVideo, packageId });
     items.push(item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex));
     if (!items[items.length - 1].aspect_ratio) needsReview = true;
   }
-  const extras = item4NormalizePlanExtras(payload.extras, platforms, items)
+  const extrasPayload = Array.isArray(payload.extras) ? [...payload.extras] : [];
+  if (packageId === "video" || (!packageId && (hasVideo || photoCount > 1))) {
+    extrasPayload.push("Instagram::Story", "Facebook::Story");
+  }
+  const extras = item4NormalizePlanExtras(extrasPayload, platforms, items)
     .filter((extra) => !hasVideo || extra.companion || !item4IsNativeStillOutput(extra.platform, extra.output_type));
   for (const extra of extras) {
     try {
@@ -13016,12 +13082,16 @@ async function promoteIdeaViaI3I4(request, env, url, authorization) {
   const title = String(f(record, "Candidate_Title") || "").trim();
   const summary = String(f(record, "Idea_Summary") || "").trim();
   if (!title) throw new HttpError(409, "Idea title is required before promotion");
-  if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate; add a summary before promoting");
 
   const input = cleanPromotionPayload(payload);
-  if (ideaPhotoWaitApplies(input) || String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting") {
+  const waitingAlready = String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting";
+  if (ideaPhotoWaitApplies(input) || waitingAlready || payload?.photo_wait === true) {
+    if (!summary) {
+      input.production_notes = [input.production_notes, `Summary pending: ${title}`].filter(Boolean).join("\n");
+    }
     return approveIdeaAndWaitForPhotos(request, env, record, input, authorization);
   }
+  if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate; add a summary before promoting");
   const webhook = promotionWebhookUrl(env, recordId, input);
   await fetchPromotionHandoff(env, webhook);
 
@@ -13048,7 +13118,10 @@ async function getAuthorizedIdeaRoute(request, env, url, authorization) {
 }
 
 async function approveIdeaAndWaitForPhotos(request, env, record, input, authorization) {
-  if (!ideaPhotoWaitApplies(input) && String(f(record, "Studio_Photo_Wait_Status") || "").trim() !== "Waiting") {
+  const waitingAlready = String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting";
+  const rangeWait = String(input.carousel_slide_count_mode || "").trim() === "Target range"
+    && String(input.carousel_image_mode || "").trim() !== "Make AI Generated";
+  if (!ideaPhotoWaitApplies(input) && !waitingAlready && !rangeWait) {
     throw new HttpError(400, "Photo wait requires a target range and real photos, not AI-generated slides");
   }
   const now = new Date().toISOString();
@@ -13071,30 +13144,32 @@ async function approveIdeaAndWaitForPhotos(request, env, record, input, authoriz
       ? "Ready"
       : "Waiting",
   };
+  if (!String(f(record, "Idea_Summary") || "").trim()) {
+    fields.Idea_Summary = String(f(record, "Candidate_Title") || "Photo wait").trim();
+  }
   const updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, record.id, {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
   });
   const draft = await existingDraftForIdea(env, record.id, authorization)
     || await createDraftForIdea(env, updatedIdea, authorization);
-  const match = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, updatedIdea, {
-    authorization,
-    force: false,
-    productionRequest: draft,
-  });
+  // Do not scan the full library on this request. Matching runs from cron / Match photos now.
   return respond(request, env, {
     ok: true,
     promoted: false,
-    waiting: match.action !== "ready",
-    photo_wait: match,
-    promotion_state: match.action === "ready" ? "production_ready" : "waiting_for_photos",
+    waiting: true,
+    photo_wait: {
+      action: "wait",
+      reason: "deferred_scan",
+      high_count: 0,
+      selected: [],
+    },
+    promotion_state: "waiting_for_photos",
     handoff: "photo-wait",
-    message: match.action === "ready"
-      ? `Matched ${match.selected.length} photo${match.selected.length === 1 ? "" : "s"}. Production is ready for content rules; rendering is not started.`
-      : `Approved. Waiting for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
-    record: mapIdea(match.idea || updatedIdea),
-    production_request: match.production_request ? mapProductionRequest(match.production_request) : mapProductionRequest(draft),
-  }, match.action === "ready" ? 200 : 202);
+    message: `Approved. Waiting for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
+    record: mapIdea(updatedIdea),
+    production_request: mapProductionRequest(draft),
+  }, 202);
 }
 
 async function matchIdeaPhotosRoute(request, env, url, authorization) {
@@ -20649,7 +20724,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
   + 'OR({Publish_Status}=BLANK(),{Publish_Status}="Not Ready",{Publish_Status}="Ready",{Publish_Status}="Ready to Schedule",{Publish_Status}="Ready to Publish"),'
   + 'OR({IG_Story_Status}=BLANK(),{IG_Story_Status}="Not Needed",{IG_Story_Status}="Ready"),'
   + 'OR({IG_Carousel_Status}=BLANK(),{IG_Carousel_Status}="Not Selected",{IG_Carousel_Status}="Ready for Asset Prep",{IG_Carousel_Status}="Assets Ready",{IG_Carousel_Status}="Children Processing",{IG_Carousel_Status}="Children Ready",{IG_Carousel_Status}="Parent Processing",{IG_Carousel_Status}="Parent Ready",{IG_Carousel_Status}="Publishing"),'
-  + 'OR({TikTok_Draft_Status}=BLANK(),{TikTok_Draft_Status}="Not Selected",{TikTok_Draft_Status}="Ready for Assets"),'
+  + 'OR({TikTok_Draft_Status}=BLANK(),{TikTok_Draft_Status}="Not Selected",{TikTok_Draft_Status}="Ready for Assets",{TikTok_Draft_Status}="Waiting for Schedule"),'
   + 'OR({FB_Slideshow_Status}=BLANK(),{FB_Slideshow_Status}="Not Required",{FB_Slideshow_Status}="Ready to Render"),'
   + 'OR({FB_Publish_Status}=BLANK(),{FB_Publish_Status}="Ready for Assets"),'
   + 'OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),'
@@ -20723,7 +20798,7 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
     {
       stage: "ttd0",
       pulse: studioPulseTtd0,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({TikTok_Draft_Status}="Ready for Assets",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({TikTok_Draft_Status}="Ready for Assets",{TikTok_Draft_Status}="Waiting for Schedule",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))',
     },
     {
       stage: "ttd1",
@@ -21064,6 +21139,7 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   }
   const scheduleFields = studioPublishScheduleFields(payload || {}, record, { occupiedMs });
   const facebookManual = studioFacebookGraphPublishHeld(env) && platform === "Facebook";
+  const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
@@ -21075,13 +21151,17 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     Review_Notes: [existingNotes, note, facebookManual
       ? `Studio Pipeline approved the Facebook render at ${stamp}. Graph publish is held — post this in Business Suite until the Meta app is live.`
       : `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
-    ...studioPublishHandoffFields(record),
+    ...studioPublishHandoffFields(record, { scheduledPostDate: scheduledIso }),
     ...scheduleFields,
   };
   const prepared = await studioEnsureNativePublishSlides(env, record);
+  // Handoff must not clobber schedule-aware Publish_Status / TikTok draft labels.
+  const preparedHandoff = studioPublishHandoffFields(prepared, {
+    scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
+  });
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
     method: "PATCH",
-    body: JSON.stringify({ fields: { ...fields, ...studioPublishHandoffFields(prepared) }, typecast: true }),
+    body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
   });
 }
 
@@ -25632,13 +25712,24 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
   const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [match[1]] });
   const iso = studioNextOpenScheduleIso(new Date(value).toISOString(), occupied[platform] || []);
   const due = Date.parse(iso) <= Date.now() + 120000;
+  const fields = {
+    Scheduled_Post_Date: iso,
+    Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
+  };
+  if (platform === "YouTube") {
+    fields.YouTube_Scheduled_Publish_At = iso;
+    fields.YouTube_Privacy_Status = "public";
+  }
+  if (platform === "TikTok") {
+    const draft = String(f(existing, "TikTok_Draft_Status") || "").trim();
+    if (!draft || draft === "Ready for Assets" || draft === "Waiting for Schedule" || draft === "Not Selected") {
+      fields.TikTok_Draft_Status = due ? "Ready for Assets" : "Waiting for Schedule";
+    }
+  }
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({
-      fields: {
-        Scheduled_Post_Date: iso,
-        Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
-      },
+      fields,
       typecast: true,
     }),
   });

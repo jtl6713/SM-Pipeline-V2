@@ -41,24 +41,39 @@ export const EZ_PHOTO_PASSES = Object.freeze({
   single: Object.freeze({
     Instagram: "Single Image",
     Facebook: "Single Image",
-    TikTok: "Multi-Photo",
+    TikTok: "Single Photo",
   }),
-  multiple: Object.freeze({
+  video: Object.freeze({
+    Instagram: "Reel",
+    Facebook: "Slideshow Reel",
+    TikTok: "Video Draft",
+    YouTube: "Short",
+  }),
+  slides: Object.freeze({
     Instagram: "Carousel",
     Facebook: "Multi-Image Post",
     TikTok: "Multi-Photo",
-    YouTube: "Short",
+    YouTube: "Slideshow Video",
   }),
 });
+
+export const EZ_VIDEO_STORY_EXTRAS = Object.freeze(["Instagram::Story", "Facebook::Story"]);
 
 export function ezPhotoCountKind(count) {
   const n = Math.max(0, Number(count) || 0);
   return n <= 1 ? EZ_INPUTS.SINGLE_PHOTO : EZ_INPUTS.MULTIPLE_PHOTOS;
 }
 
-export function ezDefaultPassMap(photoCount) {
+export function ezDefaultPassMap(photoCount, packageId) {
+  const pkg = String(packageId || "").trim().toLowerCase();
+  if (pkg === "video") return { ...EZ_PHOTO_PASSES.video };
+  if (pkg === "slides") {
+    return Math.max(0, Number(photoCount) || 0) <= 1
+      ? { ...EZ_PHOTO_PASSES.single }
+      : { ...EZ_PHOTO_PASSES.slides };
+  }
   const n = Math.max(0, Number(photoCount) || 0);
-  return n <= 1 ? { ...EZ_PHOTO_PASSES.single } : { ...EZ_PHOTO_PASSES.multiple };
+  return n <= 1 ? { ...EZ_PHOTO_PASSES.single } : { ...EZ_PHOTO_PASSES.video };
 }
 
 export function ezMasterContentType(photoCount) {
@@ -69,9 +84,9 @@ export function ezMasterContentType(photoCount) {
  * Photo-count-aware /plan body. Client can POST this as { platforms, overrides }
  * so the live Worker honors EZ defaults before the planner itself is deployed.
  */
-export function ezPlanFromPhotoCount({ photoCount, platforms } = {}) {
+export function ezPlanFromPhotoCount({ photoCount, platforms, packageId } = {}) {
   const count = Math.max(0, Number(photoCount) || 0);
-  const defaults = ezDefaultPassMap(count);
+  const defaults = ezDefaultPassMap(count, packageId);
   const requested = Array.isArray(platforms) && platforms.length
     ? [...new Set(platforms.map((value) => String(value || "").trim()).filter(Boolean))]
     : Object.keys(defaults);
@@ -81,6 +96,8 @@ export function ezPlanFromPhotoCount({ photoCount, platforms } = {}) {
     if (!outputType) continue;
     items.push({ platform, output_type: outputType });
   }
+  const pkg = String(packageId || "").trim().toLowerCase();
+  const extras = (pkg === "video" || (!pkg && count > 1)) ? [...EZ_VIDEO_STORY_EXTRAS] : [];
   return {
     photo_count: count,
     photo_count_kind: ezPhotoCountKind(count),
@@ -88,6 +105,7 @@ export function ezPlanFromPhotoCount({ photoCount, platforms } = {}) {
     youtube_enabled: Boolean(defaults.YouTube),
     platforms: items.map((item) => item.platform),
     overrides: Object.fromEntries(items.map((item) => [item.platform, item.output_type])),
+    extras,
     items,
   };
 }
@@ -143,10 +161,13 @@ export function ezCaptionFields(mode, { caption = "", captions = [] } = {}) {
   };
 }
 
-export function ezOriginNotes({ inputKind, captionMode } = {}) {
+export function ezOriginNotes({ inputKind, captionMode, packageId } = {}) {
   const input = String(inputKind || EZ_INPUTS.SINGLE_PHOTO).trim() || EZ_INPUTS.SINGLE_PHOTO;
   const caption = String(captionMode || "ai").trim().toLowerCase() || "ai";
-  return `origin=${EZ_ORIGIN}; ez-input=${input}; ez-caption=${caption}`;
+  const pkg = String(packageId || "").trim().toLowerCase();
+  const parts = [`origin=${EZ_ORIGIN}`, `ez-input=${input}`, `ez-caption=${caption}`];
+  if (pkg === "video" || pkg === "slides" || pkg === "custom") parts.push(`ez-package=${pkg}`);
+  return parts.join("; ");
 }
 
 export function ezIdeaSummary({ inputKind } = {}) {

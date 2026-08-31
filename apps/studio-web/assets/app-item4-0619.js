@@ -581,6 +581,16 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function abortSignalWithTimeout(timeoutMs) {
+    const ms = Math.max(1000, Number(timeoutMs) || 25000);
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      return AbortSignal.timeout(ms);
+    }
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  }
+
   function isTransientApiFailure({ status = 0, text = "", error = null, method = "GET" } = {}) {
     const write = !["GET", "HEAD"].includes(String(method || "GET").toUpperCase());
     if (error) {
@@ -621,10 +631,7 @@
 
     let lastError = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const timeoutSignal =
-        !explicitSignal && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-          ? AbortSignal.timeout(timeoutMs)
-          : explicitSignal;
+      const timeoutSignal = explicitSignal || abortSignalWithTimeout(timeoutMs);
       try {
         const response = await fetch(`${apiBase}${withStudioProfile(path)}`, {
           credentials: "same-origin",
@@ -1897,8 +1904,21 @@
     });
   }
 
+  function currentEzPackageId() {
+    return String(
+      ezWizardPending?.packageId
+      || ezWizardAnswers?.packageId
+      || ezPlanApi()?.parseEzOriginNotes?.($("prProductionNotes")?.value || $("ezProductionNotes")?.value)?.packageId
+      || ""
+    ).trim();
+  }
+
   function applyEzPlanOverrides(photoCount, platforms) {
-    const planned = ezPlanApi()?.ezPlanFromPhotoCount({ photoCount, platforms }) || { overrides: {}, platforms: platforms || [] };
+    const planned = ezPlanApi()?.ezPlanFromPhotoCount({
+      photoCount,
+      platforms,
+      packageId: currentEzPackageId(),
+    }) || { overrides: {}, platforms: platforms || [] };
     item4PlanOverrides = { ...planned.overrides, ...item4PlanOverrides };
     return planned;
   }
@@ -2411,7 +2431,7 @@
       if ($("ezAudioTrack")) $("ezAudioTrack").value = "";
       if ($("prMusicAsset")) $("prMusicAsset").value = "";
     }
-    const audioWarning = "Music and voiceover play on video outputs (Reels, Slideshow Reels, TikTok video drafts, YouTube). They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.";
+    const audioWarning = "Music and voiceover play on vertical video (Reels, TikTok drafts, YouTube Shorts) and on the YouTube Slideshow Video that accompanies scrollable slides. They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.";
     ["prAudioPlatformWarning", "ezAudioPlatformWarning"].forEach((id) => {
       const el = $(id);
       if (!el) return;
@@ -2454,6 +2474,7 @@
       captionMode: parsed.captionMode,
       manualCount: parsed.manualCount,
       aiCount: parsed.aiCount,
+      packageId: parsed.packageId,
     }) || "";
     if (origin && text.startsWith(origin)) return text.slice(origin.length).replace(/^\s+/, "");
     const lines = text.split(/\n/);
@@ -2469,6 +2490,7 @@
       captionMode: ezCaptionMode(),
       manualCount: pending?.manualCount,
       aiCount: pending?.aiCount,
+      packageId: pending?.packageId || currentEzPackageId(),
     }) || "";
     const user = String($("ezProductionNotes")?.value || "").trim();
     const combined = user ? `${origin}\n\n${user}` : origin;
@@ -3010,11 +3032,34 @@
 
   function syncEzYouTubeAvailability(resetChecked = true) {
     const youtube = $("ezYouTube");
-    const youtubeOn = ezIntakeKind === "multiple-photos" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills";
+    const packageId = currentEzPackageId();
+    const youtubeOn = packageId === "video"
+      || (packageId === "slides" && (ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-stills"))
+      || (!packageId && (ezIntakeKind === "multiple-photos" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills"));
     if (!youtube) return;
     youtube.disabled = !youtubeOn;
     if (!youtubeOn) youtube.checked = false;
     else if (resetChecked) youtube.checked = true;
+  }
+
+  function selectEzPackage(packageId, { resetPlatforms = true } = {}) {
+    const next = String(packageId || "").trim().toLowerCase();
+    if (next !== "video" && next !== "slides") return;
+    ezWizardAnswers = { ...ezWizardAnswers, packageId: next };
+    if (ezWizardPending) ezWizardPending = { ...ezWizardPending, packageId: next };
+    document.querySelectorAll("[data-ez-package]").forEach((button) => {
+      button.classList.toggle("selected", button.dataset.ezPackage === next);
+    });
+    const count = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardAnswers) || item4Workspace?.assets?.length || ezStagedFiles.length || 1;
+    applyEzPlanOverrides(count, ezSelectedPlatforms());
+    if (next === "video") {
+      ezPinnedExtraOutputs = ezPlanApi()?.EZ_VIDEO_STORY_EXTRAS || ["Instagram::Story", "Facebook::Story"];
+      applyEzExtraOutputs(ezPinnedExtraOutputs);
+    } else {
+      ezPinnedExtraOutputs = [];
+    }
+    syncEzYouTubeAvailability(resetPlatforms);
+    if (resetPlatforms) syncItem4PlatformsFromEz();
   }
 
   function selectEzInput(kind, { resetPlatforms = true } = {}) {
@@ -3061,6 +3106,12 @@
     }
     selectPrMediaKind(nextKind, { quiet: true });
     syncFinishedMediaHeadings();
+    const slidesCard = document.querySelector('[data-ez-package="slides"]');
+    const videoOnlyInput = nextKind === "photos-and-clips" || nextKind === "video-clips" || nextKind === "finished-video";
+    if (slidesCard) slidesCard.hidden = videoOnlyInput;
+    if (videoOnlyInput && currentEzPackageId() !== "video") {
+      selectEzPackage("video", { resetPlatforms: false });
+    }
     syncEzYouTubeAvailability(resetPlatforms);
     if (resetPlatforms) syncItem4PlatformsFromEz();
     renderEzCaptionUi();
@@ -3251,6 +3302,11 @@
     ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax"].forEach((id) => ezDirty.add(id));
     ezPinnedExtraOutputs = planned.extras || [];
     applyEzExtraOutputs(ezPinnedExtraOutputs);
+    if (answers.packageId) {
+      document.querySelectorAll("[data-ez-package]").forEach((button) => {
+        button.classList.toggle("selected", button.dataset.ezPackage === answers.packageId);
+      });
+    }
     const expected = helpers.ezWizardExpectedUploads(answers);
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
@@ -3373,7 +3429,7 @@
       aiCount: "How many AI images do you prefer?",
       mixManual: "How many of your photos?",
       mixAi: "How many AI-generated images?",
-      package: "Which platform package do you want?",
+      package: "Vertical video, or scrollable slides?",
       platforms: "Which platforms?",
       custom: "Pick the formats you want.",
       confirm: "Ready to continue with this plan?",
@@ -3528,6 +3584,7 @@
         { label: "2–5", onClick: () => ezWizardPick("2–5", { photoWait: true, photoCountMin: 2, photoCountMax: 5, photoCount: 5 }, "package") },
         { label: "3–8", onClick: () => ezWizardPick("3–8", { photoWait: true, photoCountMin: 3, photoCountMax: 8, photoCount: 8 }, "package") },
         { label: "3–10", onClick: () => ezWizardPick("3–10", { photoWait: true, photoCountMin: 3, photoCountMax: 10, photoCount: 10 }, "package") },
+        { label: "5–10", onClick: () => ezWizardPick("5–10", { photoWait: true, photoCountMin: 5, photoCountMax: 10, photoCount: 10 }, "package") },
       ]);
       ezWizardShowForm(
         `<label>Minimum<input name="min" type="number" min="1" max="20" step="1" value="2" required></label>
@@ -3614,7 +3671,7 @@
     }
 
     if (ezWizardStep === "package") {
-      prompt.textContent = "Which platform package do you want?";
+      prompt.textContent = "Vertical video, or scrollable slides?";
       const packages = helpers?.ezWizardPackages?.(count, answers) || [];
       renderEzWizardChips(packages.map((pkg) => ({
         label: pkg.label,
@@ -3698,32 +3755,37 @@
     ezWizardBusy = true;
     ezWizardSetMessage("Saving your answers…");
     try {
-      const planned = applyEzWizardAnswersToIntake();
-      const answers = ezWizardPending || ezWizardAnswers;
+      const helpersNow = ezPlanApi();
+      const planned = helpersNow?.ezWizardResolvePackage?.(ezWizardAnswers) || applyEzWizardAnswersToIntake();
+      ezWizardPending = { ...ezWizardAnswers, planned };
+      const answers = ezWizardPending;
       if (answers.start === "idea") {
         let idea = null;
         if (answers.ideaMode === "existing" && answers.ideaId) {
           idea = ideasCache.find((row) => row.id === answers.ideaId) || { id: answers.ideaId, title: answers.ideaTitle };
         } else if (answers.ideaTitle) {
+          ezWizardSetMessage("Creating the idea…");
           const result = await api("/api/ideas", {
             method: "POST",
             body: JSON.stringify({
               title: answers.ideaTitle,
-              summary: answers.ideaSummary || "",
+              summary: answers.ideaSummary || answers.ideaTitle,
               primary_location: answers.ideaLocation || "",
             }),
+            timeoutMs: 30000,
+            retries: 1,
           });
-          await loadIdeas();
           idea = result.record;
         }
         if (!idea?.id) {
+          ezWizardSetMessage("Could not save the idea. Enter a title and try again.", "error-text");
           enterEzIdeaPath();
           setIdeaFormOpen(true, { mode: "manual" });
           return;
         }
         if (answers.photoWait && answers.photoCountMin && answers.photoCountMax) {
-          const planned = applyEzWizardAnswersToIntake();
-          const platforms = planned?.platforms?.length ? planned.platforms : ["Instagram", "Facebook", "TikTok", "YouTube"];
+          ezWizardSetMessage(`Approving and waiting for ${answers.photoCountMin}–${answers.photoCountMax} photos…`);
+          const platforms = planned?.platforms?.length ? planned.platforms : ["Instagram", "Facebook", "TikTok"];
           const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/promote`, {
             method: "POST",
             body: JSON.stringify({
@@ -3736,19 +3798,24 @@
               carousel_slide_count_min: answers.photoCountMin,
               carousel_slide_count_max: answers.photoCountMax,
               carousel_image_mode: "Wait for matching photos",
+              photo_wait: true,
             }),
+            timeoutMs: 45000,
+            retries: 0,
           });
           resetEzWizard({ silent: true });
           switchToPage("ideas");
           updateIdeaDrawer(result.record || idea);
           openIdeaDrawer(result.record || idea);
           setManageMessage(result.message || `Approved. Waiting for ${answers.photoCountMin}–${answers.photoCountMax} matching photos.`, "success");
-          await loadIdeas();
+          loadIdeas().catch(() => {});
           return;
         }
+        applyEzWizardAnswersToIntake();
         await openProductionRequestForIdea(idea);
         return;
       }
+      applyEzWizardAnswersToIntake();
       if (!helpers.ezWizardRequiresUploads(answers)) {
         if ($("ezIdeaTitle") && !String($("ezIdeaTitle").value || "").trim()) {
           $("ezIdeaTitle").value = answers.photoCount > 1 ? "AI generated images" : "AI generated image";
@@ -3766,7 +3833,13 @@
             ? "Drop one photo to continue."
             : `Add ${expected} photos one at a time, or drop several together.`);
     } catch (error) {
-      ezWizardSetMessage(error.message || "Could not continue.", "error-text");
+      const timedOut = isTimeoutError(error);
+      ezWizardSetMessage(
+        timedOut
+          ? "Studio took too long to save that start. Tap Continue again, or open Ideas and approve the idea there."
+          : (error.message || "Could not continue."),
+        "error-text"
+      );
     } finally {
       ezWizardBusy = false;
     }
@@ -4104,6 +4177,9 @@
     });
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.addEventListener("click", () => selectEzInput(button.dataset.ezInput));
+    });
+    document.querySelectorAll("[data-ez-package]").forEach((button) => {
+      button.addEventListener("click", () => selectEzPackage(button.dataset.ezPackage));
     });
     document.querySelectorAll('input[name="ezCaptionMode"]').forEach((input) => {
       input.addEventListener("change", renderEzCaptionUi);
@@ -5490,7 +5566,7 @@
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
     setRequestMessage();
     try {
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {method:"POST", body:JSON.stringify({platforms,overrides:item4PlanOverrides,extras:item4EnabledExtraPairs()}), timeoutMs:30000});
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {method:"POST", body:JSON.stringify({platforms,overrides:item4PlanOverrides,extras:item4EnabledExtraPairs(),package:currentEzPackageId()}), timeoutMs:30000});
       if (result.production_request) activeProductionRequest = result.production_request;
       productionRequestOutputs = Array.isArray(result.outputs) ? result.outputs : productionRequestOutputs;
       populateProductionRequestForm(activeProductionRequest);
@@ -5592,7 +5668,7 @@
   const OUTPUT_DEFAULTS_BY_CONTENT_TYPE = {
     "Vertical Short Video": {Instagram:"Reel", Facebook:"Reel", TikTok:"Video Draft", YouTube:"Short"},
     "Story": {Instagram:"Story", Facebook:"Story", TikTok:"Story"},
-    "Carousel": {Instagram:"Carousel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo"},
+    "Carousel": {Instagram:"Carousel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo", YouTube:"Slideshow Video"},
     "Feed Post": {Instagram:"Single Image", Facebook:"Single Image", TikTok:"Multi-Photo"},
     "Photo Set": {Instagram:"Reel", Facebook:"Slideshow Reel", TikTok:"Video Draft", YouTube:"Short"},
     "Longform Video": {YouTube:"Standard Video"},
@@ -5939,6 +6015,7 @@
       const planned = ezPlanApi()?.ezPlanFromPhotoCount({
         photoCount: count,
         platforms: [platform],
+        packageId: currentEzPackageId(),
       });
       if (planned?.overrides?.[platform]) return planned.overrides[platform];
     }
