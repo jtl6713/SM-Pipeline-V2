@@ -27,17 +27,29 @@
     TikTok: "Video Draft",
     YouTube: "Short",
   });
+  const EZ_PACKAGES = Object.freeze({
+    VIDEO: "video",
+    SLIDES: "slides",
+    CUSTOM: "custom",
+  });
+  const EZ_VIDEO_STORY_EXTRAS = Object.freeze(["Instagram::Story", "Facebook::Story"]);
   const EZ_PHOTO_PASSES = Object.freeze({
     single: Object.freeze({
       Instagram: "Single Image",
       Facebook: "Single Image",
-      TikTok: "Video Draft",
+      TikTok: "Single Photo",
     }),
-    multiple: Object.freeze({
+    video: Object.freeze({
       Instagram: "Reel",
       Facebook: "Slideshow Reel",
       TikTok: "Video Draft",
       YouTube: "Short",
+    }),
+    slides: Object.freeze({
+      Instagram: "Carousel",
+      Facebook: "Multi-Image Post",
+      TikTok: "Multi-Photo",
+      YouTube: "Slideshow Video",
     }),
   });
   const EZ_OUTPUT_OPTIONS = Object.freeze([
@@ -61,18 +73,39 @@
     return n <= 1 ? EZ_INPUTS.SINGLE_PHOTO : EZ_INPUTS.MULTIPLE_PHOTOS;
   }
 
-  function ezDefaultPassMap(photoCount) {
+  function ezVideoOverrides({ finishedVideo = false, clipInput = false } = {}) {
+    if (finishedVideo || clipInput) return { ...EZ_VIDEO_PASSES };
+    return { ...EZ_PHOTO_PASSES.video };
+  }
+
+  function ezVideoStoryExtras(platforms) {
+    const selected = Array.isArray(platforms) && platforms.length ? platforms : null;
+    return [...EZ_VIDEO_STORY_EXTRAS].filter((key) => {
+      const platform = key.split("::", 1)[0];
+      return !selected || selected.includes(platform);
+    });
+  }
+
+  function ezSlidesOverrides(photoCount) {
+    if (Math.max(0, Number(photoCount) || 0) <= 1) return { ...EZ_PHOTO_PASSES.single };
+    return { ...EZ_PHOTO_PASSES.slides };
+  }
+
+  function ezDefaultPassMap(photoCount, packageId) {
+    const pkg = String(packageId || "").trim().toLowerCase();
+    if (pkg === EZ_PACKAGES.VIDEO) return ezVideoOverrides();
+    if (pkg === EZ_PACKAGES.SLIDES) return ezSlidesOverrides(photoCount);
     const n = Math.max(0, Number(photoCount) || 0);
-    return n <= 1 ? { ...EZ_PHOTO_PASSES.single } : { ...EZ_PHOTO_PASSES.multiple };
+    return n <= 1 ? { ...EZ_PHOTO_PASSES.single } : { ...EZ_PHOTO_PASSES.video };
   }
 
   function ezMasterContentType(photoCount) {
     return (Math.max(0, Number(photoCount) || 0) <= 1) ? "Feed Post" : "Photo Set";
   }
 
-  function ezPlanFromPhotoCount({ photoCount, platforms } = {}) {
+  function ezPlanFromPhotoCount({ photoCount, platforms, packageId } = {}) {
     const count = Math.max(0, Number(photoCount) || 0);
-    const defaults = ezDefaultPassMap(count);
+    const defaults = ezDefaultPassMap(count, packageId);
     const requested = Array.isArray(platforms) && platforms.length
       ? [...new Set(platforms.map((value) => String(value || "").trim()).filter(Boolean))]
       : Object.keys(defaults);
@@ -82,6 +115,10 @@
       if (!outputType) continue;
       items.push({ platform, output_type: outputType });
     }
+    const pkg = String(packageId || "").trim().toLowerCase();
+    const extras = (pkg === EZ_PACKAGES.VIDEO || (!pkg && count > 1))
+      ? ezVideoStoryExtras(items.map((item) => item.platform))
+      : [];
     return {
       photo_count: count,
       photo_count_kind: ezPhotoCountKind(count),
@@ -89,6 +126,7 @@
       youtube_enabled: Boolean(defaults.YouTube),
       platforms: items.map((item) => item.platform),
       overrides: Object.fromEntries(items.map((item) => [item.platform, item.output_type])),
+      extras,
       items,
     };
   }
@@ -152,11 +190,15 @@
     };
   }
 
-  function ezOriginNotes({ inputKind, captionMode, origin, manualCount, aiCount } = {}) {
+  function ezOriginNotes({ inputKind, captionMode, origin, manualCount, aiCount, packageId } = {}) {
     const tag = String(origin || EZ_ORIGIN).trim() || EZ_ORIGIN;
     const input = String(inputKind || EZ_INPUTS.SINGLE_PHOTO).trim() || EZ_INPUTS.SINGLE_PHOTO;
     const caption = String(captionMode || "ai").trim().toLowerCase() || "ai";
+    const pkg = String(packageId || "").trim().toLowerCase();
     const parts = [`origin=${tag}`, `ez-input=${input}`, `ez-caption=${caption}`];
+    if (pkg === EZ_PACKAGES.VIDEO || pkg === EZ_PACKAGES.SLIDES || pkg === EZ_PACKAGES.CUSTOM) {
+      parts.push(`ez-package=${pkg}`);
+    }
     const manual = Number(manualCount);
     const ai = Number(aiCount);
     if (Number.isFinite(manual) && manual > 0) parts.push(`ez-manual=${Math.round(manual)}`);
@@ -176,10 +218,12 @@
     const caption = /ez-caption=([a-z0-9-]+)/i.exec(text)?.[1] || "";
     const manual = Number(/ez-manual=(\d+)/i.exec(text)?.[1] || "");
     const ai = Number(/ez-ai=(\d+)/i.exec(text)?.[1] || "");
+    const packageId = /ez-package=(video|slides|custom)/i.exec(text)?.[1] || "";
     return {
       origin: originMatch[1].toLowerCase(),
       inputKind: input,
       captionMode: caption,
+      packageId: packageId ? packageId.toLowerCase() : null,
       manualCount: Number.isFinite(manual) && manual > 0 ? manual : null,
       aiCount: Number.isFinite(ai) && ai > 0 ? ai : null,
     };
@@ -238,13 +282,6 @@
     return ezWizardExpectedUploads(answers) > 0;
   }
 
-  function ezStillsOverrides(photoCount) {
-    if (Math.max(0, Number(photoCount) || 0) <= 1) {
-      return { Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" };
-    }
-    return { Instagram: "Carousel", Facebook: "Multi-Image Post", TikTok: "Multi-Photo" };
-  }
-
   function ezPlanFromOverrides(photoCount, overrides, extras = []) {
     const count = Math.max(0, Number(photoCount) || 0);
     const map = overrides && typeof overrides === "object" ? overrides : {};
@@ -268,45 +305,30 @@
 
   function ezWizardPackages(photoCount, answers = {}) {
     const count = Math.max(1, Number(photoCount) || 1);
-    const clipInput = ezIsClipInput(answers.inputKind);
-    const defaults = clipInput
-      ? ezPlanFromOverrides(count, { ...EZ_VIDEO_PASSES })
-      : ezPlanFromPhotoCount({ photoCount: count });
-    const stills = ezStillsOverrides(count);
+    const clipInput = ezIsClipInput(answers.inputKind) || String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
     const packages = [
       {
-        id: "default",
-        label: "Default for this input",
-        hint: defaults.items.map((item) => `${item.platform} ${item.output_type}`).join(" · "),
-      },
-      {
-        id: "video",
-        label: "Video everywhere",
-        hint: "Reel, Facebook Reel, TikTok draft, YouTube Short",
+        id: EZ_PACKAGES.VIDEO,
+        label: "Vertical video",
+        hint: "IG Reel · FB Reel · TikTok · YouTube Short · IG & FB Stories · grid thumbnail",
       },
     ];
     if (!clipInput) {
       packages.push({
-        id: "stills",
-        label: count <= 1 ? "Stills" : "Stills / carousel",
-        hint: Object.entries(stills).map(([platform, type]) => `${platform} ${type}`).join(" · "),
+        id: EZ_PACKAGES.SLIDES,
+        label: "Scrollable slides",
+        hint: count <= 1
+          ? "IG / FB / TikTok stills. YouTube has no image post — pick Vertical video for a Short."
+          : "IG carousel · FB album · TikTok photos. YouTube is a rendered video, not an image post.",
       });
     }
-    packages.push(
-      {
-        id: "stories",
-        label: "Stories plus feed",
-        hint: "Default package plus Instagram and Facebook Stories",
-      },
-      { id: "platforms", label: "Choose platforms", hint: "Instagram, Facebook, TikTok, YouTube" },
-      { id: "custom", label: "Custom formats", hint: "Pick each platform format" },
-    );
+    packages.push({ id: EZ_PACKAGES.CUSTOM, label: "Custom formats", hint: "Pick each platform format" });
     return packages;
   }
 
   function ezWizardResolvePackage(answers = {}) {
     const count = ezWizardPhotoCount(answers);
-    const packageId = String(answers.packageId || "default").trim() || "default";
+    const packageId = String(answers.packageId || EZ_PACKAGES.VIDEO).trim() || EZ_PACKAGES.VIDEO;
     if (packageId === "custom" && Array.isArray(answers.customItems) && answers.customItems.length) {
       const overrides = {};
       const extras = [];
@@ -325,23 +347,23 @@
     const selected = Array.isArray(answers.platforms) && answers.platforms.length
       ? answers.platforms
       : null;
-    if (ezIsClipInput(answers.inputKind) || String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO || packageId === "video") {
-      const overrides = { ...EZ_VIDEO_PASSES };
+    const finishedVideo = String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
+    const clipInput = ezIsClipInput(answers.inputKind);
+    if (clipInput || finishedVideo || packageId === EZ_PACKAGES.VIDEO) {
+      const overrides = ezVideoOverrides({ finishedVideo, clipInput });
+      const filtered = selected
+        ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
+        : overrides;
+      return ezPlanFromOverrides(count, filtered, ezVideoStoryExtras(selected || Object.keys(filtered)));
+    }
+    if (!clipInput && (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_STILLS || packageId === EZ_PACKAGES.SLIDES || packageId === "stills")) {
+      const overrides = ezSlidesOverrides(count);
       const filtered = selected
         ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
         : overrides;
       return ezPlanFromOverrides(count, filtered);
     }
-    if (!ezIsClipInput(answers.inputKind) && (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_STILLS || packageId === "stills")) {
-      const overrides = ezStillsOverrides(count);
-      const filtered = selected
-        ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
-        : overrides;
-      return ezPlanFromOverrides(count, filtered);
-    }
-    const planned = ezPlanFromPhotoCount({ photoCount: count, platforms: selected || undefined });
-    const extras = packageId === "stories" ? ["Instagram::Story", "Facebook::Story"] : [];
-    return { ...planned, extras };
+    return ezPlanFromPhotoCount({ photoCount: count, platforms: selected || undefined, packageId });
   }
 
   window.ChicagoShiningEzPlan = {
@@ -353,12 +375,16 @@
     EZ_DISABLED_INPUTS,
     EZ_CLIP_INPUTS,
     EZ_NATIVE_STILL_TYPES,
+    EZ_PACKAGES,
+    EZ_VIDEO_STORY_EXTRAS,
     EZ_VIDEO_PASSES,
     EZ_PHOTO_PASSES,
     EZ_OUTPUT_OPTIONS,
     ezIsClipInput,
     ezIsNativeStillOutput,
     ezPhotoCountKind,
+    ezVideoOverrides,
+    ezSlidesOverrides,
     ezDefaultPassMap,
     ezMasterContentType,
     ezPlanFromPhotoCount,

@@ -5234,7 +5234,26 @@ function item4SlideImageUrl(row) {
   return String(f(row, "Final Image URL") || f(row, "AI Image URL") || f(row, "Current Image URL") || "").trim();
 }
 
-function item4DefaultOutputType(platform, photoCount, { hasVideo = false } = {}) {
+function item4PackageOverrides(packageId, photoCount, { hasVideo = false } = {}) {
+  const pkg = String(packageId || "").trim().toLowerCase();
+  if (pkg === "video") {
+    return hasVideo
+      ? { ...ITEM4_VIDEO_DEFAULTS }
+      : { Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" };
+  }
+  if (pkg === "slides") {
+    if (hasVideo) return { ...ITEM4_VIDEO_DEFAULTS };
+    if (Math.max(0, Number(photoCount) || 0) <= 1) {
+      return { Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" };
+    }
+    return { Instagram: "Carousel", Facebook: "Multi-Image Post", TikTok: "Multi-Photo", YouTube: "Slideshow Video" };
+  }
+  return null;
+}
+
+function item4DefaultOutputType(platform, photoCount, { hasVideo = false, packageId = "" } = {}) {
+  const packaged = item4PackageOverrides(packageId, photoCount, { hasVideo });
+  if (packaged) return packaged[platform] || null;
   if (hasVideo) return ITEM4_VIDEO_DEFAULTS[platform] || null;
   const n = Math.max(0, Number(photoCount) || 0);
   const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" });
@@ -5315,12 +5334,12 @@ function item4NormalizePlanExtras(payloadExtras, platforms, existingItems = []) 
   return extras;
 }
 
-function item4PlanChoice(platform, requestedOutputType, photoCount, { hasVideo = false } = {}) {
+function item4PlanChoice(platform, requestedOutputType, photoCount, { hasVideo = false, packageId = "" } = {}) {
   const spec = ITEM4_PLAN_SPECS[platform];
   if (!spec) throw new HttpError(400, `Item 4 does not support ${platform}`);
   let requested = item4CanonicalOutputType(platform, String(requestedOutputType || "").trim());
   if (hasVideo && item4IsNativeStillOutput(platform, requested)) requested = "";
-  const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo }) || spec.default_output_type;
+  const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo, packageId }) || spec.default_output_type;
   const outputType = requested || fallback;
   const selected = spec.options[outputType];
   if (!selected) throw new HttpError(400, `${platform} output type ${outputType} is not supported by the Item 4 planner`);
@@ -5491,19 +5510,24 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const requestedPlatforms=Array.isArray(payload.platforms)&&payload.platforms.length?payload.platforms:["Instagram","Facebook","TikTok","YouTube"];
   const platforms=[...new Set(requestedPlatforms.map(x=>String(x||"").trim()).filter(Boolean))];
   const overrides=payload.overrides&&typeof payload.overrides==="object"?payload.overrides:{};
+  const packageId=String(payload.package || payload.package_id || "").trim().toLowerCase();
   const mappingIndex=await item4MappingIndex(env);
   const items=[];
   let needsReview=false;
   for (const platform of platforms) {
     const requestedRaw = item4CanonicalOutputType(platform, overrides[platform] || "");
     const requested = item4IsCompanionOutputType(requestedRaw) ? "" : requestedRaw;
-    const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo });
+    const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo, packageId });
     if (!requested && !fallback) continue;
-    const chosen = item4PlanChoice(platform, requested || fallback, photoCount, { hasVideo });
+    const chosen = item4PlanChoice(platform, requested || fallback, photoCount, { hasVideo, packageId });
     items.push(item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex));
     if (!items[items.length - 1].aspect_ratio) needsReview = true;
   }
-  const extras = item4NormalizePlanExtras(payload.extras, platforms, items)
+  const extrasPayload = Array.isArray(payload.extras) ? [...payload.extras] : [];
+  if (packageId === "video" || (!packageId && (hasVideo || photoCount > 1))) {
+    extrasPayload.push("Instagram::Story", "Facebook::Story");
+  }
+  const extras = item4NormalizePlanExtras(extrasPayload, platforms, items)
     .filter((extra) => !hasVideo || extra.companion || !item4IsNativeStillOutput(extra.platform, extra.output_type));
   for (const extra of extras) {
     try {
