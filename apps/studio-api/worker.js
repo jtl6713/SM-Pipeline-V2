@@ -5622,6 +5622,41 @@ function item4QueueRowCountsReady(row) {
   return item4QueueRowHasAuthority(row);
 }
 
+function item4QueueErrorIsTransient(message) {
+  return /(network connection lost|timed?\s*out|timeout|502|503|504|image transformation failed|stalled processing|connection reset|connection aborted)/i.test(
+    String(message || "")
+  );
+}
+
+async function item4RequeueTransientVariantFailures(env, rows) {
+  const next = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const status = item4QueueStatus(row);
+    if (!["Failed", "Error"].includes(status) || item4QueueRowHasAuthority(row) || !item4QueueErrorIsTransient(f(row, "Error_Message"))) {
+      next.push(row);
+      continue;
+    }
+    try {
+      const updated = await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Transfer_Status: "Pending",
+            Attempt_Count: 0,
+            Error_Message: "Requeued after a transient crop failure so SMV1 can retry.",
+          },
+          typecast: true,
+        }),
+      });
+      next.push(updated || row);
+    } catch (error) {
+      console.warn("Item 4 transient variant requeue failed", row.id, error);
+      next.push(row);
+    }
+  }
+  return next;
+}
+
 async function item4RequeueStaleProcessing(env, rows) {
   const now = Date.now();
   const next = [];
@@ -6912,7 +6947,10 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   const planRatios = item4PlanRatios(plan || {});
   const ratios = item4RequiredRatios(plan || {});
   let queueRows = await item4VariantQueueRows(env, recordId);
-  queueRows = await item4RequeueStaleProcessing(env, queueRows);
+  queueRows = await item4RequeueTransientVariantFailures(
+    env,
+    await item4RequeueStaleProcessing(env, queueRows)
+  );
   const expectedIds = new Set(
     item4ExpectedVariantKeys(recordId, assets, plan || {}).map((row) => row.transfer_id)
   );

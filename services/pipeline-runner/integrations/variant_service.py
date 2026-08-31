@@ -1,12 +1,36 @@
 from __future__ import annotations
 
+import io
 from typing import Any
 
 import requests
+from PIL import Image
 
 from config import load_settings
 from item4.constants import VARIANT_RECIPE_VERSION
 from item4.settings import PipelineSettings
+
+# Cloudflare Images on the variant Worker dies on 20MB+ phone JPEGs
+# ("Worker exceeded resource limits" / "Network connection lost").
+MAX_VARIANT_SOURCE_BYTES = 3_500_000
+MAX_VARIANT_SOURCE_EDGE = 2560
+
+
+def prepare_variant_source(
+    image_bytes: bytes,
+    *,
+    max_bytes: int = MAX_VARIANT_SOURCE_BYTES,
+    max_edge: int = MAX_VARIANT_SOURCE_EDGE,
+) -> bytes:
+    if len(image_bytes) <= max_bytes:
+        return image_bytes
+    image = Image.open(io.BytesIO(image_bytes))
+    image = image.convert("RGB")
+    image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+    out = io.BytesIO()
+    image.save(out, format="JPEG", quality=90, optimize=True)
+    prepared = out.getvalue()
+    return prepared if prepared else image_bytes
 
 
 class VariantServiceClient:
@@ -33,6 +57,7 @@ class VariantServiceClient:
     def render(self, image_bytes: bytes, ratio: str, gravity: str = "center") -> bytes:
         base = self._base_url()
         token = self._token()
+        payload = prepare_variant_source(image_bytes)
         params = {
             "ratio": ratio,
             "recipe": VARIANT_RECIPE_VERSION,
@@ -41,7 +66,7 @@ class VariantServiceClient:
         response = requests.post(
             f"{base}/render",
             params=params,
-            data=image_bytes,
+            data=payload,
             headers={
                 "X-Studio-Variant-Token": token,
                 "Content-Type": "application/octet-stream",
