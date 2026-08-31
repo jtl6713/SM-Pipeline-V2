@@ -16,6 +16,7 @@ import {
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
   isAutonomousOrigin,
+  autonomousRequestNeedsContinue,
   extractJsonObject,
   mapYoutubeSearchItems,
   observationIsRecent,
@@ -41,6 +42,7 @@ test("slot keys are once per morning and afternoon", () => {
   assert.equal(autonomousRunIsBusy({ status: "picking", at: "2026-08-30T13:27:00Z" }, Date.parse("2026-08-30T13:27:14Z")), true);
   assert.equal(autonomousRunIsBusy({ status: "reset" }), false);
   assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "waiting_variants" }, "2026-08-30:am"), true);
+  assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "awaiting_i4" }, "2026-08-30:am"), true);
   assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "reset" }, "2026-08-30:am"), false);
 });
 
@@ -94,6 +96,10 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.equal(autonomousDefaultVoiceoverTailSeconds(0), 0);
   assert.equal(AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID, "recT49crfrhMVfZAQ");
   assert.equal(isAutonomousOrigin("origin=autonomous cited_trend=Pilsen"), true);
+  assert.equal(autonomousRequestNeedsContinue("Submitted", "origin=autonomous cited_trend=Heat"), true);
+  assert.equal(autonomousRequestNeedsContinue("Draft", "origin=autonomous"), true);
+  assert.equal(autonomousRequestNeedsContinue("Submitted", "manual studio request"), false);
+  assert.equal(autonomousRequestNeedsContinue("Promoted", "origin=autonomous"), false);
   assert.equal(isDerivedLibraryStillName("Pilsen-Murals-9__9x16__fill-crop-v2.jpg"), true);
   assert.equal(isDerivedLibraryStillName("Pilsen Murals 1.jpg"), false);
   assert.deepEqual(autonomousMasterMediaIds([

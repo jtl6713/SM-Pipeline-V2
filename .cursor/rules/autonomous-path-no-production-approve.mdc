@@ -1,0 +1,21 @@
+---
+description: Autonomous origin=autonomous work never stops at Production Approve
+alwaysApply: true
+---
+
+# Autonomous path never waits for Production Approval
+
+End-to-end autonomy applies **only** when the idea/request is stamped `origin=autonomous` (Production Notes / idea config notes). Manual Studio requests still stop at Production Approve.
+
+## Never
+
+- Do not leave an autonomous Production Request at `Request_Status=Submitted` (Studio “waiting for Production Approval”) when masters are Ready, the output plan is Ready, and frames/variants are Ready (`plan_complete` / `Studio_Variant_Status=Ready`).
+- Do not treat `Submitted` as a terminal autonomous state. Cron and `run-autonomous` must resume it through I3/I4 finalize, Platform Output fanout, and `enqueueStudioProductionJob`.
+- Do not harvest a new idea while an autonomous request is Draft, Ready, or Submitted.
+- Do not auto-approve or auto-produce requests that lack `origin=autonomous`.
+
+## Always
+
+- Detect origin with `origin=autonomous` before applying through-approve / self-resume / produce enqueue.
+- After photos, platforms, and frames are ready, promote until `Request_Status=Promoted` and a studio-produce job exists. The human gate on this path is **Ready for Review → Approve publish**, not Production Approve.
+- Keep `Thumbnail_URL` / native grid cover rules. Nothing auto-publishes.
