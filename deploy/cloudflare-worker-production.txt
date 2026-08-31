@@ -254,3 +254,5 @@ Autonomous subject pin Worker deploy: 2026-08-31 - Run autonomous can pin the ne
 Library browse Worker deploy: 2026-08-31 - Operators browse classified Google Drive stills and attach the ones they check. Worker 0.10.201-library-browse.
 
 Variant authority heal Worker deploy: 2026-08-31 - Error crops that already have Drive + Media Asset count as Ready; Prepare retries Error without files. Worker 0.10.202-variant-authority-heal.
+
+Scheduled waiting status Worker deploy: 2026-08-31 - Future-dated TikTok/approve handoffs stamp Ready to Schedule / Waiting for Schedule instead of Ready for Assets. Worker 0.10.203-scheduled-waiting-status.
