@@ -237,4 +237,6 @@ IG carousel due publish Worker deploy: 2026-08-30 - Run due Parent Ready AP4C be
 
 Autonomous dedupe Worker deploy: 2026-08-30 - Do not mint an idea that shares stills or the same place/subject as an in-flight or recently published piece. Worker 0.10.194-autonomous-dedupe.
 
+Autonomous voiceover tail Worker deploy: 2026-08-30 - Voiceover tail is a 0-10s pad (default 2). Do not treat leftover video-minus-VO bed as tail. Worker 0.10.195-autonomous-vo-tail.
+
 IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline carousel statuses are eligible on the first publish reconcile sweep; AP4C respects Scheduled_Post_Date. Worker 0.10.193-ig-carousel-due-publish.
