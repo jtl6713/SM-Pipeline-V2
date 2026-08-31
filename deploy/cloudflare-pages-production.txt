@@ -287,3 +287,5 @@ Autonomous running button Pages deploy: 2026-08-30 - Run autonomous now shows Ru
 Autonomous defaults Pages deploy: 2026-08-30 - Section 6 sets video duration, voiceover duration, and music start; frame previews use crop CDN first. UI 0.6.193-autonomous-defaults.
 
 Autonomous through Pages deploy: 2026-08-30 - Relabel music skip-into-song; video still starts at 0:00. UI 0.6.194-autonomous-through.
+
+Production live statuses Pages deploy: 2026-08-30 - Production In production table auto-refreshes Studio stage, assets, render, and review while the page is open. UI 0.6.195-production-live.
