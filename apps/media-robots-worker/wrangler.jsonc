@@ -1,0 +1,13 @@
+{
+  "name": "chicagoshining-media-robots",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-31",
+  "account_id": "cbb5651c94e9bd2efc4594dc87229acb",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "media.chicagoshining.com/robots.txt",
+      "zone_name": "chicagoshining.com"
+    }
+  ]
+}
