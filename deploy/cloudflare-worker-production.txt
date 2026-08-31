@@ -243,4 +243,6 @@ Autonomous self-resume Worker deploy: 2026-08-30 - Two-minute cron drains crops 
 
 Autonomous never Production Approve Worker deploy: 2026-08-30 - origin=autonomous requests that have photos, plan, and frames ready never park at Submitted / Production Approve. Cron resumes Submitted through I4 finalize and studio-produce. Manual requests still wait. Worker 0.10.197-autonomous-never-prod-approve.
 
+Autonomous library-first Worker deploy: 2026-08-30 - Pick from unused classified library stills. Trends are optional. Keep similar-idea / same-still blocking. Worker 0.10.198-autonomous-library-first.
+
 IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline carousel statuses are eligible on the first publish reconcile sweep; AP4C respects Scheduled_Post_Date. Worker 0.10.193-ig-carousel-due-publish.

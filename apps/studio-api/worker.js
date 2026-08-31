@@ -189,7 +189,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.197-autonomous-never-prod-approve",
+          version: "0.10.198-autonomous-library-first",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -24377,32 +24377,40 @@ function autonomousIncomingMediaIds(existingAssets, mediaAssetIds, max = AUTONOM
   return incoming;
 }
 
+function autonomousUnusedLibraryAssets(assets, occupied = []) {
+  const used = new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []));
+  return (assets || []).filter((row) => {
+    const id = String(row?.id || row?.media_asset_id || "").trim();
+    return /^rec[A-Za-z0-9]+$/.test(id) && !used.has(id);
+  });
+}
+
 function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas }) {
   const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
   const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
   const voice = profile?.brand_voice || profile?.Brand_Voice || "";
-  return `You are ChicagoShining's autonomous producer. Pick ONE idea that is both timely and shootable from the library stills listed.
+  return `You are ChicagoShining's autonomous producer. Start from the library stills. Review those photos and pick ONE unused set that can become a short.
 
 Return ONLY one raw JSON object. No markdown.
 
-Skip unless a listed library asset clearly matches a listed trend. Do not invent events, dates, prices, or rankings that are not in the harvest. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
+A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
 
 ACTIVE PROFILE
 Name: ${profileName}
 Voice: ${voice}
 Avoid topics: ${avoid}
 
-TREND HARVEST (last 48 hours)
-${JSON.stringify(trends, null, 2)}
-
-LIBRARY STILLS (use only these media_asset_ids)
+LIBRARY STILLS (review these; use only these media_asset_ids)
 ${JSON.stringify(assets, null, 2)}
+
+OPTIONAL TREND HARVEST (cite only if it actually fits the stills you picked)
+${JSON.stringify(trends, null, 2)}
 
 IN FLIGHT OR RECENT IDEAS (do not repeat these subjects, places, or stills)
 ${JSON.stringify(occupiedIdeas || recentTitles || [], null, 2)}
 
-If nothing is both timely and producible, or every timely subject is already in flight or recently published, return:
-{"skip":true,"reason":"no_asset_backed_trend"}
+If every listed still conflicts with an in-flight or recent idea, return:
+{"skip":true,"reason":"no_unused_library_stills"}
 
 Otherwise return:
 {
@@ -24414,7 +24422,7 @@ Otherwise return:
   "suggested_visuals": "max 14 words",
   "required_assets": "max 12 words",
   "why_this_should_work": "max 12 words",
-  "cited_trend": "which harvest item this follows",
+  "cited_trend": "matching harvest item, or library",
   "suggested_format": "Vertical Short Video or Carousel",
   "media_asset_ids": ["rec..."]
 }`;
@@ -24483,41 +24491,28 @@ async function harvestAutonomousYoutube(env) {
   }
 }
 
-async function harvestAutonomousLibraryStills(env, trendText) {
-  const stub = {
-    fields: {
-      Candidate_Title: trendText,
-      Idea_Summary: trendText,
-      Primary_Location: "",
-    },
-  };
-  const ideaTokens = ideaLibraryTokens(trendText);
-  const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
-  const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(stub, "");
-  const today = chicagoNowParts().date;
-  const scanLimit = scanKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : Math.min(250, IDEA_LIBRARY_SCAN_LIMIT);
+async function harvestAutonomousLibraryCatalog(env) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-    limit: scanLimit,
+    limit: 80,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(scanKeys),
+    filterFormula: ideaLibraryFilterFormula([]),
   }).catch(() => []);
-  const ranked = [];
+  const rows = [];
   for (const record of records || []) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
-    const row = ideaLibraryRankAsset(record, {
-      placeKeys,
-      subjectKeys,
-      strongIdeaTokens,
-      ideaTokens,
-      queryTokens: [],
-      today,
+    const topic = f(record, "Topic");
+    rows.push({
+      id: record.id,
+      name: f(record, "Asset Name"),
+      location: f(record, "Location") || null,
+      topic: Array.isArray(topic) ? topic.join(", ") : (topic || null),
+      subtopic: f(record, "Subtopic") || null,
+      intake_date: ideaLibraryIntakeDate(record) || null,
     });
-    if (!row || row.confidence === "none") continue;
-    ranked.push(mapIdeaLibraryAsset(record, row));
+    if (rows.length >= 40) break;
   }
-  ranked.sort((a, b) => (Number(b.score || 0) - Number(a.score || 0)));
-  return ranked.slice(0, 24);
+  return rows;
 }
 
 async function harvestAutonomousRecentTitles(env) {
@@ -25001,23 +24996,17 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     harvestAutonomousOccupiedTopics(env),
   ]);
   const recentTitles = occupiedIdeas.map((row) => row.title);
-  const trendText = [
-    ...similar.map((row) => row.caption),
-    ...news.map((row) => row.title),
-    ...youtube.map((row) => row.title),
-  ].filter(Boolean).join(" ");
-  const assets = await harvestAutonomousLibraryStills(env, trendText || "Chicago");
-  const occupiedMedia = new Set(occupiedIdeas.flatMap((row) => row.media_asset_ids || []));
-  const highAssets = assets.filter((row) => row.confidence === "high" && !occupiedMedia.has(row.id));
+  const catalog = await harvestAutonomousLibraryCatalog(env);
+  const unusedAssets = autonomousUnusedLibraryAssets(catalog, occupiedIdeas);
   const trends = { similar, news, youtube };
-  if (!highAssets.length) {
+  if (!unusedAssets.length) {
     const result = {
-      skipped: "no_high_confidence_assets",
+      skipped: "no_unused_library_stills",
       chicago_date: chicago.date,
       slot,
       status: "skipped",
-      skip_reason: "no_high_confidence_assets",
-      harvest: { similar: similar.length, news: news.length, youtube: youtube.length, assets: assets.length },
+      skip_reason: "no_unused_library_stills",
+      harvest: { similar: similar.length, news: news.length, youtube: youtube.length, assets: catalog.length },
     };
     await studioSaveAutonomousLastRun(env, result);
     return result;
@@ -25030,12 +25019,12 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       avoid_topics: f(profile, "Avoid_Topics"),
     },
     trends,
-    assets: highAssets.slice(0, 16).map((row) => ({
+    assets: unusedAssets.slice(0, 24).map((row) => ({
       media_asset_id: row.id,
       name: row.name,
       location: row.location,
-      confidence: row.confidence,
-      score: row.score,
+      topic: row.topic,
+      subtopic: row.subtopic,
     })),
     recentTitles,
     occupiedIdeas,
@@ -25046,7 +25035,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       dry_run: true,
       chicago_date: chicago.date,
       slot,
-      harvest: { similar: similar.length, news: news.length, youtube: youtube.length, assets: highAssets.length },
+      harvest: { similar: similar.length, news: news.length, youtube: youtube.length, assets: unusedAssets.length },
       prompt,
     };
   }
@@ -25064,7 +25053,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  const allowed = new Set(highAssets.map((row) => row.id));
+  const allowed = new Set(unusedAssets.map((row) => row.id));
   pick.media_asset_ids = pick.media_asset_ids.filter((id) => allowed.has(id)).slice(0, AUTONOMOUS_MAX_MASTER_ASSETS);
   if (!pick.media_asset_ids.length) {
     const result = {

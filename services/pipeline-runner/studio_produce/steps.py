@@ -357,7 +357,9 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
             patch["Voiceover_Status"] = "Ready"
         if field_str(parent, "Content_Status") != "Ready for Voiceover":
             patch["Content_Status"] = "Ready for Voiceover"
-        if field_str(parent, "Thumbnail_Status") in {"", "Not Started", "None"} and not want_thumb:
+        if want_thumb and not field_str(parent, "Thumbnail_URL") and field_str(parent, "Thumbnail_Status") != "Ready":
+            patch["Thumbnail_Status"] = "Ready"
+        elif field_str(parent, "Thumbnail_Status") in {"", "Not Started", "None"} and not want_thumb:
             patch["Thumbnail_Status"] = "Not Needed"
         if patch:
             client.update_record(CONTENT_ITEMS_TABLE, parent["id"], patch, typecast=True)

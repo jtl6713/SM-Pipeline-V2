@@ -26,6 +26,8 @@ import {
   parseRssItemTitles,
   summarizeObservations,
   autonomousIdeaConflictsOccupied,
+  autonomousUnusedLibraryAssets,
+  buildAutonomousPickerPrompt,
 } from "./autonomous-produce.mjs";
 
 test("Chicago 8am and 4pm are autonomous windows", () => {
@@ -73,7 +75,20 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     items: [{ snippet: { title: "Chicago river kayak", channelTitle: "Local", publishedAt: "2026-08-30T01:00:00Z" } }],
   });
   assert.equal(videos[0].title, "Chicago river kayak");
-  assert.equal(parseAutonomousPick({ skip: true, reason: "no_asset_backed_trend" }).reason, "no_asset_backed_trend");
+  assert.equal(parseAutonomousPick({ skip: true, reason: "no_unused_library_stills" }).reason, "no_unused_library_stills");
+  const libraryFirst = buildAutonomousPickerPrompt({
+    profile: { name: "Chicago" },
+    trends: { news: [{ title: "Heat wave" }] },
+    assets: [{ media_asset_id: "recAsset1234567890", name: "Navy Pier.jpeg" }],
+    occupiedIdeas: [{ title: "Pilsen Murals: Color on 18th Street", location: "18th Street, Pilsen" }],
+  });
+  assert.match(libraryFirst, /Start from the library stills/);
+  assert.match(libraryFirst, /no_unused_library_stills/);
+  assert.equal(libraryFirst.includes("no_asset_backed_trend"), false);
+  assert.deepEqual(autonomousUnusedLibraryAssets([
+    { id: "recAsset1234567890" },
+    { id: "recfgniLGTG1tTviX" },
+  ], [{ media_asset_ids: ["recfgniLGTG1tTviX"] }]).map((row) => row.id), ["recAsset1234567890"]);
   assert.equal(parseAutonomousPick({ candidate_title: "Hi", idea_summary: "There" }).skip, true);
   const picked = parseAutonomousPick({
     candidate_title: "Pilsen mural walk",
