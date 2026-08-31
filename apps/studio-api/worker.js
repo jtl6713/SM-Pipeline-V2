@@ -189,7 +189,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.196-autonomous-self-resume",
+          version: "0.10.197-autonomous-never-prod-approve",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -12288,8 +12288,10 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
   }
 
   if (requestStatus === "Submitted") {
-    // Do not resend I3 automatically. This avoids duplicate workflow triggers.
-    ideaRecord = await waitForPromotionResult(env, ideaRecordId, 4, 750);
+    // Manual path: wait briefly, do not resend I3. Autonomous path: I4 is not a
+    // human Production Approve stop — wait long enough to attach the Content Item.
+    const autonomous = isAutonomousOrigin(f(requestRecord, "Production_Notes"));
+    ideaRecord = await waitForPromotionResult(env, ideaRecordId, autonomous ? 24 : 4, autonomous ? 1250 : 750);
     if (promotionCompleted(ideaRecord)) {
       const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord);
       return respond(request, env, {
@@ -12354,7 +12356,13 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
     throw error;
   }
 
-  ideaRecord = await waitForPromotionResult(env, ideaRecordId);
+  const autonomousSubmit = isAutonomousOrigin(f(requestRecord, "Production_Notes"));
+  ideaRecord = await waitForPromotionResult(
+    env,
+    ideaRecordId,
+    autonomousSubmit ? 24 : 8,
+    autonomousSubmit ? 1250 : 750
+  );
   if (promotionCompleted(ideaRecord)) {
     const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord);
     return respond(request, env, {
@@ -24281,6 +24289,11 @@ function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
 }
 
+function autonomousRequestNeedsContinue(requestStatus, notes) {
+  if (!isAutonomousOrigin(notes)) return false;
+  return ["Draft", "Ready", "Submitted"].includes(String(requestStatus || "").trim());
+}
+
 function parseAutonomousNotedMediaIds(notes) {
   const match = String(notes || "").match(/media_asset_ids=([^\n]+)/i);
   if (!match) return [];
@@ -24690,6 +24703,22 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
     }
     const promoteCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
     await promoteProductionRequestViaI3I4(promoteCall.request, env, promoteCall.url, authorization, ctx);
+    let after = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    if (String(f(after, "Request_Status") || "").trim() === "Submitted") {
+      let ideaNow = await waitForPromotionResult(env, idea.id, 24, 1250);
+      if (promotionCompleted(ideaNow)) {
+        await finalizeProductionRequestPromotion(env, requestId, ideaNow);
+        after = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+      }
+    }
+    if (String(f(after, "Request_Status") || "").trim() === "Submitted") {
+      return {
+        waiting: true,
+        waiting_reason: "awaiting_i4",
+        production_request_id: requestId,
+        idea_id: idea.id,
+      };
+    }
     try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
       console.warn("autonomous studio-produce enqueue failed", requestId, error);
     }
@@ -24705,8 +24734,12 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
   if (ctx?.waitUntil) {
     ctx.waitUntil(continueAfterPlan().then(async (finished) => {
       await studioSaveAutonomousLastRun(env, {
-        status: finished.waiting ? "waiting_variants" : "producing",
-        skip_reason: finished.waiting ? "variants_still_preparing" : null,
+        status: finished.waiting
+          ? (finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "waiting_variants")
+          : "producing",
+        skip_reason: finished.waiting
+          ? (finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "variants_still_preparing")
+          : null,
         idea_id: idea.id,
         production_request_id: requestId,
       });
@@ -24730,7 +24763,7 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
 async function listAutonomousDraftRequests(env) {
   return listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 1,
-    filterFormula: "AND({Request_Status}='Draft',FIND('origin=autonomous',{Production_Notes}&'')>0)",
+    filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),FIND('origin=autonomous',{Production_Notes}&'')>0)",
     sortField: "Created_At",
     sortDirection: "asc",
   });
@@ -24779,7 +24812,9 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         results.push({
           production_request_id: finished.production_request_id,
           idea_id: finished.idea_id,
-          status: finished.waiting ? "waiting_variants" : "producing",
+          status: finished.waiting
+            ? (finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "waiting_variants")
+            : "producing",
         });
       } catch (error) {
         console.warn("autonomous draft resume failed", requestRecord.id, error);
@@ -24791,11 +24826,12 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         });
       }
     }
+    const waitingI4 = results.some((row) => row.status === "awaiting_i4");
     const waiting = results.some((row) => row.status === "waiting_variants");
     const producing = results.some((row) => row.status === "producing");
     await studioSaveAutonomousLastRun(env, {
-      status: waiting ? "waiting_variants" : (producing ? "producing" : "skipped"),
-      skip_reason: waiting ? "variants_still_preparing" : null,
+      status: waitingI4 ? "awaiting_i4" : (waiting ? "waiting_variants" : (producing ? "producing" : "skipped")),
+      skip_reason: waitingI4 ? "awaiting_i4" : (waiting ? "variants_still_preparing" : null),
       chicago_date: chicago.date,
       slot,
       idea_id: ideaIds[ideaIds.length - 1] || null,
@@ -24833,7 +24869,9 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
 
   const results = await runAll();
   return {
-    status: results.some((row) => row.status === "waiting_variants") ? "waiting_variants" : "producing",
+    status: results.some((row) => row.status === "awaiting_i4")
+      ? "awaiting_i4"
+      : (results.some((row) => row.status === "waiting_variants") ? "waiting_variants" : "producing"),
     chicago_date: chicago.date,
     slot,
     resumed: results,
@@ -24853,12 +24891,19 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, last.idea_id).catch(() => null);
     const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, last.production_request_id).catch(() => null);
     const requestStatus = String(f(requestRecord, "Request_Status") || "").trim();
-    const lastNeedsResume = ["waiting_variants", "skipped", "reset", "picking", "resuming"].includes(String(last.status || "").trim())
-      || ["Draft", "Ready"].includes(requestStatus);
-    if (last.status === "waiting_variants" && (!idea || !requestRecord)) {
+    const notes = f(requestRecord, "Production_Notes");
+    const job = requestRecord ? parseStudioProductionJob(requestRecord) : null;
+    const jobStep = String(job?.step || "").trim();
+    const lastNeedsResume = ["waiting_variants", "awaiting_i4", "skipped", "reset", "picking", "resuming"].includes(String(last.status || "").trim())
+      || autonomousRequestNeedsContinue(requestStatus, notes)
+      || (isAutonomousOrigin(notes) && requestStatus === "Promoted" && !jobStep);
+    if (["waiting_variants", "awaiting_i4"].includes(String(last.status || "").trim()) && (!idea || !requestRecord)) {
       return studioSaveAutonomousLastRun(env, { ...last, status: "reset", skip_reason: "waiting_record_gone" });
     }
-    if (idea && requestRecord && lastNeedsResume && ["Draft", "Ready"].includes(requestStatus)) {
+    if (idea && requestRecord && lastNeedsResume && (
+      autonomousRequestNeedsContinue(requestStatus, notes)
+      || (isAutonomousOrigin(notes) && requestStatus === "Promoted" && !jobStep)
+    )) {
     const pick = {
       content_type: String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim() || "Vertical Short Video",
       media_asset_ids: autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), [])),
@@ -24883,8 +24928,8 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     if (finished.waiting) {
       return studioSaveAutonomousLastRun(env, {
         ...last,
-        status: "waiting_variants",
-        skip_reason: "variants_still_preparing",
+        status: finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "waiting_variants",
+        skip_reason: finished.waiting_reason === "awaiting_i4" ? "awaiting_i4" : "variants_still_preparing",
         chicago_date: chicago.date,
       });
     }

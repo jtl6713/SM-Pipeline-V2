@@ -241,4 +241,6 @@ Autonomous voiceover tail Worker deploy: 2026-08-30 - Voiceover tail is a 0-10s 
 
 Autonomous self-resume Worker deploy: 2026-08-30 - Two-minute cron drains crops then resumes the waiting draft so Joseph does not click Run autonomous again. Worker 0.10.196-autonomous-self-resume.
 
+Autonomous never Production Approve Worker deploy: 2026-08-30 - origin=autonomous requests that have photos, plan, and frames ready never park at Submitted / Production Approve. Cron resumes Submitted through I4 finalize and studio-produce. Manual requests still wait. Worker 0.10.197-autonomous-never-prod-approve.
+
 IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline carousel statuses are eligible on the first publish reconcile sweep; AP4C respects Scheduled_Post_Date. Worker 0.10.193-ig-carousel-due-publish.

@@ -61,7 +61,7 @@ export function autonomousRunIsBusy(last, nowMs = Date.now(), maxAgeMs = 15 * 60
 
 export function autonomousSlotAlreadyClaimed(last, slot) {
   if (!slot || String(last?.slot || "") !== slot) return false;
-  return ["picking", "resuming", "waiting_variants", "producing", "promoted"].includes(String(last?.status || "").trim());
+  return ["picking", "resuming", "waiting_variants", "awaiting_i4", "producing", "promoted"].includes(String(last?.status || "").trim());
 }
 
 export function parseAutonomousLastRun(raw) {
@@ -178,6 +178,12 @@ export function parseAutonomousPick(parsed) {
 
 export function isAutonomousOrigin(text) {
   return String(text || "").includes("origin=autonomous");
+}
+
+/** Draft / Ready / Submitted autonomous PRs must keep moving. Submitted is not a stop. */
+export function autonomousRequestNeedsContinue(requestStatus, notes) {
+  if (!isAutonomousOrigin(notes)) return false;
+  return ["Draft", "Ready", "Submitted"].includes(String(requestStatus || "").trim());
 }
 
 export const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
