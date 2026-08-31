@@ -1897,8 +1897,21 @@
     });
   }
 
+  function currentEzPackageId() {
+    return String(
+      ezWizardPending?.packageId
+      || ezWizardAnswers?.packageId
+      || ezPlanApi()?.parseEzOriginNotes?.($("prProductionNotes")?.value || $("ezProductionNotes")?.value)?.packageId
+      || ""
+    ).trim();
+  }
+
   function applyEzPlanOverrides(photoCount, platforms) {
-    const planned = ezPlanApi()?.ezPlanFromPhotoCount({ photoCount, platforms }) || { overrides: {}, platforms: platforms || [] };
+    const planned = ezPlanApi()?.ezPlanFromPhotoCount({
+      photoCount,
+      platforms,
+      packageId: currentEzPackageId(),
+    }) || { overrides: {}, platforms: platforms || [] };
     item4PlanOverrides = { ...planned.overrides, ...item4PlanOverrides };
     return planned;
   }
@@ -2411,7 +2424,7 @@
       if ($("ezAudioTrack")) $("ezAudioTrack").value = "";
       if ($("prMusicAsset")) $("prMusicAsset").value = "";
     }
-    const audioWarning = "Music and voiceover play on video outputs (Reels, Slideshow Reels, TikTok video drafts, YouTube). They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.";
+    const audioWarning = "Music and voiceover play on vertical video (Reels, TikTok drafts, YouTube Shorts) and on the YouTube Slideshow Video that accompanies scrollable slides. They are not used on native stills such as Instagram Carousel, Facebook Multi-Image Post, or TikTok Multi-Photo.";
     ["prAudioPlatformWarning", "ezAudioPlatformWarning"].forEach((id) => {
       const el = $(id);
       if (!el) return;
@@ -2454,6 +2467,7 @@
       captionMode: parsed.captionMode,
       manualCount: parsed.manualCount,
       aiCount: parsed.aiCount,
+      packageId: parsed.packageId,
     }) || "";
     if (origin && text.startsWith(origin)) return text.slice(origin.length).replace(/^\s+/, "");
     const lines = text.split(/\n/);
@@ -2469,6 +2483,7 @@
       captionMode: ezCaptionMode(),
       manualCount: pending?.manualCount,
       aiCount: pending?.aiCount,
+      packageId: pending?.packageId || currentEzPackageId(),
     }) || "";
     const user = String($("ezProductionNotes")?.value || "").trim();
     const combined = user ? `${origin}\n\n${user}` : origin;
@@ -3010,11 +3025,34 @@
 
   function syncEzYouTubeAvailability(resetChecked = true) {
     const youtube = $("ezYouTube");
-    const youtubeOn = ezIntakeKind === "multiple-photos" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills";
+    const packageId = currentEzPackageId();
+    const youtubeOn = packageId === "video"
+      || (packageId === "slides" && (ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-stills"))
+      || (!packageId && (ezIntakeKind === "multiple-photos" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills"));
     if (!youtube) return;
     youtube.disabled = !youtubeOn;
     if (!youtubeOn) youtube.checked = false;
     else if (resetChecked) youtube.checked = true;
+  }
+
+  function selectEzPackage(packageId, { resetPlatforms = true } = {}) {
+    const next = String(packageId || "").trim().toLowerCase();
+    if (next !== "video" && next !== "slides") return;
+    ezWizardAnswers = { ...ezWizardAnswers, packageId: next };
+    if (ezWizardPending) ezWizardPending = { ...ezWizardPending, packageId: next };
+    document.querySelectorAll("[data-ez-package]").forEach((button) => {
+      button.classList.toggle("selected", button.dataset.ezPackage === next);
+    });
+    const count = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardAnswers) || item4Workspace?.assets?.length || ezStagedFiles.length || 1;
+    applyEzPlanOverrides(count, ezSelectedPlatforms());
+    if (next === "video") {
+      ezPinnedExtraOutputs = ezPlanApi()?.EZ_VIDEO_STORY_EXTRAS || ["Instagram::Story", "Facebook::Story"];
+      applyEzExtraOutputs(ezPinnedExtraOutputs);
+    } else {
+      ezPinnedExtraOutputs = [];
+    }
+    syncEzYouTubeAvailability(resetPlatforms);
+    if (resetPlatforms) syncItem4PlatformsFromEz();
   }
 
   function selectEzInput(kind, { resetPlatforms = true } = {}) {
@@ -3061,6 +3099,12 @@
     }
     selectPrMediaKind(nextKind, { quiet: true });
     syncFinishedMediaHeadings();
+    const slidesCard = document.querySelector('[data-ez-package="slides"]');
+    const videoOnlyInput = nextKind === "photos-and-clips" || nextKind === "video-clips" || nextKind === "finished-video";
+    if (slidesCard) slidesCard.hidden = videoOnlyInput;
+    if (videoOnlyInput && currentEzPackageId() !== "video") {
+      selectEzPackage("video", { resetPlatforms: false });
+    }
     syncEzYouTubeAvailability(resetPlatforms);
     if (resetPlatforms) syncItem4PlatformsFromEz();
     renderEzCaptionUi();
@@ -3251,6 +3295,11 @@
     ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax"].forEach((id) => ezDirty.add(id));
     ezPinnedExtraOutputs = planned.extras || [];
     applyEzExtraOutputs(ezPinnedExtraOutputs);
+    if (answers.packageId) {
+      document.querySelectorAll("[data-ez-package]").forEach((button) => {
+        button.classList.toggle("selected", button.dataset.ezPackage === answers.packageId);
+      });
+    }
     const expected = helpers.ezWizardExpectedUploads(answers);
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
@@ -3373,7 +3422,7 @@
       aiCount: "How many AI images do you prefer?",
       mixManual: "How many of your photos?",
       mixAi: "How many AI-generated images?",
-      package: "Which platform package do you want?",
+      package: "Vertical video, or scrollable slides?",
       platforms: "Which platforms?",
       custom: "Pick the formats you want.",
       confirm: "Ready to continue with this plan?",
@@ -3614,7 +3663,7 @@
     }
 
     if (ezWizardStep === "package") {
-      prompt.textContent = "Which platform package do you want?";
+      prompt.textContent = "Vertical video, or scrollable slides?";
       const packages = helpers?.ezWizardPackages?.(count, answers) || [];
       renderEzWizardChips(packages.map((pkg) => ({
         label: pkg.label,
@@ -4104,6 +4153,9 @@
     });
     document.querySelectorAll("[data-ez-input]").forEach((button) => {
       button.addEventListener("click", () => selectEzInput(button.dataset.ezInput));
+    });
+    document.querySelectorAll("[data-ez-package]").forEach((button) => {
+      button.addEventListener("click", () => selectEzPackage(button.dataset.ezPackage));
     });
     document.querySelectorAll('input[name="ezCaptionMode"]').forEach((input) => {
       input.addEventListener("change", renderEzCaptionUi);
@@ -5490,7 +5542,7 @@
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
     setRequestMessage();
     try {
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {method:"POST", body:JSON.stringify({platforms,overrides:item4PlanOverrides,extras:item4EnabledExtraPairs()}), timeoutMs:30000});
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {method:"POST", body:JSON.stringify({platforms,overrides:item4PlanOverrides,extras:item4EnabledExtraPairs(),package:currentEzPackageId()}), timeoutMs:30000});
       if (result.production_request) activeProductionRequest = result.production_request;
       productionRequestOutputs = Array.isArray(result.outputs) ? result.outputs : productionRequestOutputs;
       populateProductionRequestForm(activeProductionRequest);
@@ -5592,7 +5644,7 @@
   const OUTPUT_DEFAULTS_BY_CONTENT_TYPE = {
     "Vertical Short Video": {Instagram:"Reel", Facebook:"Reel", TikTok:"Video Draft", YouTube:"Short"},
     "Story": {Instagram:"Story", Facebook:"Story", TikTok:"Story"},
-    "Carousel": {Instagram:"Carousel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo"},
+    "Carousel": {Instagram:"Carousel", Facebook:"Multi-Image Post", TikTok:"Multi-Photo", YouTube:"Slideshow Video"},
     "Feed Post": {Instagram:"Single Image", Facebook:"Single Image", TikTok:"Multi-Photo"},
     "Photo Set": {Instagram:"Reel", Facebook:"Slideshow Reel", TikTok:"Video Draft", YouTube:"Short"},
     "Longform Video": {YouTube:"Standard Video"},
@@ -5939,6 +5991,7 @@
       const planned = ezPlanApi()?.ezPlanFromPhotoCount({
         photoCount: count,
         platforms: [platform],
+        packageId: currentEzPackageId(),
       });
       if (planned?.overrides?.[platform]) return planned.overrides[platform];
     }

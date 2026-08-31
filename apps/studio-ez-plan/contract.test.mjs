@@ -23,21 +23,38 @@ test("single photo defaults to native stills and leaves YouTube off", () => {
   assert.deepEqual(plan.platforms, ["Instagram", "Facebook", "TikTok"]);
   assert.equal(plan.overrides.Instagram, "Single Image");
   assert.equal(plan.overrides.Facebook, "Single Image");
-  assert.equal(plan.overrides.TikTok, "Multi-Photo");
+  assert.equal(plan.overrides.TikTok, "Single Photo");
   assert.equal(plan.overrides.YouTube, undefined);
+  assert.deepEqual(plan.extras || [], []);
 });
 
-test("multiple photos default to native carousel / album / draft / Short", () => {
+test("multiple photos default to vertical video plus Stories", () => {
   const plan = ezPlanFromPhotoCount({ photoCount: 5 });
   assert.equal(plan.photo_count_kind, "multiple-photos");
   assert.equal(plan.master_content_type, "Photo Set");
   assert.equal(plan.youtube_enabled, true);
+  assert.equal(plan.overrides.Instagram, "Reel");
+  assert.equal(plan.overrides.Facebook, "Slideshow Reel");
+  assert.equal(plan.overrides.TikTok, "Video Draft");
+  assert.equal(plan.overrides.YouTube, "Short");
+  assert.deepEqual(plan.extras, ["Instagram::Story", "Facebook::Story"]);
+});
+
+test("slides package is swipeable stills and a YouTube rendered video", () => {
+  const plan = ezPlanFromPhotoCount({ photoCount: 5, packageId: "slides" });
   assert.equal(plan.overrides.Instagram, "Carousel");
   assert.equal(plan.overrides.Facebook, "Multi-Image Post");
   assert.equal(plan.overrides.TikTok, "Multi-Photo");
-  assert.equal(plan.overrides.YouTube, "Short");
+  assert.equal(plan.overrides.YouTube, "Slideshow Video");
+  assert.deepEqual(plan.extras || [], []);
   assert.ok(!Object.values(plan.overrides).includes("Reel"));
   assert.ok(!Object.values(plan.overrides).includes("Slideshow Reel"));
+});
+
+test("video package from photos keeps Facebook as a photo-origin Reel", () => {
+  const plan = ezPlanFromPhotoCount({ photoCount: 4, packageId: "video" });
+  assert.equal(plan.overrides.Facebook, "Slideshow Reel");
+  assert.deepEqual(plan.extras, ["Instagram::Story", "Facebook::Story"]);
 });
 
 test("explicit YouTube on a single still is still omitted", () => {
@@ -55,7 +72,7 @@ test("platform subset is preserved when those platforms have a photo default", (
     platforms: ["Instagram", "TikTok"],
   });
   assert.deepEqual(plan.platforms, ["Instagram", "TikTok"]);
-  assert.deepEqual(plan.overrides, { Instagram: "Carousel", TikTok: "Multi-Photo" });
+  assert.deepEqual(plan.overrides, { Instagram: "Reel", TikTok: "Video Draft" });
 });
 
 test("TikTok Single Photo canonicalizes to the proven Multi-Photo draft route", () => {
