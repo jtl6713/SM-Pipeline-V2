@@ -303,15 +303,26 @@ export function autonomousUnusedLibraryAssets(assets, occupied = []) {
   });
 }
 
-export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas }) {
+export function autonomousPreferredSubject(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas, preferredSubject }) {
   const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
   const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
   const voice = profile?.brand_voice || profile?.Brand_Voice || "";
+  const pin = autonomousPreferredSubject(preferredSubject);
+  const pinBlock = pin
+    ? `
+
+OPERATOR PIN (this run only)
+Use only stills of: ${pin}. Title, location, and media_asset_ids must be that landmark. If none of the listed stills match, return {"skip":true,"reason":"no_matching_subject_stills"}.`
+    : "";
   return `You are ChicagoShining's autonomous producer. Start from the library stills. Review those photos and pick ONE unused set that can become a short.
 
 Return ONLY one raw JSON object. No markdown.
 
-A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
+A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.${pinBlock}
 
 ACTIVE PROFILE
 Name: ${profileName}

@@ -189,7 +189,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.199-story-teaser-5s",
+          version: "0.10.200-theatre-pin",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -24409,15 +24409,26 @@ function autonomousUnusedLibraryAssets(assets, occupied = []) {
   });
 }
 
-function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas }) {
+function autonomousPreferredSubject(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas, preferredSubject }) {
   const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
   const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
   const voice = profile?.brand_voice || profile?.Brand_Voice || "";
+  const pin = autonomousPreferredSubject(preferredSubject);
+  const pinBlock = pin
+    ? `
+
+OPERATOR PIN (this run only)
+Use only stills of: ${pin}. Title, location, and media_asset_ids must be that landmark. If none of the listed stills match, return {"skip":true,"reason":"no_matching_subject_stills"}.`
+    : "";
   return `You are ChicagoShining's autonomous producer. Start from the library stills. Review those photos and pick ONE unused set that can become a short.
 
 Return ONLY one raw JSON object. No markdown.
 
-A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.
+A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.${pinBlock}
 
 ACTIVE PROFILE
 Name: ${profileName}
@@ -24515,12 +24526,13 @@ async function harvestAutonomousYoutube(env) {
   }
 }
 
-async function harvestAutonomousLibraryCatalog(env) {
+async function harvestAutonomousLibraryCatalog(env, subject = "") {
+  const pin = autonomousPreferredSubject(subject);
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
     limit: 80,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula([]),
+    filterFormula: ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []),
   }).catch(() => []);
   const rows = [];
   for (const record of records || []) {
@@ -24992,12 +25004,15 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return { skipped: "already_ran_slot", chicago_date: chicago.date, slot, last };
   }
 
+  const preferredSubject = autonomousPreferredSubject(options.preferred_subject || last.preferred_subject);
+
   if (!options.dry_run) {
     await studioSaveAutonomousLastRun(env, {
       status: "picking",
       skip_reason: null,
       chicago_date: chicago.date,
       slot,
+      preferred_subject: preferredSubject || null,
     });
   }
 
@@ -25020,16 +25035,16 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     harvestAutonomousOccupiedTopics(env),
   ]);
   const recentTitles = occupiedIdeas.map((row) => row.title);
-  const catalog = await harvestAutonomousLibraryCatalog(env);
+  const catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject);
   const unusedAssets = autonomousUnusedLibraryAssets(catalog, occupiedIdeas);
   const trends = { similar, news, youtube };
   if (!unusedAssets.length) {
     const result = {
-      skipped: "no_unused_library_stills",
+      skipped: preferredSubject ? "no_matching_subject_stills" : "no_unused_library_stills",
       chicago_date: chicago.date,
       slot,
       status: "skipped",
-      skip_reason: "no_unused_library_stills",
+      skip_reason: preferredSubject ? "no_matching_subject_stills" : "no_unused_library_stills",
       harvest: { similar: similar.length, news: news.length, youtube: youtube.length, assets: catalog.length },
     };
     await studioSaveAutonomousLastRun(env, result);
@@ -25052,6 +25067,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     })),
     recentTitles,
     occupiedIdeas,
+    preferredSubject,
   });
 
   if (options.dry_run) {
@@ -25148,15 +25164,18 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
 async function runStudioAutonomousProduce(request, env, authorization, ctx, options = {}) {
   let dryRun = Boolean(options.dry_run);
+  let preferredSubject = options.preferred_subject;
   if (request) {
     try {
       const payload = await request.json();
       dryRun = Boolean(payload?.dry_run);
+      if (payload?.preferred_subject) preferredSubject = payload.preferred_subject;
     } catch {}
   }
   const result = await executeStudioAutonomousProduce(env, ctx, {
     ...options,
     dry_run: dryRun,
+    preferred_subject: preferredSubject,
     authorization: authorization?.user?.record_id ? authorization : null,
   });
   if (!request) return result;

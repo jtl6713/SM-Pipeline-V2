@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.196-story-teaser-5s";
+  const BUILD_ID = "item4-0.6.197-theatre-pin";
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
     return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
@@ -476,7 +476,9 @@
       setOperationsMessage("Starting autonomous produce… this can take a minute.");
       const result = await api("/api/operations/ideas/run-autonomous", {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          preferred_subject: String($("operationsAutonomousSubject")?.value || "").trim(),
+        }),
         timeoutMs: 180000,
       });
       if (result.skipped) setOperationsMessage(`Skipped: ${result.skipped}`);

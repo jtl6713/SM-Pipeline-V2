@@ -248,3 +248,5 @@ Autonomous library-first Worker deploy: 2026-08-30 - Pick from unused classified
 IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline carousel statuses are eligible on the first publish reconcile sweep; AP4C respects Scheduled_Post_Date. Worker 0.10.193-ig-carousel-due-publish.
 
 Story teaser 5s Worker deploy: 2026-08-31 - Instagram and Facebook Stories default to 5 seconds for a single still and do not inherit the 30-second main video. Worker 0.10.199-story-teaser-5s.
+
+Autonomous subject pin Worker deploy: 2026-08-31 - Run autonomous can pin the next harvest to a landmark such as Chicago Theatre. Worker 0.10.200-theatre-pin.

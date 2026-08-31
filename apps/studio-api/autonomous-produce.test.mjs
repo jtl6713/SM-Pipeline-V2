@@ -28,6 +28,7 @@ import {
   autonomousIdeaConflictsOccupied,
   autonomousUnusedLibraryAssets,
   buildAutonomousPickerPrompt,
+  autonomousPreferredSubject,
 } from "./autonomous-produce.mjs";
 
 test("Chicago 8am and 4pm are autonomous windows", () => {
@@ -82,6 +83,15 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     assets: [{ media_asset_id: "recAsset1234567890", name: "Navy Pier.jpeg" }],
     occupiedIdeas: [{ title: "Pilsen Murals: Color on 18th Street", location: "18th Street, Pilsen" }],
   });
+  assert.equal(autonomousPreferredSubject("  Chicago Theatre  "), "Chicago Theatre");
+  const pinned = buildAutonomousPickerPrompt({
+    profile: { name: "Chicago" },
+    trends: {},
+    assets: [{ media_asset_id: "recTheatre12345678", name: "Chicago Theatre 7.jpeg" }],
+    preferredSubject: "Chicago Theatre",
+  });
+  assert.match(pinned, /OPERATOR PIN/);
+  assert.match(pinned, /Chicago Theatre/);
   assert.match(libraryFirst, /Start from the library stills/);
   assert.match(libraryFirst, /no_unused_library_stills/);
   assert.equal(libraryFirst.includes("no_asset_backed_trend"), false);
