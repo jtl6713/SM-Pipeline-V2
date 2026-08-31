@@ -1428,6 +1428,17 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 #page-content #productionPromotionCompatibility:not(.success):not(.error-text){
   display:none!important;
 }
+#page-content .production-heading-actions{
+  display:flex;
+  align-items:baseline;
+  gap:16px;
+  margin-left:auto;
+}
+#page-content #productionLiveHint{
+  font-size:.72rem;
+  letter-spacing:.04em;
+  text-transform:none;
+}
 #page-content .production-refresh{
   border:0;
   background:transparent;

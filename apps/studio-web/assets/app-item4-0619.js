@@ -202,6 +202,10 @@
   let pipelinePollInFlight = false;
   let operationsTimezone = null;
   const PIPELINE_POLL_MS = 8000;
+  const PRODUCTION_POLL_MS = 8000;
+  let productionPollTimer = null;
+  let productionPollInFlight = false;
+  let productionContentRecords = [];
   const pipelineProgressHighWater = new Map();
 
   function withStudioProfile(path) {
@@ -321,6 +325,7 @@
     }
     if (page === "outputs") pipelineViewFilter = "all";
     if (page !== "outputs") stopPipelinePoll();
+    if (page !== "content") stopProductionPoll();
     if (page === "support") showSupportDoc("walkthrough");
     loadPage(isHubPage(page) ? "home" : page);
   }
@@ -6805,9 +6810,11 @@
     setProductionRequestControlState(activeProductionRequest);
   });
 
-  async function loadProductionRequests() {
+  async function loadProductionRequests({ silent = false } = {}) {
     const target = $("productionRequestList");
-    target.innerHTML = '<div class="empty production-empty"><strong>Loading drafts…</strong></div>';
+    if (!target) return;
+    if (silent && item4Uploading) return;
+    if (!silent) target.innerHTML = '<div class="empty production-empty"><strong>Loading drafts…</strong></div>';
     try {
       const { records = [] } = await api("/api/production-requests?limit=100");
       // Drafts = still editable (or mid-promote). Promoted requests live under
@@ -7059,6 +7066,91 @@
     }
   }
 
+  function productionPageActive() {
+    return Boolean($("page-content")?.classList.contains("active"));
+  }
+
+  function productionContentFingerprint(records) {
+    return JSON.stringify((records || []).map((r) => [
+      r.id,
+      r.studio_stage,
+      r.asset_match_status,
+      r.render_status,
+      r.review_status || r.carousel_review_status,
+      Array.isArray(r.output_links) ? r.output_links.length : 0,
+      r.lifecycle_complete,
+    ]));
+  }
+
+  function setProductionLiveHint(text) {
+    const hint = $("productionLiveHint");
+    if (hint) hint.textContent = text;
+  }
+
+  function stopProductionPoll() {
+    if (productionPollTimer) {
+      clearTimeout(productionPollTimer);
+      productionPollTimer = null;
+    }
+    if ($("productionLiveHint") && !productionPageActive()) setProductionLiveHint("Open Production to watch live updates");
+  }
+
+  function scheduleProductionPoll() {
+    stopProductionPoll();
+    if (!productionPageActive() || document.hidden) {
+      if (productionPageActive() && document.hidden) setProductionLiveHint("Paused while this tab is in the background");
+      return;
+    }
+    productionPollTimer = setTimeout(() => {
+      productionPollTimer = null;
+      setProductionLiveHint("Live · refreshing…");
+      refreshProductionPage({ silent: true }).finally(scheduleProductionPoll);
+    }, PRODUCTION_POLL_MS);
+  }
+
+  async function refreshProductionContent({ silent = false } = {}) {
+    const target = $("contentList");
+    if (!target) return;
+    if (!silent) target.innerHTML = '<div class="empty production-empty"><strong>Loading in-production items…</strong></div>';
+    const { records = [] } = await api("/api/content?limit=100");
+    const active = records.filter((record) => !record?.lifecycle_complete);
+    const unchanged = silent && target.querySelector("table") && productionContentFingerprint(active) === productionContentFingerprint(productionContentRecords);
+    productionContentRecords = active;
+    if (unchanged) return;
+    if (!active.length) {
+      const hadAny = records.length > 0;
+      target.innerHTML = hadAny
+        ? '<div class="empty production-empty">Nothing actively in production. Published and scheduled pieces are on Platform pipeline.</div>'
+        : '<div class="empty production-empty">Nothing in production yet.</div>';
+      return;
+    }
+    const scrollTop = target.scrollTop;
+    renderContentItemsTable(target, active);
+    target.scrollTop = scrollTop;
+  }
+
+  async function refreshProductionPage({ silent = false } = {}) {
+    if (silent && productionPollInFlight) return;
+    productionPollInFlight = true;
+    if (!silent) setProductionLiveHint("Refreshing…");
+    try {
+      await Promise.all([
+        loadProductionRequests({ silent }),
+        refreshProductionContent({ silent }),
+      ]);
+      if (productionPageActive() && !document.hidden) setProductionLiveHint("Live · refreshed just now");
+    } catch (e) {
+      if (!silent) {
+        const target = $("contentList");
+        if (target) target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+      } else {
+        setProductionLiveHint("Live update failed · retrying");
+      }
+    } finally {
+      productionPollInFlight = false;
+    }
+  }
+
   async function loadContent() {
     if (ezEntryPath === "content") {
       enterEzContentPath();
@@ -7068,23 +7160,8 @@
       setPageContentSimple(false);
       hideEzFrontDoor();
     }
-    loadProductionRequests();
-    const target = $("contentList");
-    target.innerHTML = '<div class="empty production-empty"><strong>Loading in-production items…</strong></div>';
-    try {
-      const { records = [] } = await api("/api/content?limit=100");
-      // Hide pieces whose platform outputs are all published / scheduled / done.
-      // Per-output detail stays on Platform pipeline.
-      const active = records.filter((record) => !record?.lifecycle_complete);
-      if (!active.length) {
-        const hadAny = records.length > 0;
-        target.innerHTML = hadAny
-          ? '<div class="empty production-empty">Nothing actively in production. Published and scheduled pieces are on Platform pipeline.</div>'
-          : '<div class="empty production-empty">Nothing in production yet.</div>';
-        return;
-      }
-      renderContentItemsTable(target, active);
-    } catch (e) { target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`; }
+    await refreshProductionPage({ silent: false });
+    scheduleProductionPoll();
   }
 
   function phase6OptionList(values, current, { label = (v) => v, emptyLabel = null } = {}) {
@@ -10482,11 +10559,13 @@
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopPipelinePoll();
+      stopProductionPoll();
       if (pipelinePageActive()) setPipelineLiveHint("Paused while this tab is in the background");
+      if (productionPageActive()) setProductionLiveHint("Paused while this tab is in the background");
       return;
     }
-    if (!pipelinePageActive()) return;
-    refreshPipelineOutputs({ silent: true }).finally(schedulePipelinePoll);
+    if (pipelinePageActive()) refreshPipelineOutputs({ silent: true }).finally(schedulePipelinePoll);
+    if (productionPageActive()) refreshProductionPage({ silent: true }).finally(scheduleProductionPoll);
   });
 
   phase6DecorateTooltips(document);
