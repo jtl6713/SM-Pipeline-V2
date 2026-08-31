@@ -23,7 +23,7 @@ VIDEO_CANDIDATE_LIMIT = 75
 MUSIC_CANDIDATE_LIMIT = 20
 
 # P4 missing-asset webhook (Make modules 20/21)
-P4_WEBHOOK_URL = "https://hook.us2.make.com/haybdodholixaqb5riewakpsjmwlhhfm"
+P4_WEBHOOK_URL = ""
 
 # Worker continuation probe (worker.js STUDIO_R2_WORK_FORMULA)
 STUDIO_R2_WORK_FORMULA = (

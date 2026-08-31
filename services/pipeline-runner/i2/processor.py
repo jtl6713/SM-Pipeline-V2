@@ -9,19 +9,21 @@ from airtable.constants import SOURCE_CANDIDATES_TABLE
 from config import load_settings
 from i2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from i2.email_builder import review_email_html, review_subject
-from idea.constants import DEFAULT_I2_EMAIL_TO, I2_REVIEW_VIEW, MAKE_I3_WEBHOOK_URL
+from idea.constants import DEFAULT_I2_EMAIL_TO, I2_REVIEW_VIEW
 from integrations.gmail import GmailClient
 from render.fields import field_str
 
 
 def review_url() -> str:
     settings = load_settings()
-    if str(settings.get("stage_backend_i3") or "python") != "disabled":
-        base = str(settings.get("public_base_url") or "").rstrip("/")
-        token = str(settings.get("i3_webhook_token") or "").strip()
-        if base and token:
-            return f"{base}/hooks/i3/{token}"
-    return str(settings.get("i3_webhook_url") or MAKE_I3_WEBHOOK_URL).strip()
+    base = str(settings.get("public_base_url") or "").rstrip("/")
+    token = str(settings.get("i3_webhook_token") or "").strip()
+    if base and token:
+        return f"{base}/hooks/i3/{token}"
+    hook = str(settings.get("i3_webhook_url") or "").strip()
+    if "hook.us2.make.com" in hook:
+        hook = ""
+    return hook
 
 
 def process_request(

@@ -11,7 +11,6 @@ from config import load_settings
 from integrations.gmail import GmailClient
 from render.fields import field_str
 from rr1.constants import (
-    DEFAULT_DECISION_WEBHOOK_URL,
     DEFAULT_REVIEW_EMAIL_TO,
     MAKE_SCENARIO_ID,
     MAKE_SCENARIO_NAME,
@@ -23,15 +22,23 @@ from rr1.email_builder import build_review_card, build_review_email_html, review
 from rr1.formulas import rr1_exact_output_formula, rr1_production_formula
 
 
+def _decision_hook_url(settings: dict[str, Any]) -> str:
+    configured = str(settings.get("rr1_decision_webhook_url") or "").strip()
+    if "hook.us2.make.com" in configured:
+        configured = ""
+    base = str(settings.get("public_base_url") or "").rstrip("/")
+    token = str(settings.get("rr2_webhook_token") or "").strip()
+    python_hook = f"{base}/hooks/rr2/{token}" if base and token else ""
+    return configured or python_hook
+
+
 def _settings() -> dict[str, Any]:
     settings = load_settings()
     return {
         "review_email_to": (
             str(settings.get("rr1_review_email_to") or DEFAULT_REVIEW_EMAIL_TO).strip()
         ),
-        "decision_webhook_url": (
-            str(settings.get("rr1_decision_webhook_url") or DEFAULT_DECISION_WEBHOOK_URL).strip()
-        ),
+        "decision_webhook_url": _decision_hook_url(settings),
     }
 
 

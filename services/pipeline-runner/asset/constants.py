@@ -8,10 +8,10 @@ MAKE_A1P_SCENARIO_ID = 5715500
 MAKE_A1S_SCENARIO_ID = 5715530
 MAKE_A1M_SCENARIO_ID = 5764543
 
-MAKE_A2_WEBHOOK_URL = "https://hook.us2.make.com/issyeyva2ac2kyn0419w8sie63nv2bpw"
-MAKE_A2B_WEBHOOK_URL = "https://hook.us2.make.com/9y1e3puqgl6ecfhp2sdadw8q0dywze9h"
-MAKE_A3_WEBHOOK_URL = "https://hook.us2.make.com/oqp9bj7ojbt13srz9xyrpy05af1ng25v"
-MAKE_A4_WEBHOOK_URL = "https://hook.us2.make.com/3mi970dm7a06lysnm52it4j5clns155g"
+MAKE_A2_WEBHOOK_URL = ""
+MAKE_A2B_WEBHOOK_URL = ""
+MAKE_A3_WEBHOOK_URL = ""
+MAKE_A4_WEBHOOK_URL = ""
 
 GDRIVE_INGESTION_FOLDER = "1VpjoRDHbwUlQrrEjfEpkGrIz1HFFtNNX"
 GDRIVE_VIDEO_FOLDER = "1U5BbeeTBEBrMuYKpA5FoQoKY6qbTEwMi"

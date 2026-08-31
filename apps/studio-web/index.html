@@ -1081,11 +1081,10 @@
  <div id="operationsOversizedList" class="table-wrap"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Render repair</h2><p>Use these when Remotion moved URL, asset selection failed, or a Make admin command is waiting. They do not run on a clock.</p></div></div>
+ <div class="panel-heading"><div><h2>Render repair</h2><p>Use these when Remotion moved URL or asset selection failed. They do not run on a clock.</p></div></div>
  <div class="ops-repair-actions">
  <button type="button" class="secondary-button" id="operationsResetRenderUrls">Reset stale render URLs</button>
  <button type="button" class="secondary-button" id="operationsRetryAssetSelection">Retry failed asset selection</button>
- <button type="button" class="secondary-button" id="operationsMakeAdminBridge">Python runner status</button>
  </div>
  </section>
  </section>
@@ -1287,7 +1286,7 @@
  <li><strong>Library intake</strong> — Process intake folder starts A2 (and the A0 daisy-chain) instead of a 2-hour clock.</li>
  <li><strong>Ready to schedule / publish</strong> — set a post time or mark a hand-posted package published.</li>
  <li><strong>Oversized library videos</strong> — compress via A1S/A1M for Drive files over 100 MB.</li>
- <li><strong>Render repair</strong> — reset stale Remotion URLs (M1), retry failed asset selection (R2B), run a Pending Make admin queue row.</li>
+ <li><strong>Render repair</strong> — reset stale Remotion URLs (M1) and retry failed asset selection (R2B).</li>
  </ul>
  <p>These buttons do not turn interval scanners back on. They pulse the matching on-demand scenario when work exists.</p>
  <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
@@ -1454,9 +1453,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.199-library-suggest"></script>
+ <script src="/assets/config.js?v=0.6.203-make-retired"></script>
  <script src="/assets/ez-plan.js?v=0.6.198-two-packages"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.201-wizard-wait"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.203-make-retired"></script>
  <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.199";</script>
 </body>
 </html>

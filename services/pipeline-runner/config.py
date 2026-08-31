@@ -14,9 +14,19 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 StageStatus = Literal["ok", "skipped", "deferred", "not_implemented", "error"]
 
 
+def _without_retired_make_urls(settings: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(settings)
+    for key, value in list(cleaned.items()):
+        if isinstance(value, str) and "hook.us2.make.com" in value:
+            cleaned[key] = ""
+        if key.startswith("stage_backend_") and value == "make":
+            cleaned[key] = "python"
+    return cleaned
+
+
 @lru_cache
 def load_settings() -> dict[str, Any]:
-    return {
+    return _without_retired_make_urls({
         "port": int(os.environ.get("PORT", "3350")),
         "host": os.environ.get("HOST", "127.0.0.1"),
         "log_level": os.environ.get("LOG_LEVEL", "info"),
@@ -109,7 +119,7 @@ def load_settings() -> dict[str, Any]:
         "service_version": os.environ.get("SERVICE_VERSION", "2026-08-30-autonomous-pick"),
         "ops_alert_email_to": os.environ.get("OPS_ALERT_EMAIL_TO", "chicagoshining@gmail.com"),
         "produce_heal_webhook_url": os.environ.get("PRODUCE_HEAL_WEBHOOK_URL", ""),
-    }
+    })
 
 
 @dataclass
