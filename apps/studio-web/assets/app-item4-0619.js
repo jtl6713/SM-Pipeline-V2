@@ -1923,14 +1923,33 @@
     return planned;
   }
 
+  function defaultPlanPlatforms(count = 1) {
+    const planned = ezPlanApi()?.ezPlanFromPhotoCount({
+      photoCount: count,
+      packageId: currentEzPackageId(),
+    });
+    if (planned?.platforms?.length) return planned.platforms;
+    return currentEzPackageId() === "slides" && Number(count || 0) <= 1
+      ? ["Instagram", "Facebook", "TikTok"]
+      : ["Instagram", "Facebook", "TikTok", "YouTube"];
+  }
+
+  function seedPlatformToggles(platforms) {
+    const wanted = new Set(platforms || []);
+    document.querySelectorAll("[data-item4-platform], [data-ez-platform]").forEach((input) => {
+      if (input.disabled) return;
+      input.checked = wanted.has(input.value);
+    });
+  }
+
   function ezPlanPlatforms(count, selected) {
     const usingEz = usingEzPlatforms() || ezStarting || ezAutoPlanAfterUpload;
     if (!usingEz) {
       const planned = applyEzPlanOverrides(count, selected);
-      return planned.platforms.length ? planned.platforms : selected;
+      const platforms = planned.platforms.length ? planned.platforms : selected;
+      return platforms.length ? platforms : defaultPlanPlatforms(count);
     }
-    const defaults = ezPlanApi()?.ezPlanFromPhotoCount({ photoCount: count })?.platforms
-      || ["Instagram", "Facebook", "TikTok"];
+    const defaults = defaultPlanPlatforms(count);
     const boxes = Array.from(document.querySelectorAll("[data-ez-platform]"));
     const platforms = boxes.length
       ? defaults.filter((platform) => {
@@ -1938,8 +1957,9 @@
           return box ? (box.checked && !box.disabled) : true;
         })
       : defaults;
-    applyEzPlanOverrides(count, platforms);
-    return platforms;
+    const resolved = platforms.length ? platforms : defaults;
+    applyEzPlanOverrides(count, resolved);
+    return resolved;
   }
 
   function ezIsOriginRecord(record = activeProductionRequest) {
@@ -5560,13 +5580,29 @@
     const selected = ezSelectedPlatforms().length ? ezSelectedPlatforms() : item4SelectedPlatforms();
     const wizardCount = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || 0;
     const count = item4Workspace?.assets?.length || wizardCount || 0;
-    const platforms = ezPlanPlatforms(count || 1, selected);
+    let platforms = ezPlanPlatforms(count || 1, selected);
+    if (!platforms.length) {
+      platforms = defaultPlanPlatforms(count || 1);
+      seedPlatformToggles(platforms);
+    }
     if (!platforms.length) { setRequestMessage("Choose at least one platform.", "error-text"); return; }
+    seedPlatformToggles(platforms);
     const button = $("item4BuildPlan");
     if (button) { button.disabled = true; button.textContent = "Building plan…"; }
-    setRequestMessage();
+    setRequestMessage("Building the platform plan…");
     try {
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {method:"POST", body:JSON.stringify({platforms,overrides:item4PlanOverrides,extras:item4EnabledExtraPairs(),package:currentEzPackageId()}), timeoutMs:30000});
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/plan`, {
+        method: "POST",
+        body: JSON.stringify({
+          platforms,
+          overrides: item4PlanOverrides,
+          extras: item4EnabledExtraPairs(),
+          package: currentEzPackageId(),
+          skip_fbs1_guard: true,
+        }),
+        timeoutMs: 45000,
+        retries: 0,
+      });
       if (result.production_request) activeProductionRequest = result.production_request;
       productionRequestOutputs = Array.isArray(result.outputs) ? result.outputs : productionRequestOutputs;
       populateProductionRequestForm(activeProductionRequest);
@@ -5574,9 +5610,16 @@
       await loadItem4Workspace(activeProductionRequest);
       await loadProductionRequestOutputs(activeProductionRequest);
       setRequestMessage(result.message || "Platform plan ready.", "success");
-    } catch (error) { setRequestMessage(error.message, "error-text"); }
-    finally {
+    } catch (error) {
+      setRequestMessage(
+        isTimeoutError(error)
+          ? "Studio took too long to build the plan. Tap Recommend formats again."
+          : (error.message || "Could not build the platform plan."),
+        "error-text"
+      );
+    } finally {
       if (button) {
+        button.hidden = false;
         button.textContent = item4Workspace?.plan?.items?.length ? "Update formats" : "Recommend formats";
         button.disabled = !(item4Workspace?.assets?.length || ezWizardAllowsPlanWithoutAssets());
       }
