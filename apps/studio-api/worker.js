@@ -81,6 +81,7 @@ export default {
       const isIdeaDeleteRoute = isIdeaRecordRoute && request.method === "DELETE";
       const isIdeaHoldWrite = (isIdeaHoldRoute || isIdeaRestoreRoute) && request.method === "POST";
       const isIdeaPromoteWrite = isIdeaPromoteRoute && request.method === "POST";
+      const isIdeaMatchPhotosWrite = isIdeaMatchPhotosRoute && request.method === "POST";
       const isProductionRequestCreateWrite =
         (isIdeaProductionRequestRoute || isProductionRequestCollectionRoute) && request.method === "POST";
       const isProductionRequestEditWrite = isProductionRequestRecordRoute && request.method === "PATCH";
@@ -123,6 +124,7 @@ export default {
         isIdeaDeleteRoute ||
         isIdeaHoldWrite ||
         isIdeaPromoteWrite ||
+        isIdeaMatchPhotosWrite ||
         isProductionRequestCreateWrite ||
         isProductionRequestEditWrite ||
         isProductionRequestPromoteWrite ||
