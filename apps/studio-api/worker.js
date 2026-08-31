@@ -189,7 +189,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.195-autonomous-vo-tail",
+          version: "0.10.196-autonomous-self-resume",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -882,6 +882,14 @@ export default {
         console.warn("item4 pending crop drain cron failed", error);
       }
       try {
+        await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
+          scheduled: true,
+          cron: event?.cron || "",
+        });
+      } catch (error) {
+        console.warn("autonomous produce cadence failed", error);
+      }
+      try {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
@@ -960,12 +968,6 @@ export default {
       cron: event?.cron || "",
     }).catch((error) => {
       console.warn("daily idea cadence failed", error);
-    }));
-    ctx.waitUntil(runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
-      scheduled: true,
-      cron: event?.cron || "",
-    }).catch((error) => {
-      console.warn("autonomous produce cadence failed", error);
     }));
   },
 };
@@ -24661,10 +24663,20 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
 
   const continueAfterPlan = async () => {
     let current = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
-    if (!autonomousPlanVariantsReady(current)) {
-      const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
-      await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
-      current = await waitAutonomousVariantsReady(env, requestId, ctx);
+    let reconciled = await item4ReconcileVariants(env, requestId, current).catch(() => null);
+    if (reconciled?.record) current = reconciled.record;
+    if (!autonomousPlanVariantsReady(current, reconciled)) {
+      const queued = Array.isArray(reconciled?.queue_rows) && reconciled.queue_rows.length;
+      if (!queued) {
+        const variantsCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/variants`, {});
+        await prepareItem4Variants(variantsCall.request, env, variantsCall.url, authorization, ctx);
+      }
+      current = await waitAutonomousVariantsReady(
+        env,
+        requestId,
+        ctx,
+        options.scheduled ? 8000 : 80000
+      );
       if (!autonomousPlanVariantsReady(current)) {
         return { waiting: true, production_request_id: requestId, idea_id: idea.id };
       }
@@ -24733,7 +24745,7 @@ async function alignAutonomousDraftContentType(env, requestRecord, contentType) 
   });
 }
 
-async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, slot) {
+async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, slot, options = {}) {
   const ids = drafts.map((row) => row.id);
   const ideaIds = drafts.map((row) => firstLinkedRecordId(f(row, "Idea_Candidate"))).filter(Boolean);
 
@@ -24763,7 +24775,7 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         const finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, {
           content_type: contentType,
           media_asset_ids: mediaAssetIds,
-        }, { awaitFinish: true });
+        }, { awaitFinish: true, scheduled: Boolean(options.scheduled) });
         results.push({
           production_request_id: finished.production_request_id,
           idea_id: finished.idea_id,
@@ -24858,6 +24870,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     try {
       finished = await finishAutonomousProductionRequest(env, authorization, ctx, idea, requestRecord, pick, {
         awaitFinish: true,
+        scheduled: Boolean(options.scheduled),
       });
     } catch (error) {
       return studioSaveAutonomousLastRun(env, {
@@ -24901,7 +24914,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
   const pendingDrafts = await listAutonomousDraftRequests(env);
   if (pendingDrafts.length) {
-    return resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot);
+    return resumeAutonomousDrafts(env, authorization, ctx, pendingDrafts, chicago, slot, {
+      scheduled: Boolean(options.scheduled),
+    });
   }
 
   if (options.scheduled) {

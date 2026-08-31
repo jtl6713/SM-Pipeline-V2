@@ -239,4 +239,6 @@ Autonomous dedupe Worker deploy: 2026-08-30 - Do not mint an idea that shares st
 
 Autonomous voiceover tail Worker deploy: 2026-08-30 - Voiceover tail is a 0-10s pad (default 2). Do not treat leftover video-minus-VO bed as tail. Worker 0.10.195-autonomous-vo-tail.
 
+Autonomous self-resume Worker deploy: 2026-08-30 - Two-minute cron drains crops then resumes the waiting draft so Joseph does not click Run autonomous again. Worker 0.10.196-autonomous-self-resume.
+
 IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline carousel statuses are eligible on the first publish reconcile sweep; AP4C respects Scheduled_Post_Date. Worker 0.10.193-ig-carousel-due-publish.
