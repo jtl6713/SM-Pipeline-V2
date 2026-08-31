@@ -75,6 +75,14 @@ Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo
 
 They display a numbered 1-6 service menu.
 
+Task Organizer (standalone repo, port `3360`) is not a deployable SM service. Add it to the existing START / STOP / VERIFY windows with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\deploy\local-services\Integrate-TaskOrganizer-StartStopVerify.ps1"
+```
+
+That opens `9 LOC Task Organizer :3360` from the central START command and launches `http://localhost:3360/docs`.
+
 ## Direct PowerShell usage
 
 Plan only:
