@@ -409,6 +409,7 @@ export default {
           item4_facebook_slideshow_voiceover_hardening: true,
           facebook_graph_publish_held: studioFacebookGraphPublishHeld(env),
           facebook_public_make_publish: true,
+          facebook_native_cover_attach: true,
           item4_ratio_authority: "platform-output-mappings",
           item4_publish_locked_until_bridge_validation: false,
           item4_source_to_production_bridge: "validated-preflight-v1",
@@ -914,6 +915,11 @@ export default {
         await studioReconcileFacebookPublicMake(env);
       } catch (error) {
         console.warn("facebook public make reconcile cron failed", error);
+      }
+      try {
+        await studioReconcileFacebookVideoCovers(env);
+      } catch (error) {
+        console.warn("facebook native cover reconcile cron failed", error);
       }
       // Due IG carousels (Parent Ready) must publish before heavier platform polls
       // burn the isolate subrequest budget — 304 sat ~3h past schedule otherwise.
@@ -19136,6 +19142,123 @@ function studioFacebookPublicCdnUrl(record) {
   return "";
 }
 
+const STUDIO_FB_COVER_ATTACHED_MARK = "facebook-cover=attached";
+
+function studioFacebookVideoId(record) {
+  const meta = String(f(record, "FB_Slideshow_Meta_Video_ID") || "").trim();
+  if (/^\d{6,}$/.test(meta)) return meta;
+  const post = String(f(record, "Platform_Post_ID") || "").trim();
+  if (/^\d{6,}$/.test(post)) return post;
+  const tail = post.split("_").pop() || "";
+  return /^\d{6,}$/.test(tail) ? tail : "";
+}
+
+function studioFacebookVideoSurface(record) {
+  const mapping = String(f(record, "Platform_Output_Type") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || "").trim();
+  return mapping === "Facebook Reel"
+    || mapping === "Facebook Story"
+    || outputType === "Slideshow Reel"
+    || outputType === "Story";
+}
+
+function studioFacebookNativeCoverUrl(record) {
+  const thumb = studioAiThumbnailUrl(f(record, "Thumbnail_URL"));
+  const staged = studioClipPublicCdnUrl(thumb) || (item4UrlIsPublicPublishCdn(thumb) ? thumb : "");
+  if (staged) return staged;
+  const cover = studioPublicJpegCoverUrl(record);
+  return item4UrlIsPublicPublishCdn(cover) ? cover : "";
+}
+
+function studioFacebookCoverAlreadyAttached(record) {
+  const blob = [
+    f(record, "Studio_Publish_Dispatch_Note"),
+    f(record, "FB_Slideshow_Response_JSON"),
+    f(record, "Platform_Publish_Response_JSON"),
+  ].map((value) => String(value || "")).join("\n");
+  return blob.includes(STUDIO_FB_COVER_ATTACHED_MARK);
+}
+
+async function studioAttachFacebookNativeCover(env, record) {
+  if (String(f(record, "Platform") || "").trim() !== "Facebook") {
+    return { ok: true, skipped: "not-facebook" };
+  }
+  if (!studioFacebookVideoSurface(record)) return { ok: true, skipped: "not-facebook-video" };
+  if (Boolean(f(record, "Do_Not_Publish"))) return { ok: true, skipped: "do-not-publish" };
+  if (studioFacebookCoverAlreadyAttached(record)) return { ok: true, skipped: "already-attached" };
+  const videoId = studioFacebookVideoId(record);
+  if (!videoId) return { ok: true, skipped: "missing-video-id" };
+  const coverUrl = studioFacebookNativeCoverUrl(record);
+  if (!coverUrl) return { ok: false, skipped: "missing-public-cover" };
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+  ]);
+  const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+  if (!token) return { ok: false, skipped: "missing-facebook-settings" };
+  const endpoint = `https://graph.facebook.com/${version}/${videoId}/thumbnails`;
+  const attempts = [
+    { is_preferred: "true", url: coverUrl },
+    { is_preferred: "true", source: coverUrl },
+  ];
+  let last = { status: 0, payload: {} };
+  for (const params of attempts) {
+    const response = await fetch(`${endpoint}?${new URLSearchParams(params).toString()}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const payload = await response.json().catch(() => ({}));
+    last = { status: response.status, payload };
+    if (response.ok && !payload?.error) {
+      const published = /published/i.test(String(f(record, "Publish_Status") || "")) || Boolean(f(record, "Published_At"));
+      const note = [String(f(record, "Studio_Publish_Dispatch_Note") || "").trim(), STUDIO_FB_COVER_ATTACHED_MARK]
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, 900);
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          typecast: true,
+          fields: {
+            Studio_Publish_Dispatch_Note: note,
+            FB_Slideshow_Response_JSON: JSON.stringify({
+              facebook_cover: STUDIO_FB_COVER_ATTACHED_MARK,
+              video_id: videoId,
+              cover_url: coverUrl,
+              graph: payload,
+            }).slice(0, 90000),
+            Publish_Error_Stage: "",
+            Publish_Error_Message: "",
+            ...(published ? {} : {
+              Publish_Status: "Published",
+              Published_At: new Date().toISOString(),
+              FB_Publish_Status: "Published",
+              FB_Slideshow_Status: "Published",
+            }),
+          },
+        }),
+      });
+      return { ok: true, attached: true, video_id: videoId, cover_url: coverUrl, status: response.status };
+    }
+  }
+  const message = last.payload?.error?.message || `thumbnail attach ${last.status}`;
+  if (!/published/i.test(String(f(record, "Publish_Status") || "")) && !f(record, "Published_At")) {
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        typecast: true,
+        fields: {
+          Publish_Status: "Publishing",
+          Publish_Error_Stage: "FB_COVER",
+          Publish_Error_Message: String(message).slice(0, 900),
+        },
+      }),
+    });
+  }
+  return { ok: false, video_id: videoId, cover_url: coverUrl, status: last.status, message };
+}
+
 function studioFacebookPublicMakeRoutable(record) {
   const plan = studioPublishDispatchTarget(record);
   return Boolean(plan && (plan.target === "FB0" || plan.target === "FBS3" || plan.graphStory));
@@ -20978,6 +21101,39 @@ async function studioReconcileFacebookPublicMake(env, options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("facebook public make reconcile failed", row.id, error);
       await studioStampPublishDispatch(env, row, `reconcile failed: ${message}`);
+      results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
+async function studioReconcileFacebookVideoCovers(env, options = {}) {
+  const limit = Number(options.limit || 3);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,OR({Platform_Post_ID}!="",{FB_Slideshow_Meta_Video_ID}!=""),OR({Platform_Output_Type}="Facebook Reel",{Platform_Output_Type}="Facebook Story",{Studio_Output_Type}="Slideshow Reel",{Studio_Output_Type}="Story"))',
+    });
+  } catch (error) {
+    console.warn("facebook native cover reconcile scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    if (!studioFacebookVideoSurface(row) || studioFacebookCoverAlreadyAttached(row)) continue;
+    if (!studioFacebookVideoId(row) || !studioFacebookNativeCoverUrl(row)) continue;
+    try {
+      const attached = await studioAttachFacebookNativeCover(env, row);
+      results.push({
+        id: row.id,
+        ok: attached?.ok !== false,
+        skipped: attached?.skipped || false,
+        attached: Boolean(attached?.attached),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook native cover attach failed", row.id, error);
       results.push({ id: row.id, error: message });
     }
   }
