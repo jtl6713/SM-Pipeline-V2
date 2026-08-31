@@ -885,6 +885,11 @@ export default {
         console.warn("studio produce watchdog failed", error);
       }
       try {
+        await resumeStalePlatformOutputs(env);
+      } catch (error) {
+        console.warn("studio output watchdog failed", error);
+      }
+      try {
         await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
       } catch (error) {
         console.warn("item4 pending crop drain cron failed", error);
@@ -6303,6 +6308,65 @@ async function resumeStaleStudioProductionJobs(env, options = {}) {
     }
   }
   if (pulses.length) console.log("Studio produce watchdog", JSON.stringify({ count: pulses.length, pulses }));
+  return pulses;
+}
+
+function studioLastModifiedStaleFormula(minutes) {
+  const n = Math.max(1, Math.round(Number(minutes) || 2));
+  return `IS_BEFORE(LAST_MODIFIED_TIME(), DATEADD(NOW(), -${n}, "minutes"))`;
+}
+
+async function resumeStalePlatformOutputs(env, options = {}) {
+  const minutes = Number(
+    options.staleMinutes
+    || Math.max(1, Math.round(Number(options.staleAfterMs || 120000) / 60000))
+  );
+  const stale = studioLastModifiedStaleFormula(minutes);
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const pulses = [];
+  const jobs = [
+    {
+      key: "R5",
+      formula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="",${stale})`,
+      run: () => item4PulseR5Python(env, { maxRuns: 5 }),
+    },
+    {
+      key: "T1",
+      formula: `AND(${STUDIO_T1_WORK_FORMULA},${stale})`,
+      run: () => item4PulseT1Python(env, { maxRuns: 5 }),
+    },
+    {
+      key: "R4",
+      formula: `AND(${STUDIO_R4_WORK_FORMULA},${stale})`,
+      run: () => item4PulseR4Python(env),
+    },
+    {
+      key: "LETTER",
+      formula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Native Photo Route",OR({Output_Status}="Ready for Review",{Output_Status}="In Production"),${stale})`,
+      run: () => item4PulseLetterPython(env, { maxRuns: 8 }),
+    },
+    {
+      key: "RR1",
+      formula: `AND(${STUDIO_RR1_WORK_FORMULA},${stale})`,
+      run: () => item4PulseRR1Python(env, { maxRuns: 10 }),
+    },
+  ];
+  for (const job of jobs) {
+    const hasWork = await cadenceQueueHasWork(env, outputTable, { formula: job.formula }).catch(() => false);
+    if (!hasWork) {
+      pulses.push({ key: job.key, skipped: "no_stale_work" });
+      continue;
+    }
+    try {
+      const payload = await job.run();
+      pulses.push({ key: job.key, pulsed: true, backend: "python", stale_minutes: minutes, payload });
+    } catch (error) {
+      pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (pulses.some((row) => row.pulsed)) {
+    console.log("Studio output watchdog", JSON.stringify({ count: pulses.length, pulses: pulses.map((row) => ({ key: row.key, pulsed: row.pulsed || false, skipped: row.skipped || null, error: row.error || null })) }));
+  }
   return pulses;
 }
 
@@ -17991,7 +18055,7 @@ async function pulseStudioContinuationJobs(env, options = {}) {
     }).catch(() => []);
     const leftoverHits = [];
     for (const po of leftoverNatives || []) {
-      if (!item4OutputHasLeftoverOverlay(po)) continue;
+      if (!item4OutputHasLeftoverOverlay(po) && !studioNativeStillsNeedLettering(po)) continue;
       const captionFirst = String(f(po, "Output_Caption") || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
       const repaired = await studioRepairLeftoverNativeLettering(env, po, {
         requestRecord: { fields: {} },
@@ -18049,17 +18113,17 @@ async function pulseStudioContinuationJobs(env, options = {}) {
       if (job.key === "T1" && (pipelineStageBackend(env, "T1").mode === "python" || pipelineStageBackend(env, "R4").mode === "python")) {
         await item4PulseT1Python(env, { maxRuns: 5 });
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
-        break;
+        continue;
       }
       if (job.key === "R4" && pipelineStageBackend(env, "R4").mode === "python") {
         await item4PulseR4Python(env);
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
-        break;
+        continue;
       }
       if (job.key === "R3" && pipelineStageBackend(env, "R3").mode === "python") {
         await item4PulseR3Python(env, { maxRuns: 10 });
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
-        break;
+        continue;
       }
       if (job.key === "RR1" && pipelineStageBackend(env, "RR1").mode === "python") {
         await item4PulseRR1Python(env, { maxRuns: 10 });
@@ -18264,7 +18328,14 @@ async function advanceStudioProductionOutputs(env, options = {}) {
 }
 
 async function pulseOnDemandRenderChain(env, options = {}) {
-  return resumeStaleStudioProductionJobs(env, options);
+  const pulses = [];
+  try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
+    pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
+  }
+  try { pulses.push(...await resumeStalePlatformOutputs(env, options)); } catch (error) {
+    pulses.push({ key: "STUDIO_OUTPUTS", error: error instanceof Error ? error.message : String(error) });
+  }
+  return pulses;
 }
 
 async function pulseOnDemandPublishChain(env) {
@@ -18461,18 +18532,38 @@ async function handleR5DoneCallback(request, env, ctx) {
   const presented = bearer || queryToken;
   const expected = await r5DoneCallbackSecret(env);
   if (!expected || !timingSafeSecretEqual(presented, expected)) throw new HttpError(401, "Invalid R5 callback secret");
-  const eligible = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 1,
-    view: "R5 - Rendering Jobs to Poll",
-  }).catch(() => []);
+  const body = await request.json().catch(() => ({}));
+  const jobId = String(body?.jobId || "").trim().replace(/"/g, "");
+  const byJob = jobId
+    ? await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 1,
+      filterFormula: `AND({Test_Run_ID}=BLANK(),{Remotion_Job_ID}="${jobId}")`,
+    }).catch(() => [])
+    : [];
+  const eligible = byJob.length
+    ? byJob
+    : await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 1,
+      view: "R5 - Rendering Jobs to Poll",
+    }).catch(() => []);
   const task = (async () => {
-    if (eligible.length) {
-      try { await phase6PulseOnDemandScenario(env, PHASE6_R5_SCENARIO_ID); } catch (error) {
-        console.error("R5 done callback pulse failed", error);
+    try {
+      if (pipelineStageBackend(env, "R5").mode === "python") {
+        await item4PulseR5Python(env, {
+          maxRuns: 5,
+          ...(eligible[0]?.id ? { outputRecordId: eligible[0].id } : {}),
+        });
+      } else if (eligible.length) {
+        await phase6PulseOnDemandScenario(env, PHASE6_R5_SCENARIO_ID);
       }
+    } catch (error) {
+      console.error("R5 done callback pulse failed", error);
     }
     try { await pulseOnDemandM1(env); } catch (error) {
       console.error("M1 r5-done pulse failed", error);
+    }
+    try { await resumeStalePlatformOutputs(env, { staleMinutes: 1 }); } catch (error) {
+      console.error("studio output r5-done watchdog failed", error);
     }
     try {
       const requestId = studioFirstLinkedId(f(eligible[0] || {}, "Production_Request"));
