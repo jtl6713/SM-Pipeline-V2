@@ -289,3 +289,5 @@ Autonomous defaults Pages deploy: 2026-08-30 - Section 6 sets video duration, vo
 Autonomous through Pages deploy: 2026-08-30 - Relabel music skip-into-song; video still starts at 0:00. UI 0.6.194-autonomous-through.
 
 Production live statuses Pages deploy: 2026-08-30 - Production In production table auto-refreshes Studio stage, assets, render, and review while the page is open. UI 0.6.195-production-live.
+
+Story teaser 5s Pages deploy: 2026-08-31 - Story review copy and duration override show 5 seconds, not 15 or the inherited 30-second video default. UI 0.6.196-story-teaser-5s.

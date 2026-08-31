@@ -189,7 +189,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.198-autonomous-library-first",
+          version: "0.10.199-story-teaser-5s",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -2931,7 +2931,12 @@ function mapProductionRequestOutput(record, master = null) {
       voiceover_mode: choice("Voiceover_Mode_Override", f(master, "Voiceover_Mode")),
       background_music_mode: choice("Background_Music_Mode_Override", f(master, "Background_Music_Mode")),
       thumbnail_mode: choice("Thumbnail_Mode_Override", f(master, "Thumbnail_Mode")),
-      video_duration_seconds: number("Video_Duration_Seconds_Override", f(master, "Video_Duration_Seconds")),
+      video_duration_seconds: number(
+        "Video_Duration_Seconds_Override",
+        item4IsCompanionOutputType(f(record, "Output_Type"))
+          ? ITEM4_STORY_TEASER_SECONDS
+          : f(master, "Video_Duration_Seconds")
+      ),
       video_clip_count_mode: choice("Video_Clip_Count_Mode_Override", f(master, "Video_Clip_Count_Mode")),
       video_clip_count_exact: number("Video_Clip_Count_Exact_Override", f(master, "Video_Clip_Count_Exact")),
       video_clip_count_min: number("Video_Clip_Count_Min_Override", f(master, "Video_Clip_Count_Min")),
@@ -3245,7 +3250,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Carousel": { mapping_type: "Instagram Carousel", format: "Carousel", rationale: "Optional. Publishes a silent swipeable 4:5 Instagram carousel with no music or voiceover." },
       "Reel": { mapping_type: "Instagram Reel", format: "Vertical Short Video", rationale: "Default. Renders the photos as a 9:16 Instagram Reel with music and voiceover." },
       "Single Image": { mapping_type: "Instagram Feed Post", format: "Feed Post", rationale: "Use one hero photo as a feed post." },
-      "Story": { mapping_type: "Instagram Story", format: "Story", rationale: "Companion 15-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or feed post." },
+      "Story": { mapping_type: "Instagram Story", format: "Story", rationale: "Companion 5-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or feed post." },
     }),
   }),
   Facebook: Object.freeze({
@@ -3255,7 +3260,7 @@ const ITEM4_PLAN_SPECS = Object.freeze({
       "Slideshow Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Default. Renders the same photos as a 9:16 Facebook Reel with music and voiceover." },
       "Reel": { mapping_type: "Facebook Reel", format: "Vertical Short Video", rationale: "Creates a 9:16 Facebook Reel from shot video, not from a photo set." },
       "Single Image": { mapping_type: "Facebook Post", format: "Feed Post", rationale: "Use one hero photo as a Facebook post." },
-      "Story": { mapping_type: "Facebook Story", format: "Story", rationale: "Companion 15-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or photo post." },
+      "Story": { mapping_type: "Facebook Story", format: "Story", rationale: "Companion 5-second 9:16 Story from the first photo, with a slight zoom and the same music. After the main post is live, the Story can link through to that Reel or photo post." },
     }),
   }),
   TikTok: Object.freeze({
@@ -5067,16 +5072,18 @@ function item4IsUnsupportedCompanion(platform, outputType) {
 const ITEM4_STORY_TEASER_SECONDS = 5;
 const ITEM4_SINGLE_STILL_SECONDS = 5;
 
-function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, requestRecord }) {
-  const override = Number(f(requestRecord, "Video_Duration_Seconds_Override") || 0);
-  if (Number.isFinite(override) && override > 0) return override;
+function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, requestRecord, outputRow }) {
+  const outputOverride = Number(f(outputRow || {}, "Video_Duration_Seconds_Override") || 0);
+  if (Number.isFinite(outputOverride) && outputOverride > 0) {
+    return storyTeaser ? Math.min(15, outputOverride) : outputOverride;
+  }
   if (storyTeaser) {
     return clipCount <= 1
       ? ITEM4_SINGLE_STILL_SECONDS
       : Math.min(15, clipCount * ITEM4_SINGLE_STILL_SECONDS);
   }
   const stored = Number(effective?.video_duration_seconds || f(requestRecord, "Video_Duration_Seconds") || 0);
-  // Owner-set duration on the Production Request (including 30) is authoritative.
+  // Owner-set duration on the Production Request (including 30) is authoritative for the main video.
   if (Number.isFinite(stored) && stored > 0) return stored;
   if (clipCount <= 1) return ITEM4_SINGLE_STILL_SECONDS;
   return Math.min(30, Math.max(clipCount * 3, 9));
@@ -8197,7 +8204,7 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   if (compatibility.length) issues.push(...compatibility);
   warnings.push(...productionRequestAudioPlatformWarnings(requestRecord, routeRows));
   if (routeRows.some((row) => row.output_type === "Story" && (row.platform === "Instagram" || row.platform === "Facebook"))) {
-    notes.push("Instagram and Facebook Stories will be a 15-second clip from the first vertical photo, with a slight zoom and your music.");
+    notes.push("Instagram and Facebook Stories will be a 5-second clip from the first vertical photo, with a slight zoom and your music. They do not inherit the 30-second main-video length.");
   }
 
   return {
@@ -8961,13 +8968,29 @@ async function buildOutputWorkItemEffective(env, outputRow, requestRecord, paren
     ),
 
 
-    video_duration_seconds: outputEffectiveNumber(
-      outputRow,
-      "Video_Duration_Seconds_Override",
+    video_duration_seconds: item4ResolvedVideoDurationSeconds({
+      storyTeaser: String(f(outputRow, "Output_Type") || "").trim() === "Story",
+      clipCount: Number(
+        outputEffectiveNumber(
+          outputRow,
+          "Video_Clip_Count_Exact_Override",
+          requestRecord,
+          "Video_Clip_Count_Exact",
+          1
+        )
+      ) || 1,
+      effective: {
+        video_duration_seconds: outputEffectiveNumber(
+          outputRow,
+          "Video_Duration_Seconds_Override",
+          requestRecord,
+          "Video_Duration_Seconds",
+          profileDefaults.default_duration
+        ),
+      },
       requestRecord,
-      "Video_Duration_Seconds",
-      profileDefaults.default_duration
-    ),
+      outputRow,
+    }),
     voiceover_duration_seconds: outputEffectiveNumber(
       outputRow,
       "Voiceover_Duration_Seconds",
@@ -9670,6 +9693,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     clipCount: eligibleSources.length,
     effective,
     requestRecord,
+    outputRow,
   });
   const fps = 30;
   const totalFrames = Math.max(eligibleSources.length, Math.round(durationSeconds * fps));
@@ -10027,7 +10051,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Output_Notes: [
       `Studio single-parent output seed. Production Request Output ${String(f(outputRow,"Production_Request_Output_ID")||outputRow.id)} is the per-platform execution authority.`,
       effective.output_type === "Story"
-        ? `Companion 15-second Story teaser from the first photo, slight zoom, music, no voiceover. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
+        ? `Companion 5-second Story teaser from the first photo, slight zoom, music, no voiceover. After the matching ${effective.platform} main post is live, attach that post URL as the Story link.`
         : "",
     ].filter(Boolean).join(" "),
     Asset_Need_Status: "Not Needed",
@@ -14236,7 +14260,7 @@ function item4P3SingleParentEnrichmentRecord() {
     Voiceover_URL:'{{if(ifempty(102.Studio_Effective_Voiceover_Mode; "Yes") = "No"; ""; 101.Voiceover_URL)}}',
     Output_Status: STUDIO_P3_NATIVE_PHOTO_STATUS_IF,
     Asset_Selection_Status: STUDIO_P3_NATIVE_PHOTO_SELECTION_IF,
-    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Instagram and Facebook Story plus other Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render the 15-second Story teaser. Enrichment from Content Item {{101.Content_ID}}.`
+    Output_Notes:`{{102.Output_Notes}}\nP3 v4.8 ${STUDIO_P3_REMOTION_HANDOFF_MARKER}: Multi-Photo / Instagram Carousel / Facebook Multi-Image Post stay Ready for Review; Instagram and Facebook Story plus other Remotion Studio outputs stay In Production with assets Selected so R3/R4 can render the 5-second Story teaser. Enrichment from Content Item {{101.Content_ID}}.`
   };
 }
 

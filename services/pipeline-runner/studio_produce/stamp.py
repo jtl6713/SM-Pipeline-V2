@@ -71,11 +71,19 @@ def output_effective(output: dict[str, Any], request: dict[str, Any], parent: di
     }
 
 
-def duration_seconds(*, story: bool, clip_count: int, effective: dict[str, Any], request: dict[str, Any]) -> float:
-    override = field(request, "Video_Duration_Seconds_Override")
+def duration_seconds(
+    *,
+    story: bool,
+    clip_count: int,
+    effective: dict[str, Any],
+    request: dict[str, Any],
+    output: dict[str, Any] | None = None,
+) -> float:
+    output_override = field(output or {}, "Video_Duration_Seconds_Override")
     try:
-        if override and float(override) > 0:
-            return float(override)
+        if output_override and float(output_override) > 0:
+            value = float(output_override)
+            return min(15.0, value) if story else value
     except (TypeError, ValueError):
         pass
     if story:
@@ -314,7 +322,13 @@ def source_package(
         })
     if omitted or not clips:
         return None
-    seconds = duration_seconds(story=story, clip_count=len(clips), effective=effective, request=request)
+    seconds = duration_seconds(
+        story=story,
+        clip_count=len(clips),
+        effective=effective,
+        request=request,
+        output=output,
+    )
     fps = 30
     total_frames = max(len(clips), round(seconds * fps))
     base = total_frames // len(clips)

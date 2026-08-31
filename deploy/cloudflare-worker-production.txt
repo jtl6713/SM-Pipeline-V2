@@ -246,3 +246,5 @@ Autonomous never Production Approve Worker deploy: 2026-08-30 - origin=autonomou
 Autonomous library-first Worker deploy: 2026-08-30 - Pick from unused classified library stills. Trends are optional. Keep similar-idea / same-still blocking. Worker 0.10.198-autonomous-library-first.
 
 IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline carousel statuses are eligible on the first publish reconcile sweep; AP4C respects Scheduled_Post_Date. Worker 0.10.193-ig-carousel-due-publish.
+
+Story teaser 5s Worker deploy: 2026-08-31 - Instagram and Facebook Stories default to 5 seconds for a single still and do not inherit the 30-second main video. Worker 0.10.199-story-teaser-5s.

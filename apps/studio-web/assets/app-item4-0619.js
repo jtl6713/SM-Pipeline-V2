@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.194-autonomous-through";
+  const BUILD_ID = "item4-0.6.196-story-teaser-5s";
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
     return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
@@ -5575,7 +5575,7 @@
     if (dropped) {
       updateOutputMatrixSummary();
       if (announce) {
-        const text = "TikTok Story is not a posting destination. Instagram and Facebook Stories are 15-second 9:16 teasers from the first photo, with a slight zoom and music. After the main post is live, the Story can link through to it.";
+        const text = "TikTok Story is not a posting destination. Instagram and Facebook Stories are 5-second 9:16 teasers from the first photo, with a slight zoom and music. After the main post is live, the Story can link through to it.";
         setEzMessage(text);
         setRequestMessage(text);
       }
@@ -5782,7 +5782,7 @@
     fillOverrideMusicChoices(row);
     $("prOverrideClipSection").hidden = !isVideoClipOutput(row.output_type);
     $("prOverrideSlideSection").hidden = !isSlideOutput(row.output_type);
-    $("prOverrideDurationField").hidden = !isVideoClipOutput(row.output_type) && !["Slideshow Reel","Slideshow Video"].includes(row.output_type);
+    $("prOverrideDurationField").hidden = !isVideoClipOutput(row.output_type) && !["Slideshow Reel","Slideshow Video","Story"].includes(row.output_type);
     $("prOverrideEffectivePreview").innerHTML = effectivePreviewHtml(row);
     $("prOverrideMessage").textContent = "";
     $("prOverrideMessage").className = "form-message";
@@ -7430,7 +7430,7 @@
     const photos = included.length;
     const slideSeconds = included.reduce((total, slide) => total + Number(slide?.duration_seconds || 0), 0);
     const duration = kind === "story"
-      ? "15 seconds"
+      ? "5 seconds"
       : (slideSeconds > 0
         ? `${Math.round(slideSeconds)} seconds`
         : `${Number($("creativeDefaultDuration")?.value || output?.creative_settings?.default_slide_duration_seconds || 30)} seconds`);
@@ -7534,7 +7534,7 @@
       }
     }
     const titles = {
-      story: ["This Story", "Fixed 15-second teaser. Music volume is the useful control."],
+      story: ["This Story", "Fixed 5-second teaser. Music volume is the useful control."],
       reel: ["This Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
       slideshow: ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
       tiktok: ["This TikTok video", "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok."],
@@ -7922,7 +7922,7 @@
     prOverrideMusicMode: "Override background music for this one output, or inherit the master setting.",
     prOverrideThumbnail: "Override this output’s cover. Inherit follows the piece. Yes is AI generated. Use photo frame copies a still from the photos.",
     prOverrideMusicAsset: "Override the music track for this one output, or inherit the master track.",
-    prOverrideDuration: "Override duration for this one output. Leave blank to inherit.",
+    prOverrideDuration: "Override duration for this one output. Stories default to 5 seconds for a single still and do not inherit the 30-second main video. Leave blank to inherit.",
     prOverrideVoiceoverTail: "Override extra seconds after narration for this one output.",
     prOverrideClipMode: "Override video clip count for this one output, or inherit the master setting.",
     prOverridePublishMode: "Override whether this output auto-publishes, waits for review, or stays unpublished.",
@@ -8102,7 +8102,7 @@
       const text = type === "Story" && platform === "TikTok"
         ? "TikTok’s posting API does not have a separate Stories destination. Leave this off; the Video Draft is the TikTok post."
         : type === "Story"
-          ? `Add a companion 15-second 9:16 ${platform} Story from the first photo, with a slight zoom and music. After the main ${platform} post is live, the Story can link through to it.`
+          ? `Add a companion 5-second 9:16 ${platform} Story from the first photo, with a slight zoom and music. After the main ${platform} post is live, the Story can link through to it.`
           : `Add ${platform} ${type} as an extra output beyond the recommended plan.`.replace(/\s+/g, " ").trim();
       phase6BindTooltipTarget(label, text);
     });
@@ -8608,7 +8608,7 @@
         copy.textContent = "This output posts as native stills. Review the photo package below. There is no Remotion video.";
       } else if (storyOutput) {
         heading.textContent = "Story teaser";
-        copy.textContent = "A 15-second 9:16 clip from the first photo, with a slight zoom and the selected music.";
+        copy.textContent = "A 5-second 9:16 clip from the first photo, with a slight zoom and the selected music.";
       } else if (videoKind === "reel") {
         heading.textContent = "Instagram Reel";
         copy.textContent = "Play the rendered Reel, then change music under Audio if you want a new mix.";
@@ -8669,7 +8669,7 @@
         ? "Native photo route — review the stills below. No Remotion MP4."
         : (String(output.render_status || "").toLowerCase().includes("render") || /story/i.test(String(output.studio_output_type || output.platform_output_type || ""))
           ? (/story/i.test(String(output.studio_output_type || output.platform_output_type || ""))
-            ? "The 15-second Story teaser is still rendering. Open Review will show the zoom-and-music clip when the MP4 is ready."
+            ? "The 5-second Story teaser is still rendering. Open Review will show the zoom-and-music clip when the MP4 is ready."
             : "The video is still rendering. Open Review will unlock when the MP4 is ready.")
           : "No rendered preview is available yet.");
       empty.hidden = false;
