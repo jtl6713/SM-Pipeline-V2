@@ -189,7 +189,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.194-autonomous-dedupe",
+          version: "0.10.195-autonomous-vo-tail",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -7566,13 +7566,7 @@ async function cleanProductionRequestPayload(payload, env) {
   const voiceoverDurationSeconds = nullableNumber(payload?.voiceover_duration_seconds, 1, 600, "Voiceover duration");
   const musicStartSeconds = nullableNumber(payload?.music_start_seconds, 0, 3600, "Music start");
   let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");
-  if (
-    voiceoverTailSeconds == null
-    && voiceoverDurationSeconds != null
-    && videoDurationSeconds != null
-  ) {
-    voiceoverTailSeconds = Math.max(0, Number(videoDurationSeconds) - Number(voiceoverDurationSeconds));
-  }
+  voiceoverTailSeconds = autonomousDefaultVoiceoverTailSeconds(voiceoverTailSeconds);
 
   let videoClipCountExact = nullableInt(payload?.video_clip_count_exact, 1, 30, "Exact video clip count");
   let videoClipCountMin = nullableInt(payload?.video_clip_count_min, 1, 30, "Minimum video clip count");
@@ -7732,7 +7726,7 @@ function productionRequestDefaultsFromIdea(idea) {
     carousel_slide_count_min: f(idea, "Production_Carousel_Slide_Count_Min") || null,
     carousel_slide_count_max: f(idea, "Production_Carousel_Slide_Count_Max") || null,
     carousel_image_mode: String(f(idea, "Production_Carousel_Image_Mode") || "Make AI Generated").trim() || "Make AI Generated",
-    voiceover_tail_seconds: f(idea, "Voiceover_Tail_Seconds") ?? 2,
+    voiceover_tail_seconds: autonomousDefaultVoiceoverTailSeconds(f(idea, "Voiceover_Tail_Seconds")),
     selected_music_asset_id: null,
     voice_id: null,
     voice_name: null,
@@ -8433,7 +8427,7 @@ function promotionInputFromProductionRequest(record) {
     include_thumbnail: promotionThumbnailTriState(f(record, "Thumbnail_Mode")),
     video_duration: f(record, "Video_Duration_Seconds") ?? 30,
     video_clip_count: videoMode === "Exact" ? f(record, "Video_Clip_Count_Exact") : "Auto",
-    voiceover_tail_seconds: f(record, "Voiceover_Tail_Seconds") ?? 2,
+    voiceover_tail_seconds: autonomousDefaultVoiceoverTailSeconds(f(record, "Voiceover_Tail_Seconds")),
     carousel_slide_count: carouselMode === "Exact" ? f(record, "Carousel_Slide_Count_Exact") : 5,
     carousel_image_mode: String(f(record, "Carousel_Image_Mode") || "Make AI Generated"),
     production_notes: String(f(record, "Production_Notes") || "").trim(),
@@ -24094,6 +24088,7 @@ const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze(["Instagram", "Facebook", "T
 const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "recT49crfrhMVfZAQ";
 const AUTONOMOUS_DEFAULT_VIDEO_SECONDS = 30;
 const AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION = 0.5;
+const AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
 const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
 const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
   Instagram: "Reel",
@@ -24267,6 +24262,17 @@ function autonomousDefaultVoiceoverSeconds(videoSeconds = AUTONOMOUS_DEFAULT_VID
   const duration = Number(videoSeconds);
   const base = Number.isFinite(duration) && duration > 0 ? duration : AUTONOMOUS_DEFAULT_VIDEO_SECONDS;
   return Math.max(1, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
+}
+
+function autonomousDefaultVoiceoverTailSeconds(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 10) {
+    return AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS;
+  }
+  return Math.round(value * 2) / 2;
 }
 
 function isAutonomousOrigin(text) {
@@ -25036,7 +25042,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     thumbnail_mode: "Yes",
     video_duration_seconds: AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
     voiceover_duration_seconds: autonomousDefaultVoiceoverSeconds(AUTONOMOUS_DEFAULT_VIDEO_SECONDS),
-    voiceover_tail_seconds: AUTONOMOUS_DEFAULT_VIDEO_SECONDS - autonomousDefaultVoiceoverSeconds(AUTONOMOUS_DEFAULT_VIDEO_SECONDS),
+    voiceover_tail_seconds: AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
     music_start_seconds: 0,
     selected_music_asset_id: AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
     voice_id: PHASE6_DEFAULT_VOICE_ID,

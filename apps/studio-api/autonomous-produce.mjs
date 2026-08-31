@@ -34,6 +34,7 @@ export const AUTONOMOUS_PLAN_EXTRAS = Object.freeze([
 export const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "recT49crfrhMVfZAQ";
 export const AUTONOMOUS_DEFAULT_VIDEO_SECONDS = 30;
 export const AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION = 0.5;
+export const AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
 
 export function autonomousSlot(chicago) {
   const date = String(chicago?.date || "").trim();
@@ -222,6 +223,17 @@ export function autonomousDefaultVoiceoverSeconds(videoSeconds = AUTONOMOUS_DEFA
   const duration = Number(videoSeconds);
   const base = Number.isFinite(duration) && duration > 0 ? duration : AUTONOMOUS_DEFAULT_VIDEO_SECONDS;
   return Math.max(1, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
+}
+
+export function autonomousDefaultVoiceoverTailSeconds(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 10) {
+    return AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS;
+  }
+  return Math.round(value * 2) / 2;
 }
 
 export function parseAutonomousNotedMediaIds(notes) {
