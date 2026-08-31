@@ -18,6 +18,7 @@ from ttd.constants import (
     STATUS_READY_FOR_ASSETS,
     STATUS_READY_FOR_DELIVERY,
     STATUS_RETRY,
+    STATUS_WAITING_FOR_SCHEDULE,
 )
 
 
@@ -59,7 +60,11 @@ def ttd0_eligibility_reason(record: dict[str, Any]) -> str | None:
     if field_str(record, "Platform_Post_ID"):
         return "already_has_platform_post"
     status = _ci(field_str(record, "TikTok_Draft_Status"))
-    if status == _ci(STATUS_READY_FOR_ASSETS) or is_retry_for(record, STAGE_TTD0):
+    if (
+        status == _ci(STATUS_READY_FOR_ASSETS)
+        or status == _ci(STATUS_WAITING_FOR_SCHEDULE)
+        or is_retry_for(record, STAGE_TTD0)
+    ):
         return None
     return "tiktok_draft_not_ready_for_assets"
 

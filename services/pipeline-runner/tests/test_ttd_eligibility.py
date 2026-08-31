@@ -23,6 +23,8 @@ def test_tiktok_stages_are_registered():
 def test_ttd0_gates():
     ready = _record(Platform="TikTok", Auto_Publish_Enabled=True, TikTok_Draft_Status="Ready for Assets")
     assert ttd0_eligibility_reason(ready) is None
+    waiting = _record(Platform="TikTok", Auto_Publish_Enabled=True, TikTok_Draft_Status="Waiting for Schedule")
+    assert ttd0_eligibility_reason(waiting) is None
     assert ttd0_eligibility_reason(_record(Platform="Instagram", Auto_Publish_Enabled=True, TikTok_Draft_Status="Ready for Assets")) == "not_tiktok"
     assert ttd0_eligibility_reason(_record(Platform="TikTok", Auto_Publish_Enabled=False, TikTok_Draft_Status="Ready for Assets")) == "auto_publish_disabled"
     assert ttd0_eligibility_reason(_record(Platform="TikTok", Auto_Publish_Enabled=True, Do_Not_Publish=True, TikTok_Draft_Status="Ready for Assets")) == "do_not_publish"
