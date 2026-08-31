@@ -581,6 +581,16 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function abortSignalWithTimeout(timeoutMs) {
+    const ms = Math.max(1000, Number(timeoutMs) || 25000);
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      return AbortSignal.timeout(ms);
+    }
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  }
+
   function isTransientApiFailure({ status = 0, text = "", error = null, method = "GET" } = {}) {
     const write = !["GET", "HEAD"].includes(String(method || "GET").toUpperCase());
     if (error) {
@@ -621,10 +631,7 @@
 
     let lastError = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const timeoutSignal =
-        !explicitSignal && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-          ? AbortSignal.timeout(timeoutMs)
-          : explicitSignal;
+      const timeoutSignal = explicitSignal || abortSignalWithTimeout(timeoutMs);
       try {
         const response = await fetch(`${apiBase}${withStudioProfile(path)}`, {
           credentials: "same-origin",
@@ -3577,6 +3584,7 @@
         { label: "2–5", onClick: () => ezWizardPick("2–5", { photoWait: true, photoCountMin: 2, photoCountMax: 5, photoCount: 5 }, "package") },
         { label: "3–8", onClick: () => ezWizardPick("3–8", { photoWait: true, photoCountMin: 3, photoCountMax: 8, photoCount: 8 }, "package") },
         { label: "3–10", onClick: () => ezWizardPick("3–10", { photoWait: true, photoCountMin: 3, photoCountMax: 10, photoCount: 10 }, "package") },
+        { label: "5–10", onClick: () => ezWizardPick("5–10", { photoWait: true, photoCountMin: 5, photoCountMax: 10, photoCount: 10 }, "package") },
       ]);
       ezWizardShowForm(
         `<label>Minimum<input name="min" type="number" min="1" max="20" step="1" value="2" required></label>
@@ -3747,32 +3755,37 @@
     ezWizardBusy = true;
     ezWizardSetMessage("Saving your answers…");
     try {
-      const planned = applyEzWizardAnswersToIntake();
-      const answers = ezWizardPending || ezWizardAnswers;
+      const helpersNow = ezPlanApi();
+      const planned = helpersNow?.ezWizardResolvePackage?.(ezWizardAnswers) || applyEzWizardAnswersToIntake();
+      ezWizardPending = { ...ezWizardAnswers, planned };
+      const answers = ezWizardPending;
       if (answers.start === "idea") {
         let idea = null;
         if (answers.ideaMode === "existing" && answers.ideaId) {
           idea = ideasCache.find((row) => row.id === answers.ideaId) || { id: answers.ideaId, title: answers.ideaTitle };
         } else if (answers.ideaTitle) {
+          ezWizardSetMessage("Creating the idea…");
           const result = await api("/api/ideas", {
             method: "POST",
             body: JSON.stringify({
               title: answers.ideaTitle,
-              summary: answers.ideaSummary || "",
+              summary: answers.ideaSummary || answers.ideaTitle,
               primary_location: answers.ideaLocation || "",
             }),
+            timeoutMs: 30000,
+            retries: 1,
           });
-          await loadIdeas();
           idea = result.record;
         }
         if (!idea?.id) {
+          ezWizardSetMessage("Could not save the idea. Enter a title and try again.", "error-text");
           enterEzIdeaPath();
           setIdeaFormOpen(true, { mode: "manual" });
           return;
         }
         if (answers.photoWait && answers.photoCountMin && answers.photoCountMax) {
-          const planned = applyEzWizardAnswersToIntake();
-          const platforms = planned?.platforms?.length ? planned.platforms : ["Instagram", "Facebook", "TikTok", "YouTube"];
+          ezWizardSetMessage(`Approving and waiting for ${answers.photoCountMin}–${answers.photoCountMax} photos…`);
+          const platforms = planned?.platforms?.length ? planned.platforms : ["Instagram", "Facebook", "TikTok"];
           const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/promote`, {
             method: "POST",
             body: JSON.stringify({
@@ -3785,19 +3798,24 @@
               carousel_slide_count_min: answers.photoCountMin,
               carousel_slide_count_max: answers.photoCountMax,
               carousel_image_mode: "Wait for matching photos",
+              photo_wait: true,
             }),
+            timeoutMs: 45000,
+            retries: 0,
           });
           resetEzWizard({ silent: true });
           switchToPage("ideas");
           updateIdeaDrawer(result.record || idea);
           openIdeaDrawer(result.record || idea);
           setManageMessage(result.message || `Approved. Waiting for ${answers.photoCountMin}–${answers.photoCountMax} matching photos.`, "success");
-          await loadIdeas();
+          loadIdeas().catch(() => {});
           return;
         }
+        applyEzWizardAnswersToIntake();
         await openProductionRequestForIdea(idea);
         return;
       }
+      applyEzWizardAnswersToIntake();
       if (!helpers.ezWizardRequiresUploads(answers)) {
         if ($("ezIdeaTitle") && !String($("ezIdeaTitle").value || "").trim()) {
           $("ezIdeaTitle").value = answers.photoCount > 1 ? "AI generated images" : "AI generated image";
@@ -3815,7 +3833,13 @@
             ? "Drop one photo to continue."
             : `Add ${expected} photos one at a time, or drop several together.`);
     } catch (error) {
-      ezWizardSetMessage(error.message || "Could not continue.", "error-text");
+      const timedOut = isTimeoutError(error);
+      ezWizardSetMessage(
+        timedOut
+          ? "Studio took too long to save that start. Tap Continue again, or open Ideas and approve the idea there."
+          : (error.message || "Could not continue."),
+        "error-text"
+      );
     } finally {
       ezWizardBusy = false;
     }
