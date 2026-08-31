@@ -16,7 +16,7 @@ from render.fields import field_str
 
 def review_url() -> str:
     settings = load_settings()
-    if str(settings.get("stage_backend_i3") or "make") == "python":
+    if str(settings.get("stage_backend_i3") or "python") != "disabled":
         base = str(settings.get("public_base_url") or "").rstrip("/")
         token = str(settings.get("i3_webhook_token") or "").strip()
         if base and token:

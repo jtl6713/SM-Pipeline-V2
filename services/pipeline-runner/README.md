@@ -17,11 +17,11 @@ Python stage workers that replace Make.com scenarios for SM Pipeline V2.
 | **SMV1** | Full (`5894885` replacement) | `STAGE_BACKEND_SMV1=python` |
 | **LETTER** | Native JPEG lower-third compositor (`POST /stages/letter`) | Worker pulses Python directly; no Make scenario |
 | **R2** | Full (`5569495` replacement, OpenAI module 7 port) | `STAGE_BACKEND_R2=python` |
-| **R3** | Full (`5557966` — render prep from `Selected_Assets_JSON`, batch 10) | Make until `STAGE_BACKEND_R3=python` |
+| **R3** | Full (`5557966` — render prep from `Selected_Assets_JSON`, batch 10) | Python (Make retired) |
 | **T1** | Timing Engine — beat-aware transition timeline before Remotion | `STAGE_BACKEND_T1=python` (also runs when R4 is Python) |
-| **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Make until `STAGE_BACKEND_R4=python` |
+| **R4** | Full (`5556716` — Remotion POST, 3 routes, batch 1) | Python (Make retired) |
 | **R5** | Full (`5565333` — poll, Drive upload, R2 preview, batch 5) | `STAGE_BACKEND_R5=python` |
-| **RR1** | Full (`5576363` — batched review email, max 10) | Make until `STAGE_BACKEND_RR1=python` |
+| **RR1** | Full (`5576363` — batched review email, max 10) | Python (Make retired) |
 | **P1** | Full (`5528742` — content package + OpenAI, then Python P2/P3) | `STAGE_BACKEND_P1=python` |
 | **P2** | Full (`5530955` — voiceover + thumbnail, 3 routes) | `STAGE_BACKEND_P2=python` |
 | **P3** | Full (`5531703` — studio parent enrich + legacy create) | `STAGE_BACKEND_P3=python` |
@@ -170,7 +170,7 @@ One `POST /stages/p3` takes a Content Item (`content_item_record_id` / `content_
 | Studio parent | `Production_Request` set, not a child work item, caption + required media, status Thumbnail Ready / Ready for Thumbnail / Script Generated | Enrich up to 25 seeded `Planned` Platform Outputs, then mark the parent `Review_Status=Ready for Review`, `Render_Status=Not Ready`, `Content_Status=Assets Matched` |
 | Legacy / child | `Production_Request` blank or `Studio_Is_Output_Work_Item` | Resolve platforms/formats, create missing mapping rows, skip duplicates |
 
-Native photo types (Multi-Photo / Carousel / Multi-Image Post) stay `Ready for Review` with blank `Asset_Selection_Status`. Remotion Studio outputs go `In Production` with `Asset_Selection_Status=Selected`. When `STAGE_BACKEND_P3=python`, P2 success calls local P3 instead of the Make webhook. Production stays on Make `5531703` until that var is set on both the runner and the Worker.
+Native photo types (Multi-Photo / Carousel / Multi-Image Post) stay `Ready for Review` with blank `Asset_Selection_Status`. Remotion Studio outputs go `In Production` with `Asset_Selection_Status=Selected`. P2 success calls local P3. Make `5531703` is retired.
 
 ## Enable in Studio Worker
 
@@ -178,7 +178,7 @@ Native photo types (Multi-Photo / Carousel / Multi-Image Post) stay `Ready for R
 PIPELINE_RUNNER_URL=https://pipeline.chicagoshining.com
 PIPELINE_RUNNER_SHARED_SECRET=<shared secret>
 
-# Opt-in per stage (unset or "make" keeps Make.com):
+# Optional overrides. Unset now means Python. Make is retired.
 STAGE_BACKEND_SMV1=python
 STAGE_BACKEND_R2=python
 STAGE_BACKEND_R3=python

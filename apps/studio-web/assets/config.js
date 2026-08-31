@@ -65,7 +65,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsCapAudioSilence: "Rewrite existing catalog audio on Google Drive so leading silence is no longer than 0.5 seconds. Already processed tracks are skipped.",
     operationsResetRenderUrls: "Repair stale Remotion render URLs on eligible failed/waiting records. Use this after the renderer URL or tunnel has changed.",
     operationsRetryAssetSelection: "Retry asset selection for outputs that previously failed at the asset-selection stage. It does not rerun healthy outputs.",
-    operationsMakeAdminBridge: "Run the pending Make admin queue now. Use this only for commands intentionally placed in that queue.",
+    operationsMakeAdminBridge: "Make admin is retired. Stages run on the local Python pipeline runner.",
     operationsRefreshSimilarTimes: "Look up public Instagram and YouTube post times for the current profile watchlist. TikTok and Facebook handles stay listed for review; those apps do not expose other accounts' post times. Suggested times never auto-apply.",
     operationsIdeaMeta: "Shows the current Daily Ideas timing/profile summary returned by the Operations API.",
     operationsIntakeMeta: "Shows the latest library-intake summary returned by the Operations API.",

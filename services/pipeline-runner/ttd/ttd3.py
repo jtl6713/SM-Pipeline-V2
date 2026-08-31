@@ -79,6 +79,14 @@ def process_request(
     subject = handoff_email_subject(output)
     location = resolve_publish_location(client, output, settings=settings)
     result["location"] = location.as_dict() if location else None
+    try:
+        from ap0.public_cover import ensure_public_cover_url
+
+        public_cover = ensure_public_cover_url(client, output)
+        if public_cover:
+            result["cover_url"] = public_cover
+    except Exception as exc:
+        result["cover_stage_error"] = str(exc)
     html_body = handoff_email_html(output, location=location)
     result["subject"] = subject
     try:

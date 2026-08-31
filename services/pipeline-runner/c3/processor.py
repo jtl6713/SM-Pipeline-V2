@@ -20,7 +20,7 @@ from render.fields import field_str
 
 def _review_url() -> str:
     settings = load_settings()
-    if str(settings.get("stage_backend_c3b") or "make") == "python":
+    if str(settings.get("stage_backend_c3b") or "python") != "disabled":
         base = str(settings.get("public_base_url") or "").rstrip("/")
         token = str(settings.get("c3b_webhook_token") or "").strip()
         if base and token:

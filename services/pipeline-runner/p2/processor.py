@@ -56,7 +56,7 @@ def _recheck(client: AirtableClient, formula: str) -> dict[str, Any] | None:
 
 def _trigger_p3(*, content_record_id: str, test_run_id: str, source: str) -> dict[str, Any]:
     settings = load_settings()
-    if str(settings.get("stage_backend_p3") or "make") == "python":
+    if str(settings.get("stage_backend_p3") or "python") != "disabled":
         from p3.processor import process_request as process_p3
 
         result = process_p3(

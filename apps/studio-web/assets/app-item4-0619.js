@@ -362,11 +362,11 @@
   });
   $("operationsMakeAdminBridge")?.addEventListener("click", async () => {
     try {
-      setOperationsMessage("Checking Make admin queue…");
+      setOperationsMessage("Checking pipeline runner…");
       const result = await api("/api/operations/make-admin-bridge", { method: "POST", body: JSON.stringify({}) });
-      setOperationsMessage(result.message || "Make admin bridge started.");
+      setOperationsMessage(result.message || "Python runner is the production path.");
     } catch (error) {
-      setOperationsMessage(error.message || "Could not run the Make admin queue.", "error-text");
+      setOperationsMessage(error.message || "Could not reach the pipeline runner.", "error-text");
     }
   });
   $("operationsRefreshSimilarTimes")?.addEventListener("click", async () => {
@@ -3268,7 +3268,7 @@
       if (hint) hint.textContent = "Finished stills. No on-image lettering.";
     } else if (answers.inputKind === "single-ai" || answers.inputKind === "multiple-ai") {
       if (title) title.textContent = "No upload needed for AI images";
-      if (hint) hint.textContent = "Make generates the images from this plan.";
+      if (hint) hint.textContent = "Studio generates the images from this plan.";
     }
     syncEzStructureCounts();
     applyEzToAdvanced({ force: true });
@@ -3938,7 +3938,7 @@
       if (allowEmpty) {
         ezAutoPlanAfterUpload = true;
         showProductionRequestWorkspace();
-        setEzMessage("AI plan saved. Make will generate the images.");
+        setEzMessage("AI plan saved. Studio will generate the images.");
         setRequestMessage("AI image plan saved. You can still add a title, script, or notes before promote.", "success");
         await maybeAutoEzPlan(true);
       } else {
@@ -8180,7 +8180,7 @@
     ezCarouselSlideExact: "Exact number of slides in the carousel.",
     ezCarouselSlideMin: "Minimum slide count when using a target range.",
     ezCarouselSlideMax: "Maximum slide count when using a target range.",
-    ezCarouselImageMode: "Use the photos you uploaded, or let Make generate additional images.",
+    ezCarouselImageMode: "Use the photos you uploaded, or let Studio generate additional images.",
     ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
     prVideoDuration: "Requested video length in seconds for slideshows and rendered video outputs. Autonomous runs stay at 30 seconds.",
     prVoiceoverDuration: "Spoken voiceover length in seconds. Autonomous runs use half the video duration (15 seconds of a 30-second slideshow).",
@@ -8193,7 +8193,7 @@
     prCarouselSlideExact: "Exact number of slides in the carousel.",
     prCarouselSlideMin: "Minimum slide count when using a target range.",
     prCarouselSlideMax: "Maximum slide count when using a target range.",
-    prCarouselImageMode: "Use uploaded photos, or let Make generate additional images.",
+    prCarouselImageMode: "Use uploaded photos, or let Studio generate additional images.",
     prVoiceover: "Turn spoken narration on or off for video outputs. Native stills ignore this.",
     prMusicMode: "Turn background music on or off for video outputs. Native stills ignore this.",
     prVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
@@ -10726,7 +10726,7 @@
         stopIntakePoll();
         const button = $("operationsRunIntake");
         if (button) button.disabled = false;
-        setOperationsMessage("A2 is still running in Make. Open Operations again to check status.");
+        setOperationsMessage("A2 is still running on the Python runner. Open Operations again to check status.");
         return true;
       }
       return false;

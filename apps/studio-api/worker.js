@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.202-variant-authority-heal",
+          version: "0.10.203-python-default",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -6061,10 +6061,11 @@ function item4QueueRowIsOutstanding(row) {
 }
 
 function pipelineStageBackend(env, stageKey) {
-  const configured = String(env[`STAGE_BACKEND_${stageKey}`] || "make").trim().toLowerCase();
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
-  if (configured === "python" && runnerUrl) return { mode: "python", runnerUrl };
-  return { mode: "make", runnerUrl: "" };
+  // Make is retired. Unset flags, explicit "make", and a missing runner URL
+  // must not POST hook.us2.make.com. Pulse Python or fail with 503.
+  void stageKey;
+  return { mode: "python", runnerUrl };
 }
 
 function cadenceScenarioManagedByPython(env, scenarioId) {
@@ -18360,8 +18361,7 @@ async function pulseStudioContinuationJobs(env, options = {}) {
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
         continue;
       }
-      await phase6PulseOnDemandScenario(env, job.id, { waitMs });
-      pulses.push({ key: job.key, pulsed: true, matched: eligible.length });
+      throw new HttpError(503, `${job.key} is Python-only. Set PIPELINE_RUNNER_URL and keep the runner up.`);
       if (job.key === "R3" || job.key === "R4" || job.key === "T1") break;
     } catch (error) {
       pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
@@ -18717,14 +18717,8 @@ async function pulseOnDemandM1(env, { force = false } = {}) {
 }
 
 async function pulseOnDemandMakeAdminBridge(env) {
-  const hasWork = await cadenceQueueHasWork(env, REPAIR_LEASE_TABLE_ID, { formula: STUDIO_MAKE_ADMIN_PENDING_FORMULA });
-  if (!hasWork) return [{ key: "MAKEADMIN", skipped: "no_work" }];
-  try {
-    await phase6PulseOnDemandScenario(env, STUDIO_MAKE_ADMIN_BRIDGE_SCENARIO_ID, { waitMs: 45000 });
-    return [{ key: "MAKEADMIN", pulsed: true }];
-  } catch (error) {
-    return [{ key: "MAKEADMIN", error: error instanceof Error ? error.message : String(error) }];
-  }
+  void env;
+  return [{ key: "MAKEADMIN", skipped: "make_retired" }];
 }
 
 function timingSafeSecretEqual(left, right) {
@@ -19162,26 +19156,11 @@ async function studioActivePipelineSettings(env, names) {
 }
 
 async function studioPulseMakeWebhook(env, url, recordId, target, extra = {}) {
-  const hook = String(url || "").trim();
-  if (!hook) return { ok: false, skipped: "missing-url", target };
-  const response = await fetch(hook, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": "chicagoshining-studio-api/publish-dispatch" },
-    body: JSON.stringify({
-      output_record_id: recordId,
-      source: "studio-approve",
-      target,
-      requested_at: new Date().toISOString(),
-      caption: extra.caption || undefined,
-      hashtags: extra.hashtags || undefined,
-    }),
-  });
-  const body = await response.text();
-  if (!response.ok) {
-    console.warn("studio publish webhook failed", target, response.status, body.slice(0, 240));
-    return { ok: false, target, status: response.status };
-  }
-  return { ok: true, target, status: response.status };
+  void env;
+  void url;
+  void extra;
+  console.warn("Make webhook retired; use the pipeline runner", target, recordId);
+  return { ok: false, skipped: "make-retired", target };
 }
 
 function studioPublishDispatchTarget(record) {
@@ -20438,7 +20417,7 @@ async function studioRunPublishOrchestrator(env, target) {
       }
       return { ok: true, id: scenarioId, backend: "python", payload };
     }
-    return await phase6PulseOnDemandScenario(env, scenarioId, { waitMs: 0 });
+    throw new HttpError(503, `Publish orchestrator ${target} is Python-only.`);
   } catch (error) {
     console.warn("publish orchestrator pulse failed", target, scenarioId, error);
     return { ok: false, id: scenarioId };
@@ -25769,8 +25748,8 @@ async function pulseMakeAdminBridgeQueue(request, env, ctx) {
     triggered: skipped ? "make-admin-skipped" : "make-admin-on-demand",
     pulses: result,
     message: skipped
-      ? "No Pending Make admin command is waiting, so the bridge did not run."
-      : "The Make admin bridge is running the oldest Pending command.",
+      ? "Make admin is retired. Pipeline stages run on the local Python runner."
+      : "Make admin is retired. Pipeline stages run on the local Python runner.",
   }, skipped ? 200 : 202);
 }
 

@@ -7,7 +7,14 @@ from ttd.eligibility import (
     ttd3_eligibility_reason,
     ttd4_form_eligibility_reason,
 )
-from ttd.package import completion_url, hash_completion_token, photo_description, photo_title
+from ttd.package import (
+    completion_url,
+    cover_block,
+    handoff_email_html,
+    hash_completion_token,
+    photo_description,
+    photo_title,
+)
 
 
 def _record(**fields):
@@ -98,3 +105,29 @@ def test_package_helpers():
     assert completion_url("https://pipeline.chicagoshining.com/hooks/ttd4", "recABCDEFGHIJKLMN", token).endswith(
         f"token={token}&action=form"
     )
+
+
+def test_handoff_email_includes_public_cover():
+    cover = "https://media.chicagoshining.com/publish/platform-output-322/cover.png"
+    record = _record(
+        Output_ID="322",
+        Output_Title="Chicago Theatre After Dark",
+        TikTok_Draft_Type="Video",
+        Output_Caption="Caption",
+        Output_Hashtags="#Chicago",
+        Thumbnail_URL=cover,
+        TikTok_Draft_Publish_ID="pub-1",
+        TikTok_Manual_Completion_URL="https://pipeline.chicagoshining.com/hooks/ttd4?action=form",
+    )
+    html = handoff_email_html(record)
+    assert 'alt="TikTok 3D grid cover"' in html
+    assert cover in html
+    assert "Download cover image" in html
+    assert "set it as the draft cover in TikTok" in html
+    assert "Not set on this output" not in cover_block(record)
+
+
+def test_handoff_email_notes_missing_cover():
+    html = handoff_email_html(_record(Output_ID="323", Output_Title="No cover"))
+    assert "Not set on this output" in html
+    assert "TikTok 3D grid cover" not in html

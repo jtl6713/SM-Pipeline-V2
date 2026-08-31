@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
+from ap0.public_cover import graph_fetchable_cover_url
 from carousel.timeutil import iso_utc, utc_now
 from config import load_settings
 from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str
+from rr1.email_builder import thumbnail_download_url
 from ttd.constants import (
     DEFAULT_TITLE,
     DESCRIPTION_LIMIT,
@@ -84,6 +86,29 @@ def image_count_label(record: dict[str, Any]) -> str:
     return str(field(record, "Image_Count") or field(record, "Assets_Ready_Count") or "1")
 
 
+def cover_block(record: dict[str, Any]) -> str:
+    raw = field_str(record, "Thumbnail_URL")
+    public = graph_fetchable_cover_url(raw)
+    download = public or thumbnail_download_url(raw)
+    if not download:
+        return (
+            '<p style="margin:10px 0;color:#6b7280;"><b>3D grid cover:</b> '
+            "Not set on this output. Generate the thumbnail before posting so you can set the cover in TikTok.</p>"
+        )
+    safe_src = html.escape(download, quote=True)
+    safe_text = html.escape(download)
+    return (
+        '<div style="margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">'
+        '<p style="margin:0 0 8px 0;"><b>3D grid cover</b> — TikTok’s draft API cannot attach this. '
+        "Download the still and set it as the cover in the TikTok app.</p>"
+        f'<p style="margin:0 0 10px 0;"><img src="{safe_src}" alt="TikTok 3D grid cover" '
+        'style="max-width:280px;width:100%;height:auto;border-radius:6px;border:1px solid #d1d5db;display:block;"></p>'
+        f'<p style="margin:0 0 6px 0;"><a href="{safe_src}">Download cover image</a></p>'
+        f'<p style="margin:0;font-size:12px;color:#4b5563;word-break:break-all;"><b>Direct link:</b> {safe_text}</p>'
+        "</div>"
+    )
+
+
 def handoff_email_html(record: dict[str, Any], *, location: PublishLocation | None = None) -> str:
     output_id = html.escape(str(field(record, "Output_ID") or ""))
     title = html.escape(field_str(record, "Output_Title") or "TikTok draft")
@@ -109,12 +134,14 @@ def handoff_email_html(record: dict[str, Any], *, location: PublishLocation | No
         f'<div style="border:1px solid #ddd;border-radius:10px;padding:16px;"><h3 style="margin-top:0;">Output #{output_id} — {title}</h3>'
         f"<p><b>Draft type:</b> {draft_type}<br><b>Number of images:</b> {count}<br><b>Recommended publishing time:</b> {when}</p>"
         f"{location_block}"
+        f"{cover_block(record)}"
         '<p><b>Caption and hashtags — copyable block:</b></p>'
         f'<div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{caption}\n\n{hashtags}</div>'
         '<p><b>Ordered asset manifest:</b></p>'
         f'<div style="white-space:pre-wrap;word-break:break-word;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{assets}</div>'
         "<ol><li>Open the TikTok inbox notification from <b>SM Pipeline Social Publisher</b>.</li>"
         "<li>Review and edit the images/video and caption.</li>"
+        "<li>Download the 3D cover above and set it as the draft cover in TikTok.</li>"
         "<li>Add the suggested location tag in TikTok when available.</li>"
         "<li>Add music in TikTok before posting when music is requested.</li>"
         "<li>Post manually.</li>"

@@ -70,7 +70,7 @@ def test_publisher_settings_formula_matches_make():
     ids = [item[0] for item in PUBLISHER_START_SCENARIOS]
     assert ids == [5864632, 5813561, 5806668]
     assert orch_make_start_skipped(5864632, {"stage_backend_ig_orch": "python"})
-    assert not orch_make_start_skipped(5864632, {"stage_backend_ig_orch": "make"})
+    assert orch_make_start_skipped(5864632, {"stage_backend_ig_orch": "make"})
 
 
 def test_stage_skips_unknown_decision_without_airtable():

@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import requests
-
 from airtable.client import AirtableClient
 from airtable.constants import PIPELINE_SETTINGS_TABLE
 from render.fields import field_str
-from config import load_settings
 from rr2.constants import PUBLISHER_START_SCENARIOS
 
 ORCH_BACKEND_BY_SCENARIO = {
@@ -20,9 +17,7 @@ ORCH_BACKEND_BY_SCENARIO = {
 
 
 def orch_make_start_skipped(scenario_id: int, settings: dict | None = None) -> bool:
-    settings = settings or load_settings()
-    key = ORCH_BACKEND_BY_SCENARIO.get(int(scenario_id))
-    return bool(key) and str(settings.get(key) or "").strip().lower() == "python"
+    return True
 
 MAKE_API_SETTINGS_FORMULA = (
     'AND({Active}=1,OR({Setting_Name}="MAKE_API_BASE_URL",{Setting_Name}="MAKE_API_TOKEN"))'
@@ -43,43 +38,8 @@ def load_make_api_settings(client: AirtableClient) -> tuple[str, str]:
     return values.get("MAKE_API_BASE_URL", "").rstrip("/"), values.get("MAKE_API_TOKEN", "")
 
 
-def start_publisher_cadence(client: AirtableClient | None = None) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
-    try:
-        client = client or AirtableClient()
-        base, token = load_make_api_settings(client)
-        if not base or not token:
-            return [{"skipped": "missing_make_api_settings"}]
-        headers = {
-            "Authorization": f"Token {token}",
-            "Content-Type": "application/json",
-        }
-        for scenario_id, name in PUBLISHER_START_SCENARIOS:
-            if orch_make_start_skipped(scenario_id):
-                results.append({"scenario_id": scenario_id, "name": name, "skipped": "python"})
-                continue
-            try:
-                response = requests.post(
-                    f"{base}/scenarios/{scenario_id}/start",
-                    headers=headers,
-                    json={},
-                    timeout=30,
-                )
-                results.append(
-                    {
-                        "scenario_id": scenario_id,
-                        "name": name,
-                        "status_code": response.status_code,
-                    }
-                )
-            except Exception as exc:
-                results.append(
-                    {
-                        "scenario_id": scenario_id,
-                        "name": name,
-                        "error": str(exc),
-                    }
-                )
-    except Exception as exc:
-        results.append({"error": str(exc)})
-    return results
+def start_publisher_cadence(_client: AirtableClient | None = None) -> list[dict[str, Any]]:
+    return [
+        {"scenario_id": scenario_id, "name": name, "skipped": "python"}
+        for scenario_id, name in PUBLISHER_START_SCENARIOS
+    ]
