@@ -3,6 +3,7 @@ import {
   AbsoluteFill,
   Audio,
   Img,
+  OffthreadVideo,
   Sequence,
   interpolate,
   spring,
@@ -123,6 +124,11 @@ export type ChicagoShiningPhotoClip = {
   slideRecordId?: string;
   slideNumber?: string | number;
   order?: string | number;
+  mediaKind?: "photo" | "video";
+  media_kind?: "photo" | "video";
+  inSeconds?: number;
+  in_seconds?: number;
+  startFromSeconds?: number;
   url?: string;
   src?: string;
   assetVariants?: Partial<Record<PhotoSequenceAspectRatio, string>>;
@@ -187,6 +193,21 @@ const clamp01 = (value: unknown, fallback: number): number => {
   return Number.isFinite(parsed)
     ? Math.max(0, Math.min(1, parsed))
     : fallback;
+};
+
+const isVideoClip = (clip: ChicagoShiningPhotoClip): boolean => {
+  const kind = String(clip.mediaKind || clip.media_kind || "").trim().toLowerCase();
+  if (kind === "video") return true;
+  if (kind === "photo" || kind === "image") return false;
+  const src = String(clip.src || clip.url || "").toLowerCase();
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(src);
+};
+
+const clipStartFromFrames = (clip: ChicagoShiningPhotoClip, fps: number): number => {
+  const seconds = Number(
+    clip.startFromSeconds ?? clip.inSeconds ?? clip.in_seconds ?? 0,
+  );
+  return Math.max(0, Math.round((Number.isFinite(seconds) ? seconds : 0) * fps));
 };
 
 const resolveSource = (value?: string): string | undefined => {
@@ -305,6 +326,7 @@ const inferAspectRatioFromDimensions = (
 const resolveMotionType = (
   clip: ChicagoShiningPhotoClip,
 ): PhotoSequenceMotion => {
+  if (isVideoClip(clip)) return "none";
   if (clip.motion?.type) return clip.motion.type;
 
   switch (String(clip.motionStyle ?? "").trim().toLowerCase()) {
@@ -712,6 +734,25 @@ const AnimatedText: React.FC<{
   );
 };
 
+const MediaFill: React.FC<{
+  clip: ChicagoShiningPhotoClip;
+  source: string;
+  style: React.CSSProperties;
+}> = ({clip, source, style}) => {
+  const {fps} = useVideoConfig();
+  if (isVideoClip(clip)) {
+    return (
+      <OffthreadVideo
+        src={source}
+        muted
+        startFrom={clipStartFromFrames(clip, fps)}
+        style={style}
+      />
+    );
+  }
+  return <Img src={source} style={style} />;
+};
+
 const ImageSegment: React.FC<{
   clip: ChicagoShiningPhotoClip;
   source: string;
@@ -851,8 +892,9 @@ const ImageSegment: React.FC<{
     >
       {fitMode === "full_with_blur" ? (
         <>
-          <Img
-            src={source}
+          <MediaFill
+            clip={clip}
+            source={source}
             style={{
               width: "100%",
               height: "100%",
@@ -869,8 +911,9 @@ const ImageSegment: React.FC<{
               padding: "4%",
             }}
           >
-            <Img
-              src={source}
+            <MediaFill
+              clip={clip}
+              source={source}
               style={{
                 width: "100%",
                 height: "100%",
@@ -891,8 +934,9 @@ const ImageSegment: React.FC<{
             padding: "4%",
           }}
         >
-          <Img
-            src={source}
+          <MediaFill
+            clip={clip}
+            source={source}
             style={{
               width: "100%",
               height: "100%",
@@ -903,8 +947,9 @@ const ImageSegment: React.FC<{
           />
         </AbsoluteFill>
       ) : (
-        <Img
-          src={source}
+        <MediaFill
+          clip={clip}
+          source={source}
           style={{
             width: "100%",
             height: "100%",
@@ -1221,7 +1266,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
 
   if (safeClips.length === 0) {
     throw new Error(
-      "ChicagoShiningPhotoSequence requires at least one image clip.",
+      "ChicagoShiningPhotoSequence requires at least one visual clip.",
     );
   }
 

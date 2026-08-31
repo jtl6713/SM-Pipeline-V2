@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.197-theatre-pin";
+  const BUILD_ID = "item4-0.6.199-library-suggest";
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
     return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
@@ -1933,22 +1933,30 @@
 
   function ezPhotoSetActive() {
     const count = item4Workspace?.assets?.length || ezStagedFiles.length || 0;
-    if (ezIntakeKind === "multiple-photos" || count > 1) return true;
+    if (ezIntakeKind === "multiple-photos" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || count > 1) return true;
     const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
-    return ["multiple-photos", "multiple-ai", "mixed"].includes(parsed?.inputKind);
+    return ["multiple-photos", "multiple-ai", "mixed", "photos-and-clips", "video-clips"].includes(parsed?.inputKind);
   }
 
   function ezManualCaptionsEnabled() {
     return ezCaptionMode() === "manual";
   }
 
+  function ezIsClipRequest(record = activeProductionRequest) {
+    const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
+    if (kind === "photos-and-clips" || kind === "video-clips") return true;
+    const notes = String(record?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
+    return notes.includes("ez-input=photos-and-clips") || notes.includes("ez-input=video-clips");
+  }
+
   function item4IsFinishedRequest(record = activeProductionRequest) {
+    if (ezIsClipRequest(record)) return false;
     const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
     if (kind === "finished-video" || kind === "finished-stills") return true;
     const notes = String(record?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
     if (notes.includes("ez-input=finished-video") || notes.includes("ez-input=finished-stills") || notes.includes("ez-input=finished-carousel")) return true;
     const assets = item4Workspace?.assets || [];
-    return assets.length > 0 && assets.every(item4AssetLooksLikeVideo);
+    return assets.length === 1 && assets.every(item4AssetLooksLikeVideo);
   }
 
   function item4FileLooksLikeVideo(file) {
@@ -1958,28 +1966,31 @@
   }
 
   function item4AssetLooksLikeVideo(asset) {
+    if (String(asset?.media_kind || "").toLowerCase() === "video") return true;
     const mime = String(asset?.mime_type || "").toLowerCase();
     const name = String(asset?.name || "").toLowerCase();
     return mime.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(name);
   }
 
   function ezIsFinishedVideo() {
+    if (ezIsClipRequest()) return false;
     const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
     if (kind === "finished-video") return true;
     const notes = String(activeProductionRequest?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
     if (notes.includes("ez-input=finished-video")) return true;
     const assets = item4Workspace?.assets || [];
-    return assets.length > 0 && assets.every(item4AssetLooksLikeVideo);
+    return assets.length === 1 && assets.every(item4AssetLooksLikeVideo);
   }
 
   function ezMediaWord(count = 1) {
     const n = Math.max(1, Number(count) || 1);
+    if (ezIsClipRequest()) return n === 1 ? "item" : "items";
     return ezIsFinishedVideo() ? (n === 1 ? "video" : "videos") : (n === 1 ? "photo" : "photos");
   }
 
   function syncFinishedMediaHeadings() {
     const video = ezIsFinishedVideo();
-    const heading = video ? "Video" : "Photos";
+    const heading = ezIsClipRequest() ? "Photos and clips" : (video ? "Video" : "Photos");
     const mediaH = $("item4MediaHeading");
     if (mediaH) mediaH.textContent = heading;
     const step = $("productionStepMedia");
@@ -2009,29 +2020,39 @@
   }
 
   function selectPrMediaKind(kind, { quiet = false } = {}) {
-    const nextKind = ["multiple-photos", "single-photo", "finished-video", "finished-stills"].includes(kind) ? kind : null;
+    const nextKind = ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(kind) ? kind : null;
     ezIntakeKind = nextKind;
     document.querySelectorAll("[data-pr-input]").forEach((button) => {
       button.classList.toggle("selected", Boolean(nextKind) && button.dataset.prInput === nextKind);
     });
     const input = $("item4MediaInput");
     if (input) {
-      input.multiple = nextKind === "multiple-photos" || nextKind === "finished-stills";
+      input.multiple = nextKind === "multiple-photos" || nextKind === "finished-stills" || nextKind === "photos-and-clips" || nextKind === "video-clips";
       input.accept = nextKind === "finished-video"
         ? "video/mp4,video/quicktime,video/webm,video/*,image/*"
-        : "image/*,.heic,.heif,image/heic,image/heif";
+        : (nextKind === "photos-and-clips" || nextKind === "video-clips")
+          ? "image/*,.heic,.heif,image/heic,image/heif,video/mp4,video/quicktime,video/webm,video/*"
+          : "image/*,.heic,.heif,image/heic,image/heif";
     }
     const title = $("item4UploadTitle");
     const hint = $("item4UploadHint");
     const choose = $("item4ChooseMedia");
+    const library = $("item4ChooseLibrary");
+    if (library) library.hidden = nextKind === "finished-video";
     if (nextKind === "finished-video") {
       if (title) title.textContent = "Drop video";
       if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose video";
+      const picker = $("item4LibraryPicker");
+      if (picker) picker.hidden = true;
     } else if (nextKind === "finished-stills") {
       if (title) title.textContent = "Drop photos";
       if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose photos";
+    } else if (nextKind === "photos-and-clips" || nextKind === "video-clips") {
+      if (title) title.textContent = "Drop photos and clips";
+      if (hint) hint.textContent = "Mix stills and raw mp4/mov clips. Not a finished video.";
+      if (choose) choose.textContent = "Choose files";
     } else if (nextKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos";
       if (hint) hint.textContent = "";
@@ -2065,7 +2086,7 @@
       if (input) input.multiple = ezIntakeKind === "multiple-photos";
     }
     const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
-    if (!ezIntakeKind && (parsed?.inputKind === "single-photo" || parsed?.inputKind === "multiple-photos")) {
+    if (!ezIntakeKind && ["single-photo", "multiple-photos", "photos-and-clips", "video-clips"].includes(parsed?.inputKind)) {
       selectPrMediaKind(parsed.inputKind, { quiet: true });
     }
     const kindReady = Boolean(ezIntakeKind);
@@ -2989,7 +3010,7 @@
 
   function syncEzYouTubeAvailability(resetChecked = true) {
     const youtube = $("ezYouTube");
-    const youtubeOn = ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills";
+    const youtubeOn = ezIntakeKind === "multiple-photos" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills";
     if (!youtube) return;
     youtube.disabled = !youtubeOn;
     if (!youtubeOn) youtube.checked = false;
@@ -2997,8 +3018,7 @@
   }
 
   function selectEzInput(kind, { resetPlatforms = true } = {}) {
-    if (kind === "video-clips") return;
-    const nextKind = ["multiple-photos", "single-photo", "finished-video", "finished-stills"].includes(kind)
+    const nextKind = ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(kind)
       ? kind
       : "single-photo";
     if (resetPlatforms && ezIntakeKind && ezIntakeKind !== nextKind) {
@@ -3014,10 +3034,12 @@
     if (composer) composer.hidden = false;
     const input = $("ezMediaInput");
     if (input) {
-      input.multiple = ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-stills";
+      input.multiple = ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-stills" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips";
       input.accept = ezIntakeKind === "finished-video"
         ? "video/mp4,video/quicktime,video/webm,video/*,image/*"
-        : "image/*,.heic,.heif,image/heic,image/heif";
+        : (ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips")
+          ? "image/*,.heic,.heif,image/heic,image/heif,video/mp4,video/quicktime,video/webm,video/*"
+          : "image/*,.heic,.heif,image/heic,image/heif";
     }
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
@@ -3027,6 +3049,9 @@
     } else if (ezIntakeKind === "finished-stills") {
       if (title) title.textContent = "Drop finished photos here";
       if (hint) hint.textContent = "Finished stills. No on-image lettering.";
+    } else if (ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips") {
+      if (title) title.textContent = "Drop photos and clips here";
+      if (hint) hint.textContent = "Order them here. Clips are edited into a Reel — not published as a finished file.";
     } else if (ezIntakeKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos here";
       if (hint) hint.textContent = "Add or remove one at a time. They show up here immediately.";
@@ -3176,7 +3201,7 @@
     if (answers.inputKind === "multiple-ai" && answers.photoCount) bits.push(`${answers.photoCount} AI images`);
     if (answers.inputKind === "mixed") bits.push(`${answers.manualCount || 0} yours · ${answers.aiCount || 0} AI`);
     if (answers.packageId) {
-      const pkg = ezPlanApi()?.ezWizardPackages?.(ezPlanApi()?.ezWizardPhotoCount?.(answers) || 1)
+      const pkg = ezPlanApi()?.ezWizardPackages?.(ezPlanApi()?.ezWizardPhotoCount?.(answers) || 1, answers)
         ?.find((row) => row.id === answers.packageId);
       if (pkg) bits.push(pkg.label);
     }
@@ -3472,6 +3497,7 @@
         { label: "Single AI image", onClick: () => ezWizardPick("Single AI image", { inputKind: "single-ai", photoCount: 1 }, "package") },
         { label: "Multiple AI images", onClick: () => ezWizardPick("Multiple AI images", { inputKind: "multiple-ai" }, "aiCount") },
         { label: "Mix of my photos and AI", onClick: () => ezWizardPick("Mix of my photos and AI", { inputKind: "mixed" }, "mixManual") },
+        { label: "Photos and clips I’ll combine", onClick: () => ezWizardPick("Photos and clips", { inputKind: "photos-and-clips" }, "photoCount") },
         { label: "Finished video I’ll upload", onClick: () => ezWizardPick("Finished video", { inputKind: "finished-video", photoCount: 1 }, "package") },
         { label: "Finished photos I’ll upload", onClick: () => ezWizardPick("Finished photos", { inputKind: "finished-stills" }, "photoCount") },
       ]);
@@ -3589,7 +3615,7 @@
 
     if (ezWizardStep === "package") {
       prompt.textContent = "Which platform package do you want?";
-      const packages = helpers?.ezWizardPackages?.(count) || [];
+      const packages = helpers?.ezWizardPackages?.(count, answers) || [];
       renderEzWizardChips(packages.map((pkg) => ({
         label: pkg.label,
         onClick: () => {
@@ -4323,13 +4349,16 @@
       ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
       : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
+    const isVideo = item4AssetLooksLikeVideo(asset);
+    const seconds = Number(asset?.duration_seconds || 0);
+    const durationNote = isVideo && seconds > 0 ? ` · ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s` : "";
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
     const showCaption = ezManualCaptionsEnabled() && (ezPhotoSetActive() || ezIntakeKind === "single-photo");
     const captionField = showCaption ? item4CaptionField(asset.id) : "";
     const canRemove = asset.id && !String(asset.id).startsWith("local:");
     return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}" data-item4-asset="${escapeHtml(asset.id)}">
       <div class="item4-thumb">${visual}</div>
-      <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || (ezIsFinishedVideo() ? "Video" : "Photo"))}</strong><span>${escapeHtml(ezIsFinishedVideo() ? "Video" : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${formatNote}</span></div>
+      <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || (isVideo ? "Clip" : "Photo"))}</strong><span>${escapeHtml(isVideo ? `Clip ${asset.order || ""}` : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${durationNote}${formatNote}</span></div>
       ${captionField}
       ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
     </article>`;
@@ -5263,8 +5292,10 @@
   function item4IsSupportedPhotoFile(file) {
     const mime = String(file?.type || "").toLowerCase();
     const ext = item4UploadFileExtension(file?.name);
-    if (item4FileLooksLikeVideo(file)) return true;
     const kind = ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
+    if (item4FileLooksLikeVideo(file)) {
+      return kind === "finished-video" || kind === "photos-and-clips" || kind === "video-clips";
+    }
     if (kind === "finished-video") {
       return mime.startsWith("image/") || ["heic", "heif"].includes(ext);
     }
@@ -5284,12 +5315,32 @@
   async function imageMetadataForFiles(files) {
     const result = [];
     for (const file of files) {
-      let width = null, height = null;
-      try {
-        const bitmap = await createImageBitmap(file);
-        width = bitmap.width; height = bitmap.height; bitmap.close();
-      } catch {}
-      result.push({ name: file.name, width, height });
+      let width = null, height = null, duration_seconds = null;
+      if (item4FileLooksLikeVideo(file)) {
+        try {
+          duration_seconds = await new Promise((resolve) => {
+            const url = URL.createObjectURL(file);
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.onloadedmetadata = () => {
+              const value = Number(video.duration);
+              URL.revokeObjectURL(url);
+              resolve(Number.isFinite(value) && value > 0 ? value : null);
+            };
+            video.onerror = () => {
+              URL.revokeObjectURL(url);
+              resolve(null);
+            };
+            video.src = url;
+          });
+        } catch {}
+      } else {
+        try {
+          const bitmap = await createImageBitmap(file);
+          width = bitmap.width; height = bitmap.height; bitmap.close();
+        } catch {}
+      }
+      result.push({ name: file.name, width, height, duration_seconds });
     }
     return result;
   }
@@ -5301,11 +5352,15 @@
       return;
     }
     if (!ezIntakeKind) {
-      setRequestMessage("Choose Single photo or Multiple photos before uploading.", "error-text");
+      setRequestMessage("Choose a media type before uploading.", "error-text");
       syncPrMediaKindUi();
       return;
     }
     const incoming = Array.from(fileList || []);
+    if ((ezIntakeKind === "single-photo" || ezIntakeKind === "multiple-photos") && incoming.some(item4FileLooksLikeVideo)) {
+      selectEzInput("photos-and-clips", { resetPlatforms: false });
+      selectPrMediaKind("photos-and-clips", { quiet: true });
+    }
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
     let files = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
@@ -6131,7 +6186,7 @@
     const intakeKind = parsed?.inputKind
       ? (ezPlanApi()?.ezIntakeKindFromWizard?.(parsed.inputKind) || parsed.inputKind)
       : null;
-    if (ezEntryPath === "content" && ["multiple-photos", "single-photo", "finished-video", "finished-stills"].includes(intakeKind)) {
+    if (ezEntryPath === "content" && ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(intakeKind)) {
       selectEzInput(intakeKind, { resetPlatforms: false });
       document.querySelectorAll("[data-ez-platform]").forEach((input) => {
         input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
@@ -6222,11 +6277,15 @@
 
   let ideaLibraryPickerItems = [];
   let ideaLibrarySelected = new Set();
+  let ideaLibrarySuggestedIds = new Set();
+  let ideaLibrarySeeded = false;
   let ideaLibrarySearchTimer = 0;
 
   function resetIdeaLibraryPicker() {
     ideaLibraryPickerItems = [];
     ideaLibrarySelected = new Set();
+    ideaLibrarySuggestedIds = new Set();
+    ideaLibrarySeeded = false;
     const picker = $("ideaLibraryPicker");
     const grid = $("ideaLibraryGrid");
     const search = $("ideaLibrarySearch");
@@ -6245,6 +6304,76 @@
     return id ? `${apiBase}/api/media-assets/${encodeURIComponent(id)}/preview` : "";
   }
 
+  function libraryPickerMaxCount() {
+    const ideaMax = Number(activeIdea?.carousel_slide_count_max || 0);
+    const requestMax = Number(activeProductionRequest?.carousel_slide_count_max || 0);
+    const cap = ideaMax || requestMax || 10;
+    return Math.min(20, Math.max(1, cap));
+  }
+
+  async function fetchLibraryBrowse(query = "") {
+    const q = String(query || "").trim();
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    params.set("include", "video");
+    const result = await api(`/api/media-assets/library-stills?${params.toString()}`, { timeoutMs: 20000 });
+    return Array.isArray(result?.records) ? result.records : [];
+  }
+
+  async function fetchIdeaLibrarySuggested(ideaId) {
+    if (!ideaId) return [];
+    const result = await api(`/api/ideas/${encodeURIComponent(ideaId)}/library-suggestions`, { timeoutMs: 20000 });
+    return Array.isArray(result?.suggested) ? result.suggested : [];
+  }
+
+  function mergeLibraryPickerItems(suggested, browse) {
+    const byId = new Map();
+    for (const item of suggested || []) byId.set(item.id, { ...item, suggested: true });
+    for (const item of browse || []) {
+      if (!byId.has(item.id)) byId.set(item.id, { ...item, suggested: false });
+    }
+    return [...byId.values()];
+  }
+
+  function seedLibrarySelection(current, suggested, attachedIds, max, seed) {
+    const next = new Set(current || []);
+    for (const id of attachedIds || []) if (id) next.add(id);
+    if (seed) {
+      for (const item of suggested || []) {
+        if (next.size >= max) break;
+        if (item?.id) next.add(item.id);
+      }
+    }
+    return next;
+  }
+
+  function renderLibraryPickerSections(items, selected, suggestedIds, idAttr) {
+    const suggested = items.filter((item) => suggestedIds.has(item.id));
+    const more = items.filter((item) => !suggestedIds.has(item.id));
+    const card = (item) => {
+      const checked = selected.has(item.id);
+      const preview = ideaLibraryPreviewUrl(item);
+      const tags = [];
+      if (suggestedIds.has(item.id)) tags.push(`<em class="idea-library-card-tag">Suggested</em>`);
+      if (String(item.media_kind || "").toLowerCase() === "video") tags.push(`<em class="idea-library-card-tag">Clip</em>`);
+      const tag = tags.join("");
+      return `<button type="button" class="idea-library-card" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
+        <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
+        ${preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`}
+        ${tag}
+        <span>${escapeHtml(item.name || item.id)}</span>
+      </button>`;
+    };
+    const parts = [];
+    if (suggested.length) {
+      parts.push(`<div class="idea-library-block"><p class="idea-library-section">Suggested</p><div class="idea-library-cards">${suggested.map(card).join("")}</div></div>`);
+    }
+    if (more.length) {
+      parts.push(`<div class="idea-library-block"><p class="idea-library-section">More from library</p><div class="idea-library-cards">${more.map(card).join("")}</div></div>`);
+    }
+    return parts.join("") || `<p class="idea-library-picker-hint">No classified Drive stills matched that search.</p>`;
+  }
+
   function syncIdeaLibraryContinue() {
     const button = $("ideaLibraryContinueButton");
     if (button) button.disabled = ideaLibrarySelected.size < 1;
@@ -6254,25 +6383,19 @@
     const grid = $("ideaLibraryGrid");
     const hint = $("ideaLibraryPickerHint");
     if (!grid) return;
-    if (!ideaLibraryPickerItems.length) {
-      grid.innerHTML = `<p class="idea-library-picker-hint">No classified library stills matched. Search a neighborhood or tag, or add new photos instead.</p>`;
-      syncIdeaLibraryContinue();
-      return;
-    }
-    grid.innerHTML = ideaLibraryPickerItems.map((item) => {
-      const checked = ideaLibrarySelected.has(item.id);
-      const preview = ideaLibraryPreviewUrl(item);
-      return `<button type="button" class="idea-library-card" data-library-id="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
-        <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
-        ${preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`}
-        <span>${escapeHtml(item.name || item.id)}</span>
-      </button>`;
-    }).join("");
+    grid.innerHTML = renderLibraryPickerSections(
+      ideaLibraryPickerItems,
+      ideaLibrarySelected,
+      ideaLibrarySuggestedIds,
+      "data-library-id"
+    );
     if (hint) {
-      const suggested = ideaLibraryPickerItems.filter((item) => item.preselected).length;
+      const checked = ideaLibrarySelected.size;
+      const suggested = ideaLibrarySuggestedIds.size;
+      const max = libraryPickerMaxCount();
       hint.textContent = suggested
-        ? `${suggested} place-matched still${suggested === 1 ? "" : "s"} checked (safe for auto-attach). Search if you need another neighborhood.`
-        : "No place match yet. Search a neighborhood (Pilsen, Andersonville…) or check stills manually.";
+        ? `${suggested} suggested. ${checked} checked (max ${max}). Uncheck to drop, search to add.`
+        : `No place match yet. ${checked} checked (max ${max}). Search the Drive library and check stills to add.`;
     }
     syncIdeaLibraryContinue();
   }
@@ -6282,14 +6405,21 @@
     const grid = $("ideaLibraryGrid");
     const hint = $("ideaLibraryPickerHint");
     if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library stills…</p>`;
-    if (hint) hint.textContent = "Matching classified library images to this idea.";
-    const q = String(query || "").trim();
-    const path = `/api/ideas/${encodeURIComponent(activeIdea.id)}/library-suggestions${q ? `?q=${encodeURIComponent(q)}` : ""}`;
-    const result = await api(path, { timeoutMs: 20000 });
-    const suggested = Array.isArray(result?.suggested) ? result.suggested : [];
-    const matches = Array.isArray(result?.matches) ? result.matches : [];
-    ideaLibraryPickerItems = [...suggested, ...matches];
-    ideaLibrarySelected = new Set(suggested.filter((item) => item?.preselected !== false).map((item) => item.id));
+    if (hint) hint.textContent = "Loading suggested stills and the Drive library.";
+    const [suggested, browse] = await Promise.all([
+      fetchIdeaLibrarySuggested(activeIdea.id),
+      fetchLibraryBrowse(query),
+    ]);
+    ideaLibrarySuggestedIds = new Set(suggested.map((item) => item.id));
+    ideaLibraryPickerItems = mergeLibraryPickerItems(suggested, browse);
+    ideaLibrarySelected = seedLibrarySelection(
+      ideaLibrarySelected,
+      suggested,
+      [],
+      libraryPickerMaxCount(),
+      !ideaLibrarySeeded
+    );
+    ideaLibrarySeeded = true;
     renderIdeaLibraryPicker();
   }
 
@@ -6353,8 +6483,165 @@
     }
   }
 
-  $("item4ChooseMedia")?.addEventListener("click", () => $("item4MediaInput")?.click());
+  $("item4ChooseMedia")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    $("item4MediaInput")?.click();
+  });
   $("item4MediaInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
+
+  let item4LibraryItems = [];
+  let item4LibrarySelected = new Set();
+  let item4LibrarySuggestedIds = new Set();
+  let item4LibrarySeeded = false;
+  let item4LibrarySearchTimer = 0;
+
+  function item4AttachedMediaIds() {
+    return new Set((item4Workspace?.assets || []).map((asset) => String(asset.media_asset_record_id || "").trim()).filter(Boolean));
+  }
+
+  function item4LibraryDiff() {
+    const attached = item4AttachedMediaIds();
+    const toAdd = [...item4LibrarySelected].filter((id) => !attached.has(id));
+    const toRemove = [...attached].filter((id) => !item4LibrarySelected.has(id));
+    return { toAdd, toRemove, attached };
+  }
+
+  function syncItem4LibraryAdd() {
+    const button = $("item4LibraryAddButton");
+    if (!button) return;
+    const { toAdd, toRemove } = item4LibraryDiff();
+    button.disabled = !activeProductionRequest?.id || (!toAdd.length && !toRemove.length);
+  }
+
+  function renderItem4LibraryPicker() {
+    const grid = $("item4LibraryGrid");
+    const hint = $("item4LibraryPickerHint");
+    if (!grid) return;
+    grid.innerHTML = renderLibraryPickerSections(
+      item4LibraryItems,
+      item4LibrarySelected,
+      item4LibrarySuggestedIds,
+      "data-item4-library-id"
+    );
+    if (hint) {
+      const { toAdd, toRemove } = item4LibraryDiff();
+      const max = libraryPickerMaxCount();
+      hint.textContent = `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked (max ${max}). Uncheck to remove, search to add.${toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : ""}`;
+    }
+    syncItem4LibraryAdd();
+  }
+
+  async function loadItem4LibraryStills(query = "") {
+    const grid = $("item4LibraryGrid");
+    const hint = $("item4LibraryPickerHint");
+    if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading suggested stills and the Drive library…</p>`;
+    if (hint) hint.textContent = "Loading suggested stills and the Drive library.";
+    const ideaId = activeProductionRequest?.idea_record_id || activeIdea?.id || null;
+    const [suggested, browse] = await Promise.all([
+      fetchIdeaLibrarySuggested(ideaId),
+      fetchLibraryBrowse(query),
+    ]);
+    item4LibrarySuggestedIds = new Set(suggested.map((item) => item.id));
+    item4LibraryItems = mergeLibraryPickerItems(suggested, browse);
+    item4LibrarySelected = seedLibrarySelection(
+      item4LibrarySelected,
+      suggested,
+      [...item4AttachedMediaIds()],
+      libraryPickerMaxCount(),
+      !item4LibrarySeeded
+    );
+    item4LibrarySeeded = true;
+    renderItem4LibraryPicker();
+  }
+
+  async function openItem4LibraryPicker() {
+    if (!activeProductionRequest?.id) {
+      setRequestMessage("Open or create a Production request first, then pick from the library.", "error-text");
+      return;
+    }
+    const picker = $("item4LibraryPicker");
+    if (picker) picker.hidden = false;
+    picker?.scrollIntoView({ block: "nearest" });
+    try {
+      await loadItem4LibraryStills($("item4LibrarySearch")?.value || "");
+    } catch (error) {
+      setRequestMessage(error.message || "Could not load Drive library stills.", "error-text");
+      const grid = $("item4LibraryGrid");
+      if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">${escapeHtml(error.message || "Could not load Drive library stills.")}</p>`;
+    }
+  }
+
+  $("item4ChooseLibrary")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openItem4LibraryPicker();
+  });
+  $("item4LibraryGrid")?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-item4-library-id]");
+    if (!card || card.disabled) return;
+    const id = String(card.dataset.item4LibraryId || "").trim();
+    if (!id) return;
+    if (item4LibrarySelected.has(id)) item4LibrarySelected.delete(id);
+    else item4LibrarySelected.add(id);
+    renderItem4LibraryPicker();
+  });
+  $("item4LibrarySearch")?.addEventListener("input", () => {
+    window.clearTimeout(item4LibrarySearchTimer);
+    item4LibrarySearchTimer = window.setTimeout(() => {
+      loadItem4LibraryStills($("item4LibrarySearch")?.value || "").catch((error) => {
+        setRequestMessage(error.message || "Library search failed.", "error-text");
+      });
+    }, 280);
+  });
+  $("item4LibraryCancelButton")?.addEventListener("click", () => {
+    const picker = $("item4LibraryPicker");
+    if (picker) picker.hidden = true;
+  });
+  $("item4LibraryAddButton")?.addEventListener("click", async () => {
+    if (!activeProductionRequest?.id) return;
+    const { toAdd, toRemove } = item4LibraryDiff();
+    if (!toAdd.length && !toRemove.length) return;
+    const button = $("item4LibraryAddButton");
+    try {
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Applying…";
+      }
+      for (const mediaId of toRemove) {
+        const asset = (item4Workspace?.assets || []).find((row) => String(row.media_asset_record_id || "").trim() === mediaId);
+        if (!asset?.id) continue;
+        await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(asset.id)}`, {
+          method: "DELETE",
+          body: JSON.stringify({}),
+        });
+      }
+      let result = null;
+      if (toAdd.length) {
+        result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/library`, {
+          method: "POST",
+          body: JSON.stringify({ media_asset_ids: toAdd, allow_video: true, origin_kind: ezIntakeKind || "photos-and-clips" }),
+          timeoutMs: 45000,
+        });
+        if (result?.record) {
+          activeProductionRequest = result.record;
+          populateProductionRequestForm(result.record);
+        }
+      }
+      await loadItem4Workspace(activeProductionRequest);
+      const added = Number(result?.attached || toAdd.length);
+      setRequestMessage(
+        `Updated library stills: added ${added}, removed ${toRemove.length}.`,
+        "success"
+      );
+      const picker = $("item4LibraryPicker");
+      if (picker) picker.hidden = true;
+    } catch (error) {
+      setRequestMessage(error.message || "Could not update library stills.", "error-text");
+    } finally {
+      if (button) button.textContent = "Apply selection";
+      syncItem4LibraryAdd();
+    }
+  });
   $("item4BuildPlan")?.addEventListener("click", buildItem4Plan);
   $("item4PrepareVariants")?.addEventListener("click", prepareItem4Variants);
   document.querySelectorAll("[data-pr-input]").forEach((button) => {
@@ -7939,6 +8226,9 @@
     ezAudioVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     ezAudioTrackPreview: "Play a preview of the selected music track.",
     item4ChooseMedia: "Open a file picker for master photos. You can also drop files onto the dashed box.",
+    item4ChooseLibrary: "Review suggested Drive stills, uncheck to remove, or search the library to add more.",
+    item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
+    item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
     item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
     item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. Drag each photo to keep the important part in frame first.",
     closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
@@ -7955,7 +8245,7 @@
 
   const PRODUCTION_TARGET_HELP = {
     ezUploadZone: "Drop photos here. They appear immediately. Drive copies can finish in the background — you can keep working or leave this screen.",
-    item4UploadZone: "Drop master photos here. They appear immediately. You can keep working or leave while Google Drive copies finish.",
+    item4UploadZone: "Drop master photos here, or use From library to pick classified stills already on Google Drive.",
     ezUploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
     item4UploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
     item4AssetStatus: "Shows whether master photos are still loading into Drive or already saved.",
@@ -8092,6 +8382,9 @@
     });
     searchRoot.querySelectorAll?.("[data-ez-input='multiple-photos'], [data-pr-input='multiple-photos']").forEach((card) => {
       phase6BindTooltipTarget(card, "A set of photos. Studio plans Reels, a Facebook slideshow Reel, TikTok video draft, and YouTube Short. The 3D thumbnail is the grid cover on those videos.");
+    });
+    searchRoot.querySelectorAll?.("[data-ez-input='photos-and-clips'], [data-pr-input='photos-and-clips'], [data-ez-input='video-clips']").forEach((card) => {
+      phase6BindTooltipTarget(card, "Mix photos and raw clips on one timeline. Studio renders a Reel, Facebook Reel, TikTok draft, and YouTube Short. Finished video (publish as-is) is a different choice.");
     });
     searchRoot.querySelectorAll?.("[data-item4-platform], [data-ez-platform]").forEach((input) => {
       const label = input.closest("label") || input;

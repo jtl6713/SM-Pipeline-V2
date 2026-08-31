@@ -13,6 +13,7 @@ from studio_produce.constants import (
     VARIANT_RECIPE,
 )
 from studio_produce.job import parse_json, utc_now
+from studio_produce.media import asset_is_video, playable_url
 
 if TYPE_CHECKING:
     from airtable.client import AirtableClient
@@ -159,6 +160,8 @@ def upsert_variant_queue(
     }
     created = 0
     for asset in assets:
+        if asset_is_video(asset):
+            continue
         drive_id = str(asset.get("google_drive_file_id") or "").strip()
         media_id = str(asset.get("media_asset_record_id") or "").strip()
         if not drive_id or not media_id:
@@ -269,6 +272,36 @@ def rebuild_variant_manifest(
             "variants": {},
         }
         for ratio in asset_ratios:
+            if asset_is_video(asset):
+                playable = playable_url(asset) or playable_url(row)
+                media_id = str(asset.get("media_asset_record_id") or "").strip()
+                drive_id = str(asset.get("google_drive_file_id") or "").strip()
+                if not playable or not media_id.startswith("rec"):
+                    continue
+                spec = RATIO_SPECS[ratio]
+                row["media_kind"] = "video"
+                row["variants"][ratio] = {
+                    "aspect_ratio": ratio,
+                    "recipe_version": "video-passthrough",
+                    "media_kind": "video",
+                    "width": spec["width"],
+                    "height": spec["height"],
+                    "google_drive_file_id": drive_id,
+                    "google_drive_url": str(asset.get("google_drive_url") or "").strip() or (
+                        f"https://drive.google.com/file/d/{drive_id}/view" if drive_id else ""
+                    ),
+                    "media_asset_record_id": media_id,
+                    "preview_url": playable,
+                    "preview_status": "Ready",
+                    "file_name": str(asset.get("name") or "clip.mp4"),
+                    "duration_seconds": asset.get("duration_seconds"),
+                    "in_seconds": asset.get("in_seconds") or 0,
+                    "out_seconds": asset.get("out_seconds"),
+                }
+                manifest["ready_count"] += 1
+                if ratio in plan_list:
+                    manifest["plan_ready_count"] += 1
+                continue
             transfer_id = variant_transfer_id(request_id, str(asset.get("id")), ratio)
             queue = by_transfer.get(transfer_id)
             if not queue or field_str(queue, "Transfer_Status") != "Ready":

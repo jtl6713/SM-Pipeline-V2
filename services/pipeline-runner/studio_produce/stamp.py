@@ -8,6 +8,7 @@ from render.fields import field, field_str
 from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
 from studio_produce.job import finished_origin_kind, parse_json
+from studio_produce.media import asset_is_video, asset_media_kind, clip_in_out_seconds, playable_url
 
 if TYPE_CHECKING:
     from airtable.client import AirtableClient
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
 
 STORY_TEASER_SECONDS = 5
 SINGLE_STILL_SECONDS = 5
+PHOTO_FLOOR_SECONDS = 3
+FPS = 30
 
 
 def is_native_photo(platform: str, output_type: str, mapping: str = "") -> bool:
@@ -98,7 +101,66 @@ def duration_seconds(
         return stored_n
     if clip_count <= 1:
         return SINGLE_STILL_SECONDS
-    return min(30, max(clip_count * 3, 9))
+    return min(30, max(clip_count * PHOTO_FLOOR_SECONDS, 9))
+
+
+def _master_for_source(masters: list[dict[str, Any]], source: dict[str, Any]) -> dict[str, Any]:
+    source_id = str(source.get("id") or "")
+    for master in masters:
+        if str(master.get("id") or "") == source_id:
+            return master
+    return source
+
+
+def assign_clip_frames(
+    clips: list[dict[str, Any]],
+    *,
+    story: bool,
+    effective: dict[str, Any],
+    request: dict[str, Any],
+    output: dict[str, Any] | None,
+) -> tuple[list[int], int]:
+    kinds = [asset_media_kind(item.get("source") or item) for item in clips]
+    video_indexes = [index for index, kind in enumerate(kinds) if kind == "video"]
+    photo_indexes = [index for index, kind in enumerate(kinds) if kind != "video"]
+    frames = [0] * len(clips)
+    for index in video_indexes:
+        source = clips[index].get("source") or {}
+        start, end = clip_in_out_seconds(source)
+        frames[index] = max(1, round((end - start) * FPS))
+    video_total = sum(frames[index] for index in video_indexes)
+    owner = duration_seconds(
+        story=story,
+        clip_count=len(clips),
+        effective=effective,
+        request=request,
+        output=output,
+    )
+    stored = effective.get("video_duration_seconds") or 0
+    try:
+        owner_set = float(stored) > 0
+    except (TypeError, ValueError):
+        owner_set = False
+    if story:
+        target = max(len(clips), round(owner * FPS))
+    elif owner_set:
+        target = max(len(clips), round(float(stored) * FPS))
+    else:
+        photo_seconds = PHOTO_FLOOR_SECONDS * max(1, len(photo_indexes)) if photo_indexes else 0
+        target = video_total + max(len(photo_indexes), round(photo_seconds * FPS))
+        if not video_indexes:
+            target = max(len(clips), round(owner * FPS))
+    remaining = max(len(photo_indexes), target - video_total) if photo_indexes else 0
+    if photo_indexes:
+        base = remaining // len(photo_indexes)
+        leftover = remaining - (base * len(photo_indexes))
+        for index in photo_indexes:
+            extra = 1 if leftover > 0 else 0
+            if leftover > 0:
+                leftover -= 1
+            frames[index] = max(1, base + extra)
+    total = sum(frames) or max(1, target)
+    return frames, total
 
 
 def overlay_from_caption(text: str, *, tiktok_916: bool = False) -> dict[str, Any] | None:
@@ -300,10 +362,14 @@ def source_package(
     }
     clips = []
     omitted = []
+    has_video = False
     for source in sources:
+        master = _master_for_source(masters, source)
+        merged = {**master, **source}
+        video = asset_is_video(merged)
         variant = pick_variant(source, ratio)
-        url = str((variant or {}).get("preview_url") or "").strip()
-        media_id = str((variant or {}).get("media_asset_record_id") or "").strip()
+        url = str((variant or {}).get("preview_url") or "").strip() or playable_url(merged)
+        media_id = str((variant or {}).get("media_asset_record_id") or merged.get("media_asset_record_id") or "").strip()
         if not url or not media_id.startswith("rec"):
             omitted.append(str(source.get("id") or source.get("name") or "unknown"))
             continue
@@ -312,34 +378,35 @@ def source_package(
             overlay_text,
             tiktok_916=effective["platform"] == "TikTok" and ratio == "9:16",
         )
+        in_seconds, out_seconds = clip_in_out_seconds(merged)
+        has_video = has_video or video
         clips.append({
-            "source": source,
+            "source": merged,
             "variant": variant,
             "url": url,
             "media_asset_id": media_id,
-            "drive_id": str((variant or {}).get("google_drive_file_id") or "").strip(),
+            "drive_id": str((variant or {}).get("google_drive_file_id") or merged.get("google_drive_file_id") or "").strip(),
             "overlay": overlay,
+            "media_kind": "video" if video else "photo",
+            "in_seconds": in_seconds,
+            "out_seconds": out_seconds,
         })
     if omitted or not clips:
         return None
-    seconds = duration_seconds(
+    clip_frames, total_frames = assign_clip_frames(
+        clips,
         story=story,
-        clip_count=len(clips),
         effective=effective,
         request=request,
         output=output,
     )
-    fps = 30
-    total_frames = max(len(clips), round(seconds * fps))
-    base = total_frames // len(clips)
-    remainder = total_frames - (base * len(clips))
+    fps = FPS
     start = 0
     built = []
     for index, item in enumerate(clips):
-        frames = base + (1 if remainder > 0 else 0)
-        if remainder > 0:
-            remainder -= 1
+        frames = clip_frames[index]
         overlay = item["overlay"]
+        video = item["media_kind"] == "video"
         built.append({
             "id": f"studio-source-{index + 1}",
             "order": int((item["source"] or {}).get("order") or index + 1),
@@ -351,7 +418,13 @@ def source_package(
             "src": item["url"],
             "startFrame": start,
             "durationFrames": frames,
-            "motionStyle": "slowZoom" if story else "stillPhoto",
+            "motionStyle": "none" if video else ("slowZoom" if story else "stillPhoto"),
+            "media_kind": item["media_kind"],
+            "mediaKind": item["media_kind"],
+            "in_seconds": item["in_seconds"],
+            "out_seconds": item["out_seconds"],
+            "inSeconds": item["in_seconds"],
+            "startFromSeconds": item["in_seconds"] if video else 0,
             "source": "studio_platform_variant",
             "aspect_ratio": ratio,
             "google_drive_file_id": item["drive_id"] or None,
@@ -359,7 +432,7 @@ def source_package(
             "caption": (overlay or {}).get("text") or "",
         })
         start += frames
-    native = is_native_photo(effective["platform"], effective["output_type"], field_str(output, "Platform_Output_Type"))
+    native = (not has_video) and is_native_photo(effective["platform"], effective["output_type"], field_str(output, "Platform_Output_Type"))
     composition_id = None if native else "ChicagoShiningPhotoSequence"
     safe_type = "".join(ch if ch.isalnum() else "-" for ch in effective["output_type"].lower()).strip("-") or "output"
     filename = f"studio-{field_str(request, 'Production_Request_ID') or request['id']}-{effective['platform'].lower()}-{safe_type}.mp4"
@@ -374,6 +447,10 @@ def source_package(
             "startFrame": clip["startFrame"],
             "durationFrames": clip["durationFrames"],
             "motionStyle": clip["motionStyle"],
+            "mediaKind": clip.get("media_kind") or "photo",
+            "media_kind": clip.get("media_kind") or "photo",
+            "inSeconds": clip.get("in_seconds") or 0,
+            "startFromSeconds": clip.get("startFromSeconds") or 0,
             "overlay": clip.get("overlay") or None,
             "caption": clip.get("caption") or "",
         }

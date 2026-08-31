@@ -36,6 +36,24 @@ def test_apply_timeline_preserves_urls_and_phase6_transition_type():
     assert timed[0]["overlay"]["text"] == "A"
 
 
+def test_apply_timeline_keeps_video_duration():
+    clips = [
+        {"url": "https://cdn/a.jpg", "durationFrames": 90, "media_kind": "photo"},
+        {"url": "https://cdn/b.mp4", "durationFrames": 180, "mediaKind": "video"},
+    ]
+    timed = apply_timeline(clips, {
+        "timeline": {
+            "clips": [
+                {"duration_frames": 60, "start_frame": 0},
+                {"duration_frames": 45, "start_frame": 60},
+            ]
+        }
+    })
+    assert timed[0]["durationFrames"] == 60
+    assert timed[1]["durationFrames"] == 180
+    assert timed[1]["startFrame"] == 60
+
+
 def test_music_and_window_helpers():
     output = {
         "fields": {

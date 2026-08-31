@@ -5,6 +5,7 @@
     SINGLE_PHOTO: "single-photo",
     MULTIPLE_PHOTOS: "multiple-photos",
     VIDEO_CLIPS: "video-clips",
+    PHOTOS_AND_CLIPS: "photos-and-clips",
     FINISHED_VIDEO: "finished-video",
     FINISHED_STILLS: "finished-stills",
     SINGLE_AI: "single-ai",
@@ -13,7 +14,19 @@
   });
   const EZ_CAPTION_MODES = Object.freeze(["manual", "none", "ai"]);
   const EZ_PHASE1_INPUTS = Object.freeze([EZ_INPUTS.SINGLE_PHOTO, EZ_INPUTS.MULTIPLE_PHOTOS]);
-  const EZ_DISABLED_INPUTS = Object.freeze([EZ_INPUTS.VIDEO_CLIPS]);
+  const EZ_DISABLED_INPUTS = Object.freeze([]);
+  const EZ_CLIP_INPUTS = Object.freeze([EZ_INPUTS.VIDEO_CLIPS, EZ_INPUTS.PHOTOS_AND_CLIPS]);
+  const EZ_NATIVE_STILL_TYPES = Object.freeze({
+    Instagram: Object.freeze(["Single Image", "Carousel"]),
+    Facebook: Object.freeze(["Single Image", "Multi-Image Post"]),
+    TikTok: Object.freeze(["Single Photo", "Multi-Photo"]),
+  });
+  const EZ_VIDEO_PASSES = Object.freeze({
+    Instagram: "Reel",
+    Facebook: "Reel",
+    TikTok: "Video Draft",
+    YouTube: "Short",
+  });
   const EZ_PHOTO_PASSES = Object.freeze({
     single: Object.freeze({
       Instagram: "Single Image",
@@ -33,6 +46,15 @@
     Object.freeze({ platform: "TikTok", types: Object.freeze(["Video Draft", "Single Photo", "Multi-Photo"]) }),
     Object.freeze({ platform: "YouTube", types: Object.freeze(["Short", "Standard Video", "Slideshow Video"]) }),
   ]);
+
+  function ezIsClipInput(kind) {
+    return EZ_CLIP_INPUTS.includes(String(kind || "").trim());
+  }
+
+  function ezIsNativeStillOutput(platform, outputType) {
+    const types = EZ_NATIVE_STILL_TYPES[String(platform || "").trim()] || [];
+    return types.includes(String(outputType || "").trim());
+  }
 
   function ezPhotoCountKind(count) {
     const n = Math.max(0, Number(count) || 0);
@@ -167,6 +189,7 @@
     const kind = String(inputKind || "").trim();
     if (kind === EZ_INPUTS.FINISHED_VIDEO) return EZ_INPUTS.FINISHED_VIDEO;
     if (kind === EZ_INPUTS.FINISHED_STILLS) return EZ_INPUTS.FINISHED_STILLS;
+    if (ezIsClipInput(kind)) return kind;
     if (kind === EZ_INPUTS.MULTIPLE_PHOTOS || kind === EZ_INPUTS.MULTIPLE_AI || EZ_INPUTS.MIXED === kind) {
       return EZ_INPUTS.MULTIPLE_PHOTOS;
     }
@@ -178,6 +201,7 @@
     if (
       kind === EZ_INPUTS.SINGLE_PHOTO
       || kind === EZ_INPUTS.MULTIPLE_PHOTOS
+      || ezIsClipInput(kind)
       || kind === EZ_INPUTS.FINISHED_VIDEO
       || kind === EZ_INPUTS.FINISHED_STILLS
     ) return "Manual Upload";
@@ -203,6 +227,7 @@
     if (answers.photoWait) return 0;
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
     if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO) return 1;
+    if (ezIsClipInput(kind)) return Math.max(1, Number(answers.photoCount) || 2);
     if (kind === EZ_INPUTS.FINISHED_STILLS) return Math.max(1, Number(answers.photoCount) || 1);
     if (kind === EZ_INPUTS.MIXED) return Math.max(1, Number(answers.manualCount) || 1);
     if (kind === EZ_INPUTS.MULTIPLE_PHOTOS) return Math.max(2, Number(answers.photoCount) || 2);
@@ -241,17 +266,14 @@
     };
   }
 
-  function ezWizardPackages(photoCount) {
+  function ezWizardPackages(photoCount, answers = {}) {
     const count = Math.max(1, Number(photoCount) || 1);
-    const defaults = ezPlanFromPhotoCount({ photoCount: count });
-    const videoOverrides = {
-      Instagram: "Reel",
-      Facebook: "Slideshow Reel",
-      TikTok: "Video Draft",
-      YouTube: "Short",
-    };
+    const clipInput = ezIsClipInput(answers.inputKind);
+    const defaults = clipInput
+      ? ezPlanFromOverrides(count, { ...EZ_VIDEO_PASSES })
+      : ezPlanFromPhotoCount({ photoCount: count });
     const stills = ezStillsOverrides(count);
-    return [
+    const packages = [
       {
         id: "default",
         label: "Default for this input",
@@ -260,13 +282,17 @@
       {
         id: "video",
         label: "Video everywhere",
-        hint: "Reel, Slideshow Reel, TikTok draft, YouTube Short",
+        hint: "Reel, Facebook Reel, TikTok draft, YouTube Short",
       },
-      {
+    ];
+    if (!clipInput) {
+      packages.push({
         id: "stills",
         label: count <= 1 ? "Stills" : "Stills / carousel",
         hint: Object.entries(stills).map(([platform, type]) => `${platform} ${type}`).join(" · "),
-      },
+      });
+    }
+    packages.push(
       {
         id: "stories",
         label: "Stories plus feed",
@@ -274,7 +300,8 @@
       },
       { id: "platforms", label: "Choose platforms", hint: "Instagram, Facebook, TikTok, YouTube" },
       { id: "custom", label: "Custom formats", hint: "Pick each platform format" },
-    ];
+    );
+    return packages;
   }
 
   function ezWizardResolvePackage(answers = {}) {
@@ -288,6 +315,7 @@
         const platform = String(item?.platform || "").trim();
         const outputType = ezCanonicalOutputType(platform, item?.output_type);
         if (!platform || !outputType || outputType === "Story" && platform === "TikTok") continue;
+        if (ezIsClipInput(answers.inputKind) && ezIsNativeStillOutput(platform, outputType)) continue;
         if (!overrides[platform] && outputType !== "Story") overrides[platform] = outputType;
         else extras.push(`${platform}::${outputType}`);
         seen.add(platform);
@@ -297,14 +325,14 @@
     const selected = Array.isArray(answers.platforms) && answers.platforms.length
       ? answers.platforms
       : null;
-    if (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO || packageId === "video") {
-      const overrides = { Instagram: "Reel", Facebook: "Reel", TikTok: "Video Draft", YouTube: "Short" };
+    if (ezIsClipInput(answers.inputKind) || String(answers.inputKind || "") === EZ_INPUTS.FINISHED_VIDEO || packageId === "video") {
+      const overrides = { ...EZ_VIDEO_PASSES };
       const filtered = selected
         ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
         : overrides;
       return ezPlanFromOverrides(count, filtered);
     }
-    if (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_STILLS || packageId === "stills") {
+    if (!ezIsClipInput(answers.inputKind) && (String(answers.inputKind || "") === EZ_INPUTS.FINISHED_STILLS || packageId === "stills")) {
       const overrides = ezStillsOverrides(count);
       const filtered = selected
         ? Object.fromEntries(Object.entries(overrides).filter(([platform]) => selected.includes(platform)))
@@ -323,8 +351,13 @@
     EZ_CAPTION_MODES,
     EZ_PHASE1_INPUTS,
     EZ_DISABLED_INPUTS,
+    EZ_CLIP_INPUTS,
+    EZ_NATIVE_STILL_TYPES,
+    EZ_VIDEO_PASSES,
     EZ_PHOTO_PASSES,
     EZ_OUTPUT_OPTIONS,
+    ezIsClipInput,
+    ezIsNativeStillOutput,
     ezPhotoCountKind,
     ezDefaultPassMap,
     ezMasterContentType,

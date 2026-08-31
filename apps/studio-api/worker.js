@@ -3250,6 +3250,21 @@ const ITEM4_MAPPING_TABLE = "Platform Output Mappings";
 const ITEM4_MAX_FILES = 20;
 const ITEM4_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ITEM4_MAX_TOTAL_BYTES = 150 * 1024 * 1024;
+const ITEM4_MAX_CLIP_FILES = 10;
+const ITEM4_MAX_CLIP_FILE_BYTES = 200 * 1024 * 1024;
+const ITEM4_MAX_MIXED_TOTAL_BYTES = 1500 * 1024 * 1024;
+const ITEM4_CLIP_INPUTS = Object.freeze(["photos-and-clips", "video-clips"]);
+const ITEM4_NATIVE_STILL_OUTPUTS = Object.freeze({
+  Instagram: Object.freeze(["Single Image", "Carousel"]),
+  Facebook: Object.freeze(["Single Image", "Multi-Image Post"]),
+  TikTok: Object.freeze(["Single Photo", "Multi-Photo"]),
+});
+const ITEM4_VIDEO_DEFAULTS = Object.freeze({
+  Instagram: "Reel",
+  Facebook: "Reel",
+  TikTok: "Video Draft",
+  YouTube: "Short",
+});
 
 const ITEM4_RATIO_SPECS = Object.freeze({
   "4:5": Object.freeze({ width: 1080, height: 1350 }),
@@ -3338,6 +3353,42 @@ function item4IsSupportedVideoFile(file) {
   const mime = String(file?.type || "").toLowerCase();
   const ext = item4FileExtension(file?.name);
   return mime.startsWith("video/") || ["mp4", "mov", "m4v", "webm"].includes(ext);
+}
+
+function item4IsClipInputKind(kind) {
+  return ITEM4_CLIP_INPUTS.includes(String(kind || "").trim().toLowerCase());
+}
+
+function item4LooksLikeVideoAsset(asset) {
+  const kind = String(asset?.media_kind || "").trim().toLowerCase();
+  if (kind === "video") return true;
+  if (kind === "photo" || kind === "image") return false;
+  const mime = String(asset?.mime_type || "").toLowerCase();
+  const name = String(asset?.name || "").toLowerCase();
+  return mime.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(name);
+}
+
+function item4HasVideoMasters(assets) {
+  return (Array.isArray(assets) ? assets : []).some(item4LooksLikeVideoAsset);
+}
+
+function item4AssetMediaKind(asset) {
+  return item4LooksLikeVideoAsset(asset) ? "video" : "photo";
+}
+
+function item4PlayableMediaUrl(asset) {
+  const urls = [
+    asset?.preview_url,
+    asset?.url,
+    asset?.google_drive_url,
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  const publicHttp = urls.find((value) => /^https?:\/\//i.test(value) && !value.startsWith("/"));
+  return publicHttp || "";
+}
+
+function item4IsNativeStillOutput(platform, outputType) {
+  const types = ITEM4_NATIVE_STILL_OUTPUTS[String(platform || "").trim()] || [];
+  return types.includes(String(outputType || "").trim());
 }
 
 function item4NormalizedMimeType(file) {
@@ -3872,34 +3923,54 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
   if (existing.length + files.length > ITEM4_MAX_FILES) throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_FILES} master assets`);
   const meta = item4ParseJson(form.get("metadata"), []);
   const metadata = Array.isArray(meta) ? meta : [];
-  const inferredVideo = files.some((file) => item4IsSupportedVideoFile(file));
-  const finishedKind = studioNormalizeFinishedOriginKind(form.get("origin_kind"))
+  const requestedKind = String(form.get("origin_kind") || "").trim().toLowerCase();
+  const videoFiles = files.filter((file) => item4IsSupportedVideoFile(file));
+  const photoFiles = files.filter((file) => item4IsSupportedImageFile(file) && !item4IsSupportedVideoFile(file));
+  const existingVideos = existing.filter(item4LooksLikeVideoAsset).length + videoFiles.length;
+  const existingPhotos = existing.filter((asset) => !item4LooksLikeVideoAsset(asset)).length + photoFiles.length;
+  const clipOrigin = item4IsClipInputKind(requestedKind)
+    || item4IsClipInputKind(item4ParseEzOrigin(record).inputKind)
+    || existingVideos > 1
+    || (existingVideos > 0 && existingPhotos > 0);
+  const finishedKind = !clipOrigin && (
+    studioNormalizeFinishedOriginKind(requestedKind)
     || studioFinishedOriginKind(record)
-    || (inferredVideo ? "finished-video" : "");
+  );
   const finishedVideo = finishedKind === "finished-video";
-  const maxBytes = finishedVideo ? 200 * 1024 * 1024 : ITEM4_MAX_FILE_BYTES;
+  const mixedClips = clipOrigin && !finishedVideo;
+  if (mixedClips && videoFiles.length + existing.filter(item4LooksLikeVideoAsset).length > ITEM4_MAX_CLIP_FILES) {
+    throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_CLIP_FILES} video clips`);
+  }
   let total = 0;
   for (const file of files) {
     total += Number(file.size || 0);
-    const allowed = finishedVideo
-      ? (item4IsSupportedVideoFile(file) || item4IsSupportedImageFile(file))
-      : item4IsSupportedImageFile(file);
+    const isVideo = item4IsSupportedVideoFile(file);
+    const isImage = item4IsSupportedImageFile(file);
+    const allowed = finishedVideo || mixedClips
+      ? (isVideo || isImage)
+      : isImage;
     if (!allowed) {
       throw new HttpError(415, finishedVideo
         ? `${file.name || "A file"} is not a supported video or cover image.`
-        : `${file.name || "A file"} is not a supported photo. HEIC and HEIF are supported.`);
+        : mixedClips
+          ? `${file.name || "A file"} is not a supported photo or video clip.`
+          : `${file.name || "A file"} is not a supported photo. HEIC and HEIF are supported.`);
     }
-    if (Number(file.size || 0) > maxBytes) {
-      throw new HttpError(413, finishedVideo
-        ? `${file.name || "A file"} exceeds the 200 MB finished-video limit`
+    const limit = isVideo ? ITEM4_MAX_CLIP_FILE_BYTES : ITEM4_MAX_FILE_BYTES;
+    if (Number(file.size || 0) > limit) {
+      throw new HttpError(413, isVideo
+        ? `${file.name || "A file"} exceeds the 200 MB clip limit`
         : `${file.name || "An image"} exceeds the 25 MB per-image limit`);
     }
   }
-  if (!finishedVideo && total > ITEM4_MAX_TOTAL_BYTES) throw new HttpError(413, "The selected images exceed the 150 MB upload limit");
-  if (finishedVideo && total > maxBytes) throw new HttpError(413, "The finished video exceeds the 200 MB upload limit");
+  if (finishedVideo && total > ITEM4_MAX_CLIP_FILE_BYTES) throw new HttpError(413, "The finished video exceeds the 200 MB upload limit");
+  if (!finishedVideo && mixedClips && total > ITEM4_MAX_MIXED_TOTAL_BYTES) throw new HttpError(413, "The selected photos and clips exceed the upload limit");
+  if (!finishedVideo && !mixedClips && total > ITEM4_MAX_TOTAL_BYTES) throw new HttpError(413, "The selected images exceed the 150 MB upload limit");
 
   const originNotes = String(f(record, "Production_Notes") || "").trim();
-  const originStamp = finishedKind ? studioRewriteFinishedOriginNotes(originNotes, finishedKind) : originNotes;
+  const originStamp = mixedClips
+    ? studioRewriteClipOriginNotes(originNotes, requestedKind || "photos-and-clips")
+    : (finishedKind ? studioRewriteFinishedOriginNotes(originNotes, finishedKind) : originNotes);
   record = await item4UpdateRequestState(env, recordId, {
     Studio_Master_Asset_Status: "Uploading",
     ...(originStamp !== originNotes ? { Production_Notes: originStamp } : {}),
@@ -3920,11 +3991,17 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
       const m = metadata[i] || {};
       const width = Number(m.width || 0) || null;
       const height = Number(m.height || 0) || null;
+      const isVideo = item4IsSupportedVideoFile(file);
+      const durationSeconds = Number(m.duration_seconds || m.durationSeconds || 0);
       uploaded.push({
         id,
         order: existing.length + i + 1,
         name: String(file.name || safeName),
         mime_type: item4NormalizedMimeType(file),
+        media_kind: isVideo ? "video" : "photo",
+        duration_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
+        in_seconds: 0,
+        out_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
         source_format: item4IsHeicFile(file) ? item4FileExtension(file.name).toUpperCase() : (item4FileExtension(file.name).toUpperCase() || null),
         browser_preview_compatible: !item4IsHeicFile(file),
         size_bytes: Number(file.size || 0),
@@ -4019,8 +4096,8 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
       handoff_warning: drainWarning,
       record: mapProductionRequest(reconciled.record),
       message: reconciled.status === "Ready"
-        ? `${reconciled.ready_count} master photo${reconciled.ready_count === 1 ? "" : "s"} preserved in Google Drive and registered as Media Assets; temporary R2 staging removed.`
-        : "Master photos were accepted. Google Drive preservation is continuing in the restartable background handoff.",
+        ? `${reconciled.ready_count} master file${reconciled.ready_count === 1 ? "" : "s"} preserved in Google Drive and registered as Media Assets; temporary R2 staging removed.`
+        : "Master files were accepted. Google Drive preservation is continuing in the restartable background handoff.",
     }, reconciled.status === "Ready" ? 201 : 202);
   } catch (error) {
     // Before queue handoff begins, an upload failure can be rolled back completely.
@@ -4193,8 +4270,11 @@ function ideaLibraryAirtableEscape(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-function ideaLibraryFilterFormula(placeKeys) {
-  const base = "AND(OR({Media_Class}='Image',{Media_Class}='Graphic'),{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}))";
+function ideaLibraryFilterFormula(placeKeys, { includeVideo = false } = {}) {
+  const media = includeVideo
+    ? "OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video')"
+    : "OR({Media_Class}='Image',{Media_Class}='Graphic')";
+  const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}))`;
   const keys = (placeKeys || []).filter(Boolean).slice(0, 10);
   if (!keys.length) return base;
   const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic}))";
@@ -4227,6 +4307,28 @@ function ideaLibraryFileBytes(record) {
   const mb = Number(f(record, "File_Size_MB") || 0);
   if (Number.isFinite(mb) && mb > 0) return Math.round(mb * 1024 * 1024);
   return 0;
+}
+
+function ideaLibraryIsEligibleVideo(record) {
+  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
+  const role = String(f(record, "Asset_Role") || "").trim().toLowerCase();
+  const classification = String(f(record, "Classification_Status") || "").trim().toLowerCase();
+  const eligibility = String(f(record, "Raw_Source_Eligibility") || "").trim().toLowerCase();
+  const status = String(f(record, "Asset_Status") || "").trim().toLowerCase();
+  const access = String(f(record, "Drive_Access_Status") || "").trim().toLowerCase();
+  const name = String(f(record, "Asset Name") || "");
+  if (/__\d+x\d+__/i.test(name) || /fill-crop-v\d+/i.test(name)) return false;
+  if (mediaClass !== "video" && !mime.startsWith("video/")) return false;
+  if (role && role !== "raw footage") return false;
+  if (classification && classification !== "classified") return false;
+  if (Boolean(f(record, "Do_Not_Use"))) return false;
+  if (f(record, "Active") === false) return false;
+  if (eligibility === "ineligible") return false;
+  if (status && status !== "available") return false;
+  if (access && access !== "public") return false;
+  if (String(f(record, "Exclusion_Reasons") || "").trim()) return false;
+  return Boolean(googleDriveFileId(record) || String(f(record, "Google Drive URL") || "").trim());
 }
 
 function ideaLibraryIsEligibleImage(record) {
@@ -4307,9 +4409,13 @@ function ideaLibraryRankAsset(record, { placeKeys, subjectKeys, strongIdeaTokens
 }
 
 function mapIdeaLibraryAsset(record, row = {}) {
+  const video = ideaLibraryIsEligibleVideo(record);
   return {
     id: record.id,
     name: f(record, "Asset Name"),
+    media_kind: video ? "video" : "photo",
+    mime_type: String(f(record, "MIME_Type") || "").trim() || null,
+    duration_seconds: Number(f(record, "Duration_Seconds") || 0) || null,
     google_drive_file_id: googleDriveFileId(record),
     preview_path: `/api/media-assets/${record.id}/preview`,
     location: f(record, "Location") || null,
@@ -4325,16 +4431,18 @@ function mapIdeaLibraryAsset(record, row = {}) {
 async function getMediaLibraryStills(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
+  const includeVideo = ["1", "true", "video", "all", "clips"].includes(String(url.searchParams.get("include") || "").trim().toLowerCase());
   const queryTokens = ideaLibraryTokens(query);
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: IDEA_LIBRARY_SCAN_LIMIT,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(queryTokens.slice(0, 10)),
+    filterFormula: ideaLibraryFilterFormula(queryTokens.slice(0, 10), { includeVideo }),
   });
   const items = [];
   for (const record of records) {
-    if (!ideaLibraryIsEligibleImage(record)) continue;
+    const eligible = ideaLibraryIsEligibleImage(record) || (includeVideo && ideaLibraryIsEligibleVideo(record));
+    if (!eligible) continue;
     const haystack = ideaLibraryHaystack(record);
     if (queryTokens.length && !queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) continue;
     items.push(mapIdeaLibraryAsset(record, {
@@ -4415,14 +4523,17 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   });
 }
 
-function ideaLibraryRejectReason(record) {
+function ideaLibraryRejectReason(record, { allowVideo = false } = {}) {
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
   const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
   const name = String(f(record, "Asset Name") || record.id);
+  const isVideo = mediaClass === "video" || mime.startsWith("video/");
   if (Boolean(f(record, "Do_Not_Use"))) return `${name} is marked Do Not Use`;
-  if (mediaClass === "video" || mime.startsWith("video/")) return `${name} is a video; this picker attaches stills only`;
-  if (!ideaLibraryIsEligibleImage(record)) return `${name} is not a classified eligible library image`;
-  if (ideaLibraryFileBytes(record) > ITEM4_MAX_FILE_BYTES) return `${name} exceeds the 25 MB per-image limit`;
+  if (isVideo && !allowVideo) return `${name} is a video; this picker attaches stills only`;
+  if (isVideo && allowVideo && !ideaLibraryIsEligibleVideo(record)) return `${name} is not eligible Raw Footage`;
+  if (!isVideo && !ideaLibraryIsEligibleImage(record)) return `${name} is not a classified eligible library image`;
+  if (!isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_FILE_BYTES) return `${name} exceeds the 25 MB per-image limit`;
+  if (isVideo && ideaLibraryFileBytes(record) > ITEM4_MAX_CLIP_FILE_BYTES) return `${name} exceeds the 200 MB clip limit`;
   return null;
 }
 
@@ -4435,8 +4546,12 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
   const ids = [...new Set((Array.isArray(payload?.media_asset_ids) ? payload.media_asset_ids : [])
     .map((id) => String(id || "").trim())
     .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  if (!ids.length) throw new HttpError(400, "Choose at least one library still");
+  if (!ids.length) throw new HttpError(400, "Choose at least one library item");
   const existing = item4AssetManifest(record);
+  const allowVideo = Boolean(payload?.allow_video)
+    || item4IsClipInputKind(item4ParseEzOrigin(record).inputKind)
+    || item4HasVideoMasters(existing)
+    || item4IsClipInputKind(payload?.origin_kind);
   const already = new Set(existing.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean));
   const incoming = ids.filter((id) => !already.has(id));
   if (!incoming.length) {
@@ -4456,20 +4571,26 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
   const appended = [];
   for (const mediaId of incoming) {
     const media = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, mediaId);
-    const reject = ideaLibraryRejectReason(media);
+    const reject = ideaLibraryRejectReason(media, { allowVideo });
     if (reject) throw new HttpError(409, reject);
     const driveId = googleDriveFileId(media);
     const driveUrl = String(f(media, "Google Drive URL") || "").trim()
       || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : "");
     const mime = String(f(media, "MIME_Type") || "image/jpeg").trim() || "image/jpeg";
     const name = String(f(media, "Asset Name") || "photo");
+    const video = ideaLibraryIsEligibleVideo(media) || mime.startsWith("video/");
     if (/__\d+x\d+__/i.test(name) || /fill-crop-v\d+/i.test(name)) continue;
+    const durationSeconds = Number(f(media, "Duration_Seconds") || 0);
     const assetId = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
     appended.push({
       id: assetId,
       order: existing.length + appended.length + 1,
       name,
       mime_type: mime,
+      media_kind: video ? "video" : "photo",
+      duration_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
+      in_seconds: 0,
+      out_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
       source_format: String(f(media, "File_Extension") || item4FileExtension(name) || "").toUpperCase() || null,
       browser_preview_compatible: true,
       size_bytes: ideaLibraryFileBytes(media) || null,
@@ -4503,9 +4624,13 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
     String(asset?.google_drive_file_id || "").trim() && String(asset?.media_asset_record_id || "").trim()
   );
   const mediaAssetIds = [...new Set(assets.map((asset) => String(asset?.media_asset_record_id || "").trim()).filter(Boolean))];
+  const clipNotes = item4HasVideoMasters(assets)
+    ? studioRewriteClipOriginNotes(f(record, "Production_Notes"), "photos-and-clips")
+    : "";
   const updated = await item4UpdateRequestState(env, recordId, {
     Studio_Master_Assets_JSON: JSON.stringify(assets),
     Studio_Master_Asset_Count: assets.length,
+    ...(clipNotes ? { Production_Notes: clipNotes } : {}),
     Studio_Master_Asset_Status: allReady ? "Ready" : (assets.length ? "Uploading" : "None"),
     Studio_Master_Media_Assets: mediaAssetIds,
     Studio_Output_Plan_Status: "Needs Plan",
@@ -4524,8 +4649,8 @@ async function attachItem4LibraryAssets(request, env, url, authorization) {
     assets,
     record: mapProductionRequest(updated),
     message: appended.length
-      ? `${appended.length} library still${appended.length === 1 ? "" : "s"} attached from Google Drive.`
-      : "Selected library stills were already attached.",
+      ? `${appended.length} library item${appended.length === 1 ? "" : "s"} attached from Google Drive.`
+      : "Selected library items were already attached.",
   }, 201);
 }
 
@@ -4815,9 +4940,7 @@ function item4ParseEzOrigin(record) {
 }
 
 function item4MasterLooksLikeVideo(asset) {
-  const mime = String(asset?.mime_type || "").toLowerCase();
-  const name = String(asset?.name || "").toLowerCase();
-  return mime.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(name);
+  return item4LooksLikeVideoAsset(asset);
 }
 
 function studioRewriteFinishedOriginNotes(existing, kind) {
@@ -4832,11 +4955,27 @@ function studioRewriteFinishedOriginNotes(existing, kind) {
   return `${stamp}\n\n${text}`;
 }
 
+function studioRewriteClipOriginNotes(existing, kind) {
+  const nextKind = item4IsClipInputKind(kind) ? String(kind).trim().toLowerCase() : "photos-and-clips";
+  const stamp = `origin=ez-wizard; ez-input=${nextKind}; ez-caption=ai`;
+  const text = String(existing || "").trim();
+  if (!text) return stamp;
+  if (new RegExp(`ez-input=${nextKind}(?:;|\\s|$)`, "i").test(text)) return text;
+  const replaced = text.replace(/ez-input=[a-z0-9-]+/i, `ez-input=${nextKind}`);
+  if (replaced !== text) return replaced;
+  return `${stamp}\n\n${text}`;
+}
+
 function studioFinishedOriginKind(record) {
   const kind = item4ParseEzOrigin(record).inputKind;
-  if (kind === "finished-video" || kind === "finished-stills" || kind === "finished-carousel") return kind;
+  if (item4IsClipInputKind(kind)) return "";
+  if (kind === "finished-stills" || kind === "finished-carousel") return kind;
   const assets = item4AssetManifest(record);
-  if (assets.length && assets.every(item4MasterLooksLikeVideo)) return "finished-video";
+  const videos = assets.filter(item4MasterLooksLikeVideo);
+  const photos = assets.filter((asset) => !item4MasterLooksLikeVideo(asset));
+  if (videos.length > 1 || (videos.length && photos.length)) return "";
+  if (kind === "finished-video") return kind;
+  if (videos.length === 1 && photos.length === 0 && assets.length === 1) return "finished-video";
   return "";
 }
 
@@ -5095,7 +5234,8 @@ function item4SlideImageUrl(row) {
   return String(f(row, "Final Image URL") || f(row, "AI Image URL") || f(row, "Current Image URL") || "").trim();
 }
 
-function item4DefaultOutputType(platform, photoCount) {
+function item4DefaultOutputType(platform, photoCount, { hasVideo = false } = {}) {
+  if (hasVideo) return ITEM4_VIDEO_DEFAULTS[platform] || null;
   const n = Math.max(0, Number(photoCount) || 0);
   const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" });
   const multiple = Object.freeze({ Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" });
@@ -5175,14 +5315,19 @@ function item4NormalizePlanExtras(payloadExtras, platforms, existingItems = []) 
   return extras;
 }
 
-function item4PlanChoice(platform, requestedOutputType, photoCount) {
+function item4PlanChoice(platform, requestedOutputType, photoCount, { hasVideo = false } = {}) {
   const spec = ITEM4_PLAN_SPECS[platform];
   if (!spec) throw new HttpError(400, `Item 4 does not support ${platform}`);
-  const fallback = item4DefaultOutputType(platform, photoCount) || spec.default_output_type;
-  const outputType = item4CanonicalOutputType(platform, String(requestedOutputType || fallback).trim());
+  let requested = item4CanonicalOutputType(platform, String(requestedOutputType || "").trim());
+  if (hasVideo && item4IsNativeStillOutput(platform, requested)) requested = "";
+  const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo }) || spec.default_output_type;
+  const outputType = requested || fallback;
   const selected = spec.options[outputType];
   if (!selected) throw new HttpError(400, `${platform} output type ${outputType} is not supported by the Item 4 planner`);
-  return { output_type: outputType, ...selected, available_output_types: Object.keys(spec.options) };
+  const available = hasVideo
+    ? Object.keys(spec.options).filter((type) => !item4IsNativeStillOutput(platform, type))
+    : Object.keys(spec.options);
+  return { output_type: outputType, ...selected, available_output_types: available };
 }
 
 function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { companion = false } = {}) {
@@ -5214,6 +5359,7 @@ function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { c
 async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
   const assets = item4AssetManifest(record);
   const photoCount = item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
+  const hasVideo = item4HasVideoMasters(assets);
   const mappingIndex = await item4MappingIndex(env);
   const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   const items = Array.isArray(existingPlan?.items) ? [...existingPlan.items] : [];
@@ -5222,13 +5368,14 @@ async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
 
   for (const pair of enabledPairs || []) {
     const outputType = item4CanonicalOutputType(pair.platform, pair.output_type)
-      || item4DefaultOutputType(pair.platform, photoCount);
+      || item4DefaultOutputType(pair.platform, photoCount, { hasVideo });
     if (!outputType || !ITEM4_PLAN_SPECS[pair.platform]) continue;
     if (item4IsUnsupportedCompanion(pair.platform, outputType)) continue;
+    if (hasVideo && item4IsNativeStillOutput(pair.platform, outputType)) continue;
     const key = item4BridgePlanKey(pair.platform, outputType);
     if (items.some((item) => item4BridgePlanKey(item.platform, item.output_type) === key)) continue;
     try {
-      const chosen = item4PlanChoice(pair.platform, outputType, photoCount);
+      const chosen = item4PlanChoice(pair.platform, outputType, photoCount, { hasVideo });
       items.push(item4PlanItemFromChoice(pair.platform, chosen, photoCount, mappingIndex, {
         companion: item4IsCompanionOutputType(outputType),
       }));
@@ -5339,7 +5486,8 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   assertEditableProductionRequest(record);
   const assets=item4AssetManifest(record).sort((a,b)=>Number(a.order||0)-Number(b.order||0));
   const photoCount=item4EffectivePhotoCount(record, assets);
-  if (!photoCount) throw new HttpError(409,"Upload at least one master photo before building the platform plan, or set an exact AI slide count with Make AI Generated.");
+  const hasVideo=item4HasVideoMasters(assets);
+  if (!photoCount) throw new HttpError(409,"Upload at least one master photo or clip before building the platform plan, or set an exact AI slide count with Make AI Generated.");
   const requestedPlatforms=Array.isArray(payload.platforms)&&payload.platforms.length?payload.platforms:["Instagram","Facebook","TikTok","YouTube"];
   const platforms=[...new Set(requestedPlatforms.map(x=>String(x||"").trim()).filter(Boolean))];
   const overrides=payload.overrides&&typeof payload.overrides==="object"?payload.overrides:{};
@@ -5349,16 +5497,17 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   for (const platform of platforms) {
     const requestedRaw = item4CanonicalOutputType(platform, overrides[platform] || "");
     const requested = item4IsCompanionOutputType(requestedRaw) ? "" : requestedRaw;
-    const fallback = item4DefaultOutputType(platform, photoCount);
+    const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo });
     if (!requested && !fallback) continue;
-    const chosen = item4PlanChoice(platform, requested || fallback, photoCount);
+    const chosen = item4PlanChoice(platform, requested || fallback, photoCount, { hasVideo });
     items.push(item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex));
     if (!items[items.length - 1].aspect_ratio) needsReview = true;
   }
-  const extras = item4NormalizePlanExtras(payload.extras, platforms, items);
+  const extras = item4NormalizePlanExtras(payload.extras, platforms, items)
+    .filter((extra) => !hasVideo || extra.companion || !item4IsNativeStillOutput(extra.platform, extra.output_type));
   for (const extra of extras) {
     try {
-      const chosen = item4PlanChoice(extra.platform, extra.output_type, photoCount);
+      const chosen = item4PlanChoice(extra.platform, extra.output_type, photoCount, { hasVideo });
       items.push(item4PlanItemFromChoice(extra.platform, chosen, photoCount, mappingIndex, { companion: extra.companion }));
       if (!items[items.length - 1].aspect_ratio) needsReview = true;
     } catch {
@@ -5780,6 +5929,7 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
 
   const expected = [];
   for (const asset of assets) {
+    if (item4LooksLikeVideoAsset(asset)) continue;
     const sourceDriveId = String(asset?.google_drive_file_id || "").trim();
     const sourceMediaAssetId = String(asset?.media_asset_record_id || "").trim();
 
@@ -6880,6 +7030,36 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
     };
 
     for (const ratio of assetRatios) {
+      if (item4LooksLikeVideoAsset(asset)) {
+        const playable = item4PlayableMediaUrl(asset);
+        const mediaId = String(asset.media_asset_record_id || "").trim();
+        const driveId = String(asset.google_drive_file_id || "").trim();
+        if (!playable || !mediaId.startsWith("rec")) continue;
+        const spec = ITEM4_RATIO_SPECS[ratio];
+        row.variants[ratio] = {
+          aspect_ratio: ratio,
+          recipe_version: "video-passthrough",
+          media_kind: "video",
+          width: spec.width,
+          height: spec.height,
+          format: "VIDEO",
+          google_drive_file_id: driveId || null,
+          google_drive_url: String(asset.google_drive_url || "").trim() || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : null),
+          media_asset_record_id: mediaId,
+          preview_url: playable,
+          preview_status: "Ready",
+          file_name: String(asset.name || "clip.mp4"),
+          duration_seconds: Number(asset.duration_seconds || 0) || null,
+          in_seconds: Number(asset.in_seconds || 0) || 0,
+          out_seconds: Number(asset.out_seconds || 0) || null,
+          authoritative_storage: "google_drive",
+          persistent_cloudflare_storage: false,
+        };
+        row.media_kind = "video";
+        manifest.ready_count += 1;
+        if (planSet.has(ratio)) manifest.plan_ready_count += 1;
+        continue;
+      }
       const transferId = item4QueueTransferId(recordId, asset.id, ratio, asset);
       const q = queueById.get(transferId);
       if (!q || !item4QueueRowCountsReady(q)) continue;
