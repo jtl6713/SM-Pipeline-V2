@@ -2035,7 +2035,7 @@ function firstIdeaProductionRequestId(record) {
   return String(links[0] || "").trim() || null;
 }
 
-const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post"]);
+const IDEA_PHOTO_WAIT_TYPES = new Set(["Carousel", "Photo Set", "Feed Post", "Vertical Short Video"]);
 
 function ideaPhotoWaitApplies(input = {}) {
   const contentType = String(input.content_type || "").trim();
@@ -13039,12 +13039,16 @@ async function promoteIdeaViaI3I4(request, env, url, authorization) {
   const title = String(f(record, "Candidate_Title") || "").trim();
   const summary = String(f(record, "Idea_Summary") || "").trim();
   if (!title) throw new HttpError(409, "Idea title is required before promotion");
-  if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate; add a summary before promoting");
 
   const input = cleanPromotionPayload(payload);
-  if (ideaPhotoWaitApplies(input) || String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting") {
+  const waitingAlready = String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting";
+  if (ideaPhotoWaitApplies(input) || waitingAlready || payload?.photo_wait === true) {
+    if (!summary) {
+      input.production_notes = [input.production_notes, `Summary pending: ${title}`].filter(Boolean).join("\n");
+    }
     return approveIdeaAndWaitForPhotos(request, env, record, input, authorization);
   }
+  if (!summary) throw new HttpError(409, "Idea summary is required by the existing I4 promotion gate; add a summary before promoting");
   const webhook = promotionWebhookUrl(env, recordId, input);
   await fetchPromotionHandoff(env, webhook);
 
@@ -13071,7 +13075,10 @@ async function getAuthorizedIdeaRoute(request, env, url, authorization) {
 }
 
 async function approveIdeaAndWaitForPhotos(request, env, record, input, authorization) {
-  if (!ideaPhotoWaitApplies(input) && String(f(record, "Studio_Photo_Wait_Status") || "").trim() !== "Waiting") {
+  const waitingAlready = String(f(record, "Studio_Photo_Wait_Status") || "").trim() === "Waiting";
+  const rangeWait = String(input.carousel_slide_count_mode || "").trim() === "Target range"
+    && String(input.carousel_image_mode || "").trim() !== "Make AI Generated";
+  if (!ideaPhotoWaitApplies(input) && !waitingAlready && !rangeWait) {
     throw new HttpError(400, "Photo wait requires a target range and real photos, not AI-generated slides");
   }
   const now = new Date().toISOString();
@@ -13094,30 +13101,32 @@ async function approveIdeaAndWaitForPhotos(request, env, record, input, authoriz
       ? "Ready"
       : "Waiting",
   };
+  if (!String(f(record, "Idea_Summary") || "").trim()) {
+    fields.Idea_Summary = String(f(record, "Candidate_Title") || "Photo wait").trim();
+  }
   const updatedIdea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, record.id, {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
   });
   const draft = await existingDraftForIdea(env, record.id, authorization)
     || await createDraftForIdea(env, updatedIdea, authorization);
-  const match = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, updatedIdea, {
-    authorization,
-    force: false,
-    productionRequest: draft,
-  });
+  // Do not scan the full library on this request. Matching runs from cron / Match photos now.
   return respond(request, env, {
     ok: true,
     promoted: false,
-    waiting: match.action !== "ready",
-    photo_wait: match,
-    promotion_state: match.action === "ready" ? "production_ready" : "waiting_for_photos",
+    waiting: true,
+    photo_wait: {
+      action: "wait",
+      reason: "deferred_scan",
+      high_count: 0,
+      selected: [],
+    },
+    promotion_state: "waiting_for_photos",
     handoff: "photo-wait",
-    message: match.action === "ready"
-      ? `Matched ${match.selected.length} photo${match.selected.length === 1 ? "" : "s"}. Production is ready for content rules; rendering is not started.`
-      : `Approved. Waiting for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
-    record: mapIdea(match.idea || updatedIdea),
-    production_request: match.production_request ? mapProductionRequest(match.production_request) : mapProductionRequest(draft),
-  }, match.action === "ready" ? 200 : 202);
+    message: `Approved. Waiting for at least ${input.carousel_slide_count_min} high-confidence photos (will take up to ${input.carousel_slide_count_max}).`,
+    record: mapIdea(updatedIdea),
+    production_request: mapProductionRequest(draft),
+  }, 202);
 }
 
 async function matchIdeaPhotosRoute(request, env, url, authorization) {
