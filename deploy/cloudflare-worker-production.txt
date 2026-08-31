@@ -258,3 +258,5 @@ Variant authority heal Worker deploy: 2026-08-31 - Error crops that already have
 Scheduled waiting status Worker deploy: 2026-08-31 - Future-dated TikTok/approve handoffs stamp Ready to Schedule / Waiting for Schedule instead of Ready for Assets. Worker 0.10.203-scheduled-waiting-status.
 
 Python default Worker deploy: 2026-08-31 - Unset STAGE_BACKEND flags no longer fall back to Make. Stages pulse the local Python runner. Worker 0.10.204-python-default.
+
+SMV1 Python-only Worker deploy: 2026-08-31 - Preview-cache drain and cron no longer pulse or PATCH Make scenario 5894885. Crops and previews stay on the Python runner. Worker 0.10.205-smv1-python-only.

@@ -7,7 +7,7 @@ from item4.processor import process_drain
 
 def run(request: StageRequest) -> StageResult:
     """
-    SMV1 — drain Studio Media Transfer Queue rows (Make scenario 5894885).
+    SMV1 — drain Studio Media Transfer Queue rows on the Python runner.
 
     Pending platform variants for the same photo share one Drive download.
     Up to four photos crop in parallel. Follow-up rows (previews, masters)

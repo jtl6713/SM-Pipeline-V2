@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.204-python-default",
+          version: "0.10.205-smv1-python-only",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -6928,81 +6928,10 @@ async function item4SetSmv1SelectorFormula(env, formula) {
 }
 
 async function item4DrainVariantWorker(env, recordId, maxRuns, options = {}) {
-  // Hard guarantee: before any pending platform variant is allowed to run,
-  // verify the live SMV1 blueprint has filename-only Drive reuse disabled.
-  // This keeps variant generation source-locked even when generic filenames
-  // (for example images 1.jpg) are reused across different Production Requests.
-  await item4EnsureSmv1PreviewCacheWorker(env);
-
-  if (pipelineStageBackend(env, "SMV1").mode === "python") {
-    return item4PulseSmv1Python(env, recordId, maxRuns);
-  }
-
-  const maxMs = Number(options.maxMs || 0);
-  const started = Date.now();
-  const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
-  const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
-  const originalState = await phase6ScenarioState(env, ITEM4_SMV1_SCENARIO_ID);
-  if (testRunId && originalState.isActive) throw new HttpError(409, "Test Mode refuses to seize an already-active SMV1 scenario");
-  const executionIds = [];
-  let selectorPinned = false;
-
-  try {
-    await item4SetSmv1SelectorFormula(env, item4Smv1ExactRequestFormula(recordId, testRunId));
-    selectorPinned = true;
-
-    for (let attempt = 0; attempt < maxRuns; attempt += 1) {
-      if (maxMs > 0 && (Date.now() - started) >= maxMs) break;
-      const current = await item4VariantQueueRows(env, recordId);
-      const outstanding = current.filter(item4QueueRowIsOutstanding);
-      if (!outstanding.length) break;
-      if (testRunId) {
-        const crossBoundary = current.filter((row) => String(f(row, "Test_Run_ID") || "").trim() !== testRunId);
-        if (crossBoundary.length) throw new HttpError(409, "SMV1 Test Mode queue contains a blank or mismatched Test_Run_ID");
-      }
-
-      if (!originalState.isActive) {
-        // SMV1 Module 1 reads maxRecords=1. Pinning the selector to this
-        // Production Request is what makes one pulse consume this request's
-        // next row instead of a random pending crop from another piece.
-        const run = await phase6PulseOnDemandScenario(env, ITEM4_SMV1_SCENARIO_ID, { waitMs: 45000 });
-        if (run?.executionId) executionIds.push(run.executionId);
-
-        const beforeIds = new Set(outstanding.map((row) => row.id));
-        for (let wait = 0; wait < 6; wait += 1) {
-          if (maxMs > 0 && (Date.now() - started) >= maxMs) break;
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          const after = await item4VariantQueueRows(env, recordId);
-          const stillOutstanding = after.filter((row) => beforeIds.has(row.id) && item4QueueRowIsOutstanding(row));
-          if (stillOutstanding.length < outstanding.length) break;
-        }
-        continue;
-      }
-
-      const run = await phase6RunScenario(env, ITEM4_SMV1_SCENARIO_ID);
-      executionIds.push(run.executionId);
-      const remaining = maxMs > 0 ? Math.max(1500, maxMs - (Date.now() - started)) : 60000;
-      const done = await phase6WaitForScenarioExecution(
-        env,
-        ITEM4_SMV1_SCENARIO_ID,
-        run.executionId,
-        Math.min(60000, remaining),
-        1500
-      );
-      if (done.done && !done.success) {
-        throw new HttpError(502, `SMV1 variant worker failed with status ${done.status}`);
-      }
-    }
-  } finally {
-    if (selectorPinned) {
-      try { await item4SetSmv1SelectorFormula(env, ITEM4_SMV1_PRODUCTION_FORMULA); } catch {}
-    }
-    if (!originalState.isActive) {
-      try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
-    }
-  }
-
-  return executionIds;
+  // Make SMV1 is retired. Crops, Drive authority, and preview cache run on
+  // the local Python runner. Do not PATCH or pulse scenario 5894885.
+  void options;
+  return item4PulseSmv1Python(env, recordId, maxRuns);
 }
 
 async function item4ListPendingQueueRequestIds(env) {
@@ -7023,11 +6952,6 @@ async function item4ListPendingQueueRequestIds(env) {
 async function item4DrainAllPendingWork(env, options = {}) {
   // Worker owns the Item 4 queue. Browser polling and HTTP timeboxes may stop;
   // cron must keep draining until every pending master/variant row is gone.
-  try {
-    await item4SetSmv1SelectorFormula(env, ITEM4_SMV1_PRODUCTION_FORMULA);
-  } catch (error) {
-    console.warn("SMV1 production selector restore deferred before queue drain", error);
-  }
   const maxMs = Number(options.maxMs || ITEM4_DRAIN_CRON_BUDGET_MS);
   const started = Date.now();
   const requestIds = await item4ListPendingQueueRequestIds(env);
@@ -15149,57 +15073,9 @@ async function item4PreviewPendingRows(env, recordId) {
 }
 
 async function item4DrainPreviewCacheWorker(env, recordId, maxRuns = 30) {
-  let pending = await item4PreviewPendingRows(env, recordId);
+  const pending = await item4PreviewPendingRows(env, recordId);
   if (!pending.length) return [];
-
-  await item4EnsureSmv1PreviewCacheWorker(env);
-
-  const originalState = await phase6ScenarioState(env, ITEM4_SMV1_SCENARIO_ID);
-  const executionIds = [];
-  try {
-    for (let attempt = 0; attempt < maxRuns; attempt += 1) {
-      pending = await item4PreviewPendingRows(env, recordId);
-      if (!pending.length) break;
-
-      if (!originalState.isActive) {
-        const beforeIds = new Set(pending.map((row) => row.id));
-        const beforeCount = pending.length;
-        const run = await phase6PulseOnDemandScenario(env, ITEM4_SMV1_SCENARIO_ID, { waitMs: 30000 });
-        if (run?.executionId) executionIds.push(run.executionId);
-
-        // Allow Make + Airtable to checkpoint Preview_Status/Preview_URL before
-        // the next pulse. Continue even if this specific wait window sees no
-        // progress; the outer loop is bounded by maxRuns.
-        for (let wait = 0; wait < 6; wait += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          const after = await item4PreviewPendingRows(env, recordId);
-          const sameRowsStillPending = after.filter((row) => beforeIds.has(row.id));
-          if (after.length < beforeCount || sameRowsStillPending.length < beforeCount) break;
-        }
-        continue;
-      }
-
-      // Preserve an already-active SMV1 and use explicit runs only in that case.
-      const run = await phase6RunScenario(env, ITEM4_SMV1_SCENARIO_ID);
-      executionIds.push(run.executionId);
-      const done = await phase6WaitForScenarioExecution(
-        env,
-        ITEM4_SMV1_SCENARIO_ID,
-        run.executionId,
-        60000,
-        1200
-      );
-      if (done.done && !done.success) {
-        throw new HttpError(502, `SMV1 browser-preview cache run failed with status ${done.status}`);
-      }
-    }
-  } finally {
-    if (!originalState.isActive) {
-      try { await phase6SetScenarioActive(env, ITEM4_SMV1_SCENARIO_ID, false); } catch {}
-    }
-  }
-
-  return executionIds;
+  return item4PulseSmv1Python(env, recordId, maxRuns);
 }
 
 function mediaAssetPreviewRecordIdFromPath(url) {
