@@ -250,3 +250,7 @@ IG carousel reconcile root cause Worker deploy: 2026-08-30 - Due mid-pipeline ca
 Story teaser 5s Worker deploy: 2026-08-31 - Instagram and Facebook Stories default to 5 seconds for a single still and do not inherit the 30-second main video. Worker 0.10.199-story-teaser-5s.
 
 Autonomous subject pin Worker deploy: 2026-08-31 - Run autonomous can pin the next harvest to a landmark such as Chicago Theatre. Worker 0.10.200-theatre-pin.
+
+Library browse Worker deploy: 2026-08-31 - Operators browse classified Google Drive stills and attach the ones they check. Worker 0.10.201-library-browse.
+
+Variant authority heal Worker deploy: 2026-08-31 - Error crops that already have Drive + Media Asset count as Ready; Prepare retries Error without files. Worker 0.10.202-variant-authority-heal.

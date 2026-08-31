@@ -62,20 +62,38 @@ def test_non_staging_source_still_uses_public_url(monkeypatch):
 
 def test_fail_row_uses_valid_transfer_status():
     client = MagicMock()
+    client.get_record.return_value = {"fields": {}}
     _fail_row(client, "recROW1", "missing folder")
     client.update_record.assert_called_once()
     fields = client.update_record.call_args.args[2]
     assert fields["Transfer_Status"] == "Error"
 
     client.reset_mock()
+    client.get_record.return_value = {"fields": {}}
     _fail_row(client, "recROW1", "404 not found", retryable=True)
     fields = client.update_record.call_args.args[2]
     assert fields["Transfer_Status"] == "Pending"
 
 
+def test_fail_row_does_not_hide_completed_crop():
+    client = MagicMock()
+    client.get_record.return_value = {
+        "fields": {
+            "Drive_File_ID": "1abc",
+            "Media_Asset_Record_ID": "recMEDIA1",
+            "Transfer_Status": "Ready",
+        }
+    }
+    _fail_row(client, "recROW1", "Variant service failed (503): Worker exceeded resource limits")
+    fields = client.update_record.call_args.args[2]
+    assert fields["Transfer_Status"] == "Ready"
+    assert fields["Error_Message"] is None
+
+
 def test_retryable_master_errors():
     assert is_retryable_master_error(RuntimeError("Staged object not found via media bridge for key x"))
     assert is_retryable_master_error(RuntimeError("404 Client Error"))
+    assert is_retryable_master_error(RuntimeError("Variant service failed (503): Worker exceeded resource limits"))
     assert not is_retryable_master_error(RuntimeError("Master queue row is missing Target_Drive_Folder_ID"))
 
 

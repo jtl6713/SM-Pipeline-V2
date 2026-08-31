@@ -21,6 +21,23 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _media_asset_id(fields: dict[str, Any] | None) -> str:
+    fields = fields or {}
+    generated = fields.get("Generated_Media_Asset") or []
+    if isinstance(generated, list) and generated:
+        first = generated[0]
+        if isinstance(first, dict):
+            return str(first.get("id") or "").strip()
+        return str(first or "").strip()
+    return str(fields.get("Media_Asset_Record_ID") or "").strip()
+
+
+def _row_has_authority(fields: dict[str, Any] | None) -> bool:
+    fields = fields or {}
+    drive_id = str(fields.get("Drive_File_ID") or "").strip()
+    return bool(drive_id and _media_asset_id(fields))
+
+
 def _fail_row(
     client: AirtableClient,
     record_id: str,
@@ -28,6 +45,7 @@ def _fail_row(
     *,
     preview: bool = False,
     retryable: bool = False,
+    existing_fields: dict[str, Any] | None = None,
 ) -> None:
     if preview:
         client.update_record(
@@ -36,6 +54,24 @@ def _fail_row(
             {
                 "Preview_Status": "Failed",
                 "Preview_Error": message[:10000],
+            },
+        )
+        return
+    current = existing_fields
+    if current is None:
+        try:
+            record = client.get_record(MEDIA_TRANSFER_QUEUE_TABLE, record_id)
+            current = record.get("fields") or {}
+        except Exception:
+            current = {}
+    if _row_has_authority(current):
+        # A later 503/retry must not hide a crop that already landed in Drive.
+        client.update_record(
+            MEDIA_TRANSFER_QUEUE_TABLE,
+            record_id,
+            {
+                "Transfer_Status": "Ready",
+                "Error_Message": None,
             },
         )
         return
@@ -98,7 +134,16 @@ def requeue_stale_processing(
         if stamp and (now_ms - stamp) < STALE_PROCESSING_MS:
             continue
         attempts = int(fields.get("Attempt_Count") or 0)
-        if attempts >= 6:
+        if _row_has_authority(fields):
+            client.update_record(
+                MEDIA_TRANSFER_QUEUE_TABLE,
+                row["id"],
+                {
+                    "Transfer_Status": "Ready",
+                    "Error_Message": None,
+                },
+            )
+        elif attempts >= 6:
             client.update_record(
                 MEDIA_TRANSFER_QUEUE_TABLE,
                 row["id"],
@@ -128,6 +173,8 @@ def requeue_stale_processing(
 def is_retryable_master_error(exc: Exception) -> bool:
     message = str(exc).lower()
     if "404" in message or "not found" in message or "timed out" in message or "timeout" in message:
+        return True
+    if "503" in message or "resource limits" in message or "worker exceeded" in message:
         return True
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
@@ -314,6 +361,22 @@ def _process_variant_pending(
     if not folder_id or not source_drive_id or not ratio:
         raise RuntimeError("Platform variant row is missing folder, source drive id, or aspect ratio")
 
+    if _row_has_authority(fields):
+        client.update_record(
+            MEDIA_TRANSFER_QUEUE_TABLE,
+            record_id,
+            {"Transfer_Status": "Ready", "Error_Message": None},
+        )
+        return {
+            "route": "variant_authority_reuse",
+            "queue_record_id": record_id,
+            "transfer_id": str(fields.get("Transfer_ID") or "").strip(),
+            "drive_file_id": str(fields.get("Drive_File_ID") or "").strip(),
+            "media_asset_id": _media_asset_id(fields),
+            "recipe": VARIANT_RECIPE_VERSION,
+            "ratio": ratio,
+        }
+
     _claim_row(client, record_id, fields)
     source_bytes, _ = drive.download_file(source_drive_id)
     rendered = variant.render(source_bytes, ratio, _gravity_token(fields))
@@ -335,22 +398,44 @@ def process_variant_group(
     if not source_drive_id:
         raise RuntimeError("Platform variant group is missing Source_Drive_File_ID")
 
+    pending_rows: list[dict] = []
+    results: list[dict[str, Any]] = []
     for row in rows:
         fields = row.get("fields") or {}
         folder_id = str(fields.get("Target_Drive_Folder_ID") or "").strip()
         ratio = str(fields.get("Aspect_Ratio") or "").strip()
         if not folder_id or not ratio:
             raise RuntimeError("Platform variant row is missing folder or aspect ratio")
+        if _row_has_authority(fields):
+            patch = {"Transfer_Status": "Ready", "Error_Message": None}
+            if airtable_lock:
+                with airtable_lock:
+                    client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, row["id"], patch)
+            else:
+                client.update_record(MEDIA_TRANSFER_QUEUE_TABLE, row["id"], patch)
+            results.append({
+                "route": "variant_authority_reuse",
+                "queue_record_id": row["id"],
+                "transfer_id": str(fields.get("Transfer_ID") or "").strip(),
+                "drive_file_id": str(fields.get("Drive_File_ID") or "").strip(),
+                "media_asset_id": _media_asset_id(fields),
+                "recipe": VARIANT_RECIPE_VERSION,
+                "ratio": ratio,
+            })
+            continue
+        pending_rows.append(row)
         if airtable_lock:
             with airtable_lock:
                 _claim_row(client, row["id"], fields)
         else:
             _claim_row(client, row["id"], fields)
 
+    if not pending_rows:
+        return results
+
     source_bytes, _ = drive.download_file(source_drive_id)
-    results: list[dict[str, Any]] = []
     first_error: Exception | None = None
-    for row in rows:
+    for row in pending_rows:
         fields = row.get("fields") or {}
         ratio = str(fields.get("Aspect_Ratio") or "").strip()
         try:
@@ -368,6 +453,7 @@ def process_variant_group(
                             row["id"],
                             str(exc),
                             retryable=is_retryable_master_error(exc),
+                            existing_fields=fields,
                         )
                 else:
                     _fail_row(
@@ -375,6 +461,7 @@ def process_variant_group(
                         row["id"],
                         str(exc),
                         retryable=is_retryable_master_error(exc),
+                        existing_fields=fields,
                     )
             except Exception:
                 pass

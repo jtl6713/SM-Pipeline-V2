@@ -16,6 +16,7 @@ export default {
       const isMusicPreviewRoute = /^\/api\/music\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
       const isVoicePreviewRoute = /^\/api\/voices\/[A-Za-z0-9_-]+\/preview$/.test(url.pathname);
       const isMediaAssetPreviewRoute = /^\/api\/media-assets\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
+      const isMediaLibraryStillsRoute = url.pathname === "/api/media-assets/library-stills";
       const isIdeaRecordRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
       const isIdeaRestoreRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/restore$/.test(url.pathname);
@@ -189,12 +190,13 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.200-theatre-pin",
+          version: "0.10.202-variant-authority-heal",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
+          studio_library_browse_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
@@ -431,6 +433,12 @@ export default {
       }
       if (!authorization.authorized) {
         throw new HttpError(403, authorization.authorization_error || "Studio membership required");
+      }
+
+      if (isMediaLibraryStillsRoute) {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requirePermission(authorization, "production_configure");
+        return getMediaLibraryStills(request, env, url, authorization);
       }
 
       if (isMediaAssetPreviewRoute) {
@@ -4307,6 +4315,37 @@ function mapIdeaLibraryAsset(record, row = {}) {
   };
 }
 
+async function getMediaLibraryStills(request, env, url, authorization) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const query = String(url.searchParams.get("q") || "").trim();
+  const queryTokens = ideaLibraryTokens(query);
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: IDEA_LIBRARY_SCAN_LIMIT,
+    sortField: "Intake_Date",
+    sortDirection: "desc",
+    filterFormula: ideaLibraryFilterFormula(queryTokens.slice(0, 10)),
+  });
+  const items = [];
+  for (const record of records) {
+    if (!ideaLibraryIsEligibleImage(record)) continue;
+    const haystack = ideaLibraryHaystack(record);
+    if (queryTokens.length && !queryTokens.some((token) => ideaLibraryHasToken(haystack, token))) continue;
+    items.push(mapIdeaLibraryAsset(record, {
+      score: 0,
+      confidence: "browse",
+      match_reasons: queryTokens.length ? ["search_hit"] : ["library_browse"],
+      preselected: false,
+    }));
+    if (items.length >= 60) break;
+  }
+  return respond(request, env, {
+    ok: true,
+    query: query || null,
+    count: items.length,
+    records: items,
+  });
+}
+
 async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const ideaId = ideaRecordIdFromPath(url);
@@ -5567,6 +5606,15 @@ function item4QueueStatus(row) {
   return String(f(row, "Transfer_Status") || "").trim();
 }
 
+function item4QueueRowHasAuthority(row) {
+  return Boolean(item4QueueDriveFileId(row) && item4QueueMediaAssetId(row));
+}
+
+function item4QueueRowCountsReady(row) {
+  if (item4QueueStatus(row) === "Ready") return true;
+  return item4QueueRowHasAuthority(row);
+}
+
 async function item4RequeueStaleProcessing(env, rows) {
   const now = Date.now();
   const next = [];
@@ -5711,7 +5759,8 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
       const current = byTransferId.get(transferId) || null;
       const currentStatus = current ? item4QueueStatus(current) : "";
       const currentPreviewStatus = current ? String(f(current, "Preview_Status") || "").trim() : "";
-      const preserveStatus = ["Ready", "Drive Uploaded", "Processing"].includes(currentStatus);
+      const hasAuthority = current ? item4QueueRowHasAuthority(current) : false;
+      const preserveStatus = hasAuthority || ["Ready", "Drive Uploaded", "Processing"].includes(currentStatus);
 
       const fields = {
         Transfer_ID: transferId,
@@ -5735,8 +5784,11 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
         Variant_Style: item4CropStyleToken(asset, ratio),
       };
 
-      if (!preserveStatus) {
-        fields.Transfer_Status = currentStatus === "Failed" ? "Pending" : (currentStatus || "Pending");
+      if (hasAuthority && currentStatus !== "Ready") {
+        fields.Transfer_Status = "Ready";
+        fields.Error_Message = null;
+      } else if (!preserveStatus) {
+        fields.Transfer_Status = ["Failed", "Error"].includes(currentStatus) ? "Pending" : (currentStatus || "Pending");
         fields.Error_Message = null;
       }
       if (!["Ready", "Pending"].includes(currentPreviewStatus)) {
@@ -6729,7 +6781,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
     for (const ratio of assetRatios) {
       const transferId = item4QueueTransferId(recordId, asset.id, ratio, asset);
       const q = queueById.get(transferId);
-      if (!q || item4QueueStatus(q) !== "Ready") continue;
+      if (!q || !item4QueueRowCountsReady(q)) continue;
 
       const driveId = item4QueueDriveFileId(q);
       const mediaAssetId = item4QueueMediaAssetId(q);
@@ -6819,8 +6871,30 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   const planExpectedIds = new Set(
     assets.flatMap((asset) => planRatios.map((ratio) => item4QueueTransferId(recordId, asset.id, ratio, asset)))
   );
+  for (const row of scoped) {
+    if (item4QueueStatus(row) === "Ready" || !item4QueueRowHasAuthority(row)) continue;
+    try {
+      const healed = await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Transfer_Status: "Ready", Error_Message: null },
+          typecast: true,
+        }),
+      });
+      if (healed?.fields) Object.assign(row.fields || (row.fields = {}), healed.fields);
+      else if (row.fields) {
+        row.fields.Transfer_Status = "Ready";
+        row.fields.Error_Message = null;
+      }
+    } catch (error) {
+      console.warn("Item 4 authority heal failed", row.id, error);
+    }
+  }
+
   const planFailed = scoped.filter((row) =>
-    planExpectedIds.has(String(f(row, "Transfer_ID") || "").trim()) && item4QueueStatus(row) === "Failed"
+    planExpectedIds.has(String(f(row, "Transfer_ID") || "").trim())
+    && ["Failed", "Error"].includes(item4QueueStatus(row))
+    && !item4QueueRowHasAuthority(row)
   );
   const pending = scoped.filter((row) =>
     ["Pending", "Drive Uploaded", "Processing"].includes(item4QueueStatus(row))
@@ -6845,7 +6919,7 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
 
   const manifest = item4BuildDriveManifest(recordId, assets, ratios, scoped, planRatios);
   const mediaAssetIds = [...new Set(
-    scoped.filter((row) => item4QueueStatus(row) === "Ready")
+    scoped.filter((row) => item4QueueRowCountsReady(row))
       .map(item4QueueMediaAssetId)
       .filter(Boolean)
   )];
