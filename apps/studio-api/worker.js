@@ -408,6 +408,7 @@ export default {
           item4_facebook_slideshow_reel_opt_in: true,
           item4_facebook_slideshow_voiceover_hardening: true,
           facebook_graph_publish_held: studioFacebookGraphPublishHeld(env),
+          facebook_public_make_publish: true,
           item4_ratio_authority: "platform-output-mappings",
           item4_publish_locked_until_bridge_validation: false,
           item4_source_to_production_bridge: "validated-preflight-v1",
@@ -908,6 +909,11 @@ export default {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
+      }
+      try {
+        await studioReconcileFacebookPublicMake(env);
+      } catch (error) {
+        console.warn("facebook public make reconcile cron failed", error);
       }
       // Due IG carousels (Parent Ready) must publish before heavier platform polls
       // burn the isolate subrequest budget — 304 sat ~3h past schedule otherwise.
@@ -17588,6 +17594,8 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: ITEM4_C2_SCENARIO_ID, key: "C2" },
 ]);
 const STUDIO_AP0_WEBHOOK_URL = "https://hook.us2.make.com/q1lx2g0gg7khxzgvnkums12wu649pjnw";
+// Live FB-PUBLIC scenario 6107230 (Make connection 9988775). Not unpublished Graph / FB-ORCH.
+const STUDIO_FB_PUBLIC_WEBHOOK_URL = "https://hook.us2.make.com/ivrjp4e0nfpuyvukb18116wj1fwgjdw1";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
   { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG" },
@@ -19114,6 +19122,64 @@ async function studioPulseMakeWebhook(env, url, recordId, target, extra = {}) {
   return { ok: false, skipped: "make-retired", target };
 }
 
+function studioFacebookPublicMakeWebhookUrl(env) {
+  return String(env?.FB_PUBLIC_MAKE_WEBHOOK_URL || STUDIO_FB_PUBLIC_WEBHOOK_URL || "").trim();
+}
+
+function studioFacebookPublicCdnUrl(record) {
+  const preview = String(f(record, "Studio_Preview_URL") || "").trim();
+  const staged = String(f(record, "FB_Slideshow_Public_URL") || "").trim();
+  const publish = String(f(record, "Publish_Asset_URL") || "").trim();
+  if (staged.startsWith("https://media.chicagoshining.com/")) return staged;
+  if (publish.startsWith("https://media.chicagoshining.com/")) return publish;
+  if (preview.startsWith("https://media.chicagoshining.com/")) return preview;
+  return "";
+}
+
+function studioFacebookPublicMakeRoutable(record) {
+  const plan = studioPublishDispatchTarget(record);
+  return Boolean(plan && (plan.target === "FB0" || plan.target === "FBS3" || plan.graphStory));
+}
+
+function studioFacebookPublicMakeEligible(record) {
+  const plan = studioPublishDispatchTarget(record);
+  if (!plan) return false;
+  if (plan.target === "FB0") return true;
+  if (plan.target === "FBS3" || plan.graphStory) return Boolean(studioFacebookPublicCdnUrl(record));
+  return false;
+}
+
+async function studioPulseFacebookPublicMake(env, record) {
+  const recordId = String(record?.id || "").trim();
+  const target = "FB-PUBLIC";
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target };
+  const url = studioFacebookPublicMakeWebhookUrl(env);
+  if (!url) return { ok: false, skipped: "no-webhook", target };
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/plain,application/json" },
+    body: JSON.stringify({ output_record_id: recordId }),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    return {
+      ok: false,
+      target,
+      backend: "make",
+      status: response.status,
+      message: body.slice(0, 400) || `FB-PUBLIC webhook returned HTTP ${response.status}`,
+    };
+  }
+  return {
+    ok: true,
+    accepted: /accepted/i.test(body) || response.status < 300,
+    target,
+    backend: "make",
+    status: response.status,
+    plan: { target },
+  };
+}
+
 function studioPublishDispatchTarget(record) {
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || "").trim();
@@ -20405,6 +20471,22 @@ async function studioEnsureOutputCaption(env, record) {
 // path where it cannot be dropped by a cancelled background task or an exhausted invocation.
 async function studioDispatchApprovedPublishNow(env, record) {
   if (studioFacebookGraphPublishHeld(env) && String(f(record, "Platform") || "").trim() === "Facebook") {
+    if (!studioPublishCanDispatchNow(record)) {
+      return {
+        ok: true,
+        skipped: "scheduled-hold",
+        held_until: studioPublishHeldUntilIso(record),
+        record,
+      };
+    }
+    if (studioFacebookPublicMakeEligible(record)) {
+      record = await studioEnsureOutputCaption(env, record);
+      const pulsed = await studioPulseFacebookPublicMake(env, record);
+      return { ...pulsed, armed: [], plan: pulsed.plan || { target: "FB-PUBLIC" }, record };
+    }
+    if (studioFacebookPublicMakeRoutable(record)) {
+      return { ok: true, skipped: "facebook-make-asset-pending", record };
+    }
     return { ok: true, skipped: "facebook-manual-publish", record };
   }
   if (!studioPublishCanDispatchNow(record)) {
@@ -20872,6 +20954,36 @@ async function studioReconcileApprovedPublishes(env, options = {}) {
   return results;
 }
 
+async function studioReconcileFacebookPublicMake(env, options = {}) {
+  if (!studioFacebookGraphPublishHeld(env)) return [];
+  const limit = Number(options.limit || 3);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{Published_At}=BLANK(),{Platform_Post_ID}="",{Output_Status}="Approved for Publishing",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))',
+    });
+  } catch (error) {
+    console.warn("facebook public make reconcile scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    if (!studioFacebookPublicMakeEligible(row) || !studioPublishCanDispatchNow(row)) continue;
+    try {
+      const primary = await studioDispatchApprovedPublishNow(env, row);
+      await studioStampPublishDispatch(env, row, `reconcile: ${studioPublishDispatchNote(primary)}`);
+      results.push({ id: row.id, target: primary?.target || primary?.skipped || null, ok: primary?.ok !== false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("facebook public make reconcile failed", row.id, error);
+      await studioStampPublishDispatch(env, row, `reconcile failed: ${message}`);
+      results.push({ id: row.id, error: message });
+    }
+  }
+  return results;
+}
+
 async function studioReconcilePublishingInstagramStories(env, options = {}) {
   if (pipelineStageBackend(env, "AP1_IGS").mode !== "python") return [];
   const limit = Number(options.limit || 3);
@@ -21014,7 +21126,9 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     occupiedMs = occupied[platform] || [];
   }
   const scheduleFields = studioPublishScheduleFields(payload || {}, record, { occupiedMs });
-  const facebookManual = studioFacebookGraphPublishHeld(env) && platform === "Facebook";
+  const facebookMake = studioFacebookGraphPublishHeld(env) && platform === "Facebook"
+    && studioFacebookPublicMakeRoutable(record);
+  const facebookManual = studioFacebookGraphPublishHeld(env) && platform === "Facebook" && !facebookMake;
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
   const fields = {
     Review_Status: "Approved",
@@ -21026,7 +21140,9 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     Do_Not_Publish: false,
     Review_Notes: [existingNotes, note, facebookManual
       ? `Studio Pipeline approved the Facebook render at ${stamp}. Graph publish is held — post this in Business Suite until the Meta app is live.`
-      : `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+      : facebookMake
+        ? `Studio Pipeline approved the Facebook render at ${stamp}. Studio will fire the Live Make publisher (FB-PUBLIC).`
+        : `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
     ...studioPublishHandoffFields(record, { scheduledPostDate: scheduledIso }),
     ...scheduleFields,
   };
