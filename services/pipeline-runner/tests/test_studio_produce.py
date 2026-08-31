@@ -6,7 +6,9 @@ from studio_produce.constants import STEP_LABELS, STEP_PERCENT
 from studio_produce.context import outputs_formula
 from studio_produce.job import derive_route, finished_origin_kind, is_finished_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
-from studio_produce.stamp import finished_source_package, is_native_photo, stamp_fields
+from studio_produce.media import asset_is_video
+from studio_produce.queue import rebuild_variant_manifest
+from studio_produce.stamp import assign_clip_frames, finished_source_package, is_native_photo, source_package, stamp_fields
 from studio_produce.steps import pick_resume_step, thumbnail_required, voiceover_required
 from studio_produce.thumbnail_prompt import COLORFUL_3D_RULE, build_finished_thumbnail_prompt
 
@@ -267,6 +269,135 @@ def test_finished_stills_package_is_native():
     assert fields["Render_Status"] == "Native Photo Route"
     assert fields["Output_Status"] == "Ready for Review"
     assert not fields.get("Final_File_URL")
+
+
+def test_clip_origin_is_not_finished_passthrough():
+    assert finished_origin_kind({"Production_Notes": "origin=ez-wizard; ez-input=photos-and-clips"}) == ""
+    route = derive_route(
+        {
+            "Production_Notes": "origin=ez-wizard; ez-input=photos-and-clips",
+            "Studio_Master_Assets_JSON": json.dumps([
+                {"id": "p1", "mime_type": "image/jpeg"},
+                {"id": "v1", "mime_type": "video/mp4", "media_kind": "video"},
+            ]),
+        },
+        [{"fields": {"Studio_Output_Type": "Reel", "Platform": "Instagram"}}],
+    )
+    assert route == "uploaded:photo_sequence"
+    assert not is_finished_route(route)
+
+
+def test_rebuild_manifest_video_skips_jpeg_crop():
+    assets = [
+        {
+            "id": "clip1",
+            "order": 1,
+            "name": "walk.mp4",
+            "mime_type": "video/mp4",
+            "media_kind": "video",
+            "google_drive_file_id": "dvid",
+            "media_asset_record_id": "recVID0000000001",
+            "url": "https://media.chicagoshining.com/studio/previews/walk.mp4",
+            "duration_seconds": 8,
+        }
+    ]
+    manifest = rebuild_variant_manifest("recPR", assets, ["9:16"], [], plan={"items": [{"aspect_ratio": "9:16"}]})
+    assert manifest["plan_complete"] is True
+    assert manifest["assets"][0]["variants"]["9:16"]["recipe_version"] == "video-passthrough"
+    assert manifest["assets"][0]["variants"]["9:16"]["preview_url"].endswith("walk.mp4")
+
+
+def test_mixed_stamp_uses_video_trim_and_photo_floor():
+    request = {
+        "id": "recPRMix",
+        "fields": {
+            "Production_Notes": "origin=ez-wizard; ez-input=photos-and-clips",
+            "Studio_Variant_Status": "Ready",
+            "Studio_Master_Assets_JSON": json.dumps([
+                {"id": "p1", "order": 1, "name": "one.jpg", "mime_type": "image/jpeg", "caption": ""},
+                {
+                    "id": "v1",
+                    "order": 2,
+                    "name": "two.mp4",
+                    "mime_type": "video/mp4",
+                    "media_kind": "video",
+                    "duration_seconds": 6,
+                    "in_seconds": 1,
+                    "out_seconds": 5,
+                },
+            ]),
+            "Studio_Variant_Manifest_JSON": json.dumps({
+                "assets": [
+                    {
+                        "id": "p1",
+                        "order": 1,
+                        "name": "one.jpg",
+                        "variants": {
+                            "9:16": {
+                                "preview_url": "https://media.chicagoshining.com/one.jpg",
+                                "media_asset_record_id": "recPHOTO00000001",
+                                "file_name": "one.jpg",
+                            }
+                        },
+                    },
+                    {
+                        "id": "v1",
+                        "order": 2,
+                        "name": "two.mp4",
+                        "media_kind": "video",
+                        "variants": {
+                            "9:16": {
+                                "preview_url": "https://media.chicagoshining.com/two.mp4",
+                                "media_asset_record_id": "recVIDEO00000001",
+                                "file_name": "two.mp4",
+                                "media_kind": "video",
+                            }
+                        },
+                    },
+                ]
+            }),
+            "Studio_Output_Plan_JSON": json.dumps({
+                "items": [{"platform": "Instagram", "output_type": "Reel", "aspect_ratio": "9:16"}]
+            }),
+        },
+    }
+    output = {"id": "recPOMix", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16"}}
+    package = source_package(request, output, None)
+    assert package is not None
+    assert package["composition_id"] == "ChicagoShiningPhotoSequence"
+    assert package["native"] is False
+    kinds = [clip["media_kind"] for clip in package["clips"]]
+    assert kinds == ["photo", "video"]
+    video = package["clips"][1]
+    assert video["durationFrames"] == 120
+    assert video["startFromSeconds"] == 1
+    fields = stamp_fields(package, None)
+    assert fields["Composition_ID"] == "ChicagoShiningPhotoSequence"
+    assert fields["Render_Status"] == "Ready for Render"
+    assert json.loads(fields["Selected_Assets_JSON"])["authority"] == "studio_owner_uploaded_exact_source"
+
+
+def test_assign_clip_frames_scales_photos_not_video():
+    clips = [
+        {"source": {"media_kind": "photo"}},
+        {"source": {"media_kind": "video", "duration_seconds": 10, "in_seconds": 0, "out_seconds": 10}},
+    ]
+    frames, total = assign_clip_frames(
+        clips,
+        story=False,
+        effective={"video_duration_seconds": 16},
+        request={"fields": {"Video_Duration_Seconds": 16}},
+        output=None,
+    )
+    assert frames[1] == 300
+    assert frames[0] == 180
+    assert total == 480
+
+
+def test_asset_is_video_helper():
+    assert asset_is_video({"media_kind": "video"})
+    assert asset_is_video({"name": "clip.mov"})
+    assert not asset_is_video({"media_kind": "photo", "name": "clip.mov"})
 
 
 def test_finished_thumbnail_prompt_requires_colorful_3d():

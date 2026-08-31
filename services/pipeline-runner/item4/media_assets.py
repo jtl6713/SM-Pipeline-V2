@@ -27,6 +27,8 @@ def create_master_media_asset(
 ) -> dict:
     name = str(fields.get("Source_Name") or fields.get("Target_File_Name") or "photo")
     ext = str(fields.get("Source_Extension") or "").lower()
+    mime = str(fields.get("Source_MIME_Type") or "").lower()
+    is_video = mime.startswith("video/") or ext in {"mp4", "mov", "m4v", "webm"}
     width = fields.get("Width")
     height = fields.get("Height")
     orientation = "Portrait"
@@ -37,7 +39,7 @@ def create_master_media_asset(
 
     body = {
         "Asset Name": name,
-        "Media_Class": "Image",
+        "Media_Class": "Video" if is_video else "Image",
         "Google Drive URL": drive_url,
         "Google Drive File ID": drive_id,
         "MIME_Type": str(fields.get("Source_MIME_Type") or "application/octet-stream"),
@@ -52,9 +54,13 @@ def create_master_media_asset(
         "Capture_Source": "Self Filmed",
         "Rights_Status": "Owned",
         "Orientation": orientation,
-        "Asset_Role": "Other",
-        "Raw_Source_Eligibility": "Not Applicable",
-        "Asset_Description": "Studio Item 4 authoritative master original preserved in Google Drive.",
+        "Asset_Role": "Raw Footage" if is_video else "Other",
+        "Raw_Source_Eligibility": "Eligible" if is_video else "Not Applicable",
+        "Asset_Description": (
+            "Studio Item 4 authoritative master clip preserved in Google Drive."
+            if is_video
+            else "Studio Item 4 authoritative master original preserved in Google Drive."
+        ),
         "Studio_Transfer_ID": transfer_id,
     }
     return client.create_records(MEDIA_ASSETS_TABLE, [body])[0]

@@ -8,7 +8,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.194-autonomous-through">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.199-library-suggest">
 </head>
 <body>
  <header class="topbar">
@@ -181,8 +181,12 @@
  <strong>Multiple photos</strong>
  <span>Carousel, album, TikTok photo draft, YouTube Short.</span>
  </button>
+ <button type="button" class="ez-card" data-ez-input="photos-and-clips">
+ <strong>Photos and clips</strong>
+ <span>Mix stills and raw clips into one Reel, Short, or TikTok draft.</span>
+ </button>
  </div>
- <p class="ez-coming-later">Video clips and finished video come later.</p>
+ <p class="ez-coming-later">Finished video (publish as-is) is in the New content wizard.</p>
  <div class="ez-composer" id="ezComposer" hidden>
  <input id="ezTitle" maxlength="160" hidden>
  <fieldset class="ez-platform-fieldset" hidden>
@@ -393,13 +397,32 @@
  <strong>A set</strong>
  <span>Carousel or album</span>
  </button>
+ <button type="button" class="ez-card production-media-kind" data-pr-input="photos-and-clips">
+ <strong>Photos and clips</strong>
+ <span>Stills plus raw clips</span>
+ </button>
  </div>
  <em class="ez-option-hint" id="item4MediaKindHint"></em>
  <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos" hidden>
  <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
  <div class="item4-upload-icon" aria-hidden="true">+</div>
  <div> <strong id="item4UploadTitle">Drop photos</strong><span id="item4UploadHint">Up to 20</span></div>
+ <div class="item4-upload-actions">
  <button type="button" class="primary-button" id="item4ChooseMedia">Choose photos</button>
+ <button type="button" class="secondary-button" id="item4ChooseLibrary">From library</button>
+ </div>
+ </div>
+ <div class="idea-library-picker item4-library-picker" id="item4LibraryPicker" hidden>
+ <label class="form-field">
+ <span>Search Google Drive library</span>
+ <input id="item4LibrarySearch" type="search" placeholder="Chicago Theatre, Navy Pier, skyline…">
+ </label>
+ <p class="idea-library-picker-hint" id="item4LibraryPickerHint">Suggested library stills and Raw Footage are checked. Uncheck to remove, or search Drive to add more.</p>
+ <div class="idea-library-picker-body" id="item4LibraryGrid"></div>
+ <div class="idea-library-picker-actions">
+ <button type="button" class="secondary-button" id="item4LibraryCancelButton">Close</button>
+ <button type="button" class="primary-button" id="item4LibraryAddButton" disabled>Apply selection</button>
+ </div>
  </div>
  <div class="item4-upload-progress" id="item4UploadProgress" hidden></div>
  <div class="item4-asset-strip" id="item4AssetStrip"><div class="empty compact-empty"></div></div>
@@ -1325,8 +1348,8 @@
  <span>Search library stills</span>
  <input id="ideaLibrarySearch" type="search" placeholder="Andersonville, Pilsen, neighborhood…">
  </label>
- <p class="idea-library-picker-hint" id="ideaLibraryPickerHint">Checked stills match this idea’s place (A3 Location or filename). Search to find another neighborhood.</p>
- <div class="idea-library-grid" id="ideaLibraryGrid"></div>
+ <p class="idea-library-picker-hint" id="ideaLibraryPickerHint">Suggested stills are checked. Uncheck any you do not want, or search the Drive library to add more.</p>
+ <div class="idea-library-picker-body" id="ideaLibraryGrid"></div>
  <div class="idea-library-picker-actions">
  <button type="button" class="primary-button" id="ideaLibraryContinueButton" disabled>Continue to Production</button>
  </div>
@@ -1421,9 +1444,9 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.194-autonomous-through"></script>
+ <script src="/assets/config.js?v=0.6.199-library-suggest"></script>
  <script src="/assets/ez-plan.js?v=0.6.194-autonomous-through"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.197-theatre-pin"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.194";</script>
+ <script src="/assets/app-item4-0619.js?v=0.6.199-library-suggest"></script>
+ <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.199";</script>
 </body>
 </html>

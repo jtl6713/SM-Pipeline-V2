@@ -63,8 +63,12 @@ def apply_timeline(clips: list[dict[str, Any]], timeline: dict[str, Any]) -> lis
     for index, clip in enumerate(clips):
         item = dict(clip)
         plan = plan_clips[index] if index < len(plan_clips) else {}
-        frames = int(plan.get("duration_frames") or item.get("durationFrames") or 1)
-        item["startFrame"] = int(plan.get("start_frame") if plan.get("start_frame") is not None else start)
+        kind = str(item.get("media_kind") or item.get("mediaKind") or "").strip().lower()
+        if kind == "video":
+            frames = int(item.get("durationFrames") or item.get("duration_frames") or 1)
+        else:
+            frames = int(plan.get("duration_frames") or item.get("durationFrames") or 1)
+        item["startFrame"] = start if kind == "video" else int(plan.get("start_frame") if plan.get("start_frame") is not None else start)
         item["durationFrames"] = max(1, frames)
         existing = item.get("transition") if isinstance(item.get("transition"), dict) else {}
         planned = plan.get("transition") if isinstance(plan.get("transition"), dict) else {}

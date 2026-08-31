@@ -4,6 +4,7 @@ export const EZ_INPUTS = Object.freeze({
   SINGLE_PHOTO: "single-photo",
   MULTIPLE_PHOTOS: "multiple-photos",
   VIDEO_CLIPS: "video-clips",
+  PHOTOS_AND_CLIPS: "photos-and-clips",
   FINISHED_VIDEO: "finished-video",
 });
 
@@ -15,9 +16,25 @@ export const EZ_PHASE1_INPUTS = Object.freeze([
 ]);
 
 export const EZ_DISABLED_INPUTS = Object.freeze([
-  EZ_INPUTS.VIDEO_CLIPS,
   EZ_INPUTS.FINISHED_VIDEO,
 ]);
+
+export const EZ_CLIP_INPUTS = Object.freeze([
+  EZ_INPUTS.VIDEO_CLIPS,
+  EZ_INPUTS.PHOTOS_AND_CLIPS,
+]);
+
+export const EZ_VIDEO_PASSES = Object.freeze({
+  Instagram: "Reel",
+  Facebook: "Reel",
+  TikTok: "Video Draft",
+  YouTube: "Short",
+});
+
+export function ezIsClipInput(kind) {
+  const value = String(kind || "").trim();
+  return EZ_CLIP_INPUTS.includes(value);
+}
 
 /** Native still/video object first. TikTok is always a draft destination. */
 export const EZ_PHOTO_PASSES = Object.freeze({
