@@ -1,10 +1,22 @@
 @echo off
 setlocal
+echo.
+echo Deploy pipeline-runner from GitHub main into Services\pipeline-runner\service
+echo and restart the :3350 listener. VERIFY health is not enough.
+echo.
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Deploy-SMService.ps1" -Service pipeline-runner -Yes
-if errorlevel 1 (
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Deploy-SMService.ps1" -Service pipeline-runner
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" (
+  echo.
   echo Pipeline runner deploy failed.
-  exit /b 1
+  echo If Git checkout has uncommitted changes, commit or stash them first, then retry.
+) else (
+  echo.
+  echo Confirm https://pipeline.chicagoshining.com/stages lists clip_poster.
+  echo A pinned SERVICE_VERSION in .env can still say 2026-08-24 after a good deploy.
 )
-echo Confirm https://pipeline.chicagoshining.com/health version is 2026-09-01-clip-poster or newer and /stages lists clip_poster.
-endlocal
+echo.
+pause
+exit /b %RC%
+

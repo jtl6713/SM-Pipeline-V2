@@ -48,6 +48,21 @@ pause
 exit /b %RC%
 '@
 
+$runnerBat = @'
+@echo off
+setlocal
+set "DEPLOYER=D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2\deploy\local-services\Deploy-SMService.ps1"
+echo Deploy pipeline-runner from GitHub main. VERIFY health is not enough.
+echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%DEPLOYER%" -Service pipeline-runner
+set "RC=%ERRORLEVEL%"
+echo.
+if not "%RC%"=="0" echo Pipeline runner deploy failed. A dirty Git checkout blocks Deploy-SMService.
+if "%RC%"=="0" echo Confirm https://pipeline.chicagoshining.com/stages lists clip_poster.
+pause
+exit /b %RC%
+'@
+
 [System.IO.File]::WriteAllText(
     (Join-Path $ToolsRoot 'DEPLOY Local Service.bat'),
     $deployBat,
@@ -63,6 +78,11 @@ exit /b %RC%
     $rollbackBat,
     [System.Text.Encoding]::ASCII
 )
+[System.IO.File]::WriteAllText(
+    (Join-Path $ToolsRoot 'DEPLOY Pipeline Runner.bat'),
+    $runnerBat,
+    [System.Text.Encoding]::ASCII
+)
 
 Write-Host ''
 Write-Host 'PASS - local service deployment launchers installed.' -ForegroundColor Green
@@ -70,6 +90,7 @@ Write-Host "Folder: $ToolsRoot"
 Write-Host ''
 Write-Host 'Created:'
 Write-Host '  DEPLOY Local Service.bat'
+Write-Host '  DEPLOY Pipeline Runner.bat'
 Write-Host '  PLAN Local Service Deployment.bat'
 Write-Host '  ROLLBACK Local Service.bat'
 Write-Host ''

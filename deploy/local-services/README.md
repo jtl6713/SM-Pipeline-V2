@@ -70,10 +70,11 @@ Framework commits:
 Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo; legacy junction at `Production Start-Stop-Verify Services`):
 
 - `PLAN Local Service Deployment.bat`
-- `DEPLOY Local Service.bat`
+- `DEPLOY Local Service.bat` (menu; pick **6 Pipeline Runner**)
+- `DEPLOY Pipeline Runner.bat` (pipeline-runner only)
 - `ROLLBACK Local Service.bat`
 
-They display a numbered 1-6 service menu.
+`DEPLOY-pipeline-runner.bat` also lives next to `Deploy-SMService.ps1` in this folder after `git pull` on SM-Pipeline-V2. VERIFY only checks that :3350 answers 200. It does not copy new Flask routes.
 
 Task Organizer (standalone repo, port `3360`) is not a deployable SM service. Add it to the existing START / STOP / VERIFY windows with:
 

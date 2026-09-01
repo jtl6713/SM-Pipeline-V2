@@ -168,6 +168,7 @@ Friendly launchers under `Production Start-Stop-Verify Services`:
 
 - `PLAN Local Service Deployment.bat`
 - `DEPLOY Local Service.bat`
+- `DEPLOY Pipeline Runner.bat`
 - `ROLLBACK Local Service.bat`
 
 ## 9. PLAN — safe/read-only
