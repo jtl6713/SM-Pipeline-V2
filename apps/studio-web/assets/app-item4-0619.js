@@ -360,15 +360,6 @@
       setOperationsMessage(error.message || "Could not retry asset selection.", "error-text");
     }
   });
-  $("operationsMakeAdminBridge")?.addEventListener("click", async () => {
-    try {
-      setOperationsMessage("Checking pipeline runner…");
-      const result = await api("/api/operations/make-admin-bridge", { method: "POST", body: JSON.stringify({}) });
-      setOperationsMessage(result.message || "Python runner is the production path.");
-    } catch (error) {
-      setOperationsMessage(error.message || "Could not reach the pipeline runner.", "error-text");
-    }
-  });
   $("operationsRefreshSimilarTimes")?.addEventListener("click", async () => {
     const button = $("operationsRefreshSimilarTimes");
     const meta = $("operationsSimilarTimesMeta");
@@ -10718,8 +10709,6 @@
       if (resetUrls) resetUrls.hidden = !data.can_edit_profiles;
       const retryAssets = $("operationsRetryAssetSelection");
       if (retryAssets) retryAssets.hidden = !data.can_edit_profiles;
-      const makeAdmin = $("operationsMakeAdminBridge");
-      if (makeAdmin) makeAdmin.hidden = !data.can_edit_profiles;
       const refreshSimilar = $("operationsRefreshSimilarTimes");
       if (refreshSimilar) refreshSimilar.hidden = !data.can_edit_profiles;
       const discoverCreators = $("operationsDiscoverCreators");

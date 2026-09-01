@@ -65,7 +65,4 @@ MAKE_IDS = {
     "c9": 5589932,
 }
 
-MAKE_HOOK_URLS = {
-    "sai1": "https://hook.us2.make.com/duojihfn68fgoz6x438tjfbw9fsb9cwz",
-    "c2": "https://hook.us2.make.com/t1wjrdod0k433jgaz10tf30q2rq0sfpb",
-}
+MAKE_HOOK_URLS = {}

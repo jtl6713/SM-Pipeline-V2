@@ -159,7 +159,7 @@ One `POST /stages/rr2` applies a single email-button decision (`approved`, `chan
 | `rejected` | `Rejected` + `Do_Not_Publish` | None |
 | `do_not_publish` | `Skipped` + `Do_Not_Publish` | None |
 
-Email buttons stay on the Make hook until cutover. Optional public GET `/hooks/rr2/<RR2_WEBHOOK_TOKEN>` matches the Make query shape (`record_id`, `decision`).
+Email buttons use public GET `/hooks/rr2/<RR2_WEBHOOK_TOKEN>` (`record_id`, `decision`). Make.com webhooks are retired.
 
 ## P3 behavior (platform outputs)
 

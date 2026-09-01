@@ -4721,237 +4721,10 @@ const ITEM4_FBS1_SCENARIO_ID = 5816409;
 const ITEM4_FBS1_EXPECTED_WEBHOOK_ID = 2639647;
 
 async function item4EnsureFacebookSlideshowVoiceoverPayload(env, authorization) {
-  const { makeApiBase, headers } = await phase6MakeApiConfig(env);
-
-  const readBlueprint = async () => {
-    const response = await fetch(
-      `${makeApiBase}/scenarios/${ITEM4_FBS1_SCENARIO_ID}/blueprint?draft=false`,
-      { method: "GET", headers }
-    );
-    const raw = await response.text();
-    let body;
-    try { body = raw ? JSON.parse(raw) : {}; } catch { body = { raw }; }
-    if (!response.ok) {
-      throw new HttpError(
-        response.status,
-        `FBS1 blueprint read failed (${response.status}): ${raw.slice(0, 500)}`
-      );
-    }
-    const blueprint = body?.response?.blueprint || body?.blueprint || null;
-    if (!blueprint || typeof blueprint !== "object") {
-      throw new HttpError(502, "FBS1 did not return a usable live blueprint");
-    }
-    return blueprint;
-  };
-
-  const live = await readBlueprint();
-  const webhookModule = phase6FindModule(live.flow, 900);
-  if (
-    !webhookModule ||
-    webhookModule.module !== "gateway:CustomWebHook" ||
-    Number(webhookModule?.parameters?.hook) !== ITEM4_FBS1_EXPECTED_WEBHOOK_ID
-  ) {
-    throw new HttpError(
-      409,
-      "FBS1 webhook no longer matches the validated production baseline; no Make write attempted"
-    );
-  }
-
-  const renderRequest = phase6FindModule(live.flow, 13);
-  if (!renderRequest || renderRequest.module !== "util:SetVariable2") {
-    throw new HttpError(
-      409,
-      "FBS1 module 13 no longer matches the validated slideshow-render baseline; no Make write attempted"
-    );
-  }
-
-  const currentValue = String(renderRequest?.mapper?.value || "");
-  if (!currentValue.includes("FacebookImageSlideshow9x16")) {
-    throw new HttpError(
-      409,
-      "FBS1 module 13 is no longer the validated FacebookImageSlideshow9x16 request; no Make write attempted"
-    );
-  }
-
-  if (currentValue.includes("Voiceover_URL") && currentValue.includes('"voiceover"')) {
-    return {
-      ok: true,
-      already_ready: true,
-      scenario_id: ITEM4_FBS1_SCENARIO_ID,
-      live_name: live.name,
-      webhook_id: ITEM4_FBS1_EXPECTED_WEBHOOK_ID,
-    };
-  }
-
-  requirePermission(authorization, "tenant_admin");
-
-  const patched = JSON.parse(JSON.stringify(live));
-  const patchedRequest = phase6FindModule(patched.flow, 13);
-  const patchedValue = String(patchedRequest?.mapper?.value || "");
-  const clipsToken = '  "clips":';
-
-  if (!patchedValue.includes(clipsToken)) {
-    throw new HttpError(
-      409,
-      "FBS1 render JSON no longer contains the expected clips token; no Make write attempted"
-    );
-  }
-
-  patchedRequest.mapper.value = patchedValue.replace(
-    clipsToken,
-    [
-      '  "voiceover": {',
-      '    "url": "{{escapeJSON(ifempty(1.Voiceover_URL; \\"\\"))}}",',
-      '    "volume": 1',
-      '  },',
-      '  "clips":'
-    ].join("\n")
-  );
-
-  if (patchedRequest?.metadata?.designer) {
-    patchedRequest.metadata.designer.name =
-      "13 - Build Slideshow Render Request with Title Cover Music Voiceover";
-  }
-
-  patched.name =
-    "FBS1 - Start Facebook Slideshow Render v1.0.7 - Voiceover Payload";
-  delete patched.idSequence;
-
-  const requestedAt = new Date().toISOString();
-  let auditId = null;
-
-  try {
-    const auditCreate = await airtableFetch(env, "Make Admin Queue", "", {
-      method: "POST",
-      body: JSON.stringify({
-        records: [{
-          fields: {
-            Command_ID: `STUDIO-FBS1-VOICEOVER-${Date.now()}`,
-            Action: "UPDATE_BLUEPRINT",
-            Scenario_ID: ITEM4_FBS1_SCENARIO_ID,
-            Scenario_Name: patched.name,
-            Proposed_Blueprint_JSON_Original: JSON.stringify(patched),
-            Write_Approved: true,
-            Status: "Processing",
-            Backup_Blueprint_Wrapper_2: JSON.stringify(live),
-            Requested_At: requestedAt,
-            Started_At: requestedAt,
-            Requested_By: String(
-              authorization?.user?.email ||
-              authorization?.email ||
-              "studio-admin"
-            ),
-            Correlation_ID: "ITEM4-FBS1-VOICEOVER-HARDENING",
-            Notes:
-              "Studio automatic hardening. Adds Platform Output Voiceover_URL to FBS1 render payload. Existing webhook, schedule and layout are preserved."
-          }
-        }],
-        typecast: true
-      })
-    });
-    auditId = auditCreate?.records?.[0]?.id || null;
-  } catch (error) {
-    console.warn("FBS1 audit row creation failed; Make write will not proceed", error);
-    throw new HttpError(502, "Could not create the required FBS1 rollback/audit checkpoint");
-  }
-
-  let patchStatus = null;
-
-  try {
-    // Match the already-proven direct Worker -> Make blueprint contract used by
-    // Phase 6 migrations: the Make API receives blueprint as a JSON string.
-    const patchResponse = await fetch(
-      `${makeApiBase}/scenarios/${ITEM4_FBS1_SCENARIO_ID}?confirmed=true`,
-      {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({ blueprint: JSON.stringify(patched) })
-      }
-    );
-    patchStatus = patchResponse.status;
-    const patchText = await patchResponse.text();
-
-    if (!patchResponse.ok) {
-      throw new Error(
-        `FBS1 Make PATCH failed (${patchResponse.status}): ${patchText.slice(0, 500)}`
-      );
-    }
-
-    const verified = await readBlueprint();
-    const verifiedWebhook = phase6FindModule(verified.flow, 900);
-    const verifiedRequest = phase6FindModule(verified.flow, 13);
-    const verifiedValue = String(verifiedRequest?.mapper?.value || "");
-
-    if (Number(verifiedWebhook?.parameters?.hook) !== ITEM4_FBS1_EXPECTED_WEBHOOK_ID) {
-      throw new Error("FBS1 post-write verification found a changed webhook ID");
-    }
-    if (!verifiedValue.includes("Voiceover_URL") || !verifiedValue.includes('"voiceover"')) {
-      throw new Error(
-        "FBS1 post-write verification did not contain the required voiceover payload"
-      );
-    }
-
-    if (auditId) {
-      await airtableFetch(env, "Make Admin Queue", auditId, {
-        method: "PATCH",
-        body: JSON.stringify({
-          fields: {
-            Status: "Succeeded",
-            Completed_At: new Date().toISOString(),
-            Error_Message: "",
-            Result_JSON: JSON.stringify({
-              ok: true,
-              scenario_id: ITEM4_FBS1_SCENARIO_ID,
-              deployed_name: verified.name,
-              make_patch_status: patchStatus,
-              webhook_preserved: true,
-              webhook_id: ITEM4_FBS1_EXPECTED_WEBHOOK_ID,
-              scheduling_changed: false,
-              voiceover_payload: true,
-            })
-          }
-        })
-      });
-    }
-
-    return {
-      ok: true,
-      already_ready: false,
-      scenario_id: ITEM4_FBS1_SCENARIO_ID,
-      live_name: verified.name,
-      audit_record_id: auditId,
-      webhook_id: ITEM4_FBS1_EXPECTED_WEBHOOK_ID,
-    };
-  } catch (error) {
-    if (auditId) {
-      try {
-        await airtableFetch(env, "Make Admin Queue", auditId, {
-          method: "PATCH",
-          body: JSON.stringify({
-            fields: {
-              Status: "Failed",
-              Completed_At: new Date().toISOString(),
-              Error_Message:
-                error instanceof Error
-                  ? error.message
-                  : "FBS1 voiceover hardening failed",
-              Result_JSON: JSON.stringify({
-                ok: false,
-                scenario_id: ITEM4_FBS1_SCENARIO_ID,
-                make_patch_status: patchStatus,
-              })
-            }
-          })
-        });
-      } catch {}
-    }
-    throw new HttpError(
-      502,
-      error instanceof Error
-        ? error.message
-        : "FBS1 voiceover hardening failed"
-    );
-  }
+  void env;
+  void authorization;
+  // Facebook slideshow voiceover is assembled by Python FBS1. Do not PATCH Make.
+  return { ok: true, skipped: "make_retired" };
 }
 
 function item4DynamicRationale(text, count) {
@@ -5648,14 +5421,14 @@ const ITEM4_SMV1_PRODUCTION_FORMULA = `AND({Test_Run_ID}=BLANK(),${ITEM4_SMV1_BA
 // on Pending-only masters so it does not re-upload.
 const ITEM4_QUEUE_DRAIN_SCAN_FORMULA = 'AND({Test_Run_ID}=BLANK(),OR(AND({Asset_Kind}="Master Original",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded",{Transfer_Status}="Processing")),AND({Asset_Kind}="Platform Variant",OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded",{Transfer_Status}="Processing")),AND(OR({Asset_Kind}="Master Original",{Asset_Kind}="Platform Variant"),{Transfer_Status}="Ready",{Preview_Status}="Pending")))';
 const ITEM4_P3_SCENARIO_ID = 5531703;
-const ITEM4_P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65";
+const ITEM4_P3_WEBHOOK_URL = ""; // Make.com retired
 const ITEM4_P2_SCENARIO_ID = 5530955;
-const ITEM4_P2_WEBHOOK_URL = "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt";
+const ITEM4_P2_WEBHOOK_URL = ""; // Make.com retired
 const STUDIO_P1_SCENARIO_ID = 5528742;
 const ITEM4_C2_SCENARIO_ID = 5582071;
-const ITEM4_C2_WEBHOOK_URL = "https://hook.us2.make.com/t1wjrdod0k433jgaz10tf30q2rq0sfpb";
+const ITEM4_C2_WEBHOOK_URL = ""; // Make.com retired
 const ITEM4_SAI1_SCENARIO_ID = 6023816;
-const ITEM4_SAI1_WEBHOOK_URL = "https://hook.us2.make.com/duojihfn68fgoz6x438tjfbw9fsb9cwz";
+const ITEM4_SAI1_WEBHOOK_URL = ""; // Make.com retired
 const ITEM4_R2_SCENARIO_ID = 5569495;
 const ITEM4_R2_SOURCE_GUARD_NAME = "R2 - Auto Asset Selection v6.2 - Studio + Legacy Explicit Eligibility";
 const ITEM4_P3_SOURCE_AUTHORITY_NAME = "P3 - Platform Output Generation v4.7 - Studio Exact Source Lock + Correct R2 Queue State";
@@ -6152,62 +5925,9 @@ function pipelineStageBackend(env, stageKey) {
 }
 
 function cadenceScenarioManagedByPython(env, scenarioId) {
-  const id = Number(scenarioId);
-  if (id === ITEM4_SMV1_SCENARIO_ID && pipelineStageBackend(env, "SMV1").mode === "python") return true;
-  if (id === PHASE6_R2_SCENARIO_ID && pipelineStageBackend(env, "R2").mode === "python") return true;
-  if (id === STUDIO_R2B_SCENARIO_ID && pipelineStageBackend(env, "R2B").mode === "python") return true;
-  if (id === PHASE6_R3_SCENARIO_ID && pipelineStageBackend(env, "R3").mode === "python") return true;
-  if (id === PHASE6_R4_SCENARIO_ID && pipelineStageBackend(env, "R4").mode === "python") return true;
-  if (id === PHASE6_R5_SCENARIO_ID && pipelineStageBackend(env, "R5").mode === "python") return true;
-  if (id === PHASE6_RR1_SCENARIO_ID && pipelineStageBackend(env, "RR1").mode === "python") return true;
-  if (id === PHASE6_RR2_SCENARIO_ID && pipelineStageBackend(env, "RR2").mode === "python") return true;
-  if (id === STUDIO_P1_SCENARIO_ID && pipelineStageBackend(env, "P1").mode === "python") return true;
-  if (id === ITEM4_P2_SCENARIO_ID && pipelineStageBackend(env, "P2").mode === "python") return true;
-  if (id === ITEM4_P3_SCENARIO_ID && pipelineStageBackend(env, "P3").mode === "python") return true;
-  if (id === ITEM4_C2_SCENARIO_ID && pipelineStageBackend(env, "C2").mode === "python") return true;
-  if (id === ITEM4_SAI1_SCENARIO_ID && pipelineStageBackend(env, "SAI1").mode === "python") return true;
-  if (id === STUDIO_IDEA_I1_SCENARIO_ID && pipelineStageBackend(env, "I1").mode === "python") return true;
-  if (id === STUDIO_AP0_SCENARIO_ID && pipelineStageBackend(env, "AP0").mode === "python") return true;
-  if (id === STUDIO_AP1_IG_SCENARIO_ID && pipelineStageBackend(env, "AP1_IG").mode === "python") return true;
-  if (id === STUDIO_AP1_IGS_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
-  if (id === STUDIO_AP1_IGS_POLL_SCENARIO_ID && pipelineStageBackend(env, "AP1_IGS").mode === "python") return true;
-  if (id === STUDIO_FBS1_SCENARIO_ID && pipelineStageBackend(env, "FBS1").mode === "python") return true;
-  if (id === STUDIO_FBS2_SCENARIO_ID && pipelineStageBackend(env, "FBS1").mode === "python") return true;
-  if (id === STUDIO_FBS3_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
-  if (id === STUDIO_FBS4_SCENARIO_ID && pipelineStageBackend(env, "FBS3").mode === "python") return true;
-  if (id === STUDIO_YT0_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
-  if (id === STUDIO_YTP1_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
-  if (id === STUDIO_YTS1_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
-  if (id === STUDIO_YTS2_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
-  if (id === STUDIO_YTS3_SCENARIO_ID && pipelineStageBackend(env, "YT0").mode === "python") return true;
-  if (id === STUDIO_TTD0_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
-  if (id === STUDIO_TTD1_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
-  if (id === STUDIO_TTD2_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
-  if (id === STUDIO_TTD3_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
-  if (id === STUDIO_TTD4_SCENARIO_ID && pipelineStageBackend(env, "TTD0").mode === "python") return true;
-  if (id === STUDIO_FB0_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
-  if (id === STUDIO_FB1_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
-  if (id === STUDIO_FB2_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
-  if (id === STUDIO_FB2R_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
-  if (id === STUDIO_FB3_SCENARIO_ID && pipelineStageBackend(env, "FB0").mode === "python") return true;
-  if (id === STUDIO_AP0C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_AP1C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_AP2C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_AP3C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_AP3P_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_AP4C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_AP4R_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_AP5C_SCENARIO_ID && pipelineStageBackend(env, "AP0C").mode === "python") return true;
-  if (id === STUDIO_A1S_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
-  if (id === STUDIO_A1M_SCENARIO_ID && pipelineStageBackend(env, "A1S").mode === "python") return true;
-  if (id === STUDIO_M1_SCENARIO_ID && pipelineStageBackend(env, "M1").mode === "python") return true;
-  if (id === STUDIO_TTD_ORCH_SCENARIO_ID && pipelineStageBackend(env, "TTD_ORCH").mode === "python") return true;
-  if (id === STUDIO_YT_ORCH_SCENARIO_ID && pipelineStageBackend(env, "YT_ORCH").mode === "python") return true;
-  if (id === STUDIO_FB_ORCH_SCENARIO_ID && pipelineStageBackend(env, "FB_ORCH").mode === "python") return true;
-  if (id === STUDIO_AP_CAR_ORCH_SCENARIO_ID && pipelineStageBackend(env, "APCAR_ORCH").mode === "python") return true;
-  if (id === STUDIO_IG_ORCH_SCENARIO_ID && pipelineStageBackend(env, "IG_ORCH").mode === "python") return true;
-  if (id === PHASE6_P0202_SCENARIO_ID && pipelineStageBackend(env, "P0202").mode === "python") return true;
-  return false;
+  void env;
+  void scenarioId;
+  return true;
 }
 
 const STUDIO_PRODUCTION_JOB_LABELS = {
@@ -6830,9 +6550,6 @@ async function item4PulseRR2Python(env, options = {}) {
 }
 
 async function handleRr2ReviewDecision(request, env, url) {
-  if (pipelineStageBackend(env, "RR2").mode !== "python") {
-    return new Response("RR2 is still on Make", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
-  }
   let recordId = String(url.searchParams.get("record_id") || url.searchParams.get("output_record_id") || "").trim();
   let decision = String(url.searchParams.get("decision") || "").trim();
   if (request.method === "POST" && (!recordId || !decision)) {
@@ -9561,18 +9278,10 @@ async function item4RequestAiSlideThemes(env, requestRecord, parent, needed) {
     total: covered.length + needed,
   };
   let parsed = null;
-  if (pipelineStageBackend(env, "SAI1").mode === "python") {
+  {
     const { response, payload } = await item4PulsePipelineStage(env, "sai1", sai1Body, "SAI1");
     if (!response.ok) throw new Error(payload?.message || `SAI1 slide themer failed (${response.status})`);
     parsed = payload?.details?.themes || payload?.details?.run?.themes || null;
-  } else {
-    const response = await fetch(ITEM4_SAI1_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(sai1Body),
-    });
-    if (!response.ok) throw new Error(`SAI1 slide themer failed (${response.status})`);
-    parsed = item4ParseJson(await response.text(), null);
   }
   const slides = (Array.isArray(parsed?.slides) ? parsed.slides : [])
     .map((slide) => ({
@@ -12512,68 +12221,24 @@ async function pulseStudioP2Handoff(env, contentItemId, requestRecord) {
   } catch (error) {
     console.warn("P2 pulse could not clear superseded media run", error);
   }
-  if (pipelineStageBackend(env, "P2").mode === "python") {
-    try {
-      const result = await item4PulseP2Python(env, contentItemId, requestRecord);
-      return { ok: true, status: 200, backend: "python", result };
-    } catch (error) {
-      console.warn("P2 python pulse failed", error);
-      return { ok: false, status: error instanceof HttpError ? error.status : 500, backend: "python" };
-    }
+  try {
+    const result = await item4PulseP2Python(env, contentItemId, requestRecord);
+    return { ok: true, status: 200, backend: "python", result };
+  } catch (error) {
+    console.warn("P2 python pulse failed", error);
+    return { ok: false, status: error instanceof HttpError ? error.status : 500, backend: "python" };
   }
-  try { await phase6EnsureScenarioActive(env, ITEM4_P2_SCENARIO_ID); } catch (error) {
-    console.warn("P2 webhook could not be armed before pulse", error);
-  }
-  const response = await fetch(ITEM4_P2_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
-    body: JSON.stringify({
-      source: "studio-promote",
-      target: "P2",
-      content_record_id: contentItemId,
-      test_run_id: testRunId,
-      requested_at: new Date().toISOString(),
-    }),
-  });
-  const body = await response.text();
-  if (!response.ok) {
-    console.warn("P2 studio promote pulse failed", response.status, String(body || "").slice(0, 300));
-    return { ok: false, status: response.status };
-  }
-  return { ok: true, status: response.status };
 }
 
 async function pulseStudioP3Handoff(env, contentItemId, requestRecord) {
   const testRunId = String(f(requestRecord, "Test_Run_ID") || "").trim();
-  if (pipelineStageBackend(env, "P3").mode === "python") {
-    try {
-      const result = await item4PulseP3Python(env, contentItemId, requestRecord);
-      return { ok: true, status: 200, backend: "python", result };
-    } catch (error) {
-      console.warn("P3 python pulse failed", error);
-      return { ok: false, status: error instanceof HttpError ? error.status : 500, backend: "python" };
-    }
+  try {
+    const result = await item4PulseP3Python(env, contentItemId, requestRecord);
+    return { ok: true, status: 200, backend: "python", result };
+  } catch (error) {
+    console.warn("P3 python pulse failed", error);
+    return { ok: false, status: error instanceof HttpError ? error.status : 500, backend: "python" };
   }
-  try { await phase6EnsureScenarioActive(env, ITEM4_P3_SCENARIO_ID); } catch (error) {
-    console.warn("P3 webhook could not be armed before pulse", error);
-  }
-  const response = await fetch(ITEM4_P3_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
-    body: JSON.stringify({
-      source: "studio-promote",
-      target: "P3",
-      content_record_id: contentItemId,
-      test_run_id: testRunId,
-      requested_at: new Date().toISOString(),
-    }),
-  });
-  const body = await response.text();
-  if (!response.ok) {
-    console.warn("P3 studio promote pulse failed", response.status, String(body || "").slice(0, 300));
-    return { ok: false, status: response.status };
-  }
-  return { ok: true, status: response.status };
 }
 
 async function pulseStudioC2Handoff(env, contentItemId, requestRecord = null) {
@@ -12587,31 +12252,15 @@ async function pulseStudioC2Handoff(env, contentItemId, requestRecord = null) {
     test_run_id: testRunId,
     requested_at: new Date().toISOString(),
   };
-  if (pipelineStageBackend(env, "C2").mode === "python") {
-    const { response, payload } = await item4PulsePipelineStage(env, "c2", {
-      ...body,
-      extra: { ...(body.extra || {}), background: true, trigger_c3: false },
-    }, "C2");
-    if (!response.ok) {
-      console.warn("C2 studio AI pulse failed", response.status, String(payload?.message || "").slice(0, 300));
-      return { ok: false, status: response.status };
-    }
-    return { ok: true, status: response.status, backend: "python", background: true };
-  }
-  try { await phase6EnsureScenarioActive(env, ITEM4_C2_SCENARIO_ID); } catch (error) {
-    console.warn("C2 webhook could not be armed before pulse", error);
-  }
-  const response = await fetch(ITEM4_C2_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
+  const { response, payload } = await item4PulsePipelineStage(env, "c2", {
+    ...body,
+    extra: { ...(body.extra || {}), background: true, trigger_c3: false },
+  }, "C2");
   if (!response.ok) {
-    console.warn("C2 studio AI pulse failed", response.status, String(text || "").slice(0, 300));
+    console.warn("C2 studio AI pulse failed", response.status, String(payload?.message || "").slice(0, 300));
     return { ok: false, status: response.status };
   }
-  return { ok: true, status: response.status };
+  return { ok: true, status: response.status, backend: "python", background: true };
 }
 
 async function promoteProductionRequestViaI3I4(request, env, url, authorization, ctx = null) {
@@ -12951,32 +12600,11 @@ function promotionWebhookUrl(env, recordId, input) {
 }
 
 async function fetchPromotionHandoff(env, webhook) {
-  if (pipelineStageBackend(env, "I3").mode === "python") {
-    const extra = Object.fromEntries(webhook.searchParams.entries());
-    extra.trigger_i4 = true;
-    const { response, payload } = await item4PulsePipelineStage(env, "i3", { extra }, "I3");
-    if (!response.ok || payload?.status === "error") {
-      throw new HttpError(502, payload?.message || `Python I3 returned HTTP ${response.status}`);
-    }
-    return;
-  }
-
-  let response;
-  try {
-    response = await fetch(webhook.toString(), {
-      method: "GET",
-      redirect: "follow",
-      headers: { "User-Agent": "ChicagoShining-Studio/Phase2A" },
-    });
-  } catch {
-    throw new HttpError(502, "The existing I3 approval workflow could not be reached");
-  }
-
-  // Consume the response so the Make request completes cleanly, but never
-  // expose webhook URLs or Make response HTML to the browser.
-  try { await response.text(); } catch {}
-  if (!response.ok) {
-    throw new HttpError(502, `The existing I3 approval workflow returned HTTP ${response.status}`);
+  const extra = Object.fromEntries(webhook.searchParams.entries());
+  extra.trigger_i4 = true;
+  const { response, payload } = await item4PulsePipelineStage(env, "i3", { extra }, "I3");
+  if (!response.ok || payload?.status === "error") {
+    throw new HttpError(502, payload?.message || `Python I3 returned HTTP ${response.status}`);
   }
 }
 
@@ -16927,6 +16555,10 @@ function phase6RunAlreadyActiveError(error) {
 }
 
 async function phase6PulseOnDemandScenario(env, scenarioId, options = {}) {
+  void env;
+  void options;
+  console.warn("Make on-demand pulse retired", scenarioId);
+  return { executionId: null, body: { skipped: "make_retired" } };
   const waitMs = Number(options.waitMs || 15000);
   const before = await phase6ScenarioState(env, scenarioId);
   try {
@@ -17498,14 +17130,8 @@ async function continueOutputCreativeHandoff(request, env, url, authorization) {
 }
 
 async function phase6MakeApiConfig(env) {
-  const settings = await listPipelineSettingsForAdmin(env);
-  const makeApiBase = pipelineSettingValue(settings, "MAKE_API_BASE_URL").replace(/\/+$/, "");
-  const makeApiToken = pipelineSettingValue(settings, "MAKE_API_TOKEN");
-  if (!makeApiBase || !makeApiToken) throw new HttpError(500, "Make API configuration is required for automatic voice prep");
-  return {
-    makeApiBase,
-    headers: { Authorization: `Token ${makeApiToken}`, Accept: "application/json", "Content-Type": "application/json" },
-  };
+  void env;
+  throw new HttpError(410, "Make.com is retired. Pipeline stages run on the Python runner.");
 }
 
 async function phase6MakeApiJson(env, path, init = {}) {
@@ -17604,7 +17230,7 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
   { id: ITEM4_P3_SCENARIO_ID, key: "P3" },
   { id: ITEM4_C2_SCENARIO_ID, key: "C2" },
 ]);
-const STUDIO_AP0_WEBHOOK_URL = "https://hook.us2.make.com/q1lx2g0gg7khxzgvnkums12wu649pjnw";
+const STUDIO_AP0_WEBHOOK_URL = ""; // Make.com retired
 // Live FB-PUBLIC scenario 6107230 (Make connection 9988775). Not unpublished Graph / FB-ORCH.
 const STUDIO_FB_PUBLIC_WEBHOOK_URL = "https://hook.us2.make.com/ivrjp4e0nfpuyvukb18116wj1fwgjdw1";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
@@ -17709,43 +17335,19 @@ async function pulseStudioP3ForPlannedOutputs(env) {
     return Array.isArray(linked) ? linked.filter(Boolean) : [];
   }))].slice(0, 8);
   if (!parentIds.length) return [{ key: "P3", skipped: "no_work" }];
-  if (pipelineStageBackend(env, "P3").mode === "python") {
-    const pulses = [];
-    for (const contentItemId of parentIds) {
-      try {
-        const result = await item4PulseP3Python(env, contentItemId);
-        pulses.push({ key: "P3", parent: contentItemId, ok: true, backend: "python", result });
-      } catch (error) {
-        pulses.push({
-          key: "P3",
-          parent: contentItemId,
-          ok: false,
-          backend: "python",
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-    return pulses;
-  }
-  try { await phase6EnsureScenarioActive(env, ITEM4_P3_SCENARIO_ID); } catch (error) {
-    console.warn("P3 planned-output arm failed", error);
-  }
   const pulses = [];
   for (const contentItemId of parentIds) {
     try {
-      const response = await fetch(ITEM4_P3_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/plain, application/json" },
-        body: JSON.stringify({
-          source: "studio-cadence",
-          target: "P3",
-          content_record_id: contentItemId,
-          requested_at: new Date().toISOString(),
-        }),
-      });
-      pulses.push({ key: "P3", parent: contentItemId, ok: response.ok, status: response.status });
+      const result = await item4PulseP3Python(env, contentItemId);
+      pulses.push({ key: "P3", parent: contentItemId, ok: true, backend: "python", result });
     } catch (error) {
-      pulses.push({ key: "P3", parent: contentItemId, error: error instanceof Error ? error.message : String(error) });
+      pulses.push({
+        key: "P3",
+        parent: contentItemId,
+        ok: false,
+        backend: "python",
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
   return pulses;
@@ -18635,12 +18237,7 @@ async function pulseOnDemandCarouselChain(env, options = {}) {
       pulses.push({ key: job.key, skipped: "no_work" });
       continue;
     }
-    try {
-      await phase6PulseOnDemandScenario(env, job.id, { waitMs: 20000 });
-      pulses.push({ key: job.key, pulsed: true });
-    } catch (error) {
-      pulses.push({ key: job.key, error: error instanceof Error ? error.message : String(error) });
-    }
+    pulses.push({ key: job.key, skipped: "make_retired" });
   }
   return pulses;
 }
@@ -19880,7 +19477,7 @@ async function studioPulseAp0PublicAsset(env, record) {
   if (String(f(record, "Publish_Asset_URL") || "").trim()) {
     return { ok: true, skipped: "already-has-asset", target: "AP0" };
   }
-  return studioPulseMakeWebhook(env, STUDIO_AP0_WEBHOOK_URL, recordId, "AP0");
+  return { ok: false, skipped: "make_retired", target: "AP0" };
 }
 
 async function studioPulseAp1IgReel(env, record) {
@@ -24320,7 +23917,7 @@ const STUDIO_A2_SCENARIO_ID = 5531974;
 const STUDIO_A2B_SCENARIO_ID = 5568863;
 const STUDIO_A3_SCENARIO_ID = 5569035;
 const STUDIO_A4_SCENARIO_ID = 5578180;
-const STUDIO_A2_WEBHOOK_URL = "https://hook.us2.make.com/issyeyva2ac2kyn0419w8sie63nv2bpw";
+const STUDIO_A2_WEBHOOK_URL = ""; // Make.com retired
 const STUDIO_A3_CLASSIFY_VIEW_ID = "viwf6dxUJrMx2yNoe";
 const STUDIO_A2_EMPTY_MAX_OPERATIONS = 4;
 const STUDIO_PIPELINE_SETTINGS_TABLE_ID = "tblpHPWeEkyJaF7ql";
@@ -26078,70 +25675,30 @@ async function pulseAudioLeadingSilence(request, env) {
 }
 
 async function pulseStudioLibraryIntake(request, env, authorization) {
-  const python = pipelineStageBackend(env, "A2");
-  if (python.mode === "python") {
-    const startedAt = new Date().toISOString();
-    const { response, payload } = await item4PulsePipelineStage(env, "a2", {
-      extra: { trigger_a2b: true, wait_for_next: false },
-    }, "A2");
-    if (!response.ok || payload?.status === "error") {
-      throw new HttpError(502, payload?.message || `Python A2 returned HTTP ${response.status}`);
-    }
-    const run = payload?.details?.run || {};
-    const filesFound = Boolean(run.files_found);
-    const knownA2 = {
-      id: "python-a2",
-      timestamp: startedAt,
-      operations: filesFound ? 20 : 2,
-      state: "success",
-      status_code: 1,
-    };
-    const status = await buildLibraryIntakeStatus(env, startedAt, knownA2);
-    return respond(request, env, {
-      ok: true,
-      triggered: "a2-python",
-      scenario_id: STUDIO_A2_SCENARIO_ID,
-      daisy_chain: ["A2", "A2B", "A3", "A4"],
-      hook_response: String(payload?.message || "python-a2").slice(0, 200),
-      ...status,
-      message: status.summary,
-    }, status.complete ? 200 : 202);
-  }
-  const state = await phase6ScenarioState(env, STUDIO_A2_SCENARIO_ID);
-  if (!state) throw new HttpError(502, "Could not read A2 scenario state");
-  if (!state.isActive) throw new HttpError(409, "A2 is off. The intake webhook only runs while A2 is active.");
+  void authorization;
   const startedAt = new Date().toISOString();
-  const url = new URL(STUDIO_A2_WEBHOOK_URL);
-  url.searchParams.set("make08_owner", "studio-operations");
-  url.searchParams.set("make08_stage", "A2");
-  url.searchParams.set("make08_cycle_id", `${startedAt.replace(/[-:]/g, "").slice(0, 15)}-studio`);
-  let hookResponse = "";
-  try {
-    const webhookTimeout =
-      typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-        ? AbortSignal.timeout(8000)
-        : undefined;
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: { Accept: "text/plain, application/json" },
-      ...(webhookTimeout ? { signal: webhookTimeout } : {}),
-    });
-    hookResponse = await response.text();
-    if (!response.ok) throw new HttpError(502, `A2 webhook returned ${response.status}: ${hookResponse.slice(0, 200)}`);
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    if (error?.name !== "AbortError" && error?.name !== "TimeoutError") {
-      throw new HttpError(502, `A2 webhook failed: ${error.message || error}`);
-    }
-    hookResponse = "webhook-timeout";
+  const { response, payload } = await item4PulsePipelineStage(env, "a2", {
+    extra: { trigger_a2b: true, wait_for_next: false },
+  }, "A2");
+  if (!response.ok || payload?.status === "error") {
+    throw new HttpError(502, payload?.message || `Python A2 returned HTTP ${response.status}`);
   }
-  const status = await buildLibraryIntakeStatus(env, startedAt);
+  const run = payload?.details?.run || {};
+  const filesFound = Boolean(run.files_found);
+  const knownA2 = {
+    id: "python-a2",
+    timestamp: startedAt,
+    operations: filesFound ? 20 : 2,
+    state: "success",
+    status_code: 1,
+  };
+  const status = await buildLibraryIntakeStatus(env, startedAt, knownA2);
   return respond(request, env, {
     ok: true,
-    triggered: "a2-webhook",
+    triggered: "a2-python",
     scenario_id: STUDIO_A2_SCENARIO_ID,
     daisy_chain: ["A2", "A2B", "A3", "A4"],
-    hook_response: hookResponse.slice(0, 200),
+    hook_response: String(payload?.message || "python-a2").slice(0, 200),
     ...status,
     message: status.summary,
   }, status.complete ? 200 : 202);

@@ -2,7 +2,7 @@ MAKE_SCENARIO_ID = 5531703
 MAKE_SCENARIO_NAME = (
     "P3 - Platform Output Generation v4.9.1 - Formula-Ready Single Parent Studio Outputs + Legacy"
 )
-WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65"
+WEBHOOK_URL = ""
 LEGACY_CONTENT_VIEW_ID = "viwwnVJVPqfy7iYJK"
 
 NATIVE_PHOTO_OUTPUT_TYPES = frozenset({"Multi-Photo", "Carousel", "Multi-Image Post"})

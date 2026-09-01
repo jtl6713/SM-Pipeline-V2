@@ -5,8 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import requests
-
 from airtable.client import AirtableClient
 from airtable.constants import CONTENT_ITEMS_TABLE
 from branding.watermark import apply_watermark_bytes, brand_watermark_bytes
@@ -16,7 +14,6 @@ from item4.settings import pipeline_settings
 from p2.constants import (
     MAKE_SCENARIO_ID,
     MAKE_SCENARIO_NAME,
-    P3_WEBHOOK_URL,
     PIPELINE_SETTING_NORMALIZER_URL,
     THUMBNAIL_DRIVE_FOLDER_ID,
     VOICEOVER_DRIVE_FOLDER_ID,
@@ -56,29 +53,15 @@ def _recheck(client: AirtableClient, formula: str) -> dict[str, Any] | None:
 
 def _trigger_p3(*, content_record_id: str, test_run_id: str, source: str) -> dict[str, Any]:
     settings = load_settings()
-    if str(settings.get("stage_backend_p3") or "python") != "disabled":
-        from p3.processor import process_request as process_p3
+    if str(settings.get("stage_backend_p3") or "python") == "disabled":
+        return {"backend": "python", "source": source, "skipped": "p3_disabled"}
+    from p3.processor import process_request as process_p3
 
-        result = process_p3(
-            content_item_record_id=content_record_id,
-            test_run_id=test_run_id or None,
-        )
-        return {"backend": "python", "source": source, **result}
-
-    webhook_url = str(settings.get("p3_webhook_url") or P3_WEBHOOK_URL).strip()
-    response = requests.post(
-        webhook_url,
-        headers={"Content-Type": "application/json", "Accept": "text/plain, application/json"},
-        json={
-            "source": source,
-            "target": "P3",
-            "content_record_id": content_record_id,
-            "test_run_id": test_run_id,
-            "requested_at": _now_iso(),
-        },
-        timeout=40,
+    result = process_p3(
+        content_item_record_id=content_record_id,
+        test_run_id=test_run_id or None,
     )
-    return {"backend": "make", "status_code": response.status_code, "body": response.text[:300]}
+    return {"backend": "python", "source": source, **result}
 
 
 def _voiceover_fields_ready(item: dict[str, Any]) -> bool:

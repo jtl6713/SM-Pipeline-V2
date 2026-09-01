@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
-
-import requests
 
 from airtable.client import AirtableClient
 from airtable.constants import (
@@ -19,7 +16,6 @@ from airtable.constants import (
     PRODUCTION_PROFILES_TABLE,
     PROMPTS_TABLE,
 )
-from config import load_settings
 from p1.constants import (
     MAKE_SCENARIO_ID,
     MAKE_SCENARIO_NAME,
@@ -27,8 +23,6 @@ from p1.constants import (
     P1_PROMPT_KEY,
     P1_PROMPT_VIEW,
     P1_VIEW,
-    P2_WEBHOOK_URL,
-    P3_WEBHOOK_URL,
 )
 from p1.context import build_runtime_context
 from p1.eligibility import (
@@ -41,10 +35,6 @@ from p1.eligibility import (
 )
 from p1.openai_package import generate_package
 from render.fields import field, field_str, first_linked_id
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _linked(client: AirtableClient, table_id: str, record: dict[str, Any], name: str) -> dict[str, Any] | None:
@@ -148,30 +138,13 @@ def _write_fields(item: dict[str, Any], parsed: dict[str, Any], options: dict[st
 
 
 def _trigger_next(stage: str, content_record_id: str, test_run_id: str | None) -> dict[str, Any]:
-    settings = load_settings()
-    if str(settings.get(f"stage_backend_{stage}") or "python").strip().lower() != "make":
-        if stage == "p2":
-            from p2.processor import process_request as process_p2
+    if stage == "p2":
+        from p2.processor import process_request as process_p2
 
-            return {"backend": "python", "stage": stage, **process_p2(content_item_record_id=content_record_id, test_run_id=test_run_id)}
-        from p3.processor import process_request as process_p3
+        return {"backend": "python", "stage": stage, **process_p2(content_item_record_id=content_record_id, test_run_id=test_run_id)}
+    from p3.processor import process_request as process_p3
 
-        return {"backend": "python", "stage": stage, **process_p3(content_item_record_id=content_record_id, test_run_id=test_run_id)}
-
-    url = str(settings.get(f"{stage}_webhook_url") or (P2_WEBHOOK_URL if stage == "p2" else P3_WEBHOOK_URL)).strip()
-    response = requests.post(
-        url,
-        headers={"Content-Type": "application/json", "Accept": "text/plain, application/json"},
-        json={
-            "source": "P-series daisy chain",
-            "target": stage.upper(),
-            "content_record_id": content_record_id,
-            "test_run_id": test_run_id or "",
-            "requested_at": _now_iso(),
-        },
-        timeout=40,
-    )
-    return {"backend": "make", "stage": stage, "status_code": response.status_code, "body": response.text[:300]}
+    return {"backend": "python", "stage": stage, **process_p3(content_item_record_id=content_record_id, test_run_id=test_run_id)}
 
 
 def _process_one(

@@ -1,7 +1,7 @@
 MAKE_SCENARIO_ID = 5530955
 MAKE_SCENARIO_NAME = "P2 - Voiceover and Thumbnail Generation - Daisy Chain v2.3 - Optional Voiceover"
-WEBHOOK_URL = "https://hook.us2.make.com/6c8csqnzebyedjkg9nfjsopln91qgtkt"
-P3_WEBHOOK_URL = "https://hook.us2.make.com/66wq22tanm43b7w9b4m8beukmv7z8a65"
+WEBHOOK_URL = ""
+P3_WEBHOOK_URL = ""
 
 VOICEOVER_DRIVE_FOLDER_ID = "1IWtzSArEsbkPeJtCyHeVNpqII6kTMjut"
 THUMBNAIL_DRIVE_FOLDER_ID = "19YXOymjeDL8XYFQMg5ZYns1FdCM55_FJ"
