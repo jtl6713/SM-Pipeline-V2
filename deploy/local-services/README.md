@@ -2,7 +2,7 @@
 
 This framework promotes approved service source from GitHub `main` into the Windows production runtime without running production directly from the Git working copy.
 
-**Current proven framework version:** `1.0.1-ps51-collections`
+**Current proven framework version:** `1.0.2-keep-dirty-checkout`
 
 For the complete operator and AI-handoff procedure, read:
 
@@ -32,8 +32,8 @@ The numbered operational tab contract is `1 LOC` through `8 LOC` (Video Compress
 
 A normal deployment:
 
-1. Requires a clean local Git checkout.
-2. Fetches and fast-forwards `main`.
+1. Fetches `origin/main`. Local leftover files (for example `package.json` or an edited Worker) stay in the Git checkout and are not copied into production.
+2. Does not require a clean checkout and does not switch your current branch.
 3. Resolves the exact approved commit.
 4. Refuses a requested commit that is not an ancestor of `origin/main`.
 5. Materializes that commit in an isolated temporary Git worktree.
@@ -70,10 +70,11 @@ Framework commits:
 Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo; legacy junction at `Production Start-Stop-Verify Services`):
 
 - `PLAN Local Service Deployment.bat`
-- `DEPLOY Local Service.bat`
+- `DEPLOY Local Service.bat` (menu; pick **6 Pipeline Runner**)
+- `DEPLOY Pipeline Runner.bat` (pipeline-runner only)
 - `ROLLBACK Local Service.bat`
 
-They display a numbered 1-6 service menu.
+`DEPLOY-pipeline-runner.bat` also lives next to `Deploy-SMService.ps1` in this folder after `git pull` on SM-Pipeline-V2. VERIFY only checks that :3350 answers 200. It does not copy new Flask routes.
 
 Task Organizer (standalone repo, port `3360`) is not a deployable SM service. Add it to the existing START / STOP / VERIFY windows with:
 

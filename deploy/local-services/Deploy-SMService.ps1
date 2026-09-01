@@ -17,7 +17,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$FrameworkVersion = '1.0.1-ps51-collections'
+$FrameworkVersion = '1.0.2-keep-dirty-checkout'
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Join-Path $PipelineRoot 'Source Control\SM-Pipeline-V2'
@@ -664,12 +664,12 @@ try {
 
     $dirty = @(& git status --porcelain)
     if ($dirty.Count -gt 0) {
-        throw "Git checkout has uncommitted changes. Deployment is blocked:`n$($dirty -join "`n")"
+        Write-Host 'Checkout has local files that are not on GitHub. Leaving them in place.' -ForegroundColor Yellow
+        Write-Host ($dirty -join "`n") -ForegroundColor DarkYellow
+        Write-Host 'Deploy still uses an isolated worktree of origin/main, not those files.' -ForegroundColor Yellow
     }
 
     Invoke-Native -FilePath 'git.exe' -NativeArgs @('fetch','origin') -WorkingDirectory $RepoRoot | Out-Null
-    Invoke-Native -FilePath 'git.exe' -NativeArgs @('checkout','main') -WorkingDirectory $RepoRoot | Out-Null
-    Invoke-Native -FilePath 'git.exe' -NativeArgs @('pull','--ff-only','origin','main') -WorkingDirectory $RepoRoot | Out-Null
 
     if ([string]::IsNullOrWhiteSpace($Commit)) {
         $ResolvedCommit = (& git rev-parse 'origin/main' | Out-String).Trim()
