@@ -33,6 +33,8 @@ await logEvent({
 
 The host is `tasks.chicagoshining.com`. Cloudflare Access login pages on that hostname are a misconfiguration for this POST — `/agent-activity/log-event` and `/health` must stay public JSON. Optional `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` are sent when set.
 
+Cursor Agent/Tab work is logged automatically by `.cursor/hooks.json` (`afterAgentResponse`, `afterFileEdit`, `afterTabFileEdit`, `stop`). The hook always returns `{}` so it never continues the agent loop.
+
 ## Agent IDs
 
 | Agent | agent_id |
