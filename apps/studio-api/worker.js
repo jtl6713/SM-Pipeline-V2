@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.206-due-publish-priority",
+          version: "0.10.207-fbs4-cover-unblock",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -210,6 +210,7 @@ export default {
           studio_insights_overview_stats_v1: true,
           studio_insights_youtube_discovery_v1: true,
           studio_due_publish_priority_v1: true,
+          studio_fbs4_cover_unblock_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
           studio_production_location_v1: true,
@@ -21246,15 +21247,40 @@ async function studioReconcileFacebookReels(env, options = {}) {
       console.warn("facebook reel create reconcile scan failed", error);
     }
   }
-  try {
-    processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({FB_Slideshow_Status}="Reel Processing",{FB_Slideshow_Status}="Published Pending Finalize"),OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""))',
-      sortField: "Scheduled_Post_Date",
-      sortDirection: "asc",
-    });
-  } catch (error) {
-    console.warn("facebook reel poll reconcile scan failed", error);
+  // Pending Finalize first so cover-stuck Reel Processing zombies cannot starve
+  // already-live Make/public posts. Skip Publish_Status=Published — those are done;
+  // native cover retries belong to studioReconcileFacebookVideoCovers.
+  const pollScans = [
+    {
+      label: "pending-finalize",
+      formula: 'AND({Test_Run_ID}=BLANK(),{FB_Slideshow_Status}="Published Pending Finalize",OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""),{Publish_Status}!="Published")',
+    },
+    {
+      label: "reel-processing",
+      formula: 'AND({Test_Run_ID}=BLANK(),{FB_Slideshow_Status}="Reel Processing",OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""),{Publish_Status}!="Published")',
+    },
+  ];
+  const seen = new Set();
+  for (const scan of pollScans) {
+    if (processing.length >= limit) break;
+    let rows = [];
+    try {
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit: limit - processing.length,
+        filterFormula: scan.formula,
+        sortField: "Scheduled_Post_Date",
+        sortDirection: "asc",
+      });
+    } catch (error) {
+      console.warn(`facebook reel poll ${scan.label} reconcile scan failed`, error);
+      continue;
+    }
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      processing.push(row);
+      if (processing.length >= limit) break;
+    }
   }
   for (const row of ready) {
     if (!studioPublishCanDispatchNow(row)) continue;

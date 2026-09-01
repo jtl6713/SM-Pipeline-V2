@@ -131,25 +131,19 @@ def process_request(
         return {"processed": True, "still_processing": True, "error": str(exc), **preview}
 
     if reel_is_ready(data):
+        # Cover attach is best-effort. Holding still_processing here left already-live
+        # reels (and Publish_Status=Published zombies) burning the FBS4 cron budget so
+        # Published Pending Finalize rows never got a poll slot.
         thumbnail_ok = _attach_thumbnail(graph, client, output, video_id)
-        if not thumbnail_ok:
-            _mark_still_processing(
-                client,
-                output,
-                {"error": "native grid cover attach pending", "payload": data},
-                attempt,
-                status_code=status_code,
-            )
-            return {
-                "processed": True,
-                "still_processing": True,
-                "reason": "missing_native_cover",
-                "video_id": video_id,
-                **preview,
-            }
         permalink = reel_permalink(data, video_id)
         _mark_published(client, output, video_id, data, permalink=permalink, thumbnail_ok=thumbnail_ok)
-        return {"processed": True, "video_id": video_id, "permalink": permalink, **preview}
+        return {
+            "processed": True,
+            "video_id": video_id,
+            "permalink": permalink,
+            "thumbnail_ok": thumbnail_ok,
+            **preview,
+        }
     if reel_is_terminal_error(data, status_code):
         _mark_failed(client, output, video_id, status_code, data)
         return {"processed": False, "reason": "reel_terminal", "status_code": status_code, **preview}

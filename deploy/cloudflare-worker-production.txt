@@ -262,3 +262,5 @@ Python default Worker deploy: 2026-08-31 - Unset STAGE_BACKEND flags no longer f
 SMV1 Python-only Worker deploy: 2026-08-31 - Preview-cache drain and cron no longer pulse or PATCH Make scenario 5894885. Crops and previews stay on the Python runner. Worker 0.10.205-smv1-python-only.
 
 Due publish priority Worker deploy: 2026-09-01 - Run due publish/TikTok/FB finalize before Item4 drain and autonomous produce; keep FBS4 finalize when Graph publish is held. Worker 0.10.206-due-publish-priority.
+
+FBS4 cover unblock Worker deploy: 2026-09-01 - Finalize ready Facebook Reels even when native cover attach fails; poll Published Pending Finalize before Reel Processing and skip already-Published zombies so due finalize work is not starved. Worker 0.10.207-fbs4-cover-unblock.
