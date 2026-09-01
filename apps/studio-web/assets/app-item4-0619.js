@@ -2014,9 +2014,13 @@
     const heading = String($("item4MediaHeading")?.textContent || "").toLowerCase();
     if (heading.includes("clip")) return true;
     const notes = String(record?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
-    return notes.includes("ez-input=photos-and-clips")
+    if (notes.includes("ez-input=photos-and-clips")
       || notes.includes("ez-input=video-clips")
-      || /ez-clips=\d+/.test(notes);
+      || /ez-clips=\d+/.test(notes)) return true;
+    const assets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [];
+    const clips = assets.filter(item4AssetLooksLikeVideo).length;
+    const photos = assets.filter((asset) => asset && !item4AssetLooksLikeVideo(asset)).length;
+    return clips > 0 && photos > 0;
   }
 
   function item4IsFinishedRequest(record = activeProductionRequest) {
@@ -2052,9 +2056,19 @@
     return assets.length === 1 && assets.every(item4AssetLooksLikeVideo);
   }
 
+  function item4MediaCountPhrase(counts) {
+    const photos = Math.max(0, Number(counts?.photos || 0));
+    const clips = Math.max(0, Number(counts?.clips || 0));
+    if (photos && clips) return `${photos} photo${photos === 1 ? "" : "s"} and ${clips} clip${clips === 1 ? "" : "s"}`;
+    if (clips) return `${clips} clip${clips === 1 ? "" : "s"}`;
+    return `${photos} photo${photos === 1 ? "" : "s"}`;
+  }
+
   function ezMediaWord(count = 1) {
     const n = Math.max(1, Number(count) || 1);
-    if (ezIsClipRequest()) return n === 1 ? "item" : "items";
+    if (ezIsClipRequest() || item4ClipCountsFromStatus(item4Workspace || {}).clips) {
+      return n === 1 ? "item" : "items";
+    }
     return ezIsFinishedVideo() ? (n === 1 ? "video" : "videos") : (n === 1 ? "photo" : "photos");
   }
 
@@ -4604,14 +4618,15 @@
     const badge = $("item4AssetStatus");
     const authority = String(status?.assets_status || "None");
     if (badge) {
-      const word = ezMediaWord(assets.length || 1);
+      const counts = item4ClipCountsFromStatus({ assets });
+      const phrase = item4MediaCountPhrase(counts);
       badge.textContent = !assets.length
         ? "No media yet"
         : authority === "Ready"
-          ? `${assets.length} ${word} ready`
+          ? `${phrase} ready`
           : authority === "Error"
-            ? `${word.charAt(0).toUpperCase()}${word.slice(1)} need${assets.length === 1 ? "s" : ""} attention`
-            : `${assets.length} ${word} processing`;
+            ? `${phrase} need attention`
+            : `${phrase} processing`;
     }
     if (!host) {
       syncProductionStudioState();
@@ -5199,9 +5214,9 @@
       return ezIncompleteSetMessage(ezPersistedAssetCount())
         || "Photos are saved. Drop an MP4 or MOV clip — it is not in the set yet.";
     }
-    if (ezIsClipRequest()) {
-      const counts = item4ClipCountsFromStatus(status);
-      return `${counts.photos} photo${counts.photos === 1 ? "" : "s"} and ${counts.clips} clip${counts.clips === 1 ? "" : "s"} are loaded. You can keep working or leave this screen anytime.`;
+    const counts = item4ClipCountsFromStatus(status);
+    if (counts.clips || ezIsClipRequest()) {
+      return `${item4MediaCountPhrase(counts)} are loaded. You can keep working or leave this screen anytime.`;
     }
     return "Photos are loaded into the system. You can keep working or leave this screen anytime.";
   }
@@ -5230,18 +5245,18 @@
           body: "The finished video is stored and ready. Crops and Drive copies are skipped.",
         };
       }
-      if (ezIsClipRequest()) {
-        const counts = item4ClipCountsFromStatus(status);
+      const counts = item4ClipCountsFromStatus(status);
+      if (counts.clips || ezIsClipRequest()) {
         return {
           heal: "ready",
           title: "Photos and clips are loaded into the system.",
-          body: `${counts.photos} photo${counts.photos === 1 ? "" : "s"} and ${counts.clips} clip${counts.clips === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
+          body: `${item4MediaCountPhrase(counts)} saved to Google Drive. You can keep editing or leave this screen anytime.`,
         };
       }
       return {
         heal: "ready",
         title: "Photos are loaded into the system.",
-        body: `${target} photo${target === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
+        body: `${item4MediaCountPhrase(counts)} saved to Google Drive. You can keep editing or leave this screen anytime.`,
       };
     }
     if (state === "Error") {
