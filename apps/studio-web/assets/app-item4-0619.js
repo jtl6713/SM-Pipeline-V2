@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.207-clip-picker";
+  const BUILD_ID = "item4-0.6.208-choose-clip";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
   const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_VIDEOS},${ITEM4_ACCEPT_PHOTOS}`;
@@ -197,11 +197,19 @@
       input.accept = accept;
       input.multiple = multiple;
     });
-    const showClip = kind === "photos-and-clips" || kind === "video-clips";
+    const hideClip = kind === "finished-video" || kind === "finished-stills";
     ["item4ChooseClip", "ezChooseClip"].forEach((id) => {
       const button = $(id);
-      if (button) button.hidden = !showClip;
+      if (button) button.hidden = hideClip;
     });
+  }
+
+  function item4BeginClipPick(inputId) {
+    if (ezIntakeKind !== "photos-and-clips" && ezIntakeKind !== "video-clips") {
+      selectPrMediaKind("photos-and-clips", { quiet: true });
+    }
+    mergeEzProductionNotes();
+    $(inputId)?.click();
   }
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
@@ -2568,11 +2576,13 @@
     const pending = ezWizardPending || ezWizardAnswers;
     const origin = ezPlanApi()?.ezOriginNotes({
       origin: pending?.start ? ezPlanApi()?.EZ_ORIGIN_WIZARD : undefined,
-      inputKind: pending?.inputKind || ezIntakeKind || "single-photo",
+      inputKind: (ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills")
+        ? ezIntakeKind
+        : (pending?.inputKind || ezIntakeKind || "single-photo"),
       captionMode: ezCaptionMode(),
       manualCount: pending?.manualCount,
       aiCount: pending?.aiCount,
-      clipCount: pending?.clipCount,
+      clipCount: pending?.clipCount || ((ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips") ? 1 : undefined),
       packageId: pending?.packageId || currentEzPackageId(),
     }) || "";
     const user = String($("ezProductionNotes")?.value || "").trim();
@@ -4322,7 +4332,7 @@
     $("ezChooseClip")?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      $("ezClipInput")?.click();
+      item4BeginClipPick("ezClipInput");
     });
     $("ezMediaInput")?.addEventListener("change", (event) => {
       startEzFromFiles(event.target.files);
@@ -6822,7 +6832,7 @@
   });
   $("item4ChooseClip")?.addEventListener("click", (event) => {
     event.stopPropagation();
-    $("item4ClipInput")?.click();
+    item4BeginClipPick("item4ClipInput");
   });
   $("item4MediaInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
   $("item4ClipInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
@@ -8564,6 +8574,7 @@
     ezAudioVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     ezAudioTrackPreview: "Play a preview of the selected music track.",
     item4ChooseMedia: "Open a file picker for master photos. You can also drop files onto the dashed box.",
+    item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos.",
     item4ChooseLibrary: "Review suggested Drive stills, uncheck to remove, or search the library to add more.",
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
@@ -8583,7 +8594,7 @@
 
   const PRODUCTION_TARGET_HELP = {
     ezUploadZone: "Drop photos here. They appear immediately. Drive copies can finish in the background — you can keep working or leave this screen.",
-    item4UploadZone: "Drop master photos here, or use From library to pick classified stills already on Google Drive.",
+    item4UploadZone: "Drop photos here, or tap Choose clip for an MP4 or MOV. From library picks classified stills already on Google Drive.",
     ezUploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
     item4UploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
     item4AssetStatus: "Shows whether master photos are still loading into Drive or already saved.",
