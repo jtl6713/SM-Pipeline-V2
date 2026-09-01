@@ -100,8 +100,12 @@ jobs:
               req = urllib.request.Request(url, data=data, method=method)
               req.add_header("Authorization", f"Bearer {token}")
               req.add_header("Content-Type", "application/json")
-              with urllib.request.urlopen(req) as res:
-                  return json.loads(res.read().decode())
+              try:
+                  with urllib.request.urlopen(req) as res:
+                      return json.loads(res.read().decode())
+              except urllib.error.HTTPError as exc:
+                  detail = exc.read().decode()[:2000]
+                  raise RuntimeError(f"{method} {url} -> {exc.code} {detail}") from exc
 
           def destinations_of(app):
               dests = app.get("destinations") or []
@@ -159,8 +163,22 @@ jobs:
                   raise SystemExit(json.dumps(result)[:2000])
               print(f"access_updated {name} {result.get('result', {}).get('id')}")
 
-          for name, uri in wanted:
-              upsert(name, uri)
+          print("access_apps:")
+          for app in apps:
+              dests = destinations_of(app)
+              interesting = any(
+                  ("tasks.chicagoshining.com" in d) or d.startswith("*.") or d.startswith("*")
+                  for d in dests
+              )
+              if interesting:
+                  print(f"  {app.get('name')} {app.get('id')} dests={dests} policies={app.get('policies')}")
+
+          try:
+              for name, uri in wanted:
+                  upsert(name, uri)
+          except Exception as exc:
+              print(f"access_write_failed {exc}")
+              print("Add Access: Apps and Policies Write to CLOUDFLARE_API_TOKEN, or create Bypass apps in Zero Trust for /agent-activity/log-event and /health.")
           PY
 
       - name: Deploy tasks Worker
