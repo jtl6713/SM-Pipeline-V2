@@ -176,7 +176,33 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.206-clip-save";
+  const BUILD_ID = "item4-0.6.207-clip-picker";
+  const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
+  const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
+  const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_VIDEOS},${ITEM4_ACCEPT_PHOTOS}`;
+
+  function item4AcceptForKind(kind = ezIntakeKind) {
+    const next = String(kind || "").trim();
+    if (next === "finished-video") return `${ITEM4_ACCEPT_VIDEOS},image/*`;
+    if (next === "photos-and-clips" || next === "video-clips") return ITEM4_ACCEPT_MIXED;
+    return ITEM4_ACCEPT_PHOTOS;
+  }
+
+  function item4ApplyMediaInputAccept(kind = ezIntakeKind) {
+    const accept = item4AcceptForKind(kind);
+    const multiple = kind === "multiple-photos" || kind === "finished-stills" || kind === "photos-and-clips" || kind === "video-clips";
+    ["item4MediaInput", "ezMediaInput"].forEach((id) => {
+      const input = $(id);
+      if (!input) return;
+      input.accept = accept;
+      input.multiple = multiple;
+    });
+    const showClip = kind === "photos-and-clips" || kind === "video-clips";
+    ["item4ChooseClip", "ezChooseClip"].forEach((id) => {
+      const button = $(id);
+      if (button) button.hidden = !showClip;
+    });
+  }
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
     return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
@@ -2060,15 +2086,7 @@
     document.querySelectorAll("[data-pr-input]").forEach((button) => {
       button.classList.toggle("selected", Boolean(nextKind) && button.dataset.prInput === nextKind);
     });
-    const input = $("item4MediaInput");
-    if (input) {
-      input.multiple = nextKind === "multiple-photos" || nextKind === "finished-stills" || nextKind === "photos-and-clips" || nextKind === "video-clips";
-      input.accept = nextKind === "finished-video"
-        ? "video/mp4,video/quicktime,video/webm,video/*,image/*"
-        : (nextKind === "photos-and-clips" || nextKind === "video-clips")
-          ? "image/*,.heic,.heif,image/heic,image/heif,video/mp4,video/quicktime,video/webm,video/*"
-          : "image/*,.heic,.heif,image/heic,image/heif";
-    }
+    item4ApplyMediaInputAccept(nextKind);
     const title = $("item4UploadTitle");
     const hint = $("item4UploadHint");
     const choose = $("item4ChooseMedia");
@@ -2112,18 +2130,32 @@
     const zone = $("item4UploadZone");
     const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
     const hasAssets = assetCount > 0;
+    const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
+    const notesText = String(activeProductionRequest?.production_notes || item4Workspace?.production_notes || "");
+    const noteKind = String(parsed?.inputKind || "").trim()
+      || (/ez-input=video-clips/i.test(notesText) ? "video-clips" : "")
+      || (/ez-input=photos-and-clips|ez-clips=\d+/i.test(notesText) ? "photos-and-clips" : "");
+    if (noteKind === "photos-and-clips" || noteKind === "video-clips" || noteKind === "finished-video" || noteKind === "finished-stills") {
+      if (ezIntakeKind !== noteKind) {
+        selectPrMediaKind(noteKind, { quiet: true });
+        return;
+      }
+    }
+    if (!ezIntakeKind && ["single-photo", "multiple-photos", "photos-and-clips", "video-clips"].includes(noteKind)) {
+      selectPrMediaKind(noteKind, { quiet: true });
+      return;
+    }
     if (!ezIntakeKind && hasAssets) {
+      if (ezIsClipRequest()) {
+        selectPrMediaKind("photos-and-clips", { quiet: true });
+        return;
+      }
       ezIntakeKind = assetCount > 1 ? "multiple-photos" : "single-photo";
       document.querySelectorAll("[data-pr-input]").forEach((button) => {
         button.classList.toggle("selected", button.dataset.prInput === ezIntakeKind);
       });
-      const input = $("item4MediaInput");
-      if (input) input.multiple = ezIntakeKind === "multiple-photos";
     }
-    const parsed = ezPlanApi()?.parseEzOriginNotes(activeProductionRequest?.production_notes);
-    if (!ezIntakeKind && ["single-photo", "multiple-photos", "photos-and-clips", "video-clips"].includes(parsed?.inputKind)) {
-      selectPrMediaKind(parsed.inputKind, { quiet: true });
-    }
+    item4ApplyMediaInputAccept(ezIntakeKind);
     const kindReady = Boolean(ezIntakeKind);
     if (grid) {
       grid.hidden = hasAssets;
@@ -3128,15 +3160,7 @@
     });
     const composer = $("ezComposer");
     if (composer) composer.hidden = false;
-    const input = $("ezMediaInput");
-    if (input) {
-      input.multiple = ezIntakeKind === "multiple-photos" || ezIntakeKind === "finished-stills" || ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips";
-      input.accept = ezIntakeKind === "finished-video"
-        ? "video/mp4,video/quicktime,video/webm,video/*,image/*"
-        : (ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips")
-          ? "image/*,.heic,.heif,image/heic,image/heif,video/mp4,video/quicktime,video/webm,video/*"
-          : "image/*,.heic,.heif,image/heic,image/heif";
-    }
+    item4ApplyMediaInputAccept(ezIntakeKind);
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
     if (ezIntakeKind === "finished-video") {
@@ -4292,9 +4316,19 @@
     $("ezChooseMedia")?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      item4ApplyMediaInputAccept(ezIntakeKind);
       $("ezMediaInput")?.click();
     });
+    $("ezChooseClip")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      $("ezClipInput")?.click();
+    });
     $("ezMediaInput")?.addEventListener("change", (event) => {
+      startEzFromFiles(event.target.files);
+      event.target.value = "";
+    });
+    $("ezClipInput")?.addEventListener("change", (event) => {
       startEzFromFiles(event.target.files);
       event.target.value = "";
     });
@@ -6480,15 +6514,19 @@
     const intakeKind = parsed?.inputKind
       ? (ezPlanApi()?.ezIntakeKindFromWizard?.(parsed.inputKind) || parsed.inputKind)
       : null;
-    if (ezEntryPath === "content" && ["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(intakeKind)) {
-      selectEzInput(intakeKind, { resetPlatforms: false });
-      document.querySelectorAll("[data-ez-platform]").forEach((input) => {
-        input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
-      });
-      syncEzYouTubeAvailability(false);
-      if (parsed?.captionMode) {
-        ezCaptionDefault = parsed.captionMode;
-        renderEzCaptionUi();
+    if (["multiple-photos", "single-photo", "photos-and-clips", "video-clips", "finished-video", "finished-stills"].includes(intakeKind)) {
+      if (ezEntryPath === "content") {
+        selectEzInput(intakeKind, { resetPlatforms: false });
+        document.querySelectorAll("[data-ez-platform]").forEach((input) => {
+          input.checked = Array.isArray(record.platforms) && record.platforms.includes(input.value);
+        });
+        syncEzYouTubeAvailability(false);
+        if (parsed?.captionMode) {
+          ezCaptionDefault = parsed.captionMode;
+          renderEzCaptionUi();
+        }
+      } else {
+        selectPrMediaKind(intakeKind, { quiet: true });
       }
     }
     hydrateEzConfigFromRequest(record);
@@ -6779,9 +6817,15 @@
 
   $("item4ChooseMedia")?.addEventListener("click", (event) => {
     event.stopPropagation();
+    item4ApplyMediaInputAccept(ezIntakeKind);
     $("item4MediaInput")?.click();
   });
+  $("item4ChooseClip")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    $("item4ClipInput")?.click();
+  });
   $("item4MediaInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
+  $("item4ClipInput")?.addEventListener("change", (event) => { uploadItem4Files(event.target.files); event.target.value = ""; });
 
   let item4LibraryItems = [];
   let item4LibrarySelected = new Set();

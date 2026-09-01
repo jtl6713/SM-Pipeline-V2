@@ -209,9 +209,11 @@
  <div class="ez-per-photo-captions" id="ezPerPhotoCaptions" hidden></div>
  <div class="item4-upload-zone ez-upload-zone" id="ezUploadZone" tabindex="0" role="button" aria-label="Upload photos for New content">
  <input id="ezMediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
+ <input id="ezClipInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm" multiple hidden>
  <div class="item4-upload-icon">＋</div>
  <div> <strong id="ezUploadTitle">Drop photos here or choose files</strong><span id="ezUploadHint">Add or remove one at a time. They show up here immediately.</span></div>
  <button type="button" class="secondary-button" id="ezChooseMedia">Choose photos</button>
+ <button type="button" class="secondary-button" id="ezChooseClip" hidden>Choose clip</button>
  </div>
  <div class="item4-upload-progress ez-upload-progress" id="ezUploadProgress" hidden></div>
  <div class="ez-photo-strip" id="ezPhotoStrip" hidden></div>
@@ -415,10 +417,12 @@
  <em class="ez-option-hint" id="item4MediaKindHint"></em>
  <div class="item4-upload-zone" id="item4UploadZone" tabindex="0" role="button" aria-label="Upload master photos" hidden>
  <input id="item4MediaInput" type="file" accept="image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence" multiple hidden>
+ <input id="item4ClipInput" type="file" accept="video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm" multiple hidden>
  <div class="item4-upload-icon" aria-hidden="true">+</div>
  <div> <strong id="item4UploadTitle">Drop photos</strong><span id="item4UploadHint">Up to 20</span></div>
  <div class="item4-upload-actions">
  <button type="button" class="primary-button" id="item4ChooseMedia">Choose photos</button>
+ <button type="button" class="secondary-button" id="item4ChooseClip" hidden>Choose clip</button>
  <button type="button" class="secondary-button" id="item4ChooseLibrary">From library</button>
  </div>
  </div>
@@ -1454,8 +1458,7 @@
  </aside>
 
  <script src="/assets/config.js?v=0.6.204-branch-cleanup"></script>
- <script src="/assets/ez-plan.js?v=0.6.206-clip-save"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.206-clip-save"></script>
- <script>document.getElementById("uiBuildLabel").textContent = "UI build 0.6.199";</script>
+ <script src="/assets/ez-plan.js?v=0.6.207-clip-picker"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.207-clip-picker"></script>
 </body>
 </html>
