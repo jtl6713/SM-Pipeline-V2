@@ -98,3 +98,19 @@ def test_fbs4_status_rules():
     assert not reel_is_terminal_error({}, 503)
     assert reel_permalink({"id": "123"}, "999") == "https://www.facebook.com/reel/123/"
     assert reel_permalink({}, "999") == "https://www.facebook.com/reel/999/"
+
+
+def test_fbs4_ready_does_not_block_on_cover_attach():
+    """Ready reels must finalize even when native cover attach fails.
+
+    Blocking on cover left Publish_Status=Published zombies in Reel Processing
+    and starved Published Pending Finalize rows of the FBS4 cron budget.
+    """
+    import inspect
+
+    from fbs3 import poll
+
+    src = inspect.getsource(poll.process_request)
+    assert "missing_native_cover" not in src
+    assert "_mark_published" in src
+    assert "_attach_thumbnail" in src
