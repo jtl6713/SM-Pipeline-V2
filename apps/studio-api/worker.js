@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.208-clip-save",
+          version: "0.10.209-clip-preview",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -3717,7 +3717,13 @@ async function item4UpsertMasterQueue(env, recordId, assets) {
       fields.Transfer_Status = currentStatus === "Failed" ? "Pending" : (currentStatus || "Pending");
       fields.Error_Message = null;
     }
-    if (!["Ready", "Pending"].includes(currentPreviewStatus)) {
+    if (item4LooksLikeVideoAsset(asset)) {
+      fields.Preview_Status = "Skipped";
+      fields.Preview_Error = null;
+      fields.Preview_R2_Key = null;
+      fields.Preview_URL = null;
+      fields.Preview_Ready_At = null;
+    } else if (!["Ready", "Pending"].includes(currentPreviewStatus)) {
       fields.Preview_Status = "Pending";
       fields.Preview_Error = null;
       fields.Preview_R2_Key = null;
@@ -14833,6 +14839,23 @@ async function mediaAssetImagePreview(request, env, url, authorization) {
   const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
   if (Boolean(f(record, "Do_Not_Use"))) {
     throw new HttpError(403, "This media asset is marked Do Not Use");
+  }
+  const previewIsVideo = String(f(record, "Media_Class") || "").toLowerCase() === "video"
+    || String(f(record, "MIME_Type") || "").toLowerCase().startsWith("video/");
+  if (previewIsVideo) {
+    const driveId = googleDriveFileId(record);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect fill="#012559" width="100%" height="100%"/><text x="50%" y="50%" fill="#d4a017" text-anchor="middle" dy=".3em" font-family="sans-serif" font-size="28">CLIP</text></svg>`;
+    if (driveId && request.method === "GET") {
+      return Response.redirect(`https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w640`, 302);
+    }
+    return new Response(svg, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Cache-Control": "private, max-age=300",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
   }
 
   let queueRow = await item4PreviewQueueRowForMediaAsset(env, recordId);
