@@ -303,3 +303,5 @@ Wizard clip count Pages deploy: 2026-09-01 - Photos and clips asks how many vide
 Clip save Pages deploy: 2026-09-01 - Photos and clips keeps asking for the video until an MP4/MOV master exists; clip uploads use a 180s timeout and stay under 100 MB. UI 0.6.206-clip-save.
 
 Clip picker Pages deploy: 2026-09-01 - Production Choose clip opens the phone video library; do not infer photo-only after stills are already on a Photos and clips request. UI 0.6.207-clip-picker.
+
+Choose clip always Pages deploy: 2026-09-01 - Show Choose clip on photo drafts so a mixed set can add an MP4 after stills are already saved. UI 0.6.208-choose-clip.
