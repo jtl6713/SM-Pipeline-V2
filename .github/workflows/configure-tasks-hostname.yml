@@ -1,0 +1,290 @@
+name: Configure tasks.chicagoshining.com
+
+on:
+  push:
+    branches:
+      - cursor/ai-activity-logging-fd02
+    paths:
+      - "apps/tasks-api/**"
+      - ".github/workflows/configure-tasks-hostname.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: configure-tasks-hostname
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ACCOUNT_ID: cbb5651c94e9bd2efc4594dc87229acb
+      TUNNEL_ID: f7a22f0f-f760-4e16-a085-3538d22981f1
+      WORKER_NAME: chicagoshining-tasks
+      HOSTNAME: tasks.chicagoshining.com
+      LOCAL_SERVICE: http://localhost:3360
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate Cloudflare secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+
+      - name: Merge tunnel ingress for tasks.chicagoshining.com
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "$AUTH" -o /tmp/tunnel-before.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("/tmp/tunnel-before.json").read_text())
+          ingress = payload.get("result", {}).get("config", {}).get("ingress") or []
+          hostname = "tasks.chicagoshining.com"
+          kept = []
+          for rule in ingress:
+              if rule.get("hostname") == hostname:
+                  continue
+              if not rule.get("hostname") and str(rule.get("service", "")).startswith("http_status:"):
+                  continue
+              kept.append(rule)
+          kept.append({"hostname": hostname, "service": "http://localhost:3360", "originRequest": {}})
+          kept.append({"service": "http_status:404"})
+          Path("/tmp/tunnel-after.json").write_text(json.dumps({"config": {"ingress": kept}}))
+          PY
+          curl -fsS -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "$AUTH" -H "Content-Type: application/json" \
+            --data-binary @/tmp/tunnel-after.json -o /tmp/tunnel-put.json
+          jq -e ".success == true" /tmp/tunnel-put.json >/dev/null
+
+      - name: Bypass Access for logger and health paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps"
+          curl -fsS "$ROOT?per_page=1000" -H "$AUTH" -o /tmp/access-apps.json
+          jq -e ".success == true" /tmp/access-apps.json >/dev/null
+          ROOT="$ROOT" python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          token = os.environ["CLOUDFLARE_API_TOKEN"]
+          root = os.environ["ROOT"]
+          payload = json.loads(Path("/tmp/access-apps.json").read_text())
+          apps = payload.get("result") or []
+          wanted = [
+              ("tasks-log-event-public", "tasks.chicagoshining.com/agent-activity/log-event"),
+              ("tasks-health-public", "tasks.chicagoshining.com/health"),
+          ]
+
+          def request(method, url, body=None):
+              data = None if body is None else json.dumps(body).encode()
+              req = urllib.request.Request(url, data=data, method=method)
+              req.add_header("Authorization", f"Bearer {token}")
+              req.add_header("Content-Type", "application/json")
+              with urllib.request.urlopen(req) as res:
+                  return json.loads(res.read().decode())
+
+          def destinations_of(app):
+              dests = app.get("destinations") or []
+              uris = []
+              for item in dests:
+                  uri = (item or {}).get("uri") or ""
+                  if uri:
+                      uris.append(uri)
+              domain = app.get("domain") or ""
+              if domain:
+                  uris.append(domain)
+              for item in app.get("self_hosted_domains") or []:
+                  if isinstance(item, str):
+                      uris.append(item)
+                  elif isinstance(item, dict):
+                      uris.append(item.get("self_hosted_domain") or item.get("domain") or "")
+              return [u.rstrip("/") for u in uris if u]
+
+          def has_bypass(app):
+              for policy in app.get("policies") or []:
+                  if isinstance(policy, dict) and policy.get("decision") == "bypass":
+                      return True
+              return False
+
+          def upsert(name, uri):
+              existing = None
+              for app in apps:
+                  if app.get("name") == name or uri in destinations_of(app):
+                      existing = app
+                      break
+              body = {
+                  "name": name,
+                  "type": "self_hosted",
+                  "domain": uri,
+                  "destinations": [{"type": "public", "uri": uri}],
+                  "session_duration": "24h",
+                  "app_launcher_visible": False,
+                  "auto_redirect_to_identity": False,
+                  "policies": [
+                      {
+                          "name": "Bypass machine clients",
+                          "decision": "bypass",
+                          "include": [{"everyone": {}}],
+                      }
+                  ],
+              }
+              if existing and has_bypass(existing) and uri in destinations_of(existing):
+                  print(f"access_ok {name} {existing.get('id')}")
+                  return
+              if existing:
+                  result = request("PUT", f"{root}/{existing['id']}", body)
+              else:
+                  result = request("POST", root, body)
+              if not result.get("success"):
+                  raise SystemExit(json.dumps(result)[:2000])
+              print(f"access_updated {name} {result.get('result', {}).get('id')}")
+
+          for name, uri in wanted:
+              upsert(name, uri)
+          PY
+
+      - name: Deploy tasks Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          ACCOUNT="$CLOUDFLARE_ACCOUNT_ID"
+          cat >/tmp/metadata.json <<'EOF'
+          {
+            "main_module": "worker.js",
+            "compatibility_date": "2026-08-31"
+          }
+          EOF
+          code=$(curl -sS -o /tmp/upload.json -w "%{http_code}" -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts/$WORKER_NAME/content" \
+            -H "$AUTH" \
+            -F "metadata=@/tmp/metadata.json;type=application/json" \
+            -F "worker.js=@apps/tasks-api/worker.js;type=application/javascript+module;filename=worker.js")
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e ".success == true" /tmp/upload.json >/dev/null
+
+          if [[ -z "${SUPABASE_URL:-}" || -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]]; then
+            echo "worker_routes=skipped_missing_supabase_secrets"
+            exit 0
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          Path("/tmp/worker-settings.json").write_text(json.dumps({
+              "bindings": [
+                  {"type": "plain_text", "name": "SUPABASE_URL", "text": os.environ["SUPABASE_URL"]},
+                  {"type": "secret_text", "name": "SUPABASE_SERVICE_ROLE_KEY", "text": os.environ["SUPABASE_SERVICE_ROLE_KEY"]},
+              ]
+          }))
+          PY
+          curl -fsS -X PATCH \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts/$WORKER_NAME/settings" \
+            -H "$AUTH" \
+            -F "settings=@/tmp/worker-settings.json;type=application/json" \
+            -o /tmp/worker-settings-result.json
+          jq -e ".success == true" /tmp/worker-settings-result.json >/dev/null
+          echo "worker_supabase_bindings=set"
+
+          curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" \
+            -H "$AUTH" -o /tmp/zone.json
+          ZONE_ID=$(jq -er ".result[0].id" /tmp/zone.json)
+          curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" \
+            -H "$AUTH" -o /tmp/routes.json
+          ZONE_ID="$ZONE_ID" python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          token = os.environ["CLOUDFLARE_API_TOKEN"]
+          zone = os.environ["ZONE_ID"]
+          script = os.environ["WORKER_NAME"]
+          wanted = [
+              "tasks.chicagoshining.com/agent-activity/log-event",
+              "tasks.chicagoshining.com/health",
+          ]
+          existing = {
+              item.get("pattern"): item
+              for item in (json.loads(Path("/tmp/routes.json").read_text()).get("result") or [])
+          }
+
+          def put(url, body):
+              req = urllib.request.Request(
+                  url,
+                  data=json.dumps(body).encode(),
+                  method="PUT" if "/routes/" in url else "POST",
+              )
+              req.add_header("Authorization", f"Bearer {token}")
+              req.add_header("Content-Type", "application/json")
+              with urllib.request.urlopen(req) as res:
+                  return json.loads(res.read().decode())
+
+          for pattern in wanted:
+              item = existing.get(pattern)
+              body = {"pattern": pattern, "script": script}
+              if item and item.get("script") == script:
+                  print(f"route_ok {pattern}")
+                  continue
+              if item:
+                  result = put(f"https://api.cloudflare.com/client/v4/zones/{zone}/workers/routes/{item['id']}", body)
+              else:
+                  req = urllib.request.Request(
+                      f"https://api.cloudflare.com/client/v4/zones/{zone}/workers/routes",
+                      data=json.dumps(body).encode(),
+                      method="POST",
+                  )
+                  req.add_header("Authorization", f"Bearer {token}")
+                  req.add_header("Content-Type", "application/json")
+                  with urllib.request.urlopen(req) as res:
+                      result = json.loads(res.read().decode())
+              if not result.get("success"):
+                  raise SystemExit(json.dumps(result)[:2000])
+              print(f"route_updated {pattern}")
+          PY
+
+      - name: Verify public log-event JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 18); do
+            code=$(curl -sS -o /tmp/health.json -w "%{http_code}" "https://tasks.chicagoshining.com/health" || true)
+            if [[ "$code" == "200" ]] && jq -e ".ok == true" /tmp/health.json >/dev/null 2>&1; then
+              jq . /tmp/health.json
+              break
+            fi
+            sleep 5
+          done
+          code=$(curl -sS -o /tmp/event.json -w "%{http_code}" \
+            -X POST "https://tasks.chicagoshining.com/agent-activity/log-event" \
+            -H "Content-Type: application/json" \
+            -d '{"task_id":1,"agent_id":13,"type":"github_actions","payload":{"message":"configure-tasks-hostname","sha":"'"$GITHUB_SHA"'"}}' || true)
+          echo "log_event_status=$code"
+          head -c 500 /tmp/event.json; echo
+          if [[ "$code" == "200" ]] && jq -e ".id or .ok == true or .type" /tmp/event.json >/dev/null 2>&1; then
+            echo "public_log_event=PASS"
+            exit 0
+          fi
+          echo "Public route not returning JSON yet. Access bypass and Worker route were applied." >&2
+          exit 2

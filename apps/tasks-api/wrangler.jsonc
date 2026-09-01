@@ -1,0 +1,17 @@
+{
+  "name": "chicagoshining-tasks",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-31",
+  "account_id": "cbb5651c94e9bd2efc4594dc87229acb",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "tasks.chicagoshining.com/agent-activity/log-event",
+      "zone_name": "chicagoshining.com"
+    },
+    {
+      "pattern": "tasks.chicagoshining.com/health",
+      "zone_name": "chicagoshining.com"
+    }
+  ]
+}
