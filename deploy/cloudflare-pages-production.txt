@@ -297,3 +297,5 @@ Autonomous subject pin Pages deploy: 2026-08-31 - Operations can pin the next au
 Library browse Pages deploy: 2026-08-31 - Production From library and Ideas Use existing browse classified Drive stills with no auto-check. UI 0.6.198-library-browse.
 
 Library suggest override Pages deploy: 2026-08-31 - Library pickers show suggested stills checked, and allow uncheck or search-to-add. UI 0.6.199-library-suggest.
+
+Wizard clip count Pages deploy: 2026-09-01 - Photos and clips asks how many video clips after the photo count. UI 0.6.205-clip-count.
