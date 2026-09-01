@@ -311,3 +311,5 @@ Clip preview Pages deploy: 2026-09-01 - Do not put MOV blobs or video URLs into 
 Clip copy Pages deploy: 2026-09-01 - Ready banner and badge count photos and clips separately (3 photos and 1 clip, not 4 photos). UI 0.6.210-clip-copy.
 
 Clip thumb Pages deploy: 2026-09-01 - Clip cards use a static MOV tile instead of a Drive thumbnail image that breaks on iPhone. UI 0.6.211-clip-thumb.
+
+Studio no-cache Pages deploy: 2026-09-01 - Do not cache index.html so iPhone Safari picks up new UI builds. UI 0.6.212-nocache.
