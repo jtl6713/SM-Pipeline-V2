@@ -110,6 +110,7 @@
   let ezStagedFiles = [];
   let ezEntryPath = null;
   let ezLocalPreviews = new Map();
+  let ezLocalClipPosters = new Map();
   let ezSelectedVoiceId = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_NAME = "Kate";
@@ -176,7 +177,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.212-nocache";
+  const BUILD_ID = "item4-0.6.213-clip-poster";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2237,11 +2238,23 @@
     setIdeaFormOpen(true, { mode: "existing" });
   }
 
+  function revokeEzLocalClipPosters() {
+    ezLocalClipPosters.forEach((url) => {
+      try { URL.revokeObjectURL(url); } catch {}
+    });
+    ezLocalClipPosters.clear();
+  }
+
   function revokeEzLocalPreviews() {
     ezLocalPreviews.forEach((url) => {
       try { URL.revokeObjectURL(url); } catch {}
     });
     ezLocalPreviews.clear();
+    revokeEzLocalClipPosters();
+  }
+
+  function item4LocalClipPoster(name) {
+    return String(ezLocalClipPosters.get(String(name || "")) || "").trim();
   }
 
   function stageEzLocalPreviews(files) {
@@ -2410,12 +2423,14 @@
       const name = asset.name || file?.name || (ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`);
       const id = String(asset.id || `staged:${index}`);
       const isVideo = item4FileLooksLikeVideo(file) || item4AssetLooksLikeVideo(asset);
-      const localUrl = isVideo ? "" : ezLocalPreviewFor(index, name);
-      const remoteUrl = !isVideo && asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
+      const localUrl = isVideo ? item4LocalClipPoster(name) : ezLocalPreviewFor(index, name);
+      const remoteUrl = asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
       const previewUrl = localUrl || remoteUrl;
       const heic = item4IsHeicAsset(file || asset);
       const visual = isVideo
-        ? item4AssetPlaceholder(file || asset, "Clip saved")
+        ? (previewUrl
+          ? `<div class="item4-clip-poster-wrap"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false" class="item4-clip-poster"><span class="item4-clip-play" aria-hidden="true"></span></div>`
+          : item4AssetPlaceholder(file || asset, "Clip saved"))
         : previewUrl
           ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
           : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
@@ -4480,14 +4495,29 @@
 
   function item4PreviewUrlLooksLikeImage(url) {
     const raw = String(url || "").trim();
-    if (!raw || raw.startsWith("blob:")) return false;
+    if (!raw) return false;
+    if (raw.startsWith("blob:")) {
+      return [...ezLocalClipPosters.values()].includes(raw);
+    }
     if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(raw)) return false;
-    return /thumbnail\?|googleusercontent|\.jpe?g(\?|#|$)|\.png(\?|#|$)|\.webp(\?|#|$)|\.gif(\?|#|$)|\.svg(\?|#|$)|\/preview/i.test(raw);
+    if (/thumbnail\?id=/i.test(raw)) return false;
+    return /googleusercontent|\.jpe?g(\?|#|$)|\.png(\?|#|$)|\.webp(\?|#|$)|\.gif(\?|#|$)|\.svg(\?|#|$)|clip-posters|\/api\/media-assets\/rec[^/]+\/preview/i.test(raw);
   }
 
   function item4AssetPreviewCandidates(asset) {
     try {
-      if (item4AssetLooksLikeVideo(asset)) return [];
+      if (item4AssetLooksLikeVideo(asset)) {
+        const candidates = [];
+        const local = item4LocalClipPoster(asset?.name);
+        const poster = String(asset?.poster_url || asset?.preview_url || "").trim();
+        if (local) candidates.push(local);
+        if (poster && item4PreviewUrlLooksLikeImage(poster)) candidates.push(poster);
+        const recordId = String(asset?.media_asset_record_id || "").trim();
+        if (/^rec[A-Za-z0-9]+$/.test(recordId)) {
+          candidates.push(`${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/preview`);
+        }
+        return [...new Set(candidates.filter(Boolean))];
+      }
       const candidates = [];
       const name = String(asset?.name || "");
       const local = ezLocalPreviewFor(Number(asset?.order || 0) - 1, name);
@@ -4582,17 +4612,19 @@
     const clipLabel = isVideo
       ? (seconds > 0 ? `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s clip saved` : "Clip saved")
       : label;
-    return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}"><strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
+    return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}">${isVideo ? `<span class="item4-clip-play" aria-hidden="true"></span>` : ""}<strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
   }
 
   function item4AssetThumb(asset) {
     const dims = asset.width && asset.height ? `${asset.width}×${asset.height}` : "Original";
     const isHeic = item4IsHeicAsset(asset);
     const isVideo = item4AssetLooksLikeVideo(asset);
-    const candidates = isVideo ? [] : item4AssetPreviewCandidates(asset);
+    const candidates = item4AssetPreviewCandidates(asset);
     const previewUrl = candidates[0] || "";
     const visual = isVideo
-      ? item4AssetPlaceholder(asset, "Clip saved")
+      ? (previewUrl
+        ? `<div class="item4-clip-poster-wrap"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Clip")}" loading="lazy" class="item4-clip-poster" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}"><span class="item4-clip-play" aria-hidden="true"></span></div>`
+        : item4AssetPlaceholder(asset, "Clip saved"))
       : previewUrl
         ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
         : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
@@ -5291,6 +5323,8 @@
         progress.hidden = true;
         progress.innerHTML = "";
         delete progress.dataset.heal;
+        delete progress.dataset.phase6Tooltip;
+        delete progress.dataset.studioTooltip;
         return;
       }
       progress.hidden = false;
@@ -5299,6 +5333,9 @@
         ? ` <em class="item4-upload-progress-count">${escapeHtml(markup.count)}</em>`
         : "";
       progress.innerHTML = `<strong>${escapeHtml(markup.title)}</strong><span>${escapeHtml(markup.body)}${countHtml}</span>`;
+      const tip = `${markup.title} ${markup.body}`.trim();
+      progress.dataset.phase6Tooltip = tip;
+      if (typeof window.studioLockTooltip === "function") window.studioLockTooltip(progress, tip);
     });
   }
 
@@ -5642,6 +5679,74 @@
     return raw || "Upload failed.";
   }
 
+  async function item4ClipPosterFromFile(file) {
+    if (!item4FileLooksLikeVideo(file)) return null;
+    const timeoutMs = 4000;
+    return new Promise((resolve) => {
+      let settled = false;
+      const url = URL.createObjectURL(file);
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      const finish = (blob) => {
+        if (settled) return;
+        settled = true;
+        try { URL.revokeObjectURL(url); } catch {}
+        resolve(blob || null);
+      };
+      const timer = window.setTimeout(() => finish(null), timeoutMs);
+      video.onerror = () => {
+        window.clearTimeout(timer);
+        finish(null);
+      };
+      const capture = () => {
+        try {
+          const width = Number(video.videoWidth || 0);
+          const height = Number(video.videoHeight || 0);
+          if (!width || !height) {
+            window.clearTimeout(timer);
+            finish(null);
+            return;
+          }
+          const max = 640;
+          const scale = Math.min(1, max / Math.max(width, height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            window.clearTimeout(timer);
+            finish(null);
+            return;
+          }
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob((blob) => {
+            window.clearTimeout(timer);
+            finish(blob && blob.size > 80 ? blob : null);
+          }, "image/jpeg", 0.82);
+        } catch {
+          window.clearTimeout(timer);
+          finish(null);
+        }
+      };
+      video.onloadeddata = () => {
+        const duration = Number(video.duration);
+        const seekTo = Number.isFinite(duration) && duration > 0
+          ? Math.min(0.35, Math.max(0.04, duration * 0.08))
+          : 0.08;
+        video.onseeked = capture;
+        try {
+          video.currentTime = seekTo;
+        } catch {
+          capture();
+        }
+      };
+      video.src = url;
+      try { video.load(); } catch {}
+    });
+  }
+
   async function imageMetadataForFiles(files) {
     const result = [];
     for (const file of files) {
@@ -5741,6 +5846,18 @@
     item4Uploading = true;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
+    const posterBlobs = await Promise.all(files.map((file) => item4ClipPosterFromFile(file).catch(() => null)));
+    posterBlobs.forEach((blob, index) => {
+      const file = files[index];
+      if (!blob || !file?.name) return;
+      try {
+        const prior = ezLocalClipPosters.get(file.name);
+        if (prior) {
+          try { URL.revokeObjectURL(prior); } catch {}
+        }
+        ezLocalClipPosters.set(file.name, URL.createObjectURL(blob));
+      } catch {}
+    });
     paintItem4LocalPreviews(files, { uploading: true });
     if (button) button.disabled = true;
     const uploadingClips = files.some(item4FileLooksLikeVideo);
@@ -5753,7 +5870,16 @@
       mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
       const form = new FormData();
-      files.forEach(file => form.append("files", file, file.name));
+      files.forEach((file, index) => {
+        form.append("files", file, file.name);
+        const poster = posterBlobs[index];
+        if (poster && poster.size > 80) {
+          const base = String(file.name || "clip").replace(/\.[^.]+$/, "") || "clip";
+          form.append("posters", poster, `${base}-poster.jpg`);
+        } else {
+          form.append("posters", new Blob([], { type: "application/octet-stream" }), "empty");
+        }
+      });
       form.append("metadata", JSON.stringify(metadata));
       const originKind = item4ClipOriginKind() || ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
       if (originKind) form.append("origin_kind", originKind);
@@ -8632,8 +8758,6 @@
   const PRODUCTION_TARGET_HELP = {
     ezUploadZone: "Drop photos here. They appear immediately. Drive copies can finish in the background — you can keep working or leave this screen.",
     item4UploadZone: "Drop photos here, or tap Choose clip for an MP4 or MOV. From library picks classified stills already on Google Drive.",
-    ezUploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
-    item4UploadProgress: "Photos are still copying into Google Drive. You can keep editing or leave this screen; nothing is lost.",
     item4AssetStatus: "Shows whether master photos are still loading into Drive or already saved.",
     item4PlanStatus: "Shows whether Studio has recommended a format for each selected platform.",
     item4VariantStatus: "Shows whether cropped platform versions have been prepared.",
@@ -8724,9 +8848,9 @@
     if (target.dataset.phase6TooltipBound === "1") return;
     target.dataset.phase6TooltipBound = "1";
     delete target.dataset.studioTooltip;
-    target.addEventListener("mouseenter", () => phase6ShowTooltip(target, text));
+    target.addEventListener("mouseenter", () => phase6ShowTooltip(target, target.dataset.phase6Tooltip || text));
     target.addEventListener("mouseleave", phase6HideTooltip);
-    target.addEventListener("focus", () => phase6ShowTooltip(target, text));
+    target.addEventListener("focus", () => phase6ShowTooltip(target, target.dataset.phase6Tooltip || text));
     target.addEventListener("blur", phase6HideTooltip);
   }
 
@@ -8752,6 +8876,7 @@
     });
 
     Object.entries(PRODUCTION_TARGET_HELP).forEach(([id, text]) => {
+      if (id === "ezUploadProgress" || id === "item4UploadProgress") return;
       const target = searchRoot.id === id ? searchRoot : searchRoot.querySelector?.(`#${id}`) || $(id);
       if (!target || target.closest?.("#creativeEditorPanel")) return;
       phase6BindTooltipTarget(target, text);
