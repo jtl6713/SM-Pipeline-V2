@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.209-clip-preview",
+          version: "0.10.210-clip-poster",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -3429,13 +3429,62 @@ function item4AssetMediaKind(asset) {
   return item4LooksLikeVideoAsset(asset) ? "video" : "photo";
 }
 
+function item4LooksLikeImagePreviewUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw || /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(raw)) return false;
+  return /\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(raw)
+    || raw.includes("/studio/previews/clip-posters/")
+    || /\/api\/media-assets\/rec[^/]+\/preview/i.test(raw);
+}
+
+function item4IsClipPosterFile(file) {
+  const mime = String(file?.type || "").toLowerCase();
+  return mime === "image/jpeg" || mime === "image/jpg" || mime === "image/png" || mime === "image/webp";
+}
+
+async function item4PutClipPoster(env, recordId, assetId, bytes, contentType = "image/jpeg") {
+  const key = `studio/previews/clip-posters/${recordId}/${assetId}.jpg`;
+  await env.STUDIO_MEDIA.put(key, bytes, {
+    httpMetadata: { contentType: String(contentType || "").startsWith("image/") ? contentType : "image/jpeg" },
+    customMetadata: { productionRequestId: String(recordId), assetId: String(assetId), role: "clip-poster" },
+  });
+  return { key, url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}` };
+}
+
+async function item4FetchDriveThumbnailBytes(driveId) {
+  const id = String(driveId || "").trim();
+  if (!id) return null;
+  const urls = [
+    `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w640`,
+    `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}=w640`,
+  ];
+  for (const source of urls) {
+    try {
+      const response = await fetch(source, {
+        method: "GET",
+        redirect: "follow",
+        headers: { Accept: "image/jpeg,image/png,image/webp,image/*;q=0.8" },
+      });
+      const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+      if (!response.ok || !type.startsWith("image/") || type.includes("svg")) {
+        try { await response.body?.cancel(); } catch {}
+        continue;
+      }
+      const bytes = await response.arrayBuffer();
+      if (!bytes || bytes.byteLength < 80) continue;
+      return { bytes, contentType: type.split(";")[0] || "image/jpeg" };
+    } catch {}
+  }
+  return null;
+}
+
 function item4PlayableMediaUrl(asset) {
   const urls = [
     asset?.preview_url,
     asset?.url,
     asset?.google_drive_url,
   ].map((value) => String(value || "").trim()).filter(Boolean);
-  const publicHttp = urls.find((value) => /^https?:\/\//i.test(value) && !value.startsWith("/"));
+  const publicHttp = urls.find((value) => /^https?:\/\//i.test(value) && !value.startsWith("/") && !item4LooksLikeImagePreviewUrl(value));
   return publicHttp || "";
 }
 
@@ -3846,7 +3895,20 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
     let driveUrl = String(asset?.google_drive_url || "").trim();
     let mediaAssetId = String(asset?.media_asset_record_id || "").trim();
     let previewUrl = String(asset?.preview_url || "").trim();
-    if (q) previewUrl = String(f(q, "Preview_URL") || previewUrl || "").trim();
+    let posterUrl = String(asset?.poster_url || "").trim();
+    let posterKey = String(asset?.poster_r2_key || "").trim();
+    if (q) {
+      const queuedPreview = String(f(q, "Preview_URL") || "").trim();
+      if (item4LooksLikeVideoAsset(asset)) {
+        if (item4LooksLikeImagePreviewUrl(queuedPreview)) posterUrl = posterUrl || queuedPreview;
+      } else {
+        previewUrl = queuedPreview || previewUrl;
+      }
+    }
+    if (item4LooksLikeVideoAsset(asset) && item4LooksLikeImagePreviewUrl(previewUrl)) {
+      posterUrl = posterUrl || previewUrl;
+      previewUrl = "";
+    }
 
     if (q && item4QueueStatus(q) === "Failed" && !failedError) {
       failedError = String(f(q, "Error_Message") || `${asset.name || "Master photo"} failed Google Drive authority handoff`);
@@ -3897,12 +3959,26 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
       readyCount += 1;
       mediaAssetIds.push(mediaAssetId);
     }
+    if (item4LooksLikeVideoAsset(asset) && driveId && !item4LooksLikeImagePreviewUrl(posterUrl) && env.STUDIO_MEDIA) {
+      try {
+        const grabbed = await item4FetchDriveThumbnailBytes(driveId);
+        if (grabbed) {
+          const stored = await item4PutClipPoster(env, recordId, asset.id, grabbed.bytes, grabbed.contentType);
+          posterUrl = stored.url;
+          posterKey = stored.key;
+        }
+      } catch (error) {
+        console.warn("Item 4 clip poster backfill failed", error);
+      }
+    }
     nextAssets.push({
       ...asset,
       google_drive_file_id: driveId || null,
       google_drive_url: driveUrl || null,
       media_asset_record_id: mediaAssetId || null,
       preview_url: previewUrl || null,
+      poster_url: posterUrl || null,
+      poster_r2_key: posterKey || null,
       authoritative_storage: authoritative ? "google_drive" : (asset.authoritative_storage || null),
       staging_deleted: authoritative ? true : Boolean(asset.staging_deleted),
       r2_key: authoritative ? null : (asset.r2_key || null),
@@ -4042,6 +4118,7 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
     Studio_Master_Asset_Status: "Uploading",
     ...(originStamp !== originNotes ? { Production_Notes: originStamp } : {}),
   });
+  const posters = form.getAll("posters");
   const uploaded = [];
   let authorityQueueStarted = false;
   try {
@@ -4060,7 +4137,7 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
       const height = Number(m.height || 0) || null;
       const isVideo = item4IsSupportedVideoFile(file);
       const durationSeconds = Number(m.duration_seconds || m.durationSeconds || 0);
-      uploaded.push({
+      const row = {
         id,
         order: existing.length + i + 1,
         name: String(file.name || safeName),
@@ -4079,7 +4156,18 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
         r2_key: key,
         url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`,
         uploaded_at: new Date().toISOString(),
-      });
+      };
+      const poster = posters[i];
+      if (isVideo && poster && typeof poster.arrayBuffer === "function" && Number(poster.size || 0) > 80 && item4IsClipPosterFile(poster)) {
+        try {
+          const stored = await item4PutClipPoster(env, recordId, id, await poster.arrayBuffer(), poster.type || "image/jpeg");
+          row.poster_url = stored.url;
+          row.poster_r2_key = stored.key;
+        } catch (error) {
+          console.warn("Item 4 clip poster staging failed", error);
+        }
+      }
+      uploaded.push(row);
     }
     const assets = [...existing, ...uploaded];
     record = await item4UpdateRequestState(env, recordId, {
@@ -4201,7 +4289,12 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
   const assets = item4AssetManifest(record);
   const target = assets.find(x => x.id === assetId);
   if (!target) throw new HttpError(404, "Master asset not found");
-  if (env.STUDIO_MEDIA) { try { await env.STUDIO_MEDIA.delete(target.r2_key); } catch {} }
+  if (env.STUDIO_MEDIA) {
+    try { await env.STUDIO_MEDIA.delete(target.r2_key); } catch {}
+    if (target.poster_r2_key) {
+      try { await env.STUDIO_MEDIA.delete(target.poster_r2_key); } catch {}
+    }
+  }
   const remaining = assets.filter(x => x.id !== assetId).map((x,i) => ({...x, order:i+1}));
   const updated = await item4UpdateRequestState(env, recordId, {
     Studio_Master_Assets_JSON: JSON.stringify(remaining),
@@ -14844,10 +14937,25 @@ async function mediaAssetImagePreview(request, env, url, authorization) {
     || String(f(record, "MIME_Type") || "").toLowerCase().startsWith("video/");
   if (previewIsVideo) {
     const driveId = googleDriveFileId(record);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect fill="#012559" width="100%" height="100%"/><text x="50%" y="50%" fill="#d4a017" text-anchor="middle" dy=".3em" font-family="sans-serif" font-size="28">CLIP</text></svg>`;
-    if (driveId && request.method === "GET") {
-      return Response.redirect(`https://drive.google.com/thumbnail?id=${encodeURIComponent(driveId)}&sz=w640`, 302);
+    if (driveId && request.method === "GET" && env.STUDIO_MEDIA) {
+      try {
+        const grabbed = await item4FetchDriveThumbnailBytes(driveId);
+        if (grabbed) {
+          return new Response(grabbed.bytes, {
+            status: 200,
+            headers: {
+              "Content-Type": grabbed.contentType || "image/jpeg",
+              "Cache-Control": "private, max-age=300",
+              "X-Content-Type-Options": "nosniff",
+              "X-Studio-Preview-Source": "drive-clip-poster",
+            },
+          });
+        }
+      } catch (error) {
+        console.warn("Item 4 clip preview thumbnail fetch failed", error);
+      }
     }
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect fill="#012559" width="100%" height="100%"/><circle cx="160" cy="150" r="36" fill="rgba(0,0,0,.35)"/><polygon points="152,132 152,168 180,150" fill="#fff"/><text x="50%" y="78%" fill="#f5c518" text-anchor="middle" font-family="sans-serif" font-size="22">CLIP</text></svg>`;
     return new Response(svg, {
       status: 200,
       headers: {
