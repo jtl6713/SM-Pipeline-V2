@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/log-chatgpt-activity.mjs",
+            "timeout": 15,
+            "statusMessage": "Logging ChatGPT/Codex edit activity"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/log-chatgpt-activity.mjs",
+            "timeout": 15,
+            "statusMessage": "Logging ChatGPT/Codex turn activity"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/log-chatgpt-activity.mjs",
+            "timeout": 15,
+            "statusMessage": "Logging ChatGPT/Codex session activity"
+          }
+        ]
+      }
+    ]
+  }
+}
