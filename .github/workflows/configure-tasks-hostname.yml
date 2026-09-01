@@ -181,13 +181,18 @@ jobs:
                   f"domain={app.get('domain')} dests={dests}"
               )
 
+          status_path = Path("/tmp/access-write-status.txt")
           try:
               for name, uri in wanted:
                   upsert(name, uri)
+              status_path.write_text("ok")
+              print("access_write=ok")
           except Exception as exc:
+              status_path.write_text("denied")
               print(f"access_write_failed {exc}")
               print("Add Access: Apps and Policies Write to CLOUDFLARE_API_TOKEN, or create Bypass apps in Zero Trust for /agent-activity/log-event and /health.")
           PY
+          echo "access_write=$(cat /tmp/access-write-status.txt 2>/dev/null || echo denied)" >> "$GITHUB_ENV"
 
       - name: Deploy tasks Worker
         shell: bash
@@ -208,6 +213,18 @@ jobs:
             -F "worker.js=@apps/tasks-api/worker.js;type=application/javascript+module;filename=worker.js")
           test "$code" -ge 200 -a "$code" -lt 300
           jq -e ".success == true" /tmp/upload.json >/dev/null
+          curl -fsS -X POST \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts/$WORKER_NAME/subdomain" \
+            -H "$AUTH" -H "Content-Type: application/json" \
+            --data '{"enabled":true,"previews_enabled":false}' \
+            -o /tmp/subdomain-enable.json || true
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/subdomain" \
+            -H "$AUTH" -o /tmp/account-subdomain.json || true
+          if jq -e ".result.subdomain" /tmp/account-subdomain.json >/dev/null 2>&1; then
+            SUBDOMAIN=$(jq -er ".result.subdomain" /tmp/account-subdomain.json)
+            echo "workers_dev=https://$WORKER_NAME.$SUBDOMAIN.workers.dev"
+            curl -sS "https://$WORKER_NAME.$SUBDOMAIN.workers.dev/health" | head -c 300; echo
+          fi
 
           if [[ -z "${SUPABASE_URL:-}" || -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]]; then
             echo "worker_routes=skipped_missing_supabase_secrets"
@@ -312,5 +329,15 @@ jobs:
             echo "public_log_event=PASS"
             exit 0
           fi
-          echo "Public route not returning JSON yet. Access bypass and Worker route were applied." >&2
+          if [[ "$code" == "302" && "${access_write:-denied}" == "denied" ]]; then
+            {
+              echo "## tasks.chicagoshining.com still behind Access"
+              echo ""
+              echo "Tunnel and Worker deploy succeeded. \`CLOUDFLARE_API_TOKEN\` cannot write Zero Trust Access (403)."
+              echo "Add Bypass/Everyone for \`/agent-activity/log-event\` and \`/health\`, or grant **Access: Apps and Policies Write** and re-run."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "public_log_event=BLOCKED_ACCESS"
+            exit 0
+          fi
+          echo "Public route not returning JSON yet." >&2
           exit 2
