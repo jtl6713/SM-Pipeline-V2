@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterAgentResponse": [
+      {
+        "command": "node .cursor/hooks/log-cursor-activity.mjs --agent-id 7"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "node .cursor/hooks/log-cursor-activity.mjs --agent-id 7"
+      }
+    ],
+    "afterTabFileEdit": [
+      {
+        "command": "node .cursor/hooks/log-cursor-activity.mjs --agent-id 7"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .cursor/hooks/log-cursor-activity.mjs --agent-id 7"
+      }
+    ]
+  }
+}
