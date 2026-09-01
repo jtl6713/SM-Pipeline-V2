@@ -51,6 +51,26 @@ Copy-Item -LiteralPath $startBatSource -Destination (Join-Path $Checkout 'start-
 Write-Step 'Create managed start/stop helpers'
 $startHelper = Join-Path $HelperRoot '91-task-organizer-local.ps1'
 $stopHelper = Join-Path $HelperRoot '91-stop-task-organizer.ps1'
+$openDocsHelper = Join-Path $HelperRoot '91-open-task-organizer-docs.ps1'
+
+$openDocsText = @"
+`$ErrorActionPreference = 'Continue'
+`$healthUrl = 'http://localhost:$Port/health'
+`$docsUrl = 'http://localhost:$Port/docs'
+`$deadline = (Get-Date).AddSeconds(90)
+do {
+    try {
+        `$health = Invoke-RestMethod -Uri `$healthUrl -TimeoutSec 2
+        if (`$health.ok -eq `$true) {
+            Start-Process `$docsUrl
+            exit 0
+        }
+    } catch {}
+    Start-Sleep -Seconds 1
+} while ((Get-Date) -lt `$deadline)
+Write-Host 'Task Organizer /health did not become ready within 90 seconds; docs were not opened.' -ForegroundColor Yellow
+exit 1
+"@
 
 $startText = @"
 `$ErrorActionPreference = 'Stop'
@@ -75,11 +95,11 @@ if (@(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyC
 Set-Location -LiteralPath `$runtime
 Write-Host 'Starting Task Organizer on port $Port...' -ForegroundColor Cyan
 Write-Host 'Local health: http://localhost:$Port/health' -ForegroundColor Yellow
-Write-Host 'Docs: http://localhost:$Port/docs' -ForegroundColor Yellow
+Write-Host 'Docs open after /health is ready (up to 90 seconds).' -ForegroundColor Yellow
 Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @(
     '-NoProfile',
-    '-Command',
-    "Start-Sleep -Seconds 4; try { Invoke-RestMethod -Uri 'http://localhost:$Port/health' -TimeoutSec 2 | Out-Null } catch {}; Start-Process 'http://localhost:$Port/docs'"
+    '-ExecutionPolicy', 'Bypass',
+    '-File', '$($openDocsHelper.Replace("'","''"))'
 ) | Out-Null
 & '.\start-task-organizer.bat'
 Write-Host 'Task Organizer stopped.' -ForegroundColor Red
@@ -108,6 +128,7 @@ do {
 } while ((Get-Date) -lt `$deadline)
 throw 'Task Organizer port $Port is still listening after stop attempt.'
 "@
+Write-Utf8NoBom $openDocsHelper $openDocsText
 Write-Utf8NoBom $startHelper $startText
 Write-Utf8NoBom $stopHelper $stopText
 
