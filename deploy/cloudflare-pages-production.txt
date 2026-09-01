@@ -299,3 +299,5 @@ Library browse Pages deploy: 2026-08-31 - Production From library and Ideas Use 
 Library suggest override Pages deploy: 2026-08-31 - Library pickers show suggested stills checked, and allow uncheck or search-to-add. UI 0.6.199-library-suggest.
 
 Wizard clip count Pages deploy: 2026-09-01 - Photos and clips asks how many video clips after the photo count. UI 0.6.205-clip-count.
+
+Clip save Pages deploy: 2026-09-01 - Photos and clips keeps asking for the video until an MP4/MOV master exists; clip uploads use a 180s timeout and stay under 100 MB. UI 0.6.206-clip-save.

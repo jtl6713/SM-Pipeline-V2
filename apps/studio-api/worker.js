@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.207-fbs4-cover-unblock",
+          version: "0.10.208-clip-save",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -3758,7 +3758,7 @@ async function item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveU
       records: [{
         fields: {
           "Asset Name": String(asset.name || "photo"),
-          Media_Class: "Image",
+          Media_Class: item4LooksLikeVideoAsset(asset) ? "Video" : "Image",
           "Google Drive URL": driveUrl,
           "Google Drive File ID": driveId,
           MIME_Type: String(asset.mime_type || "application/octet-stream"),
@@ -3981,9 +3981,17 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
   const photoFiles = files.filter((file) => item4IsSupportedImageFile(file) && !item4IsSupportedVideoFile(file));
   const existingVideos = existing.filter(item4LooksLikeVideoAsset).length + videoFiles.length;
   const existingPhotos = existing.filter((asset) => !item4LooksLikeVideoAsset(asset)).length + photoFiles.length;
+  const notesText = [
+    f(record, "Production_Notes"),
+    f(record, "Output_Notes"),
+    f(record, "Internal_Notes"),
+    f(record, "Production_Request_Notes"),
+  ].map((value) => String(value || "")).join("\n");
   const clipOrigin = item4IsClipInputKind(requestedKind)
     || item4IsClipInputKind(item4ParseEzOrigin(record).inputKind)
+    || /ez-input=photos-and-clips|ez-input=video-clips|ez-clips=\d+/i.test(notesText)
     || existingVideos > 1
+    || (videoFiles.length > 0 && existing.filter((asset) => !item4LooksLikeVideoAsset(asset)).length > 0)
     || (existingVideos > 0 && existingPhotos > 0);
   const finishedKind = !clipOrigin && (
     studioNormalizeFinishedOriginKind(requestedKind)
