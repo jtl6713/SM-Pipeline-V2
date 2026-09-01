@@ -54,6 +54,9 @@ jobs:
           rm -rf /tmp/pages-deploy
           mkdir -p /tmp/pages-deploy/assets
           cp apps/studio-web/index.html /tmp/pages-deploy/index.html
+          if [ -f apps/studio-web/_headers ]; then
+            cp apps/studio-web/_headers /tmp/pages-deploy/_headers
+          fi
           cp -a apps/studio-web/assets/. /tmp/pages-deploy/assets/
 
       - name: Read existing Pages production branch
