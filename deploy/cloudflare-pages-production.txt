@@ -321,3 +321,5 @@ Clip frame Pages deploy: 2026-09-01 - Play the clip off-screen to grab a real JP
 Clip Drive thumb Pages deploy: 2026-09-01 - Clip cards wait for the authenticated Drive still SMV1 writes. UI 0.6.215-clip-drive-thumb.
 
 Plan buttons Pages deploy: 2026-09-01 - Keep Recommend formats visible on EZ requests so Platforms and Frames can start if auto-plan did not. UI 0.6.216-plan-buttons.
+
+Clip runner poster Pages deploy: 2026-09-01 - Clip cards request a pipeline-runner JPEG frame instead of decoding the MOV on iPhone. UI 0.6.217-clip-runner-poster.
