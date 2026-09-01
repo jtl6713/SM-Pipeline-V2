@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.199-library-suggest";
+  const BUILD_ID = "item4-0.6.206-clip-save";
   function defaultVoiceoverDuration(videoSeconds) {
     const n = Number(videoSeconds);
     return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n * 0.5)) : 15;
@@ -1976,8 +1976,12 @@
   function ezIsClipRequest(record = activeProductionRequest) {
     const kind = String(ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "").trim();
     if (kind === "photos-and-clips" || kind === "video-clips") return true;
+    const heading = String($("item4MediaHeading")?.textContent || "").toLowerCase();
+    if (heading.includes("clip")) return true;
     const notes = String(record?.production_notes || item4Workspace?.production_notes || "").toLowerCase();
-    return notes.includes("ez-input=photos-and-clips") || notes.includes("ez-input=video-clips");
+    return notes.includes("ez-input=photos-and-clips")
+      || notes.includes("ez-input=video-clips")
+      || /ez-clips=\d+/.test(notes);
   }
 
   function item4IsFinishedRequest(record = activeProductionRequest) {
@@ -5102,6 +5106,40 @@
     ).length;
   }
 
+  function item4ClipCountsFromStatus(status) {
+    const assets = Array.isArray(status?.assets) ? status.assets : [];
+    let photos = 0;
+    let clips = 0;
+    for (const asset of assets) {
+      if (!asset || String(asset.id || "").startsWith("local:")) continue;
+      if (item4AssetLooksLikeVideo(asset)) clips += 1;
+      else photos += 1;
+    }
+    return { photos, clips, total: photos + clips };
+  }
+
+  function item4WaitingForClips(status) {
+    if (!ezIsClipRequest() || ezIsFinishedVideo()) return false;
+    const counts = item4ClipCountsFromStatus(status);
+    const wantClips = Math.max(1, ezTargetClipCount());
+    return counts.clips < wantClips;
+  }
+
+  function item4MasterReadyMessage(status) {
+    if (ezIsFinishedVideo()) {
+      return "Video is loaded into the system. You can keep working or leave this screen anytime.";
+    }
+    if (item4WaitingForClips(status)) {
+      return ezIncompleteSetMessage(ezPersistedAssetCount())
+        || "Photos are saved. Drop an MP4 or MOV clip — it is not in the set yet.";
+    }
+    if (ezIsClipRequest()) {
+      const counts = item4ClipCountsFromStatus(status);
+      return `${counts.photos} photo${counts.photos === 1 ? "" : "s"} and ${counts.clips} clip${counts.clips === 1 ? "" : "s"} are loaded. You can keep working or leave this screen anytime.`;
+    }
+    return "Photos are loaded into the system. You can keep working or leave this screen anytime.";
+  }
+
   function item4MasterProgressMarkup(status) {
     const assets = Array.isArray(status?.assets) ? status.assets : [];
     const ready = item4MasterReadyCount(status);
@@ -5109,33 +5147,56 @@
     const state = String(status?.assets_status || (item4Uploading ? "Uploading" : "None"));
     const loading = item4Uploading || state === "Uploading" || state === "Processing" || (target && state !== "Ready" && state !== "Error");
     if (!target && !loading) return null;
+    if (state === "Ready" && item4WaitingForClips(status)) {
+      const counts = item4ClipCountsFromStatus(status);
+      const wantClips = Math.max(1, ezTargetClipCount());
+      return {
+        heal: "uploading",
+        title: "Photos are saved. Add your video clip.",
+        body: `${counts.photos} photo${counts.photos === 1 ? "" : "s"} saved to Google Drive. ${counts.clips} of ${wantClips} clip${wantClips === 1 ? "" : "s"} saved. Drop an MP4 or MOV under 100 MB.`,
+      };
+    }
     if (state === "Ready") {
-      return ezIsFinishedVideo()
-        ? {
+      if (ezIsFinishedVideo()) {
+        return {
           heal: "ready",
           title: "Video is loaded into the system.",
           body: "The finished video is stored and ready. Crops and Drive copies are skipped.",
-        }
-        : {
-          heal: "ready",
-          title: "Photos are loaded into the system.",
-          body: `${target} photo${target === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
         };
+      }
+      if (ezIsClipRequest()) {
+        const counts = item4ClipCountsFromStatus(status);
+        return {
+          heal: "ready",
+          title: "Photos and clips are loaded into the system.",
+          body: `${counts.photos} photo${counts.photos === 1 ? "" : "s"} and ${counts.clips} clip${counts.clips === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
+        };
+      }
+      return {
+        heal: "ready",
+        title: "Photos are loaded into the system.",
+        body: `${target} photo${target === 1 ? "" : "s"} saved to Google Drive. You can keep editing or leave this screen anytime.`,
+      };
     }
     if (state === "Error") {
       return {
         heal: "error",
-        title: ezIsFinishedVideo() ? "Video upload needs attention." : "Master photos need attention.",
+        title: ezIsFinishedVideo() || ezIsClipRequest() ? "Media upload needs attention." : "Master photos need attention.",
         body: `${ready} of ${target} saved. Your originals remain in Studio. You can keep working or leave this screen.`,
       };
     }
     const count = target ? `${ready} of ${target} saved so far.` : "";
+    const clipUpload = item4Uploading && ezIsClipRequest();
     return {
       heal: "uploading",
-      title: ezIsFinishedVideo() ? "Video is loading into the system." : "Photos are loading into the system.",
+      title: ezIsFinishedVideo()
+        ? "Video is loading into the system."
+        : (clipUpload ? "Photos and clips are loading into the system." : "Photos are loading into the system."),
       body: ezIsFinishedVideo()
         ? "You can keep working on this screen, or leave and come back."
-        : "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background.",
+        : (clipUpload
+          ? "Keep this tab open until the clip appears in the strip. Drive copies finish in the background."
+          : "You can keep working on this screen, or leave and come back. Your photos stay in Studio while Google Drive copies finish in the background."),
       count,
     };
   }
@@ -5186,9 +5247,7 @@
       updateItem4MasterProgress(item4Workspace || {});
       if (state === "Ready") {
         stopItem4MasterPolling();
-        setRequestMessage(ezIsFinishedVideo()
-          ? "Video is loaded into the system. You can keep working or leave this screen anytime."
-          : "Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
+        setRequestMessage(item4MasterReadyMessage(item4Workspace || {}), "success");
         await maybeAutoEzPlan();
         return;
       }
@@ -5458,12 +5517,18 @@
     return match ? match[1] : "";
   }
 
+  function item4ClipOriginKind() {
+    if (ezIntakeKind === "video-clips") return "video-clips";
+    if (ezIsClipRequest() || ezIntakeKind === "photos-and-clips") return "photos-and-clips";
+    return ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
+  }
+
   function item4IsSupportedPhotoFile(file) {
     const mime = String(file?.type || "").toLowerCase();
     const ext = item4UploadFileExtension(file?.name);
     const kind = ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
     if (item4FileLooksLikeVideo(file)) {
-      return kind === "finished-video" || kind === "photos-and-clips" || kind === "video-clips";
+      return ezIsClipRequest() || kind === "finished-video" || kind === "photos-and-clips" || kind === "video-clips";
     }
     if (kind === "finished-video") {
       return mime.startsWith("image/") || ["heic", "heif"].includes(ext);
@@ -5475,10 +5540,25 @@
     const rejected = Array.from(files || []).filter((file) => !item4IsSupportedPhotoFile(file));
     if (!rejected.length) return "";
     const names = rejected.map((file) => String(file?.name || "").trim()).filter(Boolean);
-    const noun = ezIsFinishedVideo() ? "video" : "photo";
+    const noun = ezIsFinishedVideo() ? "video" : (ezIsClipRequest() ? "photo or clip" : "photo");
     if (names.length === 1) return `${names[0]} is not a supported ${noun}.`;
     if (names.length === 2 || names.length === 3) return `${names.join(", ")} are not supported ${noun}s.`;
     return `${rejected.length} files are not supported ${noun}s.`;
+  }
+
+  function item4UploadErrorMessage(error, files) {
+    const hasVideo = (files || []).some(item4FileLooksLikeVideo);
+    const raw = String(error?.message || error || "").trim();
+    const status = Number(error?.status || 0);
+    const aborted = error?.name === "AbortError" || /aborted|timeout|timed out|failed to fetch/i.test(raw);
+    if (aborted && hasVideo) {
+      return "The clip did not finish saving. Use an MP4 or MOV under 100 MB and keep this tab open until the clip appears next to the photos.";
+    }
+    if (status === 415 && hasVideo) {
+      return raw || "This file was rejected as a clip. Keep Photos and clips selected and drop an MP4 or MOV.";
+    }
+    if (status === 413) return raw || "This clip is too large for one upload.";
+    return raw || "Upload failed.";
   }
 
   async function imageMetadataForFiles(files) {
@@ -5519,6 +5599,9 @@
     if (item4Uploading) {
       item4PendingUploads.push(...Array.from(fileList || []).filter(item4IsSupportedPhotoFile));
       return;
+    }
+    if (!ezIntakeKind && ezIsClipRequest()) {
+      selectEzInput("photos-and-clips", { resetPlatforms: false });
     }
     if (!ezIntakeKind) {
       setRequestMessage("Choose a media type before uploading.", "error-text");
@@ -5567,27 +5650,37 @@
       }
       files = files.slice(0, remaining);
     }
+    const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
+    const oversizedClip = files.find((file) => item4FileLooksLikeVideo(file) && Number(file.size || 0) > ITEM4_CLIP_EDGE_MAX_BYTES);
+    if (oversizedClip) {
+      const mb = Math.round(Number(oversizedClip.size || 0) / (1024 * 1024));
+      setRequestMessage(`${oversizedClip.name || "This clip"} is ${mb} MB. Studio can receive clips up to 100 MB in one upload. Export a shorter MP4 or MOV and drop it again.`, "error-text");
+      return;
+    }
     item4Uploading = true;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
     paintItem4LocalPreviews(files, { uploading: true });
     if (button) button.disabled = true;
+    const uploadingClips = files.some(item4FileLooksLikeVideo);
     setRequestMessage(ezIsFinishedVideo()
       ? "Video is loading into the system. You can keep working on this screen, or leave and come back."
-      : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background.", "success");
+      : (uploadingClips
+        ? "Saving your clip. Keep this tab open until it appears under the photos."
+        : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background."), "success");
     try {
       mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
       const form = new FormData();
       files.forEach(file => form.append("files", file, file.name));
       form.append("metadata", JSON.stringify(metadata));
-      const originKind = ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
+      const originKind = item4ClipOriginKind() || ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
       if (originKind) form.append("origin_kind", originKind);
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, {
         method: "POST",
         body: form,
-        timeoutMs: originKind === "finished-video" ? 180000 : 90000,
-        retries: 1,
+        timeoutMs: uploadingClips || originKind === "finished-video" ? 180000 : 90000,
+        retries: 0,
       });
       if (result.record) activeProductionRequest = result.record;
       await loadItem4Workspace(activeProductionRequest);
@@ -5602,14 +5695,14 @@
         if (item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
       } else if (item4Workspace?.assets_status === "Ready") {
         updateItem4MasterProgress(item4Workspace);
-        setRequestMessage(ezIsFinishedVideo()
-          ? "Video is loaded into the system. You can keep working or leave this screen anytime."
-          : "Photos are loaded into the system. You can keep working or leave this screen anytime.", "success");
+        setRequestMessage(item4MasterReadyMessage(item4Workspace), "success");
       } else {
         updateItem4MasterProgress(item4Workspace || {});
         setRequestMessage(ezIsFinishedVideo()
           ? "Video is loading into the system. You can keep working or leave this screen."
-          : "Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background.", "success");
+          : (uploadingClips
+            ? "Clip is loading into the system. Keep this tab open until it appears in the strip."
+            : "Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background."), "success");
         startItem4MasterPolling();
       }
       if (!incomplete) await maybeAutoEzPlan();
@@ -5617,12 +5710,20 @@
       renderEzPhotoStrip();
     } catch (error) {
       ezAutoPlanAfterUpload = false;
+      const friendly = item4UploadErrorMessage(error, files);
       if (progress) {
         progress.hidden = false;
         progress.dataset.heal = "error";
-        progress.innerHTML = `<strong>${ezIsFinishedVideo() ? "Video" : "Photo"} upload needs attention.</strong><span>${escapeHtml(error.message)}</span>`;
+        progress.innerHTML = `<strong>${uploadingClips || ezIsFinishedVideo() ? "Clip" : "Photo"} upload needs attention.</strong><span>${escapeHtml(friendly)}</span>`;
       }
-      setRequestMessage(error.message, "error-text");
+      const ezProgress = $("ezUploadProgress");
+      if (ezProgress && (uploadingClips || ezIsClipRequest())) {
+        ezProgress.hidden = false;
+        ezProgress.dataset.heal = "error";
+        ezProgress.innerHTML = `<strong>${uploadingClips ? "Clip" : "Photo"} upload needs attention.</strong><span>${escapeHtml(friendly)}</span>`;
+      }
+      setRequestMessage(friendly, "error-text");
+      setEzMessage(friendly, "error-text");
     } finally {
       item4Uploading = false;
       if (button) button.disabled = !(item4Workspace?.assets?.length);
