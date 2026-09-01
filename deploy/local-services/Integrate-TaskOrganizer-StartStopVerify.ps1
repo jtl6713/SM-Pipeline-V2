@@ -111,9 +111,37 @@ throw 'Task Organizer port $Port is still listening after stop attempt.'
 Write-Utf8NoBom $startHelper $startText
 Write-Utf8NoBom $stopHelper $stopText
 
+function Find-ControlBat([string]$NamePattern, [string]$ContentPattern) {
+    $hits = @(Get-ChildItem -LiteralPath $ToolsRoot -File -Filter '*.bat' -ErrorAction Stop |
+        Where-Object { $_.Name -match $NamePattern -and ([System.IO.File]::ReadAllText($_.FullName) -match $ContentPattern) })
+    if ($hits.Count -lt 1) { return $null }
+    return ($hits | Sort-Object @{ Expression = { if ($_.Name -match '(?i)^start|^stop') { 0 } else { 1 } } }, Name | Select-Object -First 1).FullName
+}
+
+function Insert-BeforePauseOrAppend([string]$Existing, [string]$Block) {
+    $pausePattern = '(?im)^\s*pause\s*$'
+    if ($Existing -match $pausePattern) {
+        return [regex]::Replace($Existing, $pausePattern, ($Block.TrimEnd() + "`r`n`r`npause"), 1)
+    }
+    $completedPattern = '(?im)^\s*echo\s+STARTUP COMMAND COMPLETED\s*$'
+    if ($Existing -match $completedPattern) {
+        return [regex]::Replace($Existing, $completedPattern, ($Block.TrimEnd() + "`r`n`r`necho STARTUP COMMAND COMPLETED"), 1)
+    }
+    $lastStart = [regex]::Matches($Existing, '(?im)^start\s+""\s+powershell\.exe.*$')
+    if ($lastStart.Count -gt 0) {
+        $m = $lastStart[$lastStart.Count - 1]
+        $idx = $m.Index + $m.Length
+        return $Existing.Substring(0, $idx) + "`r`n" + $Block.TrimEnd() + $Existing.Substring($idx)
+    }
+    return $Existing.TrimEnd() + "`r`n" + $Block
+}
+
 Write-Step 'Patch central START command'
 if (-not (Test-Path -LiteralPath $StartBat -PathType Leaf)) {
-    throw "Central START BAT not found: $StartBat"
+    $discovered = Find-ControlBat '(?i)start' '3333|3334|3340|3350|3335|3336|local-services|_startup_helpers'
+    if (-not $discovered) { throw "Central START BAT not found: $StartBat" }
+    $StartBat = $discovered
+    Write-Host "Using discovered START BAT: $StartBat" -ForegroundColor DarkGray
 }
 Backup-File $StartBat
 $start = [System.IO.File]::ReadAllText($StartBat)
@@ -124,36 +152,19 @@ REM ============================================================
 REM $Marker
 REM Managed local service #9; docs open at http://localhost:$Port/docs
 REM ============================================================
-start "" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%HELPER_DIR%\91-task-organizer-local.ps1"
+start "" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0_startup_helpers\91-task-organizer-local.ps1"
 
 "@
-    $anchor = 'echo ============================================================\r?\necho STARTUP COMMAND COMPLETED'
-    if ($start -match $anchor) {
-        $start = [regex]::Replace($start, $anchor, ($block + 'echo ============================================================' + "`r`n" + 'echo STARTUP COMMAND COMPLETED'), 1)
-    }
-    else {
-        $exitAnchor = 'pause\r?\nexit /b 0'
-        if ($start -notmatch $exitAnchor) { throw 'Could not find a safe insertion point in the central START BAT.' }
-        $start = [regex]::Replace($start, $exitAnchor, ($block + 'pause' + "`r`n" + 'exit /b 0'), 1)
-    }
+    $start = Insert-BeforePauseOrAppend $start $block
     Write-Utf8NoBom $StartBat $start
-    Write-Host 'Added Task Organizer to central START.' -ForegroundColor Green
+    Write-Host "Added Task Organizer to central START: $StartBat" -ForegroundColor Green
 }
 else {
     Write-Host 'Central START already contains Task Organizer integration.' -ForegroundColor DarkGray
 }
 
 Write-Step 'Patch central STOP command'
-$stopCandidates = @(
-    Get-ChildItem -LiteralPath $ToolsRoot -File -Filter '*.bat' -ErrorAction Stop |
-        Where-Object { $_.Name -match '(?i)stop' }
-)
-$stopBat = $null
-foreach ($candidate in $stopCandidates) {
-    $text = [System.IO.File]::ReadAllText($candidate.FullName)
-    if ($text -match '3333|3334|3340|local.services') { $stopBat = $candidate.FullName; break }
-}
-if (-not $stopBat -and $stopCandidates.Count -gt 0) { $stopBat = $stopCandidates[0].FullName }
+$stopBat = Find-ControlBat '(?i)stop' '3333|3334|3340|3350|3335|3336|local-services|_startup_helpers'
 if (-not $stopBat) {
     throw 'Could not locate the existing central STOP BAT. No partial STOP patch will be guessed.'
 }
@@ -165,19 +176,13 @@ if ($stop -notmatch [regex]::Escape($Marker)) {
 REM ============================================================
 REM $Marker
 REM ============================================================
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HELPER_DIR%\91-stop-task-organizer.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0_startup_helpers\91-stop-task-organizer.ps1"
 if errorlevel 1 (
   echo WARNING: Task Organizer :$Port did not stop cleanly.
 )
 
 "@
-    $pauseAnchor = 'pause\r?\nexit /b'
-    if ($stop -match $pauseAnchor) {
-        $stop = [regex]::Replace($stop, $pauseAnchor, ($stopBlock + 'pause' + "`r`n" + 'exit /b'), 1)
-    }
-    else {
-        $stop += $stopBlock
-    }
+    $stop = Insert-BeforePauseOrAppend $stop $stopBlock
     Write-Utf8NoBom $stopBat $stop
     Write-Host "Added Task Organizer to central STOP: $stopBat" -ForegroundColor Green
 }
@@ -185,9 +190,16 @@ else {
     Write-Host 'Central STOP already contains Task Organizer integration.' -ForegroundColor DarkGray
 }
 
-Write-Step 'Patch OAuth-hardened VERIFY command'
+Write-Step 'Patch VERIFY command'
 if (-not (Test-Path -LiteralPath $VerifyPs1 -PathType Leaf)) {
-    throw "OAuth-hardened VERIFY script not found: $VerifyPs1"
+    $fallbackVerify = Join-Path $ToolsRoot 'verify-chicagoshining-local-services.ps1'
+    if (Test-Path -LiteralPath $fallbackVerify -PathType Leaf) {
+        $VerifyPs1 = $fallbackVerify
+        Write-Host "Using verifier: $VerifyPs1" -ForegroundColor DarkGray
+    }
+    else {
+        throw "VERIFY script not found: $VerifyPs1"
+    }
 }
 Backup-File $VerifyPs1
 $verify = [System.IO.File]::ReadAllText($VerifyPs1)
@@ -206,12 +218,11 @@ if ($verify -notmatch 'Task Organizer local') {
         }
     }
     if (-not $inserted) {
-        $pattern = '(?m)^(\s*)@\{\s*Name\s*=\s*"YouTube Uploader local";\s*Url\s*=\s*"http://localhost:3340/health"\s*\}(,?)\s*$'
-        if ($verify -notmatch $pattern) { throw 'Could not find the local-service array in the hardened verifier.' }
-        $verify = [regex]::Replace($verify, $pattern, {
-            param($m)
-            $m.Value.TrimEnd(',') + ',' + "`r`n" + $m.Groups[1].Value + '@{ Name = "Task Organizer local";         Url = "http://localhost:' + $Port + '/health" }'
-        }, 1)
+        $runnerPattern = '(?m)^(.*(?:Pipeline Runner local|Video Compressor local|YouTube Uploader local).*http://localhost:\d+/health.*)$'
+        if ($verify -notmatch $runnerPattern) { throw 'Could not find the local-service array in the hardened verifier.' }
+        $line = $Matches[1]
+        $newLine = ($line -replace 'Pipeline Runner local|Video Compressor local|YouTube Uploader local', 'Task Organizer local') -replace 'http://localhost:\d+/health', ("http://localhost:{0}/health" -f $Port)
+        $verify = $verify.Replace($line, $line + "`r`n" + $newLine)
     }
     Write-Utf8NoBom $VerifyPs1 $verify
     Write-Host 'Added Task Organizer local health to hardened VERIFY.' -ForegroundColor Green
