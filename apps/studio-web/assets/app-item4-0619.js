@@ -176,7 +176,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.210-clip-copy";
+  const BUILD_ID = "item4-0.6.211-clip-thumb";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4487,10 +4487,7 @@
 
   function item4AssetPreviewCandidates(asset) {
     try {
-      if (item4AssetLooksLikeVideo(asset)) {
-        const driveThumb = item4DriveThumbnailUrl(asset?.google_drive_file_id);
-        return driveThumb ? [driveThumb] : [];
-      }
+      if (item4AssetLooksLikeVideo(asset)) return [];
       const candidates = [];
       const name = String(asset?.name || "");
       const local = ezLocalPreviewFor(Number(asset?.order || 0) - 1, name);
@@ -4578,21 +4575,24 @@
   }
 
   function item4AssetPlaceholder(asset, label = "Preview unavailable") {
+    const isVideo = item4AssetLooksLikeVideo(asset);
     const ext = item4AssetExtension(asset?.name).toUpperCase();
-    const format = ext || (item4IsHeicAsset(asset) ? "HEIC" : "IMAGE");
-    return `<div class="item4-heic-placeholder item4-image-placeholder"><strong>${escapeHtml(format)}</strong><span>${escapeHtml(label)}</span></div>`;
+    const format = ext || (isVideo ? "CLIP" : (item4IsHeicAsset(asset) ? "HEIC" : "IMAGE"));
+    const seconds = Number(asset?.duration_seconds || 0);
+    const clipLabel = isVideo
+      ? (seconds > 0 ? `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s clip saved` : "Clip saved")
+      : label;
+    return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}"><strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
   }
 
   function item4AssetThumb(asset) {
     const dims = asset.width && asset.height ? `${asset.width}×${asset.height}` : "Original";
     const isHeic = item4IsHeicAsset(asset);
     const isVideo = item4AssetLooksLikeVideo(asset);
-    const candidates = item4AssetPreviewCandidates(asset);
+    const candidates = isVideo ? [] : item4AssetPreviewCandidates(asset);
     const previewUrl = candidates[0] || "";
     const visual = isVideo
-      ? (previewUrl
-        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Clip")}" loading="lazy">`
-        : item4AssetPlaceholder(asset, "Clip saved"))
+      ? item4AssetPlaceholder(asset, "Clip saved")
       : previewUrl
         ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
         : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
