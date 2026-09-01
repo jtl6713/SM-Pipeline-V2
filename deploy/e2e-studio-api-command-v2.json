@@ -1,7 +1,11 @@
 {
-  "correlation_id":"SUNSET-E2E-PROMOTE-20260816-0211",
-  "requests":[
-    {"name":"promote-production-request","method":"POST","path":"/api/production-requests/recc9H8SXdUnKEMhQ/promote","body":{}},
-    {"name":"production-request-after-promote","method":"GET","path":"/api/production-requests/recc9H8SXdUnKEMhQ"}
+  "correlation_id": "KICK-326-TTD0-DUE-PUBLISH-20260901",
+  "requests": [
+    {
+      "name": "publish-kick-326",
+      "method": "POST",
+      "path": "/api/operations/outputs/recPgNwCVSncmXDbE/publish-kick",
+      "body": {}
+    }
   ]
 }
