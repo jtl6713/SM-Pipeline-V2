@@ -10,6 +10,7 @@ from airtable.constants import MEDIA_TRANSFER_QUEUE_TABLE
 from integrations.google_drive import GoogleDriveClient
 from integrations.r2_upload import R2UploadClient
 from integrations.variant_service import VariantServiceClient
+from item4.clip_poster import clip_poster_bytes, is_video_preview_row, stamp_request_clip_poster
 from item4.constants import BROWSER_MASTER_EXTENSIONS, STALE_PROCESSING_MS, VARIANT_RECIPE_VERSION
 from item4.formulas import airtable_quote, smv1_exact_request_formula
 from item4.media_assets import ensure_media_asset
@@ -519,27 +520,31 @@ def _process_preview_pending(
     drive_id = str(fields.get("Drive_File_ID") or "").strip()
     production_request_id = str(fields.get("Production_Request_Record_ID") or "").strip()
     transfer_id = str(fields.get("Transfer_ID") or "").strip()
-    ext = str(fields.get("Source_Extension") or "").lower()
+    ext = str(fields.get("Source_Extension") or "").lower().lstrip(".")
     if not drive_id or not production_request_id or not transfer_id:
         raise RuntimeError("Preview row is missing drive id, production request, or transfer id")
 
-    source_bytes, source_mime = drive.download_file(drive_id)
-    if kind == "Platform Variant":
-        preview_bytes = source_bytes
-        content_type = "image/jpeg"
-        suffix = f"-{drive_id}.jpg"
-    elif ext in {"heic", "heif"}:
-        preview_bytes = variant.render(source_bytes, "4:5", "center")
-        content_type = "image/jpeg"
+    if is_video_preview_row(fields):
+        preview_bytes, content_type = clip_poster_bytes(drive, drive_id, ext)
         suffix = ".jpg"
-    elif ext in BROWSER_MASTER_EXTENSIONS:
-        preview_bytes = source_bytes
-        content_type = source_mime or f"image/{ext}"
-        suffix = f".{ext}" if ext else ".jpg"
     else:
-        preview_bytes = source_bytes
-        content_type = source_mime or "application/octet-stream"
-        suffix = f".{ext}" if ext else ".bin"
+        source_bytes, source_mime = drive.download_file(drive_id)
+        if kind == "Platform Variant":
+            preview_bytes = source_bytes
+            content_type = "image/jpeg"
+            suffix = f"-{drive_id}.jpg"
+        elif ext in {"heic", "heif"}:
+            preview_bytes = variant.render(source_bytes, "4:5", "center")
+            content_type = "image/jpeg"
+            suffix = ".jpg"
+        elif ext in BROWSER_MASTER_EXTENSIONS:
+            preview_bytes = source_bytes
+            content_type = source_mime or f"image/{ext}"
+            suffix = f".{ext}" if ext else ".jpg"
+        else:
+            preview_bytes = source_bytes
+            content_type = source_mime or "application/octet-stream"
+            suffix = f".{ext}" if ext else ".bin"
 
     key = r2.preview_key(production_request_id, transfer_id, suffix)
     r2.put_object(key, preview_bytes, content_type)
@@ -555,6 +560,17 @@ def _process_preview_pending(
             "Preview_Ready_At": _now_iso(),
         },
     )
+    if is_video_preview_row(fields):
+        try:
+            stamp_request_clip_poster(
+                client,
+                production_request_id,
+                str(fields.get("Source_Asset_ID") or "").strip(),
+                preview_url,
+                key,
+            )
+        except Exception:
+            pass
     return {
         "route": "preview_pending",
         "queue_record_id": record_id,

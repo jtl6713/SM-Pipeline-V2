@@ -272,3 +272,5 @@ Clip preview Worker deploy: 2026-09-01 - Do not stream master MOVs through the i
 Clip poster Worker deploy: 2026-09-01 - Store a short-lived JPEG clip poster under studio/previews/clip-posters and stream Drive thumbnails as same-origin images. Worker 0.10.210-clip-poster.
 
 Clip frame Worker deploy: 2026-09-01 - Accept a saved clip JPEG poster and stream the Drive clip for same-origin frame capture. Worker 0.10.211-clip-frame.
+
+Clip Drive thumb Worker deploy: 2026-09-01 - Requeue skipped clip previews so SMV1 can write a JPEG poster from Drive. Worker 0.10.212-clip-drive-thumb.

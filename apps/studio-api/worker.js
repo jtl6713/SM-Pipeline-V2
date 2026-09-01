@@ -197,7 +197,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.211-clip-frame",
+          version: "0.10.212-clip-drive-thumb",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -3783,12 +3783,18 @@ async function item4UpsertMasterQueue(env, recordId, assets) {
       fields.Transfer_Status = currentStatus === "Failed" ? "Pending" : (currentStatus || "Pending");
       fields.Error_Message = null;
     }
-    if (item4LooksLikeVideoAsset(asset)) {
-      fields.Preview_Status = "Skipped";
+    if (item4LooksLikeVideoAsset(asset) && item4LooksLikeImagePreviewUrl(asset?.poster_url || asset?.preview_url)) {
+      fields.Preview_Status = "Ready";
+      fields.Preview_URL = String(asset.poster_url || asset.preview_url || "").trim();
       fields.Preview_Error = null;
-      fields.Preview_R2_Key = null;
-      fields.Preview_URL = null;
-      fields.Preview_Ready_At = null;
+    } else if (item4LooksLikeVideoAsset(asset)) {
+      if (currentPreviewStatus !== "Pending" && currentPreviewStatus !== "Ready") {
+        fields.Preview_Status = "Pending";
+        fields.Preview_Error = null;
+        fields.Preview_R2_Key = null;
+        fields.Preview_URL = null;
+        fields.Preview_Ready_At = null;
+      }
     } else if (!["Ready", "Pending"].includes(currentPreviewStatus)) {
       fields.Preview_Status = "Pending";
       fields.Preview_Error = null;
@@ -3976,16 +3982,26 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
       readyCount += 1;
       mediaAssetIds.push(mediaAssetId);
     }
-    if (item4LooksLikeVideoAsset(asset) && driveId && !item4LooksLikeImagePreviewUrl(posterUrl) && env.STUDIO_MEDIA) {
-      try {
-        const grabbed = await item4FetchDriveThumbnailBytes(driveId);
-        if (grabbed) {
-          const stored = await item4PutClipPoster(env, recordId, asset.id, grabbed.bytes, grabbed.contentType);
-          posterUrl = stored.url;
-          posterKey = stored.key;
+    if (item4LooksLikeVideoAsset(asset) && driveId && !item4LooksLikeImagePreviewUrl(posterUrl) && q) {
+      const previewStatus = String(f(q, "Preview_Status") || "").trim();
+      if (previewStatus === "Skipped") {
+        try {
+          await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, q.id, {
+            method: "PATCH",
+            body: JSON.stringify({
+              fields: {
+                Preview_Status: "Pending",
+                Preview_Error: null,
+                Preview_URL: null,
+                Preview_R2_Key: null,
+                Preview_Ready_At: null,
+              },
+              typecast: true,
+            }),
+          });
+        } catch (error) {
+          console.warn("Item 4 clip poster preview requeue failed", error);
         }
-      } catch (error) {
-        console.warn("Item 4 clip poster backfill failed", error);
       }
     }
     nextAssets.push({
@@ -7501,6 +7517,17 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
       assets = (masterAuthorityResume.assets || assets)
         .slice()
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    }
+    const needsClipPoster = assets.some((asset) => item4LooksLikeVideoAsset(asset) && !item4LooksLikeImagePreviewUrl(asset?.poster_url));
+    if (needsClipPoster && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil((async () => {
+        try {
+          await item4DrainPreviewCacheWorker(env, recordId, 4);
+          await item4ReconcileMasterAuthority(env, recordId);
+        } catch (error) {
+          console.warn("Item 4 clip poster drain deferred", error);
+        }
+      })());
     }
   } catch (error) {
     masterAuthorityResume = {
