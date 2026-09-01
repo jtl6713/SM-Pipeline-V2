@@ -197,7 +197,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.214-clip-chrome-frame",
+          version: "0.10.215-runner-clip-route",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -6263,29 +6263,77 @@ function studioProductionJobLabel(job) {
   return detail || null;
 }
 
-async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = {}) {
+async function item4RunnerClipPosterRoutes(env) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
-  if (!runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
-  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
-  const response = await fetch(`${runnerUrl}/jobs/studio-clip-poster`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
-    },
-    body: JSON.stringify({
-      production_request_record_id: recordId,
-      ...(assetId ? { source_asset_id: assetId } : {}),
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new HttpError(
-      response.status,
-      payload?.error || payload?.message || `Clip poster job failed (${response.status})`
-    );
+  if (!runnerUrl) return { runnerUrl: "", hasStage: false, hasJob: false, version: "" };
+  try {
+    const [healthResponse, stagesResponse] = await Promise.all([
+      fetch(`${runnerUrl}/health`),
+      fetch(`${runnerUrl}/stages`),
+    ]);
+    const health = await healthResponse.json().catch(() => ({}));
+    const stages = await stagesResponse.json().catch(() => ({}));
+    const jobs = Array.isArray(health?.jobs) ? health.jobs : [];
+    const hasJob = jobs.some((job) => String(job?.path || job?.name || "").includes("studio-clip-poster"));
+    const hasStage = (Array.isArray(stages?.stages) ? stages.stages : []).some((stage) => (
+      String(stage?.name || "") === "clip_poster" && stage?.implemented !== false
+    ));
+    return {
+      runnerUrl,
+      hasStage,
+      hasJob,
+      version: String(health?.version || "").trim(),
+    };
+  } catch (error) {
+    console.warn("Item 4 runner clip-poster discovery failed", error);
+    return { runnerUrl, hasStage: false, hasJob: false, version: "" };
   }
-  return payload;
+}
+
+async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = {}) {
+  const advertised = await item4RunnerClipPosterRoutes(env);
+  if (!advertised.runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const body = {
+    production_request_record_id: recordId,
+    ...(assetId ? { source_asset_id: assetId, extra: { source_asset_id: assetId } } : {}),
+  };
+
+  if (advertised.hasStage) {
+    const { response, payload } = await item4PulsePipelineStage(env, "clip_poster", body, "CLIP_POSTER");
+    if (!response.ok) {
+      throw new HttpError(
+        response.status,
+        payload?.error || payload?.message || `Clip poster stage failed (${response.status})`
+      );
+    }
+    return payload?.details || payload;
+  }
+
+  if (advertised.hasJob) {
+    const response = await fetch(`${advertised.runnerUrl}/jobs/studio-clip-poster`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new HttpError(
+        response.status,
+        payload?.error || payload?.message || `Clip poster job failed (${response.status})`
+      );
+    }
+    return payload;
+  }
+
+  console.warn(
+    "Item 4 clip poster skipped: live runner does not advertise clip_poster",
+    advertised.version || "unknown-version"
+  );
+  return { ok: false, skipped: "runner-missing-clip-poster", runner_version: advertised.version || null };
 }
 
 async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}) {
