@@ -16,6 +16,7 @@ export default {
       const isMusicPreviewRoute = /^\/api\/music\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
       const isVoicePreviewRoute = /^\/api\/voices\/[A-Za-z0-9_-]+\/preview$/.test(url.pathname);
       const isMediaAssetPreviewRoute = /^\/api\/media-assets\/rec[A-Za-z0-9]+\/preview$/.test(url.pathname);
+      const isMediaAssetStreamRoute = /^\/api\/media-assets\/rec[A-Za-z0-9]+\/stream$/.test(url.pathname);
       const isMediaLibraryStillsRoute = url.pathname === "/api/media-assets/library-stills";
       const isIdeaRecordRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isIdeaHoldRoute = /^\/api\/ideas\/rec[A-Za-z0-9]+\/hold$/.test(url.pathname);
@@ -34,8 +35,10 @@ export default {
       const isProductionRequestOutputsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/outputs$/.test(url.pathname);
       const isItem4AssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets$/.test(url.pathname);
       const isItem4LibraryAssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/library$/.test(url.pathname);
+      const isItem4AssetPosterRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+\/poster$/.test(url.pathname);
       const isItem4AssetRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+$/.test(url.pathname)
-        && !isItem4LibraryAssetsRoute;
+        && !isItem4LibraryAssetsRoute
+        && !isItem4AssetPosterRoute;
       const isItem4PlanRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/plan$/.test(url.pathname);
       const isItem4StatusRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/item4$/.test(url.pathname);
       const isItem4VariantsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/variants$/.test(url.pathname);
@@ -91,6 +94,7 @@ export default {
       const isItem4AssetsUploadWrite = isItem4AssetsRoute && request.method === "POST";
       const isItem4LibraryAssetsWrite = isItem4LibraryAssetsRoute && request.method === "POST";
       const isItem4AssetDeleteWrite = isItem4AssetRecordRoute && request.method === "DELETE";
+      const isItem4AssetPosterWrite = isItem4AssetPosterRoute && request.method === "POST";
       const isItem4PlanWrite = isItem4PlanRoute && request.method === "POST";
       const isItem4VariantsWrite = isItem4VariantsRoute && request.method === "POST";
       const isProductionRequestOutputEditWrite = isProductionRequestOutputRecordRoute && request.method === "PATCH";
@@ -117,7 +121,7 @@ export default {
       const isInsightsDiscoverWrite = isInsightsDiscoverRoute && request.method === "POST";
       const allowedMethod =
         request.method === "GET" ||
-        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
+        (request.method === "HEAD" && (isMusicPreviewRoute || isMediaAssetPreviewRoute || isMediaAssetStreamRoute || isOutputPreviewRoute || isVoicePreviewRoute)) ||
         isIdeaCreateRoute ||
         isIdeaGenerateWrite ||
         isIdeaEditRoute ||
@@ -136,6 +140,7 @@ export default {
         isMusicFavoriteWrite ||
         isMusicDeleteWrite ||
         isItem4AssetDeleteWrite ||
+        isItem4AssetPosterWrite ||
         isItem4PlanWrite ||
         isItem4VariantsWrite ||
         isProductionRequestOutputEditWrite ||
@@ -192,7 +197,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.210-clip-poster",
+          version: "0.10.211-clip-frame",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -451,6 +456,11 @@ export default {
         return mediaAssetImagePreview(request, env, url, authorization);
       }
 
+      if (isMediaAssetStreamRoute) {
+        if (request.method !== "GET" && request.method !== "HEAD") throw new HttpError(405, "Method not allowed");
+        return mediaAssetVideoStream(request, env, url, authorization);
+      }
+
       if (isAdminMakeDeployRoute) {
         requirePermission(authorization, "tenant_admin");
         if (request.method === "GET") {
@@ -676,6 +686,13 @@ export default {
           return uploadItem4MasterAssets(request, env, url, authorization);
         }
         return getItem4MasterAssets(request, env, url, authorization);
+      }
+
+      if (isItem4AssetPosterRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertUploadWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return uploadItem4ClipPoster(request, env, url, authorization);
       }
 
       if (isItem4AssetRecordRoute) {
@@ -3377,7 +3394,7 @@ function item4RequestIdFromPath(url) {
 }
 
 function item4AssetIdFromPath(url) {
-  const match = url.pathname.match(/^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/([A-Za-z0-9_-]+)$/);
+  const match = url.pathname.match(/^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/([A-Za-z0-9_-]+)(?:\/poster)?$/);
   return match ? match[1] : null;
 }
 
@@ -4309,6 +4326,39 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
     Studio_Item4_State: remaining.length ? "Assets Ready" : "Draft",
   });
   return respond(request, env, { ok: true, deleted: true, assets: remaining, record: mapProductionRequest(updated) });
+}
+
+async function uploadItem4ClipPoster(request, env, url, authorization) {
+  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
+  const recordId = item4RequestIdFromPath(url);
+  const assetId = item4AssetIdFromPath(url);
+  if (!assetId) throw new HttpError(400, "Invalid master asset ID");
+  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+  const assets = item4AssetManifest(record);
+  const target = assets.find((asset) => String(asset?.id || "") === String(assetId));
+  if (!target) throw new HttpError(404, "Master asset not found");
+  if (!item4LooksLikeVideoAsset(target)) throw new HttpError(415, "A clip poster can only be saved on a video clip");
+
+  let form;
+  try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read clip poster"); }
+  const poster = form.get("poster") || form.get("posters") || form.get("file");
+  if (!poster || typeof poster.arrayBuffer !== "function" || Number(poster.size || 0) < 80 || !item4IsClipPosterFile(poster)) {
+    throw new HttpError(400, "Choose a JPEG or PNG clip frame");
+  }
+  const stored = await item4PutClipPoster(env, recordId, assetId, await poster.arrayBuffer(), poster.type || "image/jpeg");
+  const nextAssets = assets.map((asset) => String(asset?.id || "") === String(assetId)
+    ? { ...asset, poster_url: stored.url, poster_r2_key: stored.key }
+    : asset);
+  const updated = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
+  });
+  return respond(request, env, {
+    ok: true,
+    poster_url: stored.url,
+    assets: nextAssets,
+    record: mapProductionRequest(updated),
+  });
 }
 
 /**
@@ -14831,7 +14881,7 @@ async function item4DrainPreviewCacheWorker(env, recordId, maxRuns = 30) {
 }
 
 function mediaAssetPreviewRecordIdFromPath(url) {
-  const match = url.pathname.match(/^\/api\/media-assets\/(rec[A-Za-z0-9]+)\/preview$/);
+  const match = url.pathname.match(/^\/api\/media-assets\/(rec[A-Za-z0-9]+)\/(?:preview|stream)$/);
   if (!match) throw new HttpError(400, "Invalid media asset preview route");
   return match[1];
 }
@@ -15031,6 +15081,37 @@ function outputPreviewRecordIdFromPath(url) {
   const match = url.pathname.match(/^\/api\/outputs\/(rec[A-Za-z0-9]+)\/preview$/);
   if (!match) throw new HttpError(400, "Invalid output preview route");
   return match[1];
+}
+
+async function mediaAssetVideoStream(request, env, url, authorization) {
+  if (!authorization?.authenticated || !authorization?.authorized) {
+    throw new HttpError(401, "Authenticated Studio session required");
+  }
+  const recordId = mediaAssetPreviewRecordIdFromPath(url);
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  if (Boolean(f(record, "Do_Not_Use"))) {
+    throw new HttpError(403, "This media asset is marked Do Not Use");
+  }
+  const isVideo = String(f(record, "Media_Class") || "").toLowerCase() === "video"
+    || String(f(record, "MIME_Type") || "").toLowerCase().startsWith("video/");
+  if (!isVideo) throw new HttpError(415, "This media asset is not a video clip");
+  const fileId = googleDriveFileId(record);
+  const fileUrl = String(f(record, "Google Drive URL") || "").trim();
+  if (!fileId) throw new HttpError(404, "Google Drive file ID is not available for this clip");
+
+  if (request.method === "HEAD") {
+    const probeRequest = new Request(request.url, { method: "GET", headers: { Range: "bytes=0-0" } });
+    const upstream = await fetchGoogleDriveVideo(fileId, fileUrl, probeRequest);
+    const headers = copyDriveVideoHeaders(upstream);
+    try { await upstream.body?.cancel(); } catch {}
+    return new Response(null, { status: 200, headers });
+  }
+
+  const upstream = await fetchGoogleDriveVideo(fileId, fileUrl, request);
+  return new Response(upstream.body, {
+    status: upstream.status === 206 ? 206 : 200,
+    headers: copyDriveVideoHeaders(upstream),
+  });
 }
 
 async function fetchGoogleDriveVideo(fileId, finalFileUrl, request) {
