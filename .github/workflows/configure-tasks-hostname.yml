@@ -79,6 +79,9 @@ jobs:
           ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps"
           curl -fsS "$ROOT?per_page=1000" -H "$AUTH" -o /tmp/access-apps.json
           jq -e ".success == true" /tmp/access-apps.json >/dev/null
+          curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" -o /tmp/zone.json
+          ZONE_ID=$(jq -er ".result[0].id" /tmp/zone.json)
+          curl -sS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/access/apps?per_page=1000" -H "$AUTH" -o /tmp/access-apps-zone.json || true
           ROOT="$ROOT" python - <<'PY'
           import json
           import os
@@ -89,7 +92,14 @@ jobs:
           token = os.environ["CLOUDFLARE_API_TOKEN"]
           root = os.environ["ROOT"]
           payload = json.loads(Path("/tmp/access-apps.json").read_text())
-          apps = payload.get("result") or []
+          apps = list(payload.get("result") or [])
+          zone_path = Path("/tmp/access-apps-zone.json")
+          if zone_path.exists():
+              zone_payload = json.loads(zone_path.read_text() or "{}")
+              print(f"zone_access_success={zone_payload.get('success')} zone_access_errors={zone_payload.get('errors')}")
+              for app in zone_payload.get("result") or []:
+                  if app.get("id") not in {item.get("id") for item in apps}:
+                      apps.append(app)
           wanted = [
               ("tasks-log-event-public", "tasks.chicagoshining.com/agent-activity/log-event"),
               ("tasks-health-public", "tasks.chicagoshining.com/health"),
@@ -163,15 +173,13 @@ jobs:
                   raise SystemExit(json.dumps(result)[:2000])
               print(f"access_updated {name} {result.get('result', {}).get('id')}")
 
-          print("access_apps:")
+          print(f"access_app_count={len(apps)}")
           for app in apps:
               dests = destinations_of(app)
-              interesting = any(
-                  ("tasks.chicagoshining.com" in d) or d.startswith("*.") or d.startswith("*")
-                  for d in dests
+              print(
+                  f"  name={app.get('name')} id={app.get('id')} aud={app.get('aud')} "
+                  f"domain={app.get('domain')} dests={dests}"
               )
-              if interesting:
-                  print(f"  {app.get('name')} {app.get('id')} dests={dests} policies={app.get('policies')}")
 
           try:
               for name, uri in wanted:
