@@ -5372,7 +5372,7 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   }
   const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items};
 
-  if (!payload.skip_fbs1_guard && items.some(item =>
+  if (payload.check_fbs1 === true && !payload.skip_fbs1_guard && items.some(item =>
     item.platform === "Facebook" &&
     item.output_type === "Slideshow Reel"
   )) {
