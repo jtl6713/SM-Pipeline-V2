@@ -10,6 +10,8 @@ from stages.registry import STAGE_NAMES, get_handler, is_implemented
 from audio.backfill import process_request as backfill_audio_leading_silence
 from i1.openai_ideas import generate_ideas
 from studio_music.processor import ingest_studio_music, trash_studio_music
+from airtable.client import AirtableClient
+from item4.clip_poster import ensure_request_clip_posters
 from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
 
@@ -360,6 +362,41 @@ def run_studio_audio_leading_silence():
         result.get("matched"),
         result.get("capped"),
         result.get("failed"),
+    )
+    return jsonify(result), 200
+
+
+@app.post("/jobs/studio-clip-poster")
+def run_studio_clip_poster():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    record_id = str(
+        payload.get("production_request_record_id")
+        or payload.get("record_id")
+        or ""
+    ).strip()
+    source_asset_id = str(payload.get("source_asset_id") or payload.get("asset_id") or "").strip()
+    if not record_id.startswith("rec"):
+        return jsonify({"error": "production_request_record_id is required"}), 422
+    try:
+        result = ensure_request_clip_posters(
+            AirtableClient(),
+            record_id,
+            source_asset_id=source_asset_id,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-clip-poster failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info(
+        "job=studio-clip-poster request=%s asset=%s posters=%s ready=%s",
+        record_id,
+        source_asset_id or "*",
+        len(result.get("posters") or []),
+        result.get("already_ready"),
     )
     return jsonify(result), 200
 

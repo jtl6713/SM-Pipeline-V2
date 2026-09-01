@@ -274,3 +274,5 @@ Clip poster Worker deploy: 2026-09-01 - Store a short-lived JPEG clip poster und
 Clip frame Worker deploy: 2026-09-01 - Accept a saved clip JPEG poster and stream the Drive clip for same-origin frame capture. Worker 0.10.211-clip-frame.
 
 Clip Drive thumb Worker deploy: 2026-09-01 - Requeue skipped clip previews so SMV1 can write a JPEG poster from Drive. Worker 0.10.212-clip-drive-thumb.
+
+Clip runner poster Worker deploy: 2026-09-01 - Ask the pipeline runner for a Drive-authenticated JPEG frame and stamp poster_url on the clip card. Worker 0.10.213-clip-runner-poster.
