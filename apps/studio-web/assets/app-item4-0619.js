@@ -179,7 +179,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.216-plan-buttons";
+  const BUILD_ID = "item4-0.6.217-clip-runner-poster";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -5859,35 +5859,50 @@
     return String(result?.poster_url || "").trim() || null;
   }
 
+  async function item4RequestSavedClipPoster(asset) {
+    if (!activeProductionRequest?.id || !asset?.id || String(asset.id).startsWith("local:")) return null;
+    const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(asset.id)}/poster`, {
+      method: "POST",
+      body: new FormData(),
+      timeoutMs: 90000,
+      retries: 0,
+    });
+    return String(result?.poster_url || "").trim() || null;
+  }
+
+  function item4ApplySavedClipPoster(asset, stored) {
+    if (!stored || !item4Workspace?.assets) return;
+    item4Workspace.assets = item4Workspace.assets.map((row) => String(row?.id || "") === String(asset.id)
+      ? { ...row, poster_url: stored }
+      : row);
+    item4AssetStripSignature = "";
+    renderItem4Assets(item4Workspace);
+    renderEzPhotoStrip();
+  }
+
   async function item4FillClipPoster(asset) {
     if (!asset || !item4AssetLooksLikeVideo(asset)) return;
     if (item4ClipPosterLooksReal(asset.poster_url) || item4LocalClipPoster(asset.name) || item4LocalClipPoster(asset.id)) return;
-    let blob = null;
     const held = item4HeldClipFiles.get(String(asset.name || "")) || item4HeldClipFiles.get(String(asset.id || ""));
-    if (held) blob = await item4ClipPosterFromFile(held);
-    const mediaId = String(asset.media_asset_record_id || "").trim();
-    if (!blob && /^rec[A-Za-z0-9]+$/.test(mediaId)) {
-      blob = await item4ClipPosterFromUrl(`${apiBase}/api/media-assets/${encodeURIComponent(mediaId)}/stream`);
-    }
-    if (!blob) return;
-    const localUrl = item4ApplyLocalClipPoster(asset, blob);
-    if (item4Workspace?.assets) {
-      item4Workspace.assets = item4Workspace.assets.map((row) => String(row?.id || "") === String(asset.id)
-        ? { ...row, poster_url: localUrl || row.poster_url }
-        : row);
-      item4AssetStripSignature = "";
-      renderItem4Assets(item4Workspace);
-      renderEzPhotoStrip();
+    if (held) {
+      const blob = await item4ClipPosterFromFile(held);
+      if (blob) {
+        const localUrl = item4ApplyLocalClipPoster(asset, blob);
+        item4ApplySavedClipPoster(asset, localUrl);
+        try {
+          const stored = await item4PersistClipPoster(asset, blob);
+          if (stored) item4ApplySavedClipPoster(asset, stored);
+        } catch (error) {
+          console.warn("Item 4 clip poster persist deferred", error);
+        }
+        return;
+      }
     }
     try {
-      const stored = await item4PersistClipPoster(asset, blob);
-      if (stored && item4Workspace?.assets) {
-        item4Workspace.assets = item4Workspace.assets.map((row) => String(row?.id || "") === String(asset.id)
-          ? { ...row, poster_url: stored }
-          : row);
-      }
+      const stored = await item4RequestSavedClipPoster(asset);
+      if (item4ClipPosterLooksReal(stored)) item4ApplySavedClipPoster(asset, stored);
     } catch (error) {
-      console.warn("Item 4 clip poster persist deferred", error);
+      console.warn("Item 4 clip poster job deferred", error);
     }
   }
 

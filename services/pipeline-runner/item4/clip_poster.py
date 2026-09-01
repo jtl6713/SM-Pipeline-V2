@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from typing import Any
 
-from airtable.constants import PRODUCTION_REQUESTS_TABLE
+from airtable.constants import MEDIA_ASSETS_TABLE, PRODUCTION_REQUESTS_TABLE
 
 VIDEO_MASTER_EXTENSIONS = {"mp4", "mov", "m4v", "webm", "quicktime"}
 
@@ -90,3 +91,123 @@ def stamp_request_clip_poster(
             production_request_id,
             {"Studio_Master_Assets_JSON": json.dumps(next_assets)},
         )
+
+
+def is_video_master_asset(asset: dict[str, Any] | None) -> bool:
+    asset = asset or {}
+    kind = str(asset.get("media_kind") or "").strip().lower()
+    if kind == "video":
+        return True
+    if kind in {"photo", "image"}:
+        return False
+    mime = str(asset.get("mime_type") or "").lower()
+    name = str(asset.get("name") or "").lower()
+    return mime.startswith("video/") or name.endswith(tuple(f".{item}" for item in VIDEO_MASTER_EXTENSIONS if item != "quicktime"))
+
+
+def looks_like_clip_poster_url(url: str | None) -> bool:
+    raw = str(url or "").strip()
+    if not raw or raw.startswith("blob:"):
+        return False
+    if re.search(r"\.(mp4|mov|m4v|webm)(\?|#|$)", raw, re.I):
+        return False
+    if "/studio/previews/clip-posters/" in raw:
+        return True
+    return bool(re.search(r"\.(jpe?g|png|webp|gif)(\?|#|$)", raw, re.I))
+
+
+def clip_poster_r2_key(production_request_id: str, asset_id: str) -> str:
+    return f"studio/previews/clip-posters/{production_request_id}/{asset_id}.jpg"
+
+
+def asset_clip_extension(asset: dict[str, Any] | None) -> str:
+    asset = asset or {}
+    name = str(asset.get("name") or "")
+    mime = str(asset.get("mime_type") or "").lower()
+    if "." in name:
+        return name.rsplit(".", 1)[-1].lower().lstrip(".") or "mov"
+    if "quicktime" in mime:
+        return "mov"
+    if mime.startswith("video/"):
+        return mime.split("/", 1)[-1] or "mp4"
+    return "mov"
+
+
+def resolve_asset_drive_id(client: Any, asset: dict[str, Any] | None) -> str:
+    asset = asset or {}
+    drive_id = str(asset.get("google_drive_file_id") or "").strip()
+    if drive_id:
+        return drive_id
+    media_id = str(asset.get("media_asset_record_id") or "").strip()
+    if not media_id or client is None:
+        return ""
+    record = client.get_record(MEDIA_ASSETS_TABLE, media_id)
+    fields = record.get("fields") or {}
+    return str(fields.get("Google Drive File ID") or "").strip()
+
+
+def ensure_request_clip_posters(
+    client: Any,
+    production_request_id: str,
+    *,
+    source_asset_id: str = "",
+    drive: Any = None,
+    r2: Any = None,
+) -> dict[str, Any]:
+    record_id = str(production_request_id or "").strip()
+    if not record_id:
+        raise ValueError("production_request_record_id is required")
+    if client is None:
+        from airtable.client import AirtableClient
+
+        client = AirtableClient()
+    record = client.get_record(PRODUCTION_REQUESTS_TABLE, record_id)
+    raw = (record.get("fields") or {}).get("Studio_Master_Assets_JSON") or "[]"
+    try:
+        assets = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    except Exception:
+        assets = []
+    wanted = str(source_asset_id or "").strip()
+    targets: list[dict[str, Any]] = []
+    for asset in assets if isinstance(assets, list) else []:
+        if not isinstance(asset, dict) or not is_video_master_asset(asset):
+            continue
+        if wanted and str(asset.get("id") or "") != wanted:
+            continue
+        if looks_like_clip_poster_url(str(asset.get("poster_url") or "")):
+            continue
+        targets.append(asset)
+    if not targets:
+        return {"ok": True, "posters": [], "errors": [], "already_ready": True}
+
+    if drive is None:
+        from integrations.google_drive import GoogleDriveClient
+
+        drive = GoogleDriveClient()
+    if r2 is None:
+        from integrations.r2_upload import R2UploadClient
+        from item4.settings import pipeline_settings
+
+        r2 = R2UploadClient(pipeline_settings(client))
+
+    posters: list[dict[str, str]] = []
+    errors: list[str] = []
+    for asset in targets:
+        asset_id = str(asset.get("id") or "").strip()
+        label = str(asset.get("name") or asset_id or "clip")
+        drive_id = resolve_asset_drive_id(client, asset)
+        if not asset_id or not drive_id:
+            errors.append(f"{label} is not in Google Drive yet")
+            continue
+        try:
+            frame, content_type = clip_poster_bytes(drive, drive_id, asset_clip_extension(asset))
+            key = clip_poster_r2_key(record_id, asset_id)
+            r2.put_object(key, frame, content_type or "image/jpeg")
+            url = r2.preview_url(key)
+            stamp_request_clip_poster(client, record_id, asset_id, url, key)
+            posters.append({"source_asset_id": asset_id, "poster_url": url, "poster_r2_key": key})
+        except Exception as exc:
+            errors.append(f"{label}: {exc}")
+    if not posters and errors:
+        raise RuntimeError(errors[0])
+    return {"ok": True, "posters": posters, "errors": errors, "already_ready": False}

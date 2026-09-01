@@ -197,7 +197,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.212-clip-drive-thumb",
+          version: "0.10.213-clip-runner-poster",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -4356,24 +4356,41 @@ async function uploadItem4ClipPoster(request, env, url, authorization) {
   if (!target) throw new HttpError(404, "Master asset not found");
   if (!item4LooksLikeVideoAsset(target)) throw new HttpError(415, "A clip poster can only be saved on a video clip");
 
-  let form;
-  try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read clip poster"); }
-  const poster = form.get("poster") || form.get("posters") || form.get("file");
-  if (!poster || typeof poster.arrayBuffer !== "function" || Number(poster.size || 0) < 80 || !item4IsClipPosterFile(poster)) {
-    throw new HttpError(400, "Choose a JPEG or PNG clip frame");
+  let poster = null;
+  try {
+    const form = await request.formData();
+    poster = form.get("poster") || form.get("posters") || form.get("file");
+  } catch {}
+  const hasFile = poster && typeof poster.arrayBuffer === "function" && Number(poster.size || 0) >= 80 && item4IsClipPosterFile(poster);
+  if (hasFile) {
+    const stored = await item4PutClipPoster(env, recordId, assetId, await poster.arrayBuffer(), poster.type || "image/jpeg");
+    const nextAssets = assets.map((asset) => String(asset?.id || "") === String(assetId)
+      ? { ...asset, poster_url: stored.url, poster_r2_key: stored.key }
+      : asset);
+    const updated = await item4UpdateRequestState(env, recordId, {
+      Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
+    });
+    return respond(request, env, {
+      ok: true,
+      poster_url: stored.url,
+      assets: nextAssets,
+      record: mapProductionRequest(updated),
+    });
   }
-  const stored = await item4PutClipPoster(env, recordId, assetId, await poster.arrayBuffer(), poster.type || "image/jpeg");
-  const nextAssets = assets.map((asset) => String(asset?.id || "") === String(assetId)
-    ? { ...asset, poster_url: stored.url, poster_r2_key: stored.key }
-    : asset);
-  const updated = await item4UpdateRequestState(env, recordId, {
-    Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
-  });
+
+  const pulsed = await item4PulseClipPosterJob(env, recordId, { assetId });
+  const refreshed = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+  const nextAssets = item4AssetManifest(refreshed);
+  const updatedAsset = nextAssets.find((asset) => String(asset?.id || "") === String(assetId));
+  const posterUrl = String(updatedAsset?.poster_url || pulsed?.posters?.[0]?.poster_url || "").trim();
+  if (!item4LooksLikeImagePreviewUrl(posterUrl)) {
+    throw new HttpError(502, pulsed?.errors?.[0] || "Could not pull a movie frame from Google Drive yet");
+  }
   return respond(request, env, {
     ok: true,
-    poster_url: stored.url,
+    poster_url: posterUrl,
     assets: nextAssets,
-    record: mapProductionRequest(updated),
+    record: mapProductionRequest(refreshed),
   });
 }
 
@@ -6135,6 +6152,31 @@ function studioProductionJobLabel(job) {
   return detail || null;
 }
 
+async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = {}) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const response = await fetch(`${runnerUrl}/jobs/studio-clip-poster`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({
+      production_request_record_id: recordId,
+      ...(assetId ? { source_asset_id: assetId } : {}),
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      payload?.error || payload?.message || `Clip poster job failed (${response.status})`
+    );
+  }
+  return payload;
+}
+
 async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
   if (!runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
@@ -7521,6 +7563,11 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
     const needsClipPoster = assets.some((asset) => item4LooksLikeVideoAsset(asset) && !item4LooksLikeImagePreviewUrl(asset?.poster_url));
     if (needsClipPoster && ctx && typeof ctx.waitUntil === "function") {
       ctx.waitUntil((async () => {
+        try {
+          await item4PulseClipPosterJob(env, recordId);
+        } catch (error) {
+          console.warn("Item 4 clip poster job deferred", error);
+        }
         try {
           await item4DrainPreviewCacheWorker(env, recordId, 4);
           await item4ReconcileMasterAuthority(env, recordId);
