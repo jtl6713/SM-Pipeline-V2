@@ -57,6 +57,21 @@ test("video package from photos keeps Facebook as a photo-origin Reel", () => {
   assert.deepEqual(plan.extras, ["Instagram::Story", "Facebook::Story"]);
 });
 
+test("photos-and-clips video package uses Facebook Reel plus Stories", () => {
+  const plan = ezPlanFromPhotoCount({
+    photoCount: 9,
+    packageId: "video",
+    clipInput: true,
+    inputKind: "photos-and-clips",
+  });
+  assert.equal(plan.overrides.Instagram, "Reel");
+  assert.equal(plan.overrides.Facebook, "Reel");
+  assert.equal(plan.overrides.TikTok, "Video Draft");
+  assert.equal(plan.overrides.YouTube, "Short");
+  assert.ok(!Object.values(plan.overrides).includes("Slideshow Reel"));
+  assert.deepEqual(plan.extras, ["Instagram::Story", "Facebook::Story"]);
+});
+
 test("explicit YouTube on a single still is still omitted", () => {
   const plan = ezPlanFromPhotoCount({
     photoCount: 1,

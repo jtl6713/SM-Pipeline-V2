@@ -91,11 +91,14 @@
     return { ...EZ_PHOTO_PASSES.slides };
   }
 
-  function ezDefaultPassMap(photoCount, packageId) {
+  function ezDefaultPassMap(photoCount, packageId, { clipInput = false, finishedVideo = false, inputKind = "" } = {}) {
+    const clip = Boolean(clipInput) || ezIsClipInput(inputKind);
+    const finished = Boolean(finishedVideo) || String(inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
     const pkg = String(packageId || "").trim().toLowerCase();
-    if (pkg === EZ_PACKAGES.VIDEO) return ezVideoOverrides();
+    if (pkg === EZ_PACKAGES.VIDEO) return ezVideoOverrides({ finishedVideo: finished, clipInput: clip });
     if (pkg === EZ_PACKAGES.SLIDES) return ezSlidesOverrides(photoCount);
     const n = Math.max(0, Number(photoCount) || 0);
+    if (clip || finished) return ezVideoOverrides({ finishedVideo: finished, clipInput: clip });
     return n <= 1 ? { ...EZ_PHOTO_PASSES.single } : { ...EZ_PHOTO_PASSES.video };
   }
 
@@ -103,9 +106,9 @@
     return (Math.max(0, Number(photoCount) || 0) <= 1) ? "Feed Post" : "Photo Set";
   }
 
-  function ezPlanFromPhotoCount({ photoCount, platforms, packageId } = {}) {
+  function ezPlanFromPhotoCount({ photoCount, platforms, packageId, clipInput = false, finishedVideo = false, inputKind = "" } = {}) {
     const count = Math.max(0, Number(photoCount) || 0);
-    const defaults = ezDefaultPassMap(count, packageId);
+    const defaults = ezDefaultPassMap(count, packageId, { clipInput, finishedVideo, inputKind });
     const requested = Array.isArray(platforms) && platforms.length
       ? [...new Set(platforms.map((value) => String(value || "").trim()).filter(Boolean))]
       : Object.keys(defaults);
@@ -380,7 +383,14 @@
         : overrides;
       return ezPlanFromOverrides(count, filtered);
     }
-    return ezPlanFromPhotoCount({ photoCount: count, platforms: selected || undefined, packageId });
+    return ezPlanFromPhotoCount({
+      photoCount: count,
+      platforms: selected || undefined,
+      packageId,
+      inputKind: answers.inputKind,
+      clipInput,
+      finishedVideo,
+    });
   }
 
   window.ChicagoShiningEzPlan = {

@@ -64,15 +64,20 @@ export function ezPhotoCountKind(count) {
   return n <= 1 ? EZ_INPUTS.SINGLE_PHOTO : EZ_INPUTS.MULTIPLE_PHOTOS;
 }
 
-export function ezDefaultPassMap(photoCount, packageId) {
+export function ezDefaultPassMap(photoCount, packageId, { clipInput = false, finishedVideo = false, inputKind = "" } = {}) {
+  const clip = Boolean(clipInput) || ezIsClipInput(inputKind);
+  const finished = Boolean(finishedVideo) || String(inputKind || "") === EZ_INPUTS.FINISHED_VIDEO;
   const pkg = String(packageId || "").trim().toLowerCase();
-  if (pkg === "video") return { ...EZ_PHOTO_PASSES.video };
+  if (pkg === "video") {
+    return (clip || finished) ? { ...EZ_VIDEO_PASSES } : { ...EZ_PHOTO_PASSES.video };
+  }
   if (pkg === "slides") {
     return Math.max(0, Number(photoCount) || 0) <= 1
       ? { ...EZ_PHOTO_PASSES.single }
       : { ...EZ_PHOTO_PASSES.slides };
   }
   const n = Math.max(0, Number(photoCount) || 0);
+  if (clip || finished) return { ...EZ_VIDEO_PASSES };
   return n <= 1 ? { ...EZ_PHOTO_PASSES.single } : { ...EZ_PHOTO_PASSES.video };
 }
 
@@ -84,9 +89,9 @@ export function ezMasterContentType(photoCount) {
  * Photo-count-aware /plan body. Client can POST this as { platforms, overrides }
  * so the live Worker honors EZ defaults before the planner itself is deployed.
  */
-export function ezPlanFromPhotoCount({ photoCount, platforms, packageId } = {}) {
+export function ezPlanFromPhotoCount({ photoCount, platforms, packageId, clipInput = false, finishedVideo = false, inputKind = "" } = {}) {
   const count = Math.max(0, Number(photoCount) || 0);
-  const defaults = ezDefaultPassMap(count, packageId);
+  const defaults = ezDefaultPassMap(count, packageId, { clipInput, finishedVideo, inputKind });
   const requested = Array.isArray(platforms) && platforms.length
     ? [...new Set(platforms.map((value) => String(value || "").trim()).filter(Boolean))]
     : Object.keys(defaults);
