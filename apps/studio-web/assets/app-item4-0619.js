@@ -179,7 +179,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.215-clip-drive-thumb";
+  const BUILD_ID = "item4-0.6.216-plan-buttons";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2932,21 +2932,34 @@
     const button = $("item4BuildPlan");
     const hint = $("item4PlanHint");
     const ez = ezIsOriginRecord() || ezStarting || ezAutoPlanAfterUpload;
-    if (!button) return;
-    if (ez) {
-      button.hidden = true;
-      if (hint) {
-        if (item4Workspace?.plan_status === "Ready" && item4Workspace?.plan?.items?.length) {
-          hint.textContent = "Platform plan built automatically. Change a format below if you need a different output.";
-        } else if (item4Workspace?.assets?.length) {
-          hint.textContent = "Studio is building the platform plan from these photos.";
-        } else {
-          hint.textContent = "Drop photos and Studio will build the platform plan.";
-        }
-      }
-    } else {
+    const planReady = item4Workspace?.plan_status === "Ready" && Boolean(item4Workspace?.plan?.items?.length);
+    const hasAssets = Boolean(item4Workspace?.assets?.length);
+    if (button) {
       button.hidden = false;
+      button.textContent = planReady ? "Update formats" : "Recommend formats";
+      button.disabled = !hasAssets || item4Uploading || ezPlanInFlight;
     }
+    if (!hint) return;
+    if (ezPlanInFlight) {
+      hint.textContent = "Studio is building the platform plan.";
+      return;
+    }
+    if (planReady) {
+      hint.textContent = "Formats are saved. Change one and tap Update formats if needed.";
+      return;
+    }
+    if (hasAssets && !ezMasterSetReadyForPlan()) {
+      hint.textContent = ezIncompleteSetMessage(ezPersistedAssetCount())
+        || "Add the rest of the set, or tap Recommend formats to plan with what you have.";
+      return;
+    }
+    if (hasAssets) {
+      hint.textContent = ez
+        ? "Tap Recommend formats to suggest Instagram, Facebook, TikTok, and YouTube."
+        : "Ready to recommend the best format for each selected platform.";
+      return;
+    }
+    hint.textContent = "Add photos first, then get a plan.";
   }
 
   async function maybeAutoEzPlan(force = false) {
@@ -5511,11 +5524,7 @@
     renderItem4Assets(status);
     renderItem4Plan(status);
     renderItem4Variants(status);
-    const hint = $("item4PlanHint");
-    const button = $("item4BuildPlan");
     const assets = Array.isArray(status?.assets) ? status.assets : [];
-    if (button) button.disabled = !assets.length || item4Uploading;
-    if (hint) hint.textContent = !assets.length ? "Add photos first, then get a plan." : status?.plan_status === "Ready" ? "Formats are saved. Change one and choose Update formats if needed." : "Ready to recommend the best format for each selected platform.";
     document.querySelectorAll("[data-item4-platform]").forEach(input => {
       const planPlatforms = status?.plan?.items?.map(x => x.platform) || [];
       if (planPlatforms.length) input.checked = planPlatforms.includes(input.value);
@@ -5590,6 +5599,11 @@
       item4BridgePreflight = null;
       renderItem4Workspace(status);
       syncPrMediaKindUi();
+      if ((ezIsOriginRecord() || ezAutoPlanAfterUpload || ezStarting)
+        && ezMasterSetReadyForPlan()
+        && status?.plan_status !== "Ready") {
+        Promise.resolve().then(() => maybeAutoEzPlan());
+      }
       if (status?.assets?.length && status?.plan_status === "Ready" && status?.variant_status === "Ready") {
         Promise.resolve().then(() => loadItem4BridgePreflight(record));
       }

@@ -319,3 +319,5 @@ Clip poster Pages deploy: 2026-09-01 - Clip cards show a JPEG frame (or play-til
 Clip frame Pages deploy: 2026-09-01 - Play the clip off-screen to grab a real JPEG thumbnail and persist it. UI 0.6.214-clip-frame.
 
 Clip Drive thumb Pages deploy: 2026-09-01 - Clip cards wait for the authenticated Drive still SMV1 writes. UI 0.6.215-clip-drive-thumb.
+
+Plan buttons Pages deploy: 2026-09-01 - Keep Recommend formats visible on EZ requests so Platforms and Frames can start if auto-plan did not. UI 0.6.216-plan-buttons.
