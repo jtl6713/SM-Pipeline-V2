@@ -152,7 +152,7 @@ REM ============================================================
 REM $Marker
 REM Managed local service #9; docs open at http://localhost:$Port/docs
 REM ============================================================
-start "" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0_startup_helpers\91-task-organizer-local.ps1"
+wt.exe new-tab --title "9 LOC Task Organizer :3360" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0_startup_helpers\91-task-organizer-local.ps1"
 
 "@
     $start = Insert-BeforePauseOrAppend $start $block
