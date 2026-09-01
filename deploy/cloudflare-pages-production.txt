@@ -317,3 +317,5 @@ Studio no-cache Pages deploy: 2026-09-01 - Do not cache index.html so iPhone Saf
 Clip poster Pages deploy: 2026-09-01 - Clip cards show a JPEG frame (or play-tile fallback) and the hover tooltip matches the Ready banner. UI 0.6.213-clip-poster.
 
 Clip frame Pages deploy: 2026-09-01 - Play the clip off-screen to grab a real JPEG thumbnail and persist it. UI 0.6.214-clip-frame.
+
+Clip Drive thumb Pages deploy: 2026-09-01 - Clip cards wait for the authenticated Drive still SMV1 writes. UI 0.6.215-clip-drive-thumb.

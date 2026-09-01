@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import requests
@@ -108,6 +109,31 @@ class GoogleDriveClient:
         )
         response.raise_for_status()
         return list(response.json().get("files") or [])
+
+    def download_thumbnail(self, file_id: str, *, size: str = "w720") -> tuple[bytes, str] | None:
+        meta = self.get_file(file_id, fields="id,mimeType,thumbnailLink,hasThumbnail")
+        link = str(meta.get("thumbnailLink") or "").strip()
+        if not link:
+            return None
+        if "sz=" in link:
+            link = re.sub(r"sz=[^&]+", f"sz={size}", link)
+        else:
+            joiner = "&" if "?" in link else "?"
+            link = f"{link}{joiner}sz={size}"
+        token = self.access_token()
+        response = requests.get(
+            link,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        if not response.ok:
+            return None
+        mime = response.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        if not mime.startswith("image/") or "svg" in mime:
+            return None
+        if len(response.content) < 80:
+            return None
+        return response.content, mime
 
     def get_file(self, file_id: str, *, fields: str = "id,name,mimeType,size,fileExtension,webContentLink,webViewLink,createdTime,modifiedTime,parents,trashed") -> dict[str, Any]:
         token = self.access_token()
