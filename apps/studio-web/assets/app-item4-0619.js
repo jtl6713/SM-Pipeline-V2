@@ -111,6 +111,8 @@
   let ezEntryPath = null;
   let ezLocalPreviews = new Map();
   let ezLocalClipPosters = new Map();
+  let item4HeldClipFiles = new Map();
+  const item4PosterJobs = new Set();
   let ezSelectedVoiceId = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_NAME = "Kate";
@@ -177,7 +179,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.213-clip-poster";
+  const BUILD_ID = "item4-0.6.214-clip-frame";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4501,21 +4503,24 @@
     }
     if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(raw)) return false;
     if (/thumbnail\?id=/i.test(raw)) return false;
-    return /googleusercontent|\.jpe?g(\?|#|$)|\.png(\?|#|$)|\.webp(\?|#|$)|\.gif(\?|#|$)|\.svg(\?|#|$)|clip-posters|\/api\/media-assets\/rec[^/]+\/preview/i.test(raw);
+    return /googleusercontent|\.jpe?g(\?|#|$)|\.png(\?|#|$)|\.webp(\?|#|$)|\.gif(\?|#|$)|clip-posters/i.test(raw);
+  }
+
+  function item4ClipPosterLooksReal(url) {
+    const raw = String(url || "").trim();
+    if (!raw || raw.startsWith("blob:")) return [...ezLocalClipPosters.values()].includes(raw);
+    if (/\.svg(\?|#|$)/i.test(raw) || /\/api\/media-assets\//i.test(raw)) return false;
+    return item4PreviewUrlLooksLikeImage(raw);
   }
 
   function item4AssetPreviewCandidates(asset) {
     try {
       if (item4AssetLooksLikeVideo(asset)) {
         const candidates = [];
-        const local = item4LocalClipPoster(asset?.name);
-        const poster = String(asset?.poster_url || asset?.preview_url || "").trim();
+        const local = item4LocalClipPoster(asset?.name) || item4LocalClipPoster(asset?.id);
+        const poster = String(asset?.poster_url || "").trim();
         if (local) candidates.push(local);
-        if (poster && item4PreviewUrlLooksLikeImage(poster)) candidates.push(poster);
-        const recordId = String(asset?.media_asset_record_id || "").trim();
-        if (/^rec[A-Za-z0-9]+$/.test(recordId)) {
-          candidates.push(`${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/preview`);
-        }
+        if (item4ClipPosterLooksReal(poster)) candidates.push(poster);
         return [...new Set(candidates.filter(Boolean))];
       }
       const candidates = [];
@@ -4665,13 +4670,14 @@
       return;
     }
     hydrateEzCaptionDrafts(status);
-    const signature = assets.map((asset) => `${asset.id}|${asset.name}|${asset.preview_url || ""}|${asset.google_drive_file_id || ""}`).join(";");
+    const signature = assets.map((asset) => `${asset.id}|${asset.name}|${asset.poster_url || ""}|${asset.preview_url || ""}|${asset.google_drive_file_id || ""}`).join(";");
     if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
       item4AssetStripSignature = "";
       host.innerHTML = `<div class="empty compact-empty">${ezIsFinishedVideo() ? "Video is loading into the system." : "Photos are loading into the system."} You can keep working or leave this screen.</div>`;
     } else if (signature && signature === item4AssetStripSignature && host.querySelector("[data-item4-asset]")) {
       syncFinishedMediaHeadings();
       syncProductionStudioState();
+      item4EnsureClipPosters(assets);
       return;
     } else {
       item4AssetStripSignature = signature;
@@ -4691,6 +4697,7 @@
     productionDecorateTooltips(host);
     syncFinishedMediaHeadings();
     syncProductionStudioState();
+    item4EnsureClipPosters(assets);
   }
 
   function item4PlanCard(item) {
@@ -5679,71 +5686,204 @@
     return raw || "Upload failed.";
   }
 
-  async function item4ClipPosterFromFile(file) {
-    if (!item4FileLooksLikeVideo(file)) return null;
-    const timeoutMs = 4000;
+  function item4HoldClipFile(file) {
+    if (!file || !item4FileLooksLikeVideo(file)) return;
+    const name = String(file.name || "").trim();
+    if (name) item4HeldClipFiles.set(name, file);
+  }
+
+  function item4ApplyLocalClipPoster(assetOrName, blob) {
+    if (!blob || blob.size < 80) return "";
+    const name = typeof assetOrName === "string" ? assetOrName : String(assetOrName?.name || assetOrName?.id || "");
+    if (!name) return "";
+    const prior = ezLocalClipPosters.get(name);
+    if (prior) {
+      try { URL.revokeObjectURL(prior); } catch {}
+    }
+    const url = URL.createObjectURL(blob);
+    ezLocalClipPosters.set(name, url);
+    if (assetOrName?.id) ezLocalClipPosters.set(String(assetOrName.id), url);
+    return url;
+  }
+
+  function item4CanvasHasPicture(canvas) {
+    try {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return false;
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let lit = 0;
+      for (let i = 0; i < data.length; i += 64) {
+        if (data[i] + data[i + 1] + data[i + 2] > 30) lit += 1;
+      }
+      return lit > 6;
+    } catch {
+      return false;
+    }
+  }
+
+  function item4BlobFromVideoFrame(video) {
+    const width = Number(video.videoWidth || 0);
+    const height = Number(video.videoHeight || 0);
+    if (!width || !height) return Promise.resolve(null);
+    const max = 640;
+    const scale = Math.min(1, max / Math.max(width, height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return Promise.resolve(null);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (!item4CanvasHasPicture(canvas)) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob && blob.size > 80 ? blob : null), "image/jpeg", 0.82);
+    });
+  }
+
+  async function item4ClipPosterFromUrl(src, { timeoutMs = 16000 } = {}) {
+    const source = String(src || "").trim();
+    if (!source || /\.(jpe?g|png|webp)(\?|#|$)/i.test(source)) return null;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    video.preload = "auto";
+    video.controls = false;
+    video.style.cssText = "position:fixed;left:-2400px;top:0;width:4px;height:4px;opacity:0;pointer-events:none";
+    document.body.appendChild(video);
+
+    const cleanup = () => {
+      try { video.pause(); } catch {}
+      try { video.removeAttribute("src"); video.load(); } catch {}
+      try { video.remove(); } catch {}
+    };
+
     return new Promise((resolve) => {
       let settled = false;
-      const url = URL.createObjectURL(file);
-      const video = document.createElement("video");
-      video.muted = true;
-      video.playsInline = true;
-      video.preload = "auto";
       const finish = (blob) => {
         if (settled) return;
         settled = true;
-        try { URL.revokeObjectURL(url); } catch {}
+        window.clearTimeout(timer);
+        cleanup();
         resolve(blob || null);
       };
       const timer = window.setTimeout(() => finish(null), timeoutMs);
-      video.onerror = () => {
-        window.clearTimeout(timer);
+      video.onerror = () => finish(null);
+
+      const waitFrame = () => new Promise((done) => {
+        if (typeof video.requestVideoFrameCallback === "function") {
+          video.requestVideoFrameCallback(() => done());
+          window.setTimeout(done, 400);
+          return;
+        }
+        window.setTimeout(done, 220);
+      });
+
+      video.onloadedmetadata = async () => {
+        const duration = Number(video.duration);
+        const marks = [0.08, 0.25, 0.6, Number.isFinite(duration) && duration > 1.5 ? Math.min(duration * 0.2, 1.2) : 0.15]
+          .filter((time) => time >= 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration - 0.02));
+        try {
+          await video.play();
+          await waitFrame();
+          video.pause();
+          const first = await item4BlobFromVideoFrame(video);
+          if (first) {
+            finish(first);
+            return;
+          }
+        } catch {}
+        for (const time of marks) {
+          if (settled) return;
+          try {
+            await new Promise((done) => {
+              const giveUp = window.setTimeout(done, 900);
+              video.onseeked = () => {
+                window.clearTimeout(giveUp);
+                done();
+              };
+              try { video.currentTime = time; } catch {
+                window.clearTimeout(giveUp);
+                done();
+              }
+            });
+            const blob = await item4BlobFromVideoFrame(video);
+            if (blob) {
+              finish(blob);
+              return;
+            }
+          } catch {}
+        }
         finish(null);
       };
-      const capture = () => {
-        try {
-          const width = Number(video.videoWidth || 0);
-          const height = Number(video.videoHeight || 0);
-          if (!width || !height) {
-            window.clearTimeout(timer);
-            finish(null);
-            return;
-          }
-          const max = 640;
-          const scale = Math.min(1, max / Math.max(width, height));
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.round(width * scale));
-          canvas.height = Math.max(1, Math.round(height * scale));
-          const ctx = canvas.getContext("2d");
-          if (!ctx) {
-            window.clearTimeout(timer);
-            finish(null);
-            return;
-          }
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          canvas.toBlob((blob) => {
-            window.clearTimeout(timer);
-            finish(blob && blob.size > 80 ? blob : null);
-          }, "image/jpeg", 0.82);
-        } catch {
-          window.clearTimeout(timer);
-          finish(null);
-        }
-      };
-      video.onloadeddata = () => {
-        const duration = Number(video.duration);
-        const seekTo = Number.isFinite(duration) && duration > 0
-          ? Math.min(0.35, Math.max(0.04, duration * 0.08))
-          : 0.08;
-        video.onseeked = capture;
-        try {
-          video.currentTime = seekTo;
-        } catch {
-          capture();
-        }
-      };
-      video.src = url;
+      video.src = source;
       try { video.load(); } catch {}
+    });
+  }
+
+  async function item4ClipPosterFromFile(file) {
+    if (!item4FileLooksLikeVideo(file)) return null;
+    const url = URL.createObjectURL(file);
+    try {
+      return await item4ClipPosterFromUrl(url);
+    } finally {
+      try { URL.revokeObjectURL(url); } catch {}
+    }
+  }
+
+  async function item4PersistClipPoster(asset, blob) {
+    if (!activeProductionRequest?.id || !asset?.id || String(asset.id).startsWith("local:") || !blob) return null;
+    const form = new FormData();
+    form.append("poster", blob, `${String(asset.name || "clip").replace(/\.[^.]+$/, "") || "clip"}-poster.jpg`);
+    const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(asset.id)}/poster`, {
+      method: "POST",
+      body: form,
+      timeoutMs: 30000,
+      retries: 0,
+    });
+    return String(result?.poster_url || "").trim() || null;
+  }
+
+  async function item4FillClipPoster(asset) {
+    if (!asset || !item4AssetLooksLikeVideo(asset)) return;
+    if (item4ClipPosterLooksReal(asset.poster_url) || item4LocalClipPoster(asset.name) || item4LocalClipPoster(asset.id)) return;
+    let blob = null;
+    const held = item4HeldClipFiles.get(String(asset.name || "")) || item4HeldClipFiles.get(String(asset.id || ""));
+    if (held) blob = await item4ClipPosterFromFile(held);
+    const mediaId = String(asset.media_asset_record_id || "").trim();
+    if (!blob && /^rec[A-Za-z0-9]+$/.test(mediaId)) {
+      blob = await item4ClipPosterFromUrl(`${apiBase}/api/media-assets/${encodeURIComponent(mediaId)}/stream`);
+    }
+    if (!blob) return;
+    const localUrl = item4ApplyLocalClipPoster(asset, blob);
+    if (item4Workspace?.assets) {
+      item4Workspace.assets = item4Workspace.assets.map((row) => String(row?.id || "") === String(asset.id)
+        ? { ...row, poster_url: localUrl || row.poster_url }
+        : row);
+      item4AssetStripSignature = "";
+      renderItem4Assets(item4Workspace);
+      renderEzPhotoStrip();
+    }
+    try {
+      const stored = await item4PersistClipPoster(asset, blob);
+      if (stored && item4Workspace?.assets) {
+        item4Workspace.assets = item4Workspace.assets.map((row) => String(row?.id || "") === String(asset.id)
+          ? { ...row, poster_url: stored }
+          : row);
+      }
+    } catch (error) {
+      console.warn("Item 4 clip poster persist deferred", error);
+    }
+  }
+
+  function item4EnsureClipPosters(assets) {
+    (Array.isArray(assets) ? assets : []).forEach((asset) => {
+      if (!item4AssetLooksLikeVideo(asset) || item4ClipPosterLooksReal(asset?.poster_url) || item4LocalClipPoster(asset?.name)) return;
+      const id = String(asset?.id || "");
+      if (!id || id.startsWith("local:") || item4PosterJobs.has(id)) return;
+      item4PosterJobs.add(id);
+      item4FillClipPoster(asset).finally(() => item4PosterJobs.delete(id));
     });
   }
 
@@ -5846,19 +5986,22 @@
     item4Uploading = true;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
-    const posterBlobs = await Promise.all(files.map((file) => item4ClipPosterFromFile(file).catch(() => null)));
-    posterBlobs.forEach((blob, index) => {
-      const file = files[index];
-      if (!blob || !file?.name) return;
-      try {
-        const prior = ezLocalClipPosters.get(file.name);
-        if (prior) {
-          try { URL.revokeObjectURL(prior); } catch {}
-        }
-        ezLocalClipPosters.set(file.name, URL.createObjectURL(blob));
-      } catch {}
-    });
+    files.forEach(item4HoldClipFile);
+    const posterWork = files.map((file) => item4ClipPosterFromFile(file).then((blob) => {
+      if (blob) item4ApplyLocalClipPoster(file.name, blob);
+      return blob;
+    }).catch(() => null));
     paintItem4LocalPreviews(files, { uploading: true });
+    const posterBlobs = await Promise.all(files.map((file, index) => (
+      item4FileLooksLikeVideo(file)
+        ? Promise.race([posterWork[index], new Promise((resolve) => window.setTimeout(() => resolve(null), 8000))])
+        : Promise.resolve(null)
+    )));
+    if (posterBlobs.some(Boolean) && item4Workspace) {
+      item4AssetStripSignature = "";
+      renderItem4Assets(item4Workspace);
+      renderEzPhotoStrip();
+    }
     if (button) button.disabled = true;
     const uploadingClips = files.some(item4FileLooksLikeVideo);
     setRequestMessage(ezIsFinishedVideo()
@@ -5913,6 +6056,16 @@
         startItem4MasterPolling();
       }
       if (!incomplete) await maybeAutoEzPlan();
+      const latePosters = await Promise.all(posterWork);
+      files.forEach((file, index) => {
+        const blob = latePosters[index] || posterBlobs[index];
+        if (!blob || !item4FileLooksLikeVideo(file)) return;
+        const asset = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
+          .find((row) => item4AssetLooksLikeVideo(row) && String(row?.name || "") === String(file.name || ""));
+        if (!asset || item4ClipPosterLooksReal(asset.poster_url)) return;
+        item4ApplyLocalClipPoster(asset, blob);
+        item4PersistClipPoster(asset, blob).catch((error) => console.warn("Item 4 clip poster persist deferred", error));
+      });
       renderEzCaptionUi();
       renderEzPhotoStrip();
     } catch (error) {
