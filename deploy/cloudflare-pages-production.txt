@@ -305,3 +305,5 @@ Clip save Pages deploy: 2026-09-01 - Photos and clips keeps asking for the video
 Clip picker Pages deploy: 2026-09-01 - Production Choose clip opens the phone video library; do not infer photo-only after stills are already on a Photos and clips request. UI 0.6.207-clip-picker.
 
 Choose clip always Pages deploy: 2026-09-01 - Show Choose clip on photo drafts so a mixed set can add an MP4 after stills are already saved. UI 0.6.208-choose-clip.
+
+Clip preview Pages deploy: 2026-09-01 - Do not put MOV blobs or video URLs into photo thumbs; skip strip rerender while the set is unchanged. UI 0.6.209-clip-preview.

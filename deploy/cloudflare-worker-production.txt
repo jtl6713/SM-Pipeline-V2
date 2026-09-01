@@ -266,3 +266,5 @@ Due publish priority Worker deploy: 2026-09-01 - Run due publish/TikTok/FB final
 FBS4 cover unblock Worker deploy: 2026-09-01 - Finalize ready Facebook Reels even when native cover attach fails; poll Published Pending Finalize before Reel Processing and skip already-Published zombies so due finalize work is not starved. Worker 0.10.207-fbs4-cover-unblock.
 
 Clip save Worker deploy: 2026-09-01 - Accept an incoming video clip when stills already exist on a Photos and clips request; register the Media Asset as Video. Worker 0.10.208-clip-save.
+
+Clip preview Worker deploy: 2026-09-01 - Do not stream master MOVs through the image preview route; skip JPEG preview jobs for video masters. Worker 0.10.209-clip-preview.
