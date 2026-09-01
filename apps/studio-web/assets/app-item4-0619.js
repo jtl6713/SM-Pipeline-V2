@@ -2213,14 +2213,34 @@
       .filter((asset) => asset && !String(asset.id || "").startsWith("local:")).length;
   }
 
+  function ezPersistedKindCounts() {
+    const assets = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
+      .filter((asset) => asset && !String(asset.id || "").startsWith("local:"));
+    let photos = 0;
+    let clips = 0;
+    for (const asset of assets) {
+      if (item4AssetLooksLikeVideo(asset)) clips += 1;
+      else photos += 1;
+    }
+    return { photos, clips, total: photos + clips };
+  }
+
   function ezTargetPhotoCount() {
     const pending = ezWizardPending || ezWizardAnswers;
     const helpers = ezPlanApi();
     if (pending?.inputKind === "mixed") return helpers?.ezWizardExpectedUploads?.(pending) || 1;
+    if (pending?.inputKind === "photos-and-clips") {
+      return Math.max(1, Number(pending?.photoCount) || helpers?.ezWizardPhotoCount?.(pending) || 1);
+    }
     if (pending?.inputKind === "multiple-photos" || ezIntakeKind === "multiple-photos") {
       return Math.max(2, Number(pending?.photoCount) || 2);
     }
     return 1;
+  }
+
+  function ezTargetClipCount() {
+    const pending = ezWizardPending || ezWizardAnswers;
+    return Math.max(0, Number(pending?.clipCount) || ezPlanApi()?.ezWizardClipCount?.(pending) || 0);
   }
 
   function ezMasterSetReadyForPlan() {
@@ -2229,6 +2249,12 @@
     const total = ezPersistedAssetCount();
     if (kind === "single-ai" || kind === "multiple-ai") return ezWizardAllowsPlanWithoutAssets();
     if (kind === "mixed") return total >= (ezPlanApi()?.ezWizardExpectedUploads?.(pending) || 1);
+    if (kind === "photos-and-clips" || kind === "video-clips") {
+      const counts = ezPersistedKindCounts();
+      const wantPhotos = kind === "video-clips" ? 0 : ezTargetPhotoCount();
+      const wantClips = Math.max(1, ezTargetClipCount());
+      return counts.photos >= wantPhotos && counts.clips >= wantClips;
+    }
     if (kind === "multiple-photos") return total >= ezTargetPhotoCount();
     return total >= 1;
   }
@@ -2236,6 +2262,14 @@
   function ezIncompleteSetMessage(total) {
     const pending = ezWizardPending || ezWizardAnswers;
     const kind = pending?.inputKind || ezIntakeKind;
+    if (kind === "photos-and-clips" || kind === "video-clips") {
+      const counts = ezPersistedKindCounts();
+      const wantPhotos = kind === "video-clips" ? 0 : ezTargetPhotoCount();
+      const wantClips = Math.max(1, ezTargetClipCount());
+      if (counts.photos < wantPhotos || counts.clips < wantClips) {
+        return `${counts.photos} of ${wantPhotos} photos and ${counts.clips} of ${wantClips} clips added. Add the rest one at a time.`;
+      }
+    }
     if (kind === "mixed") {
       const expected = ezPlanApi()?.ezWizardExpectedUploads?.(pending) || 1;
       if (total < expected) {
@@ -2485,6 +2519,7 @@
       captionMode: parsed.captionMode,
       manualCount: parsed.manualCount,
       aiCount: parsed.aiCount,
+      clipCount: parsed.clipCount,
       packageId: parsed.packageId,
     }) || "";
     if (origin && text.startsWith(origin)) return text.slice(origin.length).replace(/^\s+/, "");
@@ -2501,6 +2536,7 @@
       captionMode: ezCaptionMode(),
       manualCount: pending?.manualCount,
       aiCount: pending?.aiCount,
+      clipCount: pending?.clipCount,
       packageId: pending?.packageId || currentEzPackageId(),
     }) || "";
     const user = String($("ezProductionNotes")?.value || "").trim();
@@ -3261,6 +3297,10 @@
       bits.push(`wait ${answers.photoCountMin}–${answers.photoCountMax} photos`);
     } else if (answers.inputKind === "multiple-photos" && answers.photoCount) bits.push(`${answers.photoCount} photos`);
     if (answers.inputKind === "multiple-ai" && answers.photoCount) bits.push(`${answers.photoCount} AI images`);
+    if (answers.inputKind === "photos-and-clips") {
+      bits.push(`${answers.photoCount || 0} photos · ${answers.clipCount || 0} clips`);
+    }
+    if (answers.inputKind === "video-clips" && answers.clipCount) bits.push(`${answers.clipCount} clips`);
     if (answers.inputKind === "mixed") bits.push(`${answers.manualCount || 0} yours · ${answers.aiCount || 0} AI`);
     if (answers.packageId) {
       const pkg = ezPlanApi()?.ezWizardPackages?.(ezPlanApi()?.ezWizardPhotoCount?.(answers) || 1, answers)
@@ -3310,6 +3350,12 @@
     if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = answers.photoWait ? "" : String(count);
     if ($("ezCarouselSlideMin")) $("ezCarouselSlideMin").value = answers.photoWait ? String(answers.photoCountMin || "") : "";
     if ($("ezCarouselSlideMax")) $("ezCarouselSlideMax").value = answers.photoWait ? String(answers.photoCountMax || "") : "";
+    const clipCount = helpers.ezWizardClipCount?.(answers) || Number(answers.clipCount) || 0;
+    if (clipCount > 0) {
+      if ($("ezVideoClipMode")) setSelectValue("ezVideoClipMode", "Exact", "AI decides");
+      if ($("ezVideoClipExact")) $("ezVideoClipExact").value = String(clipCount);
+      ["ezVideoClipMode", "ezVideoClipExact"].forEach((id) => ezDirty.add(id));
+    }
     ["ezCarouselImageMode", "ezCarouselSlideMode", "ezCarouselSlideExact", "ezCarouselSlideMin", "ezCarouselSlideMax"].forEach((id) => ezDirty.add(id));
     ezPinnedExtraOutputs = planned.extras || [];
     applyEzExtraOutputs(ezPinnedExtraOutputs);
@@ -3327,6 +3373,11 @@
     } else if (answers.inputKind === "multiple-photos") {
       if (title) title.textContent = `Add ${count} photos`;
       if (hint) hint.textContent = "Add or remove one at a time. You can also drop several together.";
+    } else if (answers.inputKind === "photos-and-clips") {
+      const photos = helpers.ezWizardPhotoCount(answers);
+      const clips = helpers.ezWizardClipCount?.(answers) || Number(answers.clipCount) || 1;
+      if (title) title.textContent = `Add ${photos} photo${photos === 1 ? "" : "s"} and ${clips} clip${clips === 1 ? "" : "s"}`;
+      if (hint) hint.textContent = "Mix stills and raw mp4/mov clips. Not a finished video.";
     } else if (answers.inputKind === "finished-video") {
       if (title) title.textContent = "Drop the finished video here";
       if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
@@ -3358,8 +3409,12 @@
       background_music_mode: finished ? "No" : ($("ezAudioMusic")?.value || "Yes"),
       thumbnail_mode: finished ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
       video_duration_seconds: $("ezVideoDuration")?.value || 30,
-      video_clip_count_mode: $("ezVideoClipMode")?.value || "AI decides",
-      video_clip_count_exact: $("ezVideoClipExact")?.value || "",
+      video_clip_count_mode: (helpers?.ezWizardClipCount?.(ezWizardPending || ezWizardAnswers) || Number((ezWizardPending || ezWizardAnswers)?.clipCount) || 0) > 0
+        ? "Exact"
+        : ($("ezVideoClipMode")?.value || "AI decides"),
+      video_clip_count_exact: (helpers?.ezWizardClipCount?.(ezWizardPending || ezWizardAnswers) || Number((ezWizardPending || ezWizardAnswers)?.clipCount) || 0) > 0
+        ? String(helpers.ezWizardClipCount(ezWizardPending || ezWizardAnswers) || (ezWizardPending || ezWizardAnswers)?.clipCount)
+        : ($("ezVideoClipExact")?.value || ""),
       video_clip_count_min: $("ezVideoClipMin")?.value || "",
       video_clip_count_max: $("ezVideoClipMax")?.value || "",
       voiceover_tail_seconds: $("ezVoiceoverTail")?.value || 15,
@@ -3432,9 +3487,10 @@
       ideaMode: "Do you want an existing idea, or a new one?",
       ideaExisting: "Which idea should we open?",
       ideaWrite: "What’s the idea?",
-      ideaKind: "What images should this idea use?",
+      ideaKind: "What should this idea use?",
       photoKind: "Single photo, or several?",
       photoCount: "How many photos do you prefer?",
+      clipCount: "How many video clips do you prefer?",
       photoRange: "What is the minimum and maximum number of photos?",
       aiKind: "Single AI image, or several?",
       aiCount: "How many AI images do you prefer?",
@@ -3556,7 +3612,7 @@
     }
 
     if (ezWizardStep === "ideaKind") {
-      prompt.textContent = "What images should this idea use?";
+      prompt.textContent = "What should this idea use?";
       renderEzWizardChips([
         { label: "Single photo I’ll upload", onClick: () => ezWizardPick("Single photo I’ll upload", { inputKind: "single-photo", photoCount: 1 }, "package") },
         { label: "Multiple photos I’ll upload", onClick: () => ezWizardPick("Multiple photos I’ll upload", { inputKind: "multiple-photos", photoWait: false }, "photoCount") },
@@ -3617,22 +3673,46 @@
     if (ezWizardStep === "photoCount" || ezWizardStep === "aiCount") {
       const ai = ezWizardStep === "aiCount";
       prompt.textContent = ai ? "How many AI images do you prefer?" : "How many photos do you prefer?";
-      const next = "package";
-      const counts = (ezWizardAnswers.inputKind === "finished-stills") ? [1, 2, 3, 4, 5, 6, 8, 10, 12] : [2, 3, 4, 5, 6, 8, 10, 12];
+      const next = ezWizardAnswers.inputKind === "photos-and-clips" ? "clipCount" : "package";
+      const allowOne = ezWizardAnswers.inputKind === "finished-stills" || ezWizardAnswers.inputKind === "photos-and-clips";
+      const counts = allowOne ? [1, 2, 3, 4, 5, 6, 8, 10, 12] : [2, 3, 4, 5, 6, 8, 10, 12];
+      const minCount = allowOne ? 1 : 2;
       renderEzWizardChips(counts.map((n) => ({
         label: String(n),
         onClick: () => ezWizardPick(`${n}`, { photoCount: n }, next),
       })));
       ezWizardShowForm(
-        `<label>Other count<input name="count" type="number" min="2" max="20" step="1" required></label>
+        `<label>Other count<input name="count" type="number" min="${minCount}" max="20" step="1" required></label>
          <div class="ez-wizard-form-actions"><button type="submit">Use this count</button></div>`,
         (data) => {
           const n = Number(data.get("count"));
-          if (!Number.isFinite(n) || n < 2 || n > 20) {
-            ezWizardSetMessage("Enter a count between 2 and 20.", "error-text");
+          if (!Number.isFinite(n) || n < minCount || n > 20) {
+            ezWizardSetMessage(`Enter a count between ${minCount} and 20.`, "error-text");
             return;
           }
           ezWizardPick(String(n), { photoCount: Math.round(n) }, next);
+        }
+      );
+      return;
+    }
+
+    if (ezWizardStep === "clipCount") {
+      prompt.textContent = "How many video clips do you prefer?";
+      const counts = [1, 2, 3, 4, 5, 6];
+      renderEzWizardChips(counts.map((n) => ({
+        label: String(n),
+        onClick: () => ezWizardPick(`${n} clip${n === 1 ? "" : "s"}`, { clipCount: n }, "package"),
+      })));
+      ezWizardShowForm(
+        `<label>Other count<input name="count" type="number" min="1" max="12" step="1" required></label>
+         <div class="ez-wizard-form-actions"><button type="submit">Use this count</button></div>`,
+        (data) => {
+          const n = Number(data.get("count"));
+          if (!Number.isFinite(n) || n < 1 || n > 12) {
+            ezWizardSetMessage("Enter a clip count between 1 and 12.", "error-text");
+            return;
+          }
+          ezWizardPick(`${Math.round(n)} clips`, { clipCount: Math.round(n) }, "package");
         }
       );
       return;
@@ -3838,7 +3918,9 @@
       const expected = helpers.ezWizardExpectedUploads(answers);
       setEzMessage(answers.inputKind === "mixed"
         ? `Add ${expected} of your photo${expected === 1 ? "" : "s"} one at a time. Studio will add ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"}.`
-        : answers.inputKind === "finished-video"
+        : answers.inputKind === "photos-and-clips"
+          ? `Add ${answers.photoCount || 0} photo${Number(answers.photoCount) === 1 ? "" : "s"} and ${answers.clipCount || 0} clip${Number(answers.clipCount) === 1 ? "" : "s"}.`
+          : answers.inputKind === "finished-video"
           ? "Drop the finished video to continue."
           : expected === 1
             ? "Drop one photo to continue."
@@ -3864,7 +3946,7 @@
 
   function receiveMasterPhotos(fileList) {
     const incoming = Array.from(fileList || []);
-    if (incoming.some(item4FileLooksLikeVideo)) {
+    if (incoming.some(item4FileLooksLikeVideo) && !ezIsClipRequest()) {
       selectEzInput("finished-video", { resetPlatforms: false });
     }
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
@@ -3902,7 +3984,7 @@
     const expected = pending?.inputKind ? apiHelpers.ezWizardExpectedUploads(pending) : null;
     const allowEmpty = expected === 0;
     const incoming = Array.from(files || []);
-    if (incoming.some(item4FileLooksLikeVideo)) {
+    if (incoming.some(item4FileLooksLikeVideo) && !ezIsClipRequest()) {
       selectEzInput("finished-video", { resetPlatforms: false });
     }
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);

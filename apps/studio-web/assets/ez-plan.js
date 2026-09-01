@@ -190,7 +190,7 @@
     };
   }
 
-  function ezOriginNotes({ inputKind, captionMode, origin, manualCount, aiCount, packageId } = {}) {
+  function ezOriginNotes({ inputKind, captionMode, origin, manualCount, aiCount, packageId, clipCount } = {}) {
     const tag = String(origin || EZ_ORIGIN).trim() || EZ_ORIGIN;
     const input = String(inputKind || EZ_INPUTS.SINGLE_PHOTO).trim() || EZ_INPUTS.SINGLE_PHOTO;
     const caption = String(captionMode || "ai").trim().toLowerCase() || "ai";
@@ -201,8 +201,10 @@
     }
     const manual = Number(manualCount);
     const ai = Number(aiCount);
+    const clips = Number(clipCount);
     if (Number.isFinite(manual) && manual > 0) parts.push(`ez-manual=${Math.round(manual)}`);
     if (Number.isFinite(ai) && ai > 0) parts.push(`ez-ai=${Math.round(ai)}`);
+    if (Number.isFinite(clips) && clips > 0) parts.push(`ez-clips=${Math.round(clips)}`);
     return parts.join("; ");
   }
 
@@ -219,6 +221,7 @@
     const manual = Number(/ez-manual=(\d+)/i.exec(text)?.[1] || "");
     const ai = Number(/ez-ai=(\d+)/i.exec(text)?.[1] || "");
     const packageId = /ez-package=(video|slides|custom)/i.exec(text)?.[1] || "";
+    const clips = Number(/ez-clips=(\d+)/i.exec(text)?.[1] || "");
     return {
       origin: originMatch[1].toLowerCase(),
       inputKind: input,
@@ -226,6 +229,7 @@
       packageId: packageId ? packageId.toLowerCase() : null,
       manualCount: Number.isFinite(manual) && manual > 0 ? manual : null,
       aiCount: Number.isFinite(ai) && ai > 0 ? ai : null,
+      clipCount: Number.isFinite(clips) && clips > 0 ? clips : null,
     };
   }
 
@@ -255,6 +259,7 @@
   function ezWizardPhotoCount(answers = {}) {
     const kind = String(answers.inputKind || "").trim();
     if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.SINGLE_AI) return 1;
+    if (kind === EZ_INPUTS.VIDEO_CLIPS) return 0;
     if (kind === EZ_INPUTS.MIXED) {
       return Math.max(0, Number(answers.manualCount) || 0) + Math.max(0, Number(answers.aiCount) || 0);
     }
@@ -263,7 +268,16 @@
     const max = Math.max(0, Number(answers.photoCountMax) || 0);
     if (max) return max;
     if (kind === EZ_INPUTS.MULTIPLE_PHOTOS || kind === EZ_INPUTS.MULTIPLE_AI) return 4;
+    if (kind === EZ_INPUTS.PHOTOS_AND_CLIPS) return 3;
     return 1;
+  }
+
+  function ezWizardClipCount(answers = {}) {
+    const kind = String(answers.inputKind || "").trim();
+    const n = Math.max(0, Number(answers.clipCount) || 0);
+    if (n) return n;
+    if (kind === EZ_INPUTS.PHOTOS_AND_CLIPS || kind === EZ_INPUTS.VIDEO_CLIPS) return 1;
+    return 0;
   }
 
   function ezWizardExpectedUploads(answers = {}) {
@@ -271,7 +285,10 @@
     if (answers.photoWait) return 0;
     if (kind === EZ_INPUTS.SINGLE_AI || kind === EZ_INPUTS.MULTIPLE_AI) return 0;
     if (kind === EZ_INPUTS.SINGLE_PHOTO || kind === EZ_INPUTS.FINISHED_VIDEO) return 1;
-    if (ezIsClipInput(kind)) return Math.max(1, Number(answers.photoCount) || 2);
+    if (kind === EZ_INPUTS.PHOTOS_AND_CLIPS) {
+      return Math.max(1, ezWizardPhotoCount(answers)) + Math.max(1, ezWizardClipCount(answers));
+    }
+    if (kind === EZ_INPUTS.VIDEO_CLIPS) return Math.max(1, ezWizardClipCount(answers));
     if (kind === EZ_INPUTS.FINISHED_STILLS) return Math.max(1, Number(answers.photoCount) || 1);
     if (kind === EZ_INPUTS.MIXED) return Math.max(1, Number(answers.manualCount) || 1);
     if (kind === EZ_INPUTS.MULTIPLE_PHOTOS) return Math.max(2, Number(answers.photoCount) || 2);
@@ -396,6 +413,7 @@
     ezIntakeKindFromWizard,
     ezImageModeFromWizard,
     ezWizardPhotoCount,
+    ezWizardClipCount,
     ezWizardExpectedUploads,
     ezWizardRequiresUploads,
     ezWizardPackages,
