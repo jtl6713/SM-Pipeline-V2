@@ -176,7 +176,8 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.208-choose-clip";
+  const BUILD_ID = "item4-0.6.209-clip-preview";
+  let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
   const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_VIDEOS},${ITEM4_ACCEPT_PHOTOS}`;
@@ -2233,7 +2234,7 @@
     revokeEzLocalPreviews();
     (files || []).forEach((file, index) => {
       const heic = item4IsHeicAsset({ name: file.name, mime_type: file.type });
-      if (heic) return;
+      if (heic || item4FileLooksLikeVideo(file)) return;
       try {
         const url = URL.createObjectURL(file);
         ezLocalPreviews.set(index, url);
@@ -2244,10 +2245,9 @@
 
   function appendEzLocalPreview(file) {
     if (!file || item4IsHeicAsset({ name: file.name, mime_type: file.type })) return;
+    if (item4FileLooksLikeVideo(file)) return;
     try {
       const url = URL.createObjectURL(file);
-      const index = ezStagedFiles.length;
-      ezLocalPreviews.set(index, url);
       if (file.name) ezLocalPreviews.set(file.name, url);
     } catch {}
   }
@@ -2370,10 +2370,10 @@
   }
 
   function ezLocalPreviewFor(index, name) {
+    if (/\.(mp4|mov|m4v|webm)$/i.test(String(name || ""))) return "";
     if (name && ezLocalPreviews.has(name)) return ezLocalPreviews.get(name);
-    if (ezLocalPreviews.has(index)) return ezLocalPreviews.get(index);
-    const match = ezStagedFiles.findIndex((file) => file.name === name);
-    return match >= 0 ? (ezLocalPreviews.get(match) || ezLocalPreviews.get(name) || "") : "";
+    const match = ezStagedFiles.findIndex((file) => file.name === name && !item4FileLooksLikeVideo(file));
+    return match >= 0 ? (ezLocalPreviews.get(name) || "") : "";
   }
 
   function renderEzPhotoStrip() {
@@ -2395,13 +2395,16 @@
       const asset = assets[index] || {};
       const name = asset.name || file?.name || (ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`);
       const id = String(asset.id || `staged:${index}`);
-      const localUrl = ezLocalPreviewFor(index, name);
-      const remoteUrl = asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
+      const isVideo = item4FileLooksLikeVideo(file) || item4AssetLooksLikeVideo(asset);
+      const localUrl = isVideo ? "" : ezLocalPreviewFor(index, name);
+      const remoteUrl = !isVideo && asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
       const previewUrl = localUrl || remoteUrl;
       const heic = item4IsHeicAsset(file || asset);
-      const visual = previewUrl
-        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
-        : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
+      const visual = isVideo
+        ? item4AssetPlaceholder(file || asset, "Clip saved")
+        : previewUrl
+          ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
+          : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
       const canRemove = asset.id && !String(asset.id).startsWith("local:") && !String(asset.id).startsWith("staged:");
       cards.push(`<article class="ez-photo-card" data-item4-asset="${escapeHtml(id)}">
         ${visual}
@@ -4461,16 +4464,25 @@
     return { continue: false, delay_ms: null, mode: "await-visibility", extra_windows_used: extraWindowsUsed, hard_refresh_required: false };
   }
 
+  function item4PreviewUrlLooksLikeImage(url) {
+    const raw = String(url || "").trim();
+    if (!raw || raw.startsWith("blob:")) return false;
+    if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(raw)) return false;
+    return /thumbnail\?|googleusercontent|\.jpe?g(\?|#|$)|\.png(\?|#|$)|\.webp(\?|#|$)|\.gif(\?|#|$)|\.svg(\?|#|$)|\/preview/i.test(raw);
+  }
+
   function item4AssetPreviewCandidates(asset) {
     try {
+      if (item4AssetLooksLikeVideo(asset)) {
+        const driveThumb = item4DriveThumbnailUrl(asset?.google_drive_file_id);
+        return driveThumb ? [driveThumb] : [];
+      }
       const candidates = [];
       const name = String(asset?.name || "");
       const local = ezLocalPreviewFor(Number(asset?.order || 0) - 1, name);
       const cdn = String(asset?.preview_url || "").trim();
-      // Keep the dropped file on screen for this session while Drive/CDN copies
-      // catch up. Durable URLs remain fallbacks for reload and HEIC originals.
       if (local) candidates.push(local);
-      if (cdn) candidates.push(cdn);
+      if (cdn && item4PreviewUrlLooksLikeImage(cdn)) candidates.push(cdn);
       const recordId = String(asset?.media_asset_record_id || "").trim();
       if (/^rec[A-Za-z0-9]+$/.test(recordId)) {
         candidates.push(`${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/preview`);
@@ -4560,13 +4572,17 @@
   function item4AssetThumb(asset) {
     const dims = asset.width && asset.height ? `${asset.width}×${asset.height}` : "Original";
     const isHeic = item4IsHeicAsset(asset);
+    const isVideo = item4AssetLooksLikeVideo(asset);
     const candidates = item4AssetPreviewCandidates(asset);
     const previewUrl = candidates[0] || "";
-    const visual = previewUrl
-      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
-      : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
+    const visual = isVideo
+      ? (previewUrl
+        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Clip")}" loading="lazy">`
+        : item4AssetPlaceholder(asset, "Clip saved"))
+      : previewUrl
+        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
+        : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
-    const isVideo = item4AssetLooksLikeVideo(asset);
     const seconds = Number(asset?.duration_seconds || 0);
     const durationNote = isVideo && seconds > 0 ? ` · ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s` : "";
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
@@ -4587,7 +4603,6 @@
     const host = $("item4AssetStrip");
     const badge = $("item4AssetStatus");
     const authority = String(status?.assets_status || "None");
-    if (authority === "Ready") item4PreviewFailures.clear();
     if (badge) {
       const word = ezMediaWord(assets.length || 1);
       badge.textContent = !assets.length
@@ -4603,9 +4618,16 @@
       return;
     }
     hydrateEzCaptionDrafts(status);
+    const signature = assets.map((asset) => `${asset.id}|${asset.name}|${asset.preview_url || ""}|${asset.google_drive_file_id || ""}`).join(";");
     if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
+      item4AssetStripSignature = "";
       host.innerHTML = `<div class="empty compact-empty">${ezIsFinishedVideo() ? "Video is loading into the system." : "Photos are loading into the system."} You can keep working or leave this screen.</div>`;
+    } else if (signature && signature === item4AssetStripSignature && host.querySelector("[data-item4-asset]")) {
+      syncFinishedMediaHeadings();
+      syncProductionStudioState();
+      return;
     } else {
+      item4AssetStripSignature = signature;
       host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty"></div>';
     }
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
