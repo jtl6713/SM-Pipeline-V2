@@ -276,3 +276,7 @@ Clip frame Worker deploy: 2026-09-01 - Accept a saved clip JPEG poster and strea
 Clip Drive thumb Worker deploy: 2026-09-01 - Requeue skipped clip previews so SMV1 can write a JPEG poster from Drive. Worker 0.10.212-clip-drive-thumb.
 
 Clip runner poster Worker deploy: 2026-09-01 - Ask the pipeline runner for a Drive-authenticated JPEG frame and stamp poster_url on the clip card. Worker 0.10.213-clip-runner-poster.
+
+Clip Chrome frame Worker deploy: 2026-09-01 - Build clip JPEGs in the Worker from Drive, stream the MOV with OAuth for Chrome video cards, and requeue SMV1 when the runner job 404s. Worker 0.10.214-clip-chrome-frame.
+
+Runner clip route Worker deploy: 2026-09-01 - Feature-detect clip_poster on the live runner instead of POSTing a job the 2026-08-24 process does not have. Worker 0.10.215-runner-clip-route.

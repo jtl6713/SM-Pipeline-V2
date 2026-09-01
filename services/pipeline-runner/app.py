@@ -41,6 +41,14 @@ def health():
             "stages_registered": len(STAGE_NAMES),
             "stages_implemented": sum(1 for name in STAGE_NAMES if is_implemented(name)),
             "public_base_url": settings.get("public_base_url") or None,
+            "jobs": [
+                {"name": "studio-clip-poster", "path": "/jobs/studio-clip-poster"},
+                {"name": "studio-produce", "path": "/jobs/studio-produce"},
+                {"name": "studio-produce-resume", "path": "/jobs/studio-produce/resume"},
+                {"name": "studio-produce-ops-alert", "path": "/jobs/studio-produce/ops-alert"},
+                {"name": "studio-music-library", "path": "/jobs/studio-music-library"},
+                {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
+            ],
         }
     )
 

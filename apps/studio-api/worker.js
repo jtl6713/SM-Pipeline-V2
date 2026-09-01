@@ -197,7 +197,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.213-clip-runner-poster",
+          version: "0.10.215-runner-clip-route",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -3468,9 +3468,66 @@ async function item4PutClipPoster(env, recordId, assetId, bytes, contentType = "
   return { key, url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}` };
 }
 
-async function item4FetchDriveThumbnailBytes(driveId) {
+async function item4GoogleAccessToken(env) {
+  const clientId = String(env?.GOOGLE_CLIENT_ID || "").trim();
+  const clientSecret = String(env?.GOOGLE_CLIENT_SECRET || "").trim();
+  const refresh = String(env?.GOOGLE_REFRESH_TOKEN || "").trim();
+  if (!clientId || !clientSecret || !refresh) return "";
+  try {
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refresh,
+        grant_type: "refresh_token",
+      }),
+    });
+    if (!response.ok) {
+      console.warn("Item 4 Google token refresh failed", response.status);
+      return "";
+    }
+    const payload = await response.json().catch(() => ({}));
+    return String(payload.access_token || "").trim();
+  } catch (error) {
+    console.warn("Item 4 Google token refresh failed", error);
+    return "";
+  }
+}
+
+async function item4FetchDriveThumbnailBytes(driveId, env = null) {
   const id = String(driveId || "").trim();
   if (!id) return null;
+  const token = env ? await item4GoogleAccessToken(env) : "";
+  if (token) {
+    try {
+      const meta = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=thumbnailLink,hasThumbnail&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      });
+      if (meta.ok) {
+        const body = await meta.json().catch(() => ({}));
+        let link = String(body.thumbnailLink || "").trim();
+        if (link) {
+          if (/[?&]sz=/.test(link)) link = link.replace(/sz=[^&]+/, "sz=w720");
+          else link += `${link.includes("?") ? "&" : "?"}sz=w720`;
+          const thumb = await fetch(link, {
+            headers: { Authorization: `Bearer ${token}`, Accept: "image/jpeg,image/png,image/*;q=0.8" },
+            redirect: "follow",
+          });
+          const type = String(thumb.headers.get("Content-Type") || "").toLowerCase();
+          if (thumb.ok && type.startsWith("image/") && !type.includes("svg")) {
+            const bytes = await thumb.arrayBuffer();
+            if (bytes && bytes.byteLength >= 80) {
+              return { bytes, contentType: type.split(";")[0] || "image/jpeg" };
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("Item 4 authenticated Drive thumbnail failed", error);
+    }
+  }
   const urls = [
     `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w640`,
     `https://lh3.googleusercontent.com/d/${encodeURIComponent(id)}=w640`,
@@ -3493,6 +3550,38 @@ async function item4FetchDriveThumbnailBytes(driveId) {
     } catch {}
   }
   return null;
+}
+
+async function item4StampAssetPoster(env, recordId, assetId, stored) {
+  const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+  const assets = item4AssetManifest(record);
+  const nextAssets = assets.map((asset) => String(asset?.id || "") === String(assetId)
+    ? { ...asset, poster_url: stored.url, poster_r2_key: stored.key }
+    : asset);
+  const updated = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
+  });
+  return { record: updated, assets: nextAssets, poster_url: stored.url };
+}
+
+async function item4BuildClipPostersLocally(env, recordId, { assetId = "" } = {}) {
+  if (!env?.STUDIO_MEDIA) return { ok: false, posters: [] };
+  const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+  const assets = item4AssetManifest(record);
+  const posters = [];
+  for (const asset of assets) {
+    if (!item4LooksLikeVideoAsset(asset)) continue;
+    if (assetId && String(asset.id || "") !== String(assetId)) continue;
+    if (item4LooksLikeImagePreviewUrl(asset?.poster_url)) continue;
+    const driveId = String(asset.google_drive_file_id || "").trim();
+    if (!driveId || !asset.id) continue;
+    const grabbed = await item4FetchDriveThumbnailBytes(driveId, env);
+    if (!grabbed) continue;
+    const stored = await item4PutClipPoster(env, recordId, asset.id, grabbed.bytes, grabbed.contentType);
+    await item4StampAssetPoster(env, recordId, asset.id, stored);
+    posters.push({ source_asset_id: asset.id, poster_url: stored.url, poster_r2_key: stored.key });
+  }
+  return { ok: Boolean(posters.length), posters };
 }
 
 function item4PlayableMediaUrl(asset) {
@@ -3984,7 +4073,7 @@ async function item4ReconcileMasterAuthority(env, recordId, record = null) {
     }
     if (item4LooksLikeVideoAsset(asset) && driveId && !item4LooksLikeImagePreviewUrl(posterUrl) && q) {
       const previewStatus = String(f(q, "Preview_Status") || "").trim();
-      if (previewStatus === "Skipped") {
+      if (previewStatus !== "Pending" && previewStatus !== "Processing") {
         try {
           await airtableFetch(env, ITEM4_VARIANT_QUEUE_TABLE, q.id, {
             method: "PATCH",
@@ -4378,7 +4467,29 @@ async function uploadItem4ClipPoster(request, env, url, authorization) {
     });
   }
 
-  const pulsed = await item4PulseClipPosterJob(env, recordId, { assetId });
+  const local = await item4BuildClipPostersLocally(env, recordId, { assetId });
+  if (local.posters[0]?.poster_url) {
+    const refreshed = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
+    return respond(request, env, {
+      ok: true,
+      poster_url: local.posters[0].poster_url,
+      assets: item4AssetManifest(refreshed),
+      record: mapProductionRequest(refreshed),
+    });
+  }
+
+  let pulsed = null;
+  try {
+    pulsed = await item4PulseClipPosterJob(env, recordId, { assetId });
+  } catch (error) {
+    console.warn("Item 4 clip poster job deferred", error);
+    try {
+      await item4DrainPreviewCacheWorker(env, recordId, 4);
+      await item4ReconcileMasterAuthority(env, recordId);
+    } catch (drainError) {
+      console.warn("Item 4 clip poster SMV1 fallback deferred", drainError);
+    }
+  }
   const refreshed = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const nextAssets = item4AssetManifest(refreshed);
   const updatedAsset = nextAssets.find((asset) => String(asset?.id || "") === String(assetId));
@@ -6152,29 +6263,77 @@ function studioProductionJobLabel(job) {
   return detail || null;
 }
 
-async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = {}) {
+async function item4RunnerClipPosterRoutes(env) {
   const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
-  if (!runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
-  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
-  const response = await fetch(`${runnerUrl}/jobs/studio-clip-poster`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
-    },
-    body: JSON.stringify({
-      production_request_record_id: recordId,
-      ...(assetId ? { source_asset_id: assetId } : {}),
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new HttpError(
-      response.status,
-      payload?.error || payload?.message || `Clip poster job failed (${response.status})`
-    );
+  if (!runnerUrl) return { runnerUrl: "", hasStage: false, hasJob: false, version: "" };
+  try {
+    const [healthResponse, stagesResponse] = await Promise.all([
+      fetch(`${runnerUrl}/health`),
+      fetch(`${runnerUrl}/stages`),
+    ]);
+    const health = await healthResponse.json().catch(() => ({}));
+    const stages = await stagesResponse.json().catch(() => ({}));
+    const jobs = Array.isArray(health?.jobs) ? health.jobs : [];
+    const hasJob = jobs.some((job) => String(job?.path || job?.name || "").includes("studio-clip-poster"));
+    const hasStage = (Array.isArray(stages?.stages) ? stages.stages : []).some((stage) => (
+      String(stage?.name || "") === "clip_poster" && stage?.implemented !== false
+    ));
+    return {
+      runnerUrl,
+      hasStage,
+      hasJob,
+      version: String(health?.version || "").trim(),
+    };
+  } catch (error) {
+    console.warn("Item 4 runner clip-poster discovery failed", error);
+    return { runnerUrl, hasStage: false, hasJob: false, version: "" };
   }
-  return payload;
+}
+
+async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = {}) {
+  const advertised = await item4RunnerClipPosterRoutes(env);
+  if (!advertised.runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const body = {
+    production_request_record_id: recordId,
+    ...(assetId ? { source_asset_id: assetId, extra: { source_asset_id: assetId } } : {}),
+  };
+
+  if (advertised.hasStage) {
+    const { response, payload } = await item4PulsePipelineStage(env, "clip_poster", body, "CLIP_POSTER");
+    if (!response.ok) {
+      throw new HttpError(
+        response.status,
+        payload?.error || payload?.message || `Clip poster stage failed (${response.status})`
+      );
+    }
+    return payload?.details || payload;
+  }
+
+  if (advertised.hasJob) {
+    const response = await fetch(`${advertised.runnerUrl}/jobs/studio-clip-poster`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new HttpError(
+        response.status,
+        payload?.error || payload?.message || `Clip poster job failed (${response.status})`
+      );
+    }
+    return payload;
+  }
+
+  console.warn(
+    "Item 4 clip poster skipped: live runner does not advertise clip_poster",
+    advertised.version || "unknown-version"
+  );
+  return { ok: false, skipped: "runner-missing-clip-poster", runner_version: advertised.version || null };
 }
 
 async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}) {
@@ -7563,6 +7722,11 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
     const needsClipPoster = assets.some((asset) => item4LooksLikeVideoAsset(asset) && !item4LooksLikeImagePreviewUrl(asset?.poster_url));
     if (needsClipPoster && ctx && typeof ctx.waitUntil === "function") {
       ctx.waitUntil((async () => {
+        try {
+          await item4BuildClipPostersLocally(env, recordId);
+        } catch (error) {
+          console.warn("Item 4 local clip poster deferred", error);
+        }
         try {
           await item4PulseClipPosterJob(env, recordId);
         } catch (error) {
@@ -15063,7 +15227,7 @@ async function mediaAssetImagePreview(request, env, url, authorization) {
     const driveId = googleDriveFileId(record);
     if (driveId && request.method === "GET" && env.STUDIO_MEDIA) {
       try {
-        const grabbed = await item4FetchDriveThumbnailBytes(driveId);
+        const grabbed = await item4FetchDriveThumbnailBytes(driveId, env);
         if (grabbed) {
           return new Response(grabbed.bytes, {
             status: 200,
@@ -15175,26 +15339,39 @@ async function mediaAssetVideoStream(request, env, url, authorization) {
 
   if (request.method === "HEAD") {
     const probeRequest = new Request(request.url, { method: "GET", headers: { Range: "bytes=0-0" } });
-    const upstream = await fetchGoogleDriveVideo(fileId, fileUrl, probeRequest);
+    const upstream = await fetchGoogleDriveVideo(fileId, fileUrl, probeRequest, env);
     const headers = copyDriveVideoHeaders(upstream);
     try { await upstream.body?.cancel(); } catch {}
     return new Response(null, { status: 200, headers });
   }
 
-  const upstream = await fetchGoogleDriveVideo(fileId, fileUrl, request);
+  const upstream = await fetchGoogleDriveVideo(fileId, fileUrl, request, env);
   return new Response(upstream.body, {
     status: upstream.status === 206 ? 206 : 200,
     headers: copyDriveVideoHeaders(upstream),
   });
 }
 
-async function fetchGoogleDriveVideo(fileId, finalFileUrl, request) {
+async function fetchGoogleDriveVideo(fileId, finalFileUrl, request, env = null) {
   if (!fileId) throw new HttpError(404, "Rendered preview file ID is not available");
 
   const headers = new Headers();
   headers.set("Accept", "video/mp4,video/*;q=0.9,*/*;q=0.8");
   const requestedRange = request.headers.get("Range");
   if (requestedRange) headers.set("Range", requestedRange);
+
+  const token = env ? await item4GoogleAccessToken(env) : "";
+  if (token) {
+    const authHeaders = new Headers(headers);
+    authHeaders.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+      { method: "GET", headers: authHeaders, redirect: "follow" }
+    );
+    const contentType = String(response.headers.get("Content-Type") || "").toLowerCase();
+    if (response.ok && !contentType.includes("text/html")) return response;
+    try { await response.body?.cancel(); } catch {}
+  }
 
   const urls = [
     googleDriveDownloadUrl(fileId),

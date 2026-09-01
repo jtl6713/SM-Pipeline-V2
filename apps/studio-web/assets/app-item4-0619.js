@@ -179,7 +179,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.217-clip-runner-poster";
+  const BUILD_ID = "item4-0.6.218-clip-chrome-frame";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -4622,6 +4622,12 @@
     return item4AssetPreviewCandidates(asset)[0] || "";
   }
 
+  function item4ClipStreamUrl(asset) {
+    const recordId = String(asset?.media_asset_record_id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(recordId)) return "";
+    return `${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/stream`;
+  }
+
   function item4AssetPlaceholder(asset, label = "Preview unavailable") {
     const isVideo = item4AssetLooksLikeVideo(asset);
     const ext = item4AssetExtension(asset?.name).toUpperCase();
@@ -4639,10 +4645,13 @@
     const isVideo = item4AssetLooksLikeVideo(asset);
     const candidates = item4AssetPreviewCandidates(asset);
     const previewUrl = candidates[0] || "";
+    const streamUrl = isVideo ? item4ClipStreamUrl(asset) : "";
     const visual = isVideo
       ? (previewUrl
         ? `<div class="item4-clip-poster-wrap"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Clip")}" loading="lazy" class="item4-clip-poster" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}"><span class="item4-clip-play" aria-hidden="true"></span></div>`
-        : item4AssetPlaceholder(asset, "Clip saved"))
+        : streamUrl
+          ? `<div class="item4-clip-poster-wrap"><video muted playsinline preload="auto" src="${escapeHtml(`${streamUrl}#t=0.25`)}" class="item4-clip-poster" data-item4-clip-video></video><span class="item4-clip-play" aria-hidden="true"></span></div>`
+          : item4AssetPlaceholder(asset, "Clip saved"))
       : previewUrl
         ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
         : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
@@ -5896,6 +5905,25 @@
           console.warn("Item 4 clip poster persist deferred", error);
         }
         return;
+      }
+    }
+    const streamUrl = item4ClipStreamUrl(asset);
+    if (streamUrl) {
+      try {
+        const blob = await item4ClipPosterFromUrl(streamUrl, { timeoutMs: 12000 });
+        if (blob) {
+          const localUrl = item4ApplyLocalClipPoster(asset, blob);
+          item4ApplySavedClipPoster(asset, localUrl);
+          try {
+            const stored = await item4PersistClipPoster(asset, blob);
+            if (stored) item4ApplySavedClipPoster(asset, stored);
+          } catch (error) {
+            console.warn("Item 4 clip poster persist deferred", error);
+          }
+          return;
+        }
+      } catch (error) {
+        console.warn("Item 4 clip stream frame deferred", error);
       }
     }
     try {
