@@ -1,0 +1,14 @@
+name: Log Commit
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm install ./ai-activity-logger
+      - run: node scripts/log_activity.js "GitHub commit: ${{ github.sha }}"

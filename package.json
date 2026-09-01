@@ -1,0 +1,8 @@
+{
+  "name": "sm-pipeline-v2",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ai-activity-logger": "file:ai-activity-logger"
+  }
+}
