@@ -192,7 +192,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.205-smv1-python-only",
+          version: "0.10.206-due-publish-priority",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -209,6 +209,7 @@ export default {
           studio_insights_caption_learning_v1: true,
           studio_insights_overview_stats_v1: true,
           studio_insights_youtube_discovery_v1: true,
+          studio_due_publish_priority_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
           studio_production_location_v1: true,
@@ -878,48 +879,23 @@ export default {
       } catch (error) {
         console.warn("studio produce orphan kick failed", error);
       }
-      try {
-        await runWaitingIdeaPhotoMatches(env, { limit: 8 });
-      } catch (error) {
-        console.warn("idea photo-wait matcher failed", error);
-      }
-      try {
-        await resumeStaleStudioProductionJobs(env);
-      } catch (error) {
-        console.warn("studio produce watchdog failed", error);
-      }
-      try {
-        await resumeStalePlatformOutputs(env);
-      } catch (error) {
-        console.warn("studio output watchdog failed", error);
-      }
-      try {
-        await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
-      } catch (error) {
-        console.warn("item4 pending crop drain cron failed", error);
-      }
-      try {
-        await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
-          scheduled: true,
-          cron: event?.cron || "",
-        });
-      } catch (error) {
-        console.warn("autonomous produce cadence failed", error);
-      }
+      // Due publishes first. Item4 drain + autonomous produce were running before
+      // this block and routinely exhausted the isolate budget, so scheduled TikTok /
+      // FB finalize work sat for hours with no dispatch receipt (326, 311/316 late).
       try {
         await studioReconcileApprovedPublishes(env);
       } catch (error) {
         console.warn("publish reconcile cron failed", error);
       }
       try {
+        await studioReconcileTiktokDrafts(env);
+      } catch (error) {
+        console.warn("tiktok draft reconcile cron failed", error);
+      }
+      try {
         await studioReconcileFacebookPublicMake(env);
       } catch (error) {
         console.warn("facebook public make reconcile cron failed", error);
-      }
-      try {
-        await studioReconcileFacebookVideoCovers(env);
-      } catch (error) {
-        console.warn("facebook native cover reconcile cron failed", error);
       }
       // Due IG carousels (Parent Ready) must publish before heavier platform polls
       // burn the isolate subrequest budget — 304 sat ~3h past schedule otherwise.
@@ -949,14 +925,42 @@ export default {
         console.warn("youtube publish reconcile cron failed", error);
       }
       try {
-        await studioReconcileTiktokDrafts(env);
-      } catch (error) {
-        console.warn("tiktok draft reconcile cron failed", error);
-      }
-      try {
         await studioReconcileFacebookPhotos(env);
       } catch (error) {
         console.warn("facebook photo reconcile cron failed", error);
+      }
+      try {
+        await studioReconcileFacebookVideoCovers(env);
+      } catch (error) {
+        console.warn("facebook native cover reconcile cron failed", error);
+      }
+      try {
+        await runWaitingIdeaPhotoMatches(env, { limit: 8 });
+      } catch (error) {
+        console.warn("idea photo-wait matcher failed", error);
+      }
+      try {
+        await resumeStaleStudioProductionJobs(env);
+      } catch (error) {
+        console.warn("studio produce watchdog failed", error);
+      }
+      try {
+        await resumeStalePlatformOutputs(env);
+      } catch (error) {
+        console.warn("studio output watchdog failed", error);
+      }
+      try {
+        await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
+      } catch (error) {
+        console.warn("item4 pending crop drain cron failed", error);
+      }
+      try {
+        await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
+          scheduled: true,
+          cron: event?.cron || "",
+        });
+      } catch (error) {
+        console.warn("autonomous produce cadence failed", error);
       }
       try {
         await syncProductionCadence(env, { skipRenderPulse: true });
@@ -20880,6 +20884,8 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
       stage: "ttd0",
       pulse: studioPulseTtd0,
       formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({TikTok_Draft_Status}="Ready for Assets",{TikTok_Draft_Status}="Waiting for Schedule",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))',
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
     },
     {
       stage: "ttd1",
@@ -20900,7 +20906,12 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
   for (const scan of scans) {
     let rows = [];
     try {
-      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: scan.formula });
+      rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit,
+        filterFormula: scan.formula,
+        sortField: scan.sortField || null,
+        sortDirection: scan.sortDirection || "desc",
+      });
     } catch (error) {
       console.warn(`tiktok ${scan.stage} reconcile scan failed`, error);
       continue;
@@ -21053,6 +21064,8 @@ async function studioReconcileApprovedPublishes(env, options = {}) {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
       filterFormula: STUDIO_PUBLISH_RECONCILE_FORMULA,
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
     });
   } catch (error) {
     console.warn("publish reconcile scan failed", error);
@@ -21213,24 +21226,32 @@ async function studioReconcileFacebookSlideshows(env, options = {}) {
 }
 
 async function studioReconcileFacebookReels(env, options = {}) {
-  if (studioFacebookGraphPublishHeld(env)) return [];
   if (pipelineStageBackend(env, "FBS3").mode !== "python") return [];
+  const graphHeld = studioFacebookGraphPublishHeld(env);
   const limit = Number(options.limit || 3);
   const results = [];
   let ready = [];
   let processing = [];
-  try {
-    ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0)))',
-    });
-  } catch (error) {
-    console.warn("facebook reel create reconcile scan failed", error);
+  // Graph-held still allows FBS4 finalize for rows Make/public already posted.
+  // Returning [] here left 310/315/319/324 live on Facebook but stuck Publishing.
+  if (!graphHeld) {
+    try {
+      ready = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+        limit,
+        filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR(AND({FB_Slideshow_Status}="Video Ready",{FB_Slideshow_Public_URL}!=""),AND({FB_Slideshow_Status}="Retry Pending",FIND("FBS3",UPPER({Publish_Error_Stage}&""))>0)))',
+        sortField: "Scheduled_Post_Date",
+        sortDirection: "asc",
+      });
+    } catch (error) {
+      console.warn("facebook reel create reconcile scan failed", error);
+    }
   }
   try {
     processing = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({FB_Slideshow_Status}="Reel Processing",{FB_Slideshow_Status}="Published Pending Finalize"),OR({FB_Slideshow_Meta_Video_ID}!="",{Platform_Post_ID}!=""))',
+      sortField: "Scheduled_Post_Date",
+      sortDirection: "asc",
     });
   } catch (error) {
     console.warn("facebook reel poll reconcile scan failed", error);

@@ -260,3 +260,5 @@ Scheduled waiting status Worker deploy: 2026-08-31 - Future-dated TikTok/approve
 Python default Worker deploy: 2026-08-31 - Unset STAGE_BACKEND flags no longer fall back to Make. Stages pulse the local Python runner. Worker 0.10.204-python-default.
 
 SMV1 Python-only Worker deploy: 2026-08-31 - Preview-cache drain and cron no longer pulse or PATCH Make scenario 5894885. Crops and previews stay on the Python runner. Worker 0.10.205-smv1-python-only.
+
+Due publish priority Worker deploy: 2026-09-01 - Run due publish/TikTok/FB finalize before Item4 drain and autonomous produce; keep FBS4 finalize when Graph publish is held. Worker 0.10.206-due-publish-priority.

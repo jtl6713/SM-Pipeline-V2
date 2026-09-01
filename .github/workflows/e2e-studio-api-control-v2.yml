@@ -34,7 +34,7 @@ jobs:
           jq -e '.correlation_id|type=="string" and length>0' "$F" >/dev/null
           jq -e '.requests|type=="array" and length>0 and length<=12' "$F" >/dev/null
           jq -e 'all(.requests[]; (.method=="GET" or .method=="POST" or .method=="PATCH" or .method=="PUT") and (.path|type=="string"))' "$F" >/dev/null
-          jq -e 'all(.requests[]; (.path|test("^/api/production-requests/recc9H8SXdUnKEMhQ(/|$)|^/api/production-request-outputs/rec(D15PEl3x8LnZ7G|GvE1SHoxXPs5Aa|GZm1Si8GhHPP13|wvxu6GketzHWiF)(/|$)|^/api/outputs/rec[A-Za-z0-9]+/(preview|creative)(/|$)")))' "$F" >/dev/null
+          jq -e 'all(.requests[]; (.path|test("^/api/production-requests/recc9H8SXdUnKEMhQ(/|$)|^/api/production-request-outputs/rec(D15PEl3x8LnZ7G|GvE1SHoxXPs5Aa|GZm1Si8GhHPP13|wvxu6GketzHWiF)(/|$)|^/api/outputs/rec[A-Za-z0-9]+/(preview|creative)(/|$)|^/api/operations/outputs/rec[A-Za-z0-9]+/publish-kick$")))' "$F" >/dev/null
           curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
           jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
 
