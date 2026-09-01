@@ -325,3 +325,5 @@ Plan buttons Pages deploy: 2026-09-01 - Keep Recommend formats visible on EZ req
 Clip runner poster Pages deploy: 2026-09-01 - Clip cards request a pipeline-runner JPEG frame instead of decoding the MOV on iPhone. UI 0.6.217-clip-runner-poster.
 
 Clip Chrome frame Pages deploy: 2026-09-01 - Clip cards show a same-origin video frame in Chrome while a JPEG poster is saved. UI 0.6.218-clip-chrome-frame.
+
+Facebook clip Reel Pages deploy: 2026-09-01 - Photos-and-clips recommends Facebook Reel plus Story, not Slideshow Reel. UI 0.6.219-fb-clip-reel.

@@ -197,7 +197,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.215-runner-clip-route",
+          version: "0.10.216-fb-clip-reel",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -5106,6 +5106,19 @@ function studioFinishedOriginKind(record) {
   return "";
 }
 
+function item4PlanHasVideo(record, assets) {
+  if (item4HasVideoMasters(assets)) return true;
+  if (item4IsClipInputKind(item4ParseEzOrigin(record).inputKind)) return true;
+  const notes = [
+    f(record, "Production_Notes"),
+    f(record, "Output_Notes"),
+    f(record, "Internal_Notes"),
+    f(record, "Production_Request_Notes"),
+  ].map((value) => String(value || "")).join("\n");
+  if (/ez-input=photos-and-clips|ez-input=video-clips|ez-clips=\d+/i.test(notes)) return true;
+  return studioFinishedOriginKind(record) === "finished-video";
+}
+
 function studioNormalizeFinishedOriginKind(value) {
   const kind = String(value || "").trim().toLowerCase();
   if (kind === "finished-video" || kind === "finished-stills" || kind === "finished-carousel") return kind;
@@ -5471,6 +5484,7 @@ function item4PlanChoice(platform, requestedOutputType, photoCount, { hasVideo =
   const spec = ITEM4_PLAN_SPECS[platform];
   if (!spec) throw new HttpError(400, `Item 4 does not support ${platform}`);
   let requested = item4CanonicalOutputType(platform, String(requestedOutputType || "").trim());
+  if (hasVideo && platform === "Facebook" && requested === "Slideshow Reel") requested = "Reel";
   if (hasVideo && item4IsNativeStillOutput(platform, requested)) requested = "";
   const fallback = item4DefaultOutputType(platform, photoCount, { hasVideo, packageId }) || spec.default_output_type;
   const outputType = requested || fallback;
@@ -5511,7 +5525,7 @@ function item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex, { c
 async function item4ReconcilePlanWithEnabledOutputs(env, record, enabledPairs) {
   const assets = item4AssetManifest(record);
   const photoCount = item4EffectivePhotoCount(record, assets) || Math.max(assets.length, 1);
-  const hasVideo = item4HasVideoMasters(assets);
+  const hasVideo = item4PlanHasVideo(record, assets);
   const mappingIndex = await item4MappingIndex(env);
   const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   const items = Array.isArray(existingPlan?.items) ? [...existingPlan.items] : [];
@@ -5638,7 +5652,7 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   assertEditableProductionRequest(record);
   const assets=item4AssetManifest(record).sort((a,b)=>Number(a.order||0)-Number(b.order||0));
   const photoCount=item4EffectivePhotoCount(record, assets);
-  const hasVideo=item4HasVideoMasters(assets);
+  const hasVideo=item4PlanHasVideo(record, assets);
   if (!photoCount) throw new HttpError(409,"Upload at least one master photo or clip before building the platform plan, or set an exact AI slide count with Make AI Generated.");
   const requestedPlatforms=Array.isArray(payload.platforms)&&payload.platforms.length?payload.platforms:["Instagram","Facebook","TikTok","YouTube"];
   const platforms=[...new Set(requestedPlatforms.map(x=>String(x||"").trim()).filter(Boolean))];

@@ -280,3 +280,5 @@ Clip runner poster Worker deploy: 2026-09-01 - Ask the pipeline runner for a Dri
 Clip Chrome frame Worker deploy: 2026-09-01 - Build clip JPEGs in the Worker from Drive, stream the MOV with OAuth for Chrome video cards, and requeue SMV1 when the runner job 404s. Worker 0.10.214-clip-chrome-frame.
 
 Runner clip route Worker deploy: 2026-09-01 - Feature-detect clip_poster on the live runner instead of POSTing a job the 2026-08-24 process does not have. Worker 0.10.215-runner-clip-route.
+
+Facebook clip Reel Worker deploy: 2026-09-01 - Clip and finished-video plans treat Facebook Slideshow Reel as Reel. Worker 0.10.216-fb-clip-reel.

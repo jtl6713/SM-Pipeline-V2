@@ -179,7 +179,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.218-clip-chrome-frame";
+  const BUILD_ID = "item4-0.6.219-fb-clip-reel";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1942,13 +1942,31 @@
     ).trim();
   }
 
+  function ezPlanCountOptions() {
+    const inputKind = String(
+      ezIntakeKind
+      || (ezWizardPending || ezWizardAnswers)?.inputKind
+      || ezPlanApi()?.parseEzOriginNotes?.($("prProductionNotes")?.value || $("ezProductionNotes")?.value)?.inputKind
+      || ""
+    ).trim();
+    return {
+      clipInput: ezIsClipRequest(),
+      finishedVideo: ezIsFinishedVideo(),
+      inputKind,
+    };
+  }
+
   function applyEzPlanOverrides(photoCount, platforms) {
     const planned = ezPlanApi()?.ezPlanFromPhotoCount({
       photoCount,
       platforms,
       packageId: currentEzPackageId(),
+      ...ezPlanCountOptions(),
     }) || { overrides: {}, platforms: platforms || [] };
-    item4PlanOverrides = { ...planned.overrides, ...item4PlanOverrides };
+    item4PlanOverrides = { ...item4PlanOverrides, ...planned.overrides };
+    if (ezIsClipRequest() && planned.overrides?.Facebook === "Reel") {
+      item4PlanOverrides.Facebook = "Reel";
+    }
     return planned;
   }
 
@@ -1956,6 +1974,7 @@
     const planned = ezPlanApi()?.ezPlanFromPhotoCount({
       photoCount: count,
       packageId: currentEzPackageId(),
+      ...ezPlanCountOptions(),
     });
     if (planned?.platforms?.length) return planned.platforms;
     return currentEzPackageId() === "slides" && Number(count || 0) <= 1
@@ -6650,6 +6669,7 @@
         photoCount: count,
         platforms: [platform],
         packageId: currentEzPackageId(),
+        ...ezPlanCountOptions(),
       });
       if (planned?.overrides?.[platform]) return planned.overrides[platform];
     }
@@ -6683,6 +6703,15 @@
       outputMatrixInputs().forEach(input => {
         input.checked = selected.has(`${input.dataset.platform}::${input.value}`);
       });
+      if (ezIsClipRequest(record)) {
+        const slideshow = outputMatrixInputs().find((input) => input.dataset.platform === "Facebook" && input.value === "Slideshow Reel");
+        const reel = outputMatrixInputs().find((input) => input.dataset.platform === "Facebook" && input.value === "Reel");
+        if (slideshow?.checked && reel) {
+          slideshow.checked = false;
+          reel.checked = true;
+          item4PlanOverrides = { ...item4PlanOverrides, Facebook: "Reel" };
+        }
+      }
       item4DropUnsupportedStoryChecks(false);
     } else {
       seedOutputMatrixFromLegacyPlatforms(record);
