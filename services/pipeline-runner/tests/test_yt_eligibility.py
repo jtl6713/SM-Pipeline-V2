@@ -10,6 +10,7 @@ from yt.eligibility import (
 )
 from yt.constants import THUMB_NOT_NEEDED, THUMB_PENDING
 from yt.package import description_final, idempotency_key, thumbnail_status
+from yt.yts2 import thumbnail_fallback_source
 
 
 def _record(**fields):
@@ -106,3 +107,9 @@ def test_youtube_description_strips_duplicate_title():
 def test_youtube_short_thumbnail_status_stays_pending():
     assert thumbnail_status(_record(Platform_Output_Type="YouTube Short")) == THUMB_PENDING
     assert thumbnail_status(_record(Studio_Output_Type="Carousel")) == THUMB_NOT_NEEDED
+
+
+def test_required_youtube_grid_cover_never_falls_back_to_clip_frame():
+    output = _record(Clip_1_URL="https://example.com/clip-frame.jpg")
+    assert thumbnail_fallback_source(output, cover_required=True) is None
+    assert thumbnail_fallback_source(output, cover_required=False) == "https://example.com/clip-frame.jpg"

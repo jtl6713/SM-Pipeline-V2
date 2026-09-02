@@ -35,6 +35,12 @@ from yt.constants import (
 from yt.eligibility import yts2_eligibility_reason
 
 
+def thumbnail_fallback_source(output: dict[str, Any], *, cover_required: bool) -> str | None:
+    if cover_required:
+        return None
+    return field_str(output, "Clip_1_URL") or field_str(output, "Selected_Clip_1_URL") or None
+
+
 def process_request(
     *,
     output_record_id: str | None,
@@ -115,7 +121,7 @@ def process_request(
         thumb_code, thumb_body = uploader.set_thumbnail(
             video_id=video_id,
             source_url=thumb_url,
-            fallback_source_url=field_str(output, "Clip_1_URL") or field_str(output, "Selected_Clip_1_URL"),
+            fallback_source_url=thumbnail_fallback_source(output, cover_required=cover_required),
         )
         result["thumbnail_http_status"] = thumb_code
         if 200 <= thumb_code <= 299:
