@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.225-asset-library";
+  const BUILD_ID = "item4-0.6.226-clips-only-wizard";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -189,7 +189,8 @@
   function item4AcceptForKind(kind = ezIntakeKind) {
     const next = String(kind || "").trim();
     if (next === "finished-video") return `${ITEM4_ACCEPT_VIDEOS},image/*`;
-    if (next === "photos-and-clips" || next === "video-clips") return ITEM4_ACCEPT_MIXED;
+    if (next === "video-clips") return ITEM4_ACCEPT_VIDEOS;
+    if (next === "photos-and-clips") return ITEM4_ACCEPT_MIXED;
     return ITEM4_ACCEPT_PHOTOS;
   }
 
@@ -2148,7 +2149,11 @@
       if (title) title.textContent = "Drop photos";
       if (hint) hint.textContent = "";
       if (choose) choose.textContent = "Choose photos";
-    } else if (nextKind === "photos-and-clips" || nextKind === "video-clips") {
+    } else if (nextKind === "video-clips") {
+      if (title) title.textContent = "Drop clips";
+      if (hint) hint.textContent = "Raw mp4/mov clips only. Studio cuts them into a Reel — not a finished file.";
+      if (choose) choose.textContent = "Choose clips";
+    } else if (nextKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips";
       if (hint) hint.textContent = "Mix stills and raw mp4/mov clips. Not a finished video.";
       if (choose) choose.textContent = "Choose files";
@@ -2360,6 +2365,9 @@
       const wantPhotos = kind === "video-clips" ? 0 : ezTargetPhotoCount();
       const wantClips = Math.max(1, ezTargetClipCount());
       if (counts.photos < wantPhotos || counts.clips < wantClips) {
+        if (kind === "video-clips") {
+          return `${counts.clips} of ${wantClips} clip${wantClips === 1 ? "" : "s"} added. Add the rest one at a time.`;
+        }
         return `${counts.photos} of ${wantPhotos} photos and ${counts.clips} of ${wantClips} clips added. Add the rest one at a time.`;
       }
     }
@@ -3246,7 +3254,10 @@
     } else if (ezIntakeKind === "finished-stills") {
       if (title) title.textContent = "Drop finished photos here";
       if (hint) hint.textContent = "Finished stills. No on-image lettering.";
-    } else if (ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips") {
+    } else if (ezIntakeKind === "video-clips") {
+      if (title) title.textContent = "Drop clips here";
+      if (hint) hint.textContent = "Raw mp4/mov clips only. Order them here. Studio cuts them into a Reel — not a finished file.";
+    } else if (ezIntakeKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips here";
       if (hint) hint.textContent = "Order them here. Clips are edited into a Reel — not published as a finished file.";
     } else if (ezIntakeKind === "multiple-photos") {
@@ -3405,7 +3416,7 @@
     if (answers.inputKind === "photos-and-clips") {
       bits.push(`${answers.photoCount || 0} photos · ${answers.clipCount || 0} clips`);
     }
-    if (answers.inputKind === "video-clips" && answers.clipCount) bits.push(`${answers.clipCount} clips`);
+    if (answers.inputKind === "video-clips") bits.push(answers.clipCount ? `${answers.clipCount} clips` : "clips only");
     if (answers.inputKind === "mixed") bits.push(`${answers.manualCount || 0} yours · ${answers.aiCount || 0} AI`);
     if (answers.packageId) {
       const pkg = ezPlanApi()?.ezWizardPackages?.(ezPlanApi()?.ezWizardPhotoCount?.(answers) || 1, answers)
@@ -3478,6 +3489,10 @@
     } else if (answers.inputKind === "multiple-photos") {
       if (title) title.textContent = `Add ${count} photos`;
       if (hint) hint.textContent = "Add or remove one at a time. You can also drop several together.";
+    } else if (answers.inputKind === "video-clips") {
+      const clips = helpers.ezWizardClipCount?.(answers) || Number(answers.clipCount) || 1;
+      if (title) title.textContent = `Add ${clips} clip${clips === 1 ? "" : "s"}`;
+      if (hint) hint.textContent = "Raw mp4/mov clips only. Not a finished video.";
     } else if (answers.inputKind === "photos-and-clips") {
       const photos = helpers.ezWizardPhotoCount(answers);
       const clips = helpers.ezWizardClipCount?.(answers) || Number(answers.clipCount) || 1;
@@ -3726,6 +3741,7 @@
         { label: "Multiple AI images", onClick: () => ezWizardPick("Multiple AI images", { inputKind: "multiple-ai" }, "aiCount") },
         { label: "Mix of my photos and AI", onClick: () => ezWizardPick("Mix of my photos and AI", { inputKind: "mixed" }, "mixManual") },
         { label: "Photos and clips I’ll combine", onClick: () => ezWizardPick("Photos and clips", { inputKind: "photos-and-clips" }, "photoCount") },
+        { label: "Clips only I’ll upload", onClick: () => ezWizardPick("Clips only", { inputKind: "video-clips", photoCount: 0 }, "clipCount") },
         { label: "Finished video I’ll upload", onClick: () => ezWizardPick("Finished video", { inputKind: "finished-video", photoCount: 1 }, "package") },
         { label: "Finished photos I’ll upload", onClick: () => ezWizardPick("Finished photos", { inputKind: "finished-stills" }, "photoCount") },
       ]);
@@ -3737,6 +3753,7 @@
       renderEzWizardChips([
         { label: "Single manually created image", onClick: () => ezWizardPick("Single photo", { inputKind: "single-photo", photoCount: 1 }, "package") },
         { label: "Multiple manually created images", onClick: () => ezWizardPick("Multiple photos", { inputKind: "multiple-photos" }, "photoCount") },
+        { label: "Video clips I’ll upload", onClick: () => ezWizardPick("Video clips", { inputKind: "video-clips", photoCount: 0 }, "clipCount") },
       ]);
       return;
     }
@@ -4023,7 +4040,9 @@
       const expected = helpers.ezWizardExpectedUploads(answers);
       setEzMessage(answers.inputKind === "mixed"
         ? `Add ${expected} of your photo${expected === 1 ? "" : "s"} one at a time. Studio will add ${answers.aiCount} AI image${Number(answers.aiCount) === 1 ? "" : "s"}.`
-        : answers.inputKind === "photos-and-clips"
+        : answers.inputKind === "video-clips"
+          ? `Add ${answers.clipCount || 1} clip${Number(answers.clipCount) === 1 ? "" : "s"}.`
+          : answers.inputKind === "photos-and-clips"
           ? `Add ${answers.photoCount || 0} photo${Number(answers.photoCount) === 1 ? "" : "s"} and ${answers.clipCount || 0} clip${Number(answers.clipCount) === 1 ? "" : "s"}.`
           : answers.inputKind === "finished-video"
           ? "Drop the finished video to continue."
@@ -9146,8 +9165,11 @@
     searchRoot.querySelectorAll?.("[data-ez-input='multiple-photos'], [data-pr-input='multiple-photos']").forEach((card) => {
       phase6BindTooltipTarget(card, "A set of photos. Studio plans Reels, a Facebook slideshow Reel, TikTok video draft, and YouTube Short. The 3D thumbnail is the grid cover on those videos.");
     });
-    searchRoot.querySelectorAll?.("[data-ez-input='photos-and-clips'], [data-pr-input='photos-and-clips'], [data-ez-input='video-clips']").forEach((card) => {
+    searchRoot.querySelectorAll?.("[data-ez-input='photos-and-clips'], [data-pr-input='photos-and-clips']").forEach((card) => {
       phase6BindTooltipTarget(card, "Mix photos and raw clips on one timeline. Studio renders a Reel, Facebook Reel, TikTok draft, and YouTube Short. Finished video (publish as-is) is a different choice.");
+    });
+    searchRoot.querySelectorAll?.("[data-ez-input='video-clips'], [data-pr-input='video-clips']").forEach((card) => {
+      phase6BindTooltipTarget(card, "Raw clips only, no stills. Studio cuts them into a Reel, Facebook Reel, TikTok draft, and YouTube Short. Finished video (publish as-is) is a different choice.");
     });
     searchRoot.querySelectorAll?.("[data-item4-platform], [data-ez-platform]").forEach((input) => {
       const label = input.closest("label") || input;
