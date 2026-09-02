@@ -21,6 +21,7 @@ from t1.apply import (
     music_is_enabled,
     music_url,
     resolve_rules,
+    voiceover_end_seconds,
 )
 from t1.client import TimingEngineClient
 from t1.constants import (
@@ -138,6 +139,14 @@ def process_one(
     engine_url, default_rules = get_timing_defaults(client)
     rules = resolve_rules(output, default_rules)
     start, duration = analysis_window(output)
+    vo_end = voiceover_end_seconds(output)
+    content_item_id = first_linked_id(field(output, "Content_Item"))
+    parent = client.get_record(CONTENT_ITEMS_TABLE, content_item_id) if content_item_id and not vo_end else None
+    if parent and not vo_end:
+        vo_end = voiceover_end_seconds(parent)
+        if vo_end:
+            output = {**output, "fields": {**(output.get("fields") or {}), "Voiceover_Duration_Seconds": vo_end}}
+            start, duration = analysis_window(output)
     request_body = {
         "schema_version": "timing.request.1",
         "music_start_seconds": start,
@@ -145,7 +154,8 @@ def process_one(
         "clip_count": len(clips),
         "fps": 30,
         "transition_rules": rules,
-        "sources": ["beats"],
+        "sources": ["beats", "voiceover"],
+        "voiceover_end_seconds": vo_end,
         "cleanup": True,
     }
     if dry_run:
@@ -178,7 +188,6 @@ def process_one(
             "Render_Total_Frames": total_frames,
         }
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)
-        content_item_id = first_linked_id(field(output, "Content_Item"))
         if content_item_id:
             client.update_record(
                 CONTENT_ITEMS_TABLE,
