@@ -2,4 +2,4 @@ Dynamic safe update trigger for chicagoshining-studio-api.
 
 Deploy current main source through the proven non-live candidate -> core binding verification -> 0% traffic exact-version smoke -> 100% promotion path. Capture current production version as rollback anchor. Deployment itself must not activate/run Make scenarios, mutate production Airtable records, render, email, draft, upload, or publish.
 
-Purpose of this run: ship worker 0.10.34 so Approve hands publishers a public CDN JPEG cover and YouTube inserts as public instead of private.
+Purpose of this run: bound the Platform Pipeline Airtable response to list-required fields so large timing and render JSON cannot exhaust the Worker CPU limit.

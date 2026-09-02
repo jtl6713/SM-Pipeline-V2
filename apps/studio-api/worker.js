@@ -1418,7 +1418,13 @@ function clampLimit(url, fallback = 50, max = 100) {
 }
 
 async function listRecords(env, tableId, options = {}) {
-  const { limit = 50, view = null, sortDirection = "desc", filterFormula = null } = options;
+  const {
+    limit = 50,
+    view = null,
+    sortDirection = "desc",
+    filterFormula = null,
+    fields = [],
+  } = options;
   const sortField = options.sortField || null;
   const records = [];
   let offset = null;
@@ -1431,6 +1437,9 @@ async function listRecords(env, tableId, options = {}) {
     if (sortField) {
       params.set("sort[0][field]", sortField);
       params.set("sort[0][direction]", sortDirection);
+    }
+    for (const field of fields) {
+      if (field) params.append("fields[]", String(field));
     }
     if (offset) params.set("offset", offset);
     const result = await airtableFetch(env, tableId, `?${params.toString()}`);
@@ -13436,11 +13445,79 @@ async function listContent(request, env, url, authorization) {
   });
 }
 
+const OUTPUT_LIST_FIELDS = [
+  "Output_ID",
+  "Platform",
+  "Format",
+  "Platform_Output_Type",
+  "Studio_Output_Type",
+  "Aspect_Ratio",
+  "Output_Status",
+  "Render_Status",
+  "Review_Status",
+  "Publish_Status",
+  "Publish_Method",
+  "Auto_Publish_Enabled",
+  "Do_Not_Publish",
+  "Final_File_URL",
+  "Final_File_Name",
+  "Publish_Asset_URL",
+  "Output_Title",
+  "Output_Caption",
+  "Output_Notes",
+  "Output_Hashtags",
+  "Thumbnail_URL",
+  "Clip_1_URL",
+  "Selected_Clip_1_URL",
+  "Scheduled_Post_Date",
+  "Studio_Preview_URL",
+  "Studio_Preview_Updated_At",
+  "Output_URL",
+  "Platform_Post_URL",
+  "Published_At",
+  "TikTok_Draft_Status",
+  "FB_Publish_Status",
+  "FB_Slideshow_Status",
+  "IG_Carousel_Status",
+  "IG_Story_Status",
+  "YouTube_Stage",
+  "YouTube_Video_ID",
+  "YouTube_Package_Status",
+  "YouTube_Upload_Status",
+  "YouTube_Processing_Status",
+  "YouTube_Upload_Progress_Percent",
+  "YouTube_Processing_Progress_Percent",
+  "Content_Item",
+  "Content_Profile",
+  "Carousel Slides",
+  "Composition_ID",
+  "Selected_Assets_JSON",
+  "Creative_Render_Manifest_JSON",
+  "Publish_Retry_Eligible",
+  "Asset_Selection_Retry_Eligible",
+  "Asset_Selection_Status",
+  "Manual_Completion_Status",
+  "Music_Status",
+  "Publish_Error_Stage",
+  "Publish_Error_Message",
+  "Remotion_Error_Message",
+  "Final_File_Error_Message",
+  "IG_Carousel_Error_Message",
+  "Music_Error_Message",
+  "FB_Slideshow_Error_Message",
+  "YouTube_Error_Message",
+  "YouTube_Processing_Failure_Reason",
+  "YouTube_Rejection_Reason",
+  "Remotion_Job_ID",
+  "Review_Decision_At",
+];
+
 async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: clampLimit(url, 100, 100),
     filterFormula: contentProfileFilterFormula(profile),
+    fields: OUTPUT_LIST_FIELDS,
   });
   const healed = [];
   for (const record of records) {
