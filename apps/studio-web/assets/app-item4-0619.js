@@ -137,6 +137,7 @@
   let item4PendingUploads = [];
   let item4PreparingVariants = false;
   let item4PromoteInFlight = false;
+  const item4PromotedRequestIds = new Set();
   let item4VariantPollTimer = null;
   let item4VariantPollStartedAt = 0;
   let item4MasterPollTimer = null;
@@ -6756,7 +6757,10 @@
   }
 
   function setProductionRequestControlState(record) {
-    const status = String(record?.status || "Draft");
+    const recordId = String(record?.id || "");
+    const status = item4PromotedRequestIds.has(recordId)
+      ? "Promoted"
+      : String(record?.status || "Draft");
     const editable = status === "Draft" || status === "Ready";
     const form = $("productionRequestForm");
 
@@ -7748,6 +7752,7 @@
     if (!activeProductionRequest?.id) return;
     const promoteButton = $("promoteProductionRequest");
     if (item4PromoteInFlight || promoteButton?.dataset.busy === "true" || promoteButton?.disabled) return;
+    if (item4PromotedRequestIds.has(String(activeProductionRequest.id))) return;
 
     if (item4Workspace?.assets?.length && item4Workspace?.plan_status !== "Ready") {
       setRequestMessage("Save the platform plan first, then click Approve again.", "error-text");
@@ -7792,9 +7797,13 @@
 
       if (result.production_request) {
         activeProductionRequest = result.production_request;
-        populateProductionRequestForm(result.production_request);
-      } else if (result.promoted && activeProductionRequest) {
+      }
+      if (result.promoted && activeProductionRequest) {
+        item4PromotedRequestIds.add(String(activeProductionRequest.id));
         activeProductionRequest = { ...activeProductionRequest, status: "Promoted" };
+      }
+      if (result.production_request || result.promoted) {
+        populateProductionRequestForm(activeProductionRequest);
       }
       setProductionRequestControlState(activeProductionRequest);
 
@@ -7817,6 +7826,10 @@
             setProductionRequestControlState(latest.record);
             const latestStatus = String(latest.record.status || "");
             if (latestStatus === "Promoted") {
+              item4PromotedRequestIds.add(String(latest.record.id || activeProductionRequest.id));
+              activeProductionRequest = { ...activeProductionRequest, status: "Promoted" };
+              populateProductionRequestForm(activeProductionRequest);
+              setProductionRequestControlState(activeProductionRequest);
               setRequestMessage("Approved. This request is in production.", "success");
               item4PromoteInFlight = false;
               if (promoteButton) delete promoteButton.dataset.busy;
