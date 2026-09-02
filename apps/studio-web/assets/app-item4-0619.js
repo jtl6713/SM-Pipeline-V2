@@ -11173,6 +11173,21 @@
     return key;
   }
 
+  function similarAccountProfileUrl(account) {
+    const platform = String(account?.platform || "").trim().toLowerCase();
+    const handle = String(account?.handle || "").trim().replace(/^@/, "");
+    if (!handle) return "";
+    if (/^https?:\/\//i.test(handle)) return handle;
+    if (platform === "instagram") return `https://www.instagram.com/${encodeURIComponent(handle)}/`;
+    if (platform === "youtube") return `https://www.youtube.com/@${encodeURIComponent(handle)}`;
+    if (platform === "tiktok") return `https://www.tiktok.com/@${encodeURIComponent(handle)}`;
+    if (platform === "facebook") {
+      const path = handle.split("/").filter(Boolean).map((part) => encodeURIComponent(part)).join("/");
+      return `https://www.facebook.com/${path}`;
+    }
+    return "";
+  }
+
   function renderOperationsWatchlist(accounts, canEdit) {
     const target = $("operationsWatchlist");
     const empty = $("operationsWatchlistEmpty");
@@ -11195,12 +11210,18 @@
     target.innerHTML = sections.map((platform) => {
       const rows = groups.get(platform) || [];
       const timed = platform === "instagram" || platform === "youtube";
-      const cards = rows.map(({ account, index }) => `
+      const cards = rows.map(({ account, index }) => {
+        const profileUrl = similarAccountProfileUrl(account);
+        const handle = profileUrl
+          ? `<a class="table-link" href="${escapeHtml(profileUrl)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(account.handle)}</a>`
+          : `@${escapeHtml(account.handle)}`;
+        return `
       <article class="ops-profile-card">
-        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
+        <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
         <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
-      </article>`).join("");
+      </article>`;
+      }).join("");
       return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)}${timed ? " · timed" : " · review only"} · ${rows.length}</h4>${cards}</section>`;
     }).join("");
     target.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
