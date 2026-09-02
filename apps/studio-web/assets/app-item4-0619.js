@@ -11198,6 +11198,7 @@
       const cards = rows.map(({ account, index }) => `
       <article class="ops-profile-card">
         <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
+        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
       </article>`).join("");
       return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)}${timed ? " · timed" : " · review only"} · ${rows.length}</h4>${cards}</section>`;
@@ -11212,6 +11213,47 @@
           loadOperations(true);
         } catch (error) {
           setOperationsMessage(error.message || "Could not update watchlist.", "error-text");
+        }
+      });
+    });
+    target.querySelectorAll("[data-watchlist-run]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (!canEdit) return;
+        const account = accounts[Number(button.dataset.watchlistRun)];
+        if (!account) return;
+        const idleLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = "Running…";
+        try {
+          setOperationsMessage(`Fetching @${account.handle} and adding its public posts to analytics…`);
+          const result = await api("/api/insights/similar-times", {
+            method: "POST",
+            body: JSON.stringify({
+              force: true,
+              limit: 1,
+              profile: account.profile || studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
+              platform: account.platform,
+              handle: account.handle,
+              season: selectedInsightsSeason(),
+            }),
+            timeoutMs: 60000,
+          });
+          renderOperationsSimilarTimes(result);
+          const stored = Number(result.account?.posts || 0);
+          const status = similarAccountStatusLabel(result.account?.status);
+          setOperationsMessage(
+            result.updated
+              ? `Added ${stored} public post${stored === 1 ? "" : "s"} from @${account.handle} to analytics.`
+              : `@${account.handle}: ${status || "no public posts were added"}.`
+          );
+          await loadOperations(true);
+        } catch (error) {
+          setOperationsMessage(error.message || `Could not run analytics for @${account.handle}.`, "error-text");
+        } finally {
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = idleLabel;
+          }
         }
       });
     });

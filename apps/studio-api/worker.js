@@ -11944,6 +11944,8 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     limit: payload.limit,
     force: Boolean(payload.force),
     theme,
+    platform: payload.platform,
+    handle: payload.handle,
   });
   const accounts = await studioEnsureSimilarWatchlist(env);
   const cache = result.cache || await studioLoadSimilarAccountStatusCache(env);
@@ -11981,6 +11983,7 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     swept: result.scanned,
     updated: result.updated,
     remaining_to_sweep: result.remaining,
+    account: result.account || null,
     ...view,
   });
 }
@@ -12287,8 +12290,14 @@ async function postInsightsDiscover(request, env, url, authorization) {
 async function studioSweepSimilarAccountTimes(env, options = {}) {
   const limit = Math.max(1, Math.min(10, Number(options.limit) || 3));
   const force = Boolean(options.force);
+  const requestedPlatform = String(options.platform || "").trim().toLowerCase();
+  const requestedHandle = String(options.handle || "").trim().replace(/^@/, "").toLowerCase();
   const accounts = await studioEnsureSimilarWatchlist(env);
-  const timed = studioTimedWatchlistAccounts(accounts, options.theme || null);
+  const timed = studioTimedWatchlistAccounts(accounts, options.theme || null).filter((row) => {
+    if (requestedPlatform && row.platform !== requestedPlatform) return false;
+    if (requestedHandle && String(row.handle || "").toLowerCase() !== requestedHandle) return false;
+    return true;
+  });
   const cache = await studioLoadSimilarAccountStatusCache(env);
   const stale = timed.filter((row) => force || studioSimilarAccountStale(cache.accounts[studioSimilarAccountKey(row.platform, row.handle)]));
   const sweepRank = (row) => {
@@ -12303,7 +12312,12 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   };
   stale.sort((a, b) => sweepRank(a) - sweepRank(b));
   const batch = stale.slice(0, limit);
-  if (!batch.length) return { scanned: 0, updated: 0, remaining: 0, cache };
+  if (!batch.length) {
+    const account = timed[0]
+      ? cache.accounts[studioSimilarAccountKey(timed[0].platform, timed[0].handle)] || null
+      : null;
+    return { scanned: 0, updated: 0, remaining: 0, cache, account };
+  }
   const settings = await studioActivePipelineSettings(env, [
     "FACEBOOK_PAGE_ACCESS_TOKEN",
     "FACEBOOK_GRAPH_API_VERSION",
@@ -12368,7 +12382,11 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   } catch (error) {
     console.warn("insights learned recompute after similar sweep failed", error);
   }
-  return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache };
+  const selected = batch.length === 1 ? batch[0] : null;
+  const account = selected
+    ? cache.accounts[studioSimilarAccountKey(selected.platform, selected.handle)] || null
+    : null;
+  return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache, account };
 }
 
 async function restoreParentContentItemFromStudioUmbrella(env, parentContentItem) {
