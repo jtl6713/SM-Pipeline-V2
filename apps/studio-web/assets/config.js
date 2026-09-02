@@ -61,7 +61,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsRunDailyIdeas: "Run today's enabled daily-idea batches immediately. Only profiles whose Daily Ideas toggle is enabled are included.",
     operationsRunAutonomous: "Run the autonomous Chicago trend-to-review path now. Only profiles with Autonomous produce enabled are included. This does not publish.",
     operationsAutonomousMeta: "Shows the last autonomous produce run or skip reason returned by the Operations API.",
-    operationsRunIntake: "Start the library intake chain for files waiting in the configured Drive intake folder. This can classify, reconcile, or compress eligible assets.",
+    operationsRunIntake: "Start the library intake chain for files in the Drive intake folder. Oversized videos are skipped and compression starts automatically.",
     operationsCapAudioSilence: "Rewrite existing catalog audio on Google Drive so leading silence is no longer than 0.5 seconds. Already processed tracks are skipped.",
     operationsResetRenderUrls: "Repair stale Remotion render URLs on eligible failed/waiting records. Use this after the renderer URL or tunnel has changed.",
     operationsRetryAssetSelection: "Retry asset selection for outputs that previously failed at the asset-selection stage. It does not rerun healthy outputs.",
@@ -120,7 +120,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     "preview": "Preview the selected media or setting without publishing it.",
     "retry": "Retry only this eligible failed/waiting operation rather than restarting the whole pipeline.",
     "schedule": "Set or update the post date/time used by the publishing queue.",
-    "compress": "Start compression for this oversized library video only; it does not scan the entire intake folder.",
+    "compress": "Start compression for one oversized video, or scan the ingestion folder when using Compress all.",
     "mark published": "Use only after this output was posted manually. This records it as published without posting it again.",
     "approve all": "Approve all review-ready outputs in this content group. Turn on Use default schedules next to Approve All to apply suggested times to empty rows; TikTok remains a draft where required."
   };
@@ -149,7 +149,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     ["run today", "Run the enabled daily-idea jobs now instead of waiting for the normal overnight schedule."],
     ["run autonomous", "Run the autonomous Chicago produce path now. It stops at Ready for Review and does not publish."],
     ["process intake", "Start the library intake workflow for eligible files waiting in the configured Drive intake folder."],
-    ["compress", "Start compression for this oversized library video only; it does not scan the entire intake folder."],
+    ["compress", "Start compression for one oversized video, or scan the ingestion folder when using Compress all."],
     ["retry", "Retry the eligible failed/waiting item without intentionally rerunning unrelated healthy records."],
     ["refresh", "Reload the latest data from the Studio API without intentionally changing records."]
   ];

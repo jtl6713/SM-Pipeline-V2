@@ -1135,7 +1135,9 @@
  <div id="operationsPublishList" class="table-wrap"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB. Compress starts A1S for that Drive file instead of a daily folder scan.</p></div></div>
+ <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or asset library. Compress runs A1S; after compression finishes, run Process intake folder again.</p></div>
+ <button type="button" class="secondary-button" id="operationsCompressAllOversized" hidden>Compress all in intake folder</button>
+ </div>
  <div id="operationsOversizedList" class="table-wrap"></div>
  </section>
  <section class="panel">
