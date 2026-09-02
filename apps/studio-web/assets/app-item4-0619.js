@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.233-library-pages";
+  const BUILD_ID = "item4-0.6.234-library-preview";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11169,6 +11169,54 @@
     };
   }
 
+  function closeLibraryPreview() {
+    const backdrop = $("libraryPreviewBackdrop");
+    const video = $("libraryPreviewVideo");
+    const image = $("libraryPreviewImage");
+    const dialog = backdrop?.querySelector(".library-preview-dialog");
+    if (video) {
+      try { video.pause(); } catch {}
+      video.removeAttribute("src");
+      try { video.load(); } catch {}
+    }
+    if (image) image.removeAttribute("src");
+    dialog?.classList.remove("is-video", "is-image");
+    if (backdrop) backdrop.hidden = true;
+  }
+
+  function openLibraryPreview({ kind, src, name }) {
+    const backdrop = $("libraryPreviewBackdrop");
+    const video = $("libraryPreviewVideo");
+    const image = $("libraryPreviewImage");
+    const title = $("libraryPreviewTitle");
+    const dialog = backdrop?.querySelector(".library-preview-dialog");
+    if (!backdrop || !dialog) return;
+    closeLibraryPreview();
+    if (title) title.textContent = name || (kind === "video" ? "Clip" : "Photo");
+    dialog.classList.toggle("is-video", kind === "video");
+    dialog.classList.toggle("is-image", kind !== "video");
+    if (kind === "video" && video && src) {
+      video.src = src;
+      video.play().catch(() => {});
+    } else if (image && src) {
+      image.src = src;
+    }
+    backdrop.hidden = false;
+  }
+
+  function bindLibraryPreview(target) {
+    target.querySelectorAll("[data-library-preview]").forEach((node) => {
+      node.addEventListener("click", () => {
+        const kind = String(node.dataset.libraryPreview || "image");
+        const src = kind === "video"
+          ? String(node.dataset.libraryStream || "")
+          : String(node.dataset.libraryImage || "");
+        if (!src) return;
+        openLibraryPreview({ kind, src, name: String(node.dataset.libraryName || "") });
+      });
+    });
+  }
+
   function bindLibraryDeleteButtons(target) {
     target.querySelectorAll("[data-library-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
@@ -11210,12 +11258,15 @@
       } else if (preview) {
         media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
       }
-      return `<article class="library-card"><div class="library-card-media">${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+      const playAttrs = video
+        ? ` data-library-preview="video" data-library-stream="${escapeHtml(libraryStreamUrl(r))}" data-library-name="${escapeHtml(r.name || "Clip")}"`
+        : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
+      return `<article class="library-card"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
     }).join("");
   }
 
   async function fillLibraryClipPosters(target) {
-    const nodes = [...(target?.querySelectorAll("[data-library-stream]") || [])];
+    const nodes = [...(target?.querySelectorAll("img[data-library-clip-id][data-library-stream]") || [])];
     for (const img of nodes) {
       if (!img.isConnected) return;
       const id = String(img.dataset.libraryClipId || "");
@@ -11291,6 +11342,7 @@
       }
       target.innerHTML = renderLibraryCards(records);
       bindLibraryDeleteButtons(target);
+      bindLibraryPreview(target);
       updateLibraryPager();
       fillLibraryClipPosters(target);
     } catch (e) {
@@ -11432,6 +11484,13 @@
     $("libraryPageSize")?.addEventListener("change", () => {
       resetLibraryPage();
       loadLibrary();
+    });
+    $("libraryPreviewClose")?.addEventListener("click", () => closeLibraryPreview());
+    $("libraryPreviewBackdrop")?.addEventListener("click", (event) => {
+      if (event.target === $("libraryPreviewBackdrop")) closeLibraryPreview();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("libraryPreviewBackdrop")?.hidden) closeLibraryPreview();
     });
     $("libraryPrevPage")?.addEventListener("click", () => {
       if (libraryPage.index < 1) return;

@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.233-library-pages">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.234-library-preview">
 </head>
 <body>
  <header class="topbar">
@@ -1051,6 +1051,16 @@
  <button type="button" class="secondary-button" id="libraryNextPage">Next</button>
  </div>
  </section>
+ <div id="libraryPreviewBackdrop" class="library-preview-backdrop" hidden>
+ <div class="library-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryPreviewTitle">
+ <div class="library-preview-head">
+ <p id="libraryPreviewTitle"></p>
+ <button type="button" class="secondary-button" id="libraryPreviewClose">Close</button>
+ </div>
+ <video id="libraryPreviewVideo" controls playsinline></video>
+ <img id="libraryPreviewImage" alt="">
+ </div>
+ </div>
  </section>
 
  <section id="page-operations" class="page">
@@ -1074,7 +1084,7 @@
  <p class="subtle" id="operationsAutonomousMeta">Loading autonomous status…</p>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Library intake</h2><p>Opening this tab checks Airtable for assets that need classification or compression. Process intake only when you want A2 to scan the Drive folder.</p></div>
+ <div class="panel-heading"><div><h2>Library intake</h2><p>Studio scans the Drive ingestion folder every 15 minutes. Process intake if you want A2 to run now. Oversized clips compress one at a time, then classify on the next scan.</p></div>
  <div class="ops-inline-form" style="margin-top:0">
  <button type="button" class="secondary-button" id="operationsRunIntake">Process intake folder</button>
  <button type="button" class="secondary-button" id="operationsCapAudioSilence">Cap music leading silence</button>
@@ -1150,7 +1160,7 @@
  <div id="operationsPublishList" class="table-wrap"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or asset library. Compress runs A1S; after compression finishes, run Process intake folder again.</p></div>
+ <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or asset library. Compress runs A1S one file at a time. After a clip finishes, the next 15-minute scan intakes and classifies it. Compress all starts the queue now.</p></div>
  <button type="button" class="secondary-button" id="operationsCompressAllOversized" hidden>Compress all in intake folder</button>
  </div>
  <div id="operationsCompressionStatus" class="ops-compression-status" hidden></div>
@@ -1371,7 +1381,7 @@
  <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles.</p>
  <ul>
  <li><strong>Daily ideas</strong> — per-profile daily batch around 1:00 a.m. Chicago, or Run today now.</li>
- <li><strong>Library intake</strong> — Process intake folder starts A2 (and the A0 daisy-chain) instead of a 2-hour clock.</li>
+ <li><strong>Library intake</strong> — A GitHub ticker runs A2 every 15 minutes. Process intake folder runs the same scan now. Oversized clips compress one at a time; A0 stays off.</li>
  <li><strong>Ready to schedule / publish</strong> — set a post time or mark a hand-posted package published.</li>
  <li><strong>Oversized library videos</strong> — compress via A1S/A1M for Drive files over 100 MB.</li>
  <li><strong>Render repair</strong> — reset stale Remotion URLs (M1) and retry failed asset selection (R2B).</li>
@@ -1542,8 +1552,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.225-instagram-paused"></script>
+ <script src="/assets/config.js?v=0.6.234-library-preview"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.233-library-pages"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.234-library-preview"></script>
 </body>
 </html>

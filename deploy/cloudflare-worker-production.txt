@@ -290,3 +290,5 @@ Compression status Worker deploy: 2026-09-02 - Operations reads active A1_JOB ro
 Compression progress Worker deploy: 2026-09-02 - Operations compression status pulses A1S live_status so the banner shows current compressor percent. Worker 0.10.219-compression-progress.
 
 Asset Library pages Worker deploy: 2026-09-02 - GET /api/library returns one page of Media Assets (default 5, max 50) sorted by newest Intake_Date. Worker 0.10.221-library-pages.
+
+Ingestion A1S cron Worker deploy: 2026-09-02 - After publish reconcile, cron pulses A1S folder scan so a Drive dump starts the next oversized clip without Process intake folder. Worker 0.10.222-library-intake-cron.

@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.221-library-pages",
+          version: "0.10.222-library-intake-cron",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -1040,6 +1040,13 @@ export default {
         await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5 });
       } catch (error) {
         console.warn("insights youtube discovery cron failed", error);
+      }
+      try {
+        // After publish work: start the next oversized Ingestion clip so a Drive dump
+        // does not wait for Process intake folder. live_status above only resumes jobs.
+        await item4PulsePipelineStage(env, "a1s", { extra: {} }, "A1S");
+      } catch (error) {
+        console.warn("a1s ingestion scan failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
