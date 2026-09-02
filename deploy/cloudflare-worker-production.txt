@@ -282,3 +282,5 @@ Clip Chrome frame Worker deploy: 2026-09-01 - Build clip JPEGs in the Worker fro
 Runner clip route Worker deploy: 2026-09-01 - Feature-detect clip_poster on the live runner instead of POSTing a job the 2026-08-24 process does not have. Worker 0.10.215-runner-clip-route.
 
 Facebook clip Reel Worker deploy: 2026-09-01 - Clip and finished-video plans treat Facebook Slideshow Reel as Reel. Worker 0.10.216-fb-clip-reel.
+
+Wizard clip continue Worker deploy: 2026-09-02 - Accept a 0 photo-slide count on clips-only wizard drafts. Worker 0.10.218-wizard-clip-continue.

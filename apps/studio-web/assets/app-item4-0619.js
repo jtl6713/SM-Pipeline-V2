@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.226-clips-only-wizard";
+  const BUILD_ID = "item4-0.6.227-wizard-mobile-continue";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3391,6 +3391,19 @@
     node.className = `form-message${type ? ` ${type}` : ""}`;
   }
 
+  function setEzWizardBusy(busy, text, type = "") {
+    ezWizardBusy = Boolean(busy);
+    $("ezWizardChips")?.querySelectorAll("button").forEach((button) => {
+      button.disabled = ezWizardBusy;
+    });
+    $("ezWizardForm")?.querySelectorAll("button, input").forEach((el) => {
+      el.disabled = ezWizardBusy;
+    });
+    if ($("ezWizardBack")) $("ezWizardBack").disabled = ezWizardBusy;
+    if ($("ezWizardReset")) $("ezWizardReset").disabled = ezWizardBusy;
+    if (typeof text === "string") ezWizardSetMessage(text, type);
+  }
+
   function ezWizardLogAdd(role, text) {
     const log = $("ezWizardLog");
     if (!log) return;
@@ -3463,7 +3476,7 @@
       ? "Manual Upload"
       : helpers.ezImageModeFromWizard(answers.inputKind);
     if ($("ezCarouselSlideMode")) $("ezCarouselSlideMode").value = answers.photoWait ? "Target range" : "Exact";
-    if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = answers.photoWait ? "" : String(count);
+    if ($("ezCarouselSlideExact")) $("ezCarouselSlideExact").value = answers.photoWait ? "" : String(Math.max(1, Number(count) || 1));
     if ($("ezCarouselSlideMin")) $("ezCarouselSlideMin").value = answers.photoWait ? String(answers.photoCountMin || "") : "";
     if ($("ezCarouselSlideMax")) $("ezCarouselSlideMax").value = answers.photoWait ? String(answers.photoCountMax || "") : "";
     const clipCount = helpers.ezWizardClipCount?.(answers) || Number(answers.clipCount) || 0;
@@ -3558,7 +3571,12 @@
         || $("ezCarouselImageMode")?.value
         || "Manual Upload",
       carousel_slide_count_mode: (ezWizardPending || ezWizardAnswers)?.photoWait ? "Target range" : slideMode,
-      carousel_slide_count_exact: $("ezCarouselSlideExact")?.value || (slideMode === "Exact" ? count : ""),
+      carousel_slide_count_exact: (() => {
+        const raw = $("ezCarouselSlideExact")?.value;
+        const n = Number(raw);
+        if (slideMode === "Exact" && (!Number.isFinite(n) || n < 1)) return String(count);
+        return raw || (slideMode === "Exact" ? String(count) : "");
+      })(),
       carousel_slide_count_min: (ezWizardPending || ezWizardAnswers)?.photoCountMin || $("ezCarouselSlideMin")?.value || "",
       carousel_slide_count_max: (ezWizardPending || ezWizardAnswers)?.photoCountMax || $("ezCarouselSlideMax")?.value || "",
       selected_music_asset_id: $("ezAudioTrack")?.value || "",
@@ -3637,6 +3655,7 @@
   }
 
   function renderEzWizard() {
+    if (ezWizardBusy) return;
     const helpers = ezPlanApi();
     const prompt = $("ezWizardPrompt");
     const back = $("ezWizardBack");
@@ -3965,8 +3984,7 @@
       ezWizardSetMessage("Studio plan helper did not load.", "error-text");
       return;
     }
-    ezWizardBusy = true;
-    ezWizardSetMessage("Saving your answers…");
+    setEzWizardBusy(true, "Saving your answers…");
     try {
       const helpersNow = ezPlanApi();
       const planned = helpersNow?.ezWizardResolvePackage?.(ezWizardAnswers) || applyEzWizardAnswersToIntake();
@@ -3974,10 +3992,10 @@
       const answers = ezWizardPending;
       if (answers.start === "idea") {
         let idea = null;
-        if (answers.ideaMode === "existing" && answers.ideaId) {
+        if (answers.ideaId) {
           idea = ideasCache.find((row) => row.id === answers.ideaId) || { id: answers.ideaId, title: answers.ideaTitle };
         } else if (answers.ideaTitle) {
-          ezWizardSetMessage("Creating the idea…");
+          setEzWizardBusy(true, "Creating the idea…");
           const result = await api("/api/ideas", {
             method: "POST",
             body: JSON.stringify({
@@ -3989,6 +4007,10 @@
             retries: 1,
           });
           idea = result.record;
+          if (idea?.id) {
+            ezWizardAnswers.ideaId = idea.id;
+            answers.ideaId = idea.id;
+          }
         }
         if (!idea?.id) {
           ezWizardSetMessage("Could not save the idea. Enter a title and try again.", "error-text");
@@ -3997,7 +4019,7 @@
           return;
         }
         if (answers.photoWait && answers.photoCountMin && answers.photoCountMax) {
-          ezWizardSetMessage(`Approving and waiting for ${answers.photoCountMin}–${answers.photoCountMax} photos…`);
+          setEzWizardBusy(true, `Approving and waiting for ${answers.photoCountMin}–${answers.photoCountMax} photos…`);
           const platforms = planned?.platforms?.length ? planned.platforms : ["Instagram", "Facebook", "TikTok"];
           const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/promote`, {
             method: "POST",
@@ -4024,8 +4046,10 @@
           loadIdeas().catch(() => {});
           return;
         }
+        setEzWizardBusy(true, "Opening production…");
         applyEzWizardAnswersToIntake();
-        await openProductionRequestForIdea(idea);
+        await openProductionRequestForIdea(idea, { fromWizard: true });
+        resetEzWizard({ silent: true });
         return;
       }
       applyEzWizardAnswersToIntake();
@@ -4058,7 +4082,9 @@
         "error-text"
       );
     } finally {
-      ezWizardBusy = false;
+      const stayedOnHome = Boolean($("page-home")?.classList.contains("active")) && !activeProductionRequest?.id;
+      if (stayedOnHome) setEzWizardBusy(false);
+      else ezWizardBusy = false;
     }
   }
 
@@ -6971,7 +6997,7 @@
     syncFinishedMediaHeadings();
   }
 
-  async function openProductionRequestForIdea(idea) {
+  async function openProductionRequestForIdea(idea, { fromWizard = false } = {}) {
     if (!idea?.id) return;
     const button = $("configureProductionButton");
     if (button) {
@@ -6979,9 +7005,10 @@
       button.textContent = "Opening…";
     }
     setManageMessage("Opening Phase 2B Production Request…", "");
+    if (fromWizard) ezWizardSetMessage("Opening production…");
 
     try {
-      await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
+      loadEzAudioOptions().catch(() => {});
       let result;
       if (ezWizardPending) {
         applyEzWizardAnswersToIntake();
@@ -7001,6 +7028,7 @@
       switchToPage("content");
       populateProductionRequestForm(result.record);
       showProductionRequestWorkspace();
+      if (fromWizard) ezWizardSetMessage("Loading the draft…");
       await loadProductionRequestOutputs(result.record);
       await loadItem4Workspace(result.record);
       const assetCount = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.length : 0;
@@ -7017,7 +7045,7 @@
         }
       } else if (!assetCount) selectPrMediaKind(null, { quiet: true });
       else syncPrMediaKindUi();
-      await loadProductionRequests();
+      loadProductionRequests().catch(() => {});
       setEzAdvancedOpen(false);
       if (ezWizardPending) {
         const needsUpload = ezPlanApi()?.ezWizardRequiresUploads?.(ezWizardPending);
@@ -7026,6 +7054,11 @@
         } else if (ezWizardPending.inputKind === "mixed") {
           const n = ezPlanApi()?.ezWizardExpectedUploads?.(ezWizardPending) || 1;
           setRequestMessage(`Drop ${n} of your photo${n === 1 ? "" : "s"}. Studio will add ${ezWizardPending.aiCount} AI image${Number(ezWizardPending.aiCount) === 1 ? "" : "s"}.`, "success");
+        } else if (ezWizardPending.inputKind === "video-clips") {
+          const n = Number(ezWizardPending.clipCount) || 1;
+          setRequestMessage(`Add ${n} clip${n === 1 ? "" : "s"}.`, "success");
+        } else if (ezWizardPending.inputKind === "photos-and-clips") {
+          setRequestMessage(`Add ${ezWizardPending.photoCount || 0} photo${Number(ezWizardPending.photoCount) === 1 ? "" : "s"} and ${ezWizardPending.clipCount || 0} clip${Number(ezWizardPending.clipCount) === 1 ? "" : "s"}.`, "success");
         } else {
           setRequestMessage("Add photos one at a time, or drop several together.", "success");
         }
@@ -7034,6 +7067,10 @@
       }
     } catch (e) {
       setManageMessage(e.message, "error-text");
+      if (fromWizard) {
+        ezWizardSetMessage(e.message || "Could not open production.", "error-text");
+        throw e;
+      }
     } finally {
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
