@@ -7211,21 +7211,32 @@
     return next;
   }
 
+  function formatLibraryClipDuration(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return "";
+    if (value < 60) return value < 10 ? `${value.toFixed(1)}s` : `${Math.round(value)}s`;
+    const minutes = Math.floor(value / 60);
+    const rest = Math.round(value % 60);
+    return `${minutes}:${String(rest).padStart(2, "0")}`;
+  }
+
   function renderLibraryPickerSections(items, selected, suggestedIds, idAttr) {
     const suggested = items.filter((item) => suggestedIds.has(item.id));
     const more = items.filter((item) => !suggestedIds.has(item.id));
     const card = (item) => {
       const checked = selected.has(item.id);
       const preview = ideaLibraryPreviewUrl(item);
+      const video = String(item.media_kind || "").toLowerCase() === "video";
+      const duration = video ? formatLibraryClipDuration(item.duration_seconds) : "";
       const tags = [];
       if (suggestedIds.has(item.id)) tags.push(`<em class="idea-library-card-tag">Suggested</em>`);
-      if (String(item.media_kind || "").toLowerCase() === "video") tags.push(`<em class="idea-library-card-tag">Clip</em>`);
+      if (video) tags.push(`<em class="idea-library-card-tag">Clip</em>`);
       const tag = tags.join("");
       return `<button type="button" class="idea-library-card" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
         <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
         ${preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`}
         ${tag}
-        <span>${escapeHtml(item.name || item.id)}</span>
+        <span>${escapeHtml(item.name || item.id)}${duration ? ` · ${escapeHtml(duration)}` : ""}</span>
       </button>`;
     };
     const parts = [];
@@ -11261,7 +11272,8 @@
       const playAttrs = video
         ? ` data-library-preview="video" data-library-stream="${escapeHtml(libraryStreamUrl(r))}" data-library-name="${escapeHtml(r.name || "Clip")}"`
         : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
-      return `<article class="library-card"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+      const duration = video ? formatLibraryClipDuration(r.duration_seconds) : "";
+      return `<article class="library-card"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}${duration ? ` · ${escapeHtml(duration)}` : ""}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
     }).join("");
   }
 
