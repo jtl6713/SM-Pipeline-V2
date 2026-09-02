@@ -991,7 +991,7 @@ export default {
         console.warn("insights sweep cron failed", error);
       }
       try {
-        await studioSweepSimilarAccountTimes(env, { limit: 6 });
+        await studioSweepSimilarAccountTimes(env, { limit: 1 });
       } catch (error) {
         console.warn("similar-account times sweep cron failed", error);
       }
@@ -11922,7 +11922,7 @@ async function getInsightsSimilarTimes(request, env, url, authorization, ctx) {
     const asOf = view.as_of ? Date.parse(view.as_of) : 0;
     const quiet = Number.isFinite(asOf) && Date.now() - asOf < 10 * 60 * 1000;
     if (!quiet) {
-      ctx.waitUntil(studioSweepSimilarAccountTimes(env, { limit: 2, theme: view.profile }).catch((error) => {
+      ctx.waitUntil(studioSweepSimilarAccountTimes(env, { limit: 1, theme: view.profile, skipRecompute: true }).catch((error) => {
         console.warn("similar-times on-demand sweep failed", error);
       }));
     }
@@ -11940,11 +11940,12 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     : await studioResolveSimilarTimesTheme(env, url, authorization);
   const season = payload.season ? studioNormalizeInsightsSeason(payload.season) : studioInsightsResolveSeason(url);
   const result = await studioSweepSimilarAccountTimes(env, {
-    limit: payload.limit,
+    limit: 1,
     force: Boolean(payload.force),
     theme,
     platform: payload.platform,
     handle: payload.handle,
+    skipRecompute: true,
   });
   const accounts = await studioEnsureSimilarWatchlist(env);
   const cache = result.cache || await studioLoadSimilarAccountStatusCache(env);
@@ -11952,7 +11953,7 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     accounts,
     theme,
     platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
-    season: studioInsightsResolveSeason(url),
+    season,
     cache,
   });
   const occupiedByPlatform = await studioLoadOccupiedSchedules(env).catch((error) => {
@@ -11968,15 +11969,6 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     posts,
     own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
   });
-  try {
-    await studioRecomputeInsightsLearned(env, {
-      profile: theme,
-      platform: payload.platform || url.searchParams.get("platform") || "",
-      season,
-    });
-  } catch (error) {
-    console.warn("insights learned recompute after sweep failed", error);
-  }
   return respond(request, env, {
     ok: true,
     swept: result.scanned,
@@ -12376,10 +12368,12 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   }
   cache.as_of = new Date().toISOString();
   await studioSaveSimilarAccountStatusCache(env, cache);
-  try {
-    await studioRecomputeInsightsLearned(env, { profile: options.theme || "chicago" });
-  } catch (error) {
-    console.warn("insights learned recompute after similar sweep failed", error);
+  if (!options.skipRecompute) {
+    try {
+      await studioRecomputeInsightsLearned(env, { profile: options.theme || "chicago" });
+    } catch (error) {
+      console.warn("insights learned recompute after similar sweep failed", error);
+    }
   }
   const selected = batch.length === 1 ? batch[0] : null;
   const account = selected

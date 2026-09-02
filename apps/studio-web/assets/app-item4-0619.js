@@ -414,7 +414,7 @@
         method: "POST",
         body: JSON.stringify({
           force: true,
-          limit: 10,
+          limit: 1,
           profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
           season: selectedInsightsSeason(),
         }),
@@ -11457,7 +11457,10 @@
             || (row.platform === "instagram" ? "paused" : row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
         })), Boolean(data.can_edit_profiles));
       } catch (error) {
-        renderOperationsSimilarTimes({ message: error.message || "Could not load similar-account times." });
+        const similarMeta = $("operationsSimilarTimesMeta");
+        if (similarMeta) {
+          similarMeta.textContent = `Analytics refresh failed; showing the last loaded calendar. ${error.message || ""}`.trim();
+        }
       }
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
       renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");
