@@ -1,6 +1,7 @@
 from a1m.processor import _probe_one
 from a1s.compressor import target_mb
 from a1s.eligibility import eligibility_reason
+from carousel.timeutil import iso_ms
 from a1s.processor import process_request
 from stages.registry import STAGE_NAMES, is_implemented
 
@@ -124,7 +125,7 @@ def test_live_status_reads_compressor_progress(monkeypatch):
                 "id": "recJOB",
                 "fields": {
                     "Setting_Name": "A1_JOB_drive1",
-                    "Setting_Value": "compressing|job-1|1|drive1||IMG_6131.MOV|123|2026-09-02T00:00:00Z",
+                    "Setting_Value": f"compressing|job-1|1|drive1||IMG_6131.MOV|123|{iso_ms()}",
                     "Notes": "old note",
                 },
             }]
@@ -136,6 +137,7 @@ def test_live_status_reads_compressor_progress(monkeypatch):
         "poll_job",
         lambda _job_id: {"job_id": "job-1", "status": "compressing", "progress": 42},
     )
+    monkeypatch.setattr(a1s_processor, "resume_active_jobs", lambda _client=None: [])
     result = process_request(live_status=True)
     assert result["live_status"] is True
     assert result["jobs"][0]["progress"] == 42
@@ -149,8 +151,10 @@ def test_folder_scan_waits_when_another_job_is_active(monkeypatch):
     monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable())
     monkeypatch.setattr(a1s_processor, "pipeline_settings", lambda _client=None: _FakeSettings())
     monkeypatch.setattr(a1s_processor, "_any_active_a1_job", lambda _client: True)
+    monkeypatch.setattr(a1s_processor, "resume_active_jobs", lambda _client=None: [{"id": "recJOB"}])
     result = process_request(inline=True)
     assert result["processed"] is False
     assert result["reason"] == "active_compression_in_progress"
     assert result["started_count"] == 0
     assert result["queued_count"] == 2
+    assert result["resumed_count"] == 1

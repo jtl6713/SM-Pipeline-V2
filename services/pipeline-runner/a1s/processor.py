@@ -8,7 +8,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from a1p.processor import schedule_next
+from a1p.processor import resume_active_jobs, schedule_next
+from a1p.state import parse_job_value
 from a1s.compressor import delete_job, list_health_jobs, poll_job, submit_job
 from a1s.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from a1s.eligibility import eligibility_reason
@@ -59,21 +60,7 @@ def _smallest_candidate(files: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _parse_state_value(value: str) -> dict[str, str]:
-    parts = str(value or "").split("|")
-    name = ""
-    file_id = ""
-    if len(parts) >= 8:
-        file_id = str(parts[3] or "").strip()
-        name = str(parts[5] or "").strip()
-    else:
-        file_id = str(parts[3] or "").strip() if len(parts) > 3 else ""
-        name = next((part for part in parts if str(part).lower().endswith((".mov", ".mp4", ".m4v", ".webm"))), "")
-    return {
-        "phase": str(parts[0] or "").strip().lower(),
-        "job_id": str(parts[1] or "").strip() if len(parts) > 1 else "",
-        "file_id": file_id,
-        "name": name,
-    }
+    return parse_job_value(value)
 
 
 def _progress_int(value: Any) -> int | None:
@@ -84,7 +71,7 @@ def _progress_int(value: Any) -> int | None:
     return max(0, min(100, number))
 
 
-def list_live_jobs(client: AirtableClient | None = None) -> list[dict[str, Any]]:
+def list_live_jobs(client: AirtableClient | None = None, *, resume: bool = True) -> list[dict[str, Any]]:
     airtable = client or AirtableClient()
     rows = airtable.list_records(
         PIPELINE_SETTINGS_TABLE,
@@ -139,6 +126,11 @@ def list_live_jobs(client: AirtableClient | None = None) -> list[dict[str, Any]]
                 "notes": str(fields.get("Notes") or "") or None,
             }
         )
+    if resume:
+        try:
+            resume_active_jobs(airtable)
+        except Exception:
+            logger.exception("A1S live status could not resume a stale compression job")
     return live
 
 
@@ -307,11 +299,14 @@ def process_request(
     if not candidates:
         return {"processed": False, "reason": "no_eligible_files", "started_count": 0, **preview}
     if _any_active_a1_job(client):
+        resumed = resume_active_jobs(client)
         return {
             "processed": False,
             "reason": "active_compression_in_progress",
             "started_count": 0,
             "queued_count": len(candidates),
+            "resumed_count": len(resumed),
+            "resumed": resumed,
             **preview,
         }
     targeted = bool((drive_file_id or "").strip())

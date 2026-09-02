@@ -94,21 +94,33 @@ class GoogleDriveClient:
         fields: str = "files(id,name,mimeType,size,fileExtension,webContentLink,webViewLink,createdTime,modifiedTime,parents)",
     ) -> list[dict[str, Any]]:
         token = self.access_token()
-        response = requests.get(
-            "https://www.googleapis.com/drive/v3/files",
-            params={
+        listed: list[dict[str, Any]] = []
+        page_token = ""
+        field_spec = fields if "nextPageToken" in fields else f"nextPageToken,{fields}"
+        while True:
+            params = {
                 "q": query,
                 "pageSize": page_size,
                 "orderBy": order_by,
-                "fields": fields,
+                "fields": field_spec,
                 "supportsAllDrives": "true",
                 "includeItemsFromAllDrives": "true",
-            },
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=60,
-        )
-        response.raise_for_status()
-        return list(response.json().get("files") or [])
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            response = requests.get(
+                "https://www.googleapis.com/drive/v3/files",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=60,
+            )
+            response.raise_for_status()
+            payload = response.json() or {}
+            listed.extend(payload.get("files") or [])
+            page_token = str(payload.get("nextPageToken") or "")
+            if not page_token:
+                break
+        return listed
 
     def download_thumbnail(self, file_id: str, *, size: str = "w720") -> tuple[bytes, str] | None:
         meta = self.get_file(file_id, fields="id,mimeType,thumbnailLink,hasThumbnail")
