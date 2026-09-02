@@ -24,6 +24,11 @@ def asset_media_kind(asset: dict[str, Any] | None) -> str:
 
 def playable_url(asset: dict[str, Any] | None) -> str:
     item = asset or {}
+    if asset_is_video(item):
+        for key in ("google_drive_url", "url", "src"):
+            value = str(item.get(key) or "").strip()
+            if value.startswith("http://") or value.startswith("https://"):
+                return value
     for key in ("preview_url", "url", "src", "google_drive_url"):
         value = str(item.get(key) or "").strip()
         if value.startswith("http://") or value.startswith("https://"):

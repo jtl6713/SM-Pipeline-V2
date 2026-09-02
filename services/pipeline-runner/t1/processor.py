@@ -173,9 +173,7 @@ def process_one(
             request_body["music_url"] = music_url(output)
         response = (timing_client or TimingEngineClient(engine_url)).create_timeline(request_body)
         timed = apply_timeline(clips, response)
-        total_frames = int((response.get("timeline") or {}).get("duration_frames") or sum(
-            int(clip.get("durationFrames") or 0) for clip in timed
-        ))
+        total_frames = sum(int(clip.get("durationFrames") or 0) for clip in timed)
         fields = {
             "Timing_Status": STATUS_READY,
             "Timing_Error_Message": "",

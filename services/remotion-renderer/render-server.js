@@ -16,6 +16,9 @@ const DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
 const DEFAULT_MUSIC_BOOST_DELTA = 0.05;
 const DEFAULT_MUSIC_BOOST_FADE_SECONDS = 0.5;
 const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
+const PIPELINE_RUNNER_INTERNAL_URL = String(
+    process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
+).replace(/\/$/, '');
 const SERVICE_VERSION = '2026-08-24-cleanup-wired';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
@@ -454,15 +457,27 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
     for (let index = 0; index < clips.length; index += 1) {
         const clip = clips[index];
         const clipId = clip.id || `clip-${index + 1}`;
+        const mediaKind = String(clip.mediaKind || clip.media_kind || '').trim().toLowerCase();
+        const driveFileId = mediaKind === 'video'
+            ? String(clip.googleDriveFileId || clip.google_drive_file_id || '').trim()
+            : '';
+        const sourceUrl = driveFileId
+            ? `${PIPELINE_RUNNER_INTERNAL_URL}/internal/drive-media/${encodeURIComponent(driveFileId)}`
+            : clip.url;
 
-        if (isHttpUrl(clip.url)) {
-            const ext = getExtensionFromUrl(clip.url, '.mp4');
+        if (isHttpUrl(sourceUrl)) {
+            const ext = getExtensionFromUrl(clip.assetName || sourceUrl, '.mp4');
             const baseName = sanitizeSimpleName(clipId, `clip-${index + 1}`);
             const filename = makeUniqueFilename(`${baseName}${ext}`, usedFilenames);
             const destination = path.join(jobAssetDir, filename);
 
-            appendLog(job, `Downloading clip ${clipId} from ${clip.url}`);
-            await downloadUrlToFile(clip.url, destination);
+            appendLog(
+                job,
+                driveFileId
+                    ? `Downloading video clip ${clipId} from private Drive authority`
+                    : `Downloading clip ${clipId} from ${sourceUrl}`
+            );
+            await downloadUrlToFile(sourceUrl, destination);
             appendLog(job, `Downloaded clip ${clipId} to ${toProjectRelative(destination)}`);
 
             const rewrittenClip = {

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import ipaddress
 import logging
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 
 from config import StageRequest, load_settings
 from stages import a1p, c3b, i3, r2, rr2, smv1, ttd4
@@ -12,6 +13,7 @@ from i1.openai_ideas import generate_ideas
 from studio_music.processor import ingest_studio_music, trash_studio_music
 from airtable.client import AirtableClient
 from item4.clip_poster import ensure_request_clip_posters
+from integrations.google_drive import GoogleDriveClient
 from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
 
@@ -50,6 +52,26 @@ def health():
                 {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
             ],
         }
+    )
+
+
+@app.get("/internal/drive-media/<file_id>")
+def internal_drive_media(file_id: str):
+    if request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For"):
+        return jsonify({"error": "Direct loopback access required"}), 403
+    try:
+        caller = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return jsonify({"error": "Loopback access required"}), 403
+    if not caller.is_loopback:
+        return jsonify({"error": "Loopback access required"}), 403
+    if not file_id or len(file_id) > 256 or not all(char.isalnum() or char in "_-" for char in file_id):
+        return jsonify({"error": "Invalid Drive file ID"}), 400
+    content, mime_type = GoogleDriveClient().download_file(file_id)
+    return Response(
+        content,
+        mimetype=mime_type or "application/octet-stream",
+        headers={"Cache-Control": "no-store"},
     )
 
 
