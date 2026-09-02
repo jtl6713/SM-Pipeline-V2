@@ -146,6 +146,77 @@ def _mixed_media_frames(
     return fixed
 
 
+def _mixed_media_beat_frames(
+    clips: list[dict[str, Any]],
+    plan_clips: list[dict[str, Any]],
+    target_frames: int,
+    beat_frames: list[int],
+) -> list[int]:
+    """Keep authored video lengths while leaving photo boundaries on detected beats."""
+    if not beat_frames or not plan_clips or len(plan_clips) < len(clips):
+        return []
+
+    transition_frames = max(
+        [
+            int((item.get("transition") or {}).get("duration_frames") or 0)
+            for item in plan_clips
+            if isinstance(item, dict)
+        ]
+        or [0]
+    )
+    minimum = max(1, transition_frames + 1)
+    beats = sorted({frame for frame in beat_frames if 0 < frame < target_frames})
+    if not beats:
+        return []
+
+    def remaining_minimum(after_index: int) -> int:
+        return sum(
+            max(1, int(clip.get("durationFrames") or clip.get("duration_frames") or 1))
+            if _clip_kind(clip) == "video"
+            else minimum
+            for clip in clips[after_index:]
+        )
+
+    durations: list[int] = []
+    start = 0
+    for index, clip in enumerate(clips):
+        if _clip_kind(clip) == "video":
+            end = start + max(1, int(clip.get("durationFrames") or clip.get("duration_frames") or 1))
+            if index == len(clips) - 1 and end != target_frames:
+                return []
+            if end + remaining_minimum(index + 1) > target_frames:
+                return []
+        elif index == len(clips) - 1:
+            end = target_frames
+        else:
+            next_plan = plan_clips[index + 1] if index + 1 < len(plan_clips) else {}
+            desired = int(
+                next_plan.get("start_frame")
+                or next_plan.get("startFrame")
+                or (start + int(plan_clips[index].get("duration_frames") or minimum))
+            )
+            lower = start + minimum
+            upper = target_frames - remaining_minimum(index + 1)
+            next_clip = clips[index + 1]
+            if index + 1 == len(clips) - 1 and _clip_kind(next_clip) == "video":
+                required = target_frames - max(
+                    1,
+                    int(next_clip.get("durationFrames") or next_clip.get("duration_frames") or 1),
+                )
+                candidates = [required] if lower <= required <= upper else []
+            else:
+                candidates = [frame for frame in beats if lower <= frame <= upper]
+            if not candidates:
+                return []
+            end = min(candidates, key=lambda frame: (abs(frame - desired), frame))
+        if end <= start:
+            return []
+        durations.append(end - start)
+        start = end
+
+    return durations if start == target_frames else []
+
+
 def apply_timeline(clips: list[dict[str, Any]], timeline: dict[str, Any]) -> list[dict[str, Any]]:
     plan = timeline.get("timeline") or timeline
     plan_clips = plan.get("clips") or []
@@ -157,7 +228,19 @@ def apply_timeline(clips: list[dict[str, Any]], timeline: dict[str, Any]) -> lis
         int(item.get("duration_frames") or 0) for item in plan_clips
     ))
     mixed = not cycling and any(_clip_kind(clip) == "video" for clip in clips)
-    authored_frames = _mixed_media_frames(clips, plan_clips, target_frames) if mixed else []
+    fps = max(1, int(plan.get("fps") or timeline.get("fps") or 30))
+    beat_seconds = timeline.get("beats_in_window") or timeline.get("beats") or []
+    beat_frames = [
+        round(float(seconds) * fps)
+        for seconds in beat_seconds
+        if isinstance(seconds, (int, float))
+    ]
+    authored_frames = []
+    if mixed:
+        authored_frames = (
+            _mixed_media_beat_frames(clips, plan_clips, target_frames, beat_frames)
+            or _mixed_media_frames(clips, plan_clips, target_frames)
+        )
     for index in range(slot_count):
         source = clips[index % len(clips)] if clips else {}
         item = dict(source)
@@ -177,7 +260,9 @@ def apply_timeline(clips: list[dict[str, Any]], timeline: dict[str, Any]) -> lis
             merged = dict(planned)
             if existing.get("type"):
                 merged["type"] = existing["type"]
-            if existing.get("durationFrames") or existing.get("duration_frames"):
+            if not (merged.get("durationFrames") or merged.get("duration_frames")) and (
+                existing.get("durationFrames") or existing.get("duration_frames")
+            ):
                 merged["duration_frames"] = existing.get("durationFrames") or existing.get("duration_frames")
             if merged.get("duration_frames") and "durationFrames" not in merged:
                 merged["durationFrames"] = merged["duration_frames"]

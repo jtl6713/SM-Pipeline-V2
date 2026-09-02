@@ -42,6 +42,10 @@ def build_timeline(
     fps_i = max(1, int(fps))
     duration = max(0.25, float(duration_seconds))
     transition_plan = default_transition(transition)
+    post_voiceover_transition_frames = max(
+        1,
+        int((rules or {}).get("post_voiceover_transition_frames") or 2),
+    )
     min_clip = (transition_plan["duration_frames"] + 1) / fps_i
     cuts, rule_meta = apply_rules(
         beats_in_window,
@@ -74,11 +78,17 @@ def build_timeline(
             "start_frame": start_frame,
         }
         if index > 0:
-            clip["transition"] = dict(transition_plan)
+            boundary_transition = dict(transition_plan)
+            if voiceover_end_seconds is not None and start_seconds >= float(voiceover_end_seconds):
+                boundary_transition["duration_frames"] = min(
+                    boundary_transition["duration_frames"],
+                    post_voiceover_transition_frames,
+                )
+            clip["transition"] = boundary_transition
             transitions.append({
                 "at_seconds": round(start_seconds, 4),
-                "type": transition_plan["type"],
-                "duration_frames": transition_plan["duration_frames"],
+                "type": boundary_transition["type"],
+                "duration_frames": boundary_transition["duration_frames"],
             })
         clips.append(clip)
         start_frame += frames

@@ -49,6 +49,27 @@ def test_timeline_frames_sum_to_duration():
     assert all(clip["duration_frames"] > 12 for clip in plan["clips"])
 
 
+def test_timeline_shortens_transitions_after_voiceover_for_beat_impact():
+    plan = build_timeline(
+        beats_in_window=[i * 0.5 for i in range(20)],
+        clip_count=5,
+        duration_seconds=10,
+        fps=30,
+        rules={
+            "strategy": "vo_phased",
+            "post_voiceover_transition_frames": 2,
+            "rules": [
+                {"until": "voiceover_end", "spread": True},
+                {"remaining": True, "spread": True},
+            ],
+        },
+        transition={"type": "fade", "duration_frames": 12},
+        voiceover_end_seconds=4,
+    )
+    assert any(item["at_seconds"] < 4 and item["duration_frames"] == 12 for item in plan["transitions"])
+    assert all(item["duration_frames"] == 2 for item in plan["transitions"] if item["at_seconds"] >= 4)
+
+
 def test_spread_then_snap_uses_full_duration():
     beats = [i * 0.5 for i in range(20)]
     cuts = spread_then_snap(beats, 4, 0.0, 10.0, min_clip_seconds=0.4)
