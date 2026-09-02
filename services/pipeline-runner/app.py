@@ -49,6 +49,7 @@ def health():
                 {"name": "studio-produce-resume", "path": "/jobs/studio-produce/resume"},
                 {"name": "studio-produce-ops-alert", "path": "/jobs/studio-produce/ops-alert"},
                 {"name": "studio-music-library", "path": "/jobs/studio-music-library"},
+                {"name": "studio-asset-library", "path": "/jobs/studio-asset-library"},
                 {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
             ],
         }
@@ -342,6 +343,53 @@ def run_studio_music_library_delete():
         logger.exception("studio-music-library-delete failed")
         return jsonify({"error": str(exc)}), 502
     logger.info("job=studio-music-library-delete drive=%s", result.get("google_drive_file_id"))
+    return jsonify(result), 200
+
+
+@app.post("/jobs/studio-asset-library")
+def run_studio_asset_library():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    upload = request.files.get("file")
+    filename = str(request.form.get("filename") or getattr(upload, "filename", "") or "").strip()
+    mime_type = str(request.form.get("mime_type") or getattr(upload, "mimetype", "") or "").strip()
+    content = upload.read() if upload else b""
+    if not content:
+        return jsonify({"error": "file is required"}), 422
+    from studio_library.processor import ingest_studio_library_asset
+    try:
+        result = ingest_studio_library_asset(content=content, filename=filename, mime_type=mime_type)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-asset-library ingest failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info(
+        "job=studio-asset-library file=%s drive=%s kind=%s",
+        result.get("filename"),
+        result.get("google_drive_file_id"),
+        result.get("kind"),
+    )
+    return jsonify(result), 201
+
+
+@app.post("/jobs/studio-asset-library-delete")
+def run_studio_asset_library_delete():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    file_id = str(payload.get("google_drive_file_id") or payload.get("file_id") or "").strip()
+    from studio_library.processor import trash_studio_library_asset
+    try:
+        result = trash_studio_library_asset(file_id=file_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-asset-library-delete failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info("job=studio-asset-library-delete drive=%s", result.get("google_drive_file_id"))
     return jsonify(result), 200
 
 

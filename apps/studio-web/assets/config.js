@@ -161,6 +161,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     content: "Production",
     outputs: "Pipeline",
     music: "Music Library",
+    library: "Asset Library",
     operations: "Operations",
     support: "Support"
   };

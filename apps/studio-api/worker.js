@@ -78,6 +78,10 @@ export default {
       const isMusicFavoriteWrite = isMusicFavoriteRoute && request.method === "PATCH";
       const isMusicRecordRoute = /^\/api\/music\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isMusicDeleteWrite = isMusicRecordRoute && request.method === "DELETE";
+      const isAssetLibraryRoute = url.pathname === "/api/library";
+      const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
+      const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
+      const isAssetLibraryDeleteWrite = isAssetLibraryRecordRoute && request.method === "DELETE";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
@@ -139,6 +143,8 @@ export default {
         isMusicLibraryUploadWrite ||
         isMusicFavoriteWrite ||
         isMusicDeleteWrite ||
+        isAssetLibraryUploadWrite ||
+        isAssetLibraryDeleteWrite ||
         isItem4AssetDeleteWrite ||
         isItem4AssetPosterWrite ||
         isItem4PlanWrite ||
@@ -197,7 +203,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.216-fb-clip-reel",
+          version: "0.10.217-asset-library",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -875,6 +881,19 @@ export default {
           return uploadMusicLibraryTracks(request, env, authorization);
         }
         return listMusic(request, env, url);
+      }
+
+      if (isAssetLibraryDeleteWrite) {
+        assertWriteRequest(request, env);
+        return deleteAssetLibraryItem(request, env, url);
+      }
+
+      if (url.pathname === "/api/library") {
+        if (request.method === "POST") {
+          assertUploadWriteRequest(request, env);
+          return uploadAssetLibraryItems(request, env, authorization);
+        }
+        return listAssetLibrary(request, env, url);
       }
 
       return respond(request, env, { ok: false, error: "Not found" }, 404);
@@ -13849,6 +13868,237 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
       ? "Track added to the music library."
       : `${uploaded.length} tracks added to the music library.`,
   }, 201);
+}
+
+const ASSET_LIBRARY_MAX_FILES = 8;
+const ASSET_LIBRARY_LIST_FORMULA = "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({Asset Name}&''))))";
+
+function mapLibraryAsset(record) {
+  const video = ideaLibraryIsEligibleVideo(record)
+    || String(f(record, "Media_Class") || "").trim().toLowerCase() === "video"
+    || String(f(record, "MIME_Type") || "").trim().toLowerCase().startsWith("video/");
+  const transferId = String(f(record, "Studio_Transfer_ID") || "");
+  const doNotUse = Boolean(f(record, "Do_Not_Use"));
+  return {
+    id: record.id,
+    name: f(record, "Asset Name"),
+    media_kind: video ? "video" : "photo",
+    mime_type: String(f(record, "MIME_Type") || "").trim() || null,
+    duration_seconds: Number(f(record, "Duration_Seconds") || 0) || null,
+    file_size_mb: f(record, "File_Size_MB"),
+    location: f(record, "Location") || null,
+    description: f(record, "Asset_Description") || null,
+    google_drive_file_id: googleDriveFileId(record),
+    google_drive_url: String(f(record, "Google Drive URL") || "").trim() || null,
+    preview_path: `/api/media-assets/${record.id}/preview`,
+    preview_url: `/api/media-assets/${record.id}/preview`,
+    status: f(record, "Asset_Status"),
+    rights_status: f(record, "Rights_Status"),
+    do_not_use: doNotUse,
+    studio_uploaded: transferId.startsWith("LIB-"),
+    intake_date: ideaLibraryIntakeDate(record) || null,
+  };
+}
+
+async function listAssetLibrary(request, env, url) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+  const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: 100,
+    sortField: "Intake_Date",
+    sortDirection: "desc",
+    filterFormula: ASSET_LIBRARY_LIST_FORMULA,
+  });
+  const mapped = [];
+  for (const record of records) {
+    const name = String(f(record, "Asset Name") || "");
+    if (/__\d+x\d+__/i.test(name)) continue;
+    const row = mapLibraryAsset(record);
+    if (kind === "video" && row.media_kind !== "video") continue;
+    if ((kind === "photo" || kind === "image") && row.media_kind === "video") continue;
+    if (query) {
+      const hay = [row.name, row.location, row.description].filter(Boolean).join(" ").toLowerCase();
+      if (!hay.includes(query)) continue;
+    }
+    mapped.push(row);
+  }
+  return respond(request, env, { ok: true, query: query || null, count: mapped.length, records: mapped });
+}
+
+async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) {
+    throw new HttpError(503, "Pipeline runner is required to store assets in Google Drive");
+  }
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const form = new FormData();
+  form.set("filename", filename);
+  form.set("mime_type", contentType || "");
+  form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
+  const response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
+    method: "POST",
+    headers: {
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: form,
+  });
+  const payload = await response.json().catch(() => ({}));
+  const fileId = String(payload?.google_drive_file_id || "").trim();
+  const driveUrl = String(payload?.google_drive_url || "").trim();
+  if (!response.ok || !fileId || !driveUrl) {
+    throw new HttpError(
+      response.status >= 400 ? response.status : 502,
+      payload?.error || payload?.message || "Google Drive asset upload failed"
+    );
+  }
+  return payload;
+}
+
+async function uploadAssetLibraryItems(request, env, authorization) {
+  void authorization;
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  if (!String(env.PIPELINE_RUNNER_URL || "").trim()) {
+    throw new HttpError(503, "Pipeline runner is required to store assets in Google Drive");
+  }
+  let form;
+  try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded files"); }
+  const files = form.getAll("files").filter((value) => value && typeof value.arrayBuffer === "function");
+  if (!files.length) throw new HttpError(400, "Choose at least one photo or video clip");
+  if (files.length > ASSET_LIBRARY_MAX_FILES) {
+    throw new HttpError(400, `Upload no more than ${ASSET_LIBRARY_MAX_FILES} files at once`);
+  }
+  const location = String(form.get("location") || "").trim();
+  const description = String(form.get("description") || "").trim();
+  for (const file of files) {
+    const isVideo = item4IsSupportedVideoFile(file);
+    const isImage = item4IsSupportedImageFile(file);
+    if (!isVideo && !isImage) {
+      throw new HttpError(415, `${file.name || "A file"} is not a supported photo or video clip.`);
+    }
+    const limit = isVideo ? ITEM4_MAX_CLIP_FILE_BYTES : ITEM4_MAX_FILE_BYTES;
+    if (Number(file.size || 0) > limit) {
+      throw new HttpError(413, isVideo
+        ? `${file.name || "A file"} exceeds the 200 MB clip limit`
+        : `${file.name || "An image"} exceeds the 25 MB per-image limit`);
+    }
+  }
+  const uploaded = [];
+  for (const file of files) {
+    const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
+    const safeName = item4SafeFileName(file.name || "asset");
+    const isVideo = item4IsSupportedVideoFile(file);
+    const bytes = await file.arrayBuffer();
+    const drive = await promoteStudioAssetToDrive(env, {
+      filename: safeName,
+      bytes,
+      contentType: item4NormalizedMimeType(file),
+    });
+    const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
+      method: "POST",
+      body: JSON.stringify({
+        records: [{
+          fields: {
+            "Asset Name": String(file.name || safeName).replace(/\.[^.]+$/, "") || "Studio library asset",
+            Media_Class: isVideo ? "Video" : "Image",
+            "Google Drive URL": drive.google_drive_url,
+            "Google Drive File ID": drive.google_drive_file_id,
+            MIME_Type: drive.mime_type || item4NormalizedMimeType(file),
+            File_Extension: item4FileExtension(file.name),
+            File_Size_Bytes: Number(drive.file_size_bytes || file.size || 0) || null,
+            Intake_Status: "Created",
+            Intake_Date: new Date().toISOString().slice(0, 10),
+            Drive_Access_Status: "Public",
+            Classification_Status: "Classified",
+            Asset_Status: "Available",
+            Active: true,
+            Do_Not_Use: false,
+            Capture_Source: "Self Filmed",
+            Rights_Status: "Owned",
+            Asset_Role: isVideo ? "Raw Footage" : "Other",
+            Raw_Source_Eligibility: isVideo ? "Eligible" : "Not Applicable",
+            Location: location || null,
+            Asset_Description: description || "Studio Asset Library upload stored in Google Drive.",
+            Studio_Transfer_ID: `LIB-${id}`,
+          },
+        }],
+        typecast: true,
+      }),
+    });
+    const record = Array.isArray(created?.records) ? created.records[0] : null;
+    if (!record?.id) throw new HttpError(502, "The file was stored, but the catalog record was not created");
+    uploaded.push(mapLibraryAsset(record));
+  }
+  return respond(request, env, {
+    ok: true,
+    uploaded: uploaded.length,
+    records: uploaded,
+    message: uploaded.length === 1
+      ? "Asset added to the library."
+      : `${uploaded.length} assets added to the library.`,
+  }, 201);
+}
+
+async function findAssetLibraryUsages(env, recordId) {
+  const needle = ideaLibraryAirtableEscape(recordId);
+  const requests = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 10,
+    filterFormula: `FIND("${needle}", ARRAYJOIN({Studio_Master_Media_Assets}))`,
+  }).catch(() => []);
+  return { production_requests: requests };
+}
+
+async function trashStudioAssetOnDrive(env, fileId) {
+  const driveId = String(fileId || "").trim();
+  if (!driveId) return { ok: false, skipped: true, reason: "no_drive_file" };
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) return { ok: false, skipped: true, reason: "no_runner" };
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const response = await fetch(`${runnerUrl}/jobs/studio-asset-library-delete`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({ google_drive_file_id: driveId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, error: payload?.error || payload?.message || `Drive trash failed (${response.status})` };
+  }
+  return { ok: true, trashed: Boolean(payload?.trashed), google_drive_file_id: driveId };
+}
+
+async function deleteAssetLibraryItem(request, env, url) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const recordId = String(url.pathname.split("/")[3] || "");
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "Invalid library record");
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  const role = String(f(record, "Asset_Role") || "").trim();
+  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  if (role === "Music") throw new HttpError(409, "Delete music tracks from the Music Library tab");
+  if (!["image", "graphic", "video"].includes(mediaClass) && role !== "Raw Footage") {
+    throw new HttpError(409, "Only photo and video library assets can be deleted here");
+  }
+  const usages = await findAssetLibraryUsages(env, recordId);
+  if (usages.production_requests.length) {
+    throw new HttpError(
+      409,
+      `Cannot delete this asset. It is still attached to ${usages.production_requests.length} Production Request${usages.production_requests.length === 1 ? "" : "s"}. Remove it there first.`
+    );
+  }
+  const drive = await trashStudioAssetOnDrive(env, googleDriveFileId(record)).catch((error) => ({
+    ok: false,
+    error: error?.message || String(error),
+  }));
+  const deleted = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, { method: "DELETE" });
+  return respond(request, env, {
+    ok: true,
+    deleted: Boolean(deleted?.deleted),
+    record_id: recordId,
+    name: f(record, "Asset Name"),
+    drive,
+  });
 }
 
 async function fetchGoogleDriveAudio(record, request) {

@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.224-analytics-definitions">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.225-asset-library">
 </head>
 <body>
  <header class="topbar">
@@ -36,6 +36,7 @@
  <button class="nav-item" data-page="content">Production</button>
  <button class="nav-item" data-page="outputs">Pipeline</button>
  <button class="nav-item" data-page="music">Music Library</button>
+ <button class="nav-item" data-page="library">Asset Library</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item nav-item-footer-only" data-page="support">Support</button>
  </nav>
@@ -1001,6 +1002,34 @@
  <section class="panel"><div id="musicList" class="music-grid"></div></section>
  </section>
 
+ <section id="page-library" class="page">
+ <div class="page-heading"><div><span class="eyebrow">Photos and clips</span><h1>Asset library</h1><p>Browse classified Drive stills and Raw Footage, add photos or clips to the catalogue, or delete an unused Studio upload. Production and the wizard attach from this same library.</p></div><div class="heading-actions"><button type="button" class="primary-button" id="libraryAddButton">+ Add assets</button><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
+ <section class="panel music-upload-panel" id="libraryUploadPanel">
+ <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Files go to Google Drive (photos or video folders), register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
+ <div class="music-upload-body">
+ <div class="item4-upload-zone music-upload-zone" id="libraryUploadZone" tabindex="0" role="button" aria-label="Upload photos or video clips">
+ <input id="libraryFileInput" type="file" accept="image/*,.heic,.heif,.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/webm" multiple hidden>
+ <div class="item4-upload-icon">＋</div>
+ <div><strong>Drop photos or clips here or choose files</strong><span>JPG, PNG, WEBP, HEIC, MP4, MOV · up to 8 files · 25 MB photos · 200 MB clips</span></div>
+ <button type="button" class="secondary-button" id="libraryChooseFiles">Choose files</button>
+ </div>
+ <label class="form-field music-upload-name"><span>Location <em>optional</em></span><input id="libraryLocation" maxlength="120" placeholder="Oak Street Beach"></label>
+ <div class="library-toolbar">
+ <label class="form-field"><span>Search</span><input id="librarySearch" type="search" placeholder="Name or location"></label>
+ <label class="form-field"><span>Show</span>
+ <select id="libraryKindFilter">
+ <option value="">Photos and clips</option>
+ <option value="photo">Photos only</option>
+ <option value="video">Clips only</option>
+ </select>
+ </label>
+ </div>
+ <div class="form-message" id="libraryUploadMessage" aria-live="polite"></div>
+ </div>
+ </section>
+ <section class="panel"><div id="libraryList" class="library-grid"></div></section>
+ </section>
+
  <section id="page-operations" class="page">
  <div class="page-heading">
  <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, autonomous produce, library intake, publish queues, oversized compression, and render retries.</p></div>
@@ -1123,6 +1152,7 @@
  <button type="button" class="support-toc-link" data-support-doc="production">Production</button>
  <button type="button" class="support-toc-link" data-support-doc="pipeline">Pipeline</button>
  <button type="button" class="support-toc-link" data-support-doc="music">Music Library</button>
+ <button type="button" class="support-toc-link" data-support-doc="library">Asset Library</button>
  <button type="button" class="support-toc-link" data-support-doc="operations">Operations</button>
  </nav>
  <div class="support-docs">
@@ -1295,6 +1325,17 @@
  </ul>
  <button type="button" class="primary-button" data-open-page="music">Go to Music Library</button>
  </article>
+ <article class="support-article" data-support-article="library" hidden>
+ <h2>Asset Library</h2>
+ <p>Asset Library is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
+ <ul>
+ <li>Browse and search classified photos and clips. These are the same items Production and the wizard can attach.</li>
+ <li>Use + Add assets or drop files on this page. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
+ <li>Delete removes the Airtable row and trashes the Drive file when nothing still has that asset attached.</li>
+ <li>Library intake on Operations still scans the Drive intake folder for files that did not come through this page.</li>
+ </ul>
+ <button type="button" class="primary-button" data-open-page="library">Go to Asset Library</button>
+ </article>
  <article class="support-article" data-support-article="operations" hidden>
  <h2>Operations</h2>
  <figure class="support-shot">
@@ -1322,6 +1363,7 @@
  <nav class="studio-footer-links" aria-label="Secondary">
  <button type="button" data-open-page="support">Support</button>
  <button type="button" data-open-page="music">Music</button>
+ <button type="button" data-open-page="library">Assets</button>
  <button type="button" data-open-page="operations" id="footerOperations" hidden>Operations</button>
  </nav>
  <div class="studio-footer-meta">
@@ -1476,6 +1518,6 @@
 
  <script src="/assets/config.js?v=0.6.225-instagram-paused"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.226-bounded-youtube-sweep"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.225-asset-library"></script>
 </body>
 </html>

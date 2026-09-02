@@ -2152,10 +2152,20 @@ body{
 #page-ideas .page-heading,
 #page-outputs .page-heading,
 #page-music .page-heading,
+#page-library .page-heading,
 #page-operations .page-heading,
 #page-support .page-heading{
   margin-bottom:20px;
 }
+.library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:18px}
+.library-card{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fbfdfd}
+.library-card h3{font-size:.95rem;margin:0 0 6px}
+.library-card-media{position:relative;aspect-ratio:4/5;background:#eef3f2;border-radius:10px;overflow:hidden;margin-bottom:10px}
+.library-card-media img,.library-card-media video{width:100%;height:100%;object-fit:cover;display:block}
+.library-kind{position:absolute;top:8px;left:8px;background:#012559;color:#fff;font-size:.68rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 7px;border-radius:999px}
+.library-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 12rem;gap:12px;align-items:end}
+@media(max-width:1100px){.library-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.library-grid{grid-template-columns:1fr}}
 
 body:has(#page-content.active){
   background:#e8eef6;
@@ -2242,6 +2252,7 @@ body:has(#page-content.active) .studio-footer-links button:hover{
     box-shadow:0 6px 16px rgba(15,35,70,.06);
   }
   .sidebar .nav-item[data-page="music"]{display:none!important}
+  .library-toolbar{grid-template-columns:1fr}
   .nav-item{
     flex:0 0 auto;
     white-space:nowrap;

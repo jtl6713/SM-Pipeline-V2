@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.219-fb-clip-reel";
+  const BUILD_ID = "item4-0.6.225-asset-library";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11011,6 +11011,138 @@
 
   bindMusicUpload();
 
+  function setLibraryUploadMessage(text, className = "") {
+    const node = $("libraryUploadMessage");
+    if (!node) return;
+    node.textContent = text || "";
+    node.className = `form-message ${className}`.trim();
+  }
+
+  function libraryPreviewUrl(record) {
+    const path = String(record?.preview_url || record?.preview_path || "").trim();
+    if (path.startsWith("http")) return path;
+    if (path) return `${apiBase}${path}`;
+    return record?.id ? `${apiBase}/api/media-assets/${encodeURIComponent(record.id)}/preview` : "";
+  }
+
+  async function loadLibrary() {
+    const target = $("libraryList");
+    if (!target) return;
+    target.innerHTML = '<div class="empty">Loading asset library…</div>';
+    const query = String($("librarySearch")?.value || "").trim();
+    const kind = String($("libraryKindFilter")?.value || "").trim();
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (kind) params.set("kind", kind);
+    try {
+      const { records = [] } = await api(`/api/library?${params.toString()}`);
+      if (!records.length) {
+        target.innerHTML = '<div class="empty">No library photos or clips matched.</div>';
+        return;
+      }
+      target.innerHTML = records.map((r) => {
+        const preview = libraryPreviewUrl(r);
+        const video = String(r.media_kind || "").toLowerCase() === "video";
+        const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.mime_type || (video ? "video" : "photo"));
+        return `<article class="library-card"><div class="library-card-media">${preview ? (video ? `<video src="${escapeHtml(preview)}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`) : ""}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+      }).join("");
+      target.querySelectorAll("[data-library-delete]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = button.dataset.libraryDelete;
+          const name = button.dataset.libraryName || "this asset";
+          if (!window.confirm(`Delete “${name}” from the asset library and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
+            return;
+          }
+          button.disabled = true;
+          try {
+            await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
+            setLibraryUploadMessage(`Deleted ${name}.`, "success");
+            await loadLibrary();
+          } catch (error) {
+            setLibraryUploadMessage(error.message, "error-text");
+            button.disabled = false;
+          }
+        });
+      });
+    } catch (e) {
+      target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  async function uploadLibraryFiles(fileList) {
+    const files = Array.from(fileList || []).filter((file) => {
+      const name = String(file.name || "");
+      const type = String(file.type || "");
+      return /image\//i.test(type) || /video\//i.test(type) || /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/i.test(name);
+    });
+    if (!files.length) {
+      setLibraryUploadMessage("Choose one or more photos or video clips.", "error-text");
+      return;
+    }
+    const zone = $("libraryUploadZone");
+    const choose = $("libraryChooseFiles");
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file, file.name));
+    const location = String($("libraryLocation")?.value || "").trim();
+    if (location) form.append("location", location);
+    if (zone) zone.dataset.busy = "true";
+    if (choose) choose.disabled = true;
+    setLibraryUploadMessage(files.length === 1 ? "Adding asset…" : `Adding ${files.length} assets…`, "");
+    try {
+      const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
+      if ($("libraryFileInput")) $("libraryFileInput").value = "";
+      setLibraryUploadMessage(result.message || "Asset added to the library.", "success");
+      await loadLibrary();
+    } catch (error) {
+      setLibraryUploadMessage(error.message, "error-text");
+    } finally {
+      if (zone) delete zone.dataset.busy;
+      if (choose) choose.disabled = false;
+    }
+  }
+
+  function bindLibraryUpload() {
+    const zone = $("libraryUploadZone");
+    const input = $("libraryFileInput");
+    const choose = $("libraryChooseFiles");
+    const addButton = $("libraryAddButton");
+    if (!input || (zone && zone.dataset.bound)) return;
+    if (zone) zone.dataset.bound = "true";
+    const openPicker = (event) => {
+      event?.preventDefault();
+      event?.stopPropagation();
+      input.click();
+    };
+    addButton?.addEventListener("click", openPicker);
+    choose?.addEventListener("click", openPicker);
+    zone?.addEventListener("click", (event) => {
+      if (event.target === choose || event.target === addButton) return;
+      openPicker(event);
+    });
+    zone?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") openPicker(event);
+    });
+    zone?.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("dragging");
+    });
+    zone?.addEventListener("dragleave", () => zone.classList.remove("dragging"));
+    zone?.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("dragging");
+      uploadLibraryFiles(event.dataTransfer?.files);
+    });
+    input.addEventListener("change", () => uploadLibraryFiles(input.files));
+    let searchTimer = 0;
+    $("librarySearch")?.addEventListener("input", () => {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => loadLibrary(), 250);
+    });
+    $("libraryKindFilter")?.addEventListener("change", () => loadLibrary());
+  }
+
+  bindLibraryUpload();
+
   function setOperationsMessage(text, className = "") {
     const node = $("operationsMessage");
     if (!node) return;
@@ -11581,6 +11713,7 @@
     if (page === "content") return loadContent();
     if (page === "outputs") return loadOutputs();
     if (page === "music") return loadMusic();
+    if (page === "library") return loadLibrary();
     if (page === "operations") return loadOperations();
     if (page === "support") return;
   }
