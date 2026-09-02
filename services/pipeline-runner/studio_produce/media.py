@@ -46,6 +46,52 @@ def clip_in_out_seconds(asset: dict[str, Any] | None, *, default_duration: float
     return start, max(start + 0.2, end)
 
 
+def source_duration_seconds(asset: dict[str, Any] | None, *, default_duration: float = 5.0) -> float:
+    item = asset or {}
+    for key in (
+        "sourceDurationSeconds",
+        "source_duration_seconds",
+        "duration_seconds",
+        "durationSeconds",
+    ):
+        value = _positive_float(item.get(key), 0.0)
+        if value > 0:
+            return value
+    if asset_is_video(item):
+        frames = item.get("durationFrames") or item.get("duration_frames")
+        try:
+            frame_seconds = float(frames or 0) / 30.0
+        except (TypeError, ValueError):
+            frame_seconds = 0.0
+        if frame_seconds > 0:
+            return frame_seconds
+    start, end = clip_in_out_seconds(item, default_duration=default_duration)
+    return max(end, default_duration)
+
+
+def distribute_frames(weights: list[int], budget: int, *, minimum: int = 1) -> list[int]:
+    count = len(weights)
+    if count == 0:
+        return []
+    floor = max(1, int(minimum))
+    if budget <= count * floor:
+        return [floor] * count
+    leftover = budget - (count * floor)
+    positive = [max(1, int(weight)) for weight in weights]
+    total = sum(positive)
+    raw = [leftover * weight / total for weight in positive]
+    extras = [int(value) for value in raw]
+    remainder = leftover - sum(extras)
+    order = sorted(
+        range(count),
+        key=lambda index: raw[index] - extras[index],
+        reverse=True,
+    )
+    for index in order[:remainder]:
+        extras[index] += 1
+    return [floor + extras[index] for index in range(count)]
+
+
 def _positive_float(value: Any, fallback: float) -> float:
     try:
         number = float(value)

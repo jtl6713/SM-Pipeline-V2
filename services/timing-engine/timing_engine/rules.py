@@ -273,6 +273,27 @@ def _apply_phased(
     log: list[dict[str, Any]] = []
 
     if voiceover_end is None:
+        if recycle:
+            every_n = tail_every_n
+            candidates = [time for time in _every_n_from(beats, every_n) if time >= min_clip_seconds]
+            try:
+                max_clips = max(1, int(payload.get("max_clips") or 60))
+            except (TypeError, ValueError):
+                max_clips = 60
+            max_cuts = max(0, max_clips - 1)
+            cuts = candidates[:max_cuts]
+            if cuts:
+                cuts = _enforce_spacing(cuts, 0.0, duration, min_clip_seconds, len(cuts))
+            log.append({"rule": "beat_fill", "added": list(cuts), "every_n_beats": every_n})
+            return cuts, {
+                "rules_applied": log,
+                "fallback": fallback,
+                "beat_count": len(beats),
+                "strategy": "beat_fill",
+                "effective_clip_count": max(1, len(cuts) + 1),
+                "recycle": True,
+                "voiceover_end_seconds": None,
+            }
         cuts = spread_then_snap(beats, needed, 0.0, duration, min_clip_seconds=min_clip_seconds)
         if len(cuts) < needed:
             fallback = "even_split_remainder"
@@ -336,10 +357,15 @@ def _apply_phased(
     ]
 
     if recycle:
+        try:
+            max_clips = max(1, int(payload.get("max_clips") or 60))
+        except (TypeError, ValueError):
+            max_clips = 60
         tail_cuts = list(tail_candidates)
         fallback = "recycle_tail" if tail_cuts else fallback
         log.append({"rule": {"remaining": True, "every_n_beats": tail_every_n, "recycle": True}, "added": list(tail_cuts)})
         cuts = vo_cuts + tail_cuts
+        cuts = cuts[: max(0, max_clips - 1)]
         cuts = _enforce_spacing(cuts, 0.0, duration, min_clip_seconds, len(cuts))
         return cuts, {
             "rules_applied": log,

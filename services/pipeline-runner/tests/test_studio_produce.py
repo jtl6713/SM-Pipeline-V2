@@ -398,6 +398,77 @@ def test_assign_clip_frames_scales_photos_not_video():
     assert total == 480
 
 
+def test_assign_clip_frames_caps_five_long_videos_to_owner_duration():
+    clips = [
+        {"source": {"media_kind": "video", "duration_seconds": 60, "in_seconds": 0, "out_seconds": 60}}
+        for _ in range(5)
+    ]
+    frames, total = assign_clip_frames(
+        clips,
+        story=False,
+        effective={"video_duration_seconds": 30},
+        request={"fields": {"Video_Duration_Seconds": 30}},
+        output=None,
+    )
+    assert total == 900
+    assert frames == [180, 180, 180, 180, 180]
+
+
+def test_assign_clip_frames_trims_long_video_and_reserves_photo_floor():
+    clips = [
+        {"source": {"media_kind": "photo"}},
+        {"source": {"media_kind": "photo"}},
+        {"source": {"media_kind": "video", "duration_seconds": 60, "in_seconds": 0, "out_seconds": 60}},
+    ]
+    frames, total = assign_clip_frames(
+        clips,
+        story=False,
+        effective={"video_duration_seconds": 30},
+        request={"fields": {"Video_Duration_Seconds": 30}},
+        output=None,
+    )
+    assert total == 900
+    assert frames[0] == 90
+    assert frames[1] == 90
+    assert frames[2] == 720
+
+
+def test_stamp_timing_pending_for_single_clip_with_music():
+    fields = stamp_fields(
+        {
+            "native": False,
+            "story": False,
+            "clip_count": 1,
+            "total_frames": 900,
+            "clips": [{"url": "https://media.example/one.mp4", "media_asset_record_id": "recVIDEO00000001"}],
+            "effective": {"music_url": "https://media.example/track.mp3", "background_music_mode": "Yes"},
+            "render_clip_list_json": "[]",
+            "selected_assets_json": "{}",
+            "output_filename": "studio-test.mp4",
+        },
+        None,
+    )
+    assert fields["Timing_Status"] == "Pending"
+
+
+def test_stamp_timing_skipped_without_music():
+    fields = stamp_fields(
+        {
+            "native": False,
+            "story": False,
+            "clip_count": 5,
+            "total_frames": 900,
+            "clips": [{"url": "https://media.example/one.mp4", "media_asset_record_id": "recVIDEO00000001"}],
+            "effective": {"music_url": "", "background_music_mode": "No"},
+            "render_clip_list_json": "[]",
+            "selected_assets_json": "{}",
+            "output_filename": "studio-test.mp4",
+        },
+        None,
+    )
+    assert fields["Timing_Status"] == "Skipped"
+
+
 def test_asset_is_video_helper():
     assert asset_is_video({"media_kind": "video"})
     assert asset_is_video({"name": "clip.mov"})
