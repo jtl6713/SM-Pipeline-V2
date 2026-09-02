@@ -408,13 +408,13 @@
         button.disabled = true;
         button.textContent = "Refreshing…";
       }
-      if (meta) meta.textContent = "Refreshing public Instagram and YouTube times…";
-      setOperationsMessage("Refreshing public Instagram and YouTube times…");
+      if (meta) meta.textContent = "Refreshing public YouTube times… Instagram timing is paused.";
+      setOperationsMessage("Refreshing public YouTube times…");
       const result = await api("/api/insights/similar-times", {
         method: "POST",
         body: JSON.stringify({
           force: true,
-          limit: 10,
+          limit: 1,
           profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
           season: selectedInsightsSeason(),
         }),
@@ -470,7 +470,7 @@
     const platform = String($("operationsWatchlistPlatform")?.value || "instagram").trim();
     const handle = String($("operationsWatchlistHandle")?.value || "").trim().replace(/^@/, "");
     if (!handle) {
-      setOperationsMessage("Enter a handle. Instagram and YouTube are timed from public posts. TikTok and Facebook stay on the list for review only.", "error-text");
+      setOperationsMessage("Enter a handle. YouTube is timed from public posts; Instagram timing is paused pending Meta permission.", "error-text");
       return;
     }
     try {
@@ -11169,8 +11169,24 @@
     if (key === "needs_key") return "needs YouTube API key";
     if (key === "unavailable") return "not publicly readable";
     if (key === "pending") return "waiting for sweep";
+    if (key === "paused") return "paused pending Meta permission";
     if (key === "error") return "lookup failed";
     return key;
+  }
+
+  function similarAccountProfileUrl(account) {
+    const platform = String(account?.platform || "").trim().toLowerCase();
+    const handle = String(account?.handle || "").trim().replace(/^@/, "");
+    if (!handle) return "";
+    if (/^https?:\/\//i.test(handle)) return handle;
+    if (platform === "instagram") return `https://www.instagram.com/${encodeURIComponent(handle)}/`;
+    if (platform === "youtube") return `https://www.youtube.com/@${encodeURIComponent(handle)}`;
+    if (platform === "tiktok") return `https://www.tiktok.com/@${encodeURIComponent(handle)}`;
+    if (platform === "facebook") {
+      const path = handle.split("/").filter(Boolean).map((part) => encodeURIComponent(part)).join("/");
+      return `https://www.facebook.com/${path}`;
+    }
+    return "";
   }
 
   function renderOperationsWatchlist(accounts, canEdit) {
@@ -11194,13 +11210,27 @@
     );
     target.innerHTML = sections.map((platform) => {
       const rows = groups.get(platform) || [];
-      const timed = platform === "instagram" || platform === "youtube";
-      const cards = rows.map(({ account, index }) => `
-      <article class="ops-profile-card">
-        <div><strong>@${escapeHtml(account.handle)}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
+      const timed = platform === "youtube";
+      const groupMode = timed ? "timed" : platform === "instagram" ? "paused" : "review only";
+      const cards = rows.map(({ account, index }) => {
+        const profileUrl = similarAccountProfileUrl(account);
+        const handle = profileUrl
+          ? `<a class="table-link" href="${escapeHtml(profileUrl)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(account.handle)}</a>`
+          : `@${escapeHtml(account.handle)}`;
+        const status = String(account.status || "").trim();
+        const statusClass = status === "ok"
+          ? " is-sweep-success"
+          : ["error", "needs_permission", "needs_key", "unavailable"].includes(status)
+            ? " is-sweep-error"
+            : "";
+        return `
+      <article class="ops-profile-card${statusClass}">
+        <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
+        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : platform === "instagram" ? "Paused until Meta business_discovery permission is fixed" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
-      </article>`).join("");
-      return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)}${timed ? " · timed" : " · review only"} · ${rows.length}</h4>${cards}</section>`;
+      </article>`;
+      }).join("");
+      return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)} · ${groupMode} · ${rows.length}</h4>${cards}</section>`;
     }).join("");
     target.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
       button.addEventListener("click", async () => {
@@ -11212,6 +11242,47 @@
           loadOperations(true);
         } catch (error) {
           setOperationsMessage(error.message || "Could not update watchlist.", "error-text");
+        }
+      });
+    });
+    target.querySelectorAll("[data-watchlist-run]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (!canEdit) return;
+        const account = accounts[Number(button.dataset.watchlistRun)];
+        if (!account) return;
+        const idleLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = "Running…";
+        try {
+          setOperationsMessage(`Fetching @${account.handle} and adding its public posts to analytics…`);
+          const result = await api("/api/insights/similar-times", {
+            method: "POST",
+            body: JSON.stringify({
+              force: true,
+              limit: 1,
+              profile: account.profile || studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
+              platform: account.platform,
+              handle: account.handle,
+              season: selectedInsightsSeason(),
+            }),
+            timeoutMs: 60000,
+          });
+          renderOperationsSimilarTimes(result);
+          const stored = Number(result.account?.posts || 0);
+          const status = similarAccountStatusLabel(result.account?.status);
+          setOperationsMessage(
+            result.updated
+              ? `Added ${stored} public post${stored === 1 ? "" : "s"} from @${account.handle} to analytics.`
+              : `@${account.handle}: ${status || "no public posts were added"}.`
+          );
+          await loadOperations(true);
+        } catch (error) {
+          setOperationsMessage(error.message || `Could not run analytics for @${account.handle}.`, "error-text");
+        } finally {
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = idleLabel;
+          }
         }
       });
     });
@@ -11383,10 +11454,13 @@
         renderOperationsWatchlist(watchlist.map((row) => ({
           ...row,
           status: statusByKey.get(`${row.platform}:${String(row.handle || "").toLowerCase()}`)?.status
-            || (row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
+            || (row.platform === "instagram" ? "paused" : row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
         })), Boolean(data.can_edit_profiles));
       } catch (error) {
-        renderOperationsSimilarTimes({ message: error.message || "Could not load similar-account times." });
+        const similarMeta = $("operationsSimilarTimesMeta");
+        if (similarMeta) {
+          similarMeta.textContent = `Analytics refresh failed; showing the last loaded calendar. ${error.message || ""}`.trim();
+        }
       }
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
       renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");

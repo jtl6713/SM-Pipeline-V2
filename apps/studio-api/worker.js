@@ -991,7 +991,7 @@ export default {
         console.warn("insights sweep cron failed", error);
       }
       try {
-        await studioSweepSimilarAccountTimes(env, { limit: 6 });
+        await studioSweepSimilarAccountTimes(env, { limit: 1 });
       } catch (error) {
         console.warn("similar-account times sweep cron failed", error);
       }
@@ -10667,7 +10667,8 @@ function studioSuggestedLocalDatetime(windows) {
 }
 
 const STUDIO_WATCHLIST_PLATFORMS = new Set(["instagram", "youtube", "tiktok", "facebook"]);
-const STUDIO_SIMILAR_TIMED_PLATFORMS = new Set(["instagram", "youtube"]);
+// Competitor Instagram timing is paused until Meta business_discovery permission #10 is fixed.
+const STUDIO_SIMILAR_TIMED_PLATFORMS = new Set(["youtube"]);
 const STUDIO_SIMILAR_TIMES_SETTING = "SIMILAR_ACCOUNT_TIMES_CACHE";
 const STUDIO_SIMILAR_TIMES_TTL_MS = 24 * 60 * 60 * 1000;
 const STUDIO_SIMILAR_TIMES_MIN_SAMPLE = 8;
@@ -11282,6 +11283,7 @@ const STUDIO_SIMILAR_SEEDS = Object.freeze([
   { platform: "instagram", handle: "millennium_park", source: "research", profile: "chicago" },
   { platform: "instagram", handle: "360chicago", source: "research", profile: "chicago" },
   { platform: "instagram", handle: "cubs", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "ChicagoShining", source: "joseph", profile: "chicago" },
   { platform: "youtube", handle: "ChooseChicago", source: "research", profile: "chicago" },
   { platform: "youtube", handle: "TimeOutChicago", source: "research", profile: "chicago" },
   { platform: "youtube", handle: "ChicagoArchitectureCenter", source: "research", profile: "chicago" },
@@ -11511,7 +11513,7 @@ async function studioEnsureSimilarWatchlist(env) {
       env,
       STUDIO_SIMILAR_WATCHLIST_SETTING,
       JSON.stringify(accounts),
-      "Similar-account watchlist. Instagram and YouTube are swept for public post times. TikTok and Facebook stay on the list for operator review; those platforms have no public competitor post-time API we can call."
+      "Similar-account watchlist. YouTube is swept for public post times. Instagram timing is paused pending Meta business_discovery permission; TikTok and Facebook stay on the list for operator review."
     );
   }
   return accounts;
@@ -11638,8 +11640,8 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
       message = `${label} YouTube timing needs YOUTUBE_API_KEY in Pipeline Settings or the Worker.`;
     } else {
       message = stale.length
-        ? `Watchlist saved for ${label}. Public Instagram and YouTube timing fills in after the next insights sweep.`
-        : `Public Instagram/YouTube lookup found no dated posts for the ${label} watchlist yet.`;
+        ? `Watchlist saved for ${label}. Public YouTube timing fills in after the next insights sweep; Instagram timing is paused.`
+        : `Public YouTube lookup found no dated posts for the ${label} watchlist yet. Instagram timing is paused.`;
     }
   } else if (heatmap.sample_size < STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
     message = `${heatmap.sample_size} ${seasonLabel.toLowerCase()} posts so far for ${label}. Need ${STUDIO_SIMILAR_TIMES_MIN_SAMPLE} before this beats industry defaults.`;
@@ -11678,8 +11680,8 @@ async function getInsightsWatchlist(request, env) {
     ok: true,
     accounts,
     message: accounts.length
-      ? "Chicago watchlist loaded. Instagram and YouTube can be timed from public posts. TikTok and Facebook groups are stored for reference only."
-      : "Add Instagram or YouTube handles to start similar-account timing.",
+      ? "Chicago watchlist loaded. YouTube can be timed from public posts. Instagram timing is paused pending Meta permission; TikTok and Facebook are reference only."
+      : "Add a YouTube handle to start similar-account timing.",
   });
 }
 
@@ -11691,7 +11693,7 @@ async function putInsightsWatchlist(request, env) {
     env,
     STUDIO_SIMILAR_WATCHLIST_SETTING,
     JSON.stringify(accounts),
-    "Similar-account watchlist. Editable. Instagram and YouTube are swept for public post times. TikTok and Facebook stay listed for review; those apps have no public competitor post-time API."
+    "Similar-account watchlist. Editable. YouTube is swept for public post times. Instagram timing is paused pending Meta business_discovery permission; TikTok and Facebook stay listed for review."
   );
   return respond(request, env, { ok: true, accounts });
 }
@@ -11920,7 +11922,7 @@ async function getInsightsSimilarTimes(request, env, url, authorization, ctx) {
     const asOf = view.as_of ? Date.parse(view.as_of) : 0;
     const quiet = Number.isFinite(asOf) && Date.now() - asOf < 10 * 60 * 1000;
     if (!quiet) {
-      ctx.waitUntil(studioSweepSimilarAccountTimes(env, { limit: 2, theme: view.profile }).catch((error) => {
+      ctx.waitUntil(studioSweepSimilarAccountTimes(env, { limit: 1, theme: view.profile, skipRecompute: true }).catch((error) => {
         console.warn("similar-times on-demand sweep failed", error);
       }));
     }
@@ -11931,19 +11933,19 @@ async function getInsightsSimilarTimes(request, env, url, authorization, ctx) {
 async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
-  try {
-    await studioInsightsMigrateCacheToDb(env);
-  } catch (error) {
-    console.warn("similar-times legacy migrate failed", error);
-  }
+  // A single-account button click must stay bounded. Migrating every legacy
+  // cache observation here can exhaust Worker CPU before the requested sweep.
   const theme = payload.profile || payload.theme
     ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
     : await studioResolveSimilarTimesTheme(env, url, authorization);
   const season = payload.season ? studioNormalizeInsightsSeason(payload.season) : studioInsightsResolveSeason(url);
   const result = await studioSweepSimilarAccountTimes(env, {
-    limit: payload.limit,
+    limit: 1,
     force: Boolean(payload.force),
     theme,
+    platform: payload.platform,
+    handle: payload.handle,
+    skipRecompute: true,
   });
   const accounts = await studioEnsureSimilarWatchlist(env);
   const cache = result.cache || await studioLoadSimilarAccountStatusCache(env);
@@ -11951,7 +11953,7 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     accounts,
     theme,
     platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
-    season: studioInsightsResolveSeason(url),
+    season,
     cache,
   });
   const occupiedByPlatform = await studioLoadOccupiedSchedules(env).catch((error) => {
@@ -11967,20 +11969,12 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
     posts,
     own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
   });
-  try {
-    await studioRecomputeInsightsLearned(env, {
-      profile: theme,
-      platform: payload.platform || url.searchParams.get("platform") || "",
-      season,
-    });
-  } catch (error) {
-    console.warn("insights learned recompute after sweep failed", error);
-  }
   return respond(request, env, {
     ok: true,
     swept: result.scanned,
     updated: result.updated,
     remaining_to_sweep: result.remaining,
+    account: result.account || null,
     ...view,
   });
 }
@@ -12287,8 +12281,14 @@ async function postInsightsDiscover(request, env, url, authorization) {
 async function studioSweepSimilarAccountTimes(env, options = {}) {
   const limit = Math.max(1, Math.min(10, Number(options.limit) || 3));
   const force = Boolean(options.force);
+  const requestedPlatform = String(options.platform || "").trim().toLowerCase();
+  const requestedHandle = String(options.handle || "").trim().replace(/^@/, "").toLowerCase();
   const accounts = await studioEnsureSimilarWatchlist(env);
-  const timed = studioTimedWatchlistAccounts(accounts, options.theme || null);
+  const timed = studioTimedWatchlistAccounts(accounts, options.theme || null).filter((row) => {
+    if (requestedPlatform && row.platform !== requestedPlatform) return false;
+    if (requestedHandle && String(row.handle || "").toLowerCase() !== requestedHandle) return false;
+    return true;
+  });
   const cache = await studioLoadSimilarAccountStatusCache(env);
   const stale = timed.filter((row) => force || studioSimilarAccountStale(cache.accounts[studioSimilarAccountKey(row.platform, row.handle)]));
   const sweepRank = (row) => {
@@ -12303,7 +12303,12 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   };
   stale.sort((a, b) => sweepRank(a) - sweepRank(b));
   const batch = stale.slice(0, limit);
-  if (!batch.length) return { scanned: 0, updated: 0, remaining: 0, cache };
+  if (!batch.length) {
+    const account = timed[0]
+      ? cache.accounts[studioSimilarAccountKey(timed[0].platform, timed[0].handle)] || null
+      : null;
+    return { scanned: 0, updated: 0, remaining: 0, cache, account };
+  }
   const settings = await studioActivePipelineSettings(env, [
     "FACEBOOK_PAGE_ACCESS_TOKEN",
     "FACEBOOK_GRAPH_API_VERSION",
@@ -12363,12 +12368,18 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   }
   cache.as_of = new Date().toISOString();
   await studioSaveSimilarAccountStatusCache(env, cache);
-  try {
-    await studioRecomputeInsightsLearned(env, { profile: options.theme || "chicago" });
-  } catch (error) {
-    console.warn("insights learned recompute after similar sweep failed", error);
+  if (!options.skipRecompute) {
+    try {
+      await studioRecomputeInsightsLearned(env, { profile: options.theme || "chicago" });
+    } catch (error) {
+      console.warn("insights learned recompute after similar sweep failed", error);
+    }
   }
-  return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache };
+  const selected = batch.length === 1 ? batch[0] : null;
+  const account = selected
+    ? cache.accounts[studioSimilarAccountKey(selected.platform, selected.handle)] || null
+    : null;
+  return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache, account };
 }
 
 async function restoreParentContentItemFromStudioUmbrella(env, parentContentItem) {

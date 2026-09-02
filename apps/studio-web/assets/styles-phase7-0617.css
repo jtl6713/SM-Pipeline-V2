@@ -1242,6 +1242,12 @@ html[data-studio-theme="nyc"]{
 .insights-overview-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fbfdfd}
 .insights-overview-card strong{display:block;font-size:1.05rem;line-height:1.2}
 .insights-overview-card span{display:block;margin-top:3px;font-size:.74rem;color:var(--muted)}
+.ops-insights-definitions{margin:0 20px 14px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.55)}
+.ops-insights-definitions summary{cursor:pointer;padding:10px 12px;font-size:.78rem;font-weight:800;color:#37516c}
+.ops-insights-definitions dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 18px;margin:0;padding:0 12px 12px}
+.ops-insights-definitions dl div{min-width:0}
+.ops-insights-definitions dt{font-size:.76rem;font-weight:800;color:#263d55}
+.ops-insights-definitions dd{margin:2px 0 0;font-size:.74rem;line-height:1.4;color:var(--muted)}
 .ops-analytics-panel{padding:0;overflow:hidden}
 .ops-collapse{border:0;margin:0}
 .ops-collapse > summary.ops-collapse-summary{
@@ -2351,6 +2357,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 .ops-watchlist-group{display:grid;gap:8px;margin:0 0 16px}
 .ops-watchlist-group h4{margin:0;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#4b5d73}
 .ops-watchlist-group .ops-profile-card{margin:0}
+.ops-watchlist-group .ops-profile-card.is-sweep-success{background:rgba(42,157,83,.12);border-color:rgba(42,157,83,.42)}
+.ops-watchlist-group .ops-profile-card.is-sweep-error{background:rgba(205,55,55,.11);border-color:rgba(205,55,55,.4)}
 
 .heading-actions .pipeline-default-schedule-toggle{
   flex:0 0 auto;

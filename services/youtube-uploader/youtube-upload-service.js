@@ -394,7 +394,8 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
   let lastError = null;
   for (const url of [sourceUrl, fallbackSourceUrl].filter(Boolean)) {
     try {
-      const next = await tryDownload(url);
+      const downloaded = await tryDownload(url);
+      const next = fitYoutubeGridJpeg(downloaded);
       if (next.body.length > 2097152) {
         lastError = new Error(`Thumbnail exceeds 2 MB (${next.body.length} bytes)`);
         continue;
@@ -406,7 +407,6 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
     }
   }
   if (!asset) throw lastError || new Error("Thumbnail download failed");
-  asset = fitYoutubeGridJpeg(asset);
   const url = `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`;
   const response = await fetch(url, {
     method: "POST",
