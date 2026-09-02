@@ -563,6 +563,24 @@
       if (button) button.disabled = false;
     }
   });
+  $("operationsCompressAllOversized")?.addEventListener("click", async () => {
+    const button = $("operationsCompressAllOversized");
+    try {
+      if (button) button.disabled = true;
+      setOperationsMessage("Starting compression for oversized intake folder videos…");
+      const result = await api("/api/operations/compress", {
+        method: "POST",
+        body: JSON.stringify({ compress_all: true }),
+        timeoutMs: 180000,
+      });
+      setOperationsMessage(result.message || "Compression started for the intake folder.");
+      loadOperations();
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not start intake-folder compression.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
   $("operationsRunIntake")?.addEventListener("click", async () => {
     const button = $("operationsRunIntake");
     const clientStartedAt = new Date().toISOString();
@@ -11538,15 +11556,24 @@
 
   function renderOperationsOversized(records, canCompress) {
     const target = $("operationsOversizedList");
+    const compressAll = $("operationsCompressAllOversized");
+    const intakeCount = records.filter((record) => record.source === "intake_folder").length;
+    if (compressAll) {
+      compressAll.hidden = !(canCompress && intakeCount > 0);
+      compressAll.textContent = intakeCount === 1
+        ? "Compress intake folder video"
+        : `Compress all in intake folder (${intakeCount})`;
+    }
     if (!target) return;
     if (!records.length) {
       target.innerHTML = '<div class="empty">No oversized Drive videos are waiting.</div>';
       return;
     }
-    target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Action</th></tr></thead><tbody>${records.map((record) => `
+    target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Location</th><th>Action</th></tr></thead><tbody>${records.map((record) => `
       <tr>
         <td><div class="title-cell">${value(record.name)}</div>${record.google_drive_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.google_drive_url)}">Open in Drive</a>` : ""}</td>
         <td>${value(record.file_size_mb)} MB</td>
+        <td>${record.source === "intake_folder" ? "Ingestion folder" : "Asset library"}</td>
         <td>${canCompress ? `<button type="button" class="secondary-button" data-ops-compress="${escapeHtml(record.google_drive_file_id)}">Compress</button>` : "Admin only"}</td>
       </tr>
     `).join("")}</tbody></table>`;

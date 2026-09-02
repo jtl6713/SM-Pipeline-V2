@@ -552,7 +552,7 @@ export default {
         requirePermission(authorization, "tenant_admin");
         if (request.method === "GET") return getStudioLibraryIntakeStatus(request, env, url);
         assertWriteRequest(request, env);
-        return pulseStudioLibraryIntake(request, env, authorization);
+        return pulseStudioLibraryIntake(request, env, authorization, ctx);
       }
 
       if (isOperationsAudioLeadingSilenceRoute) {
@@ -25102,7 +25102,40 @@ async function studioUpsertSetting(env, name, value, notes) {
   return created?.records?.[0] || null;
 }
 
-async function listOversizedMedia(env) {
+function mapOversizedIntakeDriveFile(row) {
+  const fileId = String(row?.id || "").trim();
+  if (!fileId) return null;
+  const sizeBytes = Number(row?.size);
+  const fileSizeMb = Number.isFinite(sizeBytes) && sizeBytes > 0
+    ? Math.round((sizeBytes / 1048576) * 100) / 100
+    : null;
+  return {
+    id: null,
+    name: String(row?.name || fileId).trim() || fileId,
+    file_size_mb: fileSizeMb,
+    mime_type: "video/*",
+    google_drive_file_id: fileId,
+    google_drive_url: `https://drive.google.com/file/d/${fileId}/view`,
+    source: "intake_folder",
+  };
+}
+
+async function listOversizedIntakeVideos(env) {
+  const backend = pipelineStageBackend(env, "A1S");
+  if (backend.mode !== "python" || !backend.runnerUrl) return [];
+  try {
+    const { response, payload } = await item4PulsePipelineStage(env, "a1s", { extra: { dry_run: true } }, "A1S");
+    if (!response.ok) return [];
+    const run = payload?.details?.run || {};
+    const eligible = Array.isArray(run.eligible) ? run.eligible : [];
+    return eligible.map(mapOversizedIntakeDriveFile).filter(Boolean);
+  } catch (error) {
+    console.error("listOversizedIntakeVideos failed", error);
+    return [];
+  }
+}
+
+async function listOversizedMediaFromAirtable(env) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 50,
     filterFormula: `AND({File_Size_MB}>95.36,FIND("_compressed",{Asset Name}&"")=0)`,
@@ -25114,7 +25147,23 @@ async function listOversizedMedia(env) {
     mime_type: f(record, "MIME_Type"),
     google_drive_file_id: googleDriveFileId(record),
     google_drive_url: f(record, "Google Drive URL"),
+    source: "airtable",
   })).filter((row) => row.google_drive_file_id);
+}
+
+async function listOversizedMedia(env) {
+  const [airtableRows, intakeRows] = await Promise.all([
+    listOversizedMediaFromAirtable(env).catch(() => []),
+    listOversizedIntakeVideos(env).catch(() => []),
+  ]);
+  const byDriveId = new Map();
+  for (const row of intakeRows) {
+    byDriveId.set(row.google_drive_file_id, row);
+  }
+  for (const row of airtableRows) {
+    byDriveId.set(row.google_drive_file_id, row);
+  }
+  return [...byDriveId.values()].sort((a, b) => (Number(b.file_size_mb) || 0) - (Number(a.file_size_mb) || 0));
 }
 
 async function getStudioOperations(request, env, authorization) {
@@ -26380,12 +26429,9 @@ async function markStudioOutputPublished(request, env, url, authorization) {
   return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
 }
 
-async function pulseA1SForDriveFile(request, env, authorization, ctx) {
-  let payload;
-  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
-  const driveFileId = String(payload?.drive_file_id || "").trim();
-  if (!driveFileId) throw new HttpError(400, "drive_file_id is required");
-  const data = { drive_file_id: driveFileId };
+async function pulseA1SCompression(env, { driveFileId = null, ctx } = {}) {
+  const normalizedId = String(driveFileId || "").trim();
+  const data = normalizedId ? { drive_file_id: normalizedId } : {};
   const python = pipelineStageBackend(env, "A1S");
   const task = (async () => {
     if (python.mode === "python") {
@@ -26394,10 +26440,12 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
       } catch (error) {
         console.error("A1S python pulse failed", error);
       }
-      try {
-        await item4PulsePipelineStage(env, "a1m", { extra: data }, "A1S");
-      } catch (error) {
-        console.error("A1M python pulse failed", error);
+      if (normalizedId) {
+        try {
+          await item4PulsePipelineStage(env, "a1m", { extra: data }, "A1S");
+        } catch (error) {
+          console.error("A1M python pulse failed", error);
+        }
       }
       return;
     }
@@ -26406,20 +26454,39 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     } catch (error) {
       console.error("A1S on-demand pulse failed", error);
     }
-    try {
-      await phase6PulseOnDemandScenario(env, STUDIO_A1M_SCENARIO_ID, { waitMs: 20000, data });
-    } catch (error) {
-      console.error("A1M on-demand pulse failed", error);
+    if (normalizedId) {
+      try {
+        await phase6PulseOnDemandScenario(env, STUDIO_A1M_SCENARIO_ID, { waitMs: 20000, data });
+      } catch (error) {
+        console.error("A1M on-demand pulse failed", error);
+      }
     }
   })();
-  if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
+  if (ctx?.waitUntil) ctx.waitUntil(task);
+  else await task;
+  return { driveFileId: normalizedId || null, backend: python.mode };
+}
+
+async function pulseA1SForDriveFile(request, env, authorization, ctx) {
+  void authorization;
+  let payload;
+  try { payload = await request.json(); } catch { payload = {}; }
+  const driveFileId = String(payload?.drive_file_id || "").trim();
+  const compressAll = Boolean(payload?.compress_all);
+  if (!driveFileId && !compressAll) {
+    throw new HttpError(400, "drive_file_id is required unless compress_all is true");
+  }
+  const pulse = await pulseA1SCompression(env, { driveFileId: driveFileId || null, ctx });
   return respond(request, env, {
     ok: true,
-    triggered: python.mode === "python" ? "a1s-python" : "on-demand-run",
-    backend: python.mode,
-    drive_file_id: driveFileId,
-    scenarios: ["A1S", "A1M"],
-    message: "A1S compress and A1M duration probe were pulsed because this file is over 100 MB.",
+    triggered: pulse.backend === "python" ? "a1s-python" : "on-demand-run",
+    backend: pulse.backend,
+    drive_file_id: pulse.driveFileId,
+    compress_all: compressAll && !pulse.driveFileId,
+    scenarios: pulse.driveFileId ? ["A1S", "A1M"] : ["A1S"],
+    message: pulse.driveFileId
+      ? "A1S compress and A1M duration probe were pulsed because this file is over 100 MB."
+      : "A1S scanned the ingestion folder and started compression for eligible oversized videos.",
   }, 202);
 }
 
@@ -26497,7 +26564,7 @@ async function pulseAudioLeadingSilence(request, env) {
   });
 }
 
-async function pulseStudioLibraryIntake(request, env, authorization) {
+async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
   void authorization;
   const startedAt = new Date().toISOString();
   const { response, payload } = await item4PulsePipelineStage(env, "a2", {
@@ -26508,12 +26575,22 @@ async function pulseStudioLibraryIntake(request, env, authorization) {
   }
   const run = payload?.details?.run || {};
   const filesFound = Boolean(run.files_found);
+  const intakenCount = Number(run.intaken_count || 0);
+  const skippedOversizeCount = Number(run.skipped_oversize_count || 0);
+  let compressionTriggered = false;
+  if (skippedOversizeCount > 0) {
+    compressionTriggered = true;
+    await pulseA1SCompression(env, { ctx });
+  }
   const knownA2 = {
     id: "python-a2",
     timestamp: startedAt,
-    operations: filesFound ? 20 : 2,
+    operations: filesFound ? (intakenCount > 0 ? 20 : (skippedOversizeCount > 0 ? 6 : 2)) : 2,
     state: "success",
     status_code: 1,
+    intaken_count: intakenCount,
+    skipped_oversize_count: skippedOversizeCount,
+    compression_triggered: compressionTriggered,
   };
   const status = await buildLibraryIntakeStatus(env, startedAt, knownA2);
   return respond(request, env, {
@@ -26522,6 +26599,8 @@ async function pulseStudioLibraryIntake(request, env, authorization) {
     scenario_id: STUDIO_A2_SCENARIO_ID,
     daisy_chain: ["A2", "A2B", "A3", "A4"],
     hook_response: String(payload?.message || "python-a2").slice(0, 200),
+    skipped_oversize_count: skippedOversizeCount,
+    compression_triggered: compressionTriggered,
     ...status,
     message: status.summary,
   }, status.complete ? 200 : 202);
@@ -26649,13 +26728,36 @@ function firstRunSince(runs, startedAt) {
 function describeA2Run(run) {
   if (!run) return { files_found: null, result: "waiting", detail: "Starting A2…" };
   const python = String(run.id || "").startsWith("python");
+  const skippedOversize = Number(run.skipped_oversize_count || 0);
+  const intakenCount = Number(run.intaken_count || 0);
   if (run.state === "error") {
     return { files_found: null, result: "error", detail: python ? "A2 failed." : "A2 failed. Check Make for the error." };
   }
   if (run.operations <= STUDIO_A2_EMPTY_MAX_OPERATIONS) {
+    if (skippedOversize > 0) {
+      const compressNote = run.compression_triggered ? " Compression started." : "";
+      return {
+        files_found: true,
+        result: "oversize_only",
+        detail: `${skippedOversize} oversized video${skippedOversize === 1 ? "" : "s"} skipped intake.${compressNote}`,
+        skipped_oversize_count: skippedOversize,
+      };
+    }
     return { files_found: false, result: "empty", detail: "A2 completed with no assets to process" };
   }
-  if (python) return { files_found: true, result: "processed", detail: "A2 found files to intake." };
+  if (skippedOversize > 0 && intakenCount === 0) {
+    const compressNote = run.compression_triggered ? " Compression started." : "";
+    return {
+      files_found: true,
+      result: "oversize_only",
+      detail: `${skippedOversize} oversized video${skippedOversize === 1 ? "" : "s"} sent to compression.${compressNote}`,
+      skipped_oversize_count: skippedOversize,
+    };
+  }
+  if (python) {
+    const oversizeNote = skippedOversize > 0 ? ` ${skippedOversize} oversized skipped.` : "";
+    return { files_found: true, result: "processed", detail: `A2 intook ${intakenCount || "new"} file(s).${oversizeNote}` };
+  }
   return { files_found: true, result: "processed", detail: `A2 found files to intake (${run.operations} Make operations).` };
 }
 
@@ -26694,11 +26796,13 @@ async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const percent = empty || (complete && !failed) ? 100 : failed ? 40 : a2Result.files_found ? 55 : 12;
   const summary = empty
     ? "A2 completed with no assets to process"
-    : failed
+    : a2Result.result === "oversize_only"
       ? a2Result.detail
-      : complete
-        ? "Intake finished. Downstream classification and reconciliation ran."
-        : a2Result.detail;
+      : failed
+        ? a2Result.detail
+        : complete
+          ? "Intake finished. Downstream classification and reconciliation ran."
+          : a2Result.detail;
   return {
     started_at: startedAt,
     percent,
