@@ -368,7 +368,11 @@ def source_package(
         merged = {**master, **source}
         video = asset_is_video(merged)
         variant = pick_variant(source, ratio)
-        url = str((variant or {}).get("preview_url") or "").strip() or playable_url(merged)
+        url = (
+            playable_url(merged) or str((variant or {}).get("preview_url") or "").strip()
+            if video
+            else str((variant or {}).get("preview_url") or "").strip() or playable_url(merged)
+        )
         media_id = str((variant or {}).get("media_asset_record_id") or merged.get("media_asset_record_id") or "").strip()
         if not url or not media_id.startswith("rec"):
             omitted.append(str(source.get("id") or source.get("name") or "unknown"))
@@ -449,6 +453,7 @@ def source_package(
             "motionStyle": clip["motionStyle"],
             "mediaKind": clip.get("media_kind") or "photo",
             "media_kind": clip.get("media_kind") or "photo",
+            "googleDriveFileId": clip.get("google_drive_file_id") or None,
             "inSeconds": clip.get("in_seconds") or 0,
             "startFromSeconds": clip.get("startFromSeconds") or 0,
             "overlay": clip.get("overlay") or None,

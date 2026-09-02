@@ -6,7 +6,7 @@ from studio_produce.constants import STEP_LABELS, STEP_PERCENT
 from studio_produce.context import outputs_formula
 from studio_produce.job import derive_route, finished_origin_kind, is_finished_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
-from studio_produce.media import asset_is_video
+from studio_produce.media import asset_is_video, playable_url
 from studio_produce.queue import rebuild_variant_manifest
 from studio_produce.stamp import assign_clip_frames, finished_source_package, is_native_photo, source_package, stamp_fields
 from studio_produce.steps import pick_resume_step, thumbnail_required, voiceover_required
@@ -324,6 +324,7 @@ def test_mixed_stamp_uses_video_trim_and_photo_floor():
                     "duration_seconds": 6,
                     "in_seconds": 1,
                     "out_seconds": 5,
+                    "google_drive_file_id": "video-drive-id",
                 },
             ]),
             "Studio_Variant_Manifest_JSON": json.dumps({
@@ -371,6 +372,9 @@ def test_mixed_stamp_uses_video_trim_and_photo_floor():
     video = package["clips"][1]
     assert video["durationFrames"] == 120
     assert video["startFromSeconds"] == 1
+    assert video["url"] == "https://media.chicagoshining.com/two.mp4"
+    assert video["google_drive_file_id"] == "video-drive-id"
+    assert json.loads(package["render_clip_list_json"])[1]["googleDriveFileId"] == "video-drive-id"
     fields = stamp_fields(package, None)
     assert fields["Composition_ID"] == "ChicagoShiningPhotoSequence"
     assert fields["Render_Status"] == "Ready for Render"
@@ -398,6 +402,15 @@ def test_asset_is_video_helper():
     assert asset_is_video({"media_kind": "video"})
     assert asset_is_video({"name": "clip.mov"})
     assert not asset_is_video({"media_kind": "photo", "name": "clip.mov"})
+
+
+def test_video_playable_url_uses_drive_authority_not_poster():
+    assert playable_url({
+        "media_kind": "video",
+        "google_drive_file_id": "video-drive-id",
+        "google_drive_url": "https://drive.google.com/file/d/video-drive-id/view",
+        "preview_url": "https://media.example/video-poster.jpg",
+    }) == "https://drive.google.com/file/d/video-drive-id/view"
 
 
 def test_finished_thumbnail_prompt_requires_colorful_3d():

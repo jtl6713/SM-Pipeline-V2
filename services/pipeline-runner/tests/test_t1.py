@@ -43,6 +43,7 @@ def test_apply_timeline_keeps_video_duration():
     ]
     timed = apply_timeline(clips, {
         "timeline": {
+            "duration_frames": 240,
             "clips": [
                 {"duration_frames": 60, "start_frame": 0},
                 {"duration_frames": 45, "start_frame": 60},
@@ -52,6 +53,27 @@ def test_apply_timeline_keeps_video_duration():
     assert timed[0]["durationFrames"] == 60
     assert timed[1]["durationFrames"] == 180
     assert timed[1]["startFrame"] == 60
+
+
+def test_apply_timeline_scales_photos_around_fixed_video_without_overlap():
+    clips = [
+        {"url": "https://cdn/a.jpg", "durationFrames": 100, "media_kind": "photo"},
+        {"url": "https://cdn/b.mov", "durationFrames": 120, "media_kind": "video"},
+        {"url": "https://cdn/c.jpg", "durationFrames": 100, "media_kind": "photo"},
+    ]
+    timed = apply_timeline(clips, {
+        "timeline": {
+            "duration_frames": 300,
+            "clips": [
+                {"duration_frames": 60, "start_frame": 0},
+                {"duration_frames": 60, "start_frame": 60},
+                {"duration_frames": 180, "start_frame": 120},
+            ],
+        }
+    })
+    assert [clip["durationFrames"] for clip in timed] == [46, 120, 134]
+    assert [clip["startFrame"] for clip in timed] == [0, 46, 166]
+    assert sum(clip["durationFrames"] for clip in timed) == 300
 
 
 def test_music_and_window_helpers():
@@ -66,6 +88,8 @@ def test_music_and_window_helpers():
     assert music_is_enabled(output) is True
     assert analysis_window(output) == (4.0, 20.0)
     assert resolve_rules(output)["rules"][0]["until"] == "voiceover_end"
+    assert resolve_rules(output)["strategy"] == "vo_phased"
+    output["fields"]["Timing_Rules_JSON"] = '{"rules":[{"remaining":true,"every_n_beats":2}]}'
     assert resolve_rules(output)["strategy"] == "vo_phased"
     output["fields"]["Timing_Rules_JSON"] = '{"recycle": true}'
     merged = resolve_rules(output)
