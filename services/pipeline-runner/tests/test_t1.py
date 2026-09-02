@@ -76,6 +76,34 @@ def test_apply_timeline_scales_photos_around_fixed_video_without_overlap():
     assert sum(clip["durationFrames"] for clip in timed) == 300
 
 
+def test_apply_timeline_keeps_mixed_media_boundaries_on_beats():
+    clips = [
+        {"url": "https://cdn/a.jpg", "durationFrames": 60, "media_kind": "photo"},
+        {"url": "https://cdn/b.jpg", "durationFrames": 60, "media_kind": "photo", "transition": {"type": "fade", "durationFrames": 12}},
+        {"url": "https://cdn/c.mov", "durationFrames": 70, "media_kind": "video", "transition": {"type": "fade", "durationFrames": 12}},
+        {"url": "https://cdn/d.jpg", "durationFrames": 60, "media_kind": "photo", "transition": {"type": "fade", "durationFrames": 12}},
+        {"url": "https://cdn/e.jpg", "durationFrames": 60, "media_kind": "photo", "transition": {"type": "fade", "durationFrames": 12}},
+    ]
+    timed = apply_timeline(clips, {
+        "beats_in_window": [2.0, 4.0, 6.0, 8.0],
+        "timeline": {
+            "fps": 30,
+            "duration_frames": 300,
+            "clips": [
+                {"duration_frames": 60, "start_frame": 0},
+                {"duration_frames": 60, "start_frame": 60, "transition": {"type": "fade", "duration_frames": 12}},
+                {"duration_frames": 60, "start_frame": 120, "transition": {"type": "fade", "duration_frames": 12}},
+                {"duration_frames": 60, "start_frame": 180, "transition": {"type": "fade", "duration_frames": 2}},
+                {"duration_frames": 60, "start_frame": 240, "transition": {"type": "fade", "duration_frames": 2}},
+            ],
+        },
+    })
+    assert [clip["startFrame"] for clip in timed] == [0, 60, 120, 190, 240]
+    assert timed[2]["durationFrames"] == 70
+    assert timed[3]["transition"]["durationFrames"] == 2
+    assert sum(clip["durationFrames"] for clip in timed) == 300
+
+
 def test_music_and_window_helpers():
     output = {
         "fields": {
