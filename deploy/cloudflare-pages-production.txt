@@ -333,3 +333,5 @@ Asset Library Pages deploy: 2026-09-01 - Sidebar Asset Library tab for Drive sti
 Clips-only wizard Pages deploy: 2026-09-01 - Home wizard and Production offer Clips only (video-clips) after naming an idea. UI 0.6.226-clips-only-wizard.
 
 Library mobile picker Pages deploy: 2026-09-01 - Asset Library Add assets opens the phone photo/clip library instead of a hidden file input. UI 0.6.227-library-mobile-picker.
+
+Oversized ingestion Pages deploy: 2026-09-02 - Operations shows ingestion-folder oversized videos, location column, and Compress all in intake folder. UI 0.6.228-oversized-ingestion. Source commit 046676e.
