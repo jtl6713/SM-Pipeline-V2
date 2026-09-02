@@ -34,6 +34,7 @@ class TimelineRequest(BaseModel):
     transition_rules: dict[str, Any] | None = None
     sources: list[str] = Field(default_factory=lambda: ["beats"])
     default_transition: dict[str, Any] | None = None
+    voiceover_end_seconds: float | None = None
     cleanup: bool = True
 
 
@@ -91,6 +92,7 @@ def create_timeline(body: TimelineRequest) -> dict[str, Any]:
             audio_path=str(audio_path),
             music_start_seconds=body.music_start_seconds,
             music_duration_seconds=body.music_duration_seconds,
+            extra={"voiceover_end_seconds": body.voiceover_end_seconds},
         )
         events, source_meta = merge_sources(ctx, body.sources)
         timeline = build_timeline(
@@ -101,6 +103,8 @@ def create_timeline(body: TimelineRequest) -> dict[str, Any]:
             rules=body.transition_rules or DEFAULT_RULES,
             transition=body.default_transition,
             extra_events=events,
+            voiceover_end_seconds=body.voiceover_end_seconds,
+            beat_strengths=analysis.get("beat_strengths"),
         )
         metadata = dict(timeline.get("metadata") or {})
         metadata.update(source_meta)
@@ -111,6 +115,7 @@ def create_timeline(body: TimelineRequest) -> dict[str, Any]:
             "bpm": analysis["bpm"],
             "beats": analysis["beats"],
             "beats_in_window": analysis["beats_in_window"],
+            "beat_strengths": analysis.get("beat_strengths") or [],
             "window": analysis["window"],
             "timeline": timeline,
             "transitions": timeline["transitions"],

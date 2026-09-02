@@ -1,4 +1,4 @@
-from t1.apply import analysis_window, apply_timeline, music_is_enabled, resolve_rules
+from t1.apply import analysis_window, apply_timeline, music_is_enabled, resolve_rules, voiceover_end_seconds
 from t1.formulas import t1_production_formula
 from r4.render_request import attach_timing_plan, timing_blocks_render
 from stages.registry import STAGE_NAMES, is_implemented
@@ -65,9 +65,51 @@ def test_music_and_window_helpers():
     }
     assert music_is_enabled(output) is True
     assert analysis_window(output) == (4.0, 20.0)
-    assert resolve_rules(output)["rules"][0]["every_n_beats"] == 2
+    assert resolve_rules(output)["rules"][0]["until"] == "voiceover_end"
+    assert resolve_rules(output)["strategy"] == "vo_phased"
+    output["fields"]["Timing_Rules_JSON"] = '{"recycle": true}'
+    merged = resolve_rules(output)
+    assert merged["recycle"] is True
+    assert merged["rules"][0]["until"] == "voiceover_end"
     output["fields"]["Studio_Effective_Background_Music_Mode"] = "No"
     assert music_is_enabled(output) is False
+
+
+def test_analysis_window_extends_for_voiceover():
+    output = {
+        "fields": {
+            "Studio_Effective_Video_Duration_Seconds": 12,
+            "Studio_Effective_Voiceover_Duration_Seconds": 20,
+            "Voiceover_Tail_Seconds": 2,
+        }
+    }
+    assert voiceover_end_seconds(output) == 20.0
+    assert analysis_window(output) == (0.0, 22.0)
+
+
+def test_apply_timeline_cycles_source_clips():
+    clips = [
+        {"url": "https://cdn/a.jpg", "durationFrames": 30},
+        {"url": "https://cdn/b.jpg", "durationFrames": 30},
+    ]
+    timed = apply_timeline(clips, {
+        "timeline": {
+            "clips": [
+                {"duration_frames": 20, "start_frame": 0},
+                {"duration_frames": 20, "start_frame": 20},
+                {"duration_frames": 20, "start_frame": 40},
+                {"duration_frames": 20, "start_frame": 60},
+            ]
+        }
+    })
+    assert [clip["url"] for clip in timed] == [
+        "https://cdn/a.jpg",
+        "https://cdn/b.jpg",
+        "https://cdn/a.jpg",
+        "https://cdn/b.jpg",
+    ]
+    assert timed[-1]["durationFrames"] == 20
+    assert timed[-1]["startFrame"] == 60
 
 
 def test_r4_waits_for_timing_when_music_pending():

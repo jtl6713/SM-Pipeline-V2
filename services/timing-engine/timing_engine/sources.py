@@ -31,7 +31,14 @@ class VoiceoverSource:
     name = "voiceover"
 
     def analyze(self, ctx: TimingContext) -> list[TimingEvent]:
-        return []
+        raw = (ctx.extra or {}).get("voiceover_end_seconds")
+        try:
+            end = float(raw)
+        except (TypeError, ValueError):
+            return []
+        if end <= 0:
+            return []
+        return [TimingEvent(kind="voiceover_end", time_seconds=round(end, 4), strength=1.0)]
 
 
 class CaptionSource:

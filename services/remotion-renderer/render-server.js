@@ -754,13 +754,15 @@ async function buildRewrittenProps({ body, jobId, job }) {
             (sum, clip) => sum + Math.max(1, Math.round(toFiniteNumber(clip.durationFrames, 1))),
             0
         );
-        if (finalDurationFrames > timedTotal && adjustedClips.length) {
-            const last = adjustedClips[adjustedClips.length - 1];
-            last.durationFrames = Math.max(1, Math.round(toFiniteNumber(last.durationFrames, 1)))
-                + (finalDurationFrames - timedTotal);
-            appendLog(job, `Timing plan present; held last clip to ${finalDurationFrames} frames.`);
+        if (finalDurationFrames > timedTotal) {
+            appendLog(
+                job,
+                `Timing plan present; keeping authored clip durations ` +
+                `(not holding last clip; plan=${timedTotal} final=${finalDurationFrames}).`
+            );
         } else {
             appendLog(job, 'Timing plan present; keeping authored clip durations.');
+            finalDurationFrames = timedTotal;
         }
     }
 

@@ -35,11 +35,12 @@ def build_timeline(
     rules: dict[str, Any] | None,
     transition: dict[str, Any] | None = None,
     extra_events: list[TimingEvent] | None = None,
+    voiceover_end_seconds: float | None = None,
+    beat_strengths: list[float] | None = None,
 ) -> dict[str, Any]:
     count = max(1, int(clip_count))
     fps_i = max(1, int(fps))
     duration = max(0.25, float(duration_seconds))
-    total_frames = max(count, round(duration * fps_i))
     transition_plan = default_transition(transition)
     min_clip = (transition_plan["duration_frames"] + 1) / fps_i
     cuts, rule_meta = apply_rules(
@@ -48,7 +49,12 @@ def build_timeline(
         duration,
         rules or DEFAULT_RULES,
         min_clip_seconds=min_clip,
+        voiceover_end_seconds=voiceover_end_seconds,
+        beat_strengths=beat_strengths,
     )
+    planned = int(rule_meta.get("effective_clip_count") or count)
+    count = max(1, planned)
+    total_frames = max(count, round(duration * fps_i))
     boundaries = [0.0, *cuts, duration]
     clip_seconds = [
         max(min_clip, boundaries[index + 1] - boundaries[index])
