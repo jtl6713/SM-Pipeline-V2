@@ -1105,6 +1105,17 @@ input, select, textarea, button {
 .ops-intake-notice{margin:0 20px 12px;padding:10px 12px;border-radius:10px;font-size:.86rem;font-weight:700}
 .ops-intake-notice[data-tone="action"]{color:#5a4300;background:var(--amber-soft);border:1px solid #ead8a0}
 .ops-intake-notice[data-tone="ok"]{color:var(--teal-dark);background:var(--teal-soft);border:1px solid #b7d8d3}
+.ops-compression-status{margin:16px 20px 0;padding:18px 20px;border-radius:14px;border:1px solid var(--line);display:grid;gap:6px}
+.ops-compression-status[hidden]{display:none}
+.ops-compression-status[data-tone="compressing"]{background:var(--blue-soft);border-color:#b7c9ef;color:var(--blue)}
+.ops-compression-status[data-tone="waiting"]{background:var(--amber-soft);border-color:#ead8a0;color:#5a4300}
+.ops-compression-status[data-tone="failed"]{background:var(--red-soft);border-color:#f1b5af;color:var(--red)}
+.ops-compression-status[data-tone="ok"]{background:var(--teal-soft);border-color:#b7d8d3;color:var(--teal-dark)}
+.ops-compression-kicker{margin:0;font-size:.72rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
+.ops-compression-headline{margin:0;font-size:1.55rem;line-height:1.2;font-weight:850;color:inherit}
+.ops-compression-detail{margin:0;font-size:.88rem;font-weight:650;opacity:.88}
+@keyframes ops-compress-pulse{0%,100%{box-shadow:0 0 0 0 rgba(23,92,211,.18)}50%{box-shadow:0 0 0 8px rgba(23,92,211,0)}}
+.ops-compression-status[data-tone="compressing"]{animation:ops-compress-pulse 1.8s ease-in-out infinite}
 .ops-intake-progress{margin:0 20px 16px;display:grid;gap:10px}
 .ops-progress-track{height:10px;border-radius:999px;background:#e7eeee;overflow:hidden}
 .ops-progress-fill{height:100%;width:0;background:var(--teal);transition:width .35s ease}

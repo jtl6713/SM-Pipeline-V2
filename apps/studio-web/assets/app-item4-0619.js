@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.227-library-mobile-picker";
+  const BUILD_ID = "item4-0.6.229-compression-status";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -544,6 +544,74 @@
     intakePollDeadline = Date.now() + 90000;
     intakePollTimer = setInterval(pollIntakeStatus, 2500);
   }
+  let compressionPollTimer = null;
+  let operationsOversizedCache = [];
+  let operationsCanCompress = false;
+  let operationsCompressionJobs = [];
+
+  function stopCompressionPoll() {
+    if (compressionPollTimer) {
+      clearInterval(compressionPollTimer);
+      compressionPollTimer = null;
+    }
+  }
+
+  function startCompressionPoll() {
+    if (compressionPollTimer) return;
+    compressionPollTimer = setInterval(pollCompressionStatus, 12000);
+  }
+
+  function syncCompressionPoll(hasJobs) {
+    if (hasJobs) startCompressionPoll();
+    else stopCompressionPoll();
+  }
+
+  function renderCompressionStatus(jobs, waitingCount) {
+    const banner = $("operationsCompressionStatus");
+    operationsCompressionJobs = Array.isArray(jobs) ? jobs : [];
+    if (!banner) return;
+    const active = operationsCompressionJobs[0];
+    const extras = Math.max(0, operationsCompressionJobs.length - 1);
+    const waiting = Math.max(0, Number(waitingCount) || 0);
+    if (active) {
+      banner.hidden = false;
+      banner.dataset.tone = active.tone || "compressing";
+      const waitingNote = waiting > operationsCompressionJobs.length
+        ? `${waiting - operationsCompressionJobs.length} more waiting.`
+        : extras ? `${extras} more compressing.` : "";
+      banner.innerHTML = `<p class="ops-compression-kicker">Compression in progress</p>
+        <p class="ops-compression-headline">${escapeHtml(active.headline || `Compressing ${active.name || "video"}`)}</p>
+        <p class="ops-compression-detail">${escapeHtml([active.notes, waitingNote].filter(Boolean).join(" "))}</p>`;
+      return;
+    }
+    if (waiting) {
+      banner.hidden = false;
+      banner.dataset.tone = "waiting";
+      banner.innerHTML = `<p class="ops-compression-kicker">Waiting to compress</p>
+        <p class="ops-compression-headline">${waiting === 1 ? "1 oversized video is waiting" : `${waiting} oversized videos are waiting`}</p>
+        <p class="ops-compression-detail">Start compression from the list. One file runs at a time; this banner updates as the current file changes.</p>`;
+      return;
+    }
+    banner.hidden = true;
+    banner.removeAttribute("data-tone");
+    banner.innerHTML = "";
+  }
+
+  async function pollCompressionStatus() {
+    const operationsPage = $("page-operations");
+    if (!operationsPage || !operationsPage.classList.contains("active")) {
+      stopCompressionPoll();
+      return;
+    }
+    try {
+      const data = await api("/api/operations/compression");
+      const jobs = data.jobs || [];
+      renderOperationsOversized(operationsOversizedCache, operationsCanCompress, jobs);
+      syncCompressionPoll(jobs.length > 0 || operationsOversizedCache.length > 0);
+    } catch {
+      /* keep the last banner until the next refresh */
+    }
+  }
   $("operationsCapAudioSilence")?.addEventListener("click", async () => {
     const button = $("operationsCapAudioSilence");
     try {
@@ -574,6 +642,12 @@
         timeoutMs: 180000,
       });
       setOperationsMessage(result.message || "Compression started for the intake folder.");
+      renderCompressionStatus([{
+        headline: "Starting the next oversized video",
+        tone: "waiting",
+        notes: "Checking the intake folder…",
+      }], operationsOversizedCache.length);
+      startCompressionPoll();
       loadOperations();
     } catch (error) {
       setOperationsMessage(error.message || "Could not start intake-folder compression.", "error-text");
@@ -11109,32 +11183,76 @@
     }
   }
 
+  const LIBRARY_PICKER_FLAG = "studioLibraryPicker";
+  const LIBRARY_PHONE_RE = /iPhone|iPad|iPod|Android/i;
+
+  function libraryPickerIsPhone() {
+    return LIBRARY_PHONE_RE.test(navigator.userAgent || "");
+  }
+
+  function libraryArmPicker() {
+    try { sessionStorage.setItem(LIBRARY_PICKER_FLAG, String(Date.now())); } catch { /* ignore */ }
+  }
+
+  function libraryDisarmPicker() {
+    try { sessionStorage.removeItem(LIBRARY_PICKER_FLAG); } catch { /* ignore */ }
+  }
+
+  function libraryPickerWasAbandoned() {
+    try {
+      const raw = sessionStorage.getItem(LIBRARY_PICKER_FLAG);
+      const started = Number(raw || 0);
+      return Boolean(raw) && Number.isFinite(started) && Date.now() - started < 15 * 60 * 1000;
+    } catch {
+      return false;
+    }
+  }
+
   async function uploadLibraryFiles(fileList) {
+    libraryDisarmPicker();
     const files = Array.from(fileList || []).filter((file) => {
       const name = String(file.name || "");
       const type = String(file.type || "");
       return /image\//i.test(type) || /video\//i.test(type) || /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/i.test(name);
     });
     if (!files.length) {
-      setLibraryUploadMessage("Choose one or more photos or video clips.", "error-text");
+      setLibraryUploadMessage(libraryPickerIsPhone()
+        ? "Photo Library closed before Studio received a clip. Add one clip at a time and keep this tab open."
+        : "Choose one or more photos or video clips.", "error-text");
       return;
     }
     const zone = $("libraryUploadZone");
     const inputs = libraryFileInputs();
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file, file.name));
     const location = String($("libraryLocation")?.value || "").trim();
-    if (location) form.append("location", location);
     if (zone) zone.dataset.busy = "true";
     inputs.forEach((input) => { input.disabled = true; });
-    setLibraryUploadMessage(files.length === 1 ? "Adding asset…" : `Adding ${files.length} assets…`, "");
+    const errors = [];
+    let uploaded = 0;
     try {
-      const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        setLibraryUploadMessage(files.length === 1
+          ? `Adding ${file.name}…`
+          : `Adding ${index + 1} of ${files.length}: ${file.name}…`, "");
+        const form = new FormData();
+        form.append("files", file, file.name);
+        if (location) form.append("location", location);
+        try {
+          await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
+          uploaded += 1;
+          await loadLibrary();
+        } catch (error) {
+          errors.push(`${file.name}: ${error.message || "upload failed"}`);
+        }
+      }
       inputs.forEach((input) => { input.value = ""; });
-      setLibraryUploadMessage(result.message || "Asset added to the library.", "success");
-      await loadLibrary();
-    } catch (error) {
-      setLibraryUploadMessage(error.message, "error-text");
+      if (uploaded && !errors.length) {
+        setLibraryUploadMessage(uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`, "success");
+      } else if (uploaded) {
+        setLibraryUploadMessage(`${uploaded} added. ${errors.join(" ")}`, "error-text");
+      } else {
+        setLibraryUploadMessage(errors.join(" ") || "Could not add those assets.", "error-text");
+      }
     } finally {
       if (zone) delete zone.dataset.busy;
       inputs.forEach((input) => { input.disabled = false; });
@@ -11152,6 +11270,16 @@
     const inputs = libraryFileInputs();
     if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
+    const phone = libraryPickerIsPhone();
+    inputs.forEach((input) => { input.multiple = !phone; });
+    const hint = $("libraryUploadHint");
+    if (hint && phone) {
+      hint.textContent = "On iPhone add one clip at a time and keep this tab open. JPG, PNG, WEBP, HEIC, MP4, MOV · 25 MB photos · 100 MB clips";
+    }
+    if (libraryPickerWasAbandoned()) {
+      libraryDisarmPicker();
+      setLibraryUploadMessage("Photo Library closed before Studio received the clips. On iPhone add one clip at a time and keep this tab open.", "error-text");
+    }
     zone?.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -11170,6 +11298,7 @@
       uploadLibraryFiles(event.dataTransfer?.files);
     });
     inputs.forEach((input) => {
+      input.addEventListener("click", libraryArmPicker);
       input.addEventListener("change", () => uploadLibraryFiles(input.files));
     });
     let searchTimer = 0;
@@ -11554,10 +11683,21 @@
     });
   }
 
-  function renderOperationsOversized(records, canCompress) {
+  function renderOperationsOversized(records, canCompress, jobs) {
     const target = $("operationsOversizedList");
     const compressAll = $("operationsCompressAllOversized");
-    const intakeCount = records.filter((record) => record.source === "intake_folder").length;
+    operationsCanCompress = Boolean(canCompress);
+    const incoming = Array.isArray(records) ? records : [];
+    const jobsById = new Map((Array.isArray(jobs) ? jobs : incoming.map((row) => row.compression).filter(Boolean))
+      .map((job) => [job.google_drive_file_id, job]));
+    operationsOversizedCache = incoming.map((row) => ({
+      ...row,
+      compression: jobsById.get(row.google_drive_file_id) || null,
+    }));
+    const activeJobs = [...jobsById.values()];
+    renderCompressionStatus(activeJobs, operationsOversizedCache.length);
+    syncCompressionPoll(activeJobs.length > 0 || operationsOversizedCache.length > 0);
+    const intakeCount = operationsOversizedCache.filter((record) => record.source === "intake_folder").length;
     if (compressAll) {
       compressAll.hidden = !(canCompress && intakeCount > 0);
       compressAll.textContent = intakeCount === 1
@@ -11565,27 +11705,48 @@
         : `Compress all in intake folder (${intakeCount})`;
     }
     if (!target) return;
-    if (!records.length) {
+    if (!operationsOversizedCache.length) {
       target.innerHTML = '<div class="empty">No oversized Drive videos are waiting.</div>';
       return;
     }
-    target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Location</th><th>Action</th></tr></thead><tbody>${records.map((record) => `
+    target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Location</th><th>Status</th><th>Action</th></tr></thead><tbody>${operationsOversizedCache.map((record) => {
+      const job = record.compression || jobsById.get(record.google_drive_file_id);
+      const status = job
+        ? `<span class="badge rendering">${escapeHtml(job.label || "Compressing")}</span>`
+        : `<span class="badge attention">Waiting</span>`;
+      const action = !canCompress
+        ? "Admin only"
+        : job
+          ? `<button type="button" class="secondary-button" disabled>In progress</button>`
+          : `<button type="button" class="secondary-button" data-ops-compress="${escapeHtml(record.google_drive_file_id)}" data-ops-compress-name="${escapeHtml(record.name || "")}">Compress</button>`;
+      return `
       <tr>
         <td><div class="title-cell">${value(record.name)}</div>${record.google_drive_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.google_drive_url)}">Open in Drive</a>` : ""}</td>
         <td>${value(record.file_size_mb)} MB</td>
         <td>${record.source === "intake_folder" ? "Ingestion folder" : "Asset library"}</td>
-        <td>${canCompress ? `<button type="button" class="secondary-button" data-ops-compress="${escapeHtml(record.google_drive_file_id)}">Compress</button>` : "Admin only"}</td>
-      </tr>
-    `).join("")}</tbody></table>`;
+        <td>${status}</td>
+        <td>${action}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
     target.querySelectorAll("[data-ops-compress]").forEach((button) => {
       button.addEventListener("click", async () => {
         button.disabled = true;
+        const fileName = button.dataset.opsCompressName || "video";
+        renderCompressionStatus([{
+          headline: `Starting ${fileName}`,
+          tone: "waiting",
+          notes: "Sending this file to A1S…",
+          name: fileName,
+          google_drive_file_id: button.dataset.opsCompress,
+        }], operationsOversizedCache.length);
+        startCompressionPoll();
         try {
           await api("/api/operations/compress", {
             method: "POST",
             body: JSON.stringify({ drive_file_id: button.dataset.opsCompress }),
           });
-          setOperationsMessage("Compression pulse started for that Drive file.");
+          setOperationsMessage(`Started compression for ${fileName}.`);
+          pollCompressionStatus();
         } catch (error) {
           setOperationsMessage(error.message || "Could not start compression.", "error-text");
           button.disabled = false;
@@ -11644,7 +11805,7 @@
       }
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
       renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");
-      renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles));
+      renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles), data.compression_jobs || []);
       renderLibraryIntakeNotice(data.library_intake || {});
       const run = $("operationsRunDailyIdeas");
       if (run) run.hidden = !data.can_edit_profiles;
@@ -11755,7 +11916,10 @@
   }
 
   function loadPage(page) {
-    if (page !== "operations") stopIntakePoll();
+    if (page !== "operations") {
+      stopIntakePoll();
+      stopCompressionPoll();
+    }
     if (page === "home" || page === "dashboard") return loadDashboard();
     if (page === "ideas") return loadIdeas();
     if (page === "content") return loadContent();

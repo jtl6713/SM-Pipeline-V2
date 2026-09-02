@@ -138,8 +138,19 @@ def process_request(
     now = iso_ms()
 
     if status in {"queued", "downloading", "compressing"} and attempt_n < A1P_MAX_ATTEMPTS:
-        value = f"processing|{job_id}|{attempt_n}|{source_file_id}|{permission_id}|{source_name}|{source_size}|{now}"
-        _write_state(client, state_record_id, active=True, value=value, notes="Local compression is still processing. Poller will retry in 60 seconds.")
+        phase_label = {
+            "queued": "Queued",
+            "downloading": "Downloading",
+            "compressing": "Compressing",
+        }.get(status, "Compressing")
+        value = f"{status}|{job_id}|{attempt_n}|{source_file_id}|{permission_id}|{source_name}|{source_size}|{now}"
+        _write_state(
+            client,
+            state_record_id,
+            active=True,
+            value=value,
+            notes=f"{phase_label} {source_name or 'video'}. Poller will retry in 60 seconds.",
+        )
         next_payload = {
             "job_id": job_id,
             "status_url": status_url,

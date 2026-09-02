@@ -48,6 +48,16 @@ def _active_job(client: AirtableClient, file_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def _any_active_a1_job(client: AirtableClient) -> bool:
+    formula = "AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)"
+    rows = client.list_records(PIPELINE_SETTINGS_TABLE, formula=formula, max_records=1)
+    return bool(rows)
+
+
+def _smallest_candidate(files: list[dict[str, Any]]) -> dict[str, Any]:
+    return min(files, key=lambda item: (parse_bytes(item.get("size")), str(item.get("name") or "")))
+
+
 def _resolve_files(drive: GoogleDriveClient, drive_file_id: str | None) -> list[dict[str, Any]]:
     if drive_file_id:
         return [drive.get_file(drive_file_id, fields=FILE_FIELDS)]
@@ -115,7 +125,13 @@ def _compress_one(
         status_url = str(job.get("status_url") or "")
         now = iso_ms()
         value = f"processing_local|{job_id}|0|{file_id}||{name}|{size}|{now}"
-        _write_state(client, state_record_id, active=True, value=value, notes=A1S_JOB_NOTES)
+        _write_state(
+            client,
+            state_record_id,
+            active=True,
+            value=value,
+            notes=f"Starting compression for {name or 'video'}.",
+        )
         schedule_next(
             {
                 "job_id": job_id,
@@ -196,6 +212,18 @@ def process_request(
         return {"processed": False, "dry_run": True, **preview}
     if not candidates:
         return {"processed": False, "reason": "no_eligible_files", "started_count": 0, **preview}
+    if _any_active_a1_job(client):
+        return {
+            "processed": False,
+            "reason": "active_compression_in_progress",
+            "started_count": 0,
+            "queued_count": len(candidates),
+            **preview,
+        }
+    targeted = bool((drive_file_id or "").strip())
+    if not targeted:
+        candidates = [_smallest_candidate(candidates)]
+        preview["serialized"] = True
 
     started: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []

@@ -59,6 +59,7 @@ export default {
       const isOperationsOutputPublishedRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/published$/.test(url.pathname);
       const isOperationsOutputPublishKickRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/publish-kick$/.test(url.pathname);
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
+      const isOperationsCompressionStatusRoute = url.pathname === "/api/operations/compression";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
@@ -203,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.217-asset-library",
+          version: "0.10.218-compression-status",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -522,6 +523,11 @@ export default {
         requirePermission(authorization, "publishing_control");
         assertWriteRequest(request, env);
         return kickStudioOutputPublish(request, env, url, authorization, ctx);
+      }
+
+      if (isOperationsCompressionStatusRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        return getStudioCompressionStatus(request, env);
       }
 
       if (isOperationsCompressRoute) {
@@ -25102,6 +25108,92 @@ async function studioUpsertSetting(env, name, value, notes) {
   return created?.records?.[0] || null;
 }
 
+function parseA1JobValue(value) {
+  const parts = String(value || "").split("|");
+  const phase = String(parts[0] || "").trim().toLowerCase();
+  const looksName = (part) => /\.(mov|mp4|m4v|webm)$/i.test(part || "");
+  let fileId = "";
+  let name = "";
+  if (parts.length >= 8) {
+    fileId = String(parts[3] || "").trim();
+    name = String(parts[5] || "").trim();
+  } else {
+    fileId = String(parts[3] || "").trim();
+    name = String(parts.find(looksName) || "").trim();
+  }
+  return {
+    phase,
+    file_id: fileId,
+    name,
+    updated_at: String(parts[parts.length - 1] || "").trim(),
+  };
+}
+
+function compressionPhaseLabel(phase) {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (normalized === "queued") return "Queued";
+  if (normalized === "downloading") return "Downloading";
+  if (normalized === "starting" || normalized === "processing_local") return "Starting";
+  if (normalized.startsWith("failed") || normalized === "timeout") return "Failed";
+  if (normalized === "finished") return "Finished";
+  return "Compressing";
+}
+
+function compressionPhaseTone(phase) {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (normalized.startsWith("failed") || normalized === "timeout") return "failed";
+  if (normalized === "queued" || normalized === "starting" || normalized === "processing_local") return "waiting";
+  if (normalized === "finished") return "ok";
+  return "compressing";
+}
+
+function mapA1CompressionJob(record) {
+  const settingName = String(f(record, "Setting_Name") || "").trim();
+  if (!settingName.startsWith("A1_JOB_")) return null;
+  const parsed = parseA1JobValue(f(record, "Setting_Value"));
+  const fileId = parsed.file_id || settingName.slice("A1_JOB_".length);
+  const name = parsed.name || fileId;
+  const phase = parsed.phase || "processing";
+  const label = compressionPhaseLabel(phase);
+  return {
+    id: record.id,
+    google_drive_file_id: fileId,
+    name,
+    phase,
+    label,
+    tone: compressionPhaseTone(phase),
+    headline: name ? `${label} ${name}` : `${label} video`,
+    notes: String(f(record, "Notes") || "").trim() || null,
+    updated_at: parsed.updated_at || f(record, "Last_Modified") || null,
+  };
+}
+
+async function listActiveA1CompressionJobs(env) {
+  const records = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
+    limit: 20,
+    filterFormula: "AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
+  });
+  return records.map(mapA1CompressionJob).filter(Boolean);
+}
+
+function attachCompressionJobs(oversized, jobs) {
+  const byId = new Map((jobs || []).map((job) => [job.google_drive_file_id, job]));
+  return (oversized || []).map((row) => ({
+    ...row,
+    compression: byId.get(row.google_drive_file_id) || null,
+  }));
+}
+
+async function getStudioCompressionStatus(request, env) {
+  const jobs = await listActiveA1CompressionJobs(env).catch(() => []);
+  return respond(request, env, {
+    ok: true,
+    jobs,
+    active_count: jobs.length,
+    headline: jobs[0]?.headline || null,
+  });
+}
+
 function mapOversizedIntakeDriveFile(row) {
   const fileId = String(row?.id || "").trim();
   if (!fileId) return null;
@@ -25170,13 +25262,14 @@ async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
   const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
-  const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification] = await Promise.all([
+  const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
     listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listOversizedMedia(env).catch(() => []),
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
+    listActiveA1CompressionJobs(env).catch(() => []),
   ]);
   const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
   const similarAccounts = await studioEnsureSimilarWatchlist(env).catch(() => []);
@@ -25194,7 +25287,9 @@ async function getStudioOperations(request, env, authorization) {
     ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
     ready_to_publish: readyToPublish.map(mapOperationsOutput),
     recently_published: published.map(mapOperationsOutput),
-    oversized_media: oversized,
+    oversized_media: attachCompressionJobs(oversized, compressionJobs),
+    compression_jobs: compressionJobs,
+    compression_headline: compressionJobs[0]?.headline || null,
     a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
     library_intake: libraryIntake,
     similar_accounts: similarAccounts,

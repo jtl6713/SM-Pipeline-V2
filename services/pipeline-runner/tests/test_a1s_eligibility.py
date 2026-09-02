@@ -81,3 +81,49 @@ def test_a1s_dry_run_and_active_job_skip(monkeypatch):
     monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable(jobs=[{"id": "recJOB"}]))
     skipped = process_request(drive_file_id="drive-file", dry_run=True)
     assert skipped["skipped"][0]["reason"] == "active_job"
+
+
+class _TwoFileDrive:
+    def list_files(self, **_kwargs):
+        return [
+            _file(id="big", name="IMG_BIG.MOV", size="2000000000"),
+            _file(id="small", name="IMG_SMALL.MOV", size="120000000"),
+        ]
+
+
+def test_folder_scan_starts_smallest_only(monkeypatch):
+    import a1s.processor as a1s_processor
+
+    monkeypatch.setattr(a1s_processor, "GoogleDriveClient", _TwoFileDrive)
+    monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable())
+    monkeypatch.setattr(a1s_processor, "pipeline_settings", lambda _client=None: _FakeSettings())
+    monkeypatch.setattr(a1s_processor, "_any_active_a1_job", lambda _client: False)
+    monkeypatch.setattr(a1s_processor, "_create_state", lambda *_args, **_kwargs: "recSTATE")
+    monkeypatch.setattr(
+        a1s_processor,
+        "_compress_one",
+        lambda file, **_kwargs: {
+            "file_id": file["id"],
+            "name": file["name"],
+            "status": "started",
+        },
+    )
+    result = process_request(inline=True)
+    assert result["processed"] is True
+    assert result["serialized"] is True
+    assert result["started_count"] == 1
+    assert result["started"][0]["name"] == "IMG_SMALL.MOV"
+
+
+def test_folder_scan_waits_when_another_job_is_active(monkeypatch):
+    import a1s.processor as a1s_processor
+
+    monkeypatch.setattr(a1s_processor, "GoogleDriveClient", _TwoFileDrive)
+    monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable())
+    monkeypatch.setattr(a1s_processor, "pipeline_settings", lambda _client=None: _FakeSettings())
+    monkeypatch.setattr(a1s_processor, "_any_active_a1_job", lambda _client: True)
+    result = process_request(inline=True)
+    assert result["processed"] is False
+    assert result["reason"] == "active_compression_in_progress"
+    assert result["started_count"] == 0
+    assert result["queued_count"] == 2

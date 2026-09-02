@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.227-library-mobile-picker">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.229-compression-status">
 </head>
 <body>
  <header class="topbar">
@@ -1018,7 +1018,7 @@
  <div class="item4-upload-zone music-upload-zone" id="libraryUploadZone" tabindex="0" role="button" aria-label="Upload photos or video clips">
  <input id="libraryZoneInput" class="native-file-input native-file-input--cover" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple>
  <div class="item4-upload-icon">＋</div>
- <div><strong>Drop photos or clips here or choose files</strong><span>JPG, PNG, WEBP, HEIC, MP4, MOV · up to 8 files · 25 MB photos · 200 MB clips</span></div>
+ <div><strong>Drop photos or clips here or choose files</strong><span id="libraryUploadHint">JPG, PNG, WEBP, HEIC, MP4, MOV · on iPhone add one clip at a time · 25 MB photos · 100 MB clips</span></div>
  <label class="secondary-button native-file-label" id="libraryChooseFiles">Choose files<input id="libraryChooseInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label>
  </div>
  <label class="form-field music-upload-name"><span>Location <em>optional</em></span><input id="libraryLocation" maxlength="120" placeholder="Oak Street Beach"></label>
@@ -1138,6 +1138,7 @@
  <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or asset library. Compress runs A1S; after compression finishes, run Process intake folder again.</p></div>
  <button type="button" class="secondary-button" id="operationsCompressAllOversized" hidden>Compress all in intake folder</button>
  </div>
+ <div id="operationsCompressionStatus" class="ops-compression-status" hidden></div>
  <div id="operationsOversizedList" class="table-wrap"></div>
  </section>
  <section class="panel">
@@ -1528,6 +1529,6 @@
 
  <script src="/assets/config.js?v=0.6.225-instagram-paused"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.227-library-mobile-picker"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.229-compression-status"></script>
 </body>
 </html>
