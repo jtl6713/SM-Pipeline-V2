@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.226-clips-only-wizard";
+  const BUILD_ID = "item4-0.6.227-library-mobile-picker";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11102,47 +11102,44 @@
       return;
     }
     const zone = $("libraryUploadZone");
-    const choose = $("libraryChooseFiles");
+    const inputs = libraryFileInputs();
     const form = new FormData();
     files.forEach((file) => form.append("files", file, file.name));
     const location = String($("libraryLocation")?.value || "").trim();
     if (location) form.append("location", location);
     if (zone) zone.dataset.busy = "true";
-    if (choose) choose.disabled = true;
+    inputs.forEach((input) => { input.disabled = true; });
     setLibraryUploadMessage(files.length === 1 ? "Adding asset…" : `Adding ${files.length} assets…`, "");
     try {
       const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
-      if ($("libraryFileInput")) $("libraryFileInput").value = "";
+      inputs.forEach((input) => { input.value = ""; });
       setLibraryUploadMessage(result.message || "Asset added to the library.", "success");
       await loadLibrary();
     } catch (error) {
       setLibraryUploadMessage(error.message, "error-text");
     } finally {
       if (zone) delete zone.dataset.busy;
-      if (choose) choose.disabled = false;
+      inputs.forEach((input) => { input.disabled = false; });
     }
+  }
+
+  function libraryFileInputs() {
+    return ["libraryFileInput", "libraryZoneInput", "libraryChooseInput"]
+      .map((id) => $(id))
+      .filter(Boolean);
   }
 
   function bindLibraryUpload() {
     const zone = $("libraryUploadZone");
-    const input = $("libraryFileInput");
-    const choose = $("libraryChooseFiles");
-    const addButton = $("libraryAddButton");
-    if (!input || (zone && zone.dataset.bound)) return;
+    const inputs = libraryFileInputs();
+    if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
-    const openPicker = (event) => {
-      event?.preventDefault();
-      event?.stopPropagation();
-      input.click();
-    };
-    addButton?.addEventListener("click", openPicker);
-    choose?.addEventListener("click", openPicker);
-    zone?.addEventListener("click", (event) => {
-      if (event.target === choose || event.target === addButton) return;
-      openPicker(event);
-    });
     zone?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") openPicker(event);
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        $("libraryZoneInput")?.focus();
+        $("libraryZoneInput")?.click();
+      }
     });
     zone?.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -11154,7 +11151,9 @@
       zone.classList.remove("dragging");
       uploadLibraryFiles(event.dataTransfer?.files);
     });
-    input.addEventListener("change", () => uploadLibraryFiles(input.files));
+    inputs.forEach((input) => {
+      input.addEventListener("change", () => uploadLibraryFiles(input.files));
+    });
     let searchTimer = 0;
     $("librarySearch")?.addEventListener("input", () => {
       window.clearTimeout(searchTimer);

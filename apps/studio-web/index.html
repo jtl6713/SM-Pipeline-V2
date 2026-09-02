@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.226-clips-only-wizard">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.227-library-mobile-picker">
 </head>
 <body>
  <header class="topbar">
@@ -1011,15 +1011,15 @@
  </section>
 
  <section id="page-library" class="page">
- <div class="page-heading"><div><span class="eyebrow">Photos and clips</span><h1>Asset library</h1><p>Browse classified Drive stills and Raw Footage, add photos or clips to the catalogue, or delete an unused Studio upload. Production and the wizard attach from this same library.</p></div><div class="heading-actions"><button type="button" class="primary-button" id="libraryAddButton">+ Add assets</button><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow">Photos and clips</span><h1>Asset library</h1><p>Browse classified Drive stills and Raw Footage, add photos or clips to the catalogue, or delete an unused Studio upload. Production and the wizard attach from this same library.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="libraryUploadPanel">
  <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Files go to Google Drive (photos or video folders), register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
  <div class="music-upload-body">
  <div class="item4-upload-zone music-upload-zone" id="libraryUploadZone" tabindex="0" role="button" aria-label="Upload photos or video clips">
- <input id="libraryFileInput" type="file" accept="image/*,.heic,.heif,.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/webm" multiple hidden>
+ <input id="libraryZoneInput" class="native-file-input native-file-input--cover" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple>
  <div class="item4-upload-icon">＋</div>
  <div><strong>Drop photos or clips here or choose files</strong><span>JPG, PNG, WEBP, HEIC, MP4, MOV · up to 8 files · 25 MB photos · 200 MB clips</span></div>
- <button type="button" class="secondary-button" id="libraryChooseFiles">Choose files</button>
+ <label class="secondary-button native-file-label" id="libraryChooseFiles">Choose files<input id="libraryChooseInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label>
  </div>
  <label class="form-field music-upload-name"><span>Location <em>optional</em></span><input id="libraryLocation" maxlength="120" placeholder="Oak Street Beach"></label>
  <div class="library-toolbar">
@@ -1526,6 +1526,6 @@
 
  <script src="/assets/config.js?v=0.6.225-instagram-paused"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.226-clips-only-wizard"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.227-library-mobile-picker"></script>
 </body>
 </html>

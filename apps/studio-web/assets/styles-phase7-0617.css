@@ -2398,3 +2398,38 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   border:1px solid var(--line);
   background:#0c1c33;
 }
+.native-file-label{
+  position:relative;
+  overflow:hidden;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+}
+.heading-actions .native-file-label,
+.item4-upload-zone .native-file-label{
+  z-index:2;
+}
+.native-file-input{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  margin:0;
+  opacity:0;
+  font-size:20px;
+  cursor:pointer;
+}
+.native-file-input--cover{
+  z-index:1;
+}
+#libraryUploadZone{
+  position:relative;
+}
+@media(max-width:760px){
+  .heading-actions .native-file-label,
+  .heading-actions label.primary-button{
+    width:100%;
+    min-height:44px;
+  }
+}

@@ -331,3 +331,5 @@ Facebook clip Reel Pages deploy: 2026-09-01 - Photos-and-clips recommends Facebo
 Asset Library Pages deploy: 2026-09-01 - Sidebar Asset Library tab for Drive stills and Raw Footage. UI 0.6.225-asset-library. Source commit b4da605.
 
 Clips-only wizard Pages deploy: 2026-09-01 - Home wizard and Production offer Clips only (video-clips) after naming an idea. UI 0.6.226-clips-only-wizard.
+
+Library mobile picker Pages deploy: 2026-09-01 - Asset Library Add assets opens the phone photo/clip library instead of a hidden file input. UI 0.6.227-library-mobile-picker.
