@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.223-sweep-status">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.224-analytics-definitions">
 </head>
 <body>
  <header class="topbar">
@@ -1054,6 +1054,22 @@
  <p class="subtle" id="operationsSimilarTimesMeta">Analytics timing loads with Operations.</p>
  <p class="subtle" id="operationsInsightsCaptionMeta">Caption guidance loads with Operations.</p>
  <div id="operationsInsightsOverview" class="insights-overview" hidden></div>
+ <details class="ops-insights-definitions">
+ <summary>What these analytics values mean</summary>
+ <dl>
+ <div><dt>Profile and season</dt><dd>The city profile and seasonal subset currently included in the results.</dd></div>
+ <div><dt>Historical database</dt><dd>The figures come from saved post observations, not a live estimate.</dd></div>
+ <div><dt>Similar posts found</dt><dd>Public posts stored from the selected profile’s researched Instagram and YouTube accounts.</dd></div>
+ <div><dt>Accounts timed</dt><dd>Successful accounts divided by all Instagram and YouTube handles eligible for timing.</dd></div>
+ <div><dt>Reference only</dt><dd>TikTok and Facebook handles retained for review but unavailable through public competitor timing APIs.</dd></div>
+ <div><dt>Total likes and views</dt><dd>Combined engagement reported for the similar posts in the current selection.</dd></div>
+ <div><dt>Avg likes / post</dt><dd>Total likes divided by the number of similar posts found.</dd></div>
+ <div><dt>Captions stored</dt><dd>Posts with caption text available for caption-pattern analysis.</dd></div>
+ <div><dt>Top window</dt><dd>The Chicago weekday and time range containing the most stored similar-account posts.</dd></div>
+ <div><dt>Posts by platform</dt><dd>The stored-post total split between Instagram and YouTube.</dd></div>
+ <div><dt>Still sweeping</dt><dd>Eligible handles whose latest public posts have not yet been fetched.</dd></div>
+ </dl>
+ </details>
  <div id="operationsSimilarHeatmap" class="similar-heatmap"></div>
  <details class="ops-collapse ops-collapse-nested" id="operationsWatchlistPanel">
  <summary class="ops-collapse-summary">
