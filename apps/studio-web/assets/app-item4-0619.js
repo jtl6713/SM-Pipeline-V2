@@ -11215,8 +11215,14 @@
         const handle = profileUrl
           ? `<a class="table-link" href="${escapeHtml(profileUrl)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(account.handle)}</a>`
           : `@${escapeHtml(account.handle)}`;
+        const status = String(account.status || "").trim();
+        const statusClass = status === "ok"
+          ? " is-sweep-success"
+          : ["error", "needs_permission", "needs_key", "unavailable"].includes(status)
+            ? " is-sweep-error"
+            : "";
         return `
-      <article class="ops-profile-card">
+      <article class="ops-profile-card${statusClass}">
         <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
         <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
