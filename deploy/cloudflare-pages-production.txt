@@ -337,3 +337,5 @@ Library mobile picker Pages deploy: 2026-09-01 - Asset Library Add assets opens 
 Oversized ingestion Pages deploy: 2026-09-02 - Operations shows ingestion-folder oversized videos, location column, and Compress all in intake folder. UI 0.6.228-oversized-ingestion. Source commit 046676e.
 
 Library one-clip + compression status Pages deploy: 2026-09-02 - iPhone Asset Library adds one clip at a time. Operations shows a large color-coded Compressing IMG_…. banner. UI 0.6.229-compression-status.
+
+Compression progress Pages deploy: 2026-09-02 - Operations banner shows live compressor percent and a progress bar. UI 0.6.230-compression-progress.

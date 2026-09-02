@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.229-compression-status";
+  const BUILD_ID = "item4-0.6.230-compression-progress";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -579,8 +579,13 @@
       const waitingNote = waiting > operationsCompressionJobs.length
         ? `${waiting - operationsCompressionJobs.length} more waiting.`
         : extras ? `${extras} more compressing.` : "";
+      const percent = Number(active.progress_percent);
+      const bar = Number.isFinite(percent)
+        ? `<div class="ops-progress-track" aria-hidden="true"><div class="ops-progress-fill" style="width:${Math.max(0, Math.min(100, percent))}%"></div></div>`
+        : "";
       banner.innerHTML = `<p class="ops-compression-kicker">Compression in progress</p>
         <p class="ops-compression-headline">${escapeHtml(active.headline || `Compressing ${active.name || "video"}`)}</p>
+        ${bar}
         <p class="ops-compression-detail">${escapeHtml([active.notes, waitingNote].filter(Boolean).join(" "))}</p>`;
       return;
     }
@@ -11712,7 +11717,7 @@
     target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Location</th><th>Status</th><th>Action</th></tr></thead><tbody>${operationsOversizedCache.map((record) => {
       const job = record.compression || jobsById.get(record.google_drive_file_id);
       const status = job
-        ? `<span class="badge rendering">${escapeHtml(job.label || "Compressing")}</span>`
+        ? `<span class="badge rendering">${escapeHtml(job.label || "Compressing")}${Number.isFinite(Number(job.progress_percent)) ? ` ${Math.round(Number(job.progress_percent))}%` : ""}</span>`
         : `<span class="badge attention">Waiting</span>`;
       const action = !canCompress
         ? "Admin only"

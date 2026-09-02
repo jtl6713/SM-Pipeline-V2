@@ -143,13 +143,19 @@ def process_request(
             "downloading": "Downloading",
             "compressing": "Compressing",
         }.get(status, "Compressing")
+        progress = job.get("progress")
+        try:
+            progress_n = max(0, min(100, int(progress)))
+        except (TypeError, ValueError):
+            progress_n = None
+        progress_note = f" · {progress_n}%" if progress_n is not None else ""
         value = f"{status}|{job_id}|{attempt_n}|{source_file_id}|{permission_id}|{source_name}|{source_size}|{now}"
         _write_state(
             client,
             state_record_id,
             active=True,
             value=value,
-            notes=f"{phase_label} {source_name or 'video'}. Poller will retry in 60 seconds.",
+            notes=f"{phase_label} {source_name or 'video'}{progress_note}. Poller will retry in 60 seconds.",
         )
         next_payload = {
             "job_id": job_id,

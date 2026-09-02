@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from a1p.processor import schedule_next
-from a1s.compressor import delete_job, submit_job
+from a1s.compressor import delete_job, list_health_jobs, poll_job, submit_job
 from a1s.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from a1s.eligibility import eligibility_reason
 from airtable.client import AirtableClient
@@ -56,6 +56,90 @@ def _any_active_a1_job(client: AirtableClient) -> bool:
 
 def _smallest_candidate(files: list[dict[str, Any]]) -> dict[str, Any]:
     return min(files, key=lambda item: (parse_bytes(item.get("size")), str(item.get("name") or "")))
+
+
+def _parse_state_value(value: str) -> dict[str, str]:
+    parts = str(value or "").split("|")
+    name = ""
+    file_id = ""
+    if len(parts) >= 8:
+        file_id = str(parts[3] or "").strip()
+        name = str(parts[5] or "").strip()
+    else:
+        file_id = str(parts[3] or "").strip() if len(parts) > 3 else ""
+        name = next((part for part in parts if str(part).lower().endswith((".mov", ".mp4", ".m4v", ".webm"))), "")
+    return {
+        "phase": str(parts[0] or "").strip().lower(),
+        "job_id": str(parts[1] or "").strip() if len(parts) > 1 else "",
+        "file_id": file_id,
+        "name": name,
+    }
+
+
+def _progress_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, number))
+
+
+def list_live_jobs(client: AirtableClient | None = None) -> list[dict[str, Any]]:
+    airtable = client or AirtableClient()
+    rows = airtable.list_records(
+        PIPELINE_SETTINGS_TABLE,
+        formula="AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
+        max_records=20,
+    )
+    health_jobs: list[dict[str, Any]] = []
+    try:
+        health_jobs = list_health_jobs()
+    except Exception:
+        logger.exception("A1S could not read compressor health jobs")
+    health_by_id = {str(job.get("job_id") or ""): job for job in health_jobs if job.get("job_id")}
+    health_by_name = {str(job.get("asset_name") or "").lower(): job for job in health_jobs if job.get("asset_name")}
+    live: list[dict[str, Any]] = []
+    for row in rows:
+        fields = row.get("fields") or {}
+        setting_name = str(fields.get("Setting_Name") or "")
+        parsed = _parse_state_value(str(fields.get("Setting_Value") or ""))
+        file_id = parsed["file_id"] or setting_name.removeprefix("A1_JOB_")
+        name = parsed["name"] or file_id
+        job_id = parsed["job_id"]
+        snapshot: dict[str, Any] = {}
+        if job_id:
+            try:
+                snapshot = poll_job(job_id)
+            except Exception:
+                logger.exception("A1S could not poll compressor job %s", job_id)
+                snapshot = health_by_id.get(job_id) or {}
+        if not snapshot:
+            snapshot = health_by_name.get(name.lower()) or {}
+        status = str(snapshot.get("status") or parsed["phase"] or "processing")
+        progress = _progress_int(snapshot.get("progress"))
+        label = {
+            "queued": "Queued",
+            "downloading": "Downloading",
+            "compressing": "Compressing",
+            "starting": "Starting",
+            "processing_local": "Starting",
+        }.get(status, "Compressing")
+        detail = f"{label} {name}"
+        if progress is not None:
+            detail = f"{detail} · {progress}%"
+        live.append(
+            {
+                "id": row.get("id"),
+                "google_drive_file_id": file_id,
+                "name": name,
+                "job_id": job_id or snapshot.get("job_id") or "",
+                "status": status,
+                "progress": progress,
+                "detail": detail,
+                "notes": str(fields.get("Notes") or "") or None,
+            }
+        )
+    return live
 
 
 def _resolve_files(drive: GoogleDriveClient, drive_file_id: str | None) -> list[dict[str, Any]]:
@@ -175,8 +259,18 @@ def process_request(
     drive_file_id: str | None = None,
     dry_run: bool = False,
     inline: bool = False,
+    live_status: bool = False,
     sleep: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
+    if live_status:
+        jobs = list_live_jobs()
+        return {
+            "processed": False,
+            "dry_run": True,
+            "live_status": True,
+            "jobs": jobs,
+            "started_count": 0,
+        }
     sleeper = sleep or ((lambda _seconds: None) if inline else time.sleep)
     preview: dict[str, Any] = {
         "make_scenario_id": MAKE_SCENARIO_ID,

@@ -115,6 +115,33 @@ def test_folder_scan_starts_smallest_only(monkeypatch):
     assert result["started"][0]["name"] == "IMG_SMALL.MOV"
 
 
+def test_live_status_reads_compressor_progress(monkeypatch):
+    import a1s.processor as a1s_processor
+
+    class _JobAirtable:
+        def list_records(self, *_args, **_kwargs):
+            return [{
+                "id": "recJOB",
+                "fields": {
+                    "Setting_Name": "A1_JOB_drive1",
+                    "Setting_Value": "compressing|job-1|1|drive1||IMG_6131.MOV|123|2026-09-02T00:00:00Z",
+                    "Notes": "old note",
+                },
+            }]
+
+    monkeypatch.setattr(a1s_processor, "AirtableClient", _JobAirtable)
+    monkeypatch.setattr(a1s_processor, "list_health_jobs", lambda: [])
+    monkeypatch.setattr(
+        a1s_processor,
+        "poll_job",
+        lambda _job_id: {"job_id": "job-1", "status": "compressing", "progress": 42},
+    )
+    result = process_request(live_status=True)
+    assert result["live_status"] is True
+    assert result["jobs"][0]["progress"] == 42
+    assert result["jobs"][0]["detail"] == "Compressing IMG_6131.MOV · 42%"
+
+
 def test_folder_scan_waits_when_another_job_is_active(monkeypatch):
     import a1s.processor as a1s_processor
 

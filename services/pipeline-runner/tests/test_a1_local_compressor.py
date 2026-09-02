@@ -107,7 +107,7 @@ def test_poller_defers_active_job(monkeypatch):
     monkeypatch.setattr(
         a1p_processor,
         "poll_job",
-        lambda _job_id: {"job_id": "job-1", "status": "compressing"},
+        lambda _job_id: {"job_id": "job-1", "status": "compressing", "progress": 42},
     )
     monkeypatch.setattr(a1p_processor, "_schedule_next", scheduled.append)
 
@@ -124,6 +124,7 @@ def test_poller_defers_active_job(monkeypatch):
 
     assert result["status"] == "processing"
     assert result["deferred"] is True
+    assert "42%" in airtable.updates[0]["fields"]["Notes"]
     assert scheduled[0]["attempt"] == 2
     assert scheduled[0]["status_url"].endswith("/jobs/job-1")
     assert airtable.deleted == []

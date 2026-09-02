@@ -286,3 +286,5 @@ Facebook clip Reel Worker deploy: 2026-09-01 - Clip and finished-video plans tre
 Oversized ingestion Worker deploy: 2026-09-02 - Operations lists oversized ingestion-folder videos via A1S dry-run, auto-starts compression after A2 skip, and supports compress-all. Worker 0.10.217-oversized-ingestion. Source commit 046676e.
 
 Compression status Worker deploy: 2026-09-02 - Operations reads active A1_JOB rows and exposes GET /api/operations/compression for the live Compressing banner. Worker 0.10.218-compression-status.
+
+Compression progress Worker deploy: 2026-09-02 - Operations compression status pulses A1S live_status so the banner shows current compressor percent. Worker 0.10.219-compression-progress.

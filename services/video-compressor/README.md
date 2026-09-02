@@ -18,7 +18,7 @@ The service is deployed locally and exposed through its permanent Cloudflare rou
 
 ### `GET /health`
 
-Returns service readiness including FFmpeg/FFprobe availability.
+Returns service readiness including FFmpeg/FFprobe availability, plus `jobs` / `active_job_count` for in-flight work (`status`, `progress`, `asset_name`). Progress updates while downloading and during each FFmpeg pass.
 
 ### `POST /compress`
 

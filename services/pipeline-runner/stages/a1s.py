@@ -18,6 +18,7 @@ def run(request: StageRequest):
             "drive_file_id": (extra.get("drive_file_id") or "").strip() or None,
             "dry_run": as_bool(extra.get("dry_run")),
             "inline": as_bool(extra.get("inline")),
+            "live_status": as_bool(extra.get("live_status")),
         },
         skip_message="A1S did not start an oversized compression job",
         ok_message="A1S started {started_count} compression jobs",

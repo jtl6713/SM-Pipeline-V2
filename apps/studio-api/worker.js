@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.218-compression-status",
+          version: "0.10.219-compression-progress",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -25126,6 +25126,7 @@ function parseA1JobValue(value) {
     file_id: fileId,
     name,
     updated_at: String(parts[parts.length - 1] || "").trim(),
+    job_id: String(parts[1] || "").trim(),
   };
 }
 
@@ -25147,6 +25148,14 @@ function compressionPhaseTone(phase) {
   return "compressing";
 }
 
+function parseProgressPercent(notes, livePercent) {
+  const live = Number(livePercent);
+  if (Number.isFinite(live)) return Math.max(0, Math.min(100, Math.round(live)));
+  const match = String(notes || "").match(/(\d{1,3})\s*%/);
+  if (!match) return null;
+  return Math.max(0, Math.min(100, Number(match[1])));
+}
+
 function mapA1CompressionJob(record) {
   const settingName = String(f(record, "Setting_Name") || "").trim();
   if (!settingName.startsWith("A1_JOB_")) return null;
@@ -25155,17 +25164,54 @@ function mapA1CompressionJob(record) {
   const name = parsed.name || fileId;
   const phase = parsed.phase || "processing";
   const label = compressionPhaseLabel(phase);
+  const notes = String(f(record, "Notes") || "").trim() || null;
+  const progress = parseProgressPercent(notes);
   return {
     id: record.id,
     google_drive_file_id: fileId,
     name,
+    job_id: parsed.job_id || null,
     phase,
     label,
     tone: compressionPhaseTone(phase),
-    headline: name ? `${label} ${name}` : `${label} video`,
-    notes: String(f(record, "Notes") || "").trim() || null,
+    progress_percent: progress,
+    headline: name ? `${label} ${name}${progress != null ? ` · ${progress}%` : ""}` : `${label} video`,
+    notes,
     updated_at: parsed.updated_at || f(record, "Last_Modified") || null,
   };
+}
+
+async function enrichCompressionJobsLive(env, jobs) {
+  if (!jobs.length) return jobs;
+  const backend = pipelineStageBackend(env, "A1S");
+  if (backend.mode !== "python" || !backend.runnerUrl) return jobs;
+  try {
+    const { response, payload } = await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
+    if (!response.ok) return jobs;
+    const live = Array.isArray(payload?.details?.run?.jobs) ? payload.details.run.jobs : [];
+    const byFile = new Map(live.map((row) => [String(row.google_drive_file_id || ""), row]));
+    const byJob = new Map(live.map((row) => [String(row.job_id || ""), row]));
+    return jobs.map((job) => {
+      const snap = byFile.get(String(job.google_drive_file_id || "")) || byJob.get(String(job.job_id || ""));
+      if (!snap) return job;
+      const phase = String(snap.status || job.phase || "compressing");
+      const label = compressionPhaseLabel(phase);
+      const progress = parseProgressPercent(snap.detail || job.notes, snap.progress);
+      const name = job.name || snap.name;
+      return {
+        ...job,
+        phase,
+        label,
+        tone: compressionPhaseTone(phase),
+        progress_percent: progress,
+        headline: name ? `${label} ${name}${progress != null ? ` · ${progress}%` : ""}` : job.headline,
+        notes: snap.detail || job.notes,
+      };
+    });
+  } catch (error) {
+    console.error("enrichCompressionJobsLive failed", error);
+    return jobs;
+  }
 }
 
 async function listActiveA1CompressionJobs(env) {
@@ -25173,7 +25219,7 @@ async function listActiveA1CompressionJobs(env) {
     limit: 20,
     filterFormula: "AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
   });
-  return records.map(mapA1CompressionJob).filter(Boolean);
+  return enrichCompressionJobsLive(env, records.map(mapA1CompressionJob).filter(Boolean));
 }
 
 function attachCompressionJobs(oversized, jobs) {
