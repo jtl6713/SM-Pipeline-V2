@@ -466,7 +466,7 @@ async function rewriteClipAssets({ clips, jobId, jobAssetDir, job }) {
             : clip.url;
 
         if (isHttpUrl(sourceUrl)) {
-            const ext = getExtensionFromUrl(clip.assetName || sourceUrl, '.mp4');
+            const ext = driveFileId ? '.mp4' : getExtensionFromUrl(sourceUrl, '.mp4');
             const baseName = sanitizeSimpleName(clipId, `clip-${index + 1}`);
             const filename = makeUniqueFilename(`${baseName}${ext}`, usedFilenames);
             const destination = path.join(jobAssetDir, filename);
