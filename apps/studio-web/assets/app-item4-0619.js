@@ -180,7 +180,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.230-compression-progress";
+  const BUILD_ID = "item4-0.6.233-library-pages";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11144,47 +11144,158 @@
     return record?.id ? `${apiBase}/api/media-assets/${encodeURIComponent(record.id)}/preview` : "";
   }
 
+  const LIBRARY_PAGE_SIZES = [5, 10, 20, 50];
+  const LIBRARY_DEFAULT_PAGE_SIZE = 5;
+  let libraryPage = {
+    index: 0,
+    offsets: [null],
+    nextOffset: null,
+    hasMore: false,
+    count: 0,
+  };
+
+  function libraryPageSize() {
+    const raw = Number($("libraryPageSize")?.value || LIBRARY_DEFAULT_PAGE_SIZE);
+    return LIBRARY_PAGE_SIZES.includes(raw) ? raw : LIBRARY_DEFAULT_PAGE_SIZE;
+  }
+
+  function resetLibraryPage() {
+    libraryPage = {
+      index: 0,
+      offsets: [null],
+      nextOffset: null,
+      hasMore: false,
+      count: 0,
+    };
+  }
+
+  function bindLibraryDeleteButtons(target) {
+    target.querySelectorAll("[data-library-delete]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.dataset.libraryDelete;
+        const name = button.dataset.libraryName || "this asset";
+        if (!window.confirm(`Delete “${name}” from the asset library and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
+          setLibraryUploadMessage(`Deleted ${name}.`, "success");
+          await loadLibrary();
+        } catch (error) {
+          setLibraryUploadMessage(error.message, "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+  function libraryStreamUrl(record) {
+    const id = String(record?.id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) return "";
+    return `${apiBase}/api/media-assets/${encodeURIComponent(id)}/stream`;
+  }
+
+  function renderLibraryCards(records) {
+    return records.map((r) => {
+      const preview = libraryPreviewUrl(r);
+      const video = String(r.media_kind || "").toLowerCase() === "video";
+      const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.mime_type || (video ? "video" : "photo"));
+      let media = "";
+      if (video) {
+        const local = item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id);
+        const stream = libraryStreamUrl(r);
+        const grabAttrs = local ? "" : ` data-library-clip-id="${escapeHtml(r.id)}" data-library-clip-name="${escapeHtml(r.name || "")}" data-library-stream="${escapeHtml(stream)}"`;
+        media = `<div class="item4-clip-poster-wrap"><img${local ? ` src="${escapeHtml(local)}"` : ""} alt="" class="item4-clip-poster"${grabAttrs}><span class="item4-clip-play" aria-hidden="true"></span></div>`;
+      } else if (preview) {
+        media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
+      }
+      return `<article class="library-card"><div class="library-card-media">${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+    }).join("");
+  }
+
+  async function fillLibraryClipPosters(target) {
+    const nodes = [...(target?.querySelectorAll("[data-library-stream]") || [])];
+    for (const img of nodes) {
+      if (!img.isConnected) return;
+      const id = String(img.dataset.libraryClipId || "");
+      const name = String(img.dataset.libraryClipName || "");
+      const stream = String(img.dataset.libraryStream || "");
+      const cached = item4LocalClipPoster(name) || item4LocalClipPoster(id);
+      if (cached) {
+        img.src = cached;
+        img.removeAttribute("data-library-stream");
+        continue;
+      }
+      if (!stream) continue;
+      try {
+        const blob = await item4ClipPosterFromUrl(stream, { timeoutMs: 12000 });
+        if (!blob || !img.isConnected) continue;
+        const url = item4ApplyLocalClipPoster({ id, name }, blob);
+        if (url) {
+          img.src = url;
+          img.removeAttribute("data-library-stream");
+        }
+      } catch (error) {
+        console.warn("Asset Library clip frame deferred", error);
+      }
+    }
+  }
+
+  function updateLibraryPager() {
+    const pager = $("libraryPager");
+    const meta = $("libraryPageMeta");
+    const prev = $("libraryPrevPage");
+    const next = $("libraryNextPage");
+    if (!pager) return;
+    pager.hidden = false;
+    if (prev) prev.disabled = libraryPage.index < 1;
+    if (next) next.disabled = !libraryPage.hasMore;
+    if (meta) {
+      meta.textContent = libraryPage.count
+        ? `Page ${libraryPage.index + 1} · ${libraryPage.count} of ${libraryPageSize()} on this page`
+        : `Page ${libraryPage.index + 1}`;
+    }
+  }
+
+  async function startLibraryBrowse() {
+    resetLibraryPage();
+    await loadLibrary();
+  }
+
   async function loadLibrary() {
     const target = $("libraryList");
     if (!target) return;
-    target.innerHTML = '<div class="empty">Loading asset library…</div>';
     const query = String($("librarySearch")?.value || "").trim();
     const kind = String($("libraryKindFilter")?.value || "").trim();
-    const params = new URLSearchParams();
+    const pager = $("libraryPager");
+    if (pager) pager.hidden = true;
+    target.innerHTML = '<div class="empty">Loading this page…</div>';
+    const params = new URLSearchParams({ limit: String(libraryPageSize()) });
     if (query) params.set("q", query);
     if (kind) params.set("kind", kind);
+    const offset = libraryPage.offsets[libraryPage.index];
+    if (offset) params.set("offset", offset);
     try {
-      const { records = [] } = await api(`/api/library?${params.toString()}`);
+      const data = await api(`/api/library?${params.toString()}`);
+      const records = data.records || [];
+      libraryPage.nextOffset = data.offset || null;
+      libraryPage.hasMore = Boolean(data.has_more);
+      libraryPage.count = records.length;
       if (!records.length) {
-        target.innerHTML = '<div class="empty">No library photos or clips matched.</div>';
+        target.innerHTML = query
+          ? '<div class="empty">No library photos or clips matched that search.</div>'
+          : '<div class="empty">No library photos or clips on this page.</div>';
+        updateLibraryPager();
         return;
       }
-      target.innerHTML = records.map((r) => {
-        const preview = libraryPreviewUrl(r);
-        const video = String(r.media_kind || "").toLowerCase() === "video";
-        const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.mime_type || (video ? "video" : "photo"));
-        return `<article class="library-card"><div class="library-card-media">${preview ? (video ? `<video src="${escapeHtml(preview)}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`) : ""}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
-      }).join("");
-      target.querySelectorAll("[data-library-delete]").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const id = button.dataset.libraryDelete;
-          const name = button.dataset.libraryName || "this asset";
-          if (!window.confirm(`Delete “${name}” from the asset library and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
-            return;
-          }
-          button.disabled = true;
-          try {
-            await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
-            setLibraryUploadMessage(`Deleted ${name}.`, "success");
-            await loadLibrary();
-          } catch (error) {
-            setLibraryUploadMessage(error.message, "error-text");
-            button.disabled = false;
-          }
-        });
-      });
+      target.innerHTML = renderLibraryCards(records);
+      bindLibraryDeleteButtons(target);
+      updateLibraryPager();
+      fillLibraryClipPosters(target);
     } catch (e) {
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+      if (pager) pager.hidden = true;
     }
   }
 
@@ -11245,12 +11356,12 @@
         try {
           await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
           uploaded += 1;
-          await loadLibrary();
         } catch (error) {
           errors.push(`${file.name}: ${error.message || "upload failed"}`);
         }
       }
       inputs.forEach((input) => { input.value = ""; });
+      if (uploaded) await startLibraryBrowse();
       if (uploaded && !errors.length) {
         setLibraryUploadMessage(uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`, "success");
       } else if (uploaded) {
@@ -11309,9 +11420,30 @@
     let searchTimer = 0;
     $("librarySearch")?.addEventListener("input", () => {
       window.clearTimeout(searchTimer);
-      searchTimer = window.setTimeout(() => loadLibrary(), 250);
+      searchTimer = window.setTimeout(() => {
+        resetLibraryPage();
+        loadLibrary();
+      }, 300);
     });
-    $("libraryKindFilter")?.addEventListener("change", () => loadLibrary());
+    $("libraryKindFilter")?.addEventListener("change", () => {
+      resetLibraryPage();
+      loadLibrary();
+    });
+    $("libraryPageSize")?.addEventListener("change", () => {
+      resetLibraryPage();
+      loadLibrary();
+    });
+    $("libraryPrevPage")?.addEventListener("click", () => {
+      if (libraryPage.index < 1) return;
+      libraryPage.index -= 1;
+      loadLibrary();
+    });
+    $("libraryNextPage")?.addEventListener("click", () => {
+      if (!libraryPage.hasMore || !libraryPage.nextOffset) return;
+      libraryPage.offsets[libraryPage.index + 1] = libraryPage.nextOffset;
+      libraryPage.index += 1;
+      loadLibrary();
+    });
   }
 
   bindLibraryUpload();

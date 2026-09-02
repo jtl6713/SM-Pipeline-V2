@@ -288,3 +288,5 @@ Oversized ingestion Worker deploy: 2026-09-02 - Operations lists oversized inges
 Compression status Worker deploy: 2026-09-02 - Operations reads active A1_JOB rows and exposes GET /api/operations/compression for the live Compressing banner. Worker 0.10.218-compression-status.
 
 Compression progress Worker deploy: 2026-09-02 - Operations compression status pulses A1S live_status so the banner shows current compressor percent. Worker 0.10.219-compression-progress.
+
+Asset Library pages Worker deploy: 2026-09-02 - GET /api/library returns one page of Media Assets (default 5, max 50) sorted by newest Intake_Date. Worker 0.10.221-library-pages.

@@ -2173,8 +2173,11 @@ body{
 .library-card h3{font-size:.95rem;margin:0 0 6px}
 .library-card-media{position:relative;aspect-ratio:4/5;background:#eef3f2;border-radius:10px;overflow:hidden;margin-bottom:10px}
 .library-card-media img,.library-card-media video{width:100%;height:100%;object-fit:cover;display:block}
+.library-card-media .item4-clip-poster-wrap{position:absolute;inset:0}
 .library-kind{position:absolute;top:8px;left:8px;background:#012559;color:#fff;font-size:.68rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 7px;border-radius:999px}
-.library-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 12rem;gap:12px;align-items:end}
+.library-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 12rem 11rem;gap:12px;align-items:end}
+.library-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 18px 18px}
+.library-pager .subtle{margin:0}
 @media(max-width:1100px){.library-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){.library-grid{grid-template-columns:1fr}}
 

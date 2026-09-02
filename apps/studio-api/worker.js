@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.219-compression-progress",
+          version: "0.10.221-library-pages",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -922,6 +922,11 @@ export default {
       } catch (error) {
         console.warn("studio produce orphan kick failed", error);
       }
+      try {
+        await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
+      } catch (error) {
+        console.warn("a1s compression watchdog failed", error);
+      }
       // Due publishes first. Item4 drain + autonomous produce were running before
       // this block and routinely exhausted the isolate budget, so scheduled TikTok /
       // FB finalize work sat for hours with no dispatch receipt (326, 311/316 late).
@@ -1474,6 +1479,24 @@ async function listRecords(env, tableId, options = {}) {
     if (!offset || !page.length) break;
   }
   return records.slice(0, limit);
+}
+
+async function listRecordsPage(env, tableId, options = {}) {
+  const limit = Math.max(1, Math.min(100, Number(options.limit) || 12));
+  const params = new URLSearchParams();
+  params.set("pageSize", String(limit));
+  if (options.view) params.set("view", options.view);
+  if (options.filterFormula) params.set("filterByFormula", options.filterFormula);
+  if (options.sortField) {
+    params.set("sort[0][field]", options.sortField);
+    params.set("sort[0][direction]", options.sortDirection || "desc");
+  }
+  if (options.offset) params.set("offset", String(options.offset));
+  const result = await airtableFetch(env, tableId, `?${params.toString()}`);
+  return {
+    records: Array.isArray(result?.records) ? result.records : [],
+    offset: result?.offset || null,
+  };
 }
 
 function f(record, field) {
@@ -13878,6 +13901,24 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
 
 const ASSET_LIBRARY_MAX_FILES = 8;
 const ASSET_LIBRARY_LIST_FORMULA = "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({Asset Name}&''))))";
+const ASSET_LIBRARY_PAGE_SIZE = 5;
+const ASSET_LIBRARY_MAX_PAGE_SIZE = 50;
+
+function assetLibraryFilterFormula(query, kind) {
+  const parts = [ASSET_LIBRARY_LIST_FORMULA];
+  const normalizedKind = String(kind || "").trim().toLowerCase();
+  if (normalizedKind === "video") parts.push("{Media_Class}='Video'");
+  if (normalizedKind === "photo" || normalizedKind === "image") {
+    parts.push("OR({Media_Class}='Image',{Media_Class}='Graphic')");
+  }
+  const needle = String(query || "").trim().toLowerCase();
+  if (needle) {
+    const escaped = ideaLibraryAirtableEscape(needle);
+    const hay = "LOWER(CONCATENATE({Asset Name},' ',{Location},' ',{Asset_Description}))";
+    parts.push(`FIND("${escaped}", ${hay})`);
+  }
+  return `AND(${parts.join(",")})`;
+}
 
 function mapLibraryAsset(record) {
   const video = ideaLibraryIsEligibleVideo(record)
@@ -13908,28 +13949,32 @@ function mapLibraryAsset(record) {
 
 async function listAssetLibrary(request, env, url) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
-  const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+  const query = String(url.searchParams.get("q") || "").trim();
   const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: 100,
+  const requestedLimit = Number(url.searchParams.get("limit"));
+  const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
+  const offset = String(url.searchParams.get("offset") || "").trim() || null;
+  const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit,
+    offset,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ASSET_LIBRARY_LIST_FORMULA,
+    filterFormula: assetLibraryFilterFormula(query, kind),
   });
-  const mapped = [];
-  for (const record of records) {
-    const name = String(f(record, "Asset Name") || "");
-    if (/__\d+x\d+__/i.test(name)) continue;
-    const row = mapLibraryAsset(record);
-    if (kind === "video" && row.media_kind !== "video") continue;
-    if ((kind === "photo" || kind === "image") && row.media_kind === "video") continue;
-    if (query) {
-      const hay = [row.name, row.location, row.description].filter(Boolean).join(" ").toLowerCase();
-      if (!hay.includes(query)) continue;
-    }
-    mapped.push(row);
-  }
-  return respond(request, env, { ok: true, query: query || null, count: mapped.length, records: mapped });
+  const mapped = page.records
+    .filter((record) => !/__\d+x\d+__/i.test(String(f(record, "Asset Name") || "")))
+    .map(mapLibraryAsset);
+  return respond(request, env, {
+    ok: true,
+    idle: false,
+    query: query || null,
+    kind: kind || null,
+    count: mapped.length,
+    has_more: Boolean(page.offset),
+    offset: page.offset || null,
+    limit,
+    records: mapped,
+  });
 }
 
 async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) {

@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.230-compression-progress">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.233-library-pages">
 </head>
 <body>
  <header class="topbar">
@@ -1011,7 +1011,7 @@
  </section>
 
  <section id="page-library" class="page">
- <div class="page-heading"><div><span class="eyebrow">Photos and clips</span><h1>Asset library</h1><p>Browse classified Drive stills and Raw Footage, add photos or clips to the catalogue, or delete an unused Studio upload. Production and the wizard attach from this same library.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow">Photos and clips</span><h1>Asset library</h1><p>Opens on the 5 most recent Drive stills and Raw Footage. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="libraryUploadPanel">
  <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Files go to Google Drive (photos or video folders), register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
  <div class="music-upload-body">
@@ -1031,11 +1031,26 @@
  <option value="video">Clips only</option>
  </select>
  </label>
+ <label class="form-field"><span>Show this many on page</span>
+ <select id="libraryPageSize">
+ <option value="5" selected>5</option>
+ <option value="10">10</option>
+ <option value="20">20</option>
+ <option value="50">50</option>
+ </select>
+ </label>
  </div>
  <div class="form-message" id="libraryUploadMessage" aria-live="polite"></div>
  </div>
  </section>
- <section class="panel"><div id="libraryList" class="library-grid"></div></section>
+ <section class="panel">
+ <div id="libraryList" class="library-grid"></div>
+ <div id="libraryPager" class="library-pager" hidden>
+ <button type="button" class="secondary-button" id="libraryPrevPage">Previous</button>
+ <p id="libraryPageMeta" class="subtle"></p>
+ <button type="button" class="secondary-button" id="libraryNextPage">Next</button>
+ </div>
+ </section>
  </section>
 
  <section id="page-operations" class="page">
@@ -1340,7 +1355,7 @@
  <h2>Asset Library</h2>
  <p>Asset Library is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
  <ul>
- <li>Browse and search classified photos and clips. These are the same items Production and the wizard can attach.</li>
+ <li>The tab opens on the 5 newest assets. Use Show this many on page, then Previous and Next. Search by name or location. Opening the tab does not load every thumbnail.</li>
  <li>Use + Add assets or drop files on this page. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
  <li>Delete removes the Airtable row and trashes the Drive file when nothing still has that asset attached.</li>
  <li>Library intake on Operations still scans the Drive intake folder for files that did not come through this page.</li>
@@ -1529,6 +1544,6 @@
 
  <script src="/assets/config.js?v=0.6.225-instagram-paused"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.230-compression-progress"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.233-library-pages"></script>
 </body>
 </html>
