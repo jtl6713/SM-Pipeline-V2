@@ -327,3 +327,5 @@ Clip runner poster Pages deploy: 2026-09-01 - Clip cards request a pipeline-runn
 Clip Chrome frame Pages deploy: 2026-09-01 - Clip cards show a same-origin video frame in Chrome while a JPEG poster is saved. UI 0.6.218-clip-chrome-frame.
 
 Facebook clip Reel Pages deploy: 2026-09-01 - Photos-and-clips recommends Facebook Reel plus Story, not Slideshow Reel. UI 0.6.219-fb-clip-reel.
+
+Asset Library Pages deploy: 2026-09-01 - Sidebar Asset Library tab for Drive stills and Raw Footage. UI 0.6.225-asset-library. Source commit b4da605.
