@@ -408,8 +408,8 @@
         button.disabled = true;
         button.textContent = "Refreshing…";
       }
-      if (meta) meta.textContent = "Refreshing public Instagram and YouTube times…";
-      setOperationsMessage("Refreshing public Instagram and YouTube times…");
+      if (meta) meta.textContent = "Refreshing public YouTube times… Instagram timing is paused.";
+      setOperationsMessage("Refreshing public YouTube times…");
       const result = await api("/api/insights/similar-times", {
         method: "POST",
         body: JSON.stringify({
@@ -470,7 +470,7 @@
     const platform = String($("operationsWatchlistPlatform")?.value || "instagram").trim();
     const handle = String($("operationsWatchlistHandle")?.value || "").trim().replace(/^@/, "");
     if (!handle) {
-      setOperationsMessage("Enter a handle. Instagram and YouTube are timed from public posts. TikTok and Facebook stay on the list for review only.", "error-text");
+      setOperationsMessage("Enter a handle. YouTube is timed from public posts; Instagram timing is paused pending Meta permission.", "error-text");
       return;
     }
     try {
@@ -11169,6 +11169,7 @@
     if (key === "needs_key") return "needs YouTube API key";
     if (key === "unavailable") return "not publicly readable";
     if (key === "pending") return "waiting for sweep";
+    if (key === "paused") return "paused pending Meta permission";
     if (key === "error") return "lookup failed";
     return key;
   }
@@ -11209,7 +11210,8 @@
     );
     target.innerHTML = sections.map((platform) => {
       const rows = groups.get(platform) || [];
-      const timed = platform === "instagram" || platform === "youtube";
+      const timed = platform === "youtube";
+      const groupMode = timed ? "timed" : platform === "instagram" ? "paused" : "review only";
       const cards = rows.map(({ account, index }) => {
         const profileUrl = similarAccountProfileUrl(account);
         const handle = profileUrl
@@ -11224,11 +11226,11 @@
         return `
       <article class="ops-profile-card${statusClass}">
         <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
-        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
+        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : platform === "instagram" ? "Paused until Meta business_discovery permission is fixed" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
       </article>`;
       }).join("");
-      return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)}${timed ? " · timed" : " · review only"} · ${rows.length}</h4>${cards}</section>`;
+      return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)} · ${groupMode} · ${rows.length}</h4>${cards}</section>`;
     }).join("");
     target.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
       button.addEventListener("click", async () => {
@@ -11452,7 +11454,7 @@
         renderOperationsWatchlist(watchlist.map((row) => ({
           ...row,
           status: statusByKey.get(`${row.platform}:${String(row.handle || "").toLowerCase()}`)?.status
-            || (row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
+            || (row.platform === "instagram" ? "paused" : row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
         })), Boolean(data.can_edit_profiles));
       } catch (error) {
         renderOperationsSimilarTimes({ message: error.message || "Could not load similar-account times." });

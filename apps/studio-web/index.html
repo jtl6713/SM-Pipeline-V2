@@ -1059,9 +1059,9 @@
  <dl>
  <div><dt>Profile and season</dt><dd>The city profile and seasonal subset currently included in the results.</dd></div>
  <div><dt>Historical database</dt><dd>The figures come from saved post observations, not a live estimate.</dd></div>
- <div><dt>Similar posts found</dt><dd>Public posts stored from the selected profile’s researched Instagram and YouTube accounts.</dd></div>
- <div><dt>Accounts timed</dt><dd>Successful accounts divided by all Instagram and YouTube handles eligible for timing.</dd></div>
- <div><dt>Reference only</dt><dd>TikTok and Facebook handles retained for review but unavailable through public competitor timing APIs.</dd></div>
+ <div><dt>Similar posts found</dt><dd>Public posts already stored from researched accounts. New competitor collection currently runs on YouTube only.</dd></div>
+ <div><dt>Accounts timed</dt><dd>Successful YouTube accounts divided by all YouTube handles eligible for timing.</dd></div>
+ <div><dt>Reference only</dt><dd>Paused Instagram handles plus TikTok and Facebook handles that are not currently swept.</dd></div>
  <div><dt>Total likes and views</dt><dd>Combined engagement reported for the similar posts in the current selection.</dd></div>
  <div><dt>Avg likes / post</dt><dd>Total likes divided by the number of similar posts found.</dd></div>
  <div><dt>Captions stored</dt><dd>Posts with caption text available for caption-pattern analysis.</dd></div>
@@ -1075,7 +1075,7 @@
  <summary class="ops-collapse-summary">
  <div>
  <h3>Handles</h3>
- <p>Use Run analytics beside an Instagram or YouTube handle to fetch only that account and add its public posts to analytics. TikTok and Facebook handles remain reference-only because those apps do not expose other accounts' timestamps.</p>
+ <p>Use Run analytics beside a YouTube handle to fetch only that account and add its public posts to analytics. Instagram timing is paused until the Meta permission issue is fixed. TikTok and Facebook remain reference-only.</p>
  </div>
  </summary>
  <form class="ops-inline-form" id="operationsWatchlistForm">
@@ -1474,8 +1474,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.204-branch-cleanup"></script>
+ <script src="/assets/config.js?v=0.6.225-instagram-paused"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.223-sweep-status"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.225-instagram-paused"></script>
 </body>
 </html>

@@ -10667,7 +10667,8 @@ function studioSuggestedLocalDatetime(windows) {
 }
 
 const STUDIO_WATCHLIST_PLATFORMS = new Set(["instagram", "youtube", "tiktok", "facebook"]);
-const STUDIO_SIMILAR_TIMED_PLATFORMS = new Set(["instagram", "youtube"]);
+// Competitor Instagram timing is paused until Meta business_discovery permission #10 is fixed.
+const STUDIO_SIMILAR_TIMED_PLATFORMS = new Set(["youtube"]);
 const STUDIO_SIMILAR_TIMES_SETTING = "SIMILAR_ACCOUNT_TIMES_CACHE";
 const STUDIO_SIMILAR_TIMES_TTL_MS = 24 * 60 * 60 * 1000;
 const STUDIO_SIMILAR_TIMES_MIN_SAMPLE = 8;
@@ -11512,7 +11513,7 @@ async function studioEnsureSimilarWatchlist(env) {
       env,
       STUDIO_SIMILAR_WATCHLIST_SETTING,
       JSON.stringify(accounts),
-      "Similar-account watchlist. Instagram and YouTube are swept for public post times. TikTok and Facebook stay on the list for operator review; those platforms have no public competitor post-time API we can call."
+      "Similar-account watchlist. YouTube is swept for public post times. Instagram timing is paused pending Meta business_discovery permission; TikTok and Facebook stay on the list for operator review."
     );
   }
   return accounts;
@@ -11639,8 +11640,8 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
       message = `${label} YouTube timing needs YOUTUBE_API_KEY in Pipeline Settings or the Worker.`;
     } else {
       message = stale.length
-        ? `Watchlist saved for ${label}. Public Instagram and YouTube timing fills in after the next insights sweep.`
-        : `Public Instagram/YouTube lookup found no dated posts for the ${label} watchlist yet.`;
+        ? `Watchlist saved for ${label}. Public YouTube timing fills in after the next insights sweep; Instagram timing is paused.`
+        : `Public YouTube lookup found no dated posts for the ${label} watchlist yet. Instagram timing is paused.`;
     }
   } else if (heatmap.sample_size < STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
     message = `${heatmap.sample_size} ${seasonLabel.toLowerCase()} posts so far for ${label}. Need ${STUDIO_SIMILAR_TIMES_MIN_SAMPLE} before this beats industry defaults.`;
@@ -11679,8 +11680,8 @@ async function getInsightsWatchlist(request, env) {
     ok: true,
     accounts,
     message: accounts.length
-      ? "Chicago watchlist loaded. Instagram and YouTube can be timed from public posts. TikTok and Facebook groups are stored for reference only."
-      : "Add Instagram or YouTube handles to start similar-account timing.",
+      ? "Chicago watchlist loaded. YouTube can be timed from public posts. Instagram timing is paused pending Meta permission; TikTok and Facebook are reference only."
+      : "Add a YouTube handle to start similar-account timing.",
   });
 }
 
@@ -11692,7 +11693,7 @@ async function putInsightsWatchlist(request, env) {
     env,
     STUDIO_SIMILAR_WATCHLIST_SETTING,
     JSON.stringify(accounts),
-    "Similar-account watchlist. Editable. Instagram and YouTube are swept for public post times. TikTok and Facebook stay listed for review; those apps have no public competitor post-time API."
+    "Similar-account watchlist. Editable. YouTube is swept for public post times. Instagram timing is paused pending Meta business_discovery permission; TikTok and Facebook stay listed for review."
   );
   return respond(request, env, { ok: true, accounts });
 }
