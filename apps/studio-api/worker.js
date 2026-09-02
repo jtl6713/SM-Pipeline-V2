@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.222-library-intake-cron",
+          version: "0.10.223-ig-due-promote",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -5316,6 +5316,31 @@ function studioPublishCanDispatchNow(record) {
   // YouTube can upload now and let the channel release at publishAt.
   const platform = String(f(record, "Platform") || "").trim();
   return platform === "YouTube" && Boolean(String(f(record, "YouTube_Scheduled_Publish_At") || "").trim());
+}
+
+async function studioPromoteDuePublishStatus(env, record) {
+  const status = String(f(record, "Publish_Status") || "").trim();
+  if (status === "Ready to Publish" || status === "Publishing" || status === "Published") return record;
+  if (studioArmedPublishStatus(record) !== "Ready to Publish") return record;
+  const id = String(record?.id || "").trim();
+  if (!id) return record;
+  const fields = { Publish_Status: "Ready to Publish" };
+  const tiktok = String(f(record, "TikTok_Draft_Status") || "").trim();
+  if (tiktok === "Waiting for Schedule") fields.TikTok_Draft_Status = "Ready for Assets";
+  const outputType = String(f(record, "Platform_Output_Type") || "").trim();
+  const storyStatus = String(f(record, "IG_Story_Status") || "").trim();
+  if (outputType === "Instagram Story" && (!storyStatus || storyStatus === "Not Needed")) {
+    fields.IG_Story_Status = "Ready";
+  }
+  try {
+    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  } catch (error) {
+    console.warn("due publish-status promote failed", id, error);
+    return record;
+  }
 }
 
 function studioPublishHeldUntilIso(record) {
@@ -21103,6 +21128,7 @@ async function studioDispatchApprovedPublishNow(env, record) {
       record,
     };
   }
+  record = await studioPromoteDuePublishStatus(env, record);
   record = await studioEnsureOutputCaption(env, record);
   const plan = studioPublishDispatchTarget(record);
   if (!plan) return { ok: true, skipped: "no-dispatch", record };

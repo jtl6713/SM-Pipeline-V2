@@ -292,3 +292,5 @@ Compression progress Worker deploy: 2026-09-02 - Operations compression status p
 Asset Library pages Worker deploy: 2026-09-02 - GET /api/library returns one page of Media Assets (default 5, max 50) sorted by newest Intake_Date. Worker 0.10.221-library-pages.
 
 Ingestion A1S cron Worker deploy: 2026-09-02 - After publish reconcile, cron pulses A1S folder scan so a Drive dump starts the next oversized clip without Process intake folder. Worker 0.10.222-library-intake-cron.
+
+Due IG publish promote Worker deploy: 2026-09-02 - Before AP1-IG / AP1-IGS, flip due Ready to Schedule rows to Ready to Publish so reconcile does not skip and burn the 8-dispatch cap. Worker 0.10.223-ig-due-promote.
