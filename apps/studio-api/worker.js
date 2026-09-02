@@ -11282,6 +11282,7 @@ const STUDIO_SIMILAR_SEEDS = Object.freeze([
   { platform: "instagram", handle: "millennium_park", source: "research", profile: "chicago" },
   { platform: "instagram", handle: "360chicago", source: "research", profile: "chicago" },
   { platform: "instagram", handle: "cubs", source: "research", profile: "chicago" },
+  { platform: "youtube", handle: "ChicagoShining", source: "joseph", profile: "chicago" },
   { platform: "youtube", handle: "ChooseChicago", source: "research", profile: "chicago" },
   { platform: "youtube", handle: "TimeOutChicago", source: "research", profile: "chicago" },
   { platform: "youtube", handle: "ChicagoArchitectureCenter", source: "research", profile: "chicago" },
