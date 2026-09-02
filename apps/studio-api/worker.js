@@ -11932,11 +11932,8 @@ async function getInsightsSimilarTimes(request, env, url, authorization, ctx) {
 async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
   let payload = {};
   try { payload = await request.json(); } catch { payload = {}; }
-  try {
-    await studioInsightsMigrateCacheToDb(env);
-  } catch (error) {
-    console.warn("similar-times legacy migrate failed", error);
-  }
+  // A single-account button click must stay bounded. Migrating every legacy
+  // cache observation here can exhaust Worker CPU before the requested sweep.
   const theme = payload.profile || payload.theme
     ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
     : await studioResolveSimilarTimesTheme(env, url, authorization);
