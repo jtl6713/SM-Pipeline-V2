@@ -8,7 +8,14 @@ from render.fields import field, field_str
 from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
 from studio_produce.job import finished_origin_kind, parse_json
-from studio_produce.media import asset_is_video, asset_media_kind, clip_in_out_seconds, playable_url
+from studio_produce.media import (
+    asset_is_video,
+    asset_media_kind,
+    clip_in_out_seconds,
+    distribute_frames,
+    playable_url,
+    source_duration_seconds,
+)
 
 if TYPE_CHECKING:
     from airtable.client import AirtableClient
@@ -112,6 +119,13 @@ def _master_for_source(masters: list[dict[str, Any]], source: dict[str, Any]) ->
     return source
 
 
+def _music_requested(effective: dict[str, Any]) -> bool:
+    mode = str(effective.get("background_music_mode") or "").strip().lower()
+    if mode in {"no", "false", "0"}:
+        return False
+    return bool(effective.get("music_url"))
+
+
 def assign_clip_frames(
     clips: list[dict[str, Any]],
     *,
@@ -124,11 +138,13 @@ def assign_clip_frames(
     video_indexes = [index for index, kind in enumerate(kinds) if kind == "video"]
     photo_indexes = [index for index, kind in enumerate(kinds) if kind != "video"]
     frames = [0] * len(clips)
+    native_video = []
     for index in video_indexes:
         source = clips[index].get("source") or {}
         start, end = clip_in_out_seconds(source)
-        frames[index] = max(1, round((end - start) * FPS))
-    video_total = sum(frames[index] for index in video_indexes)
+        native_video.append(max(1, round((end - start) * FPS)))
+        frames[index] = native_video[-1]
+    video_total = sum(native_video)
     owner = duration_seconds(
         story=story,
         clip_count=len(clips),
@@ -150,15 +166,47 @@ def assign_clip_frames(
         target = video_total + max(len(photo_indexes), round(photo_seconds * FPS))
         if not video_indexes:
             target = max(len(clips), round(owner * FPS))
+    cap = story or owner_set
+    if cap:
+        photo_floor = round(PHOTO_FLOOR_SECONDS * FPS) * len(photo_indexes) if photo_indexes else 0
+        min_video = len(video_indexes)
+        min_photo = len(photo_indexes)
+        if photo_indexes and video_indexes:
+            photo_budget = max(min_photo, min(photo_floor, target - min_video))
+            video_budget = max(min_video, target - photo_budget)
+        elif photo_indexes:
+            photo_budget = target
+            video_budget = 0
+        else:
+            photo_budget = 0
+            video_budget = target
+        if video_indexes:
+            if video_total <= video_budget:
+                for position, index in enumerate(video_indexes):
+                    frames[index] = native_video[position]
+                if photo_indexes:
+                    photo_budget = max(min_photo, target - video_total)
+                else:
+                    target = video_total
+            else:
+                allocated = distribute_frames(native_video, video_budget)
+                for position, index in enumerate(video_indexes):
+                    frames[index] = allocated[position]
+        if photo_indexes:
+            allocated = distribute_frames([1] * len(photo_indexes), max(min_photo, photo_budget))
+            for position, index in enumerate(photo_indexes):
+                frames[index] = allocated[position]
+        total = sum(frames) or max(1, target)
+        if cap and photo_indexes and total != target:
+            delta = target - total
+            frames[photo_indexes[-1]] = max(1, frames[photo_indexes[-1]] + delta)
+            total = sum(frames)
+        return frames, total
     remaining = max(len(photo_indexes), target - video_total) if photo_indexes else 0
     if photo_indexes:
-        base = remaining // len(photo_indexes)
-        leftover = remaining - (base * len(photo_indexes))
-        for index in photo_indexes:
-            extra = 1 if leftover > 0 else 0
-            if leftover > 0:
-                leftover -= 1
-            frames[index] = max(1, base + extra)
+        allocated = distribute_frames([1] * len(photo_indexes), remaining)
+        for position, index in enumerate(photo_indexes):
+            frames[index] = allocated[position]
     total = sum(frames) or max(1, target)
     return frames, total
 
@@ -394,6 +442,9 @@ def source_package(
             "media_kind": "video" if video else "photo",
             "in_seconds": in_seconds,
             "out_seconds": out_seconds,
+            "source_in_seconds": in_seconds,
+            "source_out_seconds": out_seconds,
+            "source_duration_seconds": source_duration_seconds(merged),
         })
     if omitted or not clips:
         return None
@@ -411,6 +462,9 @@ def source_package(
         frames = clip_frames[index]
         overlay = item["overlay"]
         video = item["media_kind"] == "video"
+        in_seconds = float(item["in_seconds"] or 0)
+        out_seconds = in_seconds + (frames / fps) if video else item["out_seconds"]
+        source_duration = float(item.get("source_duration_seconds") or 0) or max(out_seconds or 0, in_seconds)
         built.append({
             "id": f"studio-source-{index + 1}",
             "order": int((item["source"] or {}).get("order") or index + 1),
@@ -425,10 +479,15 @@ def source_package(
             "motionStyle": "none" if video else ("slowZoom" if story else "stillPhoto"),
             "media_kind": item["media_kind"],
             "mediaKind": item["media_kind"],
-            "in_seconds": item["in_seconds"],
-            "out_seconds": item["out_seconds"],
-            "inSeconds": item["in_seconds"],
-            "startFromSeconds": item["in_seconds"] if video else 0,
+            "in_seconds": in_seconds,
+            "out_seconds": out_seconds,
+            "inSeconds": in_seconds,
+            "outSeconds": out_seconds if video else None,
+            "startFromSeconds": in_seconds if video else 0,
+            "sourceDurationSeconds": source_duration if video else None,
+            "source_duration_seconds": source_duration if video else None,
+            "sourceInSeconds": item.get("source_in_seconds") if video else None,
+            "sourceOutSeconds": item.get("source_out_seconds") if video else None,
             "source": "studio_platform_variant",
             "aspect_ratio": ratio,
             "google_drive_file_id": item["drive_id"] or None,
@@ -436,6 +495,19 @@ def source_package(
             "caption": (overlay or {}).get("text") or "",
         })
         start += frames
+    if (not story) and has_video and (not _music_requested(effective)):
+        try:
+            owner_set = float(effective.get("video_duration_seconds") or 0) > 0
+        except (TypeError, ValueError):
+            owner_set = False
+        if owner_set:
+            from t1.slice import expand_without_beats
+            built = expand_without_beats(built, target_frames=total_frames, fps=fps)
+            start = 0
+            for clip in built:
+                clip["startFrame"] = start
+                start += int(clip.get("durationFrames") or 0)
+            total_frames = sum(int(clip.get("durationFrames") or 0) for clip in built) or total_frames
     native = (not has_video) and is_native_photo(effective["platform"], effective["output_type"], field_str(output, "Platform_Output_Type"))
     composition_id = None if native else "ChicagoShiningPhotoSequence"
     safe_type = "".join(ch if ch.isalnum() else "-" for ch in effective["output_type"].lower()).strip("-") or "output"
@@ -455,7 +527,11 @@ def source_package(
             "media_kind": clip.get("media_kind") or "photo",
             "googleDriveFileId": clip.get("google_drive_file_id") or None,
             "inSeconds": clip.get("in_seconds") or 0,
+            "outSeconds": clip.get("out_seconds") or clip.get("outSeconds"),
             "startFromSeconds": clip.get("startFromSeconds") or 0,
+            "sourceDurationSeconds": clip.get("sourceDurationSeconds") or clip.get("source_duration_seconds"),
+            "sourceInSeconds": clip.get("sourceInSeconds") or clip.get("source_in_seconds"),
+            "sourceOutSeconds": clip.get("sourceOutSeconds") or clip.get("source_out_seconds"),
             "overlay": clip.get("overlay") or None,
             "caption": clip.get("caption") or "",
         }
@@ -528,7 +604,7 @@ def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict
         "Music_Start_Seconds": package.get("effective", {}).get("music_start_seconds") or 0,
         "Timing_Status": (
             "Pending"
-            if (not native and package.get("effective", {}).get("music_url") and (package.get("clip_count") or 0) > 1)
+            if (not native and _music_requested(package.get("effective") or {}))
             else ("Skipped" if not native else None)
         ),
         "Voiceover_Duration_Seconds": package.get("effective", {}).get("voiceover_duration_seconds") or None,

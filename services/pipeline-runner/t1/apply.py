@@ -4,7 +4,8 @@ import json
 from typing import Any
 
 from render.fields import field, field_str, parse_json_field
-from t1.constants import DEFAULT_RULES
+from t1.constants import DEFAULT_RULES, VIDEO_RULES
+from t1.slice import clips_have_video, expand_to_timeline
 
 DEFAULT_VOICEOVER_TAIL_SECONDS = 2.0
 
@@ -82,176 +83,53 @@ def analysis_window(output: dict[str, Any]) -> tuple[float, float]:
     vo_end = voiceover_end_seconds(output)
     if vo_end:
         duration_f = max(duration_f, vo_end + voiceover_tail_seconds(output))
+    owner = None
+    for name in ("Studio_Effective_Video_Duration_Seconds", "Video_Duration_Seconds"):
+        owner = _as_seconds(field(output, name))
+        if owner and owner > 0:
+            break
+        owner = None
+    if owner:
+        duration_f = min(duration_f, max(0.25, owner))
     return start_f, duration_f
 
 
-def resolve_rules(output: dict[str, Any], default_rules: dict[str, Any] | None = None) -> dict[str, Any]:
+def resolve_rules(
+    output: dict[str, Any],
+    default_rules: dict[str, Any] | None = None,
+    *,
+    has_video: bool = False,
+) -> dict[str, Any]:
     parsed = parse_json_field(field(output, "Timing_Rules_JSON"))
-    base = default_rules or DEFAULT_RULES
+    base = VIDEO_RULES if has_video else (default_rules or DEFAULT_RULES)
+    if has_video and default_rules and default_rules.get("recycle"):
+        base = default_rules
+    elif has_video:
+        base = VIDEO_RULES
     legacy_default = {"rules": [{"remaining": True, "every_n_beats": 2}]}
     if parsed == legacy_default:
         return base
     if isinstance(parsed, dict) and parsed.get("rules"):
         return parsed
-    if isinstance(parsed, dict) and (parsed.get("recycle") is not None or parsed.get("strategy")):
+    if isinstance(parsed, dict) and (parsed.get("recycle") is not None or parsed.get("strategy") or parsed.get("max_clips")):
         return {**base, **parsed}
     return base
 
 
-def _clip_kind(clip: dict[str, Any]) -> str:
-    return str(clip.get("media_kind") or clip.get("mediaKind") or "").strip().lower()
-
-
-def _mixed_media_frames(
-    clips: list[dict[str, Any]],
-    plan_clips: list[dict[str, Any]],
-    target_frames: int,
-) -> list[int]:
-    fixed = [
-        max(1, int(clip.get("durationFrames") or clip.get("duration_frames") or 1))
-        if _clip_kind(clip) == "video"
-        else 0
-        for clip in clips
-    ]
-    photo_indexes = [index for index, clip in enumerate(clips) if _clip_kind(clip) != "video"]
-    if not photo_indexes:
-        return fixed
-
-    photo_budget = max(len(photo_indexes), target_frames - sum(fixed))
-    weights = [
-        max(
-            1,
-            int(
-                (plan_clips[index] if index < len(plan_clips) else {}).get("duration_frames")
-                or clips[index].get("durationFrames")
-                or 1
-            ),
-        )
-        for index in photo_indexes
-    ]
-    weight_total = sum(weights)
-    distributable = photo_budget - len(photo_indexes)
-    raw_extras = [distributable * weight / weight_total for weight in weights]
-    extras = [int(value) for value in raw_extras]
-    remainder = distributable - sum(extras)
-    order = sorted(
-        range(len(photo_indexes)),
-        key=lambda index: raw_extras[index] - extras[index],
-        reverse=True,
-    )
-    for index in order[:remainder]:
-        extras[index] += 1
-    for position, clip_index in enumerate(photo_indexes):
-        fixed[clip_index] = 1 + extras[position]
-    return fixed
-
-
-def _mixed_media_beat_frames(
-    clips: list[dict[str, Any]],
-    plan_clips: list[dict[str, Any]],
-    target_frames: int,
-    beat_frames: list[int],
-) -> list[int]:
-    """Keep authored video lengths while leaving photo boundaries on detected beats."""
-    if not beat_frames or not plan_clips or len(plan_clips) < len(clips):
-        return []
-
-    transition_frames = max(
-        [
-            int((item.get("transition") or {}).get("duration_frames") or 0)
-            for item in plan_clips
-            if isinstance(item, dict)
-        ]
-        or [0]
-    )
-    minimum = max(1, transition_frames + 1)
-    beats = sorted({frame for frame in beat_frames if 0 < frame < target_frames})
-    if not beats:
-        return []
-
-    def remaining_minimum(after_index: int) -> int:
-        return sum(
-            max(1, int(clip.get("durationFrames") or clip.get("duration_frames") or 1))
-            if _clip_kind(clip) == "video"
-            else minimum
-            for clip in clips[after_index:]
-        )
-
-    durations: list[int] = []
-    start = 0
-    for index, clip in enumerate(clips):
-        if _clip_kind(clip) == "video":
-            end = start + max(1, int(clip.get("durationFrames") or clip.get("duration_frames") or 1))
-            if index == len(clips) - 1 and end != target_frames:
-                return []
-            if end + remaining_minimum(index + 1) > target_frames:
-                return []
-        elif index == len(clips) - 1:
-            end = target_frames
-        else:
-            next_plan = plan_clips[index + 1] if index + 1 < len(plan_clips) else {}
-            desired = int(
-                next_plan.get("start_frame")
-                or next_plan.get("startFrame")
-                or (start + int(plan_clips[index].get("duration_frames") or minimum))
-            )
-            lower = start + minimum
-            upper = target_frames - remaining_minimum(index + 1)
-            next_clip = clips[index + 1]
-            if index + 1 == len(clips) - 1 and _clip_kind(next_clip) == "video":
-                required = target_frames - max(
-                    1,
-                    int(next_clip.get("durationFrames") or next_clip.get("duration_frames") or 1),
-                )
-                candidates = [required] if lower <= required <= upper else []
-            else:
-                candidates = [frame for frame in beats if lower <= frame <= upper]
-            if not candidates:
-                return []
-            end = min(candidates, key=lambda frame: (abs(frame - desired), frame))
-        if end <= start:
-            return []
-        durations.append(end - start)
-        start = end
-
-    return durations if start == target_frames else []
-
-
 def apply_timeline(clips: list[dict[str, Any]], timeline: dict[str, Any]) -> list[dict[str, Any]]:
+    if clips_have_video(clips):
+        return expand_to_timeline(clips, timeline)
     plan = timeline.get("timeline") or timeline
     plan_clips = plan.get("clips") or []
     start = 0
     updated: list[dict[str, Any]] = []
     cycling = bool(plan_clips) and len(plan_clips) > len(clips)
     slot_count = len(plan_clips) if cycling else len(clips)
-    target_frames = int(plan.get("duration_frames") or sum(
-        int(item.get("duration_frames") or 0) for item in plan_clips
-    ))
-    mixed = not cycling and any(_clip_kind(clip) == "video" for clip in clips)
-    fps = max(1, int(plan.get("fps") or timeline.get("fps") or 30))
-    beat_seconds = timeline.get("beats_in_window") or timeline.get("beats") or []
-    beat_frames = [
-        round(float(seconds) * fps)
-        for seconds in beat_seconds
-        if isinstance(seconds, (int, float))
-    ]
-    authored_frames = []
-    if mixed:
-        authored_frames = (
-            _mixed_media_beat_frames(clips, plan_clips, target_frames, beat_frames)
-            or _mixed_media_frames(clips, plan_clips, target_frames)
-        )
     for index in range(slot_count):
         source = clips[index % len(clips)] if clips else {}
         item = dict(source)
         plan_clip = plan_clips[index] if index < len(plan_clips) else {}
-        kind = _clip_kind(item)
-        if mixed:
-            frames = authored_frames[index]
-        elif kind == "video" and not cycling:
-            frames = int(item.get("durationFrames") or item.get("duration_frames") or 1)
-        else:
-            frames = int(plan_clip.get("duration_frames") or item.get("durationFrames") or 1)
+        frames = int(plan_clip.get("duration_frames") or item.get("durationFrames") or 1)
         item["startFrame"] = start
         item["durationFrames"] = max(1, frames)
         existing = item.get("transition") if isinstance(item.get("transition"), dict) else {}

@@ -166,6 +166,30 @@ def test_recycle_timeline_adds_virtual_clips():
     assert sum(clip["duration_frames"] for clip in plan["clips"]) == plan["duration_frames"]
 
 
+def test_recycle_without_voiceover_fills_beats():
+    beats = [i * 1.0 for i in range(30)]
+    cuts, meta = apply_rules(
+        beats,
+        clip_count=1,
+        duration_seconds=30,
+        rules={
+            "strategy": "vo_phased",
+            "recycle": True,
+            "max_clips": 60,
+            "rules": [
+                {"until": "voiceover_end", "every_n_beats": 8, "spread": True},
+                {"remaining": True, "every_n_beats": 1},
+            ],
+        },
+        min_clip_seconds=0.4,
+    )
+    assert meta["strategy"] == "beat_fill"
+    assert meta["recycle"] is True
+    assert meta["effective_clip_count"] > 1
+    assert len(cuts) + 1 == meta["effective_clip_count"]
+    assert meta["effective_clip_count"] <= 60
+
+
 def test_voiceover_source_emits_end_event():
     ctx = TimingContext(
         audio_path="unused.wav",
