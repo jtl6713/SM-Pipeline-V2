@@ -122,6 +122,7 @@ def process_request(
             video_id=video_id,
             source_url=thumb_url,
             fallback_source_url=thumbnail_fallback_source(output, cover_required=cover_required),
+            vertical=cover_required,
         )
         result["thumbnail_http_status"] = thumb_code
         if 200 <= thumb_code <= 299:

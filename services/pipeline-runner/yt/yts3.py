@@ -8,7 +8,10 @@ from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from carousel.timeutil import iso_utc
 from render.fields import field_str
-from yt.common import preview, valid_record_id
+from ap0.public_cover import ensure_public_cover_url, graph_fetchable_cover_url, native_grid_cover_required
+from item4.settings import PipelineSettings
+from yt.client import YouTubeUploaderClient, load_uploader_settings
+from yt.common import preview, response_json, retry_at, valid_record_id
 from yt.constants import (
     MAKE_YTS3_ID,
     MAKE_YTS3_NAME,
@@ -16,9 +19,13 @@ from yt.constants import (
     PACKAGE_COMPLETE,
     PUBLISH_STATUS_PUBLISHED,
     PUBLISH_STATUS_PUBLISHED_PRIVATELY,
+    RETRY_MINUTES,
     STAGE_COMPLETE,
+    STAGE_YT4,
+    THUMB_UPLOADED,
 )
 from yt.eligibility import yts3_eligibility_reason
+from yt.yts2 import thumbnail_fallback_source
 
 
 def process_request(
@@ -61,6 +68,64 @@ def process_request(
         return {"processed": False, "dry_run": True, **result}
 
     now = iso_utc()
+    cover_required = native_grid_cover_required(output)
+    if cover_required:
+        settings = load_uploader_settings(PipelineSettings(client))
+        uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
+        try:
+            thumb_url = ensure_public_cover_url(client, output) or field_str(output, "Thumbnail_URL")
+        except Exception:
+            thumb_url = field_str(output, "Thumbnail_URL")
+        if not graph_fetchable_cover_url(thumb_url):
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                {
+                    "YouTube_Stage": STAGE_YT4,
+                    "Publish_Error_Stage": "YTS3_THUMBNAIL",
+                    "Publish_Error_Message": "YouTube Short needs a public native grid cover before publish.",
+                    "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+                    "YouTube_Error_Message": "YTS3 missing Graph/YouTube-fetchable Thumbnail_URL.",
+                    "Publish_Retry_Eligible": True,
+                    "YouTube_Last_Checked_At": now,
+                },
+            )
+            result["retry"] = True
+            return {"processed": True, "retry": True, "reason": "missing_native_cover", **result}
+        thumb_code, thumb_body = uploader.set_thumbnail(
+            video_id=video_id,
+            source_url=thumb_url,
+            fallback_source_url=thumbnail_fallback_source(output, cover_required=True),
+            vertical=True,
+        )
+        result["thumbnail_http_status"] = thumb_code
+        if not (200 <= thumb_code <= 299):
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                {
+                    "YouTube_Stage": STAGE_YT4,
+                    "Publish_Error_Stage": "YTS3_THUMBNAIL",
+                    "Publish_Error_Message": "YouTube Short thumbnail did not attach. Keeping the video unpublished until the 3D cover is set.",
+                    "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+                    "YouTube_Error_Message": f"YTS3 thumbnail upload failed. HTTP {thumb_code}: {thumb_body}",
+                    "YouTube_Response_JSON": response_json(thumb_body),
+                    "Publish_Retry_Eligible": True,
+                    "YouTube_Last_Checked_At": now,
+                },
+            )
+            result["retry"] = True
+            return {"processed": True, "retry": True, **result}
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                "YouTube_Thumbnail_Status": THUMB_UPLOADED,
+                "YouTube_Response_JSON": response_json(thumb_body),
+                "YouTube_Last_Checked_At": now,
+            },
+        )
+
     private = privacy.casefold() == "private"
     permalink = f"https://www.youtube.com/watch?v={video_id}"
     client.update_record(

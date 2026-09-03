@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ap0.public_cover import native_grid_cover_required
 from asset.helpers import as_bool
 from render.fields import field_str
 from yt.constants import STAGE_YT1, STAGE_YT2, STAGE_YT4
@@ -145,6 +146,8 @@ def yts3_eligibility_reason(
         return "missing_youtube_video_id"
     if _ci(field_str(record, "YouTube_Processing_Status")) != "succeeded":
         return "processing_not_succeeded"
+    if native_grid_cover_required(record) and _ci(field_str(record, "YouTube_Thumbnail_Status")) != "uploaded":
+        return "native_cover_not_uploaded"
     if replace_mismatch(
         record,
         replace_transaction_id=replace_transaction_id,
