@@ -2402,7 +2402,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 }
 
 .ops-watchlist-group{display:grid;gap:8px;margin:0 0 16px}
-.ops-watchlist-group h4{margin:0;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#4b5d73}
+.ops-watchlist-group h4{margin:0;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#4b5d73;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ops-watchlist-group h4 .text-button{text-transform:none;letter-spacing:0;font-size:.78rem}
 .ops-watchlist-group .ops-profile-card{margin:0}
 .ops-watchlist-group .ops-profile-card.is-sweep-success{background:rgba(42,157,83,.12);border-color:rgba(42,157,83,.42)}
 .ops-watchlist-group .ops-profile-card.is-sweep-error{background:rgba(205,55,55,.11);border-color:rgba(205,55,55,.4)}

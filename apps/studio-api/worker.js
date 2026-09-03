@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.228-wizard-clip-continue",
+          version: "0.10.229-insights-season",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -10833,17 +10833,33 @@ function studioInsightsDbEnabled(env) {
   return Boolean(env.AIRTABLE_PAT && env.AIRTABLE_BASE_ID);
 }
 
+function studioChicagoMonthDay(iso, when = new Date()) {
+  const date = new Date(iso || when);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      month: "numeric",
+      day: "numeric",
+    }).formatToParts(date);
+    const month = Number(parts.find((part) => part.type === "month")?.value);
+    const day = Number(parts.find((part) => part.type === "day")?.value);
+    if (!Number.isFinite(month) || month < 1 || !Number.isFinite(day) || day < 1) return null;
+    return { month, day };
+  } catch {
+    return null;
+  }
+}
+
 function studioChicagoSeason(iso, when = new Date()) {
-  const raw = iso || when.toISOString();
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return "winter";
-  const month = Number(new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    month: "numeric",
-  }).format(date));
-  if ([12, 1, 2].includes(month)) return "winter";
-  if ([3, 4, 5].includes(month)) return "spring";
-  if ([6, 7, 8].includes(month)) return "summer";
+  const parts = studioChicagoMonthDay(iso, when);
+  if (!parts) return "winter";
+  const md = parts.month * 100 + parts.day;
+  // Astronomical-ish Northern Hemisphere seasons in Chicago local time.
+  // Month-only mapping made Sep 1–21 default to Fall while it is still summer.
+  if (md >= 1221 || md < 320) return "winter";
+  if (md < 621) return "spring";
+  if (md < 922) return "summer";
   return "fall";
 }
 

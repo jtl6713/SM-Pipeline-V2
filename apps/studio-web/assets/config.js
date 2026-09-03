@@ -65,7 +65,10 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsCapAudioSilence: "Rewrite existing catalog audio on Google Drive so leading silence is no longer than 0.5 seconds. Already processed tracks are skipped.",
     operationsResetRenderUrls: "Repair stale Remotion render URLs on eligible failed/waiting records. Use this after the renderer URL or tunnel has changed.",
     operationsRetryAssetSelection: "Retry asset selection for outputs that previously failed at the asset-selection stage. It does not rerun healthy outputs.",
-    operationsRefreshSimilarTimes: "Look up public YouTube post times for the current profile watchlist. Instagram competitor timing is paused pending Meta permission; TikTok and Facebook remain reference-only. Suggested times never auto-apply.",
+    operationsRefreshSimilarTimes: "Look up public post times for one stale YouTube handle on the current profile watchlist. Instagram competitor timing is paused pending Meta permission; TikTok and Facebook remain reference-only. Suggested times never auto-apply.",
+    operationsAnalyticsRunScope: "Choose YouTube, Instagram, or YouTube then Instagram. Sequential run fetches one handle at a time so the Worker stays inside limits.",
+    operationsRunAllAnalytics: "Fetch public posts for every handle in the selected platform, one after another. Use Stop to halt after the current handle. Suggested times never auto-apply.",
+    operationsStopAnalytics: "Stop the sequential analytics run after the handle currently in flight finishes.",
     operationsIdeaMeta: "Shows the current Daily Ideas timing/profile summary returned by the Operations API.",
     operationsIntakeMeta: "Shows the latest library-intake summary returned by the Operations API.",
     operationsIntakeProgress: "Live progress for the current library-intake run, including intake, video backfill, classification, and reconciliation stages."

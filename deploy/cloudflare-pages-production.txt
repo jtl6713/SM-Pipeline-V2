@@ -349,3 +349,7 @@ Clip Prepare Pages deploy: 2026-09-02 - Frames shows clip players, a live elapse
 Render count Pages deploy: 2026-09-03 - Pipeline Progress and home Render show destination counts (N/6) instead of a frozen 62%. UI 0.6.236-render-count.
 
 Wizard mobile continue Pages deploy: 2026-09-03 - Home Continue opens production without waiting on the music/voice catalogs. UI 0.6.238-wizard-mobile-continue.
+
+Insights current season Pages deploy: 2026-09-03 - Operations Analytics defaults to the current Chicago season (summer until Sep 22). UI 0.6.239-insights-season.
+
+Sequential analytics Pages deploy: 2026-09-03 - Operations can run watchlist analytics one handle at a time for YouTube, Instagram, or all platforms. UI 0.6.240-analytics-seq.

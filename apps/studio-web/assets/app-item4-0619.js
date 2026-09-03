@@ -184,7 +184,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.238-wizard-mobile-continue";
+  const BUILD_ID = "item4-0.6.240-analytics-seq";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -245,6 +245,8 @@
   let pipelineNextRefreshAt = 0;
   let pipelinePollInFlight = false;
   let operationsTimezone = null;
+  let operationsAnalyticsAccounts = [];
+  const operationsAnalyticsQueue = { running: false, stop: false };
   const PIPELINE_POLL_MS = 8000;
   const PRODUCTION_POLL_MS = 8000;
   let productionPollTimer = null;
@@ -404,10 +406,19 @@
       setOperationsMessage(error.message || "Could not retry asset selection.", "error-text");
     }
   });
+  $("operationsRunAllAnalytics")?.addEventListener("click", () => {
+    runOperationsAnalyticsQueue($("operationsAnalyticsRunScope")?.value || "youtube");
+  });
+  $("operationsStopAnalytics")?.addEventListener("click", () => {
+    if (!operationsAnalyticsQueue.running) return;
+    operationsAnalyticsQueue.stop = true;
+    setOperationsMessage("Stopping after the current handle…");
+  });
   $("operationsRefreshSimilarTimes")?.addEventListener("click", async () => {
     const button = $("operationsRefreshSimilarTimes");
     const meta = $("operationsSimilarTimesMeta");
     const idleLabel = "Refresh similar times";
+    if (operationsAnalyticsQueue.running) return;
     try {
       if (button) {
         button.disabled = true;
@@ -445,6 +456,7 @@
   });
   $("operationsDiscoverCreators")?.addEventListener("click", async () => {
     const button = $("operationsDiscoverCreators");
+    if (operationsAnalyticsQueue.running) return;
     try {
       if (button) {
         button.disabled = true;
@@ -472,6 +484,7 @@
   });
   $("operationsWatchlistForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (operationsAnalyticsQueue.running) return;
     const platform = String($("operationsWatchlistPlatform")?.value || "instagram").trim();
     const handle = String($("operationsWatchlistHandle")?.value || "").trim().replace(/^@/, "");
     if (!handle) {
@@ -961,15 +974,37 @@
     }
   }
 
+  function studioChicagoMonthDay(date = new Date()) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Chicago",
+        month: "numeric",
+        day: "numeric",
+      }).formatToParts(date);
+      const month = Number(parts.find((part) => part.type === "month")?.value);
+      const day = Number(parts.find((part) => part.type === "day")?.value);
+      if (!Number.isFinite(month) || month < 1 || !Number.isFinite(day) || day < 1) return null;
+      return { month, day };
+    } catch {
+      return null;
+    }
+  }
+
   function studioInsightsSeason(date = new Date()) {
-    const month = Number(new Intl.DateTimeFormat("en-US", {
-      timeZone: studioTimezone(),
-      month: "numeric",
-    }).format(date));
-    if ([12, 1, 2].includes(month)) return "winter";
-    if ([3, 4, 5].includes(month)) return "spring";
-    if ([6, 7, 8].includes(month)) return "summer";
+    const parts = studioChicagoMonthDay(date);
+    if (!parts) return "summer";
+    const md = parts.month * 100 + parts.day;
+    if (md >= 1221 || md < 320) return "winter";
+    if (md < 621) return "spring";
+    if (md < 922) return "summer";
     return "fall";
+  }
+
+  function initOperationsInsightsSeason() {
+    const seasonSelect = $("operationsInsightsSeason");
+    if (!seasonSelect || seasonSelect.dataset.initialized) return;
+    seasonSelect.value = studioInsightsSeason();
+    seasonSelect.dataset.initialized = "true";
   }
 
   function studioInsightsSeasonLabel(season) {
@@ -981,6 +1016,7 @@
   }
 
   function selectedInsightsSeason() {
+    initOperationsInsightsSeason();
     return String($("operationsInsightsSeason")?.value || studioInsightsSeason()).trim() || studioInsightsSeason();
   }
 
@@ -12186,6 +12222,110 @@
     return `${fmt(match[1])}–${fmt(match[2])}`;
   }
 
+  function similarAccountRunAllowed(platform) {
+    const key = String(platform || "").trim().toLowerCase();
+    return key === "youtube" || key === "instagram";
+  }
+
+  function operationsAnalyticsQueueForScope(scope) {
+    const wanted = String(scope || "youtube").trim().toLowerCase();
+    const order = wanted === "all" ? ["youtube", "instagram"] : [wanted];
+    return order.flatMap((platform) =>
+      (operationsAnalyticsAccounts || []).filter((row) => String(row.platform || "").toLowerCase() === platform)
+    );
+  }
+
+  function setOperationsAnalyticsQueueUi(running) {
+    const run = $("operationsRunAllAnalytics");
+    const stop = $("operationsStopAnalytics");
+    const scope = $("operationsAnalyticsRunScope");
+    const refresh = $("operationsRefreshSimilarTimes");
+    const discover = $("operationsDiscoverCreators");
+    if (run) {
+      run.disabled = running;
+      run.textContent = running ? "Running…" : "Run sequentially";
+    }
+    if (stop) stop.hidden = !running;
+    if (scope) scope.disabled = running;
+    const season = $("operationsInsightsSeason");
+    if (season) season.disabled = running;
+    if (refresh) refresh.disabled = running;
+    if (discover) discover.disabled = running;
+    document.querySelectorAll("[data-watchlist-run-platform]").forEach((button) => {
+      button.disabled = running;
+    });
+    document.querySelectorAll("[data-watchlist-run]").forEach((button) => {
+      const account = operationsAnalyticsAccounts[Number(button.dataset.watchlistRun)];
+      const timed = String(account?.platform || "").toLowerCase() === "youtube";
+      button.disabled = running || !timed;
+    });
+    document.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
+      button.disabled = running;
+    });
+  }
+
+  async function runOperationsAccountAnalytics(account) {
+    return api("/api/insights/similar-times", {
+      method: "POST",
+      body: JSON.stringify({
+        force: true,
+        limit: 1,
+        profile: account.profile || studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
+        platform: account.platform,
+        handle: account.handle,
+        season: selectedInsightsSeason(),
+      }),
+      timeoutMs: 60000,
+      retries: 1,
+    });
+  }
+
+  async function runOperationsAnalyticsQueue(scope) {
+    if (operationsAnalyticsQueue.running) return;
+    const queue = operationsAnalyticsQueueForScope(scope);
+    if (!queue.length) {
+      setOperationsMessage("No handles to run for that platform.", "error-text");
+      return;
+    }
+    operationsAnalyticsQueue.running = true;
+    operationsAnalyticsQueue.stop = false;
+    setOperationsAnalyticsQueueUi(true);
+    let added = 0;
+    let failed = 0;
+    let processed = 0;
+    try {
+      for (let i = 0; i < queue.length; i += 1) {
+        if (operationsAnalyticsQueue.stop) break;
+        const account = queue[i];
+        const platform = String(account.platform || "youtube").toLowerCase();
+        setOperationsMessage(`Running ${platform} ${i + 1}/${queue.length}: @${account.handle}…`);
+        try {
+          const result = await runOperationsAccountAnalytics(account);
+          processed += 1;
+          renderOperationsSimilarTimes(result);
+          if (result.updated) added += 1;
+          else if (["error", "needs_permission", "needs_key", "unavailable"].includes(String(result.account?.status || ""))) failed += 1;
+        } catch (error) {
+          processed += 1;
+          failed += 1;
+          setOperationsMessage(`@${account.handle} failed (${error.message || "error"}). Continuing…`, "error-text");
+        }
+      }
+      const stopped = operationsAnalyticsQueue.stop;
+      const summary = stopped
+        ? `Stopped after ${processed} of ${queue.length}. ${added} added posts${failed ? ` · ${failed} did not add posts` : ""}.`
+        : `Finished ${processed} handle${processed === 1 ? "" : "s"}. ${added} added posts${failed ? ` · ${failed} did not add posts` : ""}.`;
+      await loadOperations();
+      setOperationsMessage(summary);
+    } catch (error) {
+      setOperationsMessage(error.message || "Sequential analytics run failed.", "error-text");
+    } finally {
+      operationsAnalyticsQueue.running = false;
+      operationsAnalyticsQueue.stop = false;
+      setOperationsAnalyticsQueueUi(false);
+    }
+  }
+
   function similarAccountStatusLabel(status) {
     const key = String(status || "").trim();
     if (key === "ok") return "timed";
@@ -12217,6 +12357,7 @@
   function renderOperationsWatchlist(accounts, canEdit) {
     const target = $("operationsWatchlist");
     const empty = $("operationsWatchlistEmpty");
+    operationsAnalyticsAccounts = Array.isArray(accounts) ? accounts : [];
     if (empty) empty.hidden = Boolean(accounts?.length);
     if (!target) return;
     if (!accounts?.length) {
@@ -12233,10 +12374,14 @@
     const sections = order.filter((platform) => groups.has(platform)).concat(
       [...groups.keys()].filter((platform) => !order.includes(platform))
     );
+    const queueBusy = operationsAnalyticsQueue.running;
     target.innerHTML = sections.map((platform) => {
       const rows = groups.get(platform) || [];
-      const timed = platform === "youtube";
-      const groupMode = timed ? "timed" : platform === "instagram" ? "paused" : "review only";
+        const timed = platform === "youtube";
+        const groupMode = platform === "youtube" ? "timed" : platform === "instagram" ? "paused" : "review only";
+        const groupRun = canEdit && similarAccountRunAllowed(platform)
+        ? `<button type="button" class="text-button" data-watchlist-run-platform="${escapeHtml(platform)}" ${queueBusy ? "disabled" : ""} title="Fetch every ${escapeHtml(platform)} handle one at a time">Run this platform</button>`
+        : "";
       const cards = rows.map(({ account, index }) => {
         const profileUrl = similarAccountProfileUrl(account);
         const handle = profileUrl
@@ -12251,15 +12396,15 @@
         return `
       <article class="ops-profile-card${statusClass}">
         <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
-        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : platform === "instagram" ? "Paused until Meta business_discovery permission is fixed" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
-        <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit ? "" : "disabled"}>Remove</button>
+        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed && !queueBusy ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : platform === "instagram" ? "Paused until Meta business_discovery permission is fixed" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
+        <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit && !queueBusy ? "" : "disabled"}>Remove</button>
       </article>`;
       }).join("");
-      return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)} · ${groupMode} · ${rows.length}</h4>${cards}</section>`;
+      return `<section class="ops-watchlist-group"><h4>${escapeHtml(platform)} · ${groupMode} · ${rows.length}${groupRun}</h4>${cards}</section>`;
     }).join("");
     target.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
       button.addEventListener("click", async () => {
-        if (!canEdit) return;
+        if (!canEdit || operationsAnalyticsQueue.running) return;
         const next = accounts.filter((_, i) => i !== Number(button.dataset.watchlistRemove));
         try {
           await api("/api/insights/watchlist", { method: "POST", body: JSON.stringify({ accounts: next }) });
@@ -12270,9 +12415,15 @@
         }
       });
     });
+    target.querySelectorAll("[data-watchlist-run-platform]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (!canEdit || operationsAnalyticsQueue.running) return;
+        runOperationsAnalyticsQueue(button.dataset.watchlistRunPlatform);
+      });
+    });
     target.querySelectorAll("[data-watchlist-run]").forEach((button) => {
       button.addEventListener("click", async () => {
-        if (!canEdit) return;
+        if (!canEdit || operationsAnalyticsQueue.running) return;
         const account = accounts[Number(button.dataset.watchlistRun)];
         if (!account) return;
         const idleLabel = button.textContent;
@@ -12280,19 +12431,7 @@
         button.textContent = "Running…";
         try {
           setOperationsMessage(`Fetching @${account.handle} and adding its public posts to analytics…`);
-          const result = await api("/api/insights/similar-times", {
-            method: "POST",
-            body: JSON.stringify({
-              force: true,
-              limit: 1,
-              profile: account.profile || studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
-              platform: account.platform,
-              handle: account.handle,
-              season: selectedInsightsSeason(),
-            }),
-            timeoutMs: 60000,
-            retries: 1,
-          });
+          const result = await runOperationsAccountAnalytics(account);
           renderOperationsSimilarTimes(result);
           const stored = Number(result.account?.posts || 0);
           const status = similarAccountStatusLabel(result.account?.status);
@@ -12483,11 +12622,7 @@
 
   async function loadOperations() {
     const meta = $("operationsIdeaMeta");
-    const seasonSelect = $("operationsInsightsSeason");
-    if (seasonSelect && !seasonSelect.dataset.initialized) {
-      seasonSelect.value = studioInsightsSeason();
-      seasonSelect.dataset.initialized = "true";
-    }
+    initOperationsInsightsSeason();
     if (meta) meta.textContent = "Loading operations…";
     try {
       const data = await api("/api/operations");
@@ -12549,6 +12684,14 @@
       if (refreshSimilar) refreshSimilar.hidden = !data.can_edit_profiles;
       const discoverCreators = $("operationsDiscoverCreators");
       if (discoverCreators) discoverCreators.hidden = !data.can_edit_profiles;
+      const runAllAnalytics = $("operationsRunAllAnalytics");
+      if (runAllAnalytics) runAllAnalytics.hidden = !data.can_edit_profiles;
+      const analyticsScope = $("operationsAnalyticsRunScope");
+      if (analyticsScope) analyticsScope.hidden = !data.can_edit_profiles;
+      const analyticsScopeLabel = document.querySelector("label[for='operationsAnalyticsRunScope']");
+      if (analyticsScopeLabel) analyticsScopeLabel.hidden = !data.can_edit_profiles;
+      const stopAnalytics = $("operationsStopAnalytics");
+      if (stopAnalytics && !data.can_edit_profiles) stopAnalytics.hidden = true;
     } catch (error) {
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
       if (meta) meta.textContent = "Unable to load operations.";
