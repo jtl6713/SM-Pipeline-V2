@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.224-clip-prepare",
+          version: "0.10.225-clip-approve",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -8797,6 +8797,13 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   );
 
   for (const routeRow of routeRows.filter(row => row.ready && row.aspect_ratio)) {
+    const videoPassthrough = variantAssets.length > 0 && variantAssets.every((asset) => {
+      const variant = asset?.variants?.[routeRow.aspect_ratio];
+      return String(variant?.recipe_version || "") === "video-passthrough"
+        && String(variant?.google_drive_file_id || "").trim()
+        && /^rec[A-Za-z0-9]+$/.test(String(variant?.media_asset_record_id || "").trim());
+    });
+    if (videoPassthrough) continue;
     const expectedId = routeRow.record_id;
     const matching = variantQueueRows.filter(row => String(f(row, "Aspect_Ratio") || "").trim() === routeRow.aspect_ratio);
     const missingLinks = matching.filter(row => !arrayOrEmpty(f(row, "Target_Production_Request_Outputs")).includes(expectedId));
