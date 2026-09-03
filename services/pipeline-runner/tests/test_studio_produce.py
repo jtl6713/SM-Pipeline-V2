@@ -9,7 +9,7 @@ from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, r
 from studio_produce.media import asset_is_video, playable_url
 from studio_produce.queue import rebuild_variant_manifest
 from studio_produce.stamp import assign_clip_frames, finished_source_package, is_native_photo, source_package, stamp_fields
-from studio_produce.steps import pick_resume_step, thumbnail_required, voiceover_required
+from studio_produce.steps import pick_resume_step, render_progress_detail, thumbnail_required, voiceover_required
 from studio_produce.thumbnail_prompt import COLORFUL_3D_RULE, build_finished_thumbnail_prompt
 
 
@@ -26,6 +26,20 @@ def test_new_job_and_labels():
     assert job["detail"] == STEP_LABELS["themes"]
     assert job["percent"] == STEP_PERCENT["themes"]
     assert job["job_id"].startswith("spj-")
+
+
+def test_render_progress_detail_counts_ready_outputs():
+    rows = [
+        {"fields": {"Output_Status": "Ready for Review", "Final_File_URL": "https://example/a.mp4"}},
+        {"fields": {"Output_Status": "In Production", "Render_Status": "Rendering"}},
+        {"fields": {"Output_Status": "In Production", "Render_Status": "Rendering"}},
+        {"fields": {"Output_Status": "Ready for Review", "Studio_Preview_URL": "https://example/b.mp4"}},
+        {"fields": {"Output_Status": "In Production"}},
+        {"fields": {"Output_Status": "Ready for Review", "Render_Status": "Native Photo Route"}},
+    ]
+    assert render_progress_detail(rows) == "Rendering 3/6"
+    assert render_progress_detail([]) == "Rendering"
+    assert render_progress_detail(None) == "Rendering"
 
 
 def test_next_step_and_with_step():

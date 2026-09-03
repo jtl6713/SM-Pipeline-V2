@@ -184,7 +184,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.235-clip-prepare";
+  const BUILD_ID = "item4-0.6.236-render-count";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -852,6 +852,49 @@
     const render = String(record?.render_status || "").trim();
     if (pipelineIsRetryingRender(record) && /failed|error/i.test(render)) return "Trying Again";
     return render;
+  }
+
+  function pipelineOutputRenderComplete(record) {
+    if (pipelineIsRetryingRender(record)) return false;
+    const state = String(record?.studio_state || "").trim();
+    return [
+      "Ready for Review",
+      "Approved",
+      "Scheduled",
+      "Published",
+      "Uploading",
+      "Platform Processing",
+      "Draft Delivered",
+      "Skipped",
+    ].includes(state);
+  }
+
+  function pipelineOutputRenderInFlight(record) {
+    if (pipelineIsRetryingRender(record)) return true;
+    const state = String(record?.studio_state || "").trim();
+    if (["Rendering", "Queued", "Preparing Assets"].includes(state)) return true;
+    const render = String(record?.render_status || "").trim();
+    return /^(Rendering|Ready for Render)(\s+\d+\/\d+)?$/i.test(render);
+  }
+
+  function pipelineDestinationProgress(records) {
+    const list = Array.isArray(records) ? records.filter(Boolean) : [];
+    const total = list.length;
+    if (!total) return null;
+    if (!list.some(pipelineOutputRenderInFlight)) return null;
+    const done = list.filter(pipelineOutputRenderComplete).length;
+    return { done, total, percent: Math.round((done / total) * 100) };
+  }
+
+  function pipelineProgressCell(record, groupRecords) {
+    const dest = pipelineDestinationProgress(groupRecords);
+    if (dest && pipelineOutputRenderInFlight(record)) {
+      return `<div>${dest.done}/${dest.total}</div><div class="progress" title="${dest.done} of ${dest.total} destinations rendered"><span style="width:${Math.max(0, Math.min(100, dest.percent))}%"></span></div>`;
+    }
+    const pct = pipelineDisplayPercent(record);
+    return pct === null || pct === undefined
+      ? "—"
+      : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0, Math.min(100, Number(pct) || 0))}%"></span></div>`;
   }
 
   function normalizeDisplayText(value) {
@@ -8561,6 +8604,21 @@
     });
   }
 
+  function contentRenderLabel(record) {
+    const counts = record?.output_state_counts;
+    if (counts && typeof counts === "object") {
+      const total = Object.values(counts).reduce((sum, n) => sum + Number(n || 0), 0);
+      const incomplete = Number(counts.Rendering || 0)
+        + Number(counts["Trying Again"] || 0)
+        + Number(counts.Queued || 0)
+        + Number(counts["Preparing Assets"] || 0);
+      if (total && (counts.Rendering || counts["Trying Again"])) {
+        return `Rendering ${Math.max(0, total - incomplete)}/${total}`;
+      }
+    }
+    return String(record?.render_status || "");
+  }
+
   function contentSortValue(record, key) {
     if (key === "content") {
       const ms = parseStudioDate(record?.created_at)?.getTime();
@@ -8569,7 +8627,7 @@
     }
     if (key === "stage") return String(record?.studio_stage || "");
     if (key === "assets") return String(record?.asset_match_status || "");
-    if (key === "render") return String(record?.render_status || "");
+    if (key === "render") return contentRenderLabel(record);
     if (key === "review") return String(record?.review_status || record?.carousel_review_status || "");
     if (key === "outputs") return Array.isArray(record?.output_links) ? record.output_links.length : 0;
     return "";
@@ -8612,7 +8670,7 @@
       return;
     }
     const sorted = sortedContentRecords(records);
-    target.innerHTML = `<table class="data-table content-table"><thead><tr>${contentSortHeader("content", "Content")}${contentSortHeader("stage", "Studio stage")}${contentSortHeader("assets", "Assets")}${contentSortHeader("render", "Render")}${contentSortHeader("review", "Review")}${contentSortHeader("outputs", "Outputs")}</tr></thead><tbody>${sorted.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+    target.innerHTML = `<table class="data-table content-table"><thead><tr>${contentSortHeader("content", "Content")}${contentSortHeader("stage", "Studio stage")}${contentSortHeader("assets", "Assets")}${contentSortHeader("render", "Render")}${contentSortHeader("review", "Review")}${contentSortHeader("outputs", "Outputs")}</tr></thead><tbody>${sorted.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(contentRenderLabel(r))}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
     target.querySelectorAll("[data-content-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -8652,7 +8710,7 @@
       r.id,
       r.studio_stage,
       r.asset_match_status,
-      r.render_status,
+      contentRenderLabel(r),
       r.review_status || r.carousel_review_status,
       Array.isArray(r.output_links) ? r.output_links.length : 0,
       r.lifecycle_complete,
@@ -11092,9 +11150,11 @@
     const title = String(first.output_title || first.content_title || "").trim();
     const count = records.length;
     const suffix = `${count} output${count === 1 ? "" : "s"}`;
-    if (title) return `${title} · ${suffix}`;
-    if (pipelineContentGroupKey(first) === "unassigned") return `Unassigned · ${suffix}`;
-    return `Content piece · ${suffix}`;
+    const dest = pipelineDestinationProgress(records);
+    const destHint = dest ? ` · ${dest.done}/${dest.total} rendered` : "";
+    if (title) return `${title} · ${suffix}${destHint}`;
+    if (pipelineContentGroupKey(first) === "unassigned") return `Unassigned · ${suffix}${destHint}`;
+    return `Content piece · ${suffix}${destHint}`;
   }
 
   function groupedPipelineRecords(records) {
@@ -11128,6 +11188,10 @@
     if (key === "review") return String(record.review_status || "");
     if (key === "publish") return String(record.platform_publish_status || record.publish_status || "");
     if (key === "progress") {
+      const dest = pipelineDestinationProgress(
+        (pipelineOutputs || []).filter((row) => pipelineContentGroupKey(row) === pipelineContentGroupKey(record))
+      );
+      if (dest && pipelineOutputRenderInFlight(record)) return dest.percent;
       const pct = pipelineDisplayPercent(record);
       return Number.isFinite(Number(pct)) ? Number(pct) : -1;
     }
@@ -11176,8 +11240,7 @@
       return;
     }
     const sortedSource = isDashboard ? sortedPipelineRecords(source) : source;
-    const pipelineRow = (r) => {
-      const pct = pipelineDisplayPercent(r);
+    const pipelineRow = (r, groupRecords) => {
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
       const timing = studioOutputTimingLabel(r);
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
@@ -11197,7 +11260,7 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? groupedPipelineRecords(source).map((group, index) => {
@@ -11205,9 +11268,9 @@
           const open = isPipelineGroupExpanded(group.key, newest);
           const label = pipelineContentGroupLabel(group.records);
           const header = `<tr class="pipeline-group-row"><td colspan="9"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button></td></tr>`;
-          return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map(pipelineRow).join("")}</tbody>`;
+          return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
         }).join("")
-      : `<tbody>${sortedSource.map(pipelineRow).join("")}</tbody>`;
+      : `<tbody>${sortedSource.map((row) => pipelineRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
     const head = isPipeline
       ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
       : isDashboard
@@ -11294,6 +11357,7 @@
       r.review_status,
       r.platform_publish_status || r.publish_status,
       pipelineDisplayPercent(r),
+      pipelineOutputRenderComplete(r),
       r.creative_available,
       r.final_file_url,
       r.studio_preview_url,

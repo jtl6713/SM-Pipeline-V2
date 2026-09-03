@@ -9,7 +9,7 @@ from airtable.client import AirtableClient
 from studio_produce.constants import STEP_LABELS, TERMINAL_STEPS
 from studio_produce.context import load_outputs, load_parent, load_request, load_slides, read_job, write_job
 from studio_produce.job import derive_route, job_is_terminal, new_job, next_step, utc_now, with_step
-from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step
+from studio_produce.steps import STEP_HANDLERS, StepBlocked, StepWait, pick_resume_step, render_progress_detail
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
@@ -143,7 +143,12 @@ def _run(request_id: str) -> None:
                 write_job(
                     client,
                     request_id,
-                    with_step(job, "render", detail="Rendering", bump_attempt=False),
+                    with_step(
+                        job,
+                        "render",
+                        detail=render_progress_detail(ctx.get("outputs") or outputs),
+                        bump_attempt=False,
+                    ),
                 )
                 time.sleep(RENDER_WAIT_SECONDS)
                 continue
