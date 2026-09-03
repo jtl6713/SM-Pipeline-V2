@@ -184,7 +184,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.236-render-count";
+  const BUILD_ID = "item4-0.6.237-yt-analytics";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12254,6 +12254,7 @@
               season: selectedInsightsSeason(),
             }),
             timeoutMs: 60000,
+            retries: 1,
           });
           renderOperationsSimilarTimes(result);
           const stored = Number(result.account?.posts || 0);
