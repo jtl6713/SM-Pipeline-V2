@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.226-render-count",
+          version: "0.10.227-yt-analytics",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -10860,12 +10860,18 @@ function studioSeasonLabel(season) {
 }
 
 function studioAnalyzeCaption(caption) {
-  const text = String(caption || "").trim();
+  const raw = String(caption || "").trim();
+  const text = raw.slice(0, 500);
   const hashtags = (text.match(/#[\w\u0080-\uFFFF]+/g) || []).length;
-  const emoji = (text.match(/\p{Extended_Pictographic}/gu) || []).length;
+  let emoji = 0;
+  try {
+    emoji = (text.match(/\p{Extended_Pictographic}/gu) || []).length;
+  } catch {
+    emoji = 0;
+  }
   return {
-    text: text.slice(0, 5000),
-    length: text.length,
+    text: text || null,
+    length: raw.length,
     hashtags,
     emoji,
     has_question: /\?/.test(text),
@@ -11010,13 +11016,47 @@ async function studioInsightsUpsertObservation(env, fields) {
 
 async function studioInsightsUpsertObservations(env, posts, meta = {}) {
   if (!studioInsightsDbEnabled(env) || !Array.isArray(posts) || !posts.length) return { upserted: 0 };
+  const prepared = posts
+    .map((post) => studioInsightsObservationFields(post, meta))
+    .filter((fields) => String(fields?.Observation_Key || "").trim());
+  if (!prepared.length) return { upserted: 0 };
+  const keyClauses = prepared.map((fields) => `{Observation_Key}='${String(fields.Observation_Key).replace(/'/g, "\\'")}'`);
+  const existingRows = await listRecords(env, studioInsightsObservationsTable(env), {
+    limit: prepared.length,
+    filterFormula: prepared.length === 1 ? keyClauses[0] : `OR(${keyClauses.join(",")})`,
+  }).catch(() => []);
+  const byKey = new Map((existingRows || []).map((row) => [String(f(row, "Observation_Key") || ""), row]));
+  const toCreate = [];
+  const toPatch = [];
+  for (const fields of prepared) {
+    const found = byKey.get(fields.Observation_Key);
+    if (found?.id) toPatch.push({ id: found.id, fields });
+    else toCreate.push({ fields });
+  }
   let upserted = 0;
-  for (const post of posts) {
+  const tableId = studioInsightsObservationsTable(env);
+  for (let i = 0; i < toCreate.length; i += 10) {
+    const chunk = toCreate.slice(i, i + 10);
     try {
-      await studioInsightsUpsertObservation(env, studioInsightsObservationFields(post, meta));
-      upserted += 1;
+      await airtableFetch(env, tableId, "", {
+        method: "POST",
+        body: JSON.stringify({ records: chunk, typecast: true }),
+      });
+      upserted += chunk.length;
     } catch (error) {
-      console.warn("insights observation upsert failed", error);
+      console.warn("insights observation create batch failed", error);
+    }
+  }
+  for (let i = 0; i < toPatch.length; i += 10) {
+    const chunk = toPatch.slice(i, i + 10);
+    try {
+      await airtableFetch(env, tableId, "", {
+        method: "PATCH",
+        body: JSON.stringify({ records: chunk, typecast: true }),
+      });
+      upserted += chunk.length;
+    } catch (error) {
+      console.warn("insights observation patch batch failed", error);
     }
   }
   return { upserted };
@@ -11059,11 +11099,28 @@ async function studioLoadSimilarAccountStatusCache(env) {
   return parseSimilarTimesCache(f(legacyRow, "Setting_Value"));
 }
 
+function studioSlimSimilarStatusCache(cache) {
+  const accounts = {};
+  for (const [key, entry] of Object.entries(cache?.accounts || {})) {
+    const posts = Array.isArray(entry?.posts) ? entry.posts.length : Number(entry?.posts || 0) || 0;
+    accounts[key] = {
+      platform: entry?.platform || null,
+      handle: entry?.handle || null,
+      profile: entry?.profile || "chicago",
+      status: entry?.status || "pending",
+      error: entry?.error ? String(entry.error).slice(0, 160) : null,
+      fetched_at: entry?.fetched_at || null,
+      posts,
+    };
+  }
+  return { as_of: cache?.as_of || null, accounts };
+}
+
 async function studioSaveSimilarAccountStatusCache(env, cache) {
   await studioUpsertSetting(
     env,
     STUDIO_SIMILAR_ACCOUNT_STATUS_SETTING,
-    JSON.stringify(cache),
+    JSON.stringify(studioSlimSimilarStatusCache(cache)),
     "Similar-account fetch status metadata. Post observations persist in Studio Insights Observations."
   );
 }
@@ -12076,39 +12133,29 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
   try { payload = await request.json(); } catch { payload = {}; }
   // A single-account button click must stay bounded. Migrating every legacy
   // cache observation here can exhaust Worker CPU before the requested sweep.
+  // Reloading 300 observations + occupied schedules after the YouTube fetch
+  // also 500s the isolate (subrequest/CPU) for handles with ~20 public uploads.
   const theme = payload.profile || payload.theme
     ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
     : await studioResolveSimilarTimesTheme(env, url, authorization);
   const season = payload.season ? studioNormalizeInsightsSeason(payload.season) : studioInsightsResolveSeason(url);
+  const platform = String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase();
   const result = await studioSweepSimilarAccountTimes(env, {
     limit: 1,
     force: Boolean(payload.force),
     theme,
-    platform: payload.platform,
+    platform,
     handle: payload.handle,
     skipRecompute: true,
   });
-  const accounts = await studioEnsureSimilarWatchlist(env);
-  const cache = result.cache || await studioLoadSimilarAccountStatusCache(env);
-  const posts = await studioInsightsPostsForView(env, {
-    accounts,
-    theme,
-    platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
-    season,
-    cache,
-  });
-  const occupiedByPlatform = await studioLoadOccupiedSchedules(env).catch((error) => {
-    console.warn("similar-times own schedule overlay failed", error);
-    return {};
-  });
   const view = studioBuildSimilarTimesView({
-    accounts,
-    cache,
+    accounts: result.accounts || [],
+    cache: result.cache || { as_of: null, accounts: {} },
     theme,
-    platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
+    platform,
     season,
-    posts,
-    own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
+    posts: result.posts || [],
+    own_schedule: { total: 0, buckets: [] },
   });
   return respond(request, env, {
     ok: true,
@@ -12296,7 +12343,7 @@ async function studioFetchYoutubePublicUploads(handle, creds) {
       views: Number(item?.statistics?.viewCount || 0) || 0,
       likes: Number(item?.statistics?.likeCount || 0) || 0,
       comments: Number(item?.statistics?.commentCount || 0) || 0,
-      caption: String(item?.snippet?.description || item?.snippet?.title || "").trim(),
+      caption: String(item?.snippet?.title || "").trim(),
       external_post_id: String(item?.id || item?.snippet?.publishedAt || "").trim(),
     }))
     .filter((item) => item.published_at);
@@ -12448,7 +12495,7 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
     const account = timed[0]
       ? cache.accounts[studioSimilarAccountKey(timed[0].platform, timed[0].handle)] || null
       : null;
-    return { scanned: 0, updated: 0, remaining: 0, cache, account };
+    return { scanned: 0, updated: 0, remaining: 0, cache, account, accounts, posts: [] };
   }
   const settings = await studioActivePipelineSettings(env, [
     "FACEBOOK_PAGE_ACCESS_TOKEN",
@@ -12463,6 +12510,7 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
     youtubeKey: settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
   };
   let updated = 0;
+  let lastPosts = [];
   for (const account of batch) {
     const key = studioSimilarAccountKey(account.platform, account.handle);
     try {
@@ -12471,6 +12519,7 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
         : await studioFetchYoutubePublicUploads(account.handle, creds);
       const fetchedAt = new Date().toISOString();
       if (fetched.status === "ok") {
+        lastPosts = fetched.posts || [];
         await studioInsightsUpsertObservations(env, (fetched.posts || []).map((post) => ({
           ...post,
           platform: account.platform,
@@ -12508,7 +12557,11 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
     }
   }
   cache.as_of = new Date().toISOString();
-  await studioSaveSimilarAccountStatusCache(env, cache);
+  try {
+    await studioSaveSimilarAccountStatusCache(env, cache);
+  } catch (error) {
+    console.warn("similar-account status cache save failed", error);
+  }
   if (!options.skipRecompute) {
     try {
       await studioRecomputeInsightsLearned(env, { profile: options.theme || "chicago" });
@@ -12520,7 +12573,15 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   const account = selected
     ? cache.accounts[studioSimilarAccountKey(selected.platform, selected.handle)] || null
     : null;
-  return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache, account };
+  return {
+    scanned: batch.length,
+    updated,
+    remaining: Math.max(0, stale.length - batch.length),
+    cache,
+    account,
+    accounts,
+    posts: batch.length === 1 ? lastPosts : [],
+  };
 }
 
 async function restoreParentContentItemFromStudioUmbrella(env, parentContentItem) {
