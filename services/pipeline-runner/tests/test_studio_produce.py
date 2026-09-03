@@ -307,6 +307,24 @@ def test_rebuild_manifest_video_skips_jpeg_crop():
     assert manifest["assets"][0]["variants"]["9:16"]["preview_url"].endswith("walk.mp4")
 
 
+def test_rebuild_manifest_video_ready_without_public_http():
+    assets = [
+        {
+            "id": "clip1",
+            "order": 1,
+            "name": "walk.mp4",
+            "mime_type": "video/mp4",
+            "media_kind": "video",
+            "google_drive_file_id": "dvid",
+            "media_asset_record_id": "recVID0000000001",
+            "duration_seconds": 8,
+        }
+    ]
+    manifest = rebuild_variant_manifest("recPR", assets, ["9:16"], [], plan={"items": [{"aspect_ratio": "9:16"}]})
+    assert manifest["plan_complete"] is True
+    assert manifest["assets"][0]["variants"]["9:16"]["preview_url"] == "/api/media-assets/recVID0000000001/stream"
+
+
 def test_mixed_stamp_uses_video_trim_and_photo_floor():
     request = {
         "id": "recPRMix",

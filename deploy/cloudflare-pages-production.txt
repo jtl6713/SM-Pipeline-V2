@@ -343,3 +343,5 @@ Compression progress Pages deploy: 2026-09-02 - Operations banner shows live com
 Asset Library pages Pages deploy: 2026-09-02 - Asset Library opens on the 5 newest assets, with Show this many on page (5/10/20/50) and Previous/Next. Clip cards grab a local frame the same way Production does. UI 0.6.233-library-pages.
 
 Asset Library preview + intake copy Pages deploy: 2026-09-02 - Click a library card to play the clip (stream) or open the photo. Operations copy notes the 15-minute ingestion ticker. UI 0.6.234-library-preview.
+
+Clip Prepare Pages deploy: 2026-09-02 - Frames shows clip players, a live elapsed timer, and Ready when clips skip photo crops. UI 0.6.235-clip-prepare.

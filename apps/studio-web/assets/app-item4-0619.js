@@ -112,6 +112,8 @@
   let ezLocalPreviews = new Map();
   let ezLocalClipPosters = new Map();
   let item4HeldClipFiles = new Map();
+  const item4ClipObjectUrls = new Map();
+  const item4ClipDurationCache = new Map();
   const item4PosterJobs = new Set();
   let ezSelectedVoiceId = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
@@ -136,6 +138,8 @@
   let item4Uploading = false;
   let item4PendingUploads = [];
   let item4PreparingVariants = false;
+  let item4PrepareClockTimer = 0;
+  let item4VariantPolling = false;
   let item4PromoteInFlight = false;
   const item4PromotedRequestIds = new Set();
   let item4VariantPollTimer = null;
@@ -180,7 +184,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.234-library-preview";
+  const BUILD_ID = "item4-0.6.235-clip-prepare";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2160,6 +2164,53 @@
     return mime.startsWith("video/") || ["mp4", "mov", "m4v", "webm"].includes(ext);
   }
 
+  const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
+  let item4OversizedClipNotice = "";
+
+  function item4ClipFileMb(file) {
+    return Math.max(1, Math.round(Number(file?.size || 0) / (1024 * 1024)));
+  }
+
+  function item4OversizedClipFiles(files) {
+    return Array.from(files || []).filter((file) => item4FileLooksLikeVideo(file) && Number(file.size || 0) > ITEM4_CLIP_EDGE_MAX_BYTES);
+  }
+
+  function item4OversizedClipMessage(oversized, keptCount = 0) {
+    const labels = oversized.map((file) => `${file.name || "clip"} (${item4ClipFileMb(file)} MB)`);
+    const list = labels.length === 1
+      ? labels[0]
+      : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+    const need = oversized.length === 1
+      ? `${list} is over 100 MB and needs to be compressed before Studio can upload it.`
+      : `${oversized.length} clips are over 100 MB and need to be compressed: ${list}.`;
+    const how = oversized.length === 1
+      ? " Compress the file first, or add it to the Drive ingestion folder so Operations can compress it."
+      : " Compress those files first, or add them to the Drive ingestion folder so Operations can compress them.";
+    const kept = keptCount
+      ? ` Uploading the other ${keptCount} file${keptCount === 1 ? "" : "s"} that ${keptCount === 1 ? "is" : "are"} under 100 MB.`
+      : "";
+    return `${need}${how}${kept}`;
+  }
+
+  function item4ShowOversizedClipNotice() {
+    if (!item4OversizedClipNotice) return false;
+    setEzMessage(item4OversizedClipNotice, "error-text");
+    setRequestMessage(item4OversizedClipNotice, "error-text");
+    return true;
+  }
+
+  function item4DropOversizedClips(files, { resetNotice = false } = {}) {
+    const incoming = Array.from(files || []);
+    const oversized = item4OversizedClipFiles(incoming);
+    const allowed = incoming.filter((file) => !oversized.includes(file));
+    if (resetNotice && !oversized.length) item4OversizedClipNotice = "";
+    if (oversized.length) {
+      item4OversizedClipNotice = item4OversizedClipMessage(oversized, allowed.length);
+      item4ShowOversizedClipNotice();
+    }
+    return { oversized, allowed };
+  }
+
   function item4AssetLooksLikeVideo(asset) {
     if (String(asset?.media_kind || "").toLowerCase() === "video") return true;
     const mime = String(asset?.mime_type || "").toLowerCase();
@@ -2248,7 +2299,7 @@
       if (choose) choose.textContent = "Choose photos";
     } else if (nextKind === "video-clips") {
       if (title) title.textContent = "Drop clips";
-      if (hint) hint.textContent = "Raw mp4/mov clips only. Studio cuts them into a Reel — not a finished file.";
+      if (hint) hint.textContent = "Raw mp4/mov clips only. Studio cuts them into a Reel — not a finished file. Clips over 100 MB need to be compressed first.";
       if (choose) choose.textContent = "Choose clips";
     } else if (nextKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips";
@@ -2554,17 +2605,18 @@
       const remoteUrl = asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
       const previewUrl = localUrl || remoteUrl;
       const heic = item4IsHeicAsset(file || asset);
+      const streamUrl = isVideo ? item4PlayableClipSrc(asset) : "";
       const visual = isVideo
-        ? (previewUrl
-          ? `<div class="item4-clip-poster-wrap"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false" class="item4-clip-poster"><span class="item4-clip-play" aria-hidden="true"></span></div>`
-          : item4AssetPlaceholder(file || asset, "Clip saved"))
+        ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name, durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(file || asset, "Clip saved"))
         : previewUrl
           ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
           : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
       const canRemove = asset.id && !String(asset.id).startsWith("local:") && !String(asset.id).startsWith("staged:");
+      const seconds = item4KnownClipDuration(asset);
+      const durationNote = isVideo && seconds > 0 ? ` · ${formatLibraryClipDuration(seconds)}` : "";
       cards.push(`<article class="ez-photo-card" data-item4-asset="${escapeHtml(id)}">
         ${visual}
-        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>${ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`}</span></div>
+        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>${isVideo ? `Clip ${index + 1}` : (ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`)}${durationNote}</span></div>
         ${item4CaptionField(id)}
         ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
       </article>`);
@@ -2573,6 +2625,7 @@
     host.querySelectorAll("[data-remove-item4-asset]").forEach((button) => {
       button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset));
     });
+    item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
   }
@@ -4171,7 +4224,7 @@
       selectEzInput("finished-video", { resetPlatforms: false });
     }
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
-    const files = incoming.filter(item4IsSupportedPhotoFile);
+    let files = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
       setEzMessage(unsupportedNote, "error-text");
       setRequestMessage(unsupportedNote, "error-text");
@@ -4182,23 +4235,28 @@
       setRequestMessage(choose, "error-text");
       return;
     }
+    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: true });
+    if (oversizedSplit.oversized.length) {
+      files = oversizedSplit.allowed;
+      if (!files.length) return;
+    }
     if (item4Uploading || ezStarting) {
       item4PendingUploads.push(...files);
-      setEzMessage("Adding to the set…");
+      if (!item4ShowOversizedClipNotice()) setEzMessage("Adding to the set…");
       return;
     }
     if (activeProductionRequest?.id) {
-      uploadItem4Files(files);
+      uploadItem4Files(files, { preserveOversizedNotice: true });
       return;
     }
-    startEzProduction({ files });
+    startEzProduction({ files, preserveOversizedNotice: true });
   }
 
   async function startEzFromFiles(fileList) {
     receiveMasterPhotos(fileList);
   }
 
-  async function startEzProduction({ files = [] } = {}) {
+  async function startEzProduction({ files = [], preserveOversizedNotice = false } = {}) {
     const apiHelpers = ezPlanApi();
     if (!apiHelpers) throw new Error("EZ plan helper did not load");
     const pending = ezWizardPending || ezWizardAnswers;
@@ -4241,8 +4299,13 @@
       }
       nextFiles = nextFiles.slice(0, remaining);
     }
+    const oversizedSplit = item4DropOversizedClips(nextFiles, { resetNotice: !preserveOversizedNotice });
+    if (oversizedSplit.oversized.length) {
+      nextFiles = oversizedSplit.allowed;
+      if (!nextFiles.length && !allowEmpty) return;
+    }
     if (activeProductionRequest?.id && nextFiles.length) {
-      await uploadItem4Files(nextFiles);
+      await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
       return;
     }
     const captionMode = ezCaptionMode();
@@ -4251,7 +4314,9 @@
     ezStarting = true;
     const continueBtn = $("ezContinue");
     if (continueBtn) continueBtn.disabled = true;
-    setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
+    if (!item4OversizedClipNotice) {
+      setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
+    }
     try {
       const wizardPlanned = pending?.planned;
       const totalAfter = existingCount + nextFiles.length;
@@ -4330,8 +4395,8 @@
         await maybeAutoEzPlan(true);
       } else {
         ezAutoPlanAfterUpload = true;
-        setEzMessage("Uploading originals…");
-        await uploadItem4Files(nextFiles);
+        if (!item4ShowOversizedClipNotice()) setEzMessage("Uploading originals…");
+        await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
         renderEzPhotoStrip();
       }
     } catch (error) {
@@ -4759,18 +4824,202 @@
   }
 
   function item4ClipStreamUrl(asset) {
-    const recordId = String(asset?.media_asset_record_id || "").trim();
+    const recordId = String(asset?.media_asset_record_id || "").trim()
+      || (/^rec[A-Za-z0-9]+$/.test(String(asset?.id || "").trim()) ? String(asset.id).trim() : "");
     if (!/^rec[A-Za-z0-9]+$/.test(recordId)) return "";
     return `${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/stream`;
+  }
+
+  function formatLibraryClipDuration(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return "";
+    const total = Math.round(value);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const rest = total % 60;
+    if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+    return `${minutes}:${String(rest).padStart(2, "0")}`;
+  }
+
+  function item4RememberClipDuration(keys, seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return;
+    (Array.isArray(keys) ? keys : [keys]).forEach((key) => {
+      const id = String(key || "").trim();
+      if (id) item4ClipDurationCache.set(id, value);
+    });
+  }
+
+  function item4KnownClipDuration(item) {
+    const stored = Number(item?.duration_seconds || 0);
+    if (Number.isFinite(stored) && stored > 0) return stored;
+    for (const key of [item?.id, item?.media_asset_record_id, item?.name]) {
+      const cached = item4ClipDurationCache.get(String(key || ""));
+      if (cached) return cached;
+    }
+    return 0;
+  }
+
+  function item4HeldClipObjectUrl(asset) {
+    const file = item4HeldClipFiles.get(String(asset?.name || "")) || item4HeldClipFiles.get(String(asset?.id || ""));
+    if (!file) return "";
+    const key = String(asset?.id || asset?.name || "");
+    if (!key) return "";
+    if (!item4ClipObjectUrls.has(key)) item4ClipObjectUrls.set(key, URL.createObjectURL(file));
+    return item4ClipObjectUrls.get(key);
+  }
+
+  function item4PlayableClipSrc(asset) {
+    return item4ClipStreamUrl(asset) || item4HeldClipObjectUrl(asset);
+  }
+
+  function item4ClipDurationBadgeHtml(seconds) {
+    const label = formatLibraryClipDuration(seconds);
+    return `<em class="item4-clip-duration"${label ? "" : " hidden"}>${escapeHtml(label)}</em>`;
+  }
+
+  function item4ClipPlayerHtml({ previewUrl = "", streamUrl = "", name = "Clip", durationSeconds = 0, asset = null, preload = false } = {}) {
+    const seconds = item4KnownClipDuration({
+      duration_seconds: durationSeconds,
+      id: asset?.id,
+      media_asset_record_id: asset?.media_asset_record_id,
+      name,
+    });
+    const src = String(streamUrl || "").trim();
+    const img = previewUrl
+      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name || "Clip")}" loading="lazy" class="item4-clip-poster"${asset ? ` data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}"` : ""}>`
+      : "";
+    const video = src
+      ? `<video muted playsinline class="item4-clip-video"${preload ? ` src="${escapeHtml(src)}" preload="metadata"` : ` preload="none" data-item4-stream="${escapeHtml(src)}"`}></video>`
+      : "";
+    if (!img && !video) return "";
+    return `<div class="item4-clip-poster-wrap" data-item4-clip-player data-clip-key="${escapeHtml(String(asset?.id || asset?.media_asset_record_id || name || ""))}">
+      ${img}${video}
+      ${src ? `<button type="button" class="item4-clip-play" data-item4-play aria-label="Play ${escapeHtml(name || "clip")}"></button>` : `<span class="item4-clip-play" aria-hidden="true"></span>`}
+      ${item4ClipDurationBadgeHtml(seconds)}
+    </div>`;
+  }
+
+  function item4PaintClipDuration(wrap, seconds) {
+    const label = formatLibraryClipDuration(seconds);
+    if (!label || !wrap) return;
+    const badge = wrap.querySelector(".item4-clip-duration");
+    if (badge) {
+      badge.textContent = label;
+      badge.hidden = false;
+    }
+    const card = wrap.closest("[data-item4-asset], .idea-library-card, .library-card");
+    const nameLine = card?.querySelector(".item4-asset-meta span, .idea-library-card > span, h3");
+    if (nameLine && !/\d+:\d{2}/.test(String(nameLine.textContent || ""))) {
+      nameLine.textContent = `${String(nameLine.textContent || "").replace(/\s+$/, "")} · ${label}`;
+    }
+  }
+
+  function item4PauseOtherClipPlayers(active) {
+    document.querySelectorAll("[data-item4-clip-player].is-playing").forEach((wrap) => {
+      if (wrap === active) return;
+      const video = wrap.querySelector("video");
+      try { video?.pause(); } catch {}
+      wrap.classList.remove("is-playing");
+      if (video) video.controls = false;
+    });
+  }
+
+  function item4BindClipPlayers(root) {
+    if (!root) return;
+    root.querySelectorAll("[data-item4-clip-player]").forEach((wrap) => {
+      if (wrap.dataset.boundPlayer) return;
+      wrap.dataset.boundPlayer = "1";
+      const video = wrap.querySelector("video");
+      const play = wrap.querySelector("[data-item4-play]");
+      const applyDuration = () => {
+        const seconds = Number(video?.duration || 0);
+        if (!Number.isFinite(seconds) || seconds <= 0) return;
+        item4RememberClipDuration(wrap.dataset.clipKey, seconds);
+        const card = wrap.closest("[data-item4-asset]");
+        const asset = (item4Workspace?.assets || []).find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
+        if (asset) asset.duration_seconds = seconds;
+        const libraryCard = wrap.closest("[data-item4-library-id], [data-library-id]");
+        const libraryId = libraryCard?.getAttribute("data-item4-library-id") || libraryCard?.getAttribute("data-library-id");
+        if (libraryId) {
+          item4RememberClipDuration(libraryId, seconds);
+          const row = item4LibraryItems.find((item) => item.id === libraryId) || ideaLibraryPickerItems.find((item) => item.id === libraryId);
+          if (row) row.duration_seconds = seconds;
+        }
+        item4PaintClipDuration(wrap, seconds);
+      };
+      const ensureSrc = () => {
+        if (!video) return false;
+        if (video.currentSrc || video.src) return true;
+        const pending = String(video.dataset.item4Stream || "").trim();
+        if (!pending) return false;
+        video.src = pending;
+        return true;
+      };
+      video?.addEventListener("loadedmetadata", applyDuration);
+      play?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!video || !ensureSrc()) return;
+        item4PauseOtherClipPlayers(wrap);
+        wrap.classList.add("is-playing");
+        video.controls = true;
+        video.muted = false;
+        video.play().catch(() => {});
+      });
+      video?.addEventListener("play", () => {
+        item4PauseOtherClipPlayers(wrap);
+        wrap.classList.add("is-playing");
+        video.controls = true;
+      });
+      video?.addEventListener("pause", () => {
+        if (video.ended) {
+          wrap.classList.remove("is-playing");
+          video.controls = false;
+        }
+      });
+      video?.addEventListener("ended", () => {
+        wrap.classList.remove("is-playing");
+        video.controls = false;
+      });
+      if (video?.readyState >= 1) applyDuration();
+    });
+    item4ProbeVisibleClipDurations(root);
+  }
+
+  function item4ProbeVisibleClipDurations(root) {
+    const videos = [...(root?.querySelectorAll("video[data-item4-stream]") || [])]
+      .filter((video) => !video.currentSrc && !video.dataset.probedDuration);
+    if (!videos.length) return;
+    const start = (video) => {
+      if (!video.isConnected || video.dataset.probedDuration || video.currentSrc) return;
+      const stream = String(video.dataset.item4Stream || "").trim();
+      if (!stream) return;
+      video.dataset.probedDuration = "1";
+      video.preload = "metadata";
+      video.src = stream;
+    };
+    if (!window.IntersectionObserver) {
+      videos.slice(0, 4).forEach(start);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        start(entry.target);
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.2 });
+    videos.forEach((video) => observer.observe(video));
   }
 
   function item4AssetPlaceholder(asset, label = "Preview unavailable") {
     const isVideo = item4AssetLooksLikeVideo(asset);
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const format = ext || (isVideo ? "CLIP" : (item4IsHeicAsset(asset) ? "HEIC" : "IMAGE"));
-    const seconds = Number(asset?.duration_seconds || 0);
+    const seconds = item4KnownClipDuration(asset);
     const clipLabel = isVideo
-      ? (seconds > 0 ? `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s clip saved` : "Clip saved")
+      ? (seconds > 0 ? `${formatLibraryClipDuration(seconds)} clip saved` : "Clip saved")
       : label;
     return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}">${isVideo ? `<span class="item4-clip-play" aria-hidden="true"></span>` : ""}<strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
   }
@@ -4781,19 +5030,15 @@
     const isVideo = item4AssetLooksLikeVideo(asset);
     const candidates = item4AssetPreviewCandidates(asset);
     const previewUrl = candidates[0] || "";
-    const streamUrl = isVideo ? item4ClipStreamUrl(asset) : "";
+    const streamUrl = isVideo ? item4PlayableClipSrc(asset) : "";
     const visual = isVideo
-      ? (previewUrl
-        ? `<div class="item4-clip-poster-wrap"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Clip")}" loading="lazy" class="item4-clip-poster" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}"><span class="item4-clip-play" aria-hidden="true"></span></div>`
-        : streamUrl
-          ? `<div class="item4-clip-poster-wrap"><video muted playsinline preload="auto" src="${escapeHtml(`${streamUrl}#t=0.25`)}" class="item4-clip-poster" data-item4-clip-video></video><span class="item4-clip-play" aria-hidden="true"></span></div>`
-          : item4AssetPlaceholder(asset, "Clip saved"))
+      ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name: asset.name || "Clip", durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(asset, "Clip saved"))
       : previewUrl
         ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
         : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
-    const seconds = Number(asset?.duration_seconds || 0);
-    const durationNote = isVideo && seconds > 0 ? ` · ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s` : "";
+    const seconds = item4KnownClipDuration(asset);
+    const durationNote = isVideo && seconds > 0 ? ` · ${formatLibraryClipDuration(seconds)}` : "";
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
     const showCaption = ezManualCaptionsEnabled() && (ezPhotoSetActive() || ezIntakeKind === "single-photo");
     const captionField = showCaption ? item4CaptionField(asset.id) : "";
@@ -4851,6 +5096,7 @@
       });
     });
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
+    item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
     syncFinishedMediaHeadings();
@@ -5195,8 +5441,80 @@
     return chain;
   }
 
+  function item4WorkspaceHasClips(status) {
+    return item4ClipCountsFromStatus(status || {}).clips > 0 || ezIsClipRequest();
+  }
+
+  function item4FormatElapsed(ms) {
+    const total = Math.max(0, Math.floor(Number(ms) / 1000) || 0);
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function stopItem4PrepareClock() {
+    if (item4PrepareClockTimer) clearInterval(item4PrepareClockTimer);
+    item4PrepareClockTimer = 0;
+  }
+
+  function ensureItem4PrepareClock() {
+    if (item4PrepareClockTimer) return;
+    if (!item4VariantPollStartedAt) item4VariantPollStartedAt = Date.now();
+    item4PrepareClockTimer = setInterval(() => {
+      updateItem4VariantProgress(item4Workspace || {});
+    }, 1000);
+  }
+
+  function updateItem4VariantProgress(status) {
+    const progress = $("item4VariantProgress");
+    if (!progress) return;
+    const variantStatus = String(status?.variant_status || "None");
+    const busy = item4PreparingVariants || variantStatus === "Preparing";
+    if (!busy) {
+      progress.hidden = true;
+      progress.innerHTML = "";
+      delete progress.dataset.heal;
+      stopItem4PrepareClock();
+      return;
+    }
+    const clips = item4WorkspaceHasClips(status);
+    const readyCount = Number(status?.variants?.ready_count || 0);
+    const targetCount = Number(status?.variants?.target_count || status?.variants?.source_asset_count || 0);
+    const elapsed = item4FormatElapsed(Date.now() - (item4VariantPollStartedAt || Date.now()));
+    const count = targetCount ? `${readyCount} of ${targetCount} ready` : `${readyCount} ready`;
+    progress.hidden = false;
+    progress.dataset.heal = "preparing";
+    progress.innerHTML = `<strong>${clips ? "Attaching clip frames" : "Preparing platform crops"}</strong><span>${escapeHtml(count)} · ${escapeHtml(elapsed)} elapsed. This page updates automatically.</span>`;
+    ensureItem4PrepareClock();
+  }
+
+  function item4VariantClipThumb(asset) {
+    const master = item4MasterAsset(asset?.id) || asset || {};
+    const previewUrl = item4AssetPreviewUrl(master);
+    const streamUrl = item4PlayableClipSrc(master);
+    const visual = item4ClipPlayerHtml({
+      previewUrl,
+      streamUrl,
+      name: master.name || "Clip",
+      durationSeconds: master.duration_seconds,
+      asset: master,
+      preload: Boolean(streamUrl),
+    }) || item4AssetPlaceholder(master, "Clip saved");
+    const assetId = master.id || "";
+    return `<article class="item4-variant-thumb item4-variant-clip" data-item4-asset="${escapeHtml(assetId)}">
+      <div class="item4-variant-image-wrap" style="aspect-ratio:9 / 16">${visual}</div>
+      <p class="item4-crop-hint">Clips skip photo crops. The same file is used for each platform frame.</p>
+      <div class="item4-variant-meta">
+        <strong>Clip ${escapeHtml(master.order || "")}</strong>
+        <span>${escapeHtml(master.name || "")}</span>
+      </div>
+      ${item4CaptionField(assetId)}
+    </article>`;
+  }
+
   function item4VariantThumb(row, ratio) {
     const master = item4MasterAsset(row.asset?.id) || row.asset;
+    if (item4AssetLooksLikeVideo(master)) return item4VariantClipThumb(master);
     const candidates = item4VariantPreviewCandidates({ asset: master, variant: row.variant });
     const previewUrl = candidates[0] || "";
     const cssRatio = String(ratio || "4:5").replace(":", " / ");
@@ -5239,6 +5557,7 @@
       }
       if (hint) hint.textContent = "Finished video. Studio skips crops and Remotion.";
       if (host) host.innerHTML = '<div class="empty compact-empty">This file is already finished. Approve sends it to review as-is.</div>';
+      updateItem4VariantProgress({});
       syncProductionStudioState();
       return;
     }
@@ -5247,6 +5566,7 @@
     const manifest = status?.variants || null;
     const readyCount = Number(manifest?.ready_count || 0);
     const targetCount = Number(manifest?.target_count || manifest?.source_asset_count || 0);
+    const clipRequest = item4WorkspaceHasClips(status);
     if (badge) badge.textContent = variantStatus === "Ready"
       ? `${readyCount} frames ready`
       : variantStatus === "Preparing"
@@ -5268,13 +5588,16 @@
       hint.textContent = status?.plan_status !== "Ready"
         ? "Choose platforms first."
         : variantStatus === "Preparing"
-          ? `Studio is preparing crops in the background. This page updates automatically (${readyCount}/${targetCount || "?"} ready).`
+          ? (clipRequest
+            ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"} ready). The elapsed timer below means this is still working.`
+            : `Studio is preparing crops in the background (${readyCount}/${targetCount || "?"} ready). This page updates automatically.`)
           : variantStatus === "Error"
             ? "Preparation stopped. The originals are still safe."
             : variantStatus === "Ready"
-              ? "Rebuild if you change the crop."
-              : "Click Prepare when the framing looks right.";
+              ? (clipRequest ? "These clips are the platform frames. Rebuild if you swapped files." : "Rebuild if you change the crop.")
+              : (clipRequest ? "Click Prepare to attach these clips as platform frames. Clips skip photo crops." : "Click Prepare when the framing looks right.");
     }
+    updateItem4VariantProgress(status);
     if (!host) {
       syncProductionStudioState();
       return;
@@ -5290,20 +5613,30 @@
     item4HydrateCrops(status);
     hydrateEzCaptionDrafts(status);
     const ratios = item4PlanRatios(status);
-    const assetsReady = Array.isArray(status?.assets) && status.assets.length;
-    if (!ratios.length || !assetsReady) {
+    const masters = Array.isArray(status?.assets) ? status.assets : [];
+    const clipAssets = masters.filter(item4AssetLooksLikeVideo);
+    const photoAssets = masters.filter((asset) => asset && !item4AssetLooksLikeVideo(asset));
+    if (!ratios.length || !masters.length) {
       host.innerHTML = variantStatus === "Ready"
-        ? '<div class="empty compact-empty">Crops are ready. Previews are catching up.</div>'
-        : '<div class="empty compact-empty">Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them.</div>';
+        ? `<div class="empty compact-empty">${clipRequest ? "Clip frames are ready. Previews are catching up." : "Crops are ready. Previews are catching up."}</div>`
+        : `<div class="empty compact-empty">${clipRequest ? "Clip frames appear here after Prepare. Clips skip photo crops." : "Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them."}</div>`;
       syncProductionStudioState();
       return;
     }
-    host.innerHTML = ratios.map(ratio => {
-      const rows = item4CropRows(status, ratio);
-      const spec = rows[0]?.variant || {};
-      const safeNote = ratio === "9:16" ? '<span class="item4-safe-note">Dashed box = centered 4:5 critical-content zone</span>' : "";
-      return `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>${escapeHtml(ratio)}</strong><span>${escapeHtml(spec.width || "")}${spec.width ? "×" : ""}${escapeHtml(spec.height || "")}${spec.width ? " · " : ""}${rows.length} photo${rows.length === 1 ? "" : "s"} · drag to reframe</span></div>${safeNote}</div><div class="item4-variant-strip">${rows.map(row => item4VariantThumb(row,ratio)).join("")}</div></section>`;
-    }).join("");
+    const clipSection = clipAssets.length
+      ? `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>Clips</strong><span>${clipAssets.length} clip${clipAssets.length === 1 ? "" : "s"} · no crop</span></div></div><div class="item4-variant-strip">${clipAssets.map(item4VariantClipThumb).join("")}</div></section>`
+      : "";
+    const photoSections = photoAssets.length
+      ? ratios.map((ratio) => {
+        const rows = item4CropRows(status, ratio).filter((row) => !item4AssetLooksLikeVideo(row.asset));
+        const spec = rows[0]?.variant || {};
+        const safeNote = ratio === "9:16" ? '<span class="item4-safe-note">Dashed box = centered 4:5 critical-content zone</span>' : "";
+        return `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>${escapeHtml(ratio)}</strong><span>${escapeHtml(spec.width || "")}${spec.width ? "×" : ""}${escapeHtml(spec.height || "")}${spec.width ? " · " : ""}${rows.length} photo${rows.length === 1 ? "" : "s"} · drag to reframe</span></div>${safeNote}</div><div class="item4-variant-strip">${rows.map((row) => item4VariantThumb(row, ratio)).join("")}</div></section>`;
+      }).join("")
+      : "";
+    host.innerHTML = clipSection + photoSections || (clipRequest
+      ? '<div class="empty compact-empty">Clip frames appear here after Prepare.</div>'
+      : '<div class="empty compact-empty">Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them.</div>');
     host.querySelectorAll(".item4-crop-frame img[data-item4-preview-image]").forEach((img) => {
       const frame = img.closest(".item4-crop-frame");
       const assetId = frame?.dataset.item4CropAsset;
@@ -5350,6 +5683,16 @@
         item4PersistCrops();
       });
     });
+    host.querySelectorAll(".item4-variant-clip [data-item4-preview-image]").forEach((img) => {
+      const card = img.closest("[data-item4-asset]");
+      const master = item4MasterAsset(card?.dataset?.item4Asset) || {};
+      item4BindPreviewImage(img, {
+        candidates: item4AssetPreviewCandidates(master),
+        failureKey: String(master.id || master.media_asset_record_id || img.dataset.previewFailureKey || "").trim(),
+        placeholder: () => item4AssetPlaceholder(master, "Clip saved"),
+      });
+    });
+    item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     if (restoreCaption?.id) {
       const thumb = restoreCaption.ratio
@@ -5567,20 +5910,31 @@
   }
 
   function stopItem4VariantPolling() {
+    item4VariantPolling = false;
     if (item4VariantPollTimer) clearTimeout(item4VariantPollTimer);
     item4VariantPollTimer = null;
     item4VariantPollStartedAt = 0;
+    stopItem4PrepareClock();
   }
 
   async function pollItem4Variants() {
     if (!activeProductionRequest?.id) { stopItem4VariantPolling(); return; }
+    item4VariantPolling = true;
+    if (item4VariantPollTimer) {
+      clearTimeout(item4VariantPollTimer);
+      item4VariantPollTimer = null;
+    }
     if (!item4VariantPollStartedAt) item4VariantPollStartedAt = Date.now();
     try {
       await loadItem4Workspace(activeProductionRequest);
       const state = item4Workspace?.variant_status || "None";
+      const clips = item4WorkspaceHasClips(item4Workspace || {});
+      updateItem4VariantProgress(item4Workspace || {});
       if (state === "Ready") {
         stopItem4VariantPolling();
-        setRequestMessage("Platform-ready media is complete. Review the prepared crops below.", "success");
+        setRequestMessage(clips
+          ? "Clip frames are ready. Clips skip photo crops."
+          : "Platform-ready media is complete. Review the prepared crops below.", "success");
         return;
       }
       if (state === "Error") {
@@ -5588,15 +5942,33 @@
         setRequestMessage(item4Workspace?.variant_error || "Platform-media preparation needs attention.", "error-text");
         return;
       }
+      if (state === "None" && !item4PreparingVariants) {
+        stopItem4VariantPolling();
+        setRequestMessage(clips
+          ? "Prepare did not finish attaching those clips. Click Prepare again."
+          : "Prepare did not finish. Click Prepare again.", "error-text");
+        renderItem4Variants(item4Workspace || {});
+        return;
+      }
+      const readyCount = Number(item4Workspace?.variants?.ready_count || 0);
+      const targetCount = Number(item4Workspace?.variants?.target_count || 0);
+      const elapsed = item4FormatElapsed(Date.now() - item4VariantPollStartedAt);
+      if (state === "Preparing") {
+        setRequestMessage(clips
+          ? `Attaching clip frames ${readyCount}/${targetCount || "?"} · ${elapsed} elapsed.`
+          : `Preparing platform crops ${readyCount}/${targetCount || "?"} · ${elapsed} elapsed.`, "success");
+      }
       const decision = item4NextStatusPoll(Date.now() - item4VariantPollStartedAt, ITEM4_VARIANT_POLL_TIMEOUT_MS, item4VariantExtraWindows);
       if (!decision.continue) {
         stopItem4VariantPolling();
-        setRequestMessage("Platform media is still reconciling. Studio will recheck automatically; no refresh or second click is needed.", "success");
+        setRequestMessage(clips
+          ? "Clip frames are still attaching. Click Prepare again if the count has not moved."
+          : "Platform media is still reconciling. Studio will recheck automatically; no refresh or second click is needed.", "success");
         return;
       }
       if (decision.mode === "revalidate") {
         item4VariantExtraWindows = decision.extra_windows_used;
-        setRequestMessage(`Platform media is still preparing. Automatic retry ${item4VariantExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}. No refresh needed.`, "success");
+        setRequestMessage(`${clips ? "Clip frames are" : "Platform media is"} still preparing (${elapsed}). Automatic retry ${item4VariantExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}.`, "success");
         item4VariantPollTimer = setTimeout(pollItem4Variants, decision.delay_ms);
         return;
       }
@@ -5607,15 +5979,23 @@
     item4VariantPollTimer = setTimeout(pollItem4Variants, ITEM4_VARIANT_POLL_MS);
   }
 
-  function startItem4VariantPolling() {
-    stopItem4VariantPolling();
-    item4VariantPollStartedAt = Date.now();
-    item4VariantExtraWindows = 0;
+  function startItem4VariantPolling(forceRestart = false) {
+    if (item4VariantPolling && !forceRestart) return;
+    if (item4VariantPollTimer) clearTimeout(item4VariantPollTimer);
+    item4VariantPollTimer = null;
+    item4VariantPolling = true;
+    if (forceRestart || !item4VariantPollStartedAt) {
+      item4VariantPollStartedAt = Date.now();
+      item4VariantExtraWindows = 0;
+    }
+    ensureItem4PrepareClock();
     item4VariantPollTimer = setTimeout(pollItem4Variants, 800);
   }
 
   function item4PreparingInBackgroundMessage() {
-    return "Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.";
+    return item4WorkspaceHasClips(item4Workspace || {})
+      ? "Attaching clip frames. Watch the elapsed timer under Prepare — if it is moving, Studio is still working."
+      : "Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.";
   }
 
   function item4IsRetryablePrepareFailure(error, status) {
@@ -5625,7 +6005,8 @@
     const message = String(error?.message || error || "");
     return /request failed \(5\d{2}\)/i.test(message)
       || isTimeoutError(error)
-      || /platform media preparation is still running/i.test(message);
+      || /platform media preparation is still running/i.test(message)
+      || /attaching .* clip frames/i.test(message);
   }
 
   async function prepareItem4Variants() {
@@ -5638,14 +6019,18 @@
       };
     }
     renderItem4Variants(item4Workspace || {});
-    startItem4VariantPolling();
-    setRequestMessage("Starting platform-media preparation…", "success");
+    startItem4VariantPolling(true);
+    setRequestMessage(item4WorkspaceHasClips(item4Workspace || {})
+      ? "Starting clip-frame attach…"
+      : "Starting platform-media preparation…", "success");
     try {
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops() }),timeoutMs:45000});
       if (result.production_request) activeProductionRequest = result.production_request;
       await loadItem4Workspace(activeProductionRequest);
       if (item4Workspace?.variant_status === "Ready") {
-        setRequestMessage(result.message || "Platform-ready media prepared. Review the crops below.", "success");
+        setRequestMessage(result.message || (item4WorkspaceHasClips(item4Workspace || {})
+          ? "Clip frames are ready. Clips skip photo crops."
+          : "Platform-ready media prepared. Review the crops below."), "success");
       } else {
         setRequestMessage(item4PreparingInBackgroundMessage(), "success");
         startItem4VariantPolling();
@@ -5656,6 +6041,7 @@
         setRequestMessage(item4PreparingInBackgroundMessage(), "success");
         startItem4VariantPolling();
       } else {
+        stopItem4VariantPolling();
         setRequestMessage(error.message, "error-text");
       }
     } finally {
@@ -5681,7 +6067,7 @@
     syncEzPlanChrome();
     if (status?.assets?.length && status?.assets_status === "Uploading" && !item4MasterPollTimer) startItem4MasterPolling();
     if (status?.assets_status === "Ready" || status?.assets_status === "Error") stopItem4MasterPolling();
-    if (status?.variant_status === "Preparing" && !item4VariantPollTimer) startItem4VariantPolling();
+    if (status?.variant_status === "Preparing" && !item4VariantPolling) startItem4VariantPolling();
     if (status?.variant_status === "Ready" || status?.variant_status === "Error") stopItem4VariantPolling();
   }
 
@@ -6113,7 +6499,7 @@
     return result;
   }
 
-  async function uploadItem4Files(fileList) {
+  async function uploadItem4Files(fileList, { preserveOversizedNotice = false } = {}) {
     if (!activeProductionRequest?.id) return;
     if (item4Uploading) {
       item4PendingUploads.push(...Array.from(fileList || []).filter(item4IsSupportedPhotoFile));
@@ -6140,6 +6526,11 @@
     } else if (!files.length) {
       setRequestMessage(ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.", "error-text");
       return;
+    }
+    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: !preserveOversizedNotice });
+    if (oversizedSplit.oversized.length) {
+      files = oversizedSplit.allowed;
+      if (!files.length) return;
     }
     const existingCount = ezPersistedAssetCount();
     if (ezIntakeKind === "finished-video") {
@@ -6169,13 +6560,6 @@
       }
       files = files.slice(0, remaining);
     }
-    const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
-    const oversizedClip = files.find((file) => item4FileLooksLikeVideo(file) && Number(file.size || 0) > ITEM4_CLIP_EDGE_MAX_BYTES);
-    if (oversizedClip) {
-      const mb = Math.round(Number(oversizedClip.size || 0) / (1024 * 1024));
-      setRequestMessage(`${oversizedClip.name || "This clip"} is ${mb} MB. Studio can receive clips up to 100 MB in one upload. Export a shorter MP4 or MOV and drop it again.`, "error-text");
-      return;
-    }
     item4Uploading = true;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
@@ -6197,11 +6581,13 @@
     }
     if (button) button.disabled = true;
     const uploadingClips = files.some(item4FileLooksLikeVideo);
-    setRequestMessage(ezIsFinishedVideo()
-      ? "Video is loading into the system. You can keep working on this screen, or leave and come back."
-      : (uploadingClips
-        ? "Saving your clip. Keep this tab open until it appears under the photos."
-        : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background."), "success");
+    if (!item4OversizedClipNotice) {
+      setRequestMessage(ezIsFinishedVideo()
+        ? "Video is loading into the system. You can keep working on this screen, or leave and come back."
+        : (uploadingClips
+          ? "Saving your clip. Keep this tab open until it appears under the photos."
+          : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background."), "success");
+    }
     try {
       mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
@@ -6231,7 +6617,13 @@
       syncPrMediaKindUi();
       const total = ezPersistedAssetCount();
       const incomplete = ezIncompleteSetMessage(total);
-      if (incomplete) {
+      if (item4OversizedClipNotice) {
+        updateItem4MasterProgress(item4Workspace || {});
+        const extra = incomplete || (item4Workspace?.assets_status === "Ready" ? item4MasterReadyMessage(item4Workspace) : "");
+        setRequestMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
+        setEzMessage(item4OversizedClipNotice, "error-text");
+        if (item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
+      } else if (incomplete) {
         updateItem4MasterProgress(item4Workspace || {});
         setRequestMessage(incomplete, "success");
         setEzMessage(incomplete, "success");
@@ -6360,6 +6752,7 @@
 
   function setRequestMessage(text = "", type = "") {
     const target = $("productionRequestMessage");
+    if (!target) return;
     target.textContent = text;
     target.className = `form-message${type ? ` ${type}` : ""}`;
   }
@@ -7211,15 +7604,6 @@
     return next;
   }
 
-  function formatLibraryClipDuration(seconds) {
-    const value = Number(seconds);
-    if (!Number.isFinite(value) || value <= 0) return "";
-    if (value < 60) return value < 10 ? `${value.toFixed(1)}s` : `${Math.round(value)}s`;
-    const minutes = Math.floor(value / 60);
-    const rest = Math.round(value % 60);
-    return `${minutes}:${String(rest).padStart(2, "0")}`;
-  }
-
   function renderLibraryPickerSections(items, selected, suggestedIds, idAttr) {
     const suggested = items.filter((item) => suggestedIds.has(item.id));
     const more = items.filter((item) => !suggestedIds.has(item.id));
@@ -7227,17 +7611,27 @@
       const checked = selected.has(item.id);
       const preview = ideaLibraryPreviewUrl(item);
       const video = String(item.media_kind || "").toLowerCase() === "video";
-      const duration = video ? formatLibraryClipDuration(item.duration_seconds) : "";
+      const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(item)) : "";
       const tags = [];
       if (suggestedIds.has(item.id)) tags.push(`<em class="idea-library-card-tag">Suggested</em>`);
       if (video) tags.push(`<em class="idea-library-card-tag">Clip</em>`);
       const tag = tags.join("");
-      return `<button type="button" class="idea-library-card" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
+      const media = video
+        ? (item4ClipPlayerHtml({
+          previewUrl: preview,
+          streamUrl: item4ClipStreamUrl(item),
+          name: item.name || "Clip",
+          durationSeconds: item.duration_seconds,
+          asset: item,
+          preload: false,
+        }) || (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`))
+        : (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`);
+      return `<div class="idea-library-card" role="button" tabindex="0" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
         <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
-        ${preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`}
+        ${media}
         ${tag}
         <span>${escapeHtml(item.name || item.id)}${duration ? ` · ${escapeHtml(duration)}` : ""}</span>
-      </button>`;
+      </div>`;
     };
     const parts = [];
     if (suggested.length) {
@@ -7273,6 +7667,7 @@
         : `No place match yet. ${checked} checked (max ${max}). Search the Drive library and check stills to add.`;
     }
     syncIdeaLibraryContinue();
+    item4BindClipPlayers(grid);
   }
 
   async function loadIdeaLibrarySuggestions(query = "") {
@@ -7410,6 +7805,7 @@
       hint.textContent = `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked (max ${max}). Uncheck to remove, search to add.${toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : ""}`;
     }
     syncItem4LibraryAdd();
+    item4BindClipPlayers(grid);
   }
 
   async function loadItem4LibraryStills(query = "") {
@@ -7458,6 +7854,7 @@
     openItem4LibraryPicker();
   });
   $("item4LibraryGrid")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-item4-play], video, .item4-clip-duration")) return;
     const card = event.target.closest("[data-item4-library-id]");
     if (!card || card.disabled) return;
     const id = String(card.dataset.item4LibraryId || "").trim();
@@ -7581,6 +7978,7 @@
   });
 
   $("ideaLibraryGrid")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-item4-play], video, .item4-clip-duration")) return;
     const card = event.target.closest("[data-library-id]");
     if (!card) return;
     const id = String(card.dataset.libraryId || "").trim();
@@ -9112,11 +9510,12 @@
   const PRODUCTION_BUTTON_HELP = {
     ezStartOver: "Return to the Production home without deleting photos that already uploaded.",
     ezChooseMedia: "Open a file picker. Dropping photos onto the dashed box does the same thing.",
+    ezChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
     ezContinue: "Save these photos into a production request and continue to platform planning.",
     ezAudioVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     ezAudioTrackPreview: "Play a preview of the selected music track.",
     item4ChooseMedia: "Open a file picker for master photos. You can also drop files onto the dashed box.",
-    item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos.",
+    item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
     item4ChooseLibrary: "Review suggested Drive stills, uncheck to remove, or search the library to add more.",
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
@@ -9139,10 +9538,10 @@
     item4UploadZone: "Drop photos here, or tap Choose clip for an MP4 or MOV. From library picks classified stills already on Google Drive.",
     item4AssetStatus: "Shows whether master photos are still loading into Drive or already saved.",
     item4PlanStatus: "Shows whether Studio has recommended a format for each selected platform.",
-    item4VariantStatus: "Shows whether cropped platform versions have been prepared.",
+    item4VariantStatus: "Shows whether platform frames have been prepared. Clips skip photo crops and attach as-is.",
     productionRequestStatus: "Draft means you can still edit. Promoted means it has entered the pipeline.",
     item4PlanHint: "Build the plan after photos are on screen. You do not have to wait for Drive copies to finish.",
-    item4VariantHint: "Prepare crops after the platform plan is ready. Drag each photo to keep the important part in frame.",
+    item4VariantHint: "Prepare after the platform plan is ready. Photos can be dragged to reframe. Clips skip crops.",
     item4ProductionGate: "The plan is saved. Studio still checks the source-to-production bridge before promote.",
     productionPromotionCompatibility: "Promote stays locked until master photos, the platform plan, and required crops are ready.",
   };
@@ -11263,16 +11662,21 @@
       let media = "";
       if (video) {
         const local = item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id);
-        const stream = libraryStreamUrl(r);
-        const grabAttrs = local ? "" : ` data-library-clip-id="${escapeHtml(r.id)}" data-library-clip-name="${escapeHtml(r.name || "")}" data-library-stream="${escapeHtml(stream)}"`;
-        media = `<div class="item4-clip-poster-wrap"><img${local ? ` src="${escapeHtml(local)}"` : ""} alt="" class="item4-clip-poster"${grabAttrs}><span class="item4-clip-play" aria-hidden="true"></span></div>`;
+        media = item4ClipPlayerHtml({
+          previewUrl: local || preview,
+          streamUrl: libraryStreamUrl(r),
+          name: r.name || "Clip",
+          durationSeconds: r.duration_seconds,
+          asset: r,
+          preload: false,
+        });
       } else if (preview) {
         media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
       }
       const playAttrs = video
-        ? ` data-library-preview="video" data-library-stream="${escapeHtml(libraryStreamUrl(r))}" data-library-name="${escapeHtml(r.name || "Clip")}"`
+        ? ""
         : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
-      const duration = video ? formatLibraryClipDuration(r.duration_seconds) : "";
+      const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(r)) : "";
       return `<article class="library-card"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}${duration ? ` · ${escapeHtml(duration)}` : ""}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
     }).join("");
   }
@@ -11355,6 +11759,7 @@
       target.innerHTML = renderLibraryCards(records);
       bindLibraryDeleteButtons(target);
       bindLibraryPreview(target);
+      item4BindClipPlayers(target);
       updateLibraryPager();
       fillLibraryClipPosters(target);
     } catch (e) {
@@ -11390,7 +11795,7 @@
 
   async function uploadLibraryFiles(fileList) {
     libraryDisarmPicker();
-    const files = Array.from(fileList || []).filter((file) => {
+    let files = Array.from(fileList || []).filter((file) => {
       const name = String(file.name || "");
       const type = String(file.type || "");
       return /image\//i.test(type) || /video\//i.test(type) || /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/i.test(name);
@@ -11400,6 +11805,12 @@
         ? "Photo Library closed before Studio received a clip. Add one clip at a time and keep this tab open."
         : "Choose one or more photos or video clips.", "error-text");
       return;
+    }
+    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: true });
+    if (oversizedSplit.oversized.length) {
+      files = oversizedSplit.allowed;
+      setLibraryUploadMessage(item4OversizedClipNotice, "error-text");
+      if (!files.length) return;
     }
     const zone = $("libraryUploadZone");
     const inputs = libraryFileInputs();
@@ -11426,7 +11837,12 @@
       }
       inputs.forEach((input) => { input.value = ""; });
       if (uploaded) await startLibraryBrowse();
-      if (uploaded && !errors.length) {
+      if (item4OversizedClipNotice) {
+        const extra = errors.length
+          ? `${uploaded ? `${uploaded} added. ` : ""}${errors.join(" ")}`
+          : (uploaded ? `${uploaded === 1 ? "The other asset was added" : `The other ${uploaded} assets were added`} to the library.` : "");
+        setLibraryUploadMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
+      } else if (uploaded && !errors.length) {
         setLibraryUploadMessage(uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`, "success");
       } else if (uploaded) {
         setLibraryUploadMessage(`${uploaded} added. ${errors.join(" ")}`, "error-text");

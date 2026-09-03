@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.223-ig-due-promote",
+          version: "0.10.224-clip-prepare",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -213,6 +213,7 @@ export default {
           studio_library_browse_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
+          studio_clip_frame_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
           studio_insights_similar_times_v1: true,
@@ -3658,6 +3659,19 @@ function item4PlayableMediaUrl(asset) {
   return publicHttp || "";
 }
 
+function item4VideoStreamPath(asset) {
+  const recordId = String(asset?.media_asset_record_id || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) return "";
+  return `/api/media-assets/${recordId}/stream`;
+}
+
+function item4VideoVariantReady(asset) {
+  return Boolean(
+    String(asset?.media_asset_record_id || "").trim().startsWith("rec")
+    && String(asset?.google_drive_file_id || "").trim()
+  );
+}
+
 function item4IsNativeStillOutput(platform, outputType) {
   const types = ITEM4_NATIVE_STILL_OUTPUTS[String(platform || "").trim()] || [];
   return types.includes(String(outputType || "").trim());
@@ -5952,13 +5966,15 @@ function item4RatiosForAsset(plan, asset, assets) {
 }
 
 function item4ExpectedVariantKeys(recordId, assets, plan) {
-  return (assets || []).flatMap((asset) =>
-    item4RatiosForAsset(plan, asset, assets).map((ratio) => ({
-      asset,
-      ratio,
-      transfer_id: item4QueueTransferId(recordId, asset.id, ratio, asset),
-    }))
-  );
+  return (assets || [])
+    .filter((asset) => !item4LooksLikeVideoAsset(asset))
+    .flatMap((asset) =>
+      item4RatiosForAsset(plan, asset, assets).map((ratio) => ({
+        asset,
+        ratio,
+        transfer_id: item4QueueTransferId(recordId, asset.id, ratio, asset),
+      }))
+    );
 }
 
 function item4VariantRatioKey(ratio) {
@@ -7233,10 +7249,9 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
 
     for (const ratio of assetRatios) {
       if (item4LooksLikeVideoAsset(asset)) {
-        const playable = item4PlayableMediaUrl(asset);
+        if (!item4VideoVariantReady(asset)) continue;
         const mediaId = String(asset.media_asset_record_id || "").trim();
         const driveId = String(asset.google_drive_file_id || "").trim();
-        if (!playable || !mediaId.startsWith("rec")) continue;
         const spec = ITEM4_RATIO_SPECS[ratio];
         row.variants[ratio] = {
           aspect_ratio: ratio,
@@ -7248,7 +7263,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
           google_drive_file_id: driveId || null,
           google_drive_url: String(asset.google_drive_url || "").trim() || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : null),
           media_asset_record_id: mediaId,
-          preview_url: playable,
+          preview_url: item4VideoStreamPath(asset) || item4PlayableMediaUrl(asset) || null,
           preview_status: "Ready",
           file_name: String(asset.name || "clip.mp4"),
           duration_seconds: Number(asset.duration_seconds || 0) || null,
@@ -7343,6 +7358,33 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   // variant queue for this request) is allowed to transition the workspace into
   // the preparing/ready/error lifecycle.
   if (!scoped.length) {
+    const currentStatus = String(f(record, "Studio_Variant_Status") || "").trim();
+    const videoOnly = assets.length > 0 && assets.every(item4LooksLikeVideoAsset);
+    if (videoOnly && (currentStatus === "Preparing" || currentStatus === "Ready")) {
+      const manifest = item4BuildDriveManifest(recordId, assets, ratios, [], planRatios);
+      const missing = assets.filter((asset) => !item4VideoVariantReady(asset));
+      let status = "Preparing";
+      let error = null;
+      if (manifest.plan_complete || manifest.complete) status = "Ready";
+      else if (missing.length) {
+        status = "Error";
+        error = missing.length === assets.length
+          ? "Those clips are not linked to Google Drive yet. Wait until they appear in the strip, then click Prepare again."
+          : `${missing.length} clip${missing.length === 1 ? " is" : "s are"} not linked to Google Drive yet.`;
+      }
+      const now = new Date().toISOString();
+      const updated = await item4UpdateRequestState(env, recordId, {
+        Studio_Variant_Manifest_JSON: JSON.stringify(manifest),
+        Studio_Variant_Status: status,
+        Studio_Variant_Updated_At: status === "Ready" ? now : null,
+        Studio_Variant_Error: error,
+        Studio_Platform_Variant_Assets: [...new Set(
+          assets.map((asset) => String(asset.media_asset_record_id || "").trim()).filter(Boolean)
+        )],
+        Studio_Item4_State: status === "Error" ? "Error" : "Plan Ready",
+      });
+      return { record: updated, status, error, manifest, queue_rows: [] };
+    }
     const updated = await item4UpdateRequestState(env, recordId, {
       Studio_Variant_Manifest_JSON: null,
       Studio_Variant_Status: "None",
@@ -7459,7 +7501,7 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   let assets = item4MergeAssetCrops(item4AssetManifest(record), cropsPayload)
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-  if (!assets.length) throw new HttpError(409, "Upload master photos before preparing platform media");
+  if (!assets.length) throw new HttpError(409, "Upload photos or clips before preparing platform media");
 
   if (Object.keys(cropsPayload).length) {
     record = await item4UpdateRequestState(env, recordId, {
@@ -7504,9 +7546,11 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
     !String(asset?.google_drive_file_id || "").trim() || !String(asset?.media_asset_record_id || "").trim()
   );
   if (stillMissing.length) {
+    const clips = stillMissing.filter(item4LooksLikeVideoAsset).length;
+    const noun = clips === stillMissing.length ? "clip" : (clips ? "file" : "photo");
     throw new HttpError(
       409,
-      `${stillMissing.length} master photo${stillMissing.length === 1 ? " has" : "s have"} not reached complete Google Drive + Media Asset authority yet`
+      `${stillMissing.length} ${noun}${stillMissing.length === 1 ? " has" : "s have"} not finished copying to Google Drive yet. Wait until ${stillMissing.length === 1 ? "it appears" : "they appear"} in the strip, then click Prepare again.`
     );
   }
 
@@ -7631,10 +7675,14 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
     error: reconciled.error,
     production_request: mapProductionRequest(reconciled.record),
     message: ready
-      ? `${reconciled.manifest.ready_count} platform-ready Google Drive variants are ready.`
+      ? (item4HasVideoMasters(item4AssetManifest(reconciled.record))
+        ? `${reconciled.manifest.ready_count} clip frame${reconciled.manifest.ready_count === 1 ? " is" : "s are"} ready. Clips skip photo crops.`
+        : `${reconciled.manifest.ready_count} platform-ready Google Drive variants are ready.`)
       : failed
         ? (reconciled.error || "Platform media preparation failed. See error.")
-        : "Platform media preparation is still running.",
+        : (item4HasVideoMasters(item4AssetManifest(reconciled.record))
+          ? `Attaching ${reconciled.manifest?.ready_count || 0} of ${reconciled.manifest?.target_count || 0} clip frames…`
+          : "Platform media preparation is still running."),
   }, failed ? 500 : ready ? 200 : 202);
 }
 
