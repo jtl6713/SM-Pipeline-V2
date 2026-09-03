@@ -67,7 +67,14 @@ class YouTubeUploaderClient:
         )
         return response.status_code, _json_body(response)
 
-    def set_thumbnail(self, *, video_id: str, source_url: str, fallback_source_url: str = "") -> tuple[int, dict[str, Any]]:
+    def set_thumbnail(
+        self,
+        *,
+        video_id: str,
+        source_url: str,
+        fallback_source_url: str = "",
+        vertical: bool = False,
+    ) -> tuple[int, dict[str, Any]]:
         response = requests.post(
             f"{self.base_url}/youtube/thumbnail",
             json={
@@ -79,6 +86,7 @@ class YouTubeUploaderClient:
                 "maxFileSizeBytes": THUMBNAIL_MAX_BYTES,
                 "compressionMode": "auto",
                 "qualityFloor": THUMBNAIL_QUALITY_FLOOR,
+                "vertical": bool(vertical),
             },
             headers=self._headers(True),
             timeout=120,

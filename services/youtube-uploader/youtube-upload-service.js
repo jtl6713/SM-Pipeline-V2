@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-08-29-snippet-update-no-title-desc";
+const SERVICE_VERSION = "2026-09-03-shorts-vertical-thumb";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -348,39 +348,110 @@ async function videoStatus(videoId) {
   return data;
 }
 
-function fitYoutubeGridJpeg(asset) {
-  const tmpIn = path.join(cfg.tempDir, `thumb-in-${crypto.randomUUID()}`);
-  const tmpOut = path.join(cfg.tempDir, `thumb-out-${crypto.randomUUID()}.jpg`);
+function pngSize(body) {
+  if (!Buffer.isBuffer(body) || body.length < 24) return null;
+  if (body[0] !== 0x89 || body[1] !== 0x50 || body[2] !== 0x4e || body[3] !== 0x47) return null;
+  return { width: body.readUInt32BE(16), height: body.readUInt32BE(20) };
+}
+
+function probeImageSize(asset) {
+  const png = pngSize(asset.body);
+  if (png) return png;
+  const tmpIn = path.join(cfg.tempDir, `thumb-probe-${crypto.randomUUID()}`);
   try {
     fs.mkdirSync(cfg.tempDir, { recursive: true });
     fs.writeFileSync(tmpIn, asset.body);
     const result = spawnSync(
-      "ffmpeg",
-      [
-        "-y",
-        "-i",
-        tmpIn,
-        "-vf",
-        "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720",
-        "-q:v",
-        "3",
-        tmpOut,
-      ],
+      "ffprobe",
+      ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", tmpIn],
       { encoding: "utf8", windowsHide: true }
     );
-    if (result.status !== 0 || !fs.existsSync(tmpOut)) return asset;
-    const body = fs.readFileSync(tmpOut);
-    if (!body.length || body.length > 2097152) return asset;
-    return { body, mime: "image/jpeg" };
+    const match = String(result.stdout || "").trim().match(/^(\d+)x(\d+)$/);
+    if (!match) return null;
+    return { width: Number(match[1]), height: Number(match[2]) };
   } catch {
-    return asset;
+    return null;
   } finally {
     fsp.unlink(tmpIn).catch(() => {});
-    fsp.unlink(tmpOut).catch(() => {});
   }
 }
 
-async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
+function ffmpegJpeg(asset, vf, maxBytes) {
+  const qualities = [3, 5, 8, 12, 18, 24];
+  for (const quality of qualities) {
+    const tmpIn = path.join(cfg.tempDir, `thumb-in-${crypto.randomUUID()}`);
+    const tmpOut = path.join(cfg.tempDir, `thumb-out-${crypto.randomUUID()}.jpg`);
+    try {
+      fs.mkdirSync(cfg.tempDir, { recursive: true });
+      fs.writeFileSync(tmpIn, asset.body);
+      const result = spawnSync(
+        "ffmpeg",
+        ["-y", "-i", tmpIn, "-vf", vf, "-q:v", String(quality), tmpOut],
+        { encoding: "utf8", windowsHide: true }
+      );
+      if (result.status !== 0 || !fs.existsSync(tmpOut)) continue;
+      const body = fs.readFileSync(tmpOut);
+      if (body.length && body.length <= maxBytes) return { body, mime: "image/jpeg" };
+    } catch {
+      // try a lower quality
+    } finally {
+      fsp.unlink(tmpIn).catch(() => {});
+      fsp.unlink(tmpOut).catch(() => {});
+    }
+  }
+  return null;
+}
+
+function prepareYoutubeThumbnail(asset, { vertical = false, maxBytes = 2097152 } = {}) {
+  const size = probeImageSize(asset) || {};
+  const portrait = Boolean(vertical) || Number(size.height) > Number(size.width);
+  const box = portrait ? { width: 1080, height: 1920 } : { width: 1280, height: 720 };
+  const vf = `scale=${box.width}:${box.height}:force_original_aspect_ratio=decrease,pad=${box.width}:${box.height}:(ow-iw)/2:(oh-ih)/2:black`;
+  return ffmpegJpeg(asset, vf, maxBytes) || asset;
+}
+
+async function setStudioVerticalStill(videoId, asset, token) {
+  const response = await fetch(
+    "https://studio.youtube.com/youtubei/v1/video_manager/metadata_update?alt=json",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Origin: "https://studio.youtube.com",
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: "WEB_CREATOR",
+            clientVersion: "1.20260903.00.00",
+          },
+        },
+        encryptedVideoId: videoId,
+        videoStill: {
+          operation: 3,
+          image: {
+            rawBytes: asset.body.toString("base64"),
+            isVertical: true,
+          },
+        },
+      }),
+    }
+  );
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = { raw: text };
+  }
+  if (!response.ok) {
+    throw new Error(`studio vertical still failed ${response.status}: ${text.slice(0, 500)}`);
+  }
+  return payload;
+}
+
+async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null, { vertical = false } = {}) {
   const token = await accessToken();
   const tryDownload = async (url) => {
     if (!url) return null;
@@ -395,7 +466,7 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
   for (const url of [sourceUrl, fallbackSourceUrl].filter(Boolean)) {
     try {
       const downloaded = await tryDownload(url);
-      const next = fitYoutubeGridJpeg(downloaded);
+      const next = prepareYoutubeThumbnail(downloaded, { vertical });
       if (next.body.length > 2097152) {
         lastError = new Error(`Thumbnail exceeds 2 MB (${next.body.length} bytes)`);
         continue;
@@ -419,7 +490,15 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null) {
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`thumbnails.set failed ${response.status}: ${text}`);
-  return JSON.parse(text);
+  const data = JSON.parse(text);
+  if (vertical) {
+    try {
+      data.studioVerticalStill = await setStudioVerticalStill(videoId, asset, token);
+    } catch (error) {
+      data.studioVerticalStillError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return data;
 }
 
 async function updatePrivacy(videoId, privacyStatus) {
@@ -533,7 +612,12 @@ async function handler(req, res) {
       if (!payload.videoId || !payload.sourceUrl) {
         return json(res, 400, { error: "videoId and sourceUrl are required" });
       }
-      return json(res, 200, await setThumbnail(payload.videoId, payload.sourceUrl, payload.fallbackSourceUrl || payload.fallback_source_url || null));
+      return json(res, 200, await setThumbnail(
+        payload.videoId,
+        payload.sourceUrl,
+        payload.fallbackSourceUrl || payload.fallback_source_url || null,
+        { vertical: Boolean(payload.vertical) }
+      ));
     }
     if (req.method === "POST" && url.pathname === "/youtube/privacy") {
       const payload = await readJson(req);

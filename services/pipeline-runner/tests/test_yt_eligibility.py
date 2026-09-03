@@ -63,6 +63,15 @@ def test_ytp1_and_poll_gates():
     yt4 = _record(YouTube_Stage="YT4", YouTube_Video_ID="abc123", YouTube_Processing_Status="Succeeded")
     assert yts3_eligibility_reason(yt4) is None
     assert yts3_eligibility_reason(_record(YouTube_Stage="YT4", YouTube_Video_ID="abc123")) == "processing_not_succeeded"
+    short = _record(
+        YouTube_Stage="YT4",
+        YouTube_Video_ID="abc123",
+        YouTube_Processing_Status="Succeeded",
+        Platform_Output_Type="YouTube Short",
+    )
+    assert yts3_eligibility_reason(short) == "native_cover_not_uploaded"
+    short["fields"]["YouTube_Thumbnail_Status"] = "Uploaded"
+    assert yts3_eligibility_reason(short) is None
 
 
 def test_package_helpers():
