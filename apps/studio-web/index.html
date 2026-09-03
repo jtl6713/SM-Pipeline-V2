@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.238-wizard-mobile-continue">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.240-analytics-seq">
 </head>
 <body>
  <header class="topbar">
@@ -1111,6 +1111,14 @@
  <div class="ops-inline-form ops-analytics-toolbar">
  <label class="subtle" for="operationsInsightsSeason">Season</label>
  <select id="operationsInsightsSeason"><option value="winter">Winter</option><option value="spring">Spring</option><option value="summer">Summer</option><option value="fall">Fall</option></select>
+ <label class="subtle" for="operationsAnalyticsRunScope">Run</label>
+ <select id="operationsAnalyticsRunScope">
+ <option value="youtube">YouTube</option>
+ <option value="instagram">Instagram</option>
+ <option value="all">YouTube, then Instagram</option>
+ </select>
+ <button type="button" class="secondary-button" id="operationsRunAllAnalytics">Run sequentially</button>
+ <button type="button" class="text-button" id="operationsStopAnalytics" hidden>Stop</button>
  <button type="button" class="secondary-button" id="operationsRefreshSimilarTimes">Refresh similar times</button>
  <button type="button" class="secondary-button" id="operationsDiscoverCreators">Find Chicago creators</button>
  </div>
@@ -1138,7 +1146,7 @@
  <summary class="ops-collapse-summary">
  <div>
  <h3>Handles</h3>
- <p>Use Run analytics beside a YouTube handle to fetch only that account and add its public posts to analytics. Instagram timing is paused until the Meta permission issue is fixed. TikTok and Facebook remain reference-only.</p>
+ <p>Use Run analytics beside a YouTube handle, Run this platform on a group, or Run sequentially in the toolbar. Sequential runs stay one handle at a time. Instagram timing is paused until the Meta permission issue is fixed. TikTok and Facebook remain reference-only.</p>
  </div>
  </summary>
  <form class="ops-inline-form" id="operationsWatchlistForm">
@@ -1553,8 +1561,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.234-library-preview"></script>
+ <script src="/assets/config.js?v=0.6.240-analytics-seq"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.238-wizard-mobile-continue"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.240-analytics-seq"></script>
 </body>
 </html>
