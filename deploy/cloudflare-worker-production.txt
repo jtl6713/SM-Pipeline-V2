@@ -298,3 +298,5 @@ Due IG publish promote Worker deploy: 2026-09-02 - Before AP1-IG / AP1-IGS, flip
 Clip Prepare Worker deploy: 2026-09-02 - Clip-only Prepare attaches Drive files as platform frames and marks Frames Ready without photo-crop queue rows. Worker 0.10.224-clip-prepare.
 
 Clip Approve Worker deploy: 2026-09-03 - Skip crop-queue destination linking when clip frames are already video passthrough. Worker 0.10.225-clip-approve.
+
+Render count Worker deploy: 2026-09-03 - Roll up home Render status as Rendering N/M while destinations are still encoding. Worker 0.10.226-render-count.
