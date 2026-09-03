@@ -300,3 +300,5 @@ Clip Prepare Worker deploy: 2026-09-02 - Clip-only Prepare attaches Drive files 
 Clip Approve Worker deploy: 2026-09-03 - Skip crop-queue destination linking when clip frames are already video passthrough. Worker 0.10.225-clip-approve.
 
 Render count Worker deploy: 2026-09-03 - Roll up home Render status as Rendering N/M while destinations are still encoding. Worker 0.10.226-render-count.
+
+Wizard clip continue Worker deploy: 2026-09-03 - Accept a 0 photo-slide count on clips-only wizard drafts. Worker 0.10.228-wizard-clip-continue.

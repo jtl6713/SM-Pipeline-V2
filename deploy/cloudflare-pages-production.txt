@@ -347,3 +347,5 @@ Asset Library preview + intake copy Pages deploy: 2026-09-02 - Click a library c
 Clip Prepare Pages deploy: 2026-09-02 - Frames shows clip players, a live elapsed timer, and Ready when clips skip photo crops. UI 0.6.235-clip-prepare.
 
 Render count Pages deploy: 2026-09-03 - Pipeline Progress and home Render show destination counts (N/6) instead of a frozen 62%. UI 0.6.236-render-count.
+
+Wizard mobile continue Pages deploy: 2026-09-03 - Home Continue opens production without waiting on the music/voice catalogs. UI 0.6.238-wizard-mobile-continue.

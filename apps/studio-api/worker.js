@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.227-yt-analytics",
+          version: "0.10.228-wizard-clip-continue",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -8227,7 +8227,9 @@ async function cleanProductionRequestPayload(payload, env) {
     videoClipCountExact = null;
   }
 
-  let carouselSlideCountExact = nullableInt(payload?.carousel_slide_count_exact, 1, 20, "Exact carousel slide count");
+  const slideExactRaw = payload?.carousel_slide_count_exact;
+  const slideExactCoerced = (slideExactRaw === 0 || slideExactRaw === "0") ? 1 : slideExactRaw;
+  let carouselSlideCountExact = nullableInt(slideExactCoerced, 1, 20, "Exact carousel slide count");
   let carouselSlideCountMin = nullableInt(payload?.carousel_slide_count_min, 1, 20, "Minimum carousel slide count");
   let carouselSlideCountMax = nullableInt(payload?.carousel_slide_count_max, 1, 20, "Maximum carousel slide count");
 
