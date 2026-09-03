@@ -107,7 +107,7 @@ def test_poller_defers_active_job(monkeypatch):
     monkeypatch.setattr(
         a1p_processor,
         "poll_job",
-        lambda _job_id: {"job_id": "job-1", "status": "compressing"},
+        lambda _job_id: {"job_id": "job-1", "status": "compressing", "progress": 42},
     )
     monkeypatch.setattr(a1p_processor, "_schedule_next", scheduled.append)
 
@@ -124,6 +124,7 @@ def test_poller_defers_active_job(monkeypatch):
 
     assert result["status"] == "processing"
     assert result["deferred"] is True
+    assert "42%" in airtable.updates[0]["fields"]["Notes"]
     assert scheduled[0]["attempt"] == 2
     assert scheduled[0]["status_url"].endswith("/jobs/job-1")
     assert airtable.deleted == []
@@ -147,6 +148,7 @@ def test_completed_job_is_verified_before_source_is_trashed(monkeypatch):
     )
     monkeypatch.setattr(a1p_processor, "download_output", lambda _job: (b"mp4!", "video/mp4"))
     monkeypatch.setattr(a1p_processor, "delete_job", cleaned.append)
+    monkeypatch.setattr(a1p_processor, "_continue_after_finish", lambda: None)
 
     result = a1p_processor.process_request(
         job_id="job-1",
@@ -189,3 +191,70 @@ def test_failed_job_preserves_source_and_clears_state(monkeypatch):
     assert result["status"] == "failed_local_compressor"
     assert airtable.deleted == ["rec-state"]
     assert cleaned == ["job-1"]
+
+
+def test_poller_keeps_waiting_after_ten_attempts(monkeypatch):
+    airtable = _FakeAirtable()
+    scheduled: list[dict[str, Any]] = []
+    monkeypatch.setattr(a1p_processor, "AirtableClient", lambda: airtable)
+    monkeypatch.setattr(
+        a1p_processor,
+        "poll_job",
+        lambda _job_id: {"job_id": "job-1", "status": "compressing", "progress": 100},
+    )
+    monkeypatch.setattr(a1p_processor, "_schedule_next", scheduled.append)
+
+    result = a1p_processor.process_request(
+        job_id="job-1",
+        state_record_id="rec-state",
+        source_file_id="source-file",
+        source_name="IMG_6124.MOV",
+        source_size="439745855",
+        attempt="50",
+    )
+
+    assert result["status"] == "processing"
+    assert result["deferred"] is True
+    assert "100%" in airtable.updates[0]["fields"]["Notes"]
+    assert scheduled[0]["attempt"] == 51
+    assert airtable.deleted == []
+
+
+def test_resume_kicks_complete_job_and_skips_fresh_lock(monkeypatch):
+    from a1p.state import parse_job_value, should_resume_job
+
+    complete = parse_job_value("compressing|job-1|3|drive1||IMG_6124.MOV|123|2026-09-01T00:00:00Z")
+    assert should_resume_job(complete, {"status": "complete"}) is True
+    locked = parse_job_value("finalizing|job-1|3|drive1||IMG_6124.MOV|123|2026-09-02T18:00:00.000Z")
+    monkeypatch.setattr(
+        "a1p.state.job_age_seconds",
+        lambda _value: 12,
+    )
+    assert should_resume_job(locked, {"status": "complete"}) is False
+
+
+def test_resume_active_jobs_schedules_complete_row(monkeypatch):
+    class _JobAirtable:
+        def list_records(self, *_args, **_kwargs):
+            return [{
+                "id": "recJOB",
+                "fields": {
+                    "Setting_Name": "A1_JOB_drive1",
+                    "Setting_Value": "compressing|job-1|3|drive1||IMG_6124.MOV|123|2026-09-01T00:00:00Z",
+                },
+            }]
+
+    scheduled: list[Any] = []
+    monkeypatch.setattr(a1p_processor, "AirtableClient", _JobAirtable)
+    monkeypatch.setattr(a1p_processor, "pipeline_settings", lambda _client=None: {"A1_POLLER_WEBHOOK_URL": ""})
+    monkeypatch.setattr(
+        a1p_processor,
+        "poll_job",
+        lambda _job_id: {"job_id": "job-1", "status": "complete", "output_size_bytes": 4},
+    )
+    monkeypatch.setattr(a1p_processor, "_schedule_next", lambda payload, delay_seconds=None: scheduled.append((payload, delay_seconds)))
+
+    kicked = a1p_processor.resume_active_jobs()
+    assert len(kicked) == 1
+    assert scheduled[0][1] == 0
+    assert scheduled[0][0]["job_id"] == "job-1"

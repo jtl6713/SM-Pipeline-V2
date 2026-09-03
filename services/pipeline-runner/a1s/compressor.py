@@ -82,6 +82,14 @@ def poll_job(job_id: str) -> dict[str, Any]:
     return payload
 
 
+def list_health_jobs() -> list[dict[str, Any]]:
+    response = requests.get(f"{_base_url()}/health", timeout=15)
+    response.raise_for_status()
+    payload = response.json() or {}
+    rows = payload.get("jobs")
+    return list(rows) if isinstance(rows, list) else []
+
+
 def download_output(job: dict[str, Any]) -> tuple[bytes, str]:
     output_url = _managed_url(str(job.get("output_url") or ""), path_prefix="/files/")
     parsed = urlparse(output_url)

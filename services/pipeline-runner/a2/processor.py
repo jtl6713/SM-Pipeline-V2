@@ -134,7 +134,7 @@ def process_request(
                 continue
             shared = drive.share_anyone_reader(file_id)
             share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
-            if size >= MAX_FILE_BYTES:
+            if size > MAX_FILE_BYTES:
                 skipped_oversize.append(file_id)
                 continue
             created = client.create_records(

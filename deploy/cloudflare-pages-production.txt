@@ -332,4 +332,20 @@ Asset Library Pages deploy: 2026-09-01 - Sidebar Asset Library tab for Drive sti
 
 Clips-only wizard Pages deploy: 2026-09-01 - Home wizard and Production offer Clips only (video-clips) after naming an idea. UI 0.6.226-clips-only-wizard.
 
-Wizard mobile continue Pages deploy: 2026-09-02 - Home Continue opens production without waiting on the music/voice catalogs. UI 0.6.227-wizard-mobile-continue.
+Library mobile picker Pages deploy: 2026-09-01 - Asset Library Add assets opens the phone photo/clip library instead of a hidden file input. UI 0.6.227-library-mobile-picker.
+
+Oversized ingestion Pages deploy: 2026-09-02 - Operations shows ingestion-folder oversized videos, location column, and Compress all in intake folder. UI 0.6.228-oversized-ingestion. Source commit 046676e.
+
+Library one-clip + compression status Pages deploy: 2026-09-02 - iPhone Asset Library adds one clip at a time. Operations shows a large color-coded Compressing IMG_…. banner. UI 0.6.229-compression-status.
+
+Compression progress Pages deploy: 2026-09-02 - Operations banner shows live compressor percent and a progress bar. UI 0.6.230-compression-progress.
+
+Asset Library pages Pages deploy: 2026-09-02 - Asset Library opens on the 5 newest assets, with Show this many on page (5/10/20/50) and Previous/Next. Clip cards grab a local frame the same way Production does. UI 0.6.233-library-pages.
+
+Asset Library preview + intake copy Pages deploy: 2026-09-02 - Click a library card to play the clip (stream) or open the photo. Operations copy notes the 15-minute ingestion ticker. UI 0.6.234-library-preview.
+
+Clip Prepare Pages deploy: 2026-09-02 - Frames shows clip players, a live elapsed timer, and Ready when clips skip photo crops. UI 0.6.235-clip-prepare.
+
+Render count Pages deploy: 2026-09-03 - Pipeline Progress and home Render show destination counts (N/6) instead of a frozen 62%. UI 0.6.236-render-count.
+
+Wizard mobile continue Pages deploy: 2026-09-03 - Home Continue opens production without waiting on the music/voice catalogs. UI 0.6.238-wizard-mobile-continue.

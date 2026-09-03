@@ -11,11 +11,11 @@ from typing import Any
 import requests
 
 from a1p.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
+from a1p.state import parse_job_value, payload_from_row, should_resume_job
 from a1s.compressor import delete_job, download_output, poll_job
 from airtable.client import AirtableClient
 from airtable.constants import PIPELINE_SETTINGS_TABLE
 from asset.constants import (
-    A1P_MAX_ATTEMPTS,
     A1P_MAX_RESULT_BYTES,
     A1P_POLL_SLEEP_SECONDS,
     GDRIVE_INGESTION_FOLDER,
@@ -23,6 +23,7 @@ from asset.constants import (
 from asset.helpers import parse_int
 from carousel.timeutil import iso_ms
 from integrations.google_drive import GoogleDriveClient
+from item4.settings import pipeline_settings
 
 logger = logging.getLogger(__name__)
 
@@ -76,30 +77,82 @@ def _delete_state(client: AirtableClient, record_id: str) -> None:
     client.delete_record(PIPELINE_SETTINGS_TABLE, record_id)
 
 
-def schedule_next(payload: dict[str, Any]) -> None:
+def _poll_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: payload.get(key) for key in (
+        "job_id",
+        "status_url",
+        "state_record_id",
+        "source_file_id",
+        "source_name",
+        "source_size",
+        "permission_id",
+        "attempt",
+        "poller_url",
+    )}
+
+
+def schedule_next(payload: dict[str, Any], delay_seconds: float | None = None) -> None:
     poller_url = str(payload.get("poller_url") or "").strip()
+    wait = A1P_POLL_SLEEP_SECONDS if delay_seconds is None else max(0.0, float(delay_seconds))
 
     def _run() -> None:
-        time.sleep(A1P_POLL_SLEEP_SECONDS)
+        if wait:
+            time.sleep(wait)
         if poller_url:
             requests.post(poller_url, json=payload, timeout=60)
             return
-        process_request(**{key: payload.get(key) for key in (
-            "job_id",
-            "status_url",
-            "state_record_id",
-            "source_file_id",
-            "source_name",
-            "source_size",
-            "permission_id",
-            "attempt",
-            "poller_url",
-        )})
+        process_request(**_poll_kwargs(payload))
 
     threading.Thread(target=_run, daemon=True, name="a1p-poll").start()
 
 
 _schedule_next = schedule_next
+
+
+def _continue_after_finish() -> None:
+    def _run() -> None:
+        try:
+            from a2.processor import process_request as process_a2
+
+            process_a2(dry_run=False, trigger_a2b=True, wait_for_next=False)
+        except Exception:
+            logger.exception("A1P could not intake the compressed replacement")
+        try:
+            from a1s.processor import process_request as process_a1s
+
+            process_a1s(inline=True)
+        except Exception:
+            logger.exception("A1P could not start the next oversized compression job")
+
+    threading.Thread(target=_run, daemon=True, name="a1p-continue").start()
+
+
+def resume_active_jobs(client: AirtableClient | None = None) -> list[dict[str, Any]]:
+    airtable = client or AirtableClient()
+    poller_url = str(pipeline_settings(airtable).get("A1_POLLER_WEBHOOK_URL") or "").strip()
+    rows = airtable.list_records(
+        PIPELINE_SETTINGS_TABLE,
+        formula="AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
+        max_records=20,
+    )
+    kicked: list[dict[str, Any]] = []
+    for row in rows:
+        parsed_payload = payload_from_row(row, poller_url=poller_url)
+        job_id = str(parsed_payload.get("job_id") or "")
+        snapshot: dict[str, Any] = {}
+        if job_id:
+            try:
+                snapshot = poll_job(job_id)
+            except Exception:
+                logger.exception("A1P resume could not poll compressor job %s", job_id)
+                snapshot = {"status": "failed", "error": "poll_failed"}
+        fields = row.get("fields") or {}
+        parsed = parse_job_value(str(fields.get("Setting_Value") or ""))
+        if not should_resume_job(parsed, snapshot):
+            continue
+        _schedule_next(parsed_payload, delay_seconds=0)
+        kicked.append({"id": row.get("id"), "job_id": job_id, "status": snapshot.get("status") or parsed.get("phase")})
+    return kicked
 
 
 def process_request(
@@ -127,7 +180,16 @@ def process_request(
         "attempt": attempt_n,
     }
     if not job_id or not state_record_id:
-        return {"processed": False, "reason": "missing_job_or_state", **preview}
+        if dry_run:
+            return {"processed": False, "dry_run": True, **preview}
+        resumed = resume_active_jobs()
+        return {
+            "processed": bool(resumed),
+            "status": "resumed" if resumed else "idle",
+            "resumed_count": len(resumed),
+            "resumed": resumed,
+            **preview,
+        }
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
@@ -137,9 +199,26 @@ def process_request(
     preview["compressor_status"] = status
     now = iso_ms()
 
-    if status in {"queued", "downloading", "compressing"} and attempt_n < A1P_MAX_ATTEMPTS:
-        value = f"processing|{job_id}|{attempt_n}|{source_file_id}|{permission_id}|{source_name}|{source_size}|{now}"
-        _write_state(client, state_record_id, active=True, value=value, notes="Local compression is still processing. Poller will retry in 60 seconds.")
+    if status in {"queued", "downloading", "compressing"}:
+        phase_label = {
+            "queued": "Queued",
+            "downloading": "Downloading",
+            "compressing": "Compressing",
+        }.get(status, "Compressing")
+        progress = job.get("progress")
+        try:
+            progress_n = max(0, min(100, int(progress)))
+        except (TypeError, ValueError):
+            progress_n = None
+        progress_note = f" · {progress_n}%" if progress_n is not None else ""
+        value = f"{status}|{job_id}|{attempt_n}|{source_file_id}|{permission_id}|{source_name}|{source_size}|{now}"
+        _write_state(
+            client,
+            state_record_id,
+            active=True,
+            value=value,
+            notes=f"{phase_label} {source_name or 'video'}{progress_note}. Poller will retry in 60 seconds.",
+        )
         next_payload = {
             "job_id": job_id,
             "status_url": status_url,
@@ -154,12 +233,6 @@ def process_request(
         _schedule_next(next_payload)
         return {"processed": True, "deferred": True, "status": "processing", **preview}
 
-    if status in {"queued", "downloading", "compressing"}:
-        value = f"timeout|{job_id}|{attempt_n}|{source_file_id}|{source_name}|{status}|{now}"
-        _write_state(client, state_record_id, active=False, value=value, notes="Polling reached 10 attempts. Original preserved. Inspect the local compressor job.")
-        _delete_state(client, state_record_id)
-        return {"processed": True, "status": "timeout", **preview}
-
     if status == "failed":
         value = f"failed_local_compressor|{job_id}|{attempt_n}|{source_file_id}|{source_name}|{status}|{now}"
         _write_state(client, state_record_id, active=False, value=value, notes="Local compressor returned an error. Original preserved.")
@@ -169,6 +242,15 @@ def process_request(
 
     if status != "complete":
         return {"processed": False, "reason": f"unexpected_status_{status}", **preview}
+
+    lock_value = f"finalizing|{job_id}|{attempt_n}|{source_file_id}|{permission_id}|{source_name}|{source_size}|{now}"
+    _write_state(
+        client,
+        state_record_id,
+        active=True,
+        value=lock_value,
+        notes=f"Uploading compressed replacement for {source_name or 'video'}.",
+    )
 
     result_size = parse_int(job.get("output_size_bytes"), 0) or 0
     preview["result_size"] = result_size
@@ -227,4 +309,5 @@ def process_request(
     preview["new_size"] = new_size
     preview["source_trashed"] = bool(source_file_id)
     preview["reused_existing_output"] = bool(existing)
+    _continue_after_finish()
     return {"processed": True, "status": "finished", **preview}

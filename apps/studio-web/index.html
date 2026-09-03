@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.227-wizard-mobile-continue">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.238-wizard-mobile-continue">
 </head>
 <body>
  <header class="topbar">
@@ -479,6 +479,7 @@
  <button type="button" class="primary-button" id="item4PrepareVariants">Prepare</button>
  <span id="item4VariantHint"></span>
  </div>
+ <div class="item4-upload-progress" id="item4VariantProgress" hidden></div>
  <div class="item4-variant-error error-text" id="item4VariantError" hidden></div>
  <div class="item4-variant-gallery" id="item4VariantGallery"><div class="empty compact-empty"></div></div>
  </div>
@@ -1011,15 +1012,15 @@
  </section>
 
  <section id="page-library" class="page">
- <div class="page-heading"><div><span class="eyebrow">Photos and clips</span><h1>Asset library</h1><p>Browse classified Drive stills and Raw Footage, add photos or clips to the catalogue, or delete an unused Studio upload. Production and the wizard attach from this same library.</p></div><div class="heading-actions"><button type="button" class="primary-button" id="libraryAddButton">+ Add assets</button><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow">Photos and clips</span><h1>Asset library</h1><p>Opens on the 5 most recent Drive stills and Raw Footage. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="libraryUploadPanel">
  <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Files go to Google Drive (photos or video folders), register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
  <div class="music-upload-body">
  <div class="item4-upload-zone music-upload-zone" id="libraryUploadZone" tabindex="0" role="button" aria-label="Upload photos or video clips">
- <input id="libraryFileInput" type="file" accept="image/*,.heic,.heif,.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/webm" multiple hidden>
+ <input id="libraryZoneInput" class="native-file-input native-file-input--cover" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple>
  <div class="item4-upload-icon">＋</div>
- <div><strong>Drop photos or clips here or choose files</strong><span>JPG, PNG, WEBP, HEIC, MP4, MOV · up to 8 files · 25 MB photos · 200 MB clips</span></div>
- <button type="button" class="secondary-button" id="libraryChooseFiles">Choose files</button>
+ <div><strong>Drop photos or clips here or choose files</strong><span id="libraryUploadHint">JPG, PNG, WEBP, HEIC, MP4, MOV · on iPhone add one clip at a time · 25 MB photos · 100 MB clips</span></div>
+ <label class="secondary-button native-file-label" id="libraryChooseFiles">Choose files<input id="libraryChooseInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label>
  </div>
  <label class="form-field music-upload-name"><span>Location <em>optional</em></span><input id="libraryLocation" maxlength="120" placeholder="Oak Street Beach"></label>
  <div class="library-toolbar">
@@ -1031,11 +1032,36 @@
  <option value="video">Clips only</option>
  </select>
  </label>
+ <label class="form-field"><span>Show this many on page</span>
+ <select id="libraryPageSize">
+ <option value="5" selected>5</option>
+ <option value="10">10</option>
+ <option value="20">20</option>
+ <option value="50">50</option>
+ </select>
+ </label>
  </div>
  <div class="form-message" id="libraryUploadMessage" aria-live="polite"></div>
  </div>
  </section>
- <section class="panel"><div id="libraryList" class="library-grid"></div></section>
+ <section class="panel">
+ <div id="libraryList" class="library-grid"></div>
+ <div id="libraryPager" class="library-pager" hidden>
+ <button type="button" class="secondary-button" id="libraryPrevPage">Previous</button>
+ <p id="libraryPageMeta" class="subtle"></p>
+ <button type="button" class="secondary-button" id="libraryNextPage">Next</button>
+ </div>
+ </section>
+ <div id="libraryPreviewBackdrop" class="library-preview-backdrop" hidden>
+ <div class="library-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryPreviewTitle">
+ <div class="library-preview-head">
+ <p id="libraryPreviewTitle"></p>
+ <button type="button" class="secondary-button" id="libraryPreviewClose">Close</button>
+ </div>
+ <video id="libraryPreviewVideo" controls playsinline></video>
+ <img id="libraryPreviewImage" alt="">
+ </div>
+ </div>
  </section>
 
  <section id="page-operations" class="page">
@@ -1059,7 +1085,7 @@
  <p class="subtle" id="operationsAutonomousMeta">Loading autonomous status…</p>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Library intake</h2><p>Opening this tab checks Airtable for assets that need classification or compression. Process intake only when you want A2 to scan the Drive folder.</p></div>
+ <div class="panel-heading"><div><h2>Library intake</h2><p>Studio scans the Drive ingestion folder every 15 minutes. Process intake if you want A2 to run now. Oversized clips compress one at a time, then classify on the next scan.</p></div>
  <div class="ops-inline-form" style="margin-top:0">
  <button type="button" class="secondary-button" id="operationsRunIntake">Process intake folder</button>
  <button type="button" class="secondary-button" id="operationsCapAudioSilence">Cap music leading silence</button>
@@ -1135,7 +1161,10 @@
  <div id="operationsPublishList" class="table-wrap"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB. Compress starts A1S for that Drive file instead of a daily folder scan.</p></div></div>
+ <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or asset library. Compress runs A1S one file at a time. After a clip finishes, the next 15-minute scan intakes and classifies it. Compress all starts the queue now.</p></div>
+ <button type="button" class="secondary-button" id="operationsCompressAllOversized" hidden>Compress all in intake folder</button>
+ </div>
+ <div id="operationsCompressionStatus" class="ops-compression-status" hidden></div>
  <div id="operationsOversizedList" class="table-wrap"></div>
  </section>
  <section class="panel">
@@ -1337,7 +1366,7 @@
  <h2>Asset Library</h2>
  <p>Asset Library is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
  <ul>
- <li>Browse and search classified photos and clips. These are the same items Production and the wizard can attach.</li>
+ <li>The tab opens on the 5 newest assets. Use Show this many on page, then Previous and Next. Search by name or location. Opening the tab does not load every thumbnail.</li>
  <li>Use + Add assets or drop files on this page. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
  <li>Delete removes the Airtable row and trashes the Drive file when nothing still has that asset attached.</li>
  <li>Library intake on Operations still scans the Drive intake folder for files that did not come through this page.</li>
@@ -1353,7 +1382,7 @@
  <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles.</p>
  <ul>
  <li><strong>Daily ideas</strong> — per-profile daily batch around 1:00 a.m. Chicago, or Run today now.</li>
- <li><strong>Library intake</strong> — Process intake folder starts A2 (and the A0 daisy-chain) instead of a 2-hour clock.</li>
+ <li><strong>Library intake</strong> — A GitHub ticker runs A2 every 15 minutes. Process intake folder runs the same scan now. Oversized clips compress one at a time; A0 stays off.</li>
  <li><strong>Ready to schedule / publish</strong> — set a post time or mark a hand-posted package published.</li>
  <li><strong>Oversized library videos</strong> — compress via A1S/A1M for Drive files over 100 MB.</li>
  <li><strong>Render repair</strong> — reset stale Remotion URLs (M1) and retry failed asset selection (R2B).</li>
@@ -1524,8 +1553,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.225-instagram-paused"></script>
+ <script src="/assets/config.js?v=0.6.234-library-preview"></script>
  <script src="/assets/ez-plan.js?v=0.6.219-fb-clip-reel"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.227-wizard-mobile-continue"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.238-wizard-mobile-continue"></script>
 </body>
 </html>

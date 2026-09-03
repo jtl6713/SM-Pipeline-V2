@@ -59,6 +59,7 @@ export default {
       const isOperationsOutputPublishedRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/published$/.test(url.pathname);
       const isOperationsOutputPublishKickRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/publish-kick$/.test(url.pathname);
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
+      const isOperationsCompressionStatusRoute = url.pathname === "/api/operations/compression";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
@@ -203,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.218-wizard-clip-continue",
+          version: "0.10.228-wizard-clip-continue",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -212,6 +213,7 @@ export default {
           studio_library_browse_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
+          studio_clip_frame_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
           studio_insights_similar_times_v1: true,
@@ -524,6 +526,11 @@ export default {
         return kickStudioOutputPublish(request, env, url, authorization, ctx);
       }
 
+      if (isOperationsCompressionStatusRoute) {
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        return getStudioCompressionStatus(request, env);
+      }
+
       if (isOperationsCompressRoute) {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
@@ -552,7 +559,7 @@ export default {
         requirePermission(authorization, "tenant_admin");
         if (request.method === "GET") return getStudioLibraryIntakeStatus(request, env, url);
         assertWriteRequest(request, env);
-        return pulseStudioLibraryIntake(request, env, authorization);
+        return pulseStudioLibraryIntake(request, env, authorization, ctx);
       }
 
       if (isOperationsAudioLeadingSilenceRoute) {
@@ -916,6 +923,11 @@ export default {
       } catch (error) {
         console.warn("studio produce orphan kick failed", error);
       }
+      try {
+        await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
+      } catch (error) {
+        console.warn("a1s compression watchdog failed", error);
+      }
       // Due publishes first. Item4 drain + autonomous produce were running before
       // this block and routinely exhausted the isolate budget, so scheduled TikTok /
       // FB finalize work sat for hours with no dispatch receipt (326, 311/316 late).
@@ -1029,6 +1041,13 @@ export default {
         await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5 });
       } catch (error) {
         console.warn("insights youtube discovery cron failed", error);
+      }
+      try {
+        // After publish work: start the next oversized Ingestion clip so a Drive dump
+        // does not wait for Process intake folder. live_status above only resumes jobs.
+        await item4PulsePipelineStage(env, "a1s", { extra: {} }, "A1S");
+      } catch (error) {
+        console.warn("a1s ingestion scan failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -1468,6 +1487,24 @@ async function listRecords(env, tableId, options = {}) {
     if (!offset || !page.length) break;
   }
   return records.slice(0, limit);
+}
+
+async function listRecordsPage(env, tableId, options = {}) {
+  const limit = Math.max(1, Math.min(100, Number(options.limit) || 12));
+  const params = new URLSearchParams();
+  params.set("pageSize", String(limit));
+  if (options.view) params.set("view", options.view);
+  if (options.filterFormula) params.set("filterByFormula", options.filterFormula);
+  if (options.sortField) {
+    params.set("sort[0][field]", options.sortField);
+    params.set("sort[0][direction]", options.sortDirection || "desc");
+  }
+  if (options.offset) params.set("offset", String(options.offset));
+  const result = await airtableFetch(env, tableId, `?${params.toString()}`);
+  return {
+    records: Array.isArray(result?.records) ? result.records : [],
+    offset: result?.offset || null,
+  };
 }
 
 function f(record, field) {
@@ -2025,9 +2062,15 @@ function contentLifecycleFromOutputs(outputRecords = []) {
   }
 
   const earlyRender = new Set(["Queued", "Preparing Assets", "Rendering"]);
+  const incompleteRender = new Set(["Queued", "Preparing Assets", "Rendering", "Trying Again"]);
+  const total = states.length;
+  const renderedCount = states.filter((state) => !incompleteRender.has(state)).length;
   let renderStatus = null;
-  if (states.some((state) => state === "Rendering")) renderStatus = "Rendering";
-  else if (states.every((state) => !earlyRender.has(state))) renderStatus = "Ready";
+  if (states.some((state) => state === "Rendering" || state === "Trying Again")) {
+    renderStatus = `Rendering ${renderedCount}/${total}`;
+  } else if (states.every((state) => !earlyRender.has(state))) {
+    renderStatus = "Ready";
+  }
 
   let reviewStatus = null;
   if (states.some((state) => state === "Ready for Review")) reviewStatus = "Ready for Review";
@@ -3620,6 +3663,19 @@ function item4PlayableMediaUrl(asset) {
   ].map((value) => String(value || "").trim()).filter(Boolean);
   const publicHttp = urls.find((value) => /^https?:\/\//i.test(value) && !value.startsWith("/") && !item4LooksLikeImagePreviewUrl(value));
   return publicHttp || "";
+}
+
+function item4VideoStreamPath(asset) {
+  const recordId = String(asset?.media_asset_record_id || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) return "";
+  return `/api/media-assets/${recordId}/stream`;
+}
+
+function item4VideoVariantReady(asset) {
+  return Boolean(
+    String(asset?.media_asset_record_id || "").trim().startsWith("rec")
+    && String(asset?.google_drive_file_id || "").trim()
+  );
 }
 
 function item4IsNativeStillOutput(platform, outputType) {
@@ -5282,6 +5338,31 @@ function studioPublishCanDispatchNow(record) {
   return platform === "YouTube" && Boolean(String(f(record, "YouTube_Scheduled_Publish_At") || "").trim());
 }
 
+async function studioPromoteDuePublishStatus(env, record) {
+  const status = String(f(record, "Publish_Status") || "").trim();
+  if (status === "Ready to Publish" || status === "Publishing" || status === "Published") return record;
+  if (studioArmedPublishStatus(record) !== "Ready to Publish") return record;
+  const id = String(record?.id || "").trim();
+  if (!id) return record;
+  const fields = { Publish_Status: "Ready to Publish" };
+  const tiktok = String(f(record, "TikTok_Draft_Status") || "").trim();
+  if (tiktok === "Waiting for Schedule") fields.TikTok_Draft_Status = "Ready for Assets";
+  const outputType = String(f(record, "Platform_Output_Type") || "").trim();
+  const storyStatus = String(f(record, "IG_Story_Status") || "").trim();
+  if (outputType === "Instagram Story" && (!storyStatus || storyStatus === "Not Needed")) {
+    fields.IG_Story_Status = "Ready";
+  }
+  try {
+    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+  } catch (error) {
+    console.warn("due publish-status promote failed", id, error);
+    return record;
+  }
+}
+
 function studioPublishHeldUntilIso(record) {
   const ms = studioPublishScheduledMs(record);
   return ms == null ? "" : new Date(ms).toISOString();
@@ -5891,13 +5972,15 @@ function item4RatiosForAsset(plan, asset, assets) {
 }
 
 function item4ExpectedVariantKeys(recordId, assets, plan) {
-  return (assets || []).flatMap((asset) =>
-    item4RatiosForAsset(plan, asset, assets).map((ratio) => ({
-      asset,
-      ratio,
-      transfer_id: item4QueueTransferId(recordId, asset.id, ratio, asset),
-    }))
-  );
+  return (assets || [])
+    .filter((asset) => !item4LooksLikeVideoAsset(asset))
+    .flatMap((asset) =>
+      item4RatiosForAsset(plan, asset, assets).map((ratio) => ({
+        asset,
+        ratio,
+        transfer_id: item4QueueTransferId(recordId, asset.id, ratio, asset),
+      }))
+    );
 }
 
 function item4VariantRatioKey(ratio) {
@@ -7172,10 +7255,9 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
 
     for (const ratio of assetRatios) {
       if (item4LooksLikeVideoAsset(asset)) {
-        const playable = item4PlayableMediaUrl(asset);
+        if (!item4VideoVariantReady(asset)) continue;
         const mediaId = String(asset.media_asset_record_id || "").trim();
         const driveId = String(asset.google_drive_file_id || "").trim();
-        if (!playable || !mediaId.startsWith("rec")) continue;
         const spec = ITEM4_RATIO_SPECS[ratio];
         row.variants[ratio] = {
           aspect_ratio: ratio,
@@ -7187,7 +7269,7 @@ function item4BuildDriveManifest(recordId, assets, ratios, queueRows, planRatios
           google_drive_file_id: driveId || null,
           google_drive_url: String(asset.google_drive_url || "").trim() || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : null),
           media_asset_record_id: mediaId,
-          preview_url: playable,
+          preview_url: item4VideoStreamPath(asset) || item4PlayableMediaUrl(asset) || null,
           preview_status: "Ready",
           file_name: String(asset.name || "clip.mp4"),
           duration_seconds: Number(asset.duration_seconds || 0) || null,
@@ -7282,6 +7364,33 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
   // variant queue for this request) is allowed to transition the workspace into
   // the preparing/ready/error lifecycle.
   if (!scoped.length) {
+    const currentStatus = String(f(record, "Studio_Variant_Status") || "").trim();
+    const videoOnly = assets.length > 0 && assets.every(item4LooksLikeVideoAsset);
+    if (videoOnly && (currentStatus === "Preparing" || currentStatus === "Ready")) {
+      const manifest = item4BuildDriveManifest(recordId, assets, ratios, [], planRatios);
+      const missing = assets.filter((asset) => !item4VideoVariantReady(asset));
+      let status = "Preparing";
+      let error = null;
+      if (manifest.plan_complete || manifest.complete) status = "Ready";
+      else if (missing.length) {
+        status = "Error";
+        error = missing.length === assets.length
+          ? "Those clips are not linked to Google Drive yet. Wait until they appear in the strip, then click Prepare again."
+          : `${missing.length} clip${missing.length === 1 ? " is" : "s are"} not linked to Google Drive yet.`;
+      }
+      const now = new Date().toISOString();
+      const updated = await item4UpdateRequestState(env, recordId, {
+        Studio_Variant_Manifest_JSON: JSON.stringify(manifest),
+        Studio_Variant_Status: status,
+        Studio_Variant_Updated_At: status === "Ready" ? now : null,
+        Studio_Variant_Error: error,
+        Studio_Platform_Variant_Assets: [...new Set(
+          assets.map((asset) => String(asset.media_asset_record_id || "").trim()).filter(Boolean)
+        )],
+        Studio_Item4_State: status === "Error" ? "Error" : "Plan Ready",
+      });
+      return { record: updated, status, error, manifest, queue_rows: [] };
+    }
     const updated = await item4UpdateRequestState(env, recordId, {
       Studio_Variant_Manifest_JSON: null,
       Studio_Variant_Status: "None",
@@ -7398,7 +7507,7 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   let assets = item4MergeAssetCrops(item4AssetManifest(record), cropsPayload)
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-  if (!assets.length) throw new HttpError(409, "Upload master photos before preparing platform media");
+  if (!assets.length) throw new HttpError(409, "Upload photos or clips before preparing platform media");
 
   if (Object.keys(cropsPayload).length) {
     record = await item4UpdateRequestState(env, recordId, {
@@ -7443,9 +7552,11 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
     !String(asset?.google_drive_file_id || "").trim() || !String(asset?.media_asset_record_id || "").trim()
   );
   if (stillMissing.length) {
+    const clips = stillMissing.filter(item4LooksLikeVideoAsset).length;
+    const noun = clips === stillMissing.length ? "clip" : (clips ? "file" : "photo");
     throw new HttpError(
       409,
-      `${stillMissing.length} master photo${stillMissing.length === 1 ? " has" : "s have"} not reached complete Google Drive + Media Asset authority yet`
+      `${stillMissing.length} ${noun}${stillMissing.length === 1 ? " has" : "s have"} not finished copying to Google Drive yet. Wait until ${stillMissing.length === 1 ? "it appears" : "they appear"} in the strip, then click Prepare again.`
     );
   }
 
@@ -7570,10 +7681,14 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
     error: reconciled.error,
     production_request: mapProductionRequest(reconciled.record),
     message: ready
-      ? `${reconciled.manifest.ready_count} platform-ready Google Drive variants are ready.`
+      ? (item4HasVideoMasters(item4AssetManifest(reconciled.record))
+        ? `${reconciled.manifest.ready_count} clip frame${reconciled.manifest.ready_count === 1 ? " is" : "s are"} ready. Clips skip photo crops.`
+        : `${reconciled.manifest.ready_count} platform-ready Google Drive variants are ready.`)
       : failed
         ? (reconciled.error || "Platform media preparation failed. See error.")
-        : "Platform media preparation is still running.",
+        : (item4HasVideoMasters(item4AssetManifest(reconciled.record))
+          ? `Attaching ${reconciled.manifest?.ready_count || 0} of ${reconciled.manifest?.target_count || 0} clip frames…`
+          : "Platform media preparation is still running."),
   }, failed ? 500 : ready ? 200 : 202);
 }
 
@@ -8690,6 +8805,13 @@ async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRe
   );
 
   for (const routeRow of routeRows.filter(row => row.ready && row.aspect_ratio)) {
+    const videoPassthrough = variantAssets.length > 0 && variantAssets.every((asset) => {
+      const variant = asset?.variants?.[routeRow.aspect_ratio];
+      return String(variant?.recipe_version || "") === "video-passthrough"
+        && String(variant?.google_drive_file_id || "").trim()
+        && /^rec[A-Za-z0-9]+$/.test(String(variant?.media_asset_record_id || "").trim());
+    });
+    if (videoPassthrough) continue;
     const expectedId = routeRow.record_id;
     const matching = variantQueueRows.filter(row => String(f(row, "Aspect_Ratio") || "").trim() === routeRow.aspect_ratio);
     const missingLinks = matching.filter(row => !arrayOrEmpty(f(row, "Target_Production_Request_Outputs")).includes(expectedId));
@@ -10740,12 +10862,18 @@ function studioSeasonLabel(season) {
 }
 
 function studioAnalyzeCaption(caption) {
-  const text = String(caption || "").trim();
+  const raw = String(caption || "").trim();
+  const text = raw.slice(0, 500);
   const hashtags = (text.match(/#[\w\u0080-\uFFFF]+/g) || []).length;
-  const emoji = (text.match(/\p{Extended_Pictographic}/gu) || []).length;
+  let emoji = 0;
+  try {
+    emoji = (text.match(/\p{Extended_Pictographic}/gu) || []).length;
+  } catch {
+    emoji = 0;
+  }
   return {
-    text: text.slice(0, 5000),
-    length: text.length,
+    text: text || null,
+    length: raw.length,
     hashtags,
     emoji,
     has_question: /\?/.test(text),
@@ -10890,13 +11018,47 @@ async function studioInsightsUpsertObservation(env, fields) {
 
 async function studioInsightsUpsertObservations(env, posts, meta = {}) {
   if (!studioInsightsDbEnabled(env) || !Array.isArray(posts) || !posts.length) return { upserted: 0 };
+  const prepared = posts
+    .map((post) => studioInsightsObservationFields(post, meta))
+    .filter((fields) => String(fields?.Observation_Key || "").trim());
+  if (!prepared.length) return { upserted: 0 };
+  const keyClauses = prepared.map((fields) => `{Observation_Key}='${String(fields.Observation_Key).replace(/'/g, "\\'")}'`);
+  const existingRows = await listRecords(env, studioInsightsObservationsTable(env), {
+    limit: prepared.length,
+    filterFormula: prepared.length === 1 ? keyClauses[0] : `OR(${keyClauses.join(",")})`,
+  }).catch(() => []);
+  const byKey = new Map((existingRows || []).map((row) => [String(f(row, "Observation_Key") || ""), row]));
+  const toCreate = [];
+  const toPatch = [];
+  for (const fields of prepared) {
+    const found = byKey.get(fields.Observation_Key);
+    if (found?.id) toPatch.push({ id: found.id, fields });
+    else toCreate.push({ fields });
+  }
   let upserted = 0;
-  for (const post of posts) {
+  const tableId = studioInsightsObservationsTable(env);
+  for (let i = 0; i < toCreate.length; i += 10) {
+    const chunk = toCreate.slice(i, i + 10);
     try {
-      await studioInsightsUpsertObservation(env, studioInsightsObservationFields(post, meta));
-      upserted += 1;
+      await airtableFetch(env, tableId, "", {
+        method: "POST",
+        body: JSON.stringify({ records: chunk, typecast: true }),
+      });
+      upserted += chunk.length;
     } catch (error) {
-      console.warn("insights observation upsert failed", error);
+      console.warn("insights observation create batch failed", error);
+    }
+  }
+  for (let i = 0; i < toPatch.length; i += 10) {
+    const chunk = toPatch.slice(i, i + 10);
+    try {
+      await airtableFetch(env, tableId, "", {
+        method: "PATCH",
+        body: JSON.stringify({ records: chunk, typecast: true }),
+      });
+      upserted += chunk.length;
+    } catch (error) {
+      console.warn("insights observation patch batch failed", error);
     }
   }
   return { upserted };
@@ -10939,11 +11101,28 @@ async function studioLoadSimilarAccountStatusCache(env) {
   return parseSimilarTimesCache(f(legacyRow, "Setting_Value"));
 }
 
+function studioSlimSimilarStatusCache(cache) {
+  const accounts = {};
+  for (const [key, entry] of Object.entries(cache?.accounts || {})) {
+    const posts = Array.isArray(entry?.posts) ? entry.posts.length : Number(entry?.posts || 0) || 0;
+    accounts[key] = {
+      platform: entry?.platform || null,
+      handle: entry?.handle || null,
+      profile: entry?.profile || "chicago",
+      status: entry?.status || "pending",
+      error: entry?.error ? String(entry.error).slice(0, 160) : null,
+      fetched_at: entry?.fetched_at || null,
+      posts,
+    };
+  }
+  return { as_of: cache?.as_of || null, accounts };
+}
+
 async function studioSaveSimilarAccountStatusCache(env, cache) {
   await studioUpsertSetting(
     env,
     STUDIO_SIMILAR_ACCOUNT_STATUS_SETTING,
-    JSON.stringify(cache),
+    JSON.stringify(studioSlimSimilarStatusCache(cache)),
     "Similar-account fetch status metadata. Post observations persist in Studio Insights Observations."
   );
 }
@@ -11956,39 +12135,29 @@ async function postInsightsSimilarTimesSweep(request, env, url, authorization) {
   try { payload = await request.json(); } catch { payload = {}; }
   // A single-account button click must stay bounded. Migrating every legacy
   // cache observation here can exhaust Worker CPU before the requested sweep.
+  // Reloading 300 observations + occupied schedules after the YouTube fetch
+  // also 500s the isolate (subrequest/CPU) for handles with ~20 public uploads.
   const theme = payload.profile || payload.theme
     ? studioNormalizeSimilarProfile(payload.profile || payload.theme)
     : await studioResolveSimilarTimesTheme(env, url, authorization);
   const season = payload.season ? studioNormalizeInsightsSeason(payload.season) : studioInsightsResolveSeason(url);
+  const platform = String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase();
   const result = await studioSweepSimilarAccountTimes(env, {
     limit: 1,
     force: Boolean(payload.force),
     theme,
-    platform: payload.platform,
+    platform,
     handle: payload.handle,
     skipRecompute: true,
   });
-  const accounts = await studioEnsureSimilarWatchlist(env);
-  const cache = result.cache || await studioLoadSimilarAccountStatusCache(env);
-  const posts = await studioInsightsPostsForView(env, {
-    accounts,
-    theme,
-    platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
-    season,
-    cache,
-  });
-  const occupiedByPlatform = await studioLoadOccupiedSchedules(env).catch((error) => {
-    console.warn("similar-times own schedule overlay failed", error);
-    return {};
-  });
   const view = studioBuildSimilarTimesView({
-    accounts,
-    cache,
+    accounts: result.accounts || [],
+    cache: result.cache || { as_of: null, accounts: {} },
     theme,
-    platform: String(payload.platform || url.searchParams.get("platform") || "").trim().toLowerCase(),
+    platform,
     season,
-    posts,
-    own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
+    posts: result.posts || [],
+    own_schedule: { total: 0, buckets: [] },
   });
   return respond(request, env, {
     ok: true,
@@ -12176,7 +12345,7 @@ async function studioFetchYoutubePublicUploads(handle, creds) {
       views: Number(item?.statistics?.viewCount || 0) || 0,
       likes: Number(item?.statistics?.likeCount || 0) || 0,
       comments: Number(item?.statistics?.commentCount || 0) || 0,
-      caption: String(item?.snippet?.description || item?.snippet?.title || "").trim(),
+      caption: String(item?.snippet?.title || "").trim(),
       external_post_id: String(item?.id || item?.snippet?.publishedAt || "").trim(),
     }))
     .filter((item) => item.published_at);
@@ -12328,7 +12497,7 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
     const account = timed[0]
       ? cache.accounts[studioSimilarAccountKey(timed[0].platform, timed[0].handle)] || null
       : null;
-    return { scanned: 0, updated: 0, remaining: 0, cache, account };
+    return { scanned: 0, updated: 0, remaining: 0, cache, account, accounts, posts: [] };
   }
   const settings = await studioActivePipelineSettings(env, [
     "FACEBOOK_PAGE_ACCESS_TOKEN",
@@ -12343,6 +12512,7 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
     youtubeKey: settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY,
   };
   let updated = 0;
+  let lastPosts = [];
   for (const account of batch) {
     const key = studioSimilarAccountKey(account.platform, account.handle);
     try {
@@ -12351,6 +12521,7 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
         : await studioFetchYoutubePublicUploads(account.handle, creds);
       const fetchedAt = new Date().toISOString();
       if (fetched.status === "ok") {
+        lastPosts = fetched.posts || [];
         await studioInsightsUpsertObservations(env, (fetched.posts || []).map((post) => ({
           ...post,
           platform: account.platform,
@@ -12388,7 +12559,11 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
     }
   }
   cache.as_of = new Date().toISOString();
-  await studioSaveSimilarAccountStatusCache(env, cache);
+  try {
+    await studioSaveSimilarAccountStatusCache(env, cache);
+  } catch (error) {
+    console.warn("similar-account status cache save failed", error);
+  }
   if (!options.skipRecompute) {
     try {
       await studioRecomputeInsightsLearned(env, { profile: options.theme || "chicago" });
@@ -12400,7 +12575,15 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   const account = selected
     ? cache.accounts[studioSimilarAccountKey(selected.platform, selected.handle)] || null
     : null;
-  return { scanned: batch.length, updated, remaining: Math.max(0, stale.length - batch.length), cache, account };
+  return {
+    scanned: batch.length,
+    updated,
+    remaining: Math.max(0, stale.length - batch.length),
+    cache,
+    account,
+    accounts,
+    posts: batch.length === 1 ? lastPosts : [],
+  };
 }
 
 async function restoreParentContentItemFromStudioUmbrella(env, parentContentItem) {
@@ -13874,6 +14057,24 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
 
 const ASSET_LIBRARY_MAX_FILES = 8;
 const ASSET_LIBRARY_LIST_FORMULA = "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({Asset Name}&''))))";
+const ASSET_LIBRARY_PAGE_SIZE = 5;
+const ASSET_LIBRARY_MAX_PAGE_SIZE = 50;
+
+function assetLibraryFilterFormula(query, kind) {
+  const parts = [ASSET_LIBRARY_LIST_FORMULA];
+  const normalizedKind = String(kind || "").trim().toLowerCase();
+  if (normalizedKind === "video") parts.push("{Media_Class}='Video'");
+  if (normalizedKind === "photo" || normalizedKind === "image") {
+    parts.push("OR({Media_Class}='Image',{Media_Class}='Graphic')");
+  }
+  const needle = String(query || "").trim().toLowerCase();
+  if (needle) {
+    const escaped = ideaLibraryAirtableEscape(needle);
+    const hay = "LOWER(CONCATENATE({Asset Name},' ',{Location},' ',{Asset_Description}))";
+    parts.push(`FIND("${escaped}", ${hay})`);
+  }
+  return `AND(${parts.join(",")})`;
+}
 
 function mapLibraryAsset(record) {
   const video = ideaLibraryIsEligibleVideo(record)
@@ -13904,28 +14105,32 @@ function mapLibraryAsset(record) {
 
 async function listAssetLibrary(request, env, url) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
-  const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+  const query = String(url.searchParams.get("q") || "").trim();
   const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
-  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit: 100,
+  const requestedLimit = Number(url.searchParams.get("limit"));
+  const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
+  const offset = String(url.searchParams.get("offset") || "").trim() || null;
+  const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit,
+    offset,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ASSET_LIBRARY_LIST_FORMULA,
+    filterFormula: assetLibraryFilterFormula(query, kind),
   });
-  const mapped = [];
-  for (const record of records) {
-    const name = String(f(record, "Asset Name") || "");
-    if (/__\d+x\d+__/i.test(name)) continue;
-    const row = mapLibraryAsset(record);
-    if (kind === "video" && row.media_kind !== "video") continue;
-    if ((kind === "photo" || kind === "image") && row.media_kind === "video") continue;
-    if (query) {
-      const hay = [row.name, row.location, row.description].filter(Boolean).join(" ").toLowerCase();
-      if (!hay.includes(query)) continue;
-    }
-    mapped.push(row);
-  }
-  return respond(request, env, { ok: true, query: query || null, count: mapped.length, records: mapped });
+  const mapped = page.records
+    .filter((record) => !/__\d+x\d+__/i.test(String(f(record, "Asset Name") || "")))
+    .map(mapLibraryAsset);
+  return respond(request, env, {
+    ok: true,
+    idle: false,
+    query: query || null,
+    kind: kind || null,
+    count: mapped.length,
+    has_more: Boolean(page.offset),
+    offset: page.offset || null,
+    limit,
+    records: mapped,
+  });
 }
 
 async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) {
@@ -21047,6 +21252,7 @@ async function studioDispatchApprovedPublishNow(env, record) {
       record,
     };
   }
+  record = await studioPromoteDuePublishStatus(env, record);
   record = await studioEnsureOutputCaption(env, record);
   const plan = studioPublishDispatchTarget(record);
   if (!plan) return { ok: true, skipped: "no-dispatch", record };
@@ -25104,7 +25310,172 @@ async function studioUpsertSetting(env, name, value, notes) {
   return created?.records?.[0] || null;
 }
 
-async function listOversizedMedia(env) {
+function parseA1JobValue(value) {
+  const parts = String(value || "").split("|");
+  const phase = String(parts[0] || "").trim().toLowerCase();
+  const looksName = (part) => /\.(mov|mp4|m4v|webm)$/i.test(part || "");
+  let fileId = "";
+  let name = "";
+  if (parts.length >= 8) {
+    fileId = String(parts[3] || "").trim();
+    name = String(parts[5] || "").trim();
+  } else {
+    fileId = String(parts[3] || "").trim();
+    name = String(parts.find(looksName) || "").trim();
+  }
+  return {
+    phase,
+    file_id: fileId,
+    name,
+    updated_at: String(parts[parts.length - 1] || "").trim(),
+    job_id: String(parts[1] || "").trim(),
+  };
+}
+
+function compressionPhaseLabel(phase) {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (normalized === "queued") return "Queued";
+  if (normalized === "downloading") return "Downloading";
+  if (normalized === "starting" || normalized === "processing_local") return "Starting";
+  if (normalized.startsWith("failed") || normalized === "timeout") return "Failed";
+  if (normalized === "finished") return "Finished";
+  return "Compressing";
+}
+
+function compressionPhaseTone(phase) {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (normalized.startsWith("failed") || normalized === "timeout") return "failed";
+  if (normalized === "queued" || normalized === "starting" || normalized === "processing_local") return "waiting";
+  if (normalized === "finished") return "ok";
+  return "compressing";
+}
+
+function parseProgressPercent(notes, livePercent) {
+  const live = Number(livePercent);
+  if (Number.isFinite(live)) return Math.max(0, Math.min(100, Math.round(live)));
+  const match = String(notes || "").match(/(\d{1,3})\s*%/);
+  if (!match) return null;
+  return Math.max(0, Math.min(100, Number(match[1])));
+}
+
+function mapA1CompressionJob(record) {
+  const settingName = String(f(record, "Setting_Name") || "").trim();
+  if (!settingName.startsWith("A1_JOB_")) return null;
+  const parsed = parseA1JobValue(f(record, "Setting_Value"));
+  const fileId = parsed.file_id || settingName.slice("A1_JOB_".length);
+  const name = parsed.name || fileId;
+  const phase = parsed.phase || "processing";
+  const label = compressionPhaseLabel(phase);
+  const notes = String(f(record, "Notes") || "").trim() || null;
+  const progress = parseProgressPercent(notes);
+  return {
+    id: record.id,
+    google_drive_file_id: fileId,
+    name,
+    job_id: parsed.job_id || null,
+    phase,
+    label,
+    tone: compressionPhaseTone(phase),
+    progress_percent: progress,
+    headline: name ? `${label} ${name}${progress != null ? ` · ${progress}%` : ""}` : `${label} video`,
+    notes,
+    updated_at: parsed.updated_at || f(record, "Last_Modified") || null,
+  };
+}
+
+async function enrichCompressionJobsLive(env, jobs) {
+  if (!jobs.length) return jobs;
+  const backend = pipelineStageBackend(env, "A1S");
+  if (backend.mode !== "python" || !backend.runnerUrl) return jobs;
+  try {
+    const { response, payload } = await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
+    if (!response.ok) return jobs;
+    const live = Array.isArray(payload?.details?.run?.jobs) ? payload.details.run.jobs : [];
+    const byFile = new Map(live.map((row) => [String(row.google_drive_file_id || ""), row]));
+    const byJob = new Map(live.map((row) => [String(row.job_id || ""), row]));
+    return jobs.map((job) => {
+      const snap = byFile.get(String(job.google_drive_file_id || "")) || byJob.get(String(job.job_id || ""));
+      if (!snap) return job;
+      const phase = String(snap.status || job.phase || "compressing");
+      const label = compressionPhaseLabel(phase);
+      const progress = parseProgressPercent(snap.detail || job.notes, snap.progress);
+      const name = job.name || snap.name;
+      return {
+        ...job,
+        phase,
+        label,
+        tone: compressionPhaseTone(phase),
+        progress_percent: progress,
+        headline: name ? `${label} ${name}${progress != null ? ` · ${progress}%` : ""}` : job.headline,
+        notes: snap.detail || job.notes,
+      };
+    });
+  } catch (error) {
+    console.error("enrichCompressionJobsLive failed", error);
+    return jobs;
+  }
+}
+
+async function listActiveA1CompressionJobs(env) {
+  const records = await listRecords(env, STUDIO_PIPELINE_SETTINGS_TABLE_ID, {
+    limit: 20,
+    filterFormula: "AND({Active}=1,FIND('A1_JOB_',{Setting_Name})=1)",
+  });
+  return enrichCompressionJobsLive(env, records.map(mapA1CompressionJob).filter(Boolean));
+}
+
+function attachCompressionJobs(oversized, jobs) {
+  const byId = new Map((jobs || []).map((job) => [job.google_drive_file_id, job]));
+  return (oversized || []).map((row) => ({
+    ...row,
+    compression: byId.get(row.google_drive_file_id) || null,
+  }));
+}
+
+async function getStudioCompressionStatus(request, env) {
+  const jobs = await listActiveA1CompressionJobs(env).catch(() => []);
+  return respond(request, env, {
+    ok: true,
+    jobs,
+    active_count: jobs.length,
+    headline: jobs[0]?.headline || null,
+  });
+}
+
+function mapOversizedIntakeDriveFile(row) {
+  const fileId = String(row?.id || "").trim();
+  if (!fileId) return null;
+  const sizeBytes = Number(row?.size);
+  const fileSizeMb = Number.isFinite(sizeBytes) && sizeBytes > 0
+    ? Math.round((sizeBytes / 1048576) * 100) / 100
+    : null;
+  return {
+    id: null,
+    name: String(row?.name || fileId).trim() || fileId,
+    file_size_mb: fileSizeMb,
+    mime_type: "video/*",
+    google_drive_file_id: fileId,
+    google_drive_url: `https://drive.google.com/file/d/${fileId}/view`,
+    source: "intake_folder",
+  };
+}
+
+async function listOversizedIntakeVideos(env) {
+  const backend = pipelineStageBackend(env, "A1S");
+  if (backend.mode !== "python" || !backend.runnerUrl) return [];
+  try {
+    const { response, payload } = await item4PulsePipelineStage(env, "a1s", { extra: { dry_run: true } }, "A1S");
+    if (!response.ok) return [];
+    const run = payload?.details?.run || {};
+    const eligible = Array.isArray(run.eligible) ? run.eligible : [];
+    return eligible.map(mapOversizedIntakeDriveFile).filter(Boolean);
+  } catch (error) {
+    console.error("listOversizedIntakeVideos failed", error);
+    return [];
+  }
+}
+
+async function listOversizedMediaFromAirtable(env) {
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 50,
     filterFormula: `AND({File_Size_MB}>95.36,FIND("_compressed",{Asset Name}&"")=0)`,
@@ -25116,20 +25487,37 @@ async function listOversizedMedia(env) {
     mime_type: f(record, "MIME_Type"),
     google_drive_file_id: googleDriveFileId(record),
     google_drive_url: f(record, "Google Drive URL"),
+    source: "airtable",
   })).filter((row) => row.google_drive_file_id);
+}
+
+async function listOversizedMedia(env) {
+  const [airtableRows, intakeRows] = await Promise.all([
+    listOversizedMediaFromAirtable(env).catch(() => []),
+    listOversizedIntakeVideos(env).catch(() => []),
+  ]);
+  const byDriveId = new Map();
+  for (const row of intakeRows) {
+    byDriveId.set(row.google_drive_file_id, row);
+  }
+  for (const row of airtableRows) {
+    byDriveId.set(row.google_drive_file_id, row);
+  }
+  return [...byDriveId.values()].sort((a, b) => (Number(b.file_size_mb) || 0) - (Number(a.file_size_mb) || 0));
 }
 
 async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
   const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
-  const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification] = await Promise.all([
+  const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
     listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB2_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 25, view: STUDIO_PUB3_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
     listOversizedMedia(env).catch(() => []),
     listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, { limit: 25, view: STUDIO_A3_CLASSIFY_VIEW_ID }).catch(() => []),
+    listActiveA1CompressionJobs(env).catch(() => []),
   ]);
   const libraryIntake = mapLibraryIntakeSnapshot(needingClassification, oversized);
   const similarAccounts = await studioEnsureSimilarWatchlist(env).catch(() => []);
@@ -25147,7 +25535,9 @@ async function getStudioOperations(request, env, authorization) {
     ready_to_schedule: readyToSchedule.map(mapOperationsOutput),
     ready_to_publish: readyToPublish.map(mapOperationsOutput),
     recently_published: published.map(mapOperationsOutput),
-    oversized_media: oversized,
+    oversized_media: attachCompressionJobs(oversized, compressionJobs),
+    compression_jobs: compressionJobs,
+    compression_headline: compressionJobs[0]?.headline || null,
     a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
     library_intake: libraryIntake,
     similar_accounts: similarAccounts,
@@ -26382,12 +26772,9 @@ async function markStudioOutputPublished(request, env, url, authorization) {
   return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
 }
 
-async function pulseA1SForDriveFile(request, env, authorization, ctx) {
-  let payload;
-  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
-  const driveFileId = String(payload?.drive_file_id || "").trim();
-  if (!driveFileId) throw new HttpError(400, "drive_file_id is required");
-  const data = { drive_file_id: driveFileId };
+async function pulseA1SCompression(env, { driveFileId = null, ctx } = {}) {
+  const normalizedId = String(driveFileId || "").trim();
+  const data = normalizedId ? { drive_file_id: normalizedId } : {};
   const python = pipelineStageBackend(env, "A1S");
   const task = (async () => {
     if (python.mode === "python") {
@@ -26396,10 +26783,12 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
       } catch (error) {
         console.error("A1S python pulse failed", error);
       }
-      try {
-        await item4PulsePipelineStage(env, "a1m", { extra: data }, "A1S");
-      } catch (error) {
-        console.error("A1M python pulse failed", error);
+      if (normalizedId) {
+        try {
+          await item4PulsePipelineStage(env, "a1m", { extra: data }, "A1S");
+        } catch (error) {
+          console.error("A1M python pulse failed", error);
+        }
       }
       return;
     }
@@ -26408,20 +26797,39 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     } catch (error) {
       console.error("A1S on-demand pulse failed", error);
     }
-    try {
-      await phase6PulseOnDemandScenario(env, STUDIO_A1M_SCENARIO_ID, { waitMs: 20000, data });
-    } catch (error) {
-      console.error("A1M on-demand pulse failed", error);
+    if (normalizedId) {
+      try {
+        await phase6PulseOnDemandScenario(env, STUDIO_A1M_SCENARIO_ID, { waitMs: 20000, data });
+      } catch (error) {
+        console.error("A1M on-demand pulse failed", error);
+      }
     }
   })();
-  if (ctx?.waitUntil) ctx.waitUntil(task); else await task;
+  if (ctx?.waitUntil) ctx.waitUntil(task);
+  else await task;
+  return { driveFileId: normalizedId || null, backend: python.mode };
+}
+
+async function pulseA1SForDriveFile(request, env, authorization, ctx) {
+  void authorization;
+  let payload;
+  try { payload = await request.json(); } catch { payload = {}; }
+  const driveFileId = String(payload?.drive_file_id || "").trim();
+  const compressAll = Boolean(payload?.compress_all);
+  if (!driveFileId && !compressAll) {
+    throw new HttpError(400, "drive_file_id is required unless compress_all is true");
+  }
+  const pulse = await pulseA1SCompression(env, { driveFileId: driveFileId || null, ctx });
   return respond(request, env, {
     ok: true,
-    triggered: python.mode === "python" ? "a1s-python" : "on-demand-run",
-    backend: python.mode,
-    drive_file_id: driveFileId,
-    scenarios: ["A1S", "A1M"],
-    message: "A1S compress and A1M duration probe were pulsed because this file is over 100 MB.",
+    triggered: pulse.backend === "python" ? "a1s-python" : "on-demand-run",
+    backend: pulse.backend,
+    drive_file_id: pulse.driveFileId,
+    compress_all: compressAll && !pulse.driveFileId,
+    scenarios: pulse.driveFileId ? ["A1S", "A1M"] : ["A1S"],
+    message: pulse.driveFileId
+      ? "A1S compress and A1M duration probe were pulsed because this file is over 100 MB."
+      : "A1S scanned the ingestion folder and started compression for eligible oversized videos.",
   }, 202);
 }
 
@@ -26499,7 +26907,7 @@ async function pulseAudioLeadingSilence(request, env) {
   });
 }
 
-async function pulseStudioLibraryIntake(request, env, authorization) {
+async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
   void authorization;
   const startedAt = new Date().toISOString();
   const { response, payload } = await item4PulsePipelineStage(env, "a2", {
@@ -26510,12 +26918,22 @@ async function pulseStudioLibraryIntake(request, env, authorization) {
   }
   const run = payload?.details?.run || {};
   const filesFound = Boolean(run.files_found);
+  const intakenCount = Number(run.intaken_count || 0);
+  const skippedOversizeCount = Number(run.skipped_oversize_count || 0);
+  let compressionTriggered = false;
+  if (skippedOversizeCount > 0) {
+    compressionTriggered = true;
+    await pulseA1SCompression(env, { ctx });
+  }
   const knownA2 = {
     id: "python-a2",
     timestamp: startedAt,
-    operations: filesFound ? 20 : 2,
+    operations: filesFound ? (intakenCount > 0 ? 20 : (skippedOversizeCount > 0 ? 6 : 2)) : 2,
     state: "success",
     status_code: 1,
+    intaken_count: intakenCount,
+    skipped_oversize_count: skippedOversizeCount,
+    compression_triggered: compressionTriggered,
   };
   const status = await buildLibraryIntakeStatus(env, startedAt, knownA2);
   return respond(request, env, {
@@ -26524,6 +26942,8 @@ async function pulseStudioLibraryIntake(request, env, authorization) {
     scenario_id: STUDIO_A2_SCENARIO_ID,
     daisy_chain: ["A2", "A2B", "A3", "A4"],
     hook_response: String(payload?.message || "python-a2").slice(0, 200),
+    skipped_oversize_count: skippedOversizeCount,
+    compression_triggered: compressionTriggered,
     ...status,
     message: status.summary,
   }, status.complete ? 200 : 202);
@@ -26651,13 +27071,36 @@ function firstRunSince(runs, startedAt) {
 function describeA2Run(run) {
   if (!run) return { files_found: null, result: "waiting", detail: "Starting A2…" };
   const python = String(run.id || "").startsWith("python");
+  const skippedOversize = Number(run.skipped_oversize_count || 0);
+  const intakenCount = Number(run.intaken_count || 0);
   if (run.state === "error") {
     return { files_found: null, result: "error", detail: python ? "A2 failed." : "A2 failed. Check Make for the error." };
   }
   if (run.operations <= STUDIO_A2_EMPTY_MAX_OPERATIONS) {
+    if (skippedOversize > 0) {
+      const compressNote = run.compression_triggered ? " Compression started." : "";
+      return {
+        files_found: true,
+        result: "oversize_only",
+        detail: `${skippedOversize} oversized video${skippedOversize === 1 ? "" : "s"} skipped intake.${compressNote}`,
+        skipped_oversize_count: skippedOversize,
+      };
+    }
     return { files_found: false, result: "empty", detail: "A2 completed with no assets to process" };
   }
-  if (python) return { files_found: true, result: "processed", detail: "A2 found files to intake." };
+  if (skippedOversize > 0 && intakenCount === 0) {
+    const compressNote = run.compression_triggered ? " Compression started." : "";
+    return {
+      files_found: true,
+      result: "oversize_only",
+      detail: `${skippedOversize} oversized video${skippedOversize === 1 ? "" : "s"} sent to compression.${compressNote}`,
+      skipped_oversize_count: skippedOversize,
+    };
+  }
+  if (python) {
+    const oversizeNote = skippedOversize > 0 ? ` ${skippedOversize} oversized skipped.` : "";
+    return { files_found: true, result: "processed", detail: `A2 intook ${intakenCount || "new"} file(s).${oversizeNote}` };
+  }
   return { files_found: true, result: "processed", detail: `A2 found files to intake (${run.operations} Make operations).` };
 }
 
@@ -26696,11 +27139,13 @@ async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const percent = empty || (complete && !failed) ? 100 : failed ? 40 : a2Result.files_found ? 55 : 12;
   const summary = empty
     ? "A2 completed with no assets to process"
-    : failed
+    : a2Result.result === "oversize_only"
       ? a2Result.detail
-      : complete
-        ? "Intake finished. Downstream classification and reconciliation ran."
-        : a2Result.detail;
+      : failed
+        ? a2Result.detail
+        : complete
+          ? "Intake finished. Downstream classification and reconciliation ran."
+          : a2Result.detail;
   return {
     started_at: startedAt,
     percent,

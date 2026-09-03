@@ -283,4 +283,22 @@ Runner clip route Worker deploy: 2026-09-01 - Feature-detect clip_poster on the 
 
 Facebook clip Reel Worker deploy: 2026-09-01 - Clip and finished-video plans treat Facebook Slideshow Reel as Reel. Worker 0.10.216-fb-clip-reel.
 
-Wizard clip continue Worker deploy: 2026-09-02 - Accept a 0 photo-slide count on clips-only wizard drafts. Worker 0.10.218-wizard-clip-continue.
+Oversized ingestion Worker deploy: 2026-09-02 - Operations lists oversized ingestion-folder videos via A1S dry-run, auto-starts compression after A2 skip, and supports compress-all. Worker 0.10.217-oversized-ingestion. Source commit 046676e.
+
+Compression status Worker deploy: 2026-09-02 - Operations reads active A1_JOB rows and exposes GET /api/operations/compression for the live Compressing banner. Worker 0.10.218-compression-status.
+
+Compression progress Worker deploy: 2026-09-02 - Operations compression status pulses A1S live_status so the banner shows current compressor percent. Worker 0.10.219-compression-progress.
+
+Asset Library pages Worker deploy: 2026-09-02 - GET /api/library returns one page of Media Assets (default 5, max 50) sorted by newest Intake_Date. Worker 0.10.221-library-pages.
+
+Ingestion A1S cron Worker deploy: 2026-09-02 - After publish reconcile, cron pulses A1S folder scan so a Drive dump starts the next oversized clip without Process intake folder. Worker 0.10.222-library-intake-cron.
+
+Due IG publish promote Worker deploy: 2026-09-02 - Before AP1-IG / AP1-IGS, flip due Ready to Schedule rows to Ready to Publish so reconcile does not skip and burn the 8-dispatch cap. Worker 0.10.223-ig-due-promote.
+
+Clip Prepare Worker deploy: 2026-09-02 - Clip-only Prepare attaches Drive files as platform frames and marks Frames Ready without photo-crop queue rows. Worker 0.10.224-clip-prepare.
+
+Clip Approve Worker deploy: 2026-09-03 - Skip crop-queue destination linking when clip frames are already video passthrough. Worker 0.10.225-clip-approve.
+
+Render count Worker deploy: 2026-09-03 - Roll up home Render status as Rendering N/M while destinations are still encoding. Worker 0.10.226-render-count.
+
+Wizard clip continue Worker deploy: 2026-09-03 - Accept a 0 photo-slide count on clips-only wizard drafts. Worker 0.10.228-wizard-clip-continue.

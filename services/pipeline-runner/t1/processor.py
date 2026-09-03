@@ -25,6 +25,7 @@ from t1.apply import (
 )
 from t1.client import TimingEngineClient
 from t1.constants import (
+    DENSE_VIDEO_TRANSITION,
     DONE_STATUSES,
     MAKE_SCENARIO_ID,
     MAKE_SCENARIO_NAME,
@@ -35,6 +36,8 @@ from t1.constants import (
     STATUS_SKIPPED,
 )
 from t1.formulas import t1_exact_output_formula, t1_production_formula
+from t1.scenes import scene_times_for_clips
+from t1.slice import clips_have_video, expand_to_timeline
 
 
 def _eligible(output: dict[str, Any], *, test_run_id: str | None = None) -> bool:
@@ -129,15 +132,16 @@ def process_one(
         "make_scenario_name": MAKE_SCENARIO_NAME,
     }
     clips = clip_list(output)
-    if not music_is_enabled(output) or len(clips) < 2:
-        reason = "no_music" if not music_is_enabled(output) else "single_clip"
+    if not music_is_enabled(output):
+        reason = "no_music"
         if dry_run:
             return {"processed": False, "dry_run": True, "skip": reason, **preview}
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], _skip_fields(reason), typecast=True)
         return {"processed": True, "skipped": reason, **preview}
 
+    has_video = clips_have_video(clips)
     engine_url, default_rules = get_timing_defaults(client)
-    rules = resolve_rules(output, default_rules)
+    rules = resolve_rules(output, default_rules, has_video=has_video)
     start, duration = analysis_window(output)
     vo_end = voiceover_end_seconds(output)
     content_item_id = first_linked_id(field(output, "Content_Item"))
@@ -151,13 +155,15 @@ def process_one(
         "schema_version": "timing.request.1",
         "music_start_seconds": start,
         "music_duration_seconds": duration,
-        "clip_count": len(clips),
+        "clip_count": max(1, len(clips)),
         "fps": 30,
         "transition_rules": rules,
         "sources": ["beats", "voiceover"],
         "voiceover_end_seconds": vo_end,
         "cleanup": True,
     }
+    if has_video:
+        request_body["default_transition"] = DENSE_VIDEO_TRANSITION
     if dry_run:
         preview["timing_request"] = request_body
         return {"processed": False, "dry_run": True, **preview}
@@ -172,7 +178,12 @@ def process_one(
         else:
             request_body["music_url"] = music_url(output)
         response = (timing_client or TimingEngineClient(engine_url)).create_timeline(request_body)
-        timed = apply_timeline(clips, response)
+        scenes = scene_times_for_clips(clips, drive=drive or GoogleDriveClient()) if has_video else {}
+        timed = (
+            expand_to_timeline(clips, response, scene_times=scenes)
+            if has_video
+            else apply_timeline(clips, response)
+        )
         total_frames = sum(int(clip.get("durationFrames") or 0) for clip in timed)
         fields = {
             "Timing_Status": STATUS_READY,

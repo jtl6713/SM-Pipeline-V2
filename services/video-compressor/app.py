@@ -89,20 +89,25 @@ def google_drive_configured():
     return bool(GOOGLE_DRIVE_CREDENTIALS_PATH and GOOGLE_DRIVE_CREDENTIALS_PATH.is_file())
 
 
-def write_response_body(response, dest):
+def write_response_body(response, dest, on_bytes=None):
+    total = int(response.headers.get("Content-Length") or 0)
+    seen = 0
     with open(dest, "wb") as handle:
         for chunk in response.iter_content(chunk_size=1024 * 1024):
             if chunk:
                 handle.write(chunk)
+                seen += len(chunk)
+                if on_bytes:
+                    on_bytes(seen, total)
 
 
-def download_url_file(url, dest):
+def download_url_file(url, dest, on_bytes=None):
     with requests.get(url, stream=True, timeout=(30, DOWNLOAD_TIMEOUT_SECONDS), allow_redirects=True) as response:
         response.raise_for_status()
-        write_response_body(response, dest)
+        write_response_body(response, dest, on_bytes=on_bytes)
 
 
-def download_google_drive_file(file_id, dest):
+def download_google_drive_file(file_id, dest, on_bytes=None):
     if not google_drive_configured():
         raise RuntimeError("Google Drive credentials are not configured")
 
@@ -125,7 +130,7 @@ def download_google_drive_file(file_id, dest):
         with response:
             if not response.ok:
                 raise RuntimeError(f"Google Drive download failed (HTTP {response.status_code})")
-            write_response_body(response, dest)
+            write_response_body(response, dest, on_bytes=on_bytes)
     finally:
         session.close()
 
@@ -172,6 +177,64 @@ def get_job(job_id):
         return dict(job) if job else None
 
 
+def public_job_view(job):
+    keys = (
+        "job_id",
+        "asset_name",
+        "status",
+        "progress",
+        "source_size_mb",
+        "duration_seconds",
+        "updated_at",
+        "created_at",
+        "retry_for_target",
+        "error",
+    )
+    return {key: job[key] for key in keys if key in job}
+
+
+def list_public_jobs(*, active_only=True):
+    with jobs_lock:
+        rows = [dict(job) for job in jobs.values()]
+    if active_only:
+        rows = [job for job in rows if job.get("status") not in {"complete", "failed"}]
+    return [public_job_view(job) for job in rows]
+
+
+def run_ffmpeg_progress(cmd, duration_seconds, on_fraction=None):
+    ffmpeg_cmd = list(cmd)
+    extras = ["-nostats", "-progress", "pipe:1"]
+    if "-hide_banner" in ffmpeg_cmd:
+        insert_at = ffmpeg_cmd.index("-hide_banner") + 1
+        ffmpeg_cmd[insert_at:insert_at] = extras
+    else:
+        ffmpeg_cmd[1:1] = extras
+    process = subprocess.Popen(
+        ffmpeg_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    duration = max(float(duration_seconds or 0), 0.1)
+    try:
+        if process.stdout:
+            for line in process.stdout:
+                key, _, raw = line.strip().partition("=")
+                if key not in {"out_time_us", "out_time_ms"} or not on_fraction:
+                    continue
+                try:
+                    value = int(raw)
+                except ValueError:
+                    continue
+                seconds = value / (1_000_000 if key.endswith("us") else 1_000)
+                on_fraction(max(0.0, min(1.0, seconds / duration)))
+    finally:
+        code = process.wait()
+    if code != 0:
+        raise RuntimeError(f"Command failed ({code}): {' '.join(ffmpeg_cmd)}")
+
+
 def scale_filter(max_width, max_height):
     return f"scale={max_width}:{max_height}:force_original_aspect_ratio=decrease:force_divisible_by=2"
 
@@ -191,7 +254,21 @@ def calculate_bitrate_budget(duration_seconds, target_bytes, requested_audio_kbp
     return video_kbps, audio_kbps
 
 
-def two_pass_encode(input_path, output_path, passlog_path, video_kbps, audio_kbps, has_audio, max_width, max_height):
+def two_pass_encode(
+    input_path,
+    output_path,
+    passlog_path,
+    video_kbps,
+    audio_kbps,
+    has_audio,
+    max_width,
+    max_height,
+    duration_seconds=0,
+    on_progress=None,
+    progress_start=20,
+    progress_mid=55,
+    progress_end=95,
+):
     vf = scale_filter(max_width, max_height)
     common = [
         "ffmpeg", "-y", "-hide_banner", "-i", str(input_path),
@@ -202,9 +279,15 @@ def two_pass_encode(input_path, output_path, passlog_path, video_kbps, audio_kbp
         "-passlogfile", str(passlog_path),
     ]
 
-    run_cmd(common + [
-        "-pass", "1", "-an", "-f", "null", os.devnull
-    ])
+    def report(start, end, fraction):
+        if on_progress:
+            on_progress(int(start + (end - start) * max(0.0, min(1.0, fraction))))
+
+    run_ffmpeg_progress(
+        common + ["-pass", "1", "-an", "-f", "null", os.devnull],
+        duration_seconds,
+        lambda fraction: report(progress_start, progress_mid, fraction),
+    )
 
     second = common + ["-pass", "2"]
     if has_audio:
@@ -212,7 +295,11 @@ def two_pass_encode(input_path, output_path, passlog_path, video_kbps, audio_kbp
     else:
         second += ["-an"]
     second += ["-movflags", "+faststart", str(output_path)]
-    run_cmd(second)
+    run_ffmpeg_progress(
+        second,
+        duration_seconds,
+        lambda fraction: report(progress_mid, progress_end, fraction),
+    )
 
 
 def cleanup_passlogs(passlog_path):
@@ -243,11 +330,17 @@ def process_job(job_id, payload):
         passlog_path = job_work / "ffmpeg2pass"
 
         try:
-            set_job(job_id, status="downloading", progress=5)
+            def mark_download(seen, total):
+                if total > 0:
+                    set_job(job_id, status="downloading", progress=max(1, min(18, int(seen / total * 18))))
+                else:
+                    set_job(job_id, status="downloading", progress=5)
+
+            set_job(job_id, status="downloading", progress=1)
             if payload["source_type"] == "google_drive":
-                download_google_drive_file(payload["drive_file_id"], input_path)
+                download_google_drive_file(payload["drive_file_id"], input_path, on_bytes=mark_download)
             else:
-                download_url_file(payload["download_url"], input_path)
+                download_url_file(payload["download_url"], input_path, on_bytes=mark_download)
             source = probe_media(input_path)
             source_mb = round(source["size_bytes"] / 1024 / 1024, 2)
             set_job(
@@ -268,7 +361,9 @@ def process_job(job_id, payload):
 
             two_pass_encode(
                 input_path, output_path, passlog_path,
-                video_kbps, audio_kbps, source["has_audio"], max_width, max_height
+                video_kbps, audio_kbps, source["has_audio"], max_width, max_height,
+                duration_seconds=source["duration_seconds"],
+                on_progress=lambda percent: set_job(job_id, status="compressing", progress=percent),
             )
             cleanup_passlogs(passlog_path)
 
@@ -282,7 +377,12 @@ def process_job(job_id, payload):
                 two_pass_encode(
                     input_path, output_path, passlog_path,
                     corrected_video_kbps, corrected_audio_kbps,
-                    source["has_audio"], max_width, max_height
+                    source["has_audio"], max_width, max_height,
+                    duration_seconds=source["duration_seconds"],
+                    on_progress=lambda percent: set_job(job_id, status="compressing", progress=percent),
+                    progress_start=70,
+                    progress_mid=82,
+                    progress_end=95,
                 )
                 cleanup_passlogs(passlog_path)
                 video_kbps = corrected_video_kbps
@@ -337,7 +437,7 @@ def health():
     return jsonify({
         "ok": True,
         "service": "chicagoshining-local-video-compressor",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffprobe": shutil.which("ffprobe") is not None,
         "port": APP_PORT,
@@ -346,6 +446,8 @@ def health():
         "api_key_required": bool(API_KEY),
         "async_jobs": True,
         "google_drive_private_downloads": google_drive_configured(),
+        "active_job_count": len(list_public_jobs(active_only=True)),
+        "jobs": list_public_jobs(active_only=True),
     })
 
 

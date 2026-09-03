@@ -273,11 +273,11 @@ def rebuild_variant_manifest(
         }
         for ratio in asset_ratios:
             if asset_is_video(asset):
-                playable = playable_url(asset) or playable_url(row)
                 media_id = str(asset.get("media_asset_record_id") or "").strip()
                 drive_id = str(asset.get("google_drive_file_id") or "").strip()
-                if not playable or not media_id.startswith("rec"):
+                if not media_id.startswith("rec") or not drive_id:
                     continue
+                playable = playable_url(asset) or playable_url(row)
                 spec = RATIO_SPECS[ratio]
                 row["media_kind"] = "video"
                 row["variants"][ratio] = {
@@ -291,7 +291,7 @@ def rebuild_variant_manifest(
                         f"https://drive.google.com/file/d/{drive_id}/view" if drive_id else ""
                     ),
                     "media_asset_record_id": media_id,
-                    "preview_url": playable,
+                    "preview_url": playable or f"/api/media-assets/{media_id}/stream",
                     "preview_status": "Ready",
                     "file_name": str(asset.get("name") or "clip.mp4"),
                     "duration_seconds": asset.get("duration_seconds"),

@@ -112,6 +112,8 @@
   let ezLocalPreviews = new Map();
   let ezLocalClipPosters = new Map();
   let item4HeldClipFiles = new Map();
+  const item4ClipObjectUrls = new Map();
+  const item4ClipDurationCache = new Map();
   const item4PosterJobs = new Set();
   let ezSelectedVoiceId = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
@@ -136,6 +138,8 @@
   let item4Uploading = false;
   let item4PendingUploads = [];
   let item4PreparingVariants = false;
+  let item4PrepareClockTimer = 0;
+  let item4VariantPolling = false;
   let item4PromoteInFlight = false;
   const item4PromotedRequestIds = new Set();
   let item4VariantPollTimer = null;
@@ -180,7 +184,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.227-wizard-mobile-continue";
+  const BUILD_ID = "item4-0.6.238-wizard-mobile-continue";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -544,6 +548,79 @@
     intakePollDeadline = Date.now() + 90000;
     intakePollTimer = setInterval(pollIntakeStatus, 2500);
   }
+  let compressionPollTimer = null;
+  let operationsOversizedCache = [];
+  let operationsCanCompress = false;
+  let operationsCompressionJobs = [];
+
+  function stopCompressionPoll() {
+    if (compressionPollTimer) {
+      clearInterval(compressionPollTimer);
+      compressionPollTimer = null;
+    }
+  }
+
+  function startCompressionPoll() {
+    if (compressionPollTimer) return;
+    compressionPollTimer = setInterval(pollCompressionStatus, 12000);
+  }
+
+  function syncCompressionPoll(hasJobs) {
+    if (hasJobs) startCompressionPoll();
+    else stopCompressionPoll();
+  }
+
+  function renderCompressionStatus(jobs, waitingCount) {
+    const banner = $("operationsCompressionStatus");
+    operationsCompressionJobs = Array.isArray(jobs) ? jobs : [];
+    if (!banner) return;
+    const active = operationsCompressionJobs[0];
+    const extras = Math.max(0, operationsCompressionJobs.length - 1);
+    const waiting = Math.max(0, Number(waitingCount) || 0);
+    if (active) {
+      banner.hidden = false;
+      banner.dataset.tone = active.tone || "compressing";
+      const waitingNote = waiting > operationsCompressionJobs.length
+        ? `${waiting - operationsCompressionJobs.length} more waiting.`
+        : extras ? `${extras} more compressing.` : "";
+      const percent = Number(active.progress_percent);
+      const bar = Number.isFinite(percent)
+        ? `<div class="ops-progress-track" aria-hidden="true"><div class="ops-progress-fill" style="width:${Math.max(0, Math.min(100, percent))}%"></div></div>`
+        : "";
+      banner.innerHTML = `<p class="ops-compression-kicker">Compression in progress</p>
+        <p class="ops-compression-headline">${escapeHtml(active.headline || `Compressing ${active.name || "video"}`)}</p>
+        ${bar}
+        <p class="ops-compression-detail">${escapeHtml([active.notes, waitingNote].filter(Boolean).join(" "))}</p>`;
+      return;
+    }
+    if (waiting) {
+      banner.hidden = false;
+      banner.dataset.tone = "waiting";
+      banner.innerHTML = `<p class="ops-compression-kicker">Waiting to compress</p>
+        <p class="ops-compression-headline">${waiting === 1 ? "1 oversized video is waiting" : `${waiting} oversized videos are waiting`}</p>
+        <p class="ops-compression-detail">Start compression from the list. One file runs at a time; this banner updates as the current file changes.</p>`;
+      return;
+    }
+    banner.hidden = true;
+    banner.removeAttribute("data-tone");
+    banner.innerHTML = "";
+  }
+
+  async function pollCompressionStatus() {
+    const operationsPage = $("page-operations");
+    if (!operationsPage || !operationsPage.classList.contains("active")) {
+      stopCompressionPoll();
+      return;
+    }
+    try {
+      const data = await api("/api/operations/compression");
+      const jobs = data.jobs || [];
+      renderOperationsOversized(operationsOversizedCache, operationsCanCompress, jobs);
+      syncCompressionPoll(jobs.length > 0 || operationsOversizedCache.length > 0);
+    } catch {
+      /* keep the last banner until the next refresh */
+    }
+  }
   $("operationsCapAudioSilence")?.addEventListener("click", async () => {
     const button = $("operationsCapAudioSilence");
     try {
@@ -559,6 +636,30 @@
       setOperationsMessage(result.message || "Leading silence pass finished.");
     } catch (error) {
       setOperationsMessage(error.message || "Leading silence pass failed.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+  $("operationsCompressAllOversized")?.addEventListener("click", async () => {
+    const button = $("operationsCompressAllOversized");
+    try {
+      if (button) button.disabled = true;
+      setOperationsMessage("Starting compression for oversized intake folder videos…");
+      const result = await api("/api/operations/compress", {
+        method: "POST",
+        body: JSON.stringify({ compress_all: true }),
+        timeoutMs: 180000,
+      });
+      setOperationsMessage(result.message || "Compression started for the intake folder.");
+      renderCompressionStatus([{
+        headline: "Starting the next oversized video",
+        tone: "waiting",
+        notes: "Checking the intake folder…",
+      }], operationsOversizedCache.length);
+      startCompressionPoll();
+      loadOperations();
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not start intake-folder compression.", "error-text");
     } finally {
       if (button) button.disabled = false;
     }
@@ -751,6 +852,49 @@
     const render = String(record?.render_status || "").trim();
     if (pipelineIsRetryingRender(record) && /failed|error/i.test(render)) return "Trying Again";
     return render;
+  }
+
+  function pipelineOutputRenderComplete(record) {
+    if (pipelineIsRetryingRender(record)) return false;
+    const state = String(record?.studio_state || "").trim();
+    return [
+      "Ready for Review",
+      "Approved",
+      "Scheduled",
+      "Published",
+      "Uploading",
+      "Platform Processing",
+      "Draft Delivered",
+      "Skipped",
+    ].includes(state);
+  }
+
+  function pipelineOutputRenderInFlight(record) {
+    if (pipelineIsRetryingRender(record)) return true;
+    const state = String(record?.studio_state || "").trim();
+    if (["Rendering", "Queued", "Preparing Assets"].includes(state)) return true;
+    const render = String(record?.render_status || "").trim();
+    return /^(Rendering|Ready for Render)(\s+\d+\/\d+)?$/i.test(render);
+  }
+
+  function pipelineDestinationProgress(records) {
+    const list = Array.isArray(records) ? records.filter(Boolean) : [];
+    const total = list.length;
+    if (!total) return null;
+    if (!list.some(pipelineOutputRenderInFlight)) return null;
+    const done = list.filter(pipelineOutputRenderComplete).length;
+    return { done, total, percent: Math.round((done / total) * 100) };
+  }
+
+  function pipelineProgressCell(record, groupRecords) {
+    const dest = pipelineDestinationProgress(groupRecords);
+    if (dest && pipelineOutputRenderInFlight(record)) {
+      return `<div>${dest.done}/${dest.total}</div><div class="progress" title="${dest.done} of ${dest.total} destinations rendered"><span style="width:${Math.max(0, Math.min(100, dest.percent))}%"></span></div>`;
+    }
+    const pct = pipelineDisplayPercent(record);
+    return pct === null || pct === undefined
+      ? "—"
+      : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0, Math.min(100, Number(pct) || 0))}%"></span></div>`;
   }
 
   function normalizeDisplayText(value) {
@@ -2063,6 +2207,53 @@
     return mime.startsWith("video/") || ["mp4", "mov", "m4v", "webm"].includes(ext);
   }
 
+  const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
+  let item4OversizedClipNotice = "";
+
+  function item4ClipFileMb(file) {
+    return Math.max(1, Math.round(Number(file?.size || 0) / (1024 * 1024)));
+  }
+
+  function item4OversizedClipFiles(files) {
+    return Array.from(files || []).filter((file) => item4FileLooksLikeVideo(file) && Number(file.size || 0) > ITEM4_CLIP_EDGE_MAX_BYTES);
+  }
+
+  function item4OversizedClipMessage(oversized, keptCount = 0) {
+    const labels = oversized.map((file) => `${file.name || "clip"} (${item4ClipFileMb(file)} MB)`);
+    const list = labels.length === 1
+      ? labels[0]
+      : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+    const need = oversized.length === 1
+      ? `${list} is over 100 MB and needs to be compressed before Studio can upload it.`
+      : `${oversized.length} clips are over 100 MB and need to be compressed: ${list}.`;
+    const how = oversized.length === 1
+      ? " Compress the file first, or add it to the Drive ingestion folder so Operations can compress it."
+      : " Compress those files first, or add them to the Drive ingestion folder so Operations can compress them.";
+    const kept = keptCount
+      ? ` Uploading the other ${keptCount} file${keptCount === 1 ? "" : "s"} that ${keptCount === 1 ? "is" : "are"} under 100 MB.`
+      : "";
+    return `${need}${how}${kept}`;
+  }
+
+  function item4ShowOversizedClipNotice() {
+    if (!item4OversizedClipNotice) return false;
+    setEzMessage(item4OversizedClipNotice, "error-text");
+    setRequestMessage(item4OversizedClipNotice, "error-text");
+    return true;
+  }
+
+  function item4DropOversizedClips(files, { resetNotice = false } = {}) {
+    const incoming = Array.from(files || []);
+    const oversized = item4OversizedClipFiles(incoming);
+    const allowed = incoming.filter((file) => !oversized.includes(file));
+    if (resetNotice && !oversized.length) item4OversizedClipNotice = "";
+    if (oversized.length) {
+      item4OversizedClipNotice = item4OversizedClipMessage(oversized, allowed.length);
+      item4ShowOversizedClipNotice();
+    }
+    return { oversized, allowed };
+  }
+
   function item4AssetLooksLikeVideo(asset) {
     if (String(asset?.media_kind || "").toLowerCase() === "video") return true;
     const mime = String(asset?.mime_type || "").toLowerCase();
@@ -2151,7 +2342,7 @@
       if (choose) choose.textContent = "Choose photos";
     } else if (nextKind === "video-clips") {
       if (title) title.textContent = "Drop clips";
-      if (hint) hint.textContent = "Raw mp4/mov clips only. Studio cuts them into a Reel — not a finished file.";
+      if (hint) hint.textContent = "Raw mp4/mov clips only. Studio cuts them into a Reel — not a finished file. Clips over 100 MB need to be compressed first.";
       if (choose) choose.textContent = "Choose clips";
     } else if (nextKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips";
@@ -2457,17 +2648,18 @@
       const remoteUrl = asset.id && !String(asset.id).startsWith("local:") ? item4AssetPreviewUrl(asset) : "";
       const previewUrl = localUrl || remoteUrl;
       const heic = item4IsHeicAsset(file || asset);
+      const streamUrl = isVideo ? item4PlayableClipSrc(asset) : "";
       const visual = isVideo
-        ? (previewUrl
-          ? `<div class="item4-clip-poster-wrap"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false" class="item4-clip-poster"><span class="item4-clip-play" aria-hidden="true"></span></div>`
-          : item4AssetPlaceholder(file || asset, "Clip saved"))
+        ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name, durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(file || asset, "Clip saved"))
         : previewUrl
           ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name)}" draggable="false">`
           : item4AssetPlaceholder(file || asset, heic ? "HEIC original" : "Preview");
       const canRemove = asset.id && !String(asset.id).startsWith("local:") && !String(asset.id).startsWith("staged:");
+      const seconds = item4KnownClipDuration(asset);
+      const durationNote = isVideo && seconds > 0 ? ` · ${formatLibraryClipDuration(seconds)}` : "";
       cards.push(`<article class="ez-photo-card" data-item4-asset="${escapeHtml(id)}">
         ${visual}
-        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>${ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`}</span></div>
+        <div class="item4-asset-meta"><strong>${escapeHtml(name)}</strong><span>${isVideo ? `Clip ${index + 1}` : (ezIsFinishedVideo() ? `Video ${index + 1}` : `Photo ${index + 1}`)}${durationNote}</span></div>
         ${item4CaptionField(id)}
         ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
       </article>`);
@@ -2476,6 +2668,7 @@
     host.querySelectorAll("[data-remove-item4-asset]").forEach((button) => {
       button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset));
     });
+    item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
   }
@@ -4100,7 +4293,7 @@
       selectEzInput("finished-video", { resetPlatforms: false });
     }
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
-    const files = incoming.filter(item4IsSupportedPhotoFile);
+    let files = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
       setEzMessage(unsupportedNote, "error-text");
       setRequestMessage(unsupportedNote, "error-text");
@@ -4111,23 +4304,28 @@
       setRequestMessage(choose, "error-text");
       return;
     }
+    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: true });
+    if (oversizedSplit.oversized.length) {
+      files = oversizedSplit.allowed;
+      if (!files.length) return;
+    }
     if (item4Uploading || ezStarting) {
       item4PendingUploads.push(...files);
-      setEzMessage("Adding to the set…");
+      if (!item4ShowOversizedClipNotice()) setEzMessage("Adding to the set…");
       return;
     }
     if (activeProductionRequest?.id) {
-      uploadItem4Files(files);
+      uploadItem4Files(files, { preserveOversizedNotice: true });
       return;
     }
-    startEzProduction({ files });
+    startEzProduction({ files, preserveOversizedNotice: true });
   }
 
   async function startEzFromFiles(fileList) {
     receiveMasterPhotos(fileList);
   }
 
-  async function startEzProduction({ files = [] } = {}) {
+  async function startEzProduction({ files = [], preserveOversizedNotice = false } = {}) {
     const apiHelpers = ezPlanApi();
     if (!apiHelpers) throw new Error("EZ plan helper did not load");
     const pending = ezWizardPending || ezWizardAnswers;
@@ -4170,8 +4368,13 @@
       }
       nextFiles = nextFiles.slice(0, remaining);
     }
+    const oversizedSplit = item4DropOversizedClips(nextFiles, { resetNotice: !preserveOversizedNotice });
+    if (oversizedSplit.oversized.length) {
+      nextFiles = oversizedSplit.allowed;
+      if (!nextFiles.length && !allowEmpty) return;
+    }
     if (activeProductionRequest?.id && nextFiles.length) {
-      await uploadItem4Files(nextFiles);
+      await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
       return;
     }
     const captionMode = ezCaptionMode();
@@ -4180,7 +4383,9 @@
     ezStarting = true;
     const continueBtn = $("ezContinue");
     if (continueBtn) continueBtn.disabled = true;
-    setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
+    if (!item4OversizedClipNotice) {
+      setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
+    }
     try {
       const wizardPlanned = pending?.planned;
       const totalAfter = existingCount + nextFiles.length;
@@ -4259,8 +4464,8 @@
         await maybeAutoEzPlan(true);
       } else {
         ezAutoPlanAfterUpload = true;
-        setEzMessage("Uploading originals…");
-        await uploadItem4Files(nextFiles);
+        if (!item4ShowOversizedClipNotice()) setEzMessage("Uploading originals…");
+        await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
         renderEzPhotoStrip();
       }
     } catch (error) {
@@ -4688,18 +4893,202 @@
   }
 
   function item4ClipStreamUrl(asset) {
-    const recordId = String(asset?.media_asset_record_id || "").trim();
+    const recordId = String(asset?.media_asset_record_id || "").trim()
+      || (/^rec[A-Za-z0-9]+$/.test(String(asset?.id || "").trim()) ? String(asset.id).trim() : "");
     if (!/^rec[A-Za-z0-9]+$/.test(recordId)) return "";
     return `${apiBase}/api/media-assets/${encodeURIComponent(recordId)}/stream`;
+  }
+
+  function formatLibraryClipDuration(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return "";
+    const total = Math.round(value);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const rest = total % 60;
+    if (hours) return `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+    return `${minutes}:${String(rest).padStart(2, "0")}`;
+  }
+
+  function item4RememberClipDuration(keys, seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return;
+    (Array.isArray(keys) ? keys : [keys]).forEach((key) => {
+      const id = String(key || "").trim();
+      if (id) item4ClipDurationCache.set(id, value);
+    });
+  }
+
+  function item4KnownClipDuration(item) {
+    const stored = Number(item?.duration_seconds || 0);
+    if (Number.isFinite(stored) && stored > 0) return stored;
+    for (const key of [item?.id, item?.media_asset_record_id, item?.name]) {
+      const cached = item4ClipDurationCache.get(String(key || ""));
+      if (cached) return cached;
+    }
+    return 0;
+  }
+
+  function item4HeldClipObjectUrl(asset) {
+    const file = item4HeldClipFiles.get(String(asset?.name || "")) || item4HeldClipFiles.get(String(asset?.id || ""));
+    if (!file) return "";
+    const key = String(asset?.id || asset?.name || "");
+    if (!key) return "";
+    if (!item4ClipObjectUrls.has(key)) item4ClipObjectUrls.set(key, URL.createObjectURL(file));
+    return item4ClipObjectUrls.get(key);
+  }
+
+  function item4PlayableClipSrc(asset) {
+    return item4ClipStreamUrl(asset) || item4HeldClipObjectUrl(asset);
+  }
+
+  function item4ClipDurationBadgeHtml(seconds) {
+    const label = formatLibraryClipDuration(seconds);
+    return `<em class="item4-clip-duration"${label ? "" : " hidden"}>${escapeHtml(label)}</em>`;
+  }
+
+  function item4ClipPlayerHtml({ previewUrl = "", streamUrl = "", name = "Clip", durationSeconds = 0, asset = null, preload = false } = {}) {
+    const seconds = item4KnownClipDuration({
+      duration_seconds: durationSeconds,
+      id: asset?.id,
+      media_asset_record_id: asset?.media_asset_record_id,
+      name,
+    });
+    const src = String(streamUrl || "").trim();
+    const img = previewUrl
+      ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(name || "Clip")}" loading="lazy" class="item4-clip-poster"${asset ? ` data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}"` : ""}>`
+      : "";
+    const video = src
+      ? `<video muted playsinline class="item4-clip-video"${preload ? ` src="${escapeHtml(src)}" preload="metadata"` : ` preload="none" data-item4-stream="${escapeHtml(src)}"`}></video>`
+      : "";
+    if (!img && !video) return "";
+    return `<div class="item4-clip-poster-wrap" data-item4-clip-player data-clip-key="${escapeHtml(String(asset?.id || asset?.media_asset_record_id || name || ""))}">
+      ${img}${video}
+      ${src ? `<button type="button" class="item4-clip-play" data-item4-play aria-label="Play ${escapeHtml(name || "clip")}"></button>` : `<span class="item4-clip-play" aria-hidden="true"></span>`}
+      ${item4ClipDurationBadgeHtml(seconds)}
+    </div>`;
+  }
+
+  function item4PaintClipDuration(wrap, seconds) {
+    const label = formatLibraryClipDuration(seconds);
+    if (!label || !wrap) return;
+    const badge = wrap.querySelector(".item4-clip-duration");
+    if (badge) {
+      badge.textContent = label;
+      badge.hidden = false;
+    }
+    const card = wrap.closest("[data-item4-asset], .idea-library-card, .library-card");
+    const nameLine = card?.querySelector(".item4-asset-meta span, .idea-library-card > span, h3");
+    if (nameLine && !/\d+:\d{2}/.test(String(nameLine.textContent || ""))) {
+      nameLine.textContent = `${String(nameLine.textContent || "").replace(/\s+$/, "")} · ${label}`;
+    }
+  }
+
+  function item4PauseOtherClipPlayers(active) {
+    document.querySelectorAll("[data-item4-clip-player].is-playing").forEach((wrap) => {
+      if (wrap === active) return;
+      const video = wrap.querySelector("video");
+      try { video?.pause(); } catch {}
+      wrap.classList.remove("is-playing");
+      if (video) video.controls = false;
+    });
+  }
+
+  function item4BindClipPlayers(root) {
+    if (!root) return;
+    root.querySelectorAll("[data-item4-clip-player]").forEach((wrap) => {
+      if (wrap.dataset.boundPlayer) return;
+      wrap.dataset.boundPlayer = "1";
+      const video = wrap.querySelector("video");
+      const play = wrap.querySelector("[data-item4-play]");
+      const applyDuration = () => {
+        const seconds = Number(video?.duration || 0);
+        if (!Number.isFinite(seconds) || seconds <= 0) return;
+        item4RememberClipDuration(wrap.dataset.clipKey, seconds);
+        const card = wrap.closest("[data-item4-asset]");
+        const asset = (item4Workspace?.assets || []).find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
+        if (asset) asset.duration_seconds = seconds;
+        const libraryCard = wrap.closest("[data-item4-library-id], [data-library-id]");
+        const libraryId = libraryCard?.getAttribute("data-item4-library-id") || libraryCard?.getAttribute("data-library-id");
+        if (libraryId) {
+          item4RememberClipDuration(libraryId, seconds);
+          const row = item4LibraryItems.find((item) => item.id === libraryId) || ideaLibraryPickerItems.find((item) => item.id === libraryId);
+          if (row) row.duration_seconds = seconds;
+        }
+        item4PaintClipDuration(wrap, seconds);
+      };
+      const ensureSrc = () => {
+        if (!video) return false;
+        if (video.currentSrc || video.src) return true;
+        const pending = String(video.dataset.item4Stream || "").trim();
+        if (!pending) return false;
+        video.src = pending;
+        return true;
+      };
+      video?.addEventListener("loadedmetadata", applyDuration);
+      play?.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!video || !ensureSrc()) return;
+        item4PauseOtherClipPlayers(wrap);
+        wrap.classList.add("is-playing");
+        video.controls = true;
+        video.muted = false;
+        video.play().catch(() => {});
+      });
+      video?.addEventListener("play", () => {
+        item4PauseOtherClipPlayers(wrap);
+        wrap.classList.add("is-playing");
+        video.controls = true;
+      });
+      video?.addEventListener("pause", () => {
+        if (video.ended) {
+          wrap.classList.remove("is-playing");
+          video.controls = false;
+        }
+      });
+      video?.addEventListener("ended", () => {
+        wrap.classList.remove("is-playing");
+        video.controls = false;
+      });
+      if (video?.readyState >= 1) applyDuration();
+    });
+    item4ProbeVisibleClipDurations(root);
+  }
+
+  function item4ProbeVisibleClipDurations(root) {
+    const videos = [...(root?.querySelectorAll("video[data-item4-stream]") || [])]
+      .filter((video) => !video.currentSrc && !video.dataset.probedDuration);
+    if (!videos.length) return;
+    const start = (video) => {
+      if (!video.isConnected || video.dataset.probedDuration || video.currentSrc) return;
+      const stream = String(video.dataset.item4Stream || "").trim();
+      if (!stream) return;
+      video.dataset.probedDuration = "1";
+      video.preload = "metadata";
+      video.src = stream;
+    };
+    if (!window.IntersectionObserver) {
+      videos.slice(0, 4).forEach(start);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        start(entry.target);
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.2 });
+    videos.forEach((video) => observer.observe(video));
   }
 
   function item4AssetPlaceholder(asset, label = "Preview unavailable") {
     const isVideo = item4AssetLooksLikeVideo(asset);
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const format = ext || (isVideo ? "CLIP" : (item4IsHeicAsset(asset) ? "HEIC" : "IMAGE"));
-    const seconds = Number(asset?.duration_seconds || 0);
+    const seconds = item4KnownClipDuration(asset);
     const clipLabel = isVideo
-      ? (seconds > 0 ? `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s clip saved` : "Clip saved")
+      ? (seconds > 0 ? `${formatLibraryClipDuration(seconds)} clip saved` : "Clip saved")
       : label;
     return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}">${isVideo ? `<span class="item4-clip-play" aria-hidden="true"></span>` : ""}<strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
   }
@@ -4710,19 +5099,15 @@
     const isVideo = item4AssetLooksLikeVideo(asset);
     const candidates = item4AssetPreviewCandidates(asset);
     const previewUrl = candidates[0] || "";
-    const streamUrl = isVideo ? item4ClipStreamUrl(asset) : "";
+    const streamUrl = isVideo ? item4PlayableClipSrc(asset) : "";
     const visual = isVideo
-      ? (previewUrl
-        ? `<div class="item4-clip-poster-wrap"><img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Clip")}" loading="lazy" class="item4-clip-poster" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}"><span class="item4-clip-play" aria-hidden="true"></span></div>`
-        : streamUrl
-          ? `<div class="item4-clip-poster-wrap"><video muted playsinline preload="auto" src="${escapeHtml(`${streamUrl}#t=0.25`)}" class="item4-clip-poster" data-item4-clip-video></video><span class="item4-clip-play" aria-hidden="true"></span></div>`
-          : item4AssetPlaceholder(asset, "Clip saved"))
+      ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name: asset.name || "Clip", durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(asset, "Clip saved"))
       : previewUrl
         ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
         : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
-    const seconds = Number(asset?.duration_seconds || 0);
-    const durationNote = isVideo && seconds > 0 ? ` · ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s` : "";
+    const seconds = item4KnownClipDuration(asset);
+    const durationNote = isVideo && seconds > 0 ? ` · ${formatLibraryClipDuration(seconds)}` : "";
     const formatNote = ext ? ` · ${ext} original` : (isHeic ? " · HEIC original" : "");
     const showCaption = ezManualCaptionsEnabled() && (ezPhotoSetActive() || ezIntakeKind === "single-photo");
     const captionField = showCaption ? item4CaptionField(asset.id) : "";
@@ -4780,6 +5165,7 @@
       });
     });
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
+    item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
     syncFinishedMediaHeadings();
@@ -5124,8 +5510,80 @@
     return chain;
   }
 
+  function item4WorkspaceHasClips(status) {
+    return item4ClipCountsFromStatus(status || {}).clips > 0 || ezIsClipRequest();
+  }
+
+  function item4FormatElapsed(ms) {
+    const total = Math.max(0, Math.floor(Number(ms) / 1000) || 0);
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function stopItem4PrepareClock() {
+    if (item4PrepareClockTimer) clearInterval(item4PrepareClockTimer);
+    item4PrepareClockTimer = 0;
+  }
+
+  function ensureItem4PrepareClock() {
+    if (item4PrepareClockTimer) return;
+    if (!item4VariantPollStartedAt) item4VariantPollStartedAt = Date.now();
+    item4PrepareClockTimer = setInterval(() => {
+      updateItem4VariantProgress(item4Workspace || {});
+    }, 1000);
+  }
+
+  function updateItem4VariantProgress(status) {
+    const progress = $("item4VariantProgress");
+    if (!progress) return;
+    const variantStatus = String(status?.variant_status || "None");
+    const busy = item4PreparingVariants || variantStatus === "Preparing";
+    if (!busy) {
+      progress.hidden = true;
+      progress.innerHTML = "";
+      delete progress.dataset.heal;
+      stopItem4PrepareClock();
+      return;
+    }
+    const clips = item4WorkspaceHasClips(status);
+    const readyCount = Number(status?.variants?.ready_count || 0);
+    const targetCount = Number(status?.variants?.target_count || status?.variants?.source_asset_count || 0);
+    const elapsed = item4FormatElapsed(Date.now() - (item4VariantPollStartedAt || Date.now()));
+    const count = targetCount ? `${readyCount} of ${targetCount} ready` : `${readyCount} ready`;
+    progress.hidden = false;
+    progress.dataset.heal = "preparing";
+    progress.innerHTML = `<strong>${clips ? "Attaching clip frames" : "Preparing platform crops"}</strong><span>${escapeHtml(count)} · ${escapeHtml(elapsed)} elapsed. This page updates automatically.</span>`;
+    ensureItem4PrepareClock();
+  }
+
+  function item4VariantClipThumb(asset) {
+    const master = item4MasterAsset(asset?.id) || asset || {};
+    const previewUrl = item4AssetPreviewUrl(master);
+    const streamUrl = item4PlayableClipSrc(master);
+    const visual = item4ClipPlayerHtml({
+      previewUrl,
+      streamUrl,
+      name: master.name || "Clip",
+      durationSeconds: master.duration_seconds,
+      asset: master,
+      preload: Boolean(streamUrl),
+    }) || item4AssetPlaceholder(master, "Clip saved");
+    const assetId = master.id || "";
+    return `<article class="item4-variant-thumb item4-variant-clip" data-item4-asset="${escapeHtml(assetId)}">
+      <div class="item4-variant-image-wrap" style="aspect-ratio:9 / 16">${visual}</div>
+      <p class="item4-crop-hint">Clips skip photo crops. The same file is used for each platform frame.</p>
+      <div class="item4-variant-meta">
+        <strong>Clip ${escapeHtml(master.order || "")}</strong>
+        <span>${escapeHtml(master.name || "")}</span>
+      </div>
+      ${item4CaptionField(assetId)}
+    </article>`;
+  }
+
   function item4VariantThumb(row, ratio) {
     const master = item4MasterAsset(row.asset?.id) || row.asset;
+    if (item4AssetLooksLikeVideo(master)) return item4VariantClipThumb(master);
     const candidates = item4VariantPreviewCandidates({ asset: master, variant: row.variant });
     const previewUrl = candidates[0] || "";
     const cssRatio = String(ratio || "4:5").replace(":", " / ");
@@ -5168,6 +5626,7 @@
       }
       if (hint) hint.textContent = "Finished video. Studio skips crops and Remotion.";
       if (host) host.innerHTML = '<div class="empty compact-empty">This file is already finished. Approve sends it to review as-is.</div>';
+      updateItem4VariantProgress({});
       syncProductionStudioState();
       return;
     }
@@ -5176,6 +5635,7 @@
     const manifest = status?.variants || null;
     const readyCount = Number(manifest?.ready_count || 0);
     const targetCount = Number(manifest?.target_count || manifest?.source_asset_count || 0);
+    const clipRequest = item4WorkspaceHasClips(status);
     if (badge) badge.textContent = variantStatus === "Ready"
       ? `${readyCount} frames ready`
       : variantStatus === "Preparing"
@@ -5197,13 +5657,16 @@
       hint.textContent = status?.plan_status !== "Ready"
         ? "Choose platforms first."
         : variantStatus === "Preparing"
-          ? `Studio is preparing crops in the background. This page updates automatically (${readyCount}/${targetCount || "?"} ready).`
+          ? (clipRequest
+            ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"} ready). The elapsed timer below means this is still working.`
+            : `Studio is preparing crops in the background (${readyCount}/${targetCount || "?"} ready). This page updates automatically.`)
           : variantStatus === "Error"
             ? "Preparation stopped. The originals are still safe."
             : variantStatus === "Ready"
-              ? "Rebuild if you change the crop."
-              : "Click Prepare when the framing looks right.";
+              ? (clipRequest ? "These clips are the platform frames. Rebuild if you swapped files." : "Rebuild if you change the crop.")
+              : (clipRequest ? "Click Prepare to attach these clips as platform frames. Clips skip photo crops." : "Click Prepare when the framing looks right.");
     }
+    updateItem4VariantProgress(status);
     if (!host) {
       syncProductionStudioState();
       return;
@@ -5219,20 +5682,30 @@
     item4HydrateCrops(status);
     hydrateEzCaptionDrafts(status);
     const ratios = item4PlanRatios(status);
-    const assetsReady = Array.isArray(status?.assets) && status.assets.length;
-    if (!ratios.length || !assetsReady) {
+    const masters = Array.isArray(status?.assets) ? status.assets : [];
+    const clipAssets = masters.filter(item4AssetLooksLikeVideo);
+    const photoAssets = masters.filter((asset) => asset && !item4AssetLooksLikeVideo(asset));
+    if (!ratios.length || !masters.length) {
       host.innerHTML = variantStatus === "Ready"
-        ? '<div class="empty compact-empty">Crops are ready. Previews are catching up.</div>'
-        : '<div class="empty compact-empty">Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them.</div>';
+        ? `<div class="empty compact-empty">${clipRequest ? "Clip frames are ready. Previews are catching up." : "Crops are ready. Previews are catching up."}</div>`
+        : `<div class="empty compact-empty">${clipRequest ? "Clip frames appear here after Prepare. Clips skip photo crops." : "Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them."}</div>`;
       syncProductionStudioState();
       return;
     }
-    host.innerHTML = ratios.map(ratio => {
-      const rows = item4CropRows(status, ratio);
-      const spec = rows[0]?.variant || {};
-      const safeNote = ratio === "9:16" ? '<span class="item4-safe-note">Dashed box = centered 4:5 critical-content zone</span>' : "";
-      return `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>${escapeHtml(ratio)}</strong><span>${escapeHtml(spec.width || "")}${spec.width ? "×" : ""}${escapeHtml(spec.height || "")}${spec.width ? " · " : ""}${rows.length} photo${rows.length === 1 ? "" : "s"} · drag to reframe</span></div>${safeNote}</div><div class="item4-variant-strip">${rows.map(row => item4VariantThumb(row,ratio)).join("")}</div></section>`;
-    }).join("");
+    const clipSection = clipAssets.length
+      ? `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>Clips</strong><span>${clipAssets.length} clip${clipAssets.length === 1 ? "" : "s"} · no crop</span></div></div><div class="item4-variant-strip">${clipAssets.map(item4VariantClipThumb).join("")}</div></section>`
+      : "";
+    const photoSections = photoAssets.length
+      ? ratios.map((ratio) => {
+        const rows = item4CropRows(status, ratio).filter((row) => !item4AssetLooksLikeVideo(row.asset));
+        const spec = rows[0]?.variant || {};
+        const safeNote = ratio === "9:16" ? '<span class="item4-safe-note">Dashed box = centered 4:5 critical-content zone</span>' : "";
+        return `<section class="item4-ratio-group"><div class="item4-ratio-heading"><div><strong>${escapeHtml(ratio)}</strong><span>${escapeHtml(spec.width || "")}${spec.width ? "×" : ""}${escapeHtml(spec.height || "")}${spec.width ? " · " : ""}${rows.length} photo${rows.length === 1 ? "" : "s"} · drag to reframe</span></div>${safeNote}</div><div class="item4-variant-strip">${rows.map((row) => item4VariantThumb(row, ratio)).join("")}</div></section>`;
+      }).join("")
+      : "";
+    host.innerHTML = clipSection + photoSections || (clipRequest
+      ? '<div class="empty compact-empty">Clip frames appear here after Prepare.</div>'
+      : '<div class="empty compact-empty">Crops for 4:5, 9:16, 1:1, or 16:9 will appear here when a platform needs them.</div>');
     host.querySelectorAll(".item4-crop-frame img[data-item4-preview-image]").forEach((img) => {
       const frame = img.closest(".item4-crop-frame");
       const assetId = frame?.dataset.item4CropAsset;
@@ -5279,6 +5752,16 @@
         item4PersistCrops();
       });
     });
+    host.querySelectorAll(".item4-variant-clip [data-item4-preview-image]").forEach((img) => {
+      const card = img.closest("[data-item4-asset]");
+      const master = item4MasterAsset(card?.dataset?.item4Asset) || {};
+      item4BindPreviewImage(img, {
+        candidates: item4AssetPreviewCandidates(master),
+        failureKey: String(master.id || master.media_asset_record_id || img.dataset.previewFailureKey || "").trim(),
+        placeholder: () => item4AssetPlaceholder(master, "Clip saved"),
+      });
+    });
+    item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     if (restoreCaption?.id) {
       const thumb = restoreCaption.ratio
@@ -5496,20 +5979,31 @@
   }
 
   function stopItem4VariantPolling() {
+    item4VariantPolling = false;
     if (item4VariantPollTimer) clearTimeout(item4VariantPollTimer);
     item4VariantPollTimer = null;
     item4VariantPollStartedAt = 0;
+    stopItem4PrepareClock();
   }
 
   async function pollItem4Variants() {
     if (!activeProductionRequest?.id) { stopItem4VariantPolling(); return; }
+    item4VariantPolling = true;
+    if (item4VariantPollTimer) {
+      clearTimeout(item4VariantPollTimer);
+      item4VariantPollTimer = null;
+    }
     if (!item4VariantPollStartedAt) item4VariantPollStartedAt = Date.now();
     try {
       await loadItem4Workspace(activeProductionRequest);
       const state = item4Workspace?.variant_status || "None";
+      const clips = item4WorkspaceHasClips(item4Workspace || {});
+      updateItem4VariantProgress(item4Workspace || {});
       if (state === "Ready") {
         stopItem4VariantPolling();
-        setRequestMessage("Platform-ready media is complete. Review the prepared crops below.", "success");
+        setRequestMessage(clips
+          ? "Clip frames are ready. Clips skip photo crops."
+          : "Platform-ready media is complete. Review the prepared crops below.", "success");
         return;
       }
       if (state === "Error") {
@@ -5517,15 +6011,33 @@
         setRequestMessage(item4Workspace?.variant_error || "Platform-media preparation needs attention.", "error-text");
         return;
       }
+      if (state === "None" && !item4PreparingVariants) {
+        stopItem4VariantPolling();
+        setRequestMessage(clips
+          ? "Prepare did not finish attaching those clips. Click Prepare again."
+          : "Prepare did not finish. Click Prepare again.", "error-text");
+        renderItem4Variants(item4Workspace || {});
+        return;
+      }
+      const readyCount = Number(item4Workspace?.variants?.ready_count || 0);
+      const targetCount = Number(item4Workspace?.variants?.target_count || 0);
+      const elapsed = item4FormatElapsed(Date.now() - item4VariantPollStartedAt);
+      if (state === "Preparing") {
+        setRequestMessage(clips
+          ? `Attaching clip frames ${readyCount}/${targetCount || "?"} · ${elapsed} elapsed.`
+          : `Preparing platform crops ${readyCount}/${targetCount || "?"} · ${elapsed} elapsed.`, "success");
+      }
       const decision = item4NextStatusPoll(Date.now() - item4VariantPollStartedAt, ITEM4_VARIANT_POLL_TIMEOUT_MS, item4VariantExtraWindows);
       if (!decision.continue) {
         stopItem4VariantPolling();
-        setRequestMessage("Platform media is still reconciling. Studio will recheck automatically; no refresh or second click is needed.", "success");
+        setRequestMessage(clips
+          ? "Clip frames are still attaching. Click Prepare again if the count has not moved."
+          : "Platform media is still reconciling. Studio will recheck automatically; no refresh or second click is needed.", "success");
         return;
       }
       if (decision.mode === "revalidate") {
         item4VariantExtraWindows = decision.extra_windows_used;
-        setRequestMessage(`Platform media is still preparing. Automatic retry ${item4VariantExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}. No refresh needed.`, "success");
+        setRequestMessage(`${clips ? "Clip frames are" : "Platform media is"} still preparing (${elapsed}). Automatic retry ${item4VariantExtraWindows}/${ITEM4_POLL_EXTRA_WINDOWS}.`, "success");
         item4VariantPollTimer = setTimeout(pollItem4Variants, decision.delay_ms);
         return;
       }
@@ -5536,15 +6048,23 @@
     item4VariantPollTimer = setTimeout(pollItem4Variants, ITEM4_VARIANT_POLL_MS);
   }
 
-  function startItem4VariantPolling() {
-    stopItem4VariantPolling();
-    item4VariantPollStartedAt = Date.now();
-    item4VariantExtraWindows = 0;
+  function startItem4VariantPolling(forceRestart = false) {
+    if (item4VariantPolling && !forceRestart) return;
+    if (item4VariantPollTimer) clearTimeout(item4VariantPollTimer);
+    item4VariantPollTimer = null;
+    item4VariantPolling = true;
+    if (forceRestart || !item4VariantPollStartedAt) {
+      item4VariantPollStartedAt = Date.now();
+      item4VariantExtraWindows = 0;
+    }
+    ensureItem4PrepareClock();
     item4VariantPollTimer = setTimeout(pollItem4Variants, 800);
   }
 
   function item4PreparingInBackgroundMessage() {
-    return "Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.";
+    return item4WorkspaceHasClips(item4Workspace || {})
+      ? "Attaching clip frames. Watch the elapsed timer under Prepare — if it is moving, Studio is still working."
+      : "Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.";
   }
 
   function item4IsRetryablePrepareFailure(error, status) {
@@ -5554,7 +6074,8 @@
     const message = String(error?.message || error || "");
     return /request failed \(5\d{2}\)/i.test(message)
       || isTimeoutError(error)
-      || /platform media preparation is still running/i.test(message);
+      || /platform media preparation is still running/i.test(message)
+      || /attaching .* clip frames/i.test(message);
   }
 
   async function prepareItem4Variants() {
@@ -5567,14 +6088,18 @@
       };
     }
     renderItem4Variants(item4Workspace || {});
-    startItem4VariantPolling();
-    setRequestMessage("Starting platform-media preparation…", "success");
+    startItem4VariantPolling(true);
+    setRequestMessage(item4WorkspaceHasClips(item4Workspace || {})
+      ? "Starting clip-frame attach…"
+      : "Starting platform-media preparation…", "success");
     try {
       const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops() }),timeoutMs:45000});
       if (result.production_request) activeProductionRequest = result.production_request;
       await loadItem4Workspace(activeProductionRequest);
       if (item4Workspace?.variant_status === "Ready") {
-        setRequestMessage(result.message || "Platform-ready media prepared. Review the crops below.", "success");
+        setRequestMessage(result.message || (item4WorkspaceHasClips(item4Workspace || {})
+          ? "Clip frames are ready. Clips skip photo crops."
+          : "Platform-ready media prepared. Review the crops below."), "success");
       } else {
         setRequestMessage(item4PreparingInBackgroundMessage(), "success");
         startItem4VariantPolling();
@@ -5585,6 +6110,7 @@
         setRequestMessage(item4PreparingInBackgroundMessage(), "success");
         startItem4VariantPolling();
       } else {
+        stopItem4VariantPolling();
         setRequestMessage(error.message, "error-text");
       }
     } finally {
@@ -5610,7 +6136,7 @@
     syncEzPlanChrome();
     if (status?.assets?.length && status?.assets_status === "Uploading" && !item4MasterPollTimer) startItem4MasterPolling();
     if (status?.assets_status === "Ready" || status?.assets_status === "Error") stopItem4MasterPolling();
-    if (status?.variant_status === "Preparing" && !item4VariantPollTimer) startItem4VariantPolling();
+    if (status?.variant_status === "Preparing" && !item4VariantPolling) startItem4VariantPolling();
     if (status?.variant_status === "Ready" || status?.variant_status === "Error") stopItem4VariantPolling();
   }
 
@@ -6042,7 +6568,7 @@
     return result;
   }
 
-  async function uploadItem4Files(fileList) {
+  async function uploadItem4Files(fileList, { preserveOversizedNotice = false } = {}) {
     if (!activeProductionRequest?.id) return;
     if (item4Uploading) {
       item4PendingUploads.push(...Array.from(fileList || []).filter(item4IsSupportedPhotoFile));
@@ -6069,6 +6595,11 @@
     } else if (!files.length) {
       setRequestMessage(ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.", "error-text");
       return;
+    }
+    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: !preserveOversizedNotice });
+    if (oversizedSplit.oversized.length) {
+      files = oversizedSplit.allowed;
+      if (!files.length) return;
     }
     const existingCount = ezPersistedAssetCount();
     if (ezIntakeKind === "finished-video") {
@@ -6098,13 +6629,6 @@
       }
       files = files.slice(0, remaining);
     }
-    const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
-    const oversizedClip = files.find((file) => item4FileLooksLikeVideo(file) && Number(file.size || 0) > ITEM4_CLIP_EDGE_MAX_BYTES);
-    if (oversizedClip) {
-      const mb = Math.round(Number(oversizedClip.size || 0) / (1024 * 1024));
-      setRequestMessage(`${oversizedClip.name || "This clip"} is ${mb} MB. Studio can receive clips up to 100 MB in one upload. Export a shorter MP4 or MOV and drop it again.`, "error-text");
-      return;
-    }
     item4Uploading = true;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
@@ -6126,11 +6650,13 @@
     }
     if (button) button.disabled = true;
     const uploadingClips = files.some(item4FileLooksLikeVideo);
-    setRequestMessage(ezIsFinishedVideo()
-      ? "Video is loading into the system. You can keep working on this screen, or leave and come back."
-      : (uploadingClips
-        ? "Saving your clip. Keep this tab open until it appears under the photos."
-        : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background."), "success");
+    if (!item4OversizedClipNotice) {
+      setRequestMessage(ezIsFinishedVideo()
+        ? "Video is loading into the system. You can keep working on this screen, or leave and come back."
+        : (uploadingClips
+          ? "Saving your clip. Keep this tab open until it appears under the photos."
+          : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background."), "success");
+    }
     try {
       mergeEzProductionNotes();
       const metadata = await imageMetadataForFiles(files);
@@ -6160,7 +6686,13 @@
       syncPrMediaKindUi();
       const total = ezPersistedAssetCount();
       const incomplete = ezIncompleteSetMessage(total);
-      if (incomplete) {
+      if (item4OversizedClipNotice) {
+        updateItem4MasterProgress(item4Workspace || {});
+        const extra = incomplete || (item4Workspace?.assets_status === "Ready" ? item4MasterReadyMessage(item4Workspace) : "");
+        setRequestMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
+        setEzMessage(item4OversizedClipNotice, "error-text");
+        if (item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
+      } else if (incomplete) {
         updateItem4MasterProgress(item4Workspace || {});
         setRequestMessage(incomplete, "success");
         setEzMessage(incomplete, "success");
@@ -6289,6 +6821,7 @@
 
   function setRequestMessage(text = "", type = "") {
     const target = $("productionRequestMessage");
+    if (!target) return;
     target.textContent = text;
     target.className = `form-message${type ? ` ${type}` : ""}`;
   }
@@ -7157,16 +7690,28 @@
     const card = (item) => {
       const checked = selected.has(item.id);
       const preview = ideaLibraryPreviewUrl(item);
+      const video = String(item.media_kind || "").toLowerCase() === "video";
+      const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(item)) : "";
       const tags = [];
       if (suggestedIds.has(item.id)) tags.push(`<em class="idea-library-card-tag">Suggested</em>`);
-      if (String(item.media_kind || "").toLowerCase() === "video") tags.push(`<em class="idea-library-card-tag">Clip</em>`);
+      if (video) tags.push(`<em class="idea-library-card-tag">Clip</em>`);
       const tag = tags.join("");
-      return `<button type="button" class="idea-library-card" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
+      const media = video
+        ? (item4ClipPlayerHtml({
+          previewUrl: preview,
+          streamUrl: item4ClipStreamUrl(item),
+          name: item.name || "Clip",
+          durationSeconds: item.duration_seconds,
+          asset: item,
+          preload: false,
+        }) || (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`))
+        : (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`);
+      return `<div class="idea-library-card" role="button" tabindex="0" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
         <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
-        ${preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`}
+        ${media}
         ${tag}
-        <span>${escapeHtml(item.name || item.id)}</span>
-      </button>`;
+        <span>${escapeHtml(item.name || item.id)}${duration ? ` · ${escapeHtml(duration)}` : ""}</span>
+      </div>`;
     };
     const parts = [];
     if (suggested.length) {
@@ -7202,6 +7747,7 @@
         : `No place match yet. ${checked} checked (max ${max}). Search the Drive library and check stills to add.`;
     }
     syncIdeaLibraryContinue();
+    item4BindClipPlayers(grid);
   }
 
   async function loadIdeaLibrarySuggestions(query = "") {
@@ -7339,6 +7885,7 @@
       hint.textContent = `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked (max ${max}). Uncheck to remove, search to add.${toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : ""}`;
     }
     syncItem4LibraryAdd();
+    item4BindClipPlayers(grid);
   }
 
   async function loadItem4LibraryStills(query = "") {
@@ -7387,6 +7934,7 @@
     openItem4LibraryPicker();
   });
   $("item4LibraryGrid")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-item4-play], video, .item4-clip-duration")) return;
     const card = event.target.closest("[data-item4-library-id]");
     if (!card || card.disabled) return;
     const id = String(card.dataset.item4LibraryId || "").trim();
@@ -7510,6 +8058,7 @@
   });
 
   $("ideaLibraryGrid")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-item4-play], video, .item4-clip-duration")) return;
     const card = event.target.closest("[data-library-id]");
     if (!card) return;
     const id = String(card.dataset.libraryId || "").trim();
@@ -8092,6 +8641,21 @@
     });
   }
 
+  function contentRenderLabel(record) {
+    const counts = record?.output_state_counts;
+    if (counts && typeof counts === "object") {
+      const total = Object.values(counts).reduce((sum, n) => sum + Number(n || 0), 0);
+      const incomplete = Number(counts.Rendering || 0)
+        + Number(counts["Trying Again"] || 0)
+        + Number(counts.Queued || 0)
+        + Number(counts["Preparing Assets"] || 0);
+      if (total && (counts.Rendering || counts["Trying Again"])) {
+        return `Rendering ${Math.max(0, total - incomplete)}/${total}`;
+      }
+    }
+    return String(record?.render_status || "");
+  }
+
   function contentSortValue(record, key) {
     if (key === "content") {
       const ms = parseStudioDate(record?.created_at)?.getTime();
@@ -8100,7 +8664,7 @@
     }
     if (key === "stage") return String(record?.studio_stage || "");
     if (key === "assets") return String(record?.asset_match_status || "");
-    if (key === "render") return String(record?.render_status || "");
+    if (key === "render") return contentRenderLabel(record);
     if (key === "review") return String(record?.review_status || record?.carousel_review_status || "");
     if (key === "outputs") return Array.isArray(record?.output_links) ? record.output_links.length : 0;
     return "";
@@ -8143,7 +8707,7 @@
       return;
     }
     const sorted = sortedContentRecords(records);
-    target.innerHTML = `<table class="data-table content-table"><thead><tr>${contentSortHeader("content", "Content")}${contentSortHeader("stage", "Studio stage")}${contentSortHeader("assets", "Assets")}${contentSortHeader("render", "Render")}${contentSortHeader("review", "Review")}${contentSortHeader("outputs", "Outputs")}</tr></thead><tbody>${sorted.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(r.render_status)}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
+    target.innerHTML = `<table class="data-table content-table"><thead><tr>${contentSortHeader("content", "Content")}${contentSortHeader("stage", "Studio stage")}${contentSortHeader("assets", "Assets")}${contentSortHeader("render", "Render")}${contentSortHeader("review", "Review")}${contentSortHeader("outputs", "Outputs")}</tr></thead><tbody>${sorted.map((r) => `<tr><td><div class="title-cell">${value(r.title)}</div><div class="subtle">Content ${value(r.content_id)} · ${value(r.content_type)}${r.created_at ? ` · Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(r.studio_stage)}</td><td>${value(r.asset_match_status)}</td><td>${value(contentRenderLabel(r))}</td><td>${value(r.review_status || r.carousel_review_status)}</td><td>${Array.isArray(r.output_links) ? r.output_links.length : 0}</td></tr>`).join("")}</tbody></table>`;
     target.querySelectorAll("[data-content-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -8183,7 +8747,7 @@
       r.id,
       r.studio_stage,
       r.asset_match_status,
-      r.render_status,
+      contentRenderLabel(r),
       r.review_status || r.carousel_review_status,
       Array.isArray(r.output_links) ? r.output_links.length : 0,
       r.lifecycle_complete,
@@ -8990,7 +9554,7 @@
     ezRequestedScript: "Paste spoken words here only if you want to control the voiceover. Leave blank to let AI write it.",
     ezThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover on Instagram Reels, Facebook Reels, and YouTube Shorts. You do not add Carousel for that. This control only applies to still-only posts.",
     ezVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
-    ezVideoDuration: "Requested video length in seconds for video outputs.",
+    ezVideoDuration: "Hard cap for the rendered video length. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
     ezVideoClipMode: "How many clips Studio should aim for in a video. AI decides unless you force a count or range.",
     ezVideoClipExact: "Exact number of clips to use in the video.",
     ezVideoClipMin: "Minimum clip count when using a target range.",
@@ -9001,7 +9565,7 @@
     ezCarouselSlideMax: "Maximum slide count when using a target range.",
     ezCarouselImageMode: "Use the photos you uploaded, or let Studio generate additional images.",
     ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
-    prVideoDuration: "Requested video length in seconds for slideshows and rendered video outputs. Autonomous runs stay at 30 seconds.",
+    prVideoDuration: "Hard cap for slideshows and rendered videos. Long uploads are trimmed or sliced to fit this length; with music, cuts land on beats. Autonomous runs stay at 30 seconds.",
     prVoiceoverDuration: "Spoken voiceover length in seconds. Autonomous runs use half the video duration (15 seconds of a 30-second slideshow).",
     prMusicStart: "Seconds into the song file to skip before playback. The video still starts at 0:00; this only fast-forwards the track so you can skip the intro.",
     prVideoClipMode: "How many clips Studio should aim for in a video.",
@@ -9030,7 +9594,7 @@
     prOverrideMusicMode: "Override background music for this one output, or inherit the master setting.",
     prOverrideThumbnail: "Override this output’s cover. Inherit follows the piece. Yes is AI generated. Use photo frame copies a still from the photos.",
     prOverrideMusicAsset: "Override the music track for this one output, or inherit the master track.",
-    prOverrideDuration: "Override duration for this one output. Stories default to 5 seconds for a single still and do not inherit the 30-second main video. Leave blank to inherit.",
+    prOverrideDuration: "Override duration for this one output. Long clips are still cut to fit. Stories default to 5 seconds for a single still and do not inherit the 30-second main video. Leave blank to inherit.",
     prOverrideVoiceoverTail: "Override extra seconds after narration for this one output.",
     prOverrideClipMode: "Override video clip count for this one output, or inherit the master setting.",
     prOverridePublishMode: "Override whether this output auto-publishes, waits for review, or stays unpublished.",
@@ -9041,11 +9605,12 @@
   const PRODUCTION_BUTTON_HELP = {
     ezStartOver: "Return to the Production home without deleting photos that already uploaded.",
     ezChooseMedia: "Open a file picker. Dropping photos onto the dashed box does the same thing.",
+    ezChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
     ezContinue: "Save these photos into a production request and continue to platform planning.",
     ezAudioVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     ezAudioTrackPreview: "Play a preview of the selected music track.",
     item4ChooseMedia: "Open a file picker for master photos. You can also drop files onto the dashed box.",
-    item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos.",
+    item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
     item4ChooseLibrary: "Review suggested Drive stills, uncheck to remove, or search the library to add more.",
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
@@ -9068,10 +9633,10 @@
     item4UploadZone: "Drop photos here, or tap Choose clip for an MP4 or MOV. From library picks classified stills already on Google Drive.",
     item4AssetStatus: "Shows whether master photos are still loading into Drive or already saved.",
     item4PlanStatus: "Shows whether Studio has recommended a format for each selected platform.",
-    item4VariantStatus: "Shows whether cropped platform versions have been prepared.",
+    item4VariantStatus: "Shows whether platform frames have been prepared. Clips skip photo crops and attach as-is.",
     productionRequestStatus: "Draft means you can still edit. Promoted means it has entered the pipeline.",
     item4PlanHint: "Build the plan after photos are on screen. You do not have to wait for Drive copies to finish.",
-    item4VariantHint: "Prepare crops after the platform plan is ready. Drag each photo to keep the important part in frame.",
+    item4VariantHint: "Prepare after the platform plan is ready. Photos can be dragged to reframe. Clips skip crops.",
     item4ProductionGate: "The plan is saved. Studio still checks the source-to-production bridge before promote.",
     productionPromotionCompatibility: "Promote stays locked until master photos, the platform plan, and required crops are ready.",
   };
@@ -10622,9 +11187,11 @@
     const title = String(first.output_title || first.content_title || "").trim();
     const count = records.length;
     const suffix = `${count} output${count === 1 ? "" : "s"}`;
-    if (title) return `${title} · ${suffix}`;
-    if (pipelineContentGroupKey(first) === "unassigned") return `Unassigned · ${suffix}`;
-    return `Content piece · ${suffix}`;
+    const dest = pipelineDestinationProgress(records);
+    const destHint = dest ? ` · ${dest.done}/${dest.total} rendered` : "";
+    if (title) return `${title} · ${suffix}${destHint}`;
+    if (pipelineContentGroupKey(first) === "unassigned") return `Unassigned · ${suffix}${destHint}`;
+    return `Content piece · ${suffix}${destHint}`;
   }
 
   function groupedPipelineRecords(records) {
@@ -10658,6 +11225,10 @@
     if (key === "review") return String(record.review_status || "");
     if (key === "publish") return String(record.platform_publish_status || record.publish_status || "");
     if (key === "progress") {
+      const dest = pipelineDestinationProgress(
+        (pipelineOutputs || []).filter((row) => pipelineContentGroupKey(row) === pipelineContentGroupKey(record))
+      );
+      if (dest && pipelineOutputRenderInFlight(record)) return dest.percent;
       const pct = pipelineDisplayPercent(record);
       return Number.isFinite(Number(pct)) ? Number(pct) : -1;
     }
@@ -10706,8 +11277,7 @@
       return;
     }
     const sortedSource = isDashboard ? sortedPipelineRecords(source) : source;
-    const pipelineRow = (r) => {
-      const pct = pipelineDisplayPercent(r);
+    const pipelineRow = (r, groupRecords) => {
       const postLink = r.platform_post_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open post ↗</a>` : "";
       const timing = studioOutputTimingLabel(r);
       const typeCell = isPipeline ? `<td><div>${value(r.platform_output_type || r.format)}</div><div class="subtle">${value(r.aspect_ratio)}</div></td>` : "";
@@ -10727,7 +11297,7 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pct === null || pct === undefined ? "—" : `<div>${value(pct)}%</div><div class="progress"><span style="width:${Math.max(0,Math.min(100,Number(pct)||0))}%"></span></div>`}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? groupedPipelineRecords(source).map((group, index) => {
@@ -10735,9 +11305,9 @@
           const open = isPipelineGroupExpanded(group.key, newest);
           const label = pipelineContentGroupLabel(group.records);
           const header = `<tr class="pipeline-group-row"><td colspan="9"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button></td></tr>`;
-          return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map(pipelineRow).join("")}</tbody>`;
+          return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
         }).join("")
-      : `<tbody>${sortedSource.map(pipelineRow).join("")}</tbody>`;
+      : `<tbody>${sortedSource.map((row) => pipelineRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
     const head = isPipeline
       ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
       : isDashboard
@@ -10824,6 +11394,7 @@
       r.review_status,
       r.platform_publish_status || r.publish_status,
       pipelineDisplayPercent(r),
+      pipelineOutputRenderComplete(r),
       r.creative_available,
       r.final_file_url,
       r.studio_preview_url,
@@ -11084,102 +11655,334 @@
     return record?.id ? `${apiBase}/api/media-assets/${encodeURIComponent(record.id)}/preview` : "";
   }
 
+  const LIBRARY_PAGE_SIZES = [5, 10, 20, 50];
+  const LIBRARY_DEFAULT_PAGE_SIZE = 5;
+  let libraryPage = {
+    index: 0,
+    offsets: [null],
+    nextOffset: null,
+    hasMore: false,
+    count: 0,
+  };
+
+  function libraryPageSize() {
+    const raw = Number($("libraryPageSize")?.value || LIBRARY_DEFAULT_PAGE_SIZE);
+    return LIBRARY_PAGE_SIZES.includes(raw) ? raw : LIBRARY_DEFAULT_PAGE_SIZE;
+  }
+
+  function resetLibraryPage() {
+    libraryPage = {
+      index: 0,
+      offsets: [null],
+      nextOffset: null,
+      hasMore: false,
+      count: 0,
+    };
+  }
+
+  function closeLibraryPreview() {
+    const backdrop = $("libraryPreviewBackdrop");
+    const video = $("libraryPreviewVideo");
+    const image = $("libraryPreviewImage");
+    const dialog = backdrop?.querySelector(".library-preview-dialog");
+    if (video) {
+      try { video.pause(); } catch {}
+      video.removeAttribute("src");
+      try { video.load(); } catch {}
+    }
+    if (image) image.removeAttribute("src");
+    dialog?.classList.remove("is-video", "is-image");
+    if (backdrop) backdrop.hidden = true;
+  }
+
+  function openLibraryPreview({ kind, src, name }) {
+    const backdrop = $("libraryPreviewBackdrop");
+    const video = $("libraryPreviewVideo");
+    const image = $("libraryPreviewImage");
+    const title = $("libraryPreviewTitle");
+    const dialog = backdrop?.querySelector(".library-preview-dialog");
+    if (!backdrop || !dialog) return;
+    closeLibraryPreview();
+    if (title) title.textContent = name || (kind === "video" ? "Clip" : "Photo");
+    dialog.classList.toggle("is-video", kind === "video");
+    dialog.classList.toggle("is-image", kind !== "video");
+    if (kind === "video" && video && src) {
+      video.src = src;
+      video.play().catch(() => {});
+    } else if (image && src) {
+      image.src = src;
+    }
+    backdrop.hidden = false;
+  }
+
+  function bindLibraryPreview(target) {
+    target.querySelectorAll("[data-library-preview]").forEach((node) => {
+      node.addEventListener("click", () => {
+        const kind = String(node.dataset.libraryPreview || "image");
+        const src = kind === "video"
+          ? String(node.dataset.libraryStream || "")
+          : String(node.dataset.libraryImage || "");
+        if (!src) return;
+        openLibraryPreview({ kind, src, name: String(node.dataset.libraryName || "") });
+      });
+    });
+  }
+
+  function bindLibraryDeleteButtons(target) {
+    target.querySelectorAll("[data-library-delete]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.dataset.libraryDelete;
+        const name = button.dataset.libraryName || "this asset";
+        if (!window.confirm(`Delete “${name}” from the asset library and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
+          setLibraryUploadMessage(`Deleted ${name}.`, "success");
+          await loadLibrary();
+        } catch (error) {
+          setLibraryUploadMessage(error.message, "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+  function libraryStreamUrl(record) {
+    const id = String(record?.id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) return "";
+    return `${apiBase}/api/media-assets/${encodeURIComponent(id)}/stream`;
+  }
+
+  function renderLibraryCards(records) {
+    return records.map((r) => {
+      const preview = libraryPreviewUrl(r);
+      const video = String(r.media_kind || "").toLowerCase() === "video";
+      const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.mime_type || (video ? "video" : "photo"));
+      let media = "";
+      if (video) {
+        const local = item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id);
+        media = item4ClipPlayerHtml({
+          previewUrl: local || preview,
+          streamUrl: libraryStreamUrl(r),
+          name: r.name || "Clip",
+          durationSeconds: r.duration_seconds,
+          asset: r,
+          preload: false,
+        });
+      } else if (preview) {
+        media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
+      }
+      const playAttrs = video
+        ? ""
+        : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
+      const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(r)) : "";
+      return `<article class="library-card"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}${duration ? ` · ${escapeHtml(duration)}` : ""}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+    }).join("");
+  }
+
+  async function fillLibraryClipPosters(target) {
+    const nodes = [...(target?.querySelectorAll("img[data-library-clip-id][data-library-stream]") || [])];
+    for (const img of nodes) {
+      if (!img.isConnected) return;
+      const id = String(img.dataset.libraryClipId || "");
+      const name = String(img.dataset.libraryClipName || "");
+      const stream = String(img.dataset.libraryStream || "");
+      const cached = item4LocalClipPoster(name) || item4LocalClipPoster(id);
+      if (cached) {
+        img.src = cached;
+        img.removeAttribute("data-library-stream");
+        continue;
+      }
+      if (!stream) continue;
+      try {
+        const blob = await item4ClipPosterFromUrl(stream, { timeoutMs: 12000 });
+        if (!blob || !img.isConnected) continue;
+        const url = item4ApplyLocalClipPoster({ id, name }, blob);
+        if (url) {
+          img.src = url;
+          img.removeAttribute("data-library-stream");
+        }
+      } catch (error) {
+        console.warn("Asset Library clip frame deferred", error);
+      }
+    }
+  }
+
+  function updateLibraryPager() {
+    const pager = $("libraryPager");
+    const meta = $("libraryPageMeta");
+    const prev = $("libraryPrevPage");
+    const next = $("libraryNextPage");
+    if (!pager) return;
+    pager.hidden = false;
+    if (prev) prev.disabled = libraryPage.index < 1;
+    if (next) next.disabled = !libraryPage.hasMore;
+    if (meta) {
+      meta.textContent = libraryPage.count
+        ? `Page ${libraryPage.index + 1} · ${libraryPage.count} of ${libraryPageSize()} on this page`
+        : `Page ${libraryPage.index + 1}`;
+    }
+  }
+
+  async function startLibraryBrowse() {
+    resetLibraryPage();
+    await loadLibrary();
+  }
+
   async function loadLibrary() {
     const target = $("libraryList");
     if (!target) return;
-    target.innerHTML = '<div class="empty">Loading asset library…</div>';
     const query = String($("librarySearch")?.value || "").trim();
     const kind = String($("libraryKindFilter")?.value || "").trim();
-    const params = new URLSearchParams();
+    const pager = $("libraryPager");
+    if (pager) pager.hidden = true;
+    target.innerHTML = '<div class="empty">Loading this page…</div>';
+    const params = new URLSearchParams({ limit: String(libraryPageSize()) });
     if (query) params.set("q", query);
     if (kind) params.set("kind", kind);
+    const offset = libraryPage.offsets[libraryPage.index];
+    if (offset) params.set("offset", offset);
     try {
-      const { records = [] } = await api(`/api/library?${params.toString()}`);
+      const data = await api(`/api/library?${params.toString()}`);
+      const records = data.records || [];
+      libraryPage.nextOffset = data.offset || null;
+      libraryPage.hasMore = Boolean(data.has_more);
+      libraryPage.count = records.length;
       if (!records.length) {
-        target.innerHTML = '<div class="empty">No library photos or clips matched.</div>';
+        target.innerHTML = query
+          ? '<div class="empty">No library photos or clips matched that search.</div>'
+          : '<div class="empty">No library photos or clips on this page.</div>';
+        updateLibraryPager();
         return;
       }
-      target.innerHTML = records.map((r) => {
-        const preview = libraryPreviewUrl(r);
-        const video = String(r.media_kind || "").toLowerCase() === "video";
-        const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.mime_type || (video ? "video" : "photo"));
-        return `<article class="library-card"><div class="library-card-media">${preview ? (video ? `<video src="${escapeHtml(preview)}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`) : ""}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
-      }).join("");
-      target.querySelectorAll("[data-library-delete]").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const id = button.dataset.libraryDelete;
-          const name = button.dataset.libraryName || "this asset";
-          if (!window.confirm(`Delete “${name}” from the asset library and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
-            return;
-          }
-          button.disabled = true;
-          try {
-            await api(`/api/library/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
-            setLibraryUploadMessage(`Deleted ${name}.`, "success");
-            await loadLibrary();
-          } catch (error) {
-            setLibraryUploadMessage(error.message, "error-text");
-            button.disabled = false;
-          }
-        });
-      });
+      target.innerHTML = renderLibraryCards(records);
+      bindLibraryDeleteButtons(target);
+      bindLibraryPreview(target);
+      item4BindClipPlayers(target);
+      updateLibraryPager();
+      fillLibraryClipPosters(target);
     } catch (e) {
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
+      if (pager) pager.hidden = true;
+    }
+  }
+
+  const LIBRARY_PICKER_FLAG = "studioLibraryPicker";
+  const LIBRARY_PHONE_RE = /iPhone|iPad|iPod|Android/i;
+
+  function libraryPickerIsPhone() {
+    return LIBRARY_PHONE_RE.test(navigator.userAgent || "");
+  }
+
+  function libraryArmPicker() {
+    try { sessionStorage.setItem(LIBRARY_PICKER_FLAG, String(Date.now())); } catch { /* ignore */ }
+  }
+
+  function libraryDisarmPicker() {
+    try { sessionStorage.removeItem(LIBRARY_PICKER_FLAG); } catch { /* ignore */ }
+  }
+
+  function libraryPickerWasAbandoned() {
+    try {
+      const raw = sessionStorage.getItem(LIBRARY_PICKER_FLAG);
+      const started = Number(raw || 0);
+      return Boolean(raw) && Number.isFinite(started) && Date.now() - started < 15 * 60 * 1000;
+    } catch {
+      return false;
     }
   }
 
   async function uploadLibraryFiles(fileList) {
-    const files = Array.from(fileList || []).filter((file) => {
+    libraryDisarmPicker();
+    let files = Array.from(fileList || []).filter((file) => {
       const name = String(file.name || "");
       const type = String(file.type || "");
       return /image\//i.test(type) || /video\//i.test(type) || /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/i.test(name);
     });
     if (!files.length) {
-      setLibraryUploadMessage("Choose one or more photos or video clips.", "error-text");
+      setLibraryUploadMessage(libraryPickerIsPhone()
+        ? "Photo Library closed before Studio received a clip. Add one clip at a time and keep this tab open."
+        : "Choose one or more photos or video clips.", "error-text");
       return;
     }
+    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: true });
+    if (oversizedSplit.oversized.length) {
+      files = oversizedSplit.allowed;
+      setLibraryUploadMessage(item4OversizedClipNotice, "error-text");
+      if (!files.length) return;
+    }
     const zone = $("libraryUploadZone");
-    const choose = $("libraryChooseFiles");
-    const form = new FormData();
-    files.forEach((file) => form.append("files", file, file.name));
+    const inputs = libraryFileInputs();
     const location = String($("libraryLocation")?.value || "").trim();
-    if (location) form.append("location", location);
     if (zone) zone.dataset.busy = "true";
-    if (choose) choose.disabled = true;
-    setLibraryUploadMessage(files.length === 1 ? "Adding asset…" : `Adding ${files.length} assets…`, "");
+    inputs.forEach((input) => { input.disabled = true; });
+    const errors = [];
+    let uploaded = 0;
     try {
-      const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
-      if ($("libraryFileInput")) $("libraryFileInput").value = "";
-      setLibraryUploadMessage(result.message || "Asset added to the library.", "success");
-      await loadLibrary();
-    } catch (error) {
-      setLibraryUploadMessage(error.message, "error-text");
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        setLibraryUploadMessage(files.length === 1
+          ? `Adding ${file.name}…`
+          : `Adding ${index + 1} of ${files.length}: ${file.name}…`, "");
+        const form = new FormData();
+        form.append("files", file, file.name);
+        if (location) form.append("location", location);
+        try {
+          await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
+          uploaded += 1;
+        } catch (error) {
+          errors.push(`${file.name}: ${error.message || "upload failed"}`);
+        }
+      }
+      inputs.forEach((input) => { input.value = ""; });
+      if (uploaded) await startLibraryBrowse();
+      if (item4OversizedClipNotice) {
+        const extra = errors.length
+          ? `${uploaded ? `${uploaded} added. ` : ""}${errors.join(" ")}`
+          : (uploaded ? `${uploaded === 1 ? "The other asset was added" : `The other ${uploaded} assets were added`} to the library.` : "");
+        setLibraryUploadMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
+      } else if (uploaded && !errors.length) {
+        setLibraryUploadMessage(uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`, "success");
+      } else if (uploaded) {
+        setLibraryUploadMessage(`${uploaded} added. ${errors.join(" ")}`, "error-text");
+      } else {
+        setLibraryUploadMessage(errors.join(" ") || "Could not add those assets.", "error-text");
+      }
     } finally {
       if (zone) delete zone.dataset.busy;
-      if (choose) choose.disabled = false;
+      inputs.forEach((input) => { input.disabled = false; });
     }
+  }
+
+  function libraryFileInputs() {
+    return ["libraryFileInput", "libraryZoneInput", "libraryChooseInput"]
+      .map((id) => $(id))
+      .filter(Boolean);
   }
 
   function bindLibraryUpload() {
     const zone = $("libraryUploadZone");
-    const input = $("libraryFileInput");
-    const choose = $("libraryChooseFiles");
-    const addButton = $("libraryAddButton");
-    if (!input || (zone && zone.dataset.bound)) return;
+    const inputs = libraryFileInputs();
+    if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
-    const openPicker = (event) => {
-      event?.preventDefault();
-      event?.stopPropagation();
-      input.click();
-    };
-    addButton?.addEventListener("click", openPicker);
-    choose?.addEventListener("click", openPicker);
-    zone?.addEventListener("click", (event) => {
-      if (event.target === choose || event.target === addButton) return;
-      openPicker(event);
-    });
+    const phone = libraryPickerIsPhone();
+    inputs.forEach((input) => { input.multiple = !phone; });
+    const hint = $("libraryUploadHint");
+    if (hint && phone) {
+      hint.textContent = "On iPhone add one clip at a time and keep this tab open. JPG, PNG, WEBP, HEIC, MP4, MOV · 25 MB photos · 100 MB clips";
+    }
+    if (libraryPickerWasAbandoned()) {
+      libraryDisarmPicker();
+      setLibraryUploadMessage("Photo Library closed before Studio received the clips. On iPhone add one clip at a time and keep this tab open.", "error-text");
+    }
     zone?.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") openPicker(event);
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        $("libraryZoneInput")?.focus();
+        $("libraryZoneInput")?.click();
+      }
     });
     zone?.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -11191,13 +11994,44 @@
       zone.classList.remove("dragging");
       uploadLibraryFiles(event.dataTransfer?.files);
     });
-    input.addEventListener("change", () => uploadLibraryFiles(input.files));
+    inputs.forEach((input) => {
+      input.addEventListener("click", libraryArmPicker);
+      input.addEventListener("change", () => uploadLibraryFiles(input.files));
+    });
     let searchTimer = 0;
     $("librarySearch")?.addEventListener("input", () => {
       window.clearTimeout(searchTimer);
-      searchTimer = window.setTimeout(() => loadLibrary(), 250);
+      searchTimer = window.setTimeout(() => {
+        resetLibraryPage();
+        loadLibrary();
+      }, 300);
     });
-    $("libraryKindFilter")?.addEventListener("change", () => loadLibrary());
+    $("libraryKindFilter")?.addEventListener("change", () => {
+      resetLibraryPage();
+      loadLibrary();
+    });
+    $("libraryPageSize")?.addEventListener("change", () => {
+      resetLibraryPage();
+      loadLibrary();
+    });
+    $("libraryPreviewClose")?.addEventListener("click", () => closeLibraryPreview());
+    $("libraryPreviewBackdrop")?.addEventListener("click", (event) => {
+      if (event.target === $("libraryPreviewBackdrop")) closeLibraryPreview();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !$("libraryPreviewBackdrop")?.hidden) closeLibraryPreview();
+    });
+    $("libraryPrevPage")?.addEventListener("click", () => {
+      if (libraryPage.index < 1) return;
+      libraryPage.index -= 1;
+      loadLibrary();
+    });
+    $("libraryNextPage")?.addEventListener("click", () => {
+      if (!libraryPage.hasMore || !libraryPage.nextOffset) return;
+      libraryPage.offsets[libraryPage.index + 1] = libraryPage.nextOffset;
+      libraryPage.index += 1;
+      loadLibrary();
+    });
   }
 
   bindLibraryUpload();
@@ -11457,6 +12291,7 @@
               season: selectedInsightsSeason(),
             }),
             timeoutMs: 60000,
+            retries: 1,
           });
           renderOperationsSimilarTimes(result);
           const stored = Number(result.account?.posts || 0);
@@ -11574,29 +12409,70 @@
     });
   }
 
-  function renderOperationsOversized(records, canCompress) {
+  function renderOperationsOversized(records, canCompress, jobs) {
     const target = $("operationsOversizedList");
+    const compressAll = $("operationsCompressAllOversized");
+    operationsCanCompress = Boolean(canCompress);
+    const incoming = Array.isArray(records) ? records : [];
+    const jobsById = new Map((Array.isArray(jobs) ? jobs : incoming.map((row) => row.compression).filter(Boolean))
+      .map((job) => [job.google_drive_file_id, job]));
+    operationsOversizedCache = incoming.map((row) => ({
+      ...row,
+      compression: jobsById.get(row.google_drive_file_id) || null,
+    }));
+    const activeJobs = [...jobsById.values()];
+    renderCompressionStatus(activeJobs, operationsOversizedCache.length);
+    syncCompressionPoll(activeJobs.length > 0 || operationsOversizedCache.length > 0);
+    const intakeCount = operationsOversizedCache.filter((record) => record.source === "intake_folder").length;
+    if (compressAll) {
+      compressAll.hidden = !(canCompress && intakeCount > 0);
+      compressAll.textContent = intakeCount === 1
+        ? "Compress intake folder video"
+        : `Compress all in intake folder (${intakeCount})`;
+    }
     if (!target) return;
-    if (!records.length) {
+    if (!operationsOversizedCache.length) {
       target.innerHTML = '<div class="empty">No oversized Drive videos are waiting.</div>';
       return;
     }
-    target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Action</th></tr></thead><tbody>${records.map((record) => `
+    target.innerHTML = `<table class="data-table"><thead><tr><th>Asset</th><th>Size</th><th>Location</th><th>Status</th><th>Action</th></tr></thead><tbody>${operationsOversizedCache.map((record) => {
+      const job = record.compression || jobsById.get(record.google_drive_file_id);
+      const status = job
+        ? `<span class="badge rendering">${escapeHtml(job.label || "Compressing")}${Number.isFinite(Number(job.progress_percent)) ? ` ${Math.round(Number(job.progress_percent))}%` : ""}</span>`
+        : `<span class="badge attention">Waiting</span>`;
+      const action = !canCompress
+        ? "Admin only"
+        : job
+          ? `<button type="button" class="secondary-button" disabled>In progress</button>`
+          : `<button type="button" class="secondary-button" data-ops-compress="${escapeHtml(record.google_drive_file_id)}" data-ops-compress-name="${escapeHtml(record.name || "")}">Compress</button>`;
+      return `
       <tr>
         <td><div class="title-cell">${value(record.name)}</div>${record.google_drive_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.google_drive_url)}">Open in Drive</a>` : ""}</td>
         <td>${value(record.file_size_mb)} MB</td>
-        <td>${canCompress ? `<button type="button" class="secondary-button" data-ops-compress="${escapeHtml(record.google_drive_file_id)}">Compress</button>` : "Admin only"}</td>
-      </tr>
-    `).join("")}</tbody></table>`;
+        <td>${record.source === "intake_folder" ? "Ingestion folder" : "Asset library"}</td>
+        <td>${status}</td>
+        <td>${action}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
     target.querySelectorAll("[data-ops-compress]").forEach((button) => {
       button.addEventListener("click", async () => {
         button.disabled = true;
+        const fileName = button.dataset.opsCompressName || "video";
+        renderCompressionStatus([{
+          headline: `Starting ${fileName}`,
+          tone: "waiting",
+          notes: "Sending this file to A1S…",
+          name: fileName,
+          google_drive_file_id: button.dataset.opsCompress,
+        }], operationsOversizedCache.length);
+        startCompressionPoll();
         try {
           await api("/api/operations/compress", {
             method: "POST",
             body: JSON.stringify({ drive_file_id: button.dataset.opsCompress }),
           });
-          setOperationsMessage("Compression pulse started for that Drive file.");
+          setOperationsMessage(`Started compression for ${fileName}.`);
+          pollCompressionStatus();
         } catch (error) {
           setOperationsMessage(error.message || "Could not start compression.", "error-text");
           button.disabled = false;
@@ -11655,7 +12531,7 @@
       }
       renderOperationsQueue($("operationsScheduleList"), data.ready_to_schedule || [], "schedule");
       renderOperationsQueue($("operationsPublishList"), data.ready_to_publish || [], "publish");
-      renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles));
+      renderOperationsOversized(data.oversized_media || [], Boolean(data.can_edit_profiles), data.compression_jobs || []);
       renderLibraryIntakeNotice(data.library_intake || {});
       const run = $("operationsRunDailyIdeas");
       if (run) run.hidden = !data.can_edit_profiles;
@@ -11766,7 +12642,10 @@
   }
 
   function loadPage(page) {
-    if (page !== "operations") stopIntakePoll();
+    if (page !== "operations") {
+      stopIntakePoll();
+      stopCompressionPoll();
+    }
     if (page === "home" || page === "dashboard") return loadDashboard();
     if (page === "ideas") return loadIdeas();
     if (page === "content") return loadContent();
