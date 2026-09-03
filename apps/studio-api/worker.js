@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.225-clip-approve",
+          version: "0.10.226-render-count",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -2062,9 +2062,15 @@ function contentLifecycleFromOutputs(outputRecords = []) {
   }
 
   const earlyRender = new Set(["Queued", "Preparing Assets", "Rendering"]);
+  const incompleteRender = new Set(["Queued", "Preparing Assets", "Rendering", "Trying Again"]);
+  const total = states.length;
+  const renderedCount = states.filter((state) => !incompleteRender.has(state)).length;
   let renderStatus = null;
-  if (states.some((state) => state === "Rendering")) renderStatus = "Rendering";
-  else if (states.every((state) => !earlyRender.has(state))) renderStatus = "Ready";
+  if (states.some((state) => state === "Rendering" || state === "Trying Again")) {
+    renderStatus = `Rendering ${renderedCount}/${total}`;
+  } else if (states.every((state) => !earlyRender.has(state))) {
+    renderStatus = "Ready";
+  }
 
   let reviewStatus = null;
   if (states.some((state) => state === "Ready for Review")) reviewStatus = "Ready for Review";

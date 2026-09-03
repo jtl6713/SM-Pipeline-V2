@@ -590,6 +590,15 @@ def _output_ready(output: dict[str, Any]) -> bool:
     return False
 
 
+def render_progress_detail(outputs: list[dict[str, Any]] | None = None) -> str:
+    rows = [row for row in (outputs or []) if row]
+    total = len(rows)
+    if total <= 0:
+        return "Rendering"
+    ready = sum(1 for row in rows if _output_ready(row))
+    return f"Rendering {ready}/{total}"
+
+
 def _is_transient_render_error(exc: BaseException) -> bool:
     text = str(exc or "").lower()
     needles = (
@@ -676,7 +685,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if all(_output_ready(row) for row in ctx["outputs"]):
         return "done"
     if remaining or transient:
-        raise StepWait("Rendering")
+        raise StepWait(render_progress_detail(ctx["outputs"]))
     raise StepBlocked("Outputs are stamped but none are eligible for R3/R4/letter")
 
 

@@ -345,3 +345,5 @@ Asset Library pages Pages deploy: 2026-09-02 - Asset Library opens on the 5 newe
 Asset Library preview + intake copy Pages deploy: 2026-09-02 - Click a library card to play the clip (stream) or open the photo. Operations copy notes the 15-minute ingestion ticker. UI 0.6.234-library-preview.
 
 Clip Prepare Pages deploy: 2026-09-02 - Frames shows clip players, a live elapsed timer, and Ready when clips skip photo crops. UI 0.6.235-clip-prepare.
+
+Render count Pages deploy: 2026-09-03 - Pipeline Progress and home Render show destination counts (N/6) instead of a frozen 62%. UI 0.6.236-render-count.
