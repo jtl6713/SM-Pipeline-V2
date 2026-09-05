@@ -187,7 +187,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.243-one-picker";
+  const BUILD_ID = "item4-0.6.244-one-picker";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -6405,6 +6405,9 @@
     if (aborted && hasVideo) {
       return "The clip did not finish saving. Use an MP4 or MOV under 100 MB and keep this tab open until the clip appears next to the photos.";
     }
+    if ((status === 500 || status === 502 || status === 503 || /Request failed \(50[023]\)/.test(raw)) && !hasVideo) {
+      return "That photo did not finish saving. Use Choose files again for it — Studio shrinks heavy stills automatically.";
+    }
     if (status === 415 && hasVideo) {
       return raw || "This file was rejected as a clip. Keep Photos and clips selected and drop an MP4 or MOV.";
     }
@@ -6680,25 +6683,83 @@
     return result;
   }
 
-  async function postItem4MasterFile(file, poster) {
-    const metadata = await imageMetadataForFiles([file]);
-    const form = new FormData();
-    form.append("files", file, file.name);
-    if (poster && poster.size > 80) {
-      const base = String(file.name || "clip").replace(/\.[^.]+$/, "") || "clip";
-      form.append("posters", poster, `${base}-poster.jpg`);
-    } else {
-      form.append("posters", new Blob([], { type: "application/octet-stream" }), "empty");
-    }
-    form.append("metadata", JSON.stringify(metadata));
-    const originKind = item4ClipOriginKind() || ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
-    if (originKind) form.append("origin_kind", originKind);
-    return api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, {
-      method: "POST",
-      body: form,
-      timeoutMs: item4FileLooksLikeVideo(file) || originKind === "finished-video" ? 180000 : 90000,
-      retries: 0,
+  const ITEM4_PHOTO_STAGE_MAX_BYTES = 4 * 1024 * 1024;
+  const ITEM4_PHOTO_STAGE_MAX_EDGE = 4096;
+  const ITEM4_PHOTO_RETRY_MAX_EDGE = 2560;
+
+  function item4CanvasToJpegBlob(canvas, quality) {
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob && blob.size > 80 ? blob : null), "image/jpeg", quality);
     });
+  }
+
+  async function item4PreparePhotoFile(file, { force = false, quality = 0.82, maxEdge = ITEM4_PHOTO_STAGE_MAX_EDGE } = {}) {
+    if (!file || item4FileLooksLikeVideo(file)) return file;
+    const size = Number(file.size || 0);
+    let bitmap = null;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      return file;
+    }
+    try {
+      const maxDim = Math.max(bitmap.width, bitmap.height);
+      const needsScale = maxDim > maxEdge;
+      const needsBytes = force || size > ITEM4_PHOTO_STAGE_MAX_BYTES;
+      if (!needsScale && !needsBytes) return file;
+      const scale = needsScale ? (maxEdge / maxDim) : 1;
+      const width = Math.max(1, Math.round(bitmap.width * scale));
+      const height = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      if (!ctx) return file;
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      let blob = await item4CanvasToJpegBlob(canvas, quality);
+      if (blob && blob.size > ITEM4_PHOTO_STAGE_MAX_BYTES && quality > 0.68) {
+        blob = await item4CanvasToJpegBlob(canvas, 0.68);
+      }
+      if (!blob || blob.size >= size) return file;
+      return new File([blob], file.name, { type: "image/jpeg", lastModified: file.lastModified || Date.now() });
+    } finally {
+      try { bitmap.close(); } catch {}
+    }
+  }
+
+  async function postItem4MasterFile(file, poster) {
+    const send = async (payload) => {
+      const metadata = await imageMetadataForFiles([payload]);
+      const form = new FormData();
+      form.append("files", payload, payload.name);
+      if (poster && poster.size > 80) {
+        const base = String(payload.name || "clip").replace(/\.[^.]+$/, "") || "clip";
+        form.append("posters", poster, `${base}-poster.jpg`);
+      } else {
+        form.append("posters", new Blob([], { type: "application/octet-stream" }), "empty");
+      }
+      form.append("metadata", JSON.stringify(metadata));
+      const originKind = item4ClipOriginKind() || ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
+      if (originKind) form.append("origin_kind", originKind);
+      return api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, {
+        method: "POST",
+        body: form,
+        timeoutMs: item4FileLooksLikeVideo(payload) || originKind === "finished-video" ? 180000 : 90000,
+        retries: 0,
+      });
+    };
+    const prepared = await item4PreparePhotoFile(file);
+    try {
+      return await send(prepared);
+    } catch (error) {
+      const status = Number(error?.status || 0);
+      if (item4FileLooksLikeVideo(file) || (status !== 500 && status !== 502 && status !== 503 && !/Request failed \(50[023]\)/.test(String(error?.message || "")))) {
+        throw error;
+      }
+      const smaller = await item4PreparePhotoFile(file, { force: true, quality: 0.68, maxEdge: ITEM4_PHOTO_RETRY_MAX_EDGE });
+      if (smaller === file || smaller.size >= Number(prepared.size || file.size || 0)) throw error;
+      return send(smaller);
+    }
   }
 
   async function uploadItem4Files(fileList, { preserveOversizedNotice = false } = {}) {

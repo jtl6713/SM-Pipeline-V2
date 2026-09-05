@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.231-bulk-upload",
+          version: "0.10.232-stage-only-upload",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -220,6 +220,7 @@ export default {
           studio_insights_learning_db_v1: true,
           studio_prepare_unsaved_guard_v1: true,
           studio_bulk_master_upload_v1: true,
+          studio_stage_only_upload_v1: true,
           studio_insights_seasonal_v1: true,
           studio_insights_caption_learning_v1: true,
           studio_insights_overview_stats_v1: true,
@@ -4407,17 +4408,8 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
     authorityQueueStarted = true;
     const expected = await item4UpsertMasterQueue(env, recordId, assets);
 
-    // Return as soon as files are staged and queued. Drive copies run in waitUntil
-    // plus GET/cron resume so a 9-file picker does not 500 the browser POST.
-    let reconciled = { status: "Uploading", assets, record, ready_count: existingReady.length, target_count: assets.length, error: null };
-    try {
-      reconciled = await item4ReconcileMasterAuthority(env, recordId, record);
-    } catch (error) {
-      console.warn("Item 4 post-queue reconciliation deferred", error);
-    }
-    const executionIds = [];
-    let drainWarning = null;
-
+    // Stage + queue only. Drive copies and SMV1 drain stay off the POST so a
+    // large still cannot 500 the browser after smaller photos already saved.
     if (expected.length && ctx && typeof ctx.waitUntil === "function") {
       ctx.waitUntil((async () => {
         try {
@@ -4432,53 +4424,18 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
           console.warn("Item 4 master-media drain continued in background", error);
         }
       })());
-    } else if (reconciled.status === "Uploading" && expected.length) {
-      try {
-        const drained = await item4DrainVariantWorker(
-          env,
-          recordId,
-          Math.min(8, Math.max(2, expected.length + 2)),
-          { maxMs: ITEM4_DRAIN_POST_BUDGET_MS }
-        );
-        if (Array.isArray(drained)) executionIds.push(...drained);
-      } catch (error) {
-        drainWarning = error instanceof Error ? error.message : String(error || "Master-media worker drain failed");
-        console.warn("Item 4 master-media drain deferred to scheduled worker", error);
-      }
-      try {
-        reconciled = await item4ReconcileMasterAuthority(env, recordId);
-      } catch (error) {
-        console.warn("Item 4 post-drain reconciliation deferred", error);
-      }
-    }
-
-    if (reconciled.status === "Error") {
-      throw new HttpError(502, reconciled.error || "Master-media Google Drive authority handoff failed");
-    }
-
-    if (reconciled.status !== "Ready") {
-      try {
-        const safeRecord = await item4UpdateRequestState(env, recordId, {
-          Studio_Master_Asset_Status: "Uploading",
-          Studio_Item4_State: "Draft",
-        });
-        reconciled.record = safeRecord;
-      } catch {}
     }
 
     return respond(request, env, {
       ok: true,
       uploaded: uploaded.length,
-      authority_status: reconciled.status,
-      authority_progress: { ready: reconciled.ready_count, target: reconciled.target_count },
-      assets: reconciled.assets,
-      execution_ids: executionIds,
-      handoff_warning: drainWarning,
-      record: mapProductionRequest(reconciled.record),
-      message: reconciled.status === "Ready"
-        ? `${reconciled.ready_count} master file${reconciled.ready_count === 1 ? "" : "s"} preserved in Google Drive and registered as Media Assets; temporary R2 staging removed.`
-        : "Master files were accepted. Google Drive preservation is continuing in the restartable background handoff.",
-    }, reconciled.status === "Ready" ? 201 : 202);
+      authority_status: "Uploading",
+      authority_progress: { ready: existingReady.length, target: assets.length },
+      assets,
+      execution_ids: [],
+      record: mapProductionRequest(record),
+      message: "Master files were accepted. Google Drive preservation is continuing in the restartable background handoff.",
+    }, 202);
   } catch (error) {
     // Before queue handoff begins, an upload failure can be rolled back completely.
     // After queue handoff begins, preserve staging and a resumable state unless

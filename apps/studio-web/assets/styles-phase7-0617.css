@@ -134,6 +134,7 @@
 .idea-library-card[data-selected="true"]{border-color:#087a65;background:#f4fbf9}
 .idea-library-picker-actions{display:flex;justify-content:flex-end;gap:8px}
 .item4-upload-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+#item4ChooseClip,#ezChooseClip{display:none!important}
 .item4-library-picker{margin-top:12px}
 .idea-library-promote{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:#f7f8f8;padding:0}
 .idea-library-promote[hidden]{display:none}
