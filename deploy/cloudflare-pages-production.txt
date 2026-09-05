@@ -355,3 +355,5 @@ Insights current season Pages deploy: 2026-09-03 - Operations Analytics defaults
 Sequential analytics Pages deploy: 2026-09-03 - Operations can run watchlist analytics one handle at a time for YouTube, Instagram, or all platforms. UI 0.6.240-analytics-seq.
 
 Prepare unsaved Pages deploy: 2026-09-04 - Do not optimistic-Prepare or poll before photos and clips finish saving to Drive. UI 0.6.241-prepare-unsaved.
+
+Bulk master upload Pages deploy: 2026-09-04 - Choose files accepts the full set; Studio saves stills and clips one at a time with a live saved count. UI 0.6.242-bulk-upload.
