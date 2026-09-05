@@ -314,3 +314,6 @@ Stage-only upload Worker deploy: 2026-09-04 - Return after R2 staging so a heavy
 Stuck-render heal Worker deploy: 2026-09-05 - Cron heals Ready-for-Render with no Remotion job and harvests 2-hour Rendering rows instead of pulsing produce forever. Worker 0.10.233-stuck-render-heal.
 
 Contain-stills Worker deploy: 2026-09-05 - Stamp original stills with contain so square and 4:5 flyers are not fill-cropped off the 9:16 frame. Worker 0.10.235-contain-stills.
+
+Continuation listener Worker deploy: 2026-09-05 - Run the production continuation inspector every two minutes and after promote so stuck Ready-for-Render, Rendering, and fill-crop still stamps heal without an operator pulse. Worker 0.10.236-continuation-listener.
+
