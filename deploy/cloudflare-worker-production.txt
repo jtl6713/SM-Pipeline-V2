@@ -321,3 +321,5 @@ Prepare retry Worker deploy: 2026-09-05 - Failed Prepare returns 409 instead of 
 
 Variant-gap heal Worker deploy: 2026-09-05 - If photos are added after Prepare, queue the missing 9:16/4:5 crops instead of sitting at 23 of 27. Worker 0.10.238-variant-gap-heal.
 
+Destination relink Worker deploy: 2026-09-05 - Bridge preflight relinks late crops to destinations so 27 frames ready is not shown next to a linking error. Worker 0.10.239-destination-relink.
+

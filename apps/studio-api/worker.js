@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.238-variant-gap-heal",
+          version: "0.10.239-destination-relink",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -267,6 +267,7 @@ export default {
           studio_continuation_controller_v1: true,
           studio_continuation_cron_v1: true,
           studio_variant_gap_heal_v1: true,
+          studio_destination_relink_v1: true,
           studio_ai_master_fill_v1: true,
           studio_audio_default_yes_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
@@ -8035,6 +8036,12 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
           }
         })());
         variantResume = { attempted: true, reason: "preparing-waituntil", execution_ids: [] };
+      } else if (reconciled.status === "Ready") {
+        try {
+          record = await item4RelinkVariantQueueOutputs(env, reconciled.record);
+        } catch (error) {
+          console.warn("Item 4 destination relink deferred from Ready workspace", error);
+        }
       }
     } catch (error) {
       variantResume = {
@@ -8777,6 +8784,12 @@ function item4BridgePlanKey(platform, outputType) {
 }
 
 async function item4SourceToProductionBridgePreflight(env, requestRecord, ideaRecord = null) {
+  try {
+    requestRecord = await item4RelinkVariantQueueOutputs(env, requestRecord);
+  } catch (error) {
+    console.warn("Item 4 destination relink deferred before bridge preflight", error);
+  }
+
   const issues = [];
   const warnings = [];
   const checks = [];
