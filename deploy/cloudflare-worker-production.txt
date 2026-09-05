@@ -310,3 +310,5 @@ Prepare unsaved guard Worker deploy: 2026-09-04 - Keep Prepare from flashing the
 Bulk master upload Worker deploy: 2026-09-04 - Stage one file per request and finish Drive copies in the background so a full photo-and-clip set does not 500. Worker 0.10.231-bulk-upload.
 
 Stage-only upload Worker deploy: 2026-09-04 - Return after R2 staging so a heavy still cannot 500 the POST. Drive copies continue in waitUntil. Worker 0.10.232-stage-only-upload.
+
+Stuck-render heal Worker deploy: 2026-09-05 - Cron heals Ready-for-Render with no Remotion job and harvests 2-hour Rendering rows instead of pulsing produce forever. Worker 0.10.233-stuck-render-heal.
