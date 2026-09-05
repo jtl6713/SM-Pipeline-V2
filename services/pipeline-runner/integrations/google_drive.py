@@ -46,13 +46,13 @@ class GoogleDriveClient:
         self._access_token = token
         return token
 
-    def download_file(self, file_id: str) -> tuple[bytes, str]:
+    def download_file(self, file_id: str, timeout: int = 300) -> tuple[bytes, str]:
         token = self.access_token()
         response = requests.get(
             f"https://www.googleapis.com/drive/v3/files/{file_id}",
             params={"alt": "media", "supportsAllDrives": "true"},
             headers={"Authorization": f"Bearer {token}"},
-            timeout=300,
+            timeout=max(5, int(timeout or 300)),
         )
         response.raise_for_status()
         mime = response.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()

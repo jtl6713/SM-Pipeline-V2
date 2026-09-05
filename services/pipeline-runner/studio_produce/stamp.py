@@ -572,7 +572,11 @@ def source_package(
     }
 
 
-def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict[str, Any]:
+def stamp_fields(
+    package: dict[str, Any],
+    parent: dict[str, Any] | None,
+    existing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     clips = package.get("clips") or []
     per = int(package["total_frames"] / package["clip_count"]) if package.get("clip_count") else 0
     native = bool(package.get("native"))
@@ -609,6 +613,16 @@ def stamp_fields(package: dict[str, Any], parent: dict[str, Any] | None) -> dict
         ),
         "Voiceover_Duration_Seconds": package.get("effective", {}).get("voiceover_duration_seconds") or None,
     }
+    existing_record = existing if isinstance(existing, dict) and "fields" in existing else {"fields": existing or {}}
+    existing_timing = field_str(existing_record, "Timing_Status")
+    existing_timeline = field_str(existing_record, "Timing_Timeline_JSON")
+    if existing_timing in {"Ready", "Skipped"} or existing_timeline:
+        fields.pop("Render_Clip_List_JSON", None)
+        fields.pop("Render_Total_Frames", None)
+        if existing_timing in {"Ready", "Skipped"}:
+            fields.pop("Timing_Status", None)
+        elif existing_timeline:
+            fields["Timing_Status"] = "Ready"
     if thumb:
         fields["Thumbnail_URL"] = thumb
     first_url = clips[0]["url"] if clips else None
@@ -669,6 +683,6 @@ def stamp_outputs(
         if not package:
             missing.append(output["id"])
             continue
-        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], stamp_fields(package, parent), typecast=True)
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], stamp_fields(package, parent, existing=output), typecast=True)
         stamped += 1
     return {"stamped": stamped, "missing": missing, "total": len(outputs)}

@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.232-stage-only-upload",
+          version: "0.10.233-stuck-render-heal",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -921,6 +921,11 @@ export default {
     // starved MX cover stamps plus P2 pulses. Daily ideas stay on a separate
     // waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
+      try {
+        await healStuckStudioRenders(env);
+      } catch (error) {
+        console.warn("studio stuck-render heal failed", error);
+      }
       try {
         await startOrphanedStudioProductionJobs(env);
       } catch (error) {
@@ -6467,7 +6472,7 @@ async function enqueueStudioProductionJob(env, requestId) {
   }
   const existing = parseStudioProductionJob(record);
   const step = String(existing?.step || "").trim();
-  if (!existing?.job_id || step === "done" || step === "blocked") {
+  if (!existing?.job_id) {
     const finishedKind = studioFinishedOriginKind(record);
     const job = {
       schema_version: "studio.production-job.1",
@@ -6487,6 +6492,9 @@ async function enqueueStudioProductionJob(env, requestId) {
         typecast: false,
       }),
     });
+  }
+  if (step === "blocked" || step === "escalated") {
+    return item4PulseStudioProduceJob(env, requestId, { resume: true });
   }
   return item4PulseStudioProduceJob(env, requestId);
 }
@@ -6781,6 +6789,64 @@ function studioLastModifiedStaleFormula(minutes) {
   return `IS_BEFORE(LAST_MODIFIED_TIME(), DATEADD(NOW(), -${n}, "minutes"))`;
 }
 
+async function healStuckStudioRenders(env) {
+  const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
+  const pulses = [];
+  const readyNoJob = await listRecords(env, outputTable, {
+    limit: 8,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: `AND(${STUDIO_R4_WORK_FORMULA},{Remotion_Job_ID}="")`,
+  }).catch(() => []);
+  for (const row of readyNoJob || []) {
+    const timing = String(f(row, "Timing_Status") || "").trim();
+    const timeline = String(f(row, "Timing_Timeline_JSON") || "").trim();
+    if ((timing === "Pending" || !timing) && timeline) {
+      await airtableFetch(env, outputTable, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Timing_Status: "Ready" }, typecast: true }),
+      }).catch(() => null);
+    }
+    if ((timing === "Pending" || !timing) && !timeline) {
+      try {
+        const payload = await item4PulseT1Python(env, { outputRecordId: row.id, maxRuns: 1 });
+        pulses.push({ key: "T1_STUCK_READY", id: row.id, payload });
+      } catch (error) {
+        pulses.push({ key: "T1_STUCK_READY", id: row.id, error: error instanceof Error ? error.message : String(error) });
+      }
+      continue;
+    }
+    try {
+      const payload = await item4PulseR4Python(env, { outputRecordId: row.id });
+      pulses.push({ key: "R4_STUCK_READY", id: row.id, payload });
+    } catch (error) {
+      pulses.push({ key: "R4_STUCK_READY", id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  const longRendering = await listRecords(env, outputTable, {
+    limit: 8,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="",${studioLastModifiedStaleFormula(120)})`,
+  }).catch(() => []);
+  for (const row of longRendering || []) {
+    try {
+      const payload = await item4PulseR5Python(env, { outputRecordId: row.id, maxRuns: 1 });
+      const stillRendering = String(payload?.details?.run?.reason || payload?.details?.runs?.[0]?.reason || "") === "still_rendering";
+      pulses.push({ key: "R5_LONG_RENDER", id: row.id, payload, still_rendering: stillRendering });
+    } catch (error) {
+      pulses.push({ key: "R5_LONG_RENDER", id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (pulses.length) {
+    console.log("Studio stuck-render heal", JSON.stringify({
+      count: pulses.length,
+      pulses: pulses.map((row) => ({ key: row.key, id: row.id, error: row.error || null })),
+    }));
+  }
+  return pulses;
+}
+
 async function resumeStalePlatformOutputs(env, options = {}) {
   const minutes = Number(
     options.staleMinutes
@@ -6798,7 +6864,7 @@ async function resumeStalePlatformOutputs(env, options = {}) {
     {
       key: "T1",
       formula: `AND(${STUDIO_T1_WORK_FORMULA},${stale})`,
-      run: () => item4PulseT1Python(env, { maxRuns: 5 }),
+      run: () => item4PulseT1Python(env, { maxRuns: 1 }),
     },
     {
       key: "R4",
@@ -18946,7 +19012,7 @@ async function pulseStudioContinuationJobs(env, options = {}) {
         continue;
       }
       if (job.key === "T1" && (pipelineStageBackend(env, "T1").mode === "python" || pipelineStageBackend(env, "R4").mode === "python")) {
-        await item4PulseT1Python(env, { maxRuns: 5 });
+        await item4PulseT1Python(env, { maxRuns: 1 });
         pulses.push({ key: job.key, pulsed: true, backend: "python", matched: eligible.length });
         continue;
       }
@@ -19163,6 +19229,9 @@ async function advanceStudioProductionOutputs(env, options = {}) {
 
 async function pulseOnDemandRenderChain(env, options = {}) {
   const pulses = [];
+  try { pulses.push(...await healStuckStudioRenders(env)); } catch (error) {
+    pulses.push({ key: "STUDIO_STUCK_RENDER", error: error instanceof Error ? error.message : String(error) });
+  }
   try { pulses.push(...await resumeStaleStudioProductionJobs(env, options)); } catch (error) {
     pulses.push({ key: "STUDIO_PRODUCE", error: error instanceof Error ? error.message : String(error) });
   }

@@ -501,6 +501,54 @@ def test_stamp_timing_skipped_without_music():
     assert fields["Timing_Status"] == "Skipped"
 
 
+def test_stamp_preserves_ready_timing_and_clip_list():
+    package = {
+        "native": False,
+        "story": False,
+        "clip_count": 1,
+        "total_frames": 900,
+        "clips": [{"url": "https://media.example/one.mp4", "media_asset_record_id": "recVIDEO00000001"}],
+        "effective": {"music_url": "https://media.example/track.mp3", "background_music_mode": "Yes"},
+        "render_clip_list_json": '[{"url":"https://media.example/unsticed.mp4"}]',
+        "selected_assets_json": "{}",
+        "output_filename": "studio-test.mp4",
+    }
+    fields = stamp_fields(
+        package,
+        None,
+        existing={
+            "fields": {
+                "Timing_Status": "Ready",
+                "Timing_Timeline_JSON": '{"schema_version":"timing.timeline.1"}',
+                "Render_Clip_List_JSON": '[{"url":"https://media.example/sliced.mp4"}]',
+            }
+        },
+    )
+    assert "Timing_Status" not in fields
+    assert "Render_Clip_List_JSON" not in fields
+    assert "Render_Total_Frames" not in fields
+
+
+def test_stamp_heals_pending_when_timeline_already_exists():
+    fields = stamp_fields(
+        {
+            "native": False,
+            "story": False,
+            "clip_count": 1,
+            "total_frames": 900,
+            "clips": [{"url": "https://media.example/one.mp4", "media_asset_record_id": "recVIDEO00000001"}],
+            "effective": {"music_url": "https://media.example/track.mp3", "background_music_mode": "Yes"},
+            "render_clip_list_json": "[]",
+            "selected_assets_json": "{}",
+            "output_filename": "studio-test.mp4",
+        },
+        None,
+        existing={"fields": {"Timing_Status": "Pending", "Timing_Timeline_JSON": '{"clips":[]}'}},
+    )
+    assert fields["Timing_Status"] == "Ready"
+    assert "Render_Clip_List_JSON" not in fields
+
+
 def test_asset_is_video_helper():
     assert asset_is_video({"media_kind": "video"})
     assert asset_is_video({"name": "clip.mov"})

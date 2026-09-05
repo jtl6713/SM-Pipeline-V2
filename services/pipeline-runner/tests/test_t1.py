@@ -16,6 +16,14 @@ def test_t1_formula_waits_for_ready_render_and_music():
     assert '{Music_URL}!=""' in formula
 
 
+def test_t1_reuses_existing_timeline_json():
+    from t1.processor import existing_timeline_json
+
+    assert existing_timeline_json({"fields": {"Timing_Timeline_JSON": '  {"clips":[]}  '}})
+    assert not existing_timeline_json({"fields": {}})
+    assert not existing_timeline_json({"fields": {"Timing_Timeline_JSON": "   "}})
+
+
 def test_apply_timeline_preserves_urls_and_phase6_transition_type():
     clips = [
         {"url": "https://cdn/a.jpg", "durationFrames": 150, "overlay": {"text": "A"}},
@@ -300,7 +308,7 @@ def test_scene_times_use_cache_and_probe():
     probed = []
 
     class Drive:
-        def download_file(self, file_id):
+        def download_file(self, file_id, timeout=300):
             probed.append(file_id)
             return b"bytes", "video/mp4"
 

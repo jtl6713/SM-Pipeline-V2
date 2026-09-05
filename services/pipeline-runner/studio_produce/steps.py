@@ -72,8 +72,8 @@ RENDERED_VIDEO_OUTPUTS = {
 
 
 def _output_type(row: dict[str, Any]) -> str:
-    fields = row.get("fields") if isinstance(row, dict) and "fields" in row else row
-    return field_str(fields or {}, "Studio_Output_Type") or field_str(fields or {}, "Output_Type")
+    record = row if isinstance(row, dict) and "fields" in row else {"fields": row or {}}
+    return field_str(record, "Studio_Output_Type") or field_str(record, "Output_Type")
 
 
 def has_rendered_video(request: dict[str, Any] | None = None, outputs: list[dict[str, Any]] | None = None) -> bool:
@@ -664,7 +664,9 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 remaining.append(fresh["id"])
                 continue
             if render_status == "Ready for Render":
-                process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
+                timing = field_str(fresh, "Timing_Status")
+                if timing not in {"Ready", "Skipped"}:
+                    process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
                 process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
                 remaining.append(fresh["id"])
                 continue
