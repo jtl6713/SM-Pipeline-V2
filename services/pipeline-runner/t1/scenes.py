@@ -76,7 +76,7 @@ def scene_times_for_clips(
             times[key] = []
             continue
         try:
-            content, _mime = drive.download_file(file_id)
+            content, _mime = drive.download_file(file_id, timeout=60)
             suffix = Path(str(clip.get("assetName") or clip.get("asset_name") or "clip.mp4")).suffix or ".mp4"
             handle = tempfile.NamedTemporaryFile(prefix="t1-scene-", suffix=suffix, delete=False)
             handle.write(content)

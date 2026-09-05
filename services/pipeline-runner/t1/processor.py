@@ -40,6 +40,10 @@ from t1.scenes import scene_times_for_clips
 from t1.slice import clips_have_video, expand_to_timeline
 
 
+def existing_timeline_json(output: dict[str, Any]) -> str:
+    return str((output.get("fields") or {}).get("Timing_Timeline_JSON") or "").strip()
+
+
 def _eligible(output: dict[str, Any], *, test_run_id: str | None = None) -> bool:
     actual_test = field_str(output, "Test_Run_ID")
     expected_test = (test_run_id or "").strip()
@@ -131,6 +135,16 @@ def process_one(
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
     }
+    if existing_timeline_json(output):
+        if dry_run:
+            return {"processed": False, "dry_run": True, "skip": "timeline_already_present", **preview}
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            output["id"],
+            {"Timing_Status": STATUS_READY, "Timing_Error_Message": ""},
+            typecast=True,
+        )
+        return {"processed": True, "reused_timeline": True, **preview}
     clips = clip_list(output)
     if not music_is_enabled(output):
         reason = "no_music"
