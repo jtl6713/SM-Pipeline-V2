@@ -304,3 +304,5 @@ Render count Worker deploy: 2026-09-03 - Roll up home Render status as Rendering
 Wizard clip continue Worker deploy: 2026-09-03 - Accept a 0 photo-slide count on clips-only wizard drafts. Worker 0.10.228-wizard-clip-continue.
 
 Insights current season Worker deploy: 2026-09-03 - Analytics season fallback uses Chicago calendar date so early September is summer. Worker 0.10.229-insights-season.
+
+Prepare unsaved guard Worker deploy: 2026-09-04 - Keep Prepare from flashing then reverting when photos and clips are still unsaved. Worker 0.10.230-prepare-unsaved.

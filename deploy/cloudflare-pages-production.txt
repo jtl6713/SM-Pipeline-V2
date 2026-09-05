@@ -353,3 +353,5 @@ Wizard mobile continue Pages deploy: 2026-09-03 - Home Continue opens production
 Insights current season Pages deploy: 2026-09-03 - Operations Analytics defaults to the current Chicago season (summer until Sep 22). UI 0.6.239-insights-season.
 
 Sequential analytics Pages deploy: 2026-09-03 - Operations can run watchlist analytics one handle at a time for YouTube, Instagram, or all platforms. UI 0.6.240-analytics-seq.
+
+Prepare unsaved Pages deploy: 2026-09-04 - Do not optimistic-Prepare or poll before photos and clips finish saving to Drive. UI 0.6.241-prepare-unsaved.
