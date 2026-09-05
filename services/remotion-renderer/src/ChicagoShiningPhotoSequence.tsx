@@ -327,30 +327,45 @@ const resolveMotionType = (
   clip: ChicagoShiningPhotoClip,
 ): PhotoSequenceMotion => {
   if (isVideoClip(clip)) return "none";
-  if (clip.motion?.type) return clip.motion.type;
 
-  switch (String(clip.motionStyle ?? "").trim().toLowerCase()) {
+  // Stamp/Worker used to emit motionStyle "stillPhoto" for non-story stills.
+  // That token was not in this switch, so it fell through to slowZoom and Ken
+  // Burns ~4.5% into already fill-cropped 9:16 variants.
+  switch (String(clip.motion?.type ?? clip.motionStyle ?? "").trim().toLowerCase()) {
     case "none":
+    case "still":
+    case "stillphoto":
+    case "still_photo":
     case "photo_sequence_hold":
     case "photo_sequence_static":
       return "none";
     case "slow_zoom_out":
+    case "slowzoomout":
       return "slowZoomOut";
     case "slow_pan_left":
+    case "panleft":
       return "panLeft";
     case "slow_pan_right":
+    case "panright":
       return "panRight";
     case "slow_pan_up":
+    case "panup":
       return "panUp";
     case "slow_pan_down":
+    case "pandown":
       return "panDown";
     case "ken_burns_left":
+    case "kenburnsleft":
       return "kenBurnsLeft";
     case "ken_burns_right":
+    case "kenburnsright":
       return "kenBurnsRight";
     case "slow_zoom_in":
-    default:
+    case "slow_zoom":
+    case "slowzoom":
       return "slowZoom";
+    default:
+      return "none";
   }
 };
 
@@ -931,7 +946,6 @@ const ImageSegment: React.FC<{
             backgroundColor,
             alignItems: "center",
             justifyContent: "center",
-            padding: "4%",
           }}
         >
           <MediaFill

@@ -346,7 +346,7 @@ def test_mixed_stamp_uses_video_trim_and_photo_floor():
             "Production_Notes": "origin=ez-wizard; ez-input=photos-and-clips",
             "Studio_Variant_Status": "Ready",
             "Studio_Master_Assets_JSON": json.dumps([
-                {"id": "p1", "order": 1, "name": "one.jpg", "mime_type": "image/jpeg", "caption": ""},
+                {"id": "p1", "order": 1, "name": "one.jpg", "mime_type": "image/jpeg", "caption": "", "preview_url": "https://media.chicagoshining.com/studio/previews/item4/master-one.jpg", "media_asset_record_id": "recPHOTO00000001"},
                 {
                     "id": "v1",
                     "order": 2,
@@ -411,6 +411,51 @@ def test_mixed_stamp_uses_video_trim_and_photo_floor():
     assert fields["Composition_ID"] == "ChicagoShiningPhotoSequence"
     assert fields["Render_Status"] == "Ready for Render"
     assert json.loads(fields["Selected_Assets_JSON"])["authority"] == "studio_owner_uploaded_exact_source"
+    clip_list = json.loads(package["render_clip_list_json"])
+    assert package["clips"][0]["url"] == "https://media.chicagoshining.com/studio/previews/item4/master-one.jpg"
+    assert package["clips"][0]["fitMode"] == "full_with_solid_background"
+    assert clip_list[0]["url"] == "https://media.chicagoshining.com/studio/previews/item4/master-one.jpg"
+    assert clip_list[0]["fitMode"] == "full_with_solid_background"
+    assert [clip["motionStyle"] for clip in package["clips"]] == ["none", "none"]
+    assert [clip["motionStyle"] for clip in clip_list] == ["none", "none"]
+
+
+def test_source_package_story_photos_use_slow_zoom():
+    request = {
+        "id": "recPRStory",
+        "fields": {
+            "Studio_Variant_Status": "Ready",
+            "Studio_Master_Assets_JSON": json.dumps([
+                {"id": "p1", "order": 1, "name": "one.jpg", "mime_type": "image/jpeg"},
+            ]),
+            "Studio_Variant_Manifest_JSON": json.dumps({
+                "assets": [
+                    {
+                        "id": "p1",
+                        "order": 1,
+                        "name": "one.jpg",
+                        "variants": {
+                            "9:16": {
+                                "preview_url": "https://media.chicagoshining.com/one.jpg",
+                                "media_asset_record_id": "recPHOTO00000001",
+                                "file_name": "one.jpg",
+                            }
+                        },
+                    },
+                ]
+            }),
+            "Studio_Output_Plan_JSON": json.dumps({
+                "items": [{"platform": "Instagram", "output_type": "Story", "aspect_ratio": "9:16"}]
+            }),
+        },
+    }
+    output = {"id": "recPOStory", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Story", "Aspect_Ratio": "9:16"}}
+    package = source_package(request, output, None)
+    assert package is not None
+    assert package["clips"][0]["motionStyle"] == "slowZoom"
+    assert package["clips"][0]["fitMode"] == "fill_crop"
+    assert json.loads(package["render_clip_list_json"])[0]["motionStyle"] == "slowZoom"
+    assert json.loads(package["render_clip_list_json"])[0]["fitMode"] == "fill_crop"
 
 
 def test_assign_clip_frames_scales_photos_not_video():

@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.233-stuck-render-heal",
+          version: "0.10.235-contain-stills",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -10270,6 +10270,20 @@ async function item4EnsureAiSourceMasters(env, requestRecord, parent) {
   return { requestRecord: current, needed, waiting: Math.max(0, expected - item4AssetManifest(current).length) };
 }
 
+function item4PublicCdnUrl(value) {
+  const url = String(value || "").trim();
+  return url.startsWith("https://media.chicagoshining.com/") ? url : "";
+}
+
+function item4MasterForSource(masters, source) {
+  const sourceId = String(source?.id || "").trim();
+  const mediaId = String(source?.media_asset_record_id || "").trim();
+  return (Array.isArray(masters) ? masters : []).find((master) =>
+    (sourceId && String(master?.id || "").trim() === sourceId)
+    || (mediaId && String(master?.media_asset_record_id || "").trim() === mediaId)
+  ) || null;
+}
+
 function item4NormalizeAspectRatioKey(ratio) {
   return String(ratio || "").trim().toLowerCase().replace(/\s+/g, "").replace(/x/g, ":");
 }
@@ -10355,24 +10369,34 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
       allowFallback: !nativePhotoRouteEarly,
     });
     const variant = picked?.variant;
+    const master = item4MasterForSource(masters, source);
+    const looksVideo = item4LooksLikeVideoAsset(source) || item4LooksLikeVideoAsset(variant) || item4LooksLikeVideoAsset(master);
     const driveId = String(
-      variant?.google_drive_file_id
-      || extractGoogleDriveFileId(variant?.google_drive_url)
+      (!looksVideo && !storyTeaser && item4PublicCdnUrl(master?.preview_url)
+        ? master?.google_drive_file_id
+        : (variant?.google_drive_file_id || extractGoogleDriveFileId(variant?.google_drive_url) || master?.google_drive_file_id)
+      )
       || ""
     ).trim();
     // Remotion must fetch real image bytes. Google Drive answers large files with
     // an HTML scan interstitial, so only a public CDN preview may back a clip.
+    // Fill-crop 9:16 variants cut square/4:5 flyers, so non-story stills use the original.
     const url = String(
-      variant?.preview_url
-      || studioClipPublicCdnUrl(variant?.google_drive_url || variant?.google_drive_file_id)
-      || ""
+      looksVideo
+        ? (variant?.preview_url || studioClipPublicCdnUrl(variant?.google_drive_url || variant?.google_drive_file_id) || "")
+        : (
+          (!storyTeaser && item4PublicCdnUrl(master?.preview_url))
+          || variant?.preview_url
+          || studioClipPublicCdnUrl(variant?.google_drive_url || variant?.google_drive_file_id)
+          || ""
+        )
     ).trim();
-    const mediaAssetId = String(variant?.media_asset_record_id || "").trim();
+    const mediaAssetId = String(variant?.media_asset_record_id || master?.media_asset_record_id || "").trim();
     if (!url || !/^rec[A-Za-z0-9]+$/.test(mediaAssetId)) {
       omittedSourceIds.push(String(source?.id || source?.name || "").trim() || "unknown");
       continue;
     }
-    eligibleSources.push({ source, variant, url, mediaAssetId, driveId });
+    eligibleSources.push({ source, variant, url, mediaAssetId, driveId, looksVideo });
   }
   if (omittedSourceIds.length) {
     console.warn("Studio source package waiting on ratio crops", {
@@ -10402,7 +10426,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
 
   const captions = item4OverlayCaptionBySourceId(requestRecord);
   const tiktok916 = platform === "TikTok" && ratio === "9:16";
-  for (const { source, variant, url, mediaAssetId, driveId } of eligibleSources) {
+  for (const { source, variant, url, mediaAssetId, driveId, looksVideo } of eligibleSources) {
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
     // Stories stay first-photo teasers, but on-image slide captions must still burn in.
@@ -10425,7 +10449,8 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
       src: url,
       startFrame,
       durationFrames: frames,
-      motionStyle: storyTeaser ? "slowZoom" : "stillPhoto",
+      motionStyle: storyTeaser ? "slowZoom" : "none",
+      fitMode: looksVideo ? undefined : (storyTeaser ? "fill_crop" : "full_with_solid_background"),
       source: "studio_platform_variant",
       aspect_ratio: ratio,
       google_drive_file_id: driveId || String(variant?.google_drive_file_id || "").trim() || null,
@@ -10448,7 +10473,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
         url: aiCover,
         src: aiCover,
         asset_name: "ai-grid-cover.jpg",
-        motionStyle: "stillPhoto",
+        motionStyle: "none",
         source: "studio_ai_grid_cover",
       });
     }
@@ -10464,7 +10489,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   const clipList = clips.map(c => ({
     id:c.id, order:c.order, mediaAssetRecordId:c.media_asset_record_id,
     assetName:c.asset_name, url:c.url, src:c.src, startFrame:c.startFrame,
-    durationFrames:c.durationFrames, motionStyle:c.motionStyle,
+    durationFrames:c.durationFrames, motionStyle:c.motionStyle, fitMode:c.fitMode,
     overlay: c.overlay || undefined,
     caption: c.caption || "",
   }));
