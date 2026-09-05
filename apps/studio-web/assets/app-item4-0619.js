@@ -6306,12 +6306,30 @@
     }).filter((line, index, all) => all.indexOf(line) === index);
   }
 
+  function item4BridgeIssuesAreDestinationLinks(issues) {
+    const lines = (Array.isArray(issues) ? issues : [issues])
+      .map((issue) => String(issue || "").trim())
+      .filter(Boolean);
+    return lines.length > 0 && lines.every((issue) =>
+      /proven production route|not fully mapped|not fully linked/i.test(issue)
+    );
+  }
+
   async function loadItem4BridgePreflight(record = activeProductionRequest) {
     if (!record?.id) return null;
     try {
       const result = await api(`/api/production-requests/${encodeURIComponent(record.id)}/bridge-preflight`);
       item4BridgePreflight = result;
       setProductionRequestControlState(activeProductionRequest || record);
+      if (
+        !result?.ready
+        && item4Workspace?.variant_status === "Ready"
+        && item4BridgeIssuesAreDestinationLinks(result?.issues)
+      ) {
+        window.setTimeout(() => {
+          if (activeProductionRequest?.id === record.id) loadItem4BridgePreflight(record).catch(() => {});
+        }, 2000);
+      }
       return result;
     } catch (error) {
       if (isTransientStudioError(error)) {
@@ -7662,6 +7680,11 @@
           const copy = item4BridgeIssueCopy(item4BridgePreflight.issues);
           if (!copy.length) {
             text = "Finishing a quick check. Your crops are saved.";
+          } else if (
+            item4Workspace?.variant_status === "Ready"
+            && item4BridgeIssuesAreDestinationLinks(item4BridgePreflight.issues)
+          ) {
+            text = "Finishing destination links. Your crops are saved.";
           } else {
             kind = "error-text";
             text = copy.join(" ");

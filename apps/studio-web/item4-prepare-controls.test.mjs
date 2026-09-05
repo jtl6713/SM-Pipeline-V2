@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  item4BridgeIssuesAreDestinationLinks,
   item4IsRetryablePrepareFailure,
   item4PrepareButtonView,
   item4PrepareHttpStatus,
@@ -82,4 +83,13 @@ test("failed prepare answers 409 instead of 500", () => {
   assert.equal(item4PrepareHttpStatus("Error"), 409);
   assert.equal(item4PrepareHttpStatus("Ready"), 200);
   assert.equal(item4PrepareHttpStatus("Preparing"), 202);
+});
+
+test("destination-link issues are not mixed with crop-complete copy", () => {
+  assert.equal(item4BridgeIssuesAreDestinationLinks([
+    "Instagram / Reel is not fully linked from the 9:16 source variants to its Production Request Output.",
+  ]), true);
+  assert.equal(item4BridgeIssuesAreDestinationLinks([
+    "Platform-ready variants must be Ready before source-to-production handoff.",
+  ]), false);
 });

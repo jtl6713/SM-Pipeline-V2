@@ -47,6 +47,15 @@ export function item4IsRetryablePrepareFailure(error, status) {
     || /attaching .* clip frames/i.test(message);
 }
 
+export function item4BridgeIssuesAreDestinationLinks(issues) {
+  const lines = (Array.isArray(issues) ? issues : [issues])
+    .map((issue) => String(issue || "").trim())
+    .filter(Boolean);
+  return lines.length > 0 && lines.every((issue) =>
+    /proven production route|not fully mapped|not fully linked/i.test(issue)
+  );
+}
+
 export function item4PrepareHttpStatus(variantStatus) {
   if (variantStatus === "Error") return 409;
   if (variantStatus === "Ready") return 200;

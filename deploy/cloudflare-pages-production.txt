@@ -363,3 +363,5 @@ One picker Pages deploy: 2026-09-04 - Photos and clips use a single Choose files
 Hide clip and compress Pages deploy: 2026-09-04 - Remove Choose clip from the drop zone and shrink heavy stills before upload. UI 0.6.244-one-picker.
 
 Prepare retry Pages deploy: 2026-09-05 - Stuck Preparing 23/27 no longer greys out Prepare. Retry remaining stays clickable and the Frames pill stays busy, not green Ready. UI 0.6.245-prepare-retry.
+
+Destination relink Pages deploy: 2026-09-05 - Do not show a red linking error next to 27 frames ready; destination links heal in the background. UI 0.6.246-destination-relink.
