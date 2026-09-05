@@ -187,11 +187,11 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.242-bulk-upload";
+  const BUILD_ID = "item4-0.6.243-one-picker";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
-  const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_VIDEOS},${ITEM4_ACCEPT_PHOTOS}`;
+  const ITEM4_ACCEPT_MIXED = `${ITEM4_ACCEPT_PHOTOS},${ITEM4_ACCEPT_VIDEOS}`;
 
   function item4AcceptForKind(kind = ezIntakeKind) {
     const next = String(kind || "").trim();
@@ -210,10 +210,9 @@
       input.accept = accept;
       input.multiple = multiple;
     });
-    const hideClip = kind === "finished-video" || kind === "finished-stills";
     ["item4ChooseClip", "ezChooseClip"].forEach((id) => {
       const button = $(id);
-      if (button) button.hidden = hideClip;
+      if (button) button.hidden = true;
     });
   }
 
@@ -2246,6 +2245,26 @@
     return mime.startsWith("video/") || ["mp4", "mov", "m4v", "webm"].includes(ext);
   }
 
+  function item4FileLooksLikePhoto(file) {
+    const mime = String(file?.type || "").toLowerCase();
+    const ext = item4UploadFileExtension(file?.name);
+    return mime.startsWith("image/") || ext === "heic" || ext === "heif";
+  }
+
+  function item4AdoptKindForIncomingFiles(incoming) {
+    const files = Array.from(incoming || []);
+    if (!files.length) return;
+    const hasVideo = files.some(item4FileLooksLikeVideo);
+    const hasPhoto = files.some(item4FileLooksLikePhoto);
+    if (!hasVideo) return;
+    if (ezIsClipRequest() || ezIsFinishedVideo()) return;
+    if (hasPhoto || files.filter(item4FileLooksLikeVideo).length > 1) {
+      selectEzInput(hasPhoto ? "photos-and-clips" : "video-clips", { resetPlatforms: false });
+      return;
+    }
+    selectEzInput("finished-video", { resetPlatforms: false });
+  }
+
   const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
   let item4OversizedClipNotice = "";
 
@@ -2385,7 +2404,7 @@
       if (choose) choose.textContent = "Choose clips";
     } else if (nextKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips";
-      if (hint) hint.textContent = "Pick the whole set at once. Studio saves stills and clips one file at a time. Clips over 100 MB need to be compressed first.";
+      if (hint) hint.textContent = "Pick stills and clips together. Studio saves them one file at a time in the background. Clips over 100 MB need to be compressed first.";
       if (choose) choose.textContent = "Choose files";
     } else if (nextKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos";
@@ -2596,9 +2615,9 @@
       const wantClips = Math.max(1, ezTargetClipCount());
       if (counts.photos < wantPhotos || counts.clips < wantClips) {
         if (kind === "video-clips") {
-          return `${counts.clips} of ${wantClips} clip${wantClips === 1 ? "" : "s"} added. Add the rest one at a time.`;
+          return `${counts.clips} of ${wantClips} clip${wantClips === 1 ? "" : "s"} added. Use Choose clips for the rest.`;
         }
-        return `${counts.photos} of ${wantPhotos} photos and ${counts.clips} of ${wantClips} clips added. Add the rest one at a time.`;
+        return `${counts.photos} of ${wantPhotos} photos and ${counts.clips} of ${wantClips} clips added. Use Choose files for the rest.`;
       }
     }
     if (kind === "mixed") {
@@ -3480,6 +3499,14 @@
     item4ApplyMediaInputAccept(ezIntakeKind);
     const title = $("ezUploadTitle");
     const hint = $("ezUploadHint");
+    const choose = $("ezChooseMedia");
+    if (choose) {
+      if (ezIntakeKind === "finished-video") choose.textContent = "Choose video";
+      else if (ezIntakeKind === "video-clips") choose.textContent = "Choose clips";
+      else if (ezIntakeKind === "photos-and-clips") choose.textContent = "Choose files";
+      else if (ezIntakeKind === "single-photo") choose.textContent = "Choose photo";
+      else choose.textContent = "Choose photos";
+    }
     if (ezIntakeKind === "finished-video") {
       if (title) title.textContent = "Drop the finished video here";
       if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
@@ -3491,7 +3518,7 @@
       if (hint) hint.textContent = "Raw mp4/mov clips only. Order them here. Studio cuts them into a Reel — not a finished file.";
     } else if (ezIntakeKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips here";
-      if (hint) hint.textContent = "Order them here. Clips are edited into a Reel — not published as a finished file.";
+      if (hint) hint.textContent = "Pick stills and clips together. Studio saves them one file at a time in the background.";
     } else if (ezIntakeKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos here";
       if (hint) hint.textContent = "Add or remove one at a time. They show up here immediately.";
@@ -3742,7 +3769,7 @@
       const photos = helpers.ezWizardPhotoCount(answers);
       const clips = helpers.ezWizardClipCount?.(answers) || Number(answers.clipCount) || 1;
       if (title) title.textContent = `Add ${photos} photo${photos === 1 ? "" : "s"} and ${clips} clip${clips === 1 ? "" : "s"}`;
-      if (hint) hint.textContent = "Mix stills and raw mp4/mov clips. Not a finished video.";
+      if (hint) hint.textContent = "Pick stills and clips together. Studio saves them one file at a time.";
     } else if (answers.inputKind === "finished-video") {
       if (title) title.textContent = "Drop the finished video here";
       if (hint) hint.textContent = "One MP4. Studio skips crops and Remotion.";
@@ -4328,9 +4355,7 @@
 
   function receiveMasterPhotos(fileList) {
     const incoming = Array.from(fileList || []);
-    if (incoming.some(item4FileLooksLikeVideo) && !ezIsClipRequest()) {
-      selectEzInput("finished-video", { resetPlatforms: false });
-    }
+    item4AdoptKindForIncomingFiles(incoming);
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
     let files = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
@@ -4371,9 +4396,7 @@
     const expected = pending?.inputKind ? apiHelpers.ezWizardExpectedUploads(pending) : null;
     const allowEmpty = expected === 0;
     const incoming = Array.from(files || []);
-    if (incoming.some(item4FileLooksLikeVideo) && !ezIsClipRequest()) {
-      selectEzInput("finished-video", { resetPlatforms: false });
-    }
+    item4AdoptKindForIncomingFiles(incoming);
     const unsupportedNote = item4UnsupportedPhotoMessage(incoming);
     const supported = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
@@ -5569,7 +5592,7 @@
     if (item4Uploading) {
       return "Those files are still saving. Wait until they finish copying to Google Drive, then click Prepare.";
     }
-    return "Those photos and clips are only on this tab. Use Choose photos / Choose clip again and wait until they show as saved, then click Prepare.";
+    return "Those photos and clips are only on this tab. Use Choose files again and wait until they show as saved, then click Prepare.";
   }
 
   function item4ShowVariantError(message) {
@@ -5888,7 +5911,7 @@
     }
     if (item4WaitingForClips(status)) {
       return ezIncompleteSetMessage(ezPersistedAssetCount())
-        || "Photos are saved. Drop an MP4 or MOV clip — it is not in the set yet.";
+        || "Photos are saved. Use Choose files again for the clips — they are not in the set yet.";
     }
     const counts = item4ClipCountsFromStatus(status);
     if (counts.clips || ezIsClipRequest()) {
@@ -5913,8 +5936,8 @@
       const wantClips = Math.max(1, ezTargetClipCount());
       return {
         heal: "uploading",
-        title: "Photos are saved. Add your video clip.",
-        body: `${counts.photos} photo${counts.photos === 1 ? "" : "s"} saved to Google Drive. ${counts.clips} of ${wantClips} clip${wantClips === 1 ? "" : "s"} saved. Drop an MP4 or MOV under 100 MB.`,
+        title: "Photos are saved. Add clips with Choose files.",
+        body: `${counts.photos} photo${counts.photos === 1 ? "" : "s"} saved to Google Drive. ${counts.clips} of ${wantClips} clip${wantClips === 1 ? "" : "s"} saved. Use the same Choose files picker for remaining stills and clips.`,
       };
     }
     if (!item4Uploading && state === "Ready") {
@@ -6693,6 +6716,7 @@
       return;
     }
     const incoming = Array.from(fileList || []);
+    item4AdoptKindForIncomingFiles(incoming);
     if ((ezIntakeKind === "single-photo" || ezIntakeKind === "multiple-photos") && incoming.some(item4FileLooksLikeVideo)) {
       selectEzInput("photos-and-clips", { resetPlatforms: false });
       selectPrMediaKind("photos-and-clips", { quiet: true });
@@ -6711,6 +6735,7 @@
       files = oversizedSplit.allowed;
       if (!files.length) return;
     }
+    files = files.slice().sort((a, b) => Number(item4FileLooksLikeVideo(a)) - Number(item4FileLooksLikeVideo(b)));
     const existingCount = ezPersistedAssetCount();
     if (ezIntakeKind === "finished-video") {
       if (existingCount >= 1) {
@@ -9717,12 +9742,12 @@
 
   const PRODUCTION_BUTTON_HELP = {
     ezStartOver: "Return to the Production home without deleting photos that already uploaded.",
-    ezChooseMedia: "Open a file picker. Dropping photos onto the dashed box does the same thing.",
+    ezChooseMedia: "Open a file picker for stills and clips. Studio saves each file in the background.",
     ezChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
     ezContinue: "Save these photos into a production request and continue to platform planning.",
     ezAudioVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     ezAudioTrackPreview: "Play a preview of the selected music track.",
-    item4ChooseMedia: "Open a file picker for master photos. You can also drop files onto the dashed box.",
+    item4ChooseMedia: "Open a file picker for stills and clips together. Studio saves each file in the background. You can also drop files onto the dashed box.",
     item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
     item4ChooseLibrary: "Review suggested Drive stills, uncheck to remove, or search the library to add more.",
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
@@ -9743,7 +9768,7 @@
 
   const PRODUCTION_TARGET_HELP = {
     ezUploadZone: "Drop photos here. They appear immediately. Drive copies can finish in the background — you can keep working or leave this screen.",
-    item4UploadZone: "Drop photos here, or tap Choose clip for an MP4 or MOV. From library picks classified stills already on Google Drive.",
+    item4UploadZone: "Drop stills and clips here, or tap Choose files. Studio saves them one at a time. From library picks classified Drive assets.",
     item4AssetStatus: "Shows whether master photos are still loading into Drive or already saved.",
     item4PlanStatus: "Shows whether Studio has recommended a format for each selected platform.",
     item4VariantStatus: "Shows whether platform frames have been prepared. Clips skip photo crops and attach as-is.",
