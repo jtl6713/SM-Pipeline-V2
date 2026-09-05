@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.229-insights-season",
+          version: "0.10.230-prepare-unsaved",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -218,6 +218,7 @@ export default {
           studio_insights_best_times_v1: true,
           studio_insights_similar_times_v1: true,
           studio_insights_learning_db_v1: true,
+          studio_prepare_unsaved_guard_v1: true,
           studio_insights_seasonal_v1: true,
           studio_insights_caption_learning_v1: true,
           studio_insights_overview_stats_v1: true,
@@ -7391,6 +7392,22 @@ async function item4ReconcileVariants(env, recordId, record = null, options = {}
       });
       return { record: updated, status, error, manifest, queue_rows: [] };
     }
+    if (currentStatus === "Preparing") {
+      const missingDrive = assets.filter((asset) =>
+        !String(asset?.google_drive_file_id || "").trim() || !String(asset?.media_asset_record_id || "").trim()
+      );
+      const error = !assets.length
+        ? "Those photos and clips are not saved yet. Wait until they finish copying to Google Drive, then click Prepare."
+        : (missingDrive.length
+          ? `${missingDrive.length} file${missingDrive.length === 1 ? " has" : "s have"} not finished copying to Google Drive yet. Wait until they appear as saved, then click Prepare.`
+          : "Prepare could not create platform frames. Click Prepare again after the files show as saved.");
+      const updated = await item4UpdateRequestState(env, recordId, {
+        Studio_Variant_Status: "Error",
+        Studio_Variant_Error: error,
+        Studio_Item4_State: "Error",
+      });
+      return { record: updated, status: "Error", error, manifest: null, queue_rows: [] };
+    }
     const updated = await item4UpdateRequestState(env, recordId, {
       Studio_Variant_Manifest_JSON: null,
       Studio_Variant_Status: "None",
@@ -7507,9 +7524,14 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   let assets = item4MergeAssetCrops(item4AssetManifest(record), cropsPayload)
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
-  if (!assets.length) throw new HttpError(409, "Upload photos or clips before preparing platform media");
+  if (!assets.length) {
+    throw new HttpError(
+      409,
+      "Those photos and clips are not saved yet. Wait until they finish copying to Google Drive, then click Prepare."
+    );
+  }
 
-  if (Object.keys(cropsPayload).length) {
+  if (Object.keys(cropsPayload).length && assets.length) {
     record = await item4UpdateRequestState(env, recordId, {
       Studio_Master_Assets_JSON: JSON.stringify(assets),
     });

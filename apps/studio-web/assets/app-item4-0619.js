@@ -138,6 +138,7 @@
   let item4Uploading = false;
   let item4PendingUploads = [];
   let item4PreparingVariants = false;
+  let item4PrepareError = "";
   let item4PrepareClockTimer = 0;
   let item4VariantPolling = false;
   let item4PromoteInFlight = false;
@@ -184,7 +185,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.240-analytics-seq";
+  const BUILD_ID = "item4-0.6.241-prepare-unsaved";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -5547,7 +5548,34 @@
   }
 
   function item4WorkspaceHasClips(status) {
-    return item4ClipCountsFromStatus(status || {}).clips > 0 || ezIsClipRequest();
+    const assets = Array.isArray((status || {}).assets) ? status.assets : [];
+    return assets.some((asset) => item4AssetLooksLikeVideo(asset))
+      || item4ClipCountsFromStatus(status || {}).clips > 0;
+  }
+
+  function item4MastersNeedSave(status = item4Workspace) {
+    const assets = Array.isArray(status?.assets) ? status.assets : [];
+    if (item4Uploading) return true;
+    if (!ezPersistedAssetCount()) return true;
+    return assets.some((asset) => {
+      const id = String(asset?.id || "");
+      return id.startsWith("local:") || id.startsWith("staged:");
+    });
+  }
+
+  function item4UnsavedPrepareMessage() {
+    if (item4Uploading) {
+      return "Those files are still saving. Wait until they finish copying to Google Drive, then click Prepare.";
+    }
+    return "Those photos and clips are only on this tab. Use Choose photos / Choose clip again and wait until they show as saved, then click Prepare.";
+  }
+
+  function item4ShowVariantError(message) {
+    item4PrepareError = String(message || "").trim();
+    const error = $("item4VariantError");
+    if (!error) return;
+    error.hidden = !item4PrepareError;
+    error.textContent = item4PrepareError;
   }
 
   function item4FormatElapsed(ms) {
@@ -5677,9 +5705,10 @@
       : variantStatus === "Preparing"
         ? `Preparing… ${readyCount}/${targetCount || "?"} ready`
         : variantStatus === "Error" ? "Needs attention" : "Waiting";
+    const shownError = String(status?.variant_error || item4PrepareError || "").trim();
     if (error) {
-      error.hidden = !status?.variant_error;
-      error.textContent = status?.variant_error || "";
+      error.hidden = !shownError;
+      error.textContent = shownError;
     }
     if (button) {
       button.disabled = status?.plan_status !== "Ready" || item4PreparingVariants || variantStatus === "Preparing";
@@ -6049,9 +6078,14 @@
       }
       if (state === "None" && !item4PreparingVariants) {
         stopItem4VariantPolling();
-        setRequestMessage(clips
-          ? "Prepare did not finish attaching those clips. Click Prepare again."
-          : "Prepare did not finish. Click Prepare again.", "error-text");
+        const unsaved = item4MastersNeedSave(item4Workspace || {});
+        const message = unsaved
+          ? item4UnsavedPrepareMessage()
+          : (clips
+            ? "Prepare did not finish attaching those clips. Click Prepare again."
+            : "Prepare did not finish. Click Prepare again.");
+        setRequestMessage(message, "error-text");
+        item4ShowVariantError(message);
         renderItem4Variants(item4Workspace || {});
         return;
       }
@@ -6116,15 +6150,15 @@
 
   async function prepareItem4Variants() {
     if (!activeProductionRequest?.id || item4PreparingVariants) return;
-    item4PreparingVariants = true;
-    if (item4Workspace) {
-      item4Workspace = {
-        ...item4Workspace,
-        variant_status: item4Workspace.variant_status === "Ready" ? "Ready" : "Preparing",
-      };
+    if (item4MastersNeedSave(item4Workspace || {})) {
+      const message = item4UnsavedPrepareMessage();
+      setRequestMessage(message, "error-text");
+      item4ShowVariantError(message);
+      return;
     }
+    item4PreparingVariants = true;
+    item4ShowVariantError("");
     renderItem4Variants(item4Workspace || {});
-    startItem4VariantPolling(true);
     setRequestMessage(item4WorkspaceHasClips(item4Workspace || {})
       ? "Starting clip-frame attach…"
       : "Starting platform-media preparation…", "success");
@@ -6133,21 +6167,24 @@
       if (result.production_request) activeProductionRequest = result.production_request;
       await loadItem4Workspace(activeProductionRequest);
       if (item4Workspace?.variant_status === "Ready") {
+        stopItem4VariantPolling();
         setRequestMessage(result.message || (item4WorkspaceHasClips(item4Workspace || {})
           ? "Clip frames are ready. Clips skip photo crops."
           : "Platform-ready media prepared. Review the crops below."), "success");
       } else {
         setRequestMessage(item4PreparingInBackgroundMessage(), "success");
-        startItem4VariantPolling();
+        startItem4VariantPolling(true);
       }
     } catch (error) {
       await loadItem4Workspace(activeProductionRequest).catch(()=>{});
       if (item4IsRetryablePrepareFailure(error, item4Workspace)) {
         setRequestMessage(item4PreparingInBackgroundMessage(), "success");
-        startItem4VariantPolling();
+        startItem4VariantPolling(true);
       } else {
         stopItem4VariantPolling();
-        setRequestMessage(error.message, "error-text");
+        const message = error.message || item4UnsavedPrepareMessage();
+        setRequestMessage(message, "error-text");
+        item4ShowVariantError(message);
       }
     } finally {
       item4PreparingVariants = false;
@@ -9651,7 +9688,7 @@
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
     item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
-    item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. Drag each photo to keep the important part in frame first.",
+    item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
     closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
     saveProductionRequest: "Save the current draft without promoting it into the pipeline.",
     syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",
