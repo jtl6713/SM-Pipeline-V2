@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.235-contain-stills",
+          version: "0.10.236-continuation-listener",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -265,6 +265,7 @@ export default {
           studio_variant_drive_ready_v1: true,
           studio_unattended_advance_v1: true,
           studio_continuation_controller_v1: true,
+          studio_continuation_cron_v1: true,
           studio_ai_master_fill_v1: true,
           studio_audio_default_yes_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
@@ -916,15 +917,20 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    // Continuation must own this isolate's subrequest budget. A parked cadence
-    // force-sync still probed publish/media/admin-bridge every two minutes and
-    // starved MX cover stamps plus P2 pulses. Daily ideas stay on a separate
-    // waitUntil so they cannot block P2/Remotion.
+    // Diagnose in-flight production first so Ready-for-Render / Rendering
+    // rows cannot sit forever. Publish reconcile stays next so due posts still
+    // dispatch in the same tick when budget remains. Daily ideas stay on a
+    // separate waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
       try {
         await healStuckStudioRenders(env);
       } catch (error) {
         console.warn("studio stuck-render heal failed", error);
+      }
+      try {
+        await advanceStudioProductionOutputs(env, { waitMs: 0 });
+      } catch (error) {
+        console.warn("studio continuation listener failed", error);
       }
       try {
         await startOrphanedStudioProductionJobs(env);
@@ -1000,11 +1006,6 @@ export default {
         await resumeStaleStudioProductionJobs(env);
       } catch (error) {
         console.warn("studio produce watchdog failed", error);
-      }
-      try {
-        await resumeStalePlatformOutputs(env);
-      } catch (error) {
-        console.warn("studio output watchdog failed", error);
       }
       try {
         await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
@@ -6827,7 +6828,7 @@ async function healStuckStudioRenders(env) {
     limit: 8,
     sortField: "Output_ID",
     sortDirection: "desc",
-    filterFormula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="",${studioLastModifiedStaleFormula(120)})`,
+    filterFormula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="",${studioLastModifiedStaleFormula(15)})`,
   }).catch(() => []);
   for (const row of longRendering || []) {
     try {
@@ -18426,6 +18427,11 @@ function continueParkedProductionAfterPromote(ctx, env, requestId = null) {
       try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
         console.warn("studio produce enqueue failed", requestId, error);
       }
+      try {
+        await advanceStudioProductionOutputs(env, { requestRecordId: requestId, waitMs: 0 });
+      } catch (error) {
+        console.warn("studio continuation after promote failed", requestId, error);
+      }
     }
   })();
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(run);
@@ -18523,6 +18529,58 @@ function studioOutputIsStoryRoute(record) {
   const format = String(f(record, "Format") || "").trim();
   const studioType = String(f(record, "Studio_Output_Type") || "").trim();
   return format === "Story" || studioType === "Story";
+}
+
+function studioClipLooksLikeVideo(clip) {
+  const url = String(clip?.src || clip?.url || "");
+  const name = String(clip?.asset_name || clip?.file_name || "");
+  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url) || /\.(mp4|mov|webm|m4v)$/i.test(name);
+}
+
+function studioPhotoSequenceNeedsContainHeal(po) {
+  if (studioOutputIsStoryRoute(po)) return false;
+  const renderStatus = String(f(po, "Render_Status") || "");
+  if (/native photo/i.test(renderStatus)) return false;
+  if (/rendering/i.test(renderStatus) && String(f(po, "Remotion_Job_ID") || "").trim()) return false;
+  if (/^ready for review$/i.test(String(f(po, "Output_Status") || "")) && String(f(po, "Final_File_URL") || "").trim()) {
+    return false;
+  }
+  let clips;
+  try { clips = JSON.parse(String(f(po, "Render_Clip_List_JSON") || "[]")); } catch { return false; }
+  if (!Array.isArray(clips) || !clips.length) return false;
+  return clips.some((clip) => {
+    if (studioClipLooksLikeVideo(clip)) return false;
+    const url = String(clip?.src || clip?.url || "");
+    const motion = String(clip?.motionStyle || clip?.motion?.type || "").toLowerCase().replace(/[\s_-]/g, "");
+    const fit = String(clip?.fitMode || clip?.fit_mode || "").toLowerCase();
+    if (/ITEM4-VARIANT-fill-crop/i.test(url)) return true;
+    if (motion === "stillphoto" || motion === "slowzoom") return true;
+    if (fit === "fill_crop") return true;
+    return false;
+  });
+}
+
+async function studioContinuationApplyInspectAction(env, po, result) {
+  const action = String(result?.action || "");
+  if (action === "start_render" || action === "prep_render") {
+    if (action === "start_render" && String(f(po, "Remotion_Job_ID") || "").trim()) return null;
+    const timing = String(f(po, "Timing_Status") || "").trim();
+    const timeline = String(f(po, "Timing_Timeline_JSON") || "").trim();
+    if ((timing === "Pending" || !timing) && timeline) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { Timing_Status: "Ready" }, typecast: true }),
+      }).catch(() => null);
+    }
+    if ((timing === "Pending" || !timing) && !timeline) {
+      return item4PulseT1Python(env, { outputRecordId: po.id, maxRuns: 1 });
+    }
+    return item4PulseR4Python(env, { outputRecordId: po.id });
+  }
+  if (action === "poll_render") {
+    return item4PulseR5Python(env, { outputRecordId: po.id, maxRuns: 1 });
+  }
+  return null;
 }
 
 function studioOutputNeedsRemotionPackage(record) {
@@ -18854,6 +18912,10 @@ async function studioContinuationInspectOutput(env, po, cache) {
     && String(f(po, "Render_Clip_List_JSON") || "").trim();
 
   if (readyForRender && hasClips && !studioOutputWrongVideoSelectorPath(po)) {
+    if (studioPhotoSequenceNeedsContainHeal(po)) {
+      await studioContinuationStampPackage(env, po, context);
+      return { action: "prep_render", reason: "contain_stamp_heal" };
+    }
     return { action: "start_render", reason: "ready_for_render" };
   }
 
@@ -19015,6 +19077,10 @@ async function pulseStudioContinuationJobs(env, options = {}) {
     pulses.push({ key: "LETTER", error: error instanceof Error ? error.message : String(error) });
   }
   for (const job of jobs) {
+    if ((options.skipKeys || []).includes(job.key)) {
+      pulses.push({ key: job.key, skipped: "already_applied" });
+      continue;
+    }
     const rows = await listRecords(env, job.table, {
       limit: 5,
       view: job.view || null,
@@ -19208,15 +19274,6 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     } catch (error) {
       pulses.push({ key: "AI_INGEST", parent: parentId, error: error instanceof Error ? error.message : String(error) });
     }
-    console.log("Studio continuation", JSON.stringify({
-      count: media.length,
-      inspected: media.map((row) => ({ id: row.id, action: row.action, reason: row.reason || row.error || null })),
-      pulses,
-    }));
-    return { inspected: media, pulses };
-  }
-  try { pulses.push(...await pulseStudioContinuationJobs(env, options)); } catch (error) {
-    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
   }
   const inspected = media.slice();
   let inspectedRemotion = 0;
@@ -19230,6 +19287,17 @@ async function advanceStudioProductionOutputs(env, options = {}) {
       if (idx >= 0) inspected[idx] = { id: po.id, ...result };
       else inspected.push({ id: po.id, ...result });
       inspectedRemotion += 1;
+      try {
+        const applied = await studioContinuationApplyInspectAction(env, po, result);
+        if (applied) pulses.push({ key: "INSPECT_ACTION", id: po.id, action: result.action, reason: result.reason || null });
+      } catch (error) {
+        pulses.push({
+          key: "INSPECT_ACTION",
+          id: po.id,
+          action: result.action,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     } catch (error) {
       const idx = inspected.findIndex((row) => row.id === po.id);
       const payload = { id: po.id, action: "error", error: error instanceof Error ? error.message : String(error) };
@@ -19237,6 +19305,19 @@ async function advanceStudioProductionOutputs(env, options = {}) {
       else inspected.push(payload);
       inspectedRemotion += 1;
     }
+  }
+  const appliedRenderStarts = pulses.some((row) =>
+    row.key === "INSPECT_ACTION"
+    && (row.action === "start_render" || row.action === "prep_render")
+    && !row.error
+  );
+  try {
+    pulses.push(...await pulseStudioContinuationJobs(env, {
+      ...options,
+      skipKeys: appliedRenderStarts ? ["T1", "R4"] : [],
+    }));
+  } catch (error) {
+    pulses.push({ key: "jobs", error: error instanceof Error ? error.message : String(error) });
   }
   const waitingPackage = inspected.some((row) => row.action === "wait_variants" || row.action === "blocked" || row.reason === "no_package" || row.reason === "missing_ratio_crop");
   if (waitingPackage) {
@@ -26309,6 +26390,11 @@ async function finishAutonomousProductionRequest(env, authorization, ctx, idea, 
     }
     try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
       console.warn("autonomous studio-produce enqueue failed", requestId, error);
+    }
+    try {
+      await advanceStudioProductionOutputs(env, { requestRecordId: requestId, waitMs: 0 });
+    } catch (error) {
+      console.warn("autonomous continuation after produce enqueue failed", requestId, error);
     }
     return { waiting: false, production_request_id: requestId, idea_id: idea.id };
   };
