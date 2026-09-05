@@ -263,6 +263,20 @@ def _public_master_url(master: dict[str, Any]) -> str:
     return str(master.get("url") or master.get("preview_url") or "").strip()
 
 
+def _public_cdn_url(value: Any) -> str:
+    url = str(value or "").strip()
+    return url if url.startswith("https://media.chicagoshining.com/") else ""
+
+
+def photo_sequence_url(master: dict[str, Any], variant: dict[str, Any] | None) -> str:
+    """Prefer the original still. 9:16 fill-crop variants cut square/4:5 flyers."""
+    return (
+        _public_cdn_url(master.get("preview_url"))
+        or str((variant or {}).get("preview_url") or "").strip()
+        or playable_url(master)
+    )
+
+
 def finished_source_package(
     request: dict[str, Any],
     output: dict[str, Any],
@@ -314,7 +328,7 @@ def finished_source_package(
             "src": url,
             "startFrame": 0,
             "durationFrames": 1,
-            "motionStyle": "stillPhoto",
+            "motionStyle": "none",
             "source": "finished_passthrough",
             "aspect_ratio": ratio,
             "google_drive_file_id": str(master.get("google_drive_file_id") or "") or None,
@@ -362,7 +376,7 @@ def finished_source_package(
                 "src": clip["src"],
                 "startFrame": 0,
                 "durationFrames": 1,
-                "motionStyle": "stillPhoto",
+                "motionStyle": "none",
                 "overlay": None,
                 "caption": "",
             }
@@ -419,9 +433,22 @@ def source_package(
         url = (
             playable_url(merged) or str((variant or {}).get("preview_url") or "").strip()
             if video
-            else str((variant or {}).get("preview_url") or "").strip() or playable_url(merged)
+            else photo_sequence_url(master, variant)
         )
-        media_id = str((variant or {}).get("media_asset_record_id") or merged.get("media_asset_record_id") or "").strip()
+        media_id = str(
+            merged.get("media_asset_record_id")
+            or (variant or {}).get("media_asset_record_id")
+            or ""
+        ).strip()
+        drive_id = str(
+            (
+                merged.get("google_drive_file_id")
+                if (not video and _public_cdn_url(master.get("preview_url")))
+                else (variant or {}).get("google_drive_file_id") or merged.get("google_drive_file_id")
+            )
+            or ""
+        ).strip()
+        fit_mode = None if video else ("fill_crop" if story else "full_with_solid_background")
         if not url or not media_id.startswith("rec"):
             omitted.append(str(source.get("id") or source.get("name") or "unknown"))
             continue
@@ -437,7 +464,8 @@ def source_package(
             "variant": variant,
             "url": url,
             "media_asset_id": media_id,
-            "drive_id": str((variant or {}).get("google_drive_file_id") or merged.get("google_drive_file_id") or "").strip(),
+            "drive_id": drive_id,
+            "fit_mode": fit_mode,
             "overlay": overlay,
             "media_kind": "video" if video else "photo",
             "in_seconds": in_seconds,
@@ -476,7 +504,8 @@ def source_package(
             "src": item["url"],
             "startFrame": start,
             "durationFrames": frames,
-            "motionStyle": "none" if video else ("slowZoom" if story else "stillPhoto"),
+            "motionStyle": "none" if video else ("slowZoom" if story else "none"),
+            "fitMode": item.get("fit_mode"),
             "media_kind": item["media_kind"],
             "mediaKind": item["media_kind"],
             "in_seconds": in_seconds,
@@ -523,6 +552,7 @@ def source_package(
             "startFrame": clip["startFrame"],
             "durationFrames": clip["durationFrames"],
             "motionStyle": clip["motionStyle"],
+            "fitMode": clip.get("fitMode") or clip.get("fit_mode"),
             "mediaKind": clip.get("media_kind") or "photo",
             "media_kind": clip.get("media_kind") or "photo",
             "googleDriveFileId": clip.get("google_drive_file_id") or None,
