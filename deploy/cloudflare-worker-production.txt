@@ -319,3 +319,5 @@ Continuation listener Worker deploy: 2026-09-05 - Run the production continuatio
 
 Prepare retry Worker deploy: 2026-09-05 - Failed Prepare returns 409 instead of 500. Clicking Retry remaining requeues leftover Failed/Error/stalled Processing crops. Worker 0.10.237-prepare-retry.
 
+Variant-gap heal Worker deploy: 2026-09-05 - If photos are added after Prepare, queue the missing 9:16/4:5 crops instead of sitting at 23 of 27. Worker 0.10.238-variant-gap-heal.
+

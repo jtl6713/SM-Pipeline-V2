@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.236-continuation-listener",
+          version: "0.10.238-variant-gap-heal",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -266,6 +266,7 @@ export default {
           studio_unattended_advance_v1: true,
           studio_continuation_controller_v1: true,
           studio_continuation_cron_v1: true,
+          studio_variant_gap_heal_v1: true,
           studio_ai_master_fill_v1: true,
           studio_audio_default_yes_v1: true,
           studio_item4_calm_bridge_preflight_v1: true,
@@ -1011,6 +1012,11 @@ export default {
         await item4DrainAllPendingWork(env, { maxMs: ITEM4_DRAIN_CRON_BUDGET_MS });
       } catch (error) {
         console.warn("item4 pending crop drain cron failed", error);
+      }
+      try {
+        await item4HealIncompletePreparingVariants(env);
+      } catch (error) {
+        console.warn("item4 preparing variant-gap heal failed", error);
       }
       try {
         await runStudioAutonomousProduce(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -7894,9 +7900,19 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
   const expectedIds = new Set(
     item4ExpectedVariantKeys(recordId, assets, plan || {}).map((row) => row.transfer_id)
   );
-  const scoped = queueRows.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
+  let scoped = queueRows.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
   if (!scoped.length) {
     return { attempted: false, reason: "prepare-not-started", record: currentRecord, execution_ids: [] };
+  }
+
+  // Photos added after Prepare can sit at 23/27 forever: drain only sees existing
+  // queue rows, and this resume path used to refuse to create the missing ones.
+  const missingKeys = [...expectedIds].filter((id) => !scoped.some((row) => String(f(row, "Transfer_ID") || "").trim() === id));
+  if (missingKeys.length && String(f(currentRecord, "Studio_Variant_Status") || "") === "Preparing") {
+    const outputRows = await outputRowsForProductionRequest(env, recordId);
+    await item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan);
+    const refreshed = await item4VariantQueueRows(env, recordId);
+    scoped = refreshed.filter((row) => expectedIds.has(String(f(row, "Transfer_ID") || "").trim()));
   }
 
   const failed = scoped.filter((row) => item4QueueStatus(row) === "Failed");
@@ -7923,6 +7939,26 @@ async function item4ResumePendingVariants(env, recordId, record = null) {
     ready_count: Number(reconciled.manifest?.ready_count || 0),
     target_count: Number(reconciled.manifest?.target_count || 0),
   };
+}
+
+async function item4HealIncompletePreparingVariants(env) {
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 8,
+    sortField: "Updated_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Preparing")',
+  }).catch(() => []);
+  const pulses = [];
+  for (const row of rows || []) {
+    try {
+      const result = await item4ResumePendingVariants(env, row.id, row);
+      if (result?.attempted) pulses.push({ id: row.id, reason: result.reason, ready: result.ready_count, target: result.target_count });
+    } catch (error) {
+      pulses.push({ id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (pulses.length) console.log("Studio preparing variant-gap heal", JSON.stringify({ count: pulses.length, pulses }));
+  return pulses;
 }
 
 async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = null) {
