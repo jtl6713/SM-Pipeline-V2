@@ -317,3 +317,5 @@ Contain-stills Worker deploy: 2026-09-05 - Stamp original stills with contain so
 
 Continuation listener Worker deploy: 2026-09-05 - Run the production continuation inspector every two minutes and after promote so stuck Ready-for-Render, Rendering, and fill-crop still stamps heal without an operator pulse. Worker 0.10.236-continuation-listener.
 
+Prepare retry Worker deploy: 2026-09-05 - Failed Prepare returns 409 instead of 500. Clicking Retry remaining requeues leftover Failed/Error/stalled Processing crops. Worker 0.10.237-prepare-retry.
+

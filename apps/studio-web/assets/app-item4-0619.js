@@ -187,7 +187,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.244-one-picker";
+  const BUILD_ID = "item4-0.6.245-prepare-retry";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -799,6 +799,7 @@
           if (preparing && (response.status === 200 || response.status === 202)) return body;
           const failure = new Error(body.error || body.message || `Request failed (${response.status})`);
           failure.status = response.status;
+          failure.bodyStatus = String(body.status || "");
           failure.transient = isTransientApiFailure({ status: response.status, text, method });
           if (failure.transient && attempt < maxAttempts) {
             lastError = failure;
@@ -4770,9 +4771,36 @@
   function productionPillState(text) {
     const t = String(text || "").toLowerCase();
     if (/attention|error|need/.test(t)) return "attention";
-    if (/ready|complete/.test(t)) return "ready";
     if (/process|prepar|upload|building/.test(t)) return "busy";
+    if (/ready|complete/.test(t)) return "ready";
     return "idle";
+  }
+
+  function item4PrepareButtonView({
+    planStatus = "",
+    variantStatus = "None",
+    readyCount = 0,
+    targetCount = 0,
+    inFlight = false,
+  } = {}) {
+    const planReady = String(planStatus || "") === "Ready";
+    const count = `${Number(readyCount || 0)}/${targetCount || "?"}`;
+    if (!planReady) {
+      return { disabled: true, label: "Prepare", retry: false };
+    }
+    if (inFlight) {
+      return { disabled: true, label: `Preparing… ${count}`, retry: false };
+    }
+    if (variantStatus === "Ready") {
+      return { disabled: false, label: "Rebuild", retry: false };
+    }
+    if (variantStatus === "Preparing") {
+      return { disabled: false, label: `Retry remaining (${count})`, retry: true };
+    }
+    if (variantStatus === "Error") {
+      return { disabled: false, label: "Retry", retry: true };
+    }
+    return { disabled: false, label: "Prepare", retry: false };
   }
 
   function syncProductionStudioState() {
@@ -5642,7 +5670,7 @@
     const count = targetCount ? `${readyCount} of ${targetCount} ready` : `${readyCount} ready`;
     progress.hidden = false;
     progress.dataset.heal = "preparing";
-    progress.innerHTML = `<strong>${clips ? "Attaching clip frames" : "Preparing platform crops"}</strong><span>${escapeHtml(count)} · ${escapeHtml(elapsed)} elapsed. This page updates automatically.</span>`;
+    progress.innerHTML = `<strong>${clips ? "Attaching clip frames" : "Preparing platform crops"}</strong><span>${escapeHtml(count)} · ${escapeHtml(elapsed)} elapsed. This page updates automatically. Click Retry remaining if the count stops moving.</span>`;
     ensureItem4PrepareClock();
   }
 
@@ -5728,7 +5756,7 @@
     if (badge) badge.textContent = variantStatus === "Ready"
       ? `${readyCount} frames ready`
       : variantStatus === "Preparing"
-        ? `Preparing… ${readyCount}/${targetCount || "?"} ready`
+        ? `Preparing… ${readyCount}/${targetCount || "?"}`
         : variantStatus === "Error" ? "Needs attention" : "Waiting";
     const shownError = String(status?.variant_error || item4PrepareError || "").trim();
     if (error) {
@@ -5736,22 +5764,25 @@
       error.textContent = shownError;
     }
     if (button) {
-      button.disabled = status?.plan_status !== "Ready" || item4PreparingVariants || variantStatus === "Preparing";
-      button.textContent = variantStatus === "Ready"
-        ? "Rebuild"
-        : (item4PreparingVariants || variantStatus === "Preparing")
-          ? `Preparing… ${readyCount}/${targetCount || "?"}`
-          : "Prepare";
+      const view = item4PrepareButtonView({
+        planStatus: status?.plan_status,
+        variantStatus,
+        readyCount,
+        targetCount,
+        inFlight: item4PreparingVariants,
+      });
+      button.disabled = view.disabled;
+      button.textContent = view.label;
     }
     if (hint) {
       hint.textContent = status?.plan_status !== "Ready"
         ? "Choose platforms first."
         : variantStatus === "Preparing"
           ? (clipRequest
-            ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"} ready). The elapsed timer below means this is still working.`
-            : `Studio is preparing crops in the background (${readyCount}/${targetCount || "?"} ready). This page updates automatically.`)
+            ? `Studio is attaching clip frames (${readyCount}/${targetCount || "?"}). Click Retry remaining if the count stops moving.`
+            : `Studio is preparing crops in the background (${readyCount}/${targetCount || "?"}). Click Retry remaining if the count stops moving.`)
           : variantStatus === "Error"
-            ? "Preparation stopped. The originals are still safe."
+            ? "Preparation stopped. Click Retry to send the leftover crops again. The originals are still safe."
             : variantStatus === "Ready"
               ? (clipRequest ? "These clips are the platform frames. Rebuild if you swapped files." : "Rebuild if you change the crop.")
               : (clipRequest ? "Click Prepare to attach these clips as platform frames. Clips skip photo crops." : "Click Prepare when the framing looks right.");
@@ -6140,8 +6171,8 @@
       if (!decision.continue) {
         stopItem4VariantPolling();
         setRequestMessage(clips
-          ? "Clip frames are still attaching. Click Prepare again if the count has not moved."
-          : "Platform media is still reconciling. Studio will recheck automatically; no refresh or second click is needed.", "success");
+          ? "Clip frames are still attaching. Click Retry remaining if the count has not moved."
+          : "Platform media is still reconciling. Click Retry remaining if the count has not moved.", "success");
         return;
       }
       if (decision.mode === "revalidate") {
@@ -6172,14 +6203,14 @@
 
   function item4PreparingInBackgroundMessage() {
     return item4WorkspaceHasClips(item4Workspace || {})
-      ? "Attaching clip frames. Watch the elapsed timer under Prepare — if it is moving, Studio is still working."
-      : "Platform media is preparing in the background. Progress updates automatically; no refresh or second click is needed.";
+      ? "Attaching clip frames. Watch the elapsed timer — if the count stops moving, click Retry remaining."
+      : "Platform media is preparing in the background. If the count stops moving, click Retry remaining.";
   }
 
   function item4IsRetryablePrepareFailure(error, status) {
     const variantStatus = String(status?.variant_status || "");
+    if (String(error?.bodyStatus || "") === "Error" || variantStatus === "Error") return false;
     if (variantStatus === "Preparing") return true;
-    if (variantStatus === "Error") return false;
     const message = String(error?.message || error || "");
     return /request failed \(5\d{2}\)/i.test(message)
       || isTimeoutError(error)
@@ -6202,7 +6233,7 @@
       ? "Starting clip-frame attach…"
       : "Starting platform-media preparation…", "success");
     try {
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops() }),timeoutMs:45000});
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/variants`, {method:"POST",body:JSON.stringify({ crops: collectItem4Crops(), retry: ["Preparing", "Error"].includes(String(item4Workspace?.variant_status || "")) }),timeoutMs:45000});
       if (result.production_request) activeProductionRequest = result.production_request;
       await loadItem4Workspace(activeProductionRequest);
       if (item4Workspace?.variant_status === "Ready") {
@@ -9814,7 +9845,7 @@
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
     item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
-    item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
+    item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. If a run stalls, Retry remaining requeues leftover crops. Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
     closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
     saveProductionRequest: "Save the current draft without promoting it into the pipeline.",
     syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",

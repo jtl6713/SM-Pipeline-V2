@@ -6179,7 +6179,8 @@ async function item4PipelineSetting(env, name) {
   return String(rows[0] ? f(rows[0], "Setting_Value") || "" : "").trim();
 }
 
-async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan) {
+async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows, plan, options = {}) {
+  const forceRetry = Boolean(options.forceRetry);
   const ownerRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, recordId);
   const testRunId = String(f(ownerRecord, "Test_Run_ID") || "").trim();
   const driveFolderId = await item4PipelineSetting(env, "STUDIO_VARIANT_DRIVE_FOLDER_ID");
@@ -6215,7 +6216,9 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
       const currentStatus = current ? item4QueueStatus(current) : "";
       const currentPreviewStatus = current ? String(f(current, "Preview_Status") || "").trim() : "";
       const hasAuthority = current ? item4QueueRowHasAuthority(current) : false;
-      const preserveStatus = hasAuthority || ["Ready", "Drive Uploaded", "Processing"].includes(currentStatus);
+      const preserveStatus = hasAuthority
+        || ["Ready", "Drive Uploaded"].includes(currentStatus)
+        || (currentStatus === "Processing" && !forceRetry);
 
       const fields = {
         Transfer_ID: transferId,
@@ -6243,8 +6246,9 @@ async function item4UpsertVariantQueue(env, recordId, assets, ratios, outputRows
         fields.Transfer_Status = "Ready";
         fields.Error_Message = null;
       } else if (!preserveStatus) {
-        fields.Transfer_Status = ["Failed", "Error"].includes(currentStatus) ? "Pending" : (currentStatus || "Pending");
+        fields.Transfer_Status = "Pending";
         fields.Error_Message = null;
+        if (forceRetry) fields.Attempt_Count = 0;
       }
       if (!["Ready", "Pending"].includes(currentPreviewStatus)) {
         fields.Preview_Status = "Pending";
@@ -7560,6 +7564,7 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
     syncBudgetMs = ITEM4_DRAIN_POST_BUDGET_MS,
     syncRunCap = 8,
     allowBackground = true,
+    forceRetry = false,
   } = options;
 
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
@@ -7632,7 +7637,15 @@ async function runItem4VariantPrepareCore(env, recordId, authorization, options 
     Studio_Item4_State: "Plan Ready",
   });
 
-  const expected = await item4UpsertVariantQueue(env, recordId, authoritativeAssets, ratios, outputRows, plan);
+  const expected = await item4UpsertVariantQueue(
+    env,
+    recordId,
+    authoritativeAssets,
+    ratios,
+    outputRows,
+    plan,
+    { forceRetry }
+  );
   let reconciled = await item4ReconcileVariants(env, recordId);
 
   if (reconciled.status === "Preparing") {
@@ -7729,6 +7742,7 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
     syncBudgetMs: ITEM4_DRAIN_POST_BUDGET_MS,
     syncRunCap: 8,
     allowBackground: true,
+    forceRetry: Boolean(payload?.retry),
   });
 
   const ready = reconciled.status === "Ready";
@@ -7752,7 +7766,7 @@ async function prepareItem4Variants(request, env, url, authorization, ctx = null
         : (item4HasVideoMasters(item4AssetManifest(reconciled.record))
           ? `Attaching ${reconciled.manifest?.ready_count || 0} of ${reconciled.manifest?.target_count || 0} clip frames…`
           : "Platform media preparation is still running."),
-  }, failed ? 500 : ready ? 200 : 202);
+  }, failed ? 409 : ready ? 200 : 202);
 }
 
 async function getItem4Variants(request, env, url, authorization, ctx = null) {
