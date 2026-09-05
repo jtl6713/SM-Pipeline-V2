@@ -136,6 +136,8 @@
   const ezDirty = new Set();
   let ezIdeaIdentitySaveTimer = null;
   let item4Uploading = false;
+  let item4UploadBatchTotal = 0;
+  let item4UploadBatchDone = 0;
   let item4PendingUploads = [];
   let item4PreparingVariants = false;
   let item4PrepareError = "";
@@ -185,7 +187,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.241-prepare-unsaved";
+  const BUILD_ID = "item4-0.6.242-bulk-upload";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2383,7 +2385,7 @@
       if (choose) choose.textContent = "Choose clips";
     } else if (nextKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips";
-      if (hint) hint.textContent = "Mix stills and raw mp4/mov clips. Not a finished video.";
+      if (hint) hint.textContent = "Pick the whole set at once. Studio saves stills and clips one file at a time. Clips over 100 MB need to be compressed first.";
       if (choose) choose.textContent = "Choose files";
     } else if (nextKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos";
@@ -5897,12 +5899,16 @@
 
   function item4MasterProgressMarkup(status) {
     const assets = Array.isArray(status?.assets) ? status.assets : [];
-    const ready = item4MasterReadyCount(status);
-    const target = assets.length || ezStagedFiles.length;
+    const ready = item4Uploading && item4UploadBatchTotal
+      ? item4UploadBatchDone
+      : item4MasterReadyCount(status);
+    const target = item4Uploading && item4UploadBatchTotal
+      ? item4UploadBatchTotal
+      : (assets.length || ezStagedFiles.length);
     const state = String(status?.assets_status || (item4Uploading ? "Uploading" : "None"));
     const loading = item4Uploading || state === "Uploading" || state === "Processing" || (target && state !== "Ready" && state !== "Error");
     if (!target && !loading) return null;
-    if (state === "Ready" && item4WaitingForClips(status)) {
+    if (!item4Uploading && state === "Ready" && item4WaitingForClips(status)) {
       const counts = item4ClipCountsFromStatus(status);
       const wantClips = Math.max(1, ezTargetClipCount());
       return {
@@ -5911,7 +5917,7 @@
         body: `${counts.photos} photo${counts.photos === 1 ? "" : "s"} saved to Google Drive. ${counts.clips} of ${wantClips} clip${wantClips === 1 ? "" : "s"} saved. Drop an MP4 or MOV under 100 MB.`,
       };
     }
-    if (state === "Ready") {
+    if (!item4Uploading && state === "Ready") {
       if (ezIsFinishedVideo()) {
         return {
           heal: "ready",
@@ -5994,6 +6000,16 @@
       if (!next.assets_status || next.assets_status === "None") {
         next.assets_status = item4Workspace?.assets_status || "Uploading";
       }
+      return next;
+    }
+    if (uploading && currentAssets.length) {
+      const incomingNames = new Set(incomingAssets.map((asset) => String(asset?.name || "").toLowerCase()));
+      const keepLocal = currentAssets.filter((asset) => {
+        const id = String(asset?.id || "");
+        const name = String(asset?.name || "").toLowerCase();
+        return id.startsWith("local:") && name && !incomingNames.has(name);
+      });
+      if (keepLocal.length) next.assets = [...incomingAssets, ...keepLocal];
     }
     return next;
   }
@@ -6641,6 +6657,27 @@
     return result;
   }
 
+  async function postItem4MasterFile(file, poster) {
+    const metadata = await imageMetadataForFiles([file]);
+    const form = new FormData();
+    form.append("files", file, file.name);
+    if (poster && poster.size > 80) {
+      const base = String(file.name || "clip").replace(/\.[^.]+$/, "") || "clip";
+      form.append("posters", poster, `${base}-poster.jpg`);
+    } else {
+      form.append("posters", new Blob([], { type: "application/octet-stream" }), "empty");
+    }
+    form.append("metadata", JSON.stringify(metadata));
+    const originKind = item4ClipOriginKind() || ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
+    if (originKind) form.append("origin_kind", originKind);
+    return api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, {
+      method: "POST",
+      body: form,
+      timeoutMs: item4FileLooksLikeVideo(file) || originKind === "finished-video" ? 180000 : 90000,
+      retries: 0,
+    });
+  }
+
   async function uploadItem4Files(fileList, { preserveOversizedNotice = false } = {}) {
     if (!activeProductionRequest?.id) return;
     if (item4Uploading) {
@@ -6703,63 +6740,65 @@
       files = files.slice(0, remaining);
     }
     item4Uploading = true;
+    item4UploadBatchTotal = existingCount + files.length;
+    item4UploadBatchDone = existingCount;
     const progress = $("item4UploadProgress");
     const button = $("item4BuildPlan");
     files.forEach(item4HoldClipFile);
-    const posterWork = files.map((file) => item4ClipPosterFromFile(file).then((blob) => {
-      if (blob) item4ApplyLocalClipPoster(file.name, blob);
-      return blob;
-    }).catch(() => null));
     paintItem4LocalPreviews(files, { uploading: true });
-    const posterBlobs = await Promise.all(files.map((file, index) => (
-      item4FileLooksLikeVideo(file)
-        ? Promise.race([posterWork[index], new Promise((resolve) => window.setTimeout(() => resolve(null), 8000))])
-        : Promise.resolve(null)
-    )));
-    if (posterBlobs.some(Boolean) && item4Workspace) {
-      item4AssetStripSignature = "";
-      renderItem4Assets(item4Workspace);
-      renderEzPhotoStrip();
-    }
     if (button) button.disabled = true;
     const uploadingClips = files.some(item4FileLooksLikeVideo);
+    updateItem4MasterProgress(item4Workspace || {});
     if (!item4OversizedClipNotice) {
-      setRequestMessage(ezIsFinishedVideo()
-        ? "Video is loading into the system. You can keep working on this screen, or leave and come back."
-        : (uploadingClips
-          ? "Saving your clip. Keep this tab open until it appears under the photos."
-          : "Photos are loading into the system. You can keep working on this screen, or leave and come back — Drive copies finish in the background."), "success");
+      setRequestMessage(`Saving ${files.length} file${files.length === 1 ? "" : "s"} one at a time so the full set can finish.`, "success");
     }
+    const failed = [];
+    const posterBlobs = [];
     try {
       mergeEzProductionNotes();
-      const metadata = await imageMetadataForFiles(files);
-      const form = new FormData();
-      files.forEach((file, index) => {
-        form.append("files", file, file.name);
-        const poster = posterBlobs[index];
-        if (poster && poster.size > 80) {
-          const base = String(file.name || "clip").replace(/\.[^.]+$/, "") || "clip";
-          form.append("posters", poster, `${base}-poster.jpg`);
-        } else {
-          form.append("posters", new Blob([], { type: "application/octet-stream" }), "empty");
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        setRequestMessage(`Saving ${index + 1} of ${files.length}: ${file.name}`, "success");
+        updateItem4MasterProgress(item4Workspace || {});
+        let poster = null;
+        if (item4FileLooksLikeVideo(file)) {
+          poster = await Promise.race([
+            item4ClipPosterFromFile(file).then((blob) => {
+              if (blob) item4ApplyLocalClipPoster(file.name, blob);
+              return blob;
+            }).catch(() => null),
+            new Promise((resolve) => window.setTimeout(() => resolve(null), 8000)),
+          ]);
         }
-      });
-      form.append("metadata", JSON.stringify(metadata));
-      const originKind = item4ClipOriginKind() || ezIntakeKind || (ezWizardPending || ezWizardAnswers)?.inputKind || "";
-      if (originKind) form.append("origin_kind", originKind);
-      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets`, {
-        method: "POST",
-        body: form,
-        timeoutMs: uploadingClips || originKind === "finished-video" ? 180000 : 90000,
-        retries: 0,
-      });
-      if (result.record) activeProductionRequest = result.record;
-      await loadItem4Workspace(activeProductionRequest);
+        posterBlobs[index] = poster;
+        try {
+          const result = await postItem4MasterFile(file, poster);
+          if (result?.record) activeProductionRequest = result.record;
+          item4UploadBatchDone += 1;
+          await loadItem4Workspace(activeProductionRequest);
+          ezStagedFiles = files.slice(index + 1);
+          updateItem4MasterProgress(item4Workspace || {});
+        } catch (error) {
+          failed.push(`${file.name}: ${item4UploadErrorMessage(error, [file])}`);
+        }
+      }
       ezStagedFiles = [];
       syncPrMediaKindUi();
       const total = ezPersistedAssetCount();
       const incomplete = ezIncompleteSetMessage(total);
-      if (item4OversizedClipNotice) {
+      if (failed.length) {
+        const friendly = failed.length === files.length
+          ? failed.join(" ")
+          : `${item4UploadBatchDone} saved. ${failed.length} still need another try. ${failed.join(" ")}`;
+        if (progress) {
+          progress.hidden = false;
+          progress.dataset.heal = "error";
+          progress.innerHTML = `<strong>Photo upload needs attention.</strong><span>${escapeHtml(friendly)}</span>`;
+        }
+        setRequestMessage(friendly, "error-text");
+        setEzMessage(friendly, "error-text");
+        if (item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
+      } else if (item4OversizedClipNotice) {
         updateItem4MasterProgress(item4Workspace || {});
         const extra = incomplete || (item4Workspace?.assets_status === "Ready" ? item4MasterReadyMessage(item4Workspace) : "");
         setRequestMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
@@ -6782,10 +6821,9 @@
             : "Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background."), "success");
         startItem4MasterPolling();
       }
-      if (!incomplete) await maybeAutoEzPlan();
-      const latePosters = await Promise.all(posterWork);
+      if (!failed.length && !incomplete) await maybeAutoEzPlan();
       files.forEach((file, index) => {
-        const blob = latePosters[index] || posterBlobs[index];
+        const blob = posterBlobs[index];
         if (!blob || !item4FileLooksLikeVideo(file)) return;
         const asset = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
           .find((row) => item4AssetLooksLikeVideo(row) && String(row?.name || "") === String(file.name || ""));
@@ -6813,6 +6851,8 @@
       setEzMessage(friendly, "error-text");
     } finally {
       item4Uploading = false;
+      item4UploadBatchTotal = 0;
+      item4UploadBatchDone = 0;
       if (button) button.disabled = !(item4Workspace?.assets?.length);
       drainPendingMasterUploads();
     }

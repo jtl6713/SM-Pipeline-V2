@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.230-prepare-unsaved",
+          version: "0.10.231-bulk-upload",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -219,6 +219,7 @@ export default {
           studio_insights_similar_times_v1: true,
           studio_insights_learning_db_v1: true,
           studio_prepare_unsaved_guard_v1: true,
+          studio_bulk_master_upload_v1: true,
           studio_insights_seasonal_v1: true,
           studio_insights_caption_learning_v1: true,
           studio_insights_overview_stats_v1: true,
@@ -697,7 +698,7 @@ export default {
         requirePermission(authorization, "production_configure");
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
-          return uploadItem4MasterAssets(request, env, url, authorization);
+          return uploadItem4MasterAssets(request, env, url, authorization, ctx);
         }
         return getItem4MasterAssets(request, env, url, authorization);
       }
@@ -4249,7 +4250,7 @@ async function getItem4MasterAssets(request, env, url, authorization) {
   });
 }
 
-async function uploadItem4MasterAssets(request, env, url, authorization) {
+async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   const recordId = item4RequestIdFromPath(url);
   let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
@@ -4321,10 +4322,10 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
   const originStamp = mixedClips
     ? studioRewriteClipOriginNotes(originNotes, requestedKind || "photos-and-clips")
     : (finishedKind ? studioRewriteFinishedOriginNotes(originNotes, finishedKind) : originNotes);
-  record = await item4UpdateRequestState(env, recordId, {
-    Studio_Master_Asset_Status: "Uploading",
-    ...(originStamp !== originNotes ? { Production_Notes: originStamp } : {}),
-  });
+  if (originStamp !== originNotes) {
+    record = await item4UpdateRequestState(env, recordId, { Production_Notes: originStamp });
+  }
+  const existingReady = existing.filter((asset) => String(asset?.google_drive_file_id || "").trim() && String(asset?.media_asset_record_id || "").trim());
   const posters = form.getAll("posters");
   const uploaded = [];
   let authorityQueueStarted = false;
@@ -4406,14 +4407,32 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
     authorityQueueStarted = true;
     const expected = await item4UpsertMasterQueue(env, recordId, assets);
 
-    // The Google Drive authority handoff is restartable. A transient synchronous
-    // Make drain failure must not turn a successful browser/R2 upload into HTTP 500
-    // after staging and queue rows already exist.
-    let reconciled = await item4ReconcileMasterAuthority(env, recordId, record);
+    // Return as soon as files are staged and queued. Drive copies run in waitUntil
+    // plus GET/cron resume so a 9-file picker does not 500 the browser POST.
+    let reconciled = { status: "Uploading", assets, record, ready_count: existingReady.length, target_count: assets.length, error: null };
+    try {
+      reconciled = await item4ReconcileMasterAuthority(env, recordId, record);
+    } catch (error) {
+      console.warn("Item 4 post-queue reconciliation deferred", error);
+    }
     const executionIds = [];
     let drainWarning = null;
 
-    if (reconciled.status === "Uploading" && expected.length) {
+    if (expected.length && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil((async () => {
+        try {
+          await item4DrainVariantWorker(
+            env,
+            recordId,
+            Math.min(8, Math.max(2, expected.length + 2)),
+            { maxMs: ITEM4_DRAIN_POST_BUDGET_MS }
+          );
+          await item4ReconcileMasterAuthority(env, recordId);
+        } catch (error) {
+          console.warn("Item 4 master-media drain continued in background", error);
+        }
+      })());
+    } else if (reconciled.status === "Uploading" && expected.length) {
       try {
         const drained = await item4DrainVariantWorker(
           env,
@@ -4426,7 +4445,6 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
         drainWarning = error instanceof Error ? error.message : String(error || "Master-media worker drain failed");
         console.warn("Item 4 master-media drain deferred to scheduled worker", error);
       }
-
       try {
         reconciled = await item4ReconcileMasterAuthority(env, recordId);
       } catch (error) {
@@ -4468,10 +4486,9 @@ async function uploadItem4MasterAssets(request, env, url, authorization) {
     if (!authorityQueueStarted && !finishedVideo) {
       for (const asset of uploaded) { try { await env.STUDIO_MEDIA.delete(asset.r2_key); } catch {} }
       try {
-        await item4UpdateRequestState(env, recordId, {
-          Studio_Master_Asset_Status: "Error",
-          Studio_Item4_State: "Error",
-        });
+        await item4UpdateRequestState(env, recordId, existingReady.length
+          ? { Studio_Master_Asset_Status: "Ready", Studio_Item4_State: "Assets Ready" }
+          : { Studio_Master_Asset_Status: "Error", Studio_Item4_State: "Error" });
       } catch {}
     } else {
       try {
