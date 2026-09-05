@@ -308,3 +308,5 @@ Insights current season Worker deploy: 2026-09-03 - Analytics season fallback us
 Prepare unsaved guard Worker deploy: 2026-09-04 - Keep Prepare from flashing then reverting when photos and clips are still unsaved. Worker 0.10.230-prepare-unsaved.
 
 Bulk master upload Worker deploy: 2026-09-04 - Stage one file per request and finish Drive copies in the background so a full photo-and-clip set does not 500. Worker 0.10.231-bulk-upload.
+
+Stage-only upload Worker deploy: 2026-09-04 - Return after R2 staging so a heavy still cannot 500 the POST. Drive copies continue in waitUntil. Worker 0.10.232-stage-only-upload.

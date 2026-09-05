@@ -359,3 +359,5 @@ Prepare unsaved Pages deploy: 2026-09-04 - Do not optimistic-Prepare or poll bef
 Bulk master upload Pages deploy: 2026-09-04 - Choose files accepts the full set; Studio saves stills and clips one at a time with a live saved count. UI 0.6.242-bulk-upload.
 
 One picker Pages deploy: 2026-09-04 - Photos and clips use a single Choose files control; Choose clip is hidden. UI 0.6.243-one-picker.
+
+Hide clip and compress Pages deploy: 2026-09-04 - Remove Choose clip from the drop zone and shrink heavy stills before upload. UI 0.6.244-one-picker.
