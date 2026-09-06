@@ -337,6 +337,8 @@ Ingestion drain Worker deploy: 2026-09-06 - Process intake folder starts an A2 d
 
 Asset Library published files Worker deploy: 2026-09-06 - GET /api/library?kind=published lists Platform Outputs. POST /api/library/published/:id/release-file trashes the Drive final and keeps Published_At plus the live post URL. Clip uploads persist Duration_Seconds. Worker 0.10.246-asset-library-published.
 
+Library layout, TikTok live URL, and AZ finished-video Worker deploy: 2026-09-06 - Asset Library list/grid plus clip playback. POST /api/outputs/:id/tiktok-complete marks a TikTok draft Published from a pasted live URL. origin=az-finished-video auto-queues IG/FB Reels+Stories, YouTube Short, and TikTok draft after cover/caption with 7-day occupancy scoring. YouTube Shorts require the vertical still. Worker 0.10.250-library-tiktok.
+
 
 
 

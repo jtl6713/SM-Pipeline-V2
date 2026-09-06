@@ -378,6 +378,8 @@ Ingestion drain Pages deploy: 2026-09-06 - Library intake listener runs every 10
 
 Asset Library published files Pages deploy: 2026-09-06 - Asset Library cards show Added date and clip duration. Show → Published files lists live Platform Outputs with Open live post and Remove Drive copy. UI 0.6.252-asset-library-published.
 
+Library layout, TikTok live URL, and AZ finished-video Pages deploy: 2026-09-06 - Asset Library list/grid and clip playback. Pipeline and Open review accept a pasted TikTok live URL. Home drop zone publishes a finished MP4 without Production Approve. UI 0.6.255-library-tiktok.
+
 
 
 
