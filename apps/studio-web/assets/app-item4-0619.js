@@ -4648,6 +4648,14 @@
     receiveMasterPhotos(fileList);
   }
 
+  function failAzFinishedIngest(message) {
+    if (!ezIsAzFinishedPath()) return;
+    stopAzFinishedProgressPolling();
+    setAzFinishedProgress("");
+    setAzFinishedMessage(message || "Could not start this upload.", "error-text");
+    $("azFinishedDrop")?.classList.remove("is-busy");
+  }
+
   async function startEzProduction({ files = [], preserveOversizedNotice = false } = {}) {
     const apiHelpers = ezPlanApi();
     if (!apiHelpers) throw new Error("EZ plan helper did not load");
@@ -4660,10 +4668,15 @@
     const supported = incoming.filter(item4IsSupportedPhotoFile);
     if (unsupportedNote) {
       setEzMessage(unsupportedNote, "error-text");
-      if (!supported.length) return;
+      if (!supported.length) {
+        failAzFinishedIngest(unsupportedNote);
+        return false;
+      }
     } else if (!allowEmpty && !supported.length) {
-      setEzMessage(ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.", "error-text");
-      return;
+      const message = ezIsFinishedVideo() ? "Choose a video file." : "Choose one or more photo files.";
+      setEzMessage(message, "error-text");
+      failAzFinishedIngest(message);
+      return false;
     }
     if (!ezIntakeKind && supported.length) {
       selectEzInput(supported.length > 1 ? "multiple-photos" : "single-photo", { resetPlatforms: false });
@@ -4673,8 +4686,10 @@
     }
     const existingCount = ezPersistedAssetCount();
     if (ezIntakeKind === "single-photo" && existingCount >= 1) {
-      setEzMessage("This piece already has a photo. Remove it first to replace it.", "error-text");
-      return;
+      const message = "This piece already has a photo. Remove it first to replace it.";
+      setEzMessage(message, "error-text");
+      failAzFinishedIngest(message);
+      return false;
     }
     let nextFiles = ezIntakeKind === "single-photo" ? supported.slice(0, 1) : supported;
     if (ezIntakeKind === "finished-video") {
@@ -4684,23 +4699,33 @@
     if (pending?.inputKind === "mixed") {
       const remaining = Math.max(0, Number(expected || 0) - existingCount);
       if (!remaining) {
-        setEzMessage("This mixed set already has your photos.", "error-text");
-        return;
+        const message = "This mixed set already has your photos.";
+        setEzMessage(message, "error-text");
+        failAzFinishedIngest(message);
+        return false;
       }
       nextFiles = nextFiles.slice(0, remaining);
     }
     const oversizedSplit = item4DropOversizedClips(nextFiles, { resetNotice: !preserveOversizedNotice });
     if (oversizedSplit.oversized.length) {
       nextFiles = oversizedSplit.allowed;
-      if (!nextFiles.length && !allowEmpty) return;
+      if (!nextFiles.length && !allowEmpty) {
+        const message = item4OversizedClipNotice
+          || "This video is over 200 MB and cannot be uploaded in Studio. Use a file under 200 MB.";
+        failAzFinishedIngest(message);
+        return false;
+      }
     }
     if (activeProductionRequest?.id && nextFiles.length) {
       await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
-      return;
+      return true;
     }
     const captionMode = ezCaptionMode();
     const captions = joinedManualSlideCaptions();
-    if (ezStarting) return;
+    if (ezStarting) {
+      failAzFinishedIngest("This video is already uploading.");
+      return false;
+    }
     ezStarting = true;
     const continueBtn = $("ezContinue");
     if (continueBtn) continueBtn.disabled = true;
@@ -4795,6 +4820,7 @@
         renderEzPhotoStrip();
         if (ezIsAzFinishedPath()) startAzFinishedProgressPolling();
       }
+      return Boolean(activeProductionRequest?.id || allowEmpty);
     } catch (error) {
       const saved = Boolean(activeProductionRequest?.id);
       const message = saved
@@ -4806,6 +4832,7 @@
         setAzFinishedMessage(error.message || "Could not start publish.", "error-text");
         $("azFinishedDrop")?.classList.remove("is-busy");
       }
+      return false;
     } finally {
       ezStarting = false;
       if (continueBtn) continueBtn.disabled = false;
@@ -4855,6 +4882,15 @@
       setAzFinishedMessage("This video is already uploading.", "error-text");
       return;
     }
+    const video = videos[0];
+    const bytes = Number(video?.size || 0);
+    if (bytes > ITEM4_CLIP_HARD_MAX_BYTES) {
+      setAzFinishedMessage(
+        `${video?.name || "This video"} is ${item4ClipFileMb(video)} MB. Studio’s limit is 200 MB — compress it first, then drop it again.`,
+        "error-text",
+      );
+      return;
+    }
     azFinishedPath = true;
     $("azFinishedDrop")?.classList.add("is-busy");
     setAzFinishedProgress("ingesting");
@@ -4871,11 +4907,17 @@
     lockAzFinishedDefaults();
     ezAutoPlanAfterUpload = false;
     try {
-      await startEzProduction({ files: videos.slice(0, 1), preserveOversizedNotice: true });
+      const started = await startEzProduction({ files: videos.slice(0, 1), preserveOversizedNotice: true });
+      if (!started || !activeProductionRequest?.id) {
+        failAzFinishedIngest(
+          item4OversizedClipNotice
+            || "Studio could not start this upload. Refresh and try again with an MP4 under 200 MB.",
+        );
+        return;
+      }
       startAzFinishedProgressPolling();
     } catch (error) {
-      setAzFinishedMessage(error.message || "Could not start publish.", "error-text");
-      $("azFinishedDrop")?.classList.remove("is-busy");
+      failAzFinishedIngest(error.message || "Could not start publish.");
     }
   }
 
