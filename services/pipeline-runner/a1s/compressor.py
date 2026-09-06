@@ -46,29 +46,53 @@ def target_mb() -> float:
     return A1S_TARGET_BYTES / 1024 / 1024
 
 
-def submit_job(file_id: str, source_name: str) -> dict[str, Any]:
+def _submit(payload: dict[str, Any]) -> dict[str, Any]:
     response = requests.post(
         f"{_base_url()}/compress",
         headers=_headers(),
-        json={
-            "drive_file_id": file_id,
-            "record_id": f"a1s-{file_id}",
-            "asset_name": source_name,
-            "target_mb": target_mb(),
-            "max_width": 1080,
-            "max_height": 1920,
-            "audio_kbps": 96,
-        },
+        json=payload,
         timeout=60,
     )
     response.raise_for_status()
-    payload = response.json()
-    job_id = str(payload.get("job_id") or "").strip()
-    status_url = str(payload.get("status_url") or "").strip()
+    body = response.json()
+    job_id = str(body.get("job_id") or "").strip()
+    status_url = str(body.get("status_url") or "").strip()
     if response.status_code != 202 or not job_id or not status_url:
         raise RuntimeError("Video Compressor submit response was incomplete")
     _managed_url(status_url, path_prefix="/jobs/")
-    return payload
+    return body
+
+
+def _compress_settings(record_id: str, source_name: str) -> dict[str, Any]:
+    return {
+        "record_id": record_id,
+        "asset_name": source_name,
+        "target_mb": target_mb(),
+        "max_width": 1080,
+        "max_height": 1920,
+        "audio_kbps": 96,
+    }
+
+
+def submit_job(file_id: str, source_name: str) -> dict[str, Any]:
+    return _submit(
+        {
+            "drive_file_id": file_id,
+            **_compress_settings(f"a1s-{file_id}", source_name),
+        }
+    )
+
+
+def submit_download_job(download_url: str, source_name: str, record_id: str) -> dict[str, Any]:
+    url = str(download_url or "").strip()
+    if not url:
+        raise RuntimeError("Video Compressor download_url is required")
+    return _submit(
+        {
+            "download_url": url,
+            **_compress_settings(record_id, source_name),
+        }
+    )
 
 
 def poll_job(job_id: str) -> dict[str, Any]:

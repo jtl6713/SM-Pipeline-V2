@@ -13,7 +13,7 @@ if not "%RC%"=="0" (
   echo If Git checkout has uncommitted changes, commit or stash them first, then retry.
 ) else (
   echo.
-  echo Confirm https://pipeline.chicagoshining.com/stages lists clip_poster.
+  echo Confirm https://pipeline.chicagoshining.com/stages lists studio_compress.
   echo A pinned SERVICE_VERSION in .env can still say 2026-08-24 after a good deploy.
 )
 echo.

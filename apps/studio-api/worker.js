@@ -204,7 +204,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.243-finished-preview-public",
+          version: "0.10.244-studio-compress",
+          studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -3452,6 +3453,7 @@ const ITEM4_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ITEM4_MAX_TOTAL_BYTES = 150 * 1024 * 1024;
 const ITEM4_MAX_CLIP_FILES = 10;
 const ITEM4_MAX_CLIP_FILE_BYTES = 200 * 1024 * 1024;
+const ITEM4_COMPRESS_THRESHOLD_BYTES = 100 * 1024 * 1024;
 const ITEM4_MAX_MIXED_TOTAL_BYTES = 1500 * 1024 * 1024;
 const ITEM4_CLIP_INPUTS = Object.freeze(["photos-and-clips", "video-clips"]);
 const ITEM4_NATIVE_STILL_OUTPUTS = Object.freeze({
@@ -3566,6 +3568,20 @@ function item4LooksLikeVideoAsset(asset) {
   const mime = String(asset?.mime_type || "").toLowerCase();
   const name = String(asset?.name || "").toLowerCase();
   return mime.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(name);
+}
+
+function item4AssetCompressionPending(asset) {
+  const status = String(asset?.compression_status || "").trim().toLowerCase();
+  if (status === "ready" || status === "skipped") return false;
+  if (["pending", "queued", "compressing", "downloading", "failed"].includes(status)) return true;
+  if (asset?.compression_needed === true) return true;
+  return item4LooksLikeVideoAsset(asset)
+    && Number(asset?.size_bytes || 0) > ITEM4_COMPRESS_THRESHOLD_BYTES
+    && !item4UrlIsPublicPublishCdn(asset?.preview_public_url || asset?.url);
+}
+
+function item4AssetsNeedStudioCompress(assets) {
+  return (Array.isArray(assets) ? assets : []).some(item4AssetCompressionPending);
 }
 
 function item4HasVideoMasters(assets) {
@@ -4426,20 +4442,34 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
         uploaded_at: new Date().toISOString(),
       };
       if (finishedVideo && isVideo) {
-        const previewKey = item4FinishedVideoPreviewKey(recordId, id);
-        const staged = await studioPutPublicObjectViaUploadWorker(env, {
-          key: previewKey,
-          body,
-          contentType: mime,
-          contentLength: Number(file.size || (body && body.byteLength) || 0),
-          outputId: recordId,
-        });
-        if (!staged.url) {
-          throw new HttpError(502, "Finished video could not be copied to the public preview host. Preview needs studio/previews/, not studio/master-assets.");
+        const needsCompress = Number(file.size || 0) > ITEM4_COMPRESS_THRESHOLD_BYTES;
+        if (needsCompress) {
+          row.compression_needed = true;
+          row.compression_status = "pending";
+          row.original_size_bytes = Number(file.size || 0);
+          row.url = "";
+        } else {
+          const previewKey = item4FinishedVideoPreviewKey(recordId, id);
+          const staged = await studioPutPublicObjectViaUploadWorker(env, {
+            key: previewKey,
+            body,
+            contentType: mime,
+            contentLength: Number(file.size || (body && body.byteLength) || 0),
+            outputId: recordId,
+          });
+          if (!staged.url) {
+            throw new HttpError(502, "Finished video could not be copied to the public preview host. Preview needs studio/previews/, not studio/master-assets.");
+          }
+          row.preview_r2_key = previewKey;
+          row.preview_public_url = staged.url;
+          row.url = staged.url;
+          row.compression_status = "skipped";
         }
-        row.preview_r2_key = previewKey;
-        row.preview_public_url = staged.url;
-        row.url = staged.url;
+      } else if (isVideo && Number(file.size || 0) > ITEM4_COMPRESS_THRESHOLD_BYTES) {
+        row.compression_needed = true;
+        row.compression_status = "pending";
+        row.original_size_bytes = Number(file.size || 0);
+        row.url = "";
       }
       const poster = posters[i];
       if (isVideo && poster && typeof poster.arrayBuffer === "function" && Number(poster.size || 0) > 80 && item4IsClipPosterFile(poster)) {
@@ -4454,29 +4484,39 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
       uploaded.push(row);
     }
     const assets = [...existing, ...uploaded];
+    const needsCompress = item4AssetsNeedStudioCompress(assets);
     record = await item4UpdateRequestState(env, recordId, {
       Studio_Master_Assets_JSON: JSON.stringify(assets),
       Studio_Master_Asset_Count: assets.length,
-      Studio_Master_Asset_Status: finishedVideo ? "Ready" : "Uploading",
+      Studio_Master_Asset_Status: finishedVideo && !needsCompress ? "Ready" : "Uploading",
       Studio_Output_Plan_Status: "Needs Plan",
       Studio_Output_Plan_JSON: null,
       Studio_Variant_Manifest_JSON: null,
       Studio_Variant_Status: "None",
       Studio_Variant_Updated_At: null,
       Studio_Variant_Error: null,
-      Studio_Item4_State: finishedVideo ? "Assets Ready" : "Draft",
+      Studio_Item4_State: finishedVideo && !needsCompress ? "Assets Ready" : "Draft",
     });
+
+    if (needsCompress && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(item4PulseStudioCompressJob(env, recordId).catch((error) => {
+        console.warn("Item 4 studio-compress pulse deferred after upload", error);
+      }));
+    }
 
     if (finishedVideo) {
       return respond(request, env, {
         ok: true,
         uploaded: uploaded.length,
-        authority_status: "Ready",
-        authority_progress: { ready: assets.length, target: assets.length },
+        authority_status: needsCompress ? "Uploading" : "Ready",
+        authority_progress: { ready: needsCompress ? 0 : assets.length, target: assets.length },
         assets,
         execution_ids: [],
         record: mapProductionRequest(record),
-        message: "Finished video is stored and ready. Crops, Remotion, and Drive copies are skipped.",
+        compression_pending: needsCompress,
+        message: needsCompress
+          ? "Studio is compressing this video automatically. Keep this tab open."
+          : "Finished video is stored and ready. Crops, Remotion, and Drive copies are skipped.",
       }, 201);
     }
 
@@ -5268,6 +5308,7 @@ function item4FinishedPublicUrl(asset) {
 }
 
 function item4FinishedMasterReady(asset) {
+  if (item4AssetCompressionPending(asset)) return false;
   if (item4FinishedPublicUrl(asset)) return true;
   return Boolean(String(asset?.google_drive_file_id || "").trim())
     && /^rec[A-Za-z0-9]+$/.test(String(asset?.media_asset_record_id || "").trim());
@@ -6539,6 +6580,79 @@ async function item4PulseClipPosterJob(env, recordId, { assetId = "" } = {}) {
     advertised.version || "unknown-version"
   );
   return { ok: false, skipped: "runner-missing-clip-poster", runner_version: advertised.version || null };
+}
+
+async function item4RunnerStudioCompressRoutes(env) {
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) return { runnerUrl: "", hasStage: false, hasJob: false, version: "" };
+  try {
+    const [healthResponse, stagesResponse] = await Promise.all([
+      fetch(`${runnerUrl}/health`),
+      fetch(`${runnerUrl}/stages`),
+    ]);
+    const health = await healthResponse.json().catch(() => ({}));
+    const stages = await stagesResponse.json().catch(() => ({}));
+    const jobs = Array.isArray(health?.jobs) ? health.jobs : [];
+    const hasJob = jobs.some((job) => String(job?.path || job?.name || "").includes("studio-compress"));
+    const hasStage = (Array.isArray(stages?.stages) ? stages.stages : []).some((stage) => (
+      String(stage?.name || "") === "studio_compress" && stage?.implemented !== false
+    ));
+    return {
+      runnerUrl,
+      hasStage,
+      hasJob,
+      version: String(health?.version || "").trim(),
+    };
+  } catch (error) {
+    console.warn("Item 4 runner studio-compress discovery failed", error);
+    return { runnerUrl, hasStage: false, hasJob: false, version: "" };
+  }
+}
+
+async function item4PulseStudioCompressJob(env, recordId, { assetId = "" } = {}) {
+  const advertised = await item4RunnerStudioCompressRoutes(env);
+  if (!advertised.runnerUrl) throw new HttpError(503, "Pipeline runner is not configured");
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const body = {
+    production_request_record_id: recordId,
+    ...(assetId ? { source_asset_id: assetId, extra: { source_asset_id: assetId } } : {}),
+  };
+
+  if (advertised.hasStage) {
+    const { response, payload } = await item4PulsePipelineStage(env, "studio_compress", body, "STUDIO_COMPRESS");
+    if (!response.ok && response.status !== 202) {
+      throw new HttpError(
+        response.status,
+        payload?.error || payload?.message || `Studio compress stage failed (${response.status})`
+      );
+    }
+    return payload?.details || payload;
+  }
+
+  if (advertised.hasJob) {
+    const response = await fetch(`${advertised.runnerUrl}/jobs/studio-compress`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok && response.status !== 202) {
+      throw new HttpError(
+        response.status,
+        payload?.error || payload?.message || `Studio compress job failed (${response.status})`
+      );
+    }
+    return payload;
+  }
+
+  console.warn(
+    "Item 4 studio compress skipped: live runner does not advertise studio_compress",
+    advertised.version || "unknown-version"
+  );
+  return { ok: false, skipped: "runner-missing-studio-compress", runner_version: advertised.version || null };
 }
 
 async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}) {
@@ -8095,6 +8209,11 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
           console.warn("Item 4 clip poster drain deferred", error);
         }
       })());
+    }
+    if (item4AssetsNeedStudioCompress(assets) && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(item4PulseStudioCompressJob(env, recordId).catch((error) => {
+        console.warn("Item 4 studio-compress pulse deferred from workspace status", error);
+      }));
     }
   } catch (error) {
     masterAuthorityResume = {

@@ -265,7 +265,7 @@ The service-account JSON belongs only in the Video Compressor runtime credential
 
 Never commit `.env`, `.venv/`, or `logs/`. Deploy with `Deploy-SMService.ps1 -Service pipeline-runner` once the runtime folder exists.
 
-Studio Workers deploy from GitHub on merge. This Windows process does not. A new `/jobs/...` or `/stages/...` route 404s until the runtime copy is redeployed and the listener on :3350 is restarted. After `clip_poster` lands on `main`, run:
+Studio Workers deploy from GitHub on merge. This Windows process does not. A new `/jobs/...` or `/stages/...` route 404s until the runtime copy is redeployed and the listener on :3350 is restarted. After `studio_compress` lands on `main`, run:
 
 ```bat
 deploy\local-services\DEPLOY-pipeline-runner.bat
@@ -277,7 +277,7 @@ or:
 .\deploy\local-services\Deploy-SMService.ps1 -Service pipeline-runner -Yes
 ```
 
-`https://pipeline.chicagoshining.com/health` must then report `version` `2026-09-01-clip-poster` (or newer) and `/stages` must list `clip_poster`. If `.env` pins `SERVICE_VERSION`, update that pin when you deploy. The live 2026-08-24 process will keep 404ing `/jobs/studio-clip-poster` until this deploy happens.
+`https://pipeline.chicagoshining.com/health` must then report `version` `2026-09-06-studio-compress` (or newer) and `/stages` must list `studio_compress`. If `.env` pins `SERVICE_VERSION`, update that pin when you deploy. The previous process will keep 404ing `/jobs/studio-compress` until this deploy happens.
 
 ## Repository placement
 
