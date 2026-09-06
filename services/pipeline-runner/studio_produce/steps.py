@@ -567,6 +567,10 @@ def step_crops(client: AirtableClient, ctx: dict[str, Any]) -> str:
 def step_stamp(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if not ctx.get("outputs"):
         raise StepBlocked("No Platform Outputs found for this Production Request")
+    if is_finished(ctx) and finished_origin_kind((ctx.get("request") or {}).get("fields") or ctx.get("request") or {}) == "finished-video":
+        from studio_produce.public_preview import ensure_finished_preview_masters
+
+        ctx["request"] = ensure_finished_preview_masters(client, ctx["request"])
     if is_finished(ctx) and ctx.get("parent"):
         from studio_produce.thumbnail import ensure_platform_thumbnails
 

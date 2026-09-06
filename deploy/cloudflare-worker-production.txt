@@ -329,4 +329,6 @@ Finished passthrough heal Worker deploy: 2026-09-05 - Finished video seed/inspec
 
 Finished video preview Worker deploy: 2026-09-05 - Treat studio/master-assets and studio/previews MP4s as playable preview sources. Graph/YouTube covers still require studio/previews or publish images only. Worker 0.10.242-finished-preview-play.
 
+Finished video public preview Worker deploy: 2026-09-06 - Copy finished uploads onto studio/previews/ on the public media host at intake. master-assets is private and 404s on media.chicagoshining.com. Produce and the continuation listener restage from Drive or private R2 if that public copy is missing. Worker 0.10.243-finished-preview-public.
+
 
