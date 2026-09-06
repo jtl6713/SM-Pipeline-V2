@@ -2288,7 +2288,7 @@
 
   const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
   const ITEM4_CLIP_HARD_MAX_BYTES = 200 * 1024 * 1024;
-  const ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES = 1024 * 1024 * 1024;
+  const ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES = Math.round(1.2 * 1024 * 1024 * 1024);
   const ITEM4_DIRECT_UPLOAD_MAX_BYTES = 95 * 1024 * 1024;
   const ITEM4_COMPRESS_POLL_TIMEOUT_MS = 20 * 60 * 1000;
   let item4OversizedClipNotice = "";
@@ -4895,7 +4895,7 @@
     const bytes = Number(video?.size || 0);
     if (bytes > ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES) {
       setAzFinishedMessage(
-        `${video?.name || "This video"} is ${item4ClipFileMb(video)} MB. Studio’s limit is 1 GB — compress it first, then drop it again.`,
+        `${video?.name || "This video"} is ${item4ClipFileMb(video)} MB. Studio’s limit is 1.2 GB — compress it first, then drop it again.`,
         "error-text",
       );
       return;
@@ -4922,7 +4922,7 @@
       if (!started || !activeProductionRequest?.id) {
         failAzFinishedIngest(
           item4OversizedClipNotice
-            || "Studio could not start this upload. Refresh and try again with an MP4 under 1 GB.",
+            || "Studio could not start this upload. Refresh and try again with an MP4 under 1.2 GB.",
         );
         return;
       }
