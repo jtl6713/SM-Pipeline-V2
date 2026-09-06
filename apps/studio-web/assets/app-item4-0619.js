@@ -187,7 +187,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.249-studio-compress";
+  const BUILD_ID = "item4-0.6.250-promote-to-production";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1531,9 +1531,12 @@
 
   function ideaStatusLabel(idea) {
     if (idea?.is_on_hold) return "On Hold";
+    if (ideaIsPromoted(idea)) return "In production";
     if (String(idea?.photo_wait_status || "") === "Waiting") return "Waiting for photos";
-    if (String(idea?.photo_wait_status || "") === "Ready" && !ideaIsPromoted(idea)) return "Photos ready";
-    return idea?.status || "Unknown";
+    if (String(idea?.photo_wait_status || "") === "Ready") return "Photos ready";
+    const status = String(idea?.status || "").trim();
+    if (status === "Sent for Review" || status === "Generated") return "Ready to produce";
+    return status || "Unknown";
   }
 
   function ideaIsPromoted(idea) {
@@ -1547,9 +1550,17 @@
     return !ideaIsPromoted(idea) && idea?.status !== "Approved";
   }
 
+  function ideaHasProductionRequest(idea) {
+    return Array.isArray(idea?.production_request_links) && idea.production_request_links.length > 0;
+  }
+
   function ideaCanPromote(idea) {
     const wait = String(idea?.photo_wait_status || "").trim();
     return !ideaIsPromoted(idea) && !idea?.is_on_hold && wait !== "Waiting" && wait !== "Ready";
+  }
+
+  function ideaShowPromoteAction(idea) {
+    return ideaCanPromote(idea) && !ideaHasProductionRequest(idea);
   }
 
   function ideaPhotoWaitActive(idea) {
@@ -1593,7 +1604,7 @@
     if ($("promotePhotoWaitHint")) $("promotePhotoWaitHint").hidden = !wait.waits;
     const promoteButton = $("promoteIdeaButton");
     if (promoteButton && !ideaIsPromoted(activeIdea) && !activeIdea?.is_on_hold && !ideaPhotoWaitActive(activeIdea)) {
-      promoteButton.textContent = wait.waits ? "Approve and wait for photos" : "Approve & Promote";
+      promoteButton.textContent = wait.waits ? "Approve and wait for photos" : "Promote to production";
     }
     if (wait.image_mode === "Wait for matching photos" && $("promoteCarouselSlideMode")) {
       $("promoteCarouselSlideMode").value = "Target range";
@@ -1696,11 +1707,9 @@
     $("restoreIdeaButton").disabled = ideaIsPromoted(idea);
 
     const promotable = ideaCanPromote(idea);
-    const waitingForI4 = idea?.status === "Approved" && !promoted && !ideaPhotoWaitActive(idea);
     const libraryPromote = $("ideaLibraryPromote");
     if (libraryPromote) {
       libraryPromote.hidden = Boolean(idea?.is_on_hold) || promoted;
-      libraryPromote.open = waitingForI4 || ideaPhotoWaitActive(idea);
     }
     $("promoteIdeaButton").disabled = !promotable;
     $("ideaPromotionZone").classList.toggle("promotion-disabled", !promotable);
@@ -1719,7 +1728,7 @@
       $("promoteIdeaButton").textContent = "Already promoted";
       setManageMessage("Promotion is complete. This Idea Candidate is intentionally locked; there is no background save or promotion task running.", "success");
     } else if (idea?.is_on_hold) {
-      setManageMessage("Restore this idea before approving and promoting it.", "");
+      setManageMessage("Restore this idea before promoting it to production.", "");
     } else if (String(idea?.photo_wait_status || "") === "Waiting") {
       const high = Number(idea?.photo_match?.high_count || 0);
       const min = Number(idea?.carousel_slide_count_min || 0);
@@ -1731,10 +1740,10 @@
       const count = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links.length : (idea?.photo_match?.selected?.length || 0);
       setManageMessage(`${count || "Matched"} photo${count === 1 ? "" : "s"} attached. Open Production to set content rules, then approve rendering there.`, "success");
     } else if (idea?.status === "Approved") {
-      setManageMessage("This idea is approved but not yet linked to a content item. Open Promote without photos to retry.", "");
+      setManageMessage("This idea is approved but not yet linked to a content item. Use Promote to production to retry.", "");
     } else {
       syncPromotionPanels();
-      setManageMessage();
+      setManageMessage("Promote to production below. No review email is required.", "");
     }
   }
 
@@ -1774,13 +1783,21 @@
     return idea;
   }
 
-  function openIdeaDrawer(idea) {
+  function openIdeaDrawer(idea, { focusPromote = false } = {}) {
     updateIdeaDrawer(idea);
     $("ideaDrawerBackdrop").hidden = false;
     $("ideaManageDrawer").classList.add("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "false");
     document.body.classList.add("drawer-open");
-    setTimeout(() => $("editIdeaTitle").focus(), 80);
+    setTimeout(() => {
+      if (focusPromote) {
+        $("ideaLibraryPromote")?.setAttribute("open", "");
+        $("promoteIdeaButton")?.focus();
+        $("promoteIdeaButton")?.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
+      $("editIdeaTitle").focus();
+    }, 80);
   }
 
   async function closeIdeaDrawer({ save = true } = {}) {
@@ -1946,14 +1963,14 @@
     const confirmed = window.confirm(
       wait.waits
         ? `Approve "${label}" and wait for photos?\n\nStudio will not create a Content Item yet. When at least ${$("promoteCarouselSlideMin")?.value || 3} high-confidence stills exist, it will attach all of them up to ${$("promoteCarouselSlideMax")?.value || 10} and open Production for rules.`
-        : `Approve and promote "${label}"?\n\nStudio will submit this production setup for approval and create the content item.`
+        : `Promote "${label}" to production?\n\nStudio will create the content item from this idea. No review email is sent.`
     );
     if (!confirmed) return;
 
     const button = $("promoteIdeaButton");
     button.disabled = true;
     button.textContent = wait.waits ? "Approving…" : "Promoting…";
-    setManageMessage(wait.waits ? "Approving and waiting for photos…" : "Sending for approval…", "");
+    setManageMessage(wait.waits ? "Approving and waiting for photos…" : "Promoting to production…", "");
 
     const payload = {
       content_type: contentType,
@@ -2003,14 +2020,14 @@
 
       if (ideaIsPromoted(record)) {
         const contentRecordId = record.promoted_content_record_id || (record.content_item_links || [])[0] || "created Content Item";
-        setManageMessage(`Approved and promoted. Content item: ${contentRecordId}.`, "success");
+        setManageMessage(`Promoted to production. Content item: ${contentRecordId}.`, "success");
       } else {
-        setManageMessage("Approved. Promotion is still finishing; use Refresh if the content item does not appear shortly.", "success");
+        setManageMessage("Promotion is still finishing; use Refresh if the content item does not appear shortly.", "success");
       }
     } catch (e) {
       setManageMessage(e.message, "error-text");
     } finally {
-      button.textContent = "Approve & Promote";
+      button.textContent = "Promote to production";
       if (activeIdea && ideaCanPromote(activeIdea)) button.disabled = false;
     }
   });
@@ -9032,7 +9049,12 @@
       return;
     }
     const sorted = sortedIdeaRecords(records);
-    target.innerHTML = `<table class="data-table idea-table"><thead><tr>${ideaSortHeader("idea", "Idea")}${ideaSortHeader("status", "Status")}${ideaSortHeader("type", "Type")}${ideaSortHeader("platforms", "Platforms")}${ideaSortHeader("structure", "Structure")}${ideaSortHeader("production", "Production")}<th></th></tr></thead><tbody>${sorted.map((r) => `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></td></tr>`).join("")}</tbody></table>`;
+    target.innerHTML = `<table class="data-table idea-table"><thead><tr>${ideaSortHeader("idea", "Idea")}${ideaSortHeader("status", "Status")}${ideaSortHeader("type", "Type")}${ideaSortHeader("platforms", "Platforms")}${ideaSortHeader("structure", "Structure")}${ideaSortHeader("production", "Production")}<th></th></tr></thead><tbody>${sorted.map((r) => {
+      const promote = ideaShowPromoteAction(r)
+        ? `<button type="button" class="manage-button promote-row-button" data-idea-id="${escapeHtml(r.id)}" data-idea-action="promote">Promote</button>`
+        : "";
+      return `<tr class="${r.is_on_hold ? "idea-row-held" : ""}"><td><div class="title-cell">${value(r.title)}</div><div class="subtle">${value(r.summary, "")}${r.created_at ? `${r.summary ? " · " : ""}Created ${dateValue(r.created_at)}` : ""}</div></td><td>${badge(ideaStatusLabel(r))}</td><td>${value(r.content_type)}</td><td>${join(r.platforms)}</td><td>${ideaStructureLabel(r)}</td><td><div class="subtle">${escapeHtml(ideaProductionLabel(r))}</div></td><td><div class="idea-row-actions">${promote}<button type="button" class="manage-button" data-idea-id="${escapeHtml(r.id)}">Manage</button></div></td></tr>`;
+    }).join("")}</tbody></table>`;
     target.querySelectorAll("[data-idea-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -9050,7 +9072,7 @@
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
       button.addEventListener("click", () => {
         const idea = byId.get(button.dataset.ideaId);
-        if (idea) openIdeaDrawer(idea);
+        if (idea) openIdeaDrawer(idea, { focusPromote: button.dataset.ideaAction === "promote" });
       });
     });
   }

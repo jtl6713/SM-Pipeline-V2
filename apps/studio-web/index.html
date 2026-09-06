@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.249-studio-compress">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.250-promote-to-production">
 </head>
 <body>
  <header class="topbar">
@@ -90,7 +90,7 @@
 
  <section id="page-ideas" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then add photos. Promotion happens after the photos are in — not from the type list on the idea.</p></div>
+ <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then Promote to production. No review email is required. Add photos first if you want new footage on the request.</p></div>
  <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="generateIdeasButton">Generate AI ideas</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
  </div>
  <section class="panel idea-generate-panel" id="ideaGeneratePanel" hidden>
@@ -1312,13 +1312,13 @@
  <li><strong>Generate AI ideas</strong> — create 1–10 ideas. Studio waits until they show up in the table.</li>
  <li><strong>New idea</strong> — select an existing unpromoted candidate or enter a title/summary by hand.</li>
  <li><strong>Manage</strong> — edit copy, hold/restore, delete, or choose <em>Add new photos</em> / <em>Use existing</em> to open Production.</li>
- <li><strong>Promote without photos</strong> — advanced path when footage already lives in the catalog. Requires a summary. Most work should use Add photos instead.</li>
+ <li><strong>Promote to production</strong> — creates the content item from this idea. No review email is sent. Requires a summary, content type, and platforms.</li>
  </ul>
  <figure class="support-shot">
  <img src="/assets/support/ideas-new.jpg?v=0.6.102" alt="New idea form on the Ideas page" width="1440" height="920">
  <figcaption>+ New idea opens the same form in manual mode so you can type a title without picking from the queue.</figcaption>
  </figure>
- <p>Status on the table is the candidate’s Airtable state (open, held, promoted). Promoted rows leave this queue.</p>
+ <p>Ready to produce means the idea is in the queue. Promote it here; nothing publishes until Ready for Review → Approve publish.</p>
  <button type="button" class="primary-button" data-open-page="ideas">Go to Ideas</button>
  </article>
  <article class="support-article" data-support-article="production" hidden>
@@ -1470,14 +1470,12 @@
  </div>
  </div>
 
- <details class="idea-library-promote" id="ideaLibraryPromote">
- <summary>Promote without photos (advanced)</summary>
- <p class="idea-library-promote-copy">Uses the existing media library and R2. This does not attach photos you upload. Open only if footage already lives in the catalog.</p>
+ <section class="idea-library-promote" id="ideaLibraryPromote">
  <div class="promotion-zone" id="ideaPromotionZone">
  <div class="promotion-heading">
  <div>
- <strong>Library-asset promote</strong>
- <span>Sends type and platforms for approval and creates a content item from library footage. Requires a summary.</span>
+ <strong>Promote to production</strong>
+ <span>Creates the content item from this idea. No review email is sent. Use Add new photos or Use existing if you want to attach footage first. Requires a summary.</span>
  </div>
  </div>
 
@@ -1533,12 +1531,12 @@
  <p class="subtle" id="promotePhotoWaitHint" hidden>Approve keeps this idea waiting. Studio attaches every high-confidence still up to the maximum once the minimum is met. You still set production rules and approve rendering later.</p>
  </div>
 
- <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction for approval and promotion."></textarea></label>
- <button type="button" class="promote-button" id="promoteIdeaButton">Approve &amp; Promote</button>
+ <label class="form-field"><span>Production notes <em>optional</em></span><textarea id="promoteProductionNotes" maxlength="3000" rows="3" placeholder="Optional direction for production."></textarea></label>
+ <button type="button" class="promote-button" id="promoteIdeaButton">Promote to production</button>
  <button type="button" class="secondary-button" id="matchIdeaPhotosButton" hidden>Match photos now</button>
  <button type="button" class="secondary-button" id="openIdeaProductionButton" hidden>Open Production</button>
  </div>
- </details>
+ </section>
 
  <div class="form-message" id="ideaManageMessage" aria-live="polite"></div>
 
@@ -1561,6 +1559,6 @@
 
  <script src="/assets/config.js?v=0.6.240-analytics-seq"></script>
  <script src="/assets/ez-plan.js?v=0.6.247-suggested-schedules"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.249-studio-compress"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.250-promote-to-production"></script>
 </body>
 </html>

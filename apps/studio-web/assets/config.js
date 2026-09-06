@@ -33,7 +33,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     promoteCarouselImageMode: "AI generated creates slides. Manual Upload uses attached photos. Wait for matching photos approves the idea and auto-attaches related library stills.",
     matchIdeaPhotosButton: "Evaluate classified stills now. This does not approve rendering.",
     openIdeaProductionButton: "Open the Production request to set content rules. Rendering still needs a separate approve.",
-    promoteIdeaButton: "Approve this idea. Target-range photo ideas wait for stills; other types promote through I3/I4 immediately.",
+    promoteIdeaButton: "Promote this idea to production. No review email is sent. Target-range photo ideas wait for stills; other types create the content item immediately. Nothing publishes until Ready for Review → Approve publish.",
     useExistingLibraryButton: "Open suggested Drive stills for this idea. Uncheck any you do not want, or search the library to add more.",
     item4ChooseLibrary: "Review suggested Drive stills, uncheck to remove, or search the library to add more.",
     item4LibraryAddButton: "Apply checked Drive stills to this request: add new checks and remove unchecked ones.",
