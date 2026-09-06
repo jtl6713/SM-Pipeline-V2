@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from a2.processor import existing_intake_record, process_request
+from a2.processor import existing_intake_record, process_request, _intake_fields
 
 
 def test_existing_intake_record_matches_drive_id_first():
@@ -168,3 +168,25 @@ def test_process_request_converts_wav_audio(monkeypatch):
     assert updated["Asset Name"] == "Sunset drone bed.mp3"
     assert updated["MIME_Type"] == "audio/mpeg"
     assert updated["File_Extension"] == "mp3"
+
+
+def test_intake_fields_write_clip_duration_from_drive_metadata():
+    fields = _intake_fields(
+        {
+            "name": "riverwalk.mp4",
+            "id": "clip1",
+            "mimeType": "video/mp4",
+            "size": "1000",
+            "fileExtension": "mp4",
+            "videoMediaMetadata": {"durationMillis": "42100"},
+        },
+        share_url="https://drive.example/clip",
+        batch_id="batch-1",
+    )
+    assert fields["Duration_Seconds"] == 42
+    photo = _intake_fields(
+        {"name": "still.jpg", "id": "img1", "mimeType": "image/jpeg", "size": "10", "fileExtension": "jpg"},
+        share_url="https://drive.example/still",
+        batch_id="batch-1",
+    )
+    assert "Duration_Seconds" not in photo
