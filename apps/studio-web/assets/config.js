@@ -61,7 +61,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsRunDailyIdeas: "Run today's enabled daily-idea batches immediately. Only profiles whose Daily Ideas toggle is enabled are included.",
     operationsRunAutonomous: "Run the autonomous Chicago trend-to-review path now. Only profiles with Autonomous produce enabled are included. This does not publish.",
     operationsAutonomousMeta: "Shows the last autonomous produce run or skip reason returned by the Operations API.",
-    operationsRunIntake: "Scan the Drive intake folder now. The same scan also runs every 15 minutes. Oversized videos skip intake and compression starts automatically.",
+    operationsRunIntake: "Scan the Drive intake folder now. The same drain also starts every 10 minutes and keeps going until remaining files are compressed if needed, recorded, and moved.",
     operationsCapAudioSilence: "Rewrite existing catalog audio on Google Drive so leading silence is no longer than 0.5 seconds. Already processed tracks are skipped.",
     operationsResetRenderUrls: "Repair stale Remotion render URLs on eligible failed/waiting records. Use this after the renderer URL or tunnel has changed.",
     operationsRetryAssetSelection: "Retry asset selection for outputs that previously failed at the asset-selection stage. It does not rerun healthy outputs.",

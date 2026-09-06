@@ -44,6 +44,96 @@ def test_process_request_skips_and_trashes_existing_files(monkeypatch):
     assert airtable.create_records.call_count == 1
 
 
+def test_drain_until_idle_processes_a_second_batch(monkeypatch):
+    from a2.processor import drain_until_idle
+
+    listings = [
+        [{"id": "a", "name": "A.jpg", "mimeType": "image/jpeg", "size": "10", "fileExtension": "jpg"}],
+        [{"id": "b", "name": "B.jpg", "mimeType": "image/jpeg", "size": "20", "fileExtension": "jpg"}],
+        [],
+    ]
+    drive = MagicMock()
+    drive.list_files.side_effect = lambda **_kwargs: listings.pop(0) if listings else []
+    drive.share_anyone_reader.return_value = {"webContentLink": "https://drive.example/x"}
+    drive.move_file.side_effect = lambda file_id, *_args, **_kwargs: {"id": file_id, "webContentLink": "https://drive.example/moved"}
+    airtable = MagicMock()
+    airtable.list_records.return_value = []
+    airtable.create_records.side_effect = [[{"id": "recA"}], [{"id": "recB"}]]
+    gmail = MagicMock()
+    started = []
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
+    monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
+        "Media_Class": "Photo",
+        "Asset_Role": "Raw Photo",
+        "Raw_Source_Eligibility": "Eligible",
+    })
+    monkeypatch.setattr("a2.processor._start_oversize_compression", lambda: started.append("a1s") or {"started": True})
+    monkeypatch.setattr("a2.processor._daisy_a2b", lambda **_kwargs: {"triggered": False})
+
+    result = drain_until_idle(trigger_a2b=True, wait_for_next=True)
+    assert result["intaken_count"] == 2
+    assert result["intake_passes"] == 3
+    assert result["intaken_ids"] == ["recA", "recB"]
+    assert started == []
+
+
+def test_drain_until_idle_starts_compression_then_continues(monkeypatch):
+    from a2.processor import drain_until_idle
+
+    listings = [
+        [
+            {"id": "big", "name": "Huge.mp4", "mimeType": "video/mp4", "size": "150000000", "fileExtension": "mp4"},
+            {"id": "ok", "name": "Still.jpg", "mimeType": "image/jpeg", "size": "10", "fileExtension": "jpg"},
+        ],
+        [],
+    ]
+    drive = MagicMock()
+    drive.list_files.side_effect = lambda **_kwargs: listings.pop(0) if listings else []
+    drive.share_anyone_reader.return_value = {"webContentLink": "https://drive.example/x"}
+    drive.move_file.return_value = {"id": "ok", "webContentLink": "https://drive.example/moved"}
+    airtable = MagicMock()
+    airtable.list_records.return_value = []
+    airtable.create_records.return_value = [{"id": "recOK"}]
+    gmail = MagicMock()
+    started = []
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
+    monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
+        "Media_Class": "Photo",
+        "Asset_Role": "Raw Photo",
+        "Raw_Source_Eligibility": "Eligible",
+    })
+    monkeypatch.setattr("a2.processor._start_oversize_compression", lambda: started.append("a1s") or {"started": True})
+    monkeypatch.setattr("a2.processor._daisy_a2b", lambda **_kwargs: {"triggered": False})
+
+    result = drain_until_idle(trigger_a2b=False)
+    assert result["intaken_count"] == 1
+    assert result["skipped_oversize_count"] == 1
+    assert result["compression_started"] is True
+    assert started == ["a1s"]
+
+
+def test_drain_skips_when_intake_already_running():
+    from a2.processor import _INTAKE_LOCK, process_request
+
+    assert _INTAKE_LOCK.acquire(blocking=False)
+    try:
+        result = process_request(drain=True, trigger_a2b=False)
+        assert result["processed"] is False
+        assert result["reason"] == "intake_already_running"
+    finally:
+        _INTAKE_LOCK.release()
+
+
 def test_process_request_converts_wav_audio(monkeypatch):
     from audio.wav_to_mp3 import WavConvertResult
 

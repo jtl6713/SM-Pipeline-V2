@@ -19,6 +19,7 @@ def run(request: StageRequest):
             "dry_run": as_bool(extra.get("dry_run")),
             "trigger_a3": extra.get("trigger_a3") is not False,
             "wait_for_next": extra.get("wait_for_next") is not False,
+            "drain": as_bool(extra.get("drain")),
         },
         skip_message="A2B did not backfill Drive videos",
         ok_message="A2B backfilled {backfill_count} videos",

@@ -77,6 +77,7 @@ def process_request(
     trigger_a3: bool = True,
     wait_for_next: bool = True,
     test_run_id: str | None = None,
+    drain: bool = False,
 ) -> dict[str, Any]:
     batch_id = chicago_now().strftime("%Y-%m-%d-%H") + "-A2B-DriveVideoBackfill"
     since = (chicago_now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -146,6 +147,7 @@ def process_request(
                 dry_run=False,
                 trigger_a4=True,
                 wait_for_next=wait_for_next,
+                drain=drain,
                 test_run_id=test_run_id,
             ),
             wait=as_bool(wait_for_next, True),
