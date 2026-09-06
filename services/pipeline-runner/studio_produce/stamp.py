@@ -8,6 +8,7 @@ from render.fields import field, field_str
 from studio_produce.constants import NATIVE_OUTPUT_TYPES, STORY_OUTPUT_TYPES
 from studio_produce.context import expected_photo_count, master_assets, variant_manifest
 from studio_produce.job import finished_origin_kind, parse_json
+from studio_produce.thumbnail import is_designed_cover_url
 from studio_produce.media import (
     asset_is_video,
     asset_media_kind,
@@ -653,7 +654,7 @@ def stamp_fields(
             fields.pop("Timing_Status", None)
         elif existing_timeline:
             fields["Timing_Status"] = "Ready"
-    if thumb:
+    if is_designed_cover_url(thumb):
         fields["Thumbnail_URL"] = thumb
     first_url = clips[0]["url"] if clips else None
     public = first_url if str(first_url or "").startswith("https://media.chicagoshining.com/") else None
