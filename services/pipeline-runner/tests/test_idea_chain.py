@@ -123,6 +123,23 @@ def test_i2_buttons_use_python_hook():
     assert review_action_url("https://example/hooks/i3/t", decision="tune", record_id="rec1").endswith("decision=tune&record_id=rec1") or "record_id=rec1" in review_action_url("https://example/hooks/i3/t", decision="tune", record_id="rec1")
 
 
+def test_i2_skips_studio_managed_candidates():
+    from i2.processor import is_studio_managed_candidate
+
+    assert is_studio_managed_candidate(
+        {"id": "recPR", "fields": {"Production Requests": ["recPR1"]}}
+    )
+    assert is_studio_managed_candidate(
+        {"id": "recEZ", "fields": {"Production_Config_Notes": "origin=ez-wizard; ez-input=finished-video"}}
+    )
+    assert is_studio_managed_candidate(
+        {"id": "recAUTO", "fields": {"Production_Config_Notes": "origin=autonomous\nmedia_asset_ids=recM"}}
+    )
+    assert not is_studio_managed_candidate(
+        {"id": "recI1", "fields": {"Candidate_Title": "Daily batch idea", "Idea_Batch": ["recBATCH"]}}
+    )
+
+
 def test_i3_and_i4_skip_without_airtable():
     missing = run_i3(StageRequest(extra={"decision": "approved"}))
     assert missing.status == "skipped"

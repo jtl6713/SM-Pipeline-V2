@@ -11,7 +11,7 @@ from i2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from i2.email_builder import review_email_html, review_subject
 from idea.constants import DEFAULT_I2_EMAIL_TO, I2_REVIEW_VIEW
 from integrations.gmail import GmailClient
-from render.fields import field_str
+from render.fields import field, field_str, linked_ids
 
 
 def review_url() -> str:
@@ -24,6 +24,20 @@ def review_url() -> str:
     if "hook.us2.make.com" in hook:
         hook = ""
     return hook
+
+
+def is_studio_managed_candidate(record: dict[str, Any]) -> bool:
+    """Studio-created ideas are promoted in Studio, not via the I2 review email."""
+    for name in ("Production Requests", "Production_Request"):
+        if linked_ids(field(record, name)):
+            return True
+    notes = " ".join(
+        [
+            field_str(record, "Production_Config_Notes"),
+            field_str(record, "Idea_Summary"),
+        ]
+    )
+    return "origin=ez-" in notes or "origin=autonomous" in notes
 
 
 def process_request(
@@ -40,10 +54,15 @@ def process_request(
     candidates = client.list_records(SOURCE_CANDIDATES_TABLE, view=I2_REVIEW_VIEW, max_records=50)
     if test_run_id:
         candidates = [row for row in candidates if field_str(row, "Test_Run_ID") == test_run_id]
-    preview["candidate_ids"] = [row["id"] for row in candidates]
-    preview["subject"] = review_subject(candidates) if candidates else None
+    reviewable = [row for row in candidates if not is_studio_managed_candidate(row)]
+    preview["loaded_count"] = len(candidates)
+    preview["skipped_studio_count"] = len(candidates) - len(reviewable)
+    preview["candidate_ids"] = [row["id"] for row in reviewable]
+    preview["subject"] = review_subject(reviewable) if reviewable else None
     if not candidates:
         return {"processed": False, "reason": "no_generated_candidates", **preview}
+    if not reviewable:
+        return {"processed": False, "reason": "studio_managed_only", **preview}
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
@@ -54,16 +73,16 @@ def process_request(
     to_addr = str(settings.get("i2_email_to") or DEFAULT_I2_EMAIL_TO).strip()
     send = GmailClient().send_html(
         to=to_addr,
-        subject=review_subject(candidates),
-        html_body=review_email_html(candidates, review_url=hook),
+        subject=review_subject(reviewable),
+        html_body=review_email_html(reviewable, review_url=hook),
     )
-    for row in candidates:
+    for row in reviewable:
         client.update_record(SOURCE_CANDIDATES_TABLE, row["id"], {"Candidate_Status": "Sent for Review"})
     return {
         "processed": True,
         "gmail_message_id": send.get("id"),
         "email_to": to_addr,
         "review_url_host": hook.split("?")[0],
-        "sent_count": len(candidates),
+        "sent_count": len(reviewable),
         **preview,
     }
