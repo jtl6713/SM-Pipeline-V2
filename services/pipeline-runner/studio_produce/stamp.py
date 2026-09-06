@@ -261,7 +261,9 @@ def _renderable(variant: Any) -> bool:
 
 
 def _public_master_url(master: dict[str, Any]) -> str:
-    return str(master.get("url") or master.get("preview_url") or "").strip()
+    from ap0.public_mp4 import existing_finished_preview_url
+
+    return existing_finished_preview_url(master) or str(master.get("url") or master.get("preview_url") or "").strip()
 
 
 def _public_cdn_url(value: Any) -> str:
@@ -657,7 +659,8 @@ def stamp_fields(
     if is_designed_cover_url(thumb):
         fields["Thumbnail_URL"] = thumb
     first_url = clips[0]["url"] if clips else None
-    public = first_url if str(first_url or "").startswith("https://media.chicagoshining.com/") else None
+    from ap0.public_mp4 import is_public_publish_url
+    public = first_url if is_public_publish_url(str(first_url or "")) else None
     if package.get("finished"):
         video = package.get("finished_kind") == "finished-video"
         fields.update({

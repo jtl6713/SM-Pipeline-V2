@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.242-finished-preview-play",
+          version: "0.10.243-finished-preview-public",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -1623,6 +1623,22 @@ function item4UrlIsPublicPublishCdn(url) {
   if (!href.startsWith("https://media.chicagoshining.com/")) return false;
   const path = href.slice("https://media.chicagoshining.com/".length);
   return path.startsWith("studio/previews/") || path.startsWith("publish/");
+}
+
+function item4FinishedVideoPreviewKey(requestId, assetId) {
+  const req = String(requestId || "").trim();
+  const id = String(assetId || "file").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "file";
+  return `studio/previews/finished-video/${req}/${id}.mp4`;
+}
+
+function item4FinishedMasterPlayUrl(master, requestRecord) {
+  const preview = String(master?.preview_public_url || "").trim();
+  if (item4UrlIsPublicPublishCdn(preview)) return preview;
+  const url = String(master?.url || master?.preview_url || "").trim();
+  if (item4UrlIsPublicPublishCdn(url) && !/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(url)) return url;
+  const key = String(master?.preview_r2_key || "").trim().replace(/^\/+/, "");
+  if (key.startsWith("studio/previews/")) return `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
+  return url;
 }
 
 function item4UrlIsPublicPlayableVideo(url) {
@@ -4376,9 +4392,12 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
       const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
       const safeName = item4SafeFileName(file.name);
       const key = `studio/master-assets/${recordId}/${id}-${safeName}`;
-      const body = typeof file.stream === "function" ? file.stream() : await file.arrayBuffer();
+      const mime = item4NormalizedMimeType(file);
+      const body = finishedVideo || typeof file.stream !== "function"
+        ? await file.arrayBuffer()
+        : file.stream();
       await env.STUDIO_MEDIA.put(key, body, {
-        httpMetadata: { contentType: item4NormalizedMimeType(file) },
+        httpMetadata: { contentType: mime },
         customMetadata: { productionRequestId: recordId, originalName: String(file.name || safeName), assetId: id },
       });
       const m = metadata[i] || {};
@@ -4406,6 +4425,22 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
         url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`,
         uploaded_at: new Date().toISOString(),
       };
+      if (finishedVideo && isVideo) {
+        const previewKey = item4FinishedVideoPreviewKey(recordId, id);
+        const staged = await studioPutPublicObjectViaUploadWorker(env, {
+          key: previewKey,
+          body,
+          contentType: mime,
+          contentLength: Number(file.size || (body && body.byteLength) || 0),
+          outputId: recordId,
+        });
+        if (!staged.url) {
+          throw new HttpError(502, "Finished video could not be copied to the public preview host. Preview needs studio/previews/, not studio/master-assets.");
+        }
+        row.preview_r2_key = previewKey;
+        row.preview_public_url = staged.url;
+        row.url = staged.url;
+      }
       const poster = posters[i];
       if (isVideo && poster && typeof poster.arrayBuffer === "function" && Number(poster.size || 0) > 80 && item4IsClipPosterFile(poster)) {
         try {
@@ -10483,7 +10518,7 @@ function item4FinishedSourcePackageForOutput(requestRecord, outputRow, effective
   const clips = [];
   for (let index = 0; index < chosen.length; index += 1) {
     const master = chosen[index];
-    const url = String(master?.url || master?.preview_url || "").trim();
+    const url = item4FinishedMasterPlayUrl(master, requestRecord);
     if (!url) return null;
     clips.push({
       id: `finished-source-${index + 1}`,
@@ -11075,7 +11110,7 @@ function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
       Render_Status: firstUrl ? "Rendered" : null,
       Final_File_URL: firstUrl,
       Studio_Preview_URL: firstUrl,
-      Publish_Asset_URL: firstUrl && String(firstUrl).startsWith("https://media.chicagoshining.com/") ? firstUrl : null,
+      Publish_Asset_URL: firstUrl && item4UrlIsPublicPublishCdn(firstUrl) ? firstUrl : null,
       Asset_Need_Status: "Not Needed",
       Asset_Selection_Status: null,
       Composition_ID: null,
@@ -19129,6 +19164,18 @@ async function studioContinuationInspectOutput(env, po, cache) {
       finalUrl = String(sourcePackage?.clips?.[0]?.url || "").trim();
       if (!finalUrl) return { action: "wait_variants", reason: "finished_file_missing" };
     }
+    if (!nativePhoto) {
+      const publicUrl = await studioEnsureFinishedVideoPublicPreview(env, { ...context, po }, cache);
+      if (publicUrl) finalUrl = publicUrl;
+      if (!item4UrlIsPublicPublishCdn(finalUrl)) {
+        return {
+          action: "wait_thumbnail",
+          reason: "finished_preview_not_public",
+          contentItemId: context.parent?.id || null,
+          requestRecordId: context.requestRecord?.id || null,
+        };
+      }
+    }
     if (studioNeedsAiThumbnail(context.parent, context.requestRecord)) {
       return {
         action: "wait_thumbnail",
@@ -20618,46 +20665,140 @@ function studioImageContentType(buffer) {
 
 const R2_UPLOAD_WORKER_PUBLIC = "https://chicagoshining-r2-upload.joseph-t-logan.workers.dev";
 
-async function studioPutPublicJpegViaUploadWorker(env, record, buffer) {
+async function studioPutPublicObjectViaUploadWorker(env, input) {
+  const key = String(input?.key || "").trim().replace(/^\/+/, "");
+  const body = input?.body;
+  if (!key || body == null) return { url: "", skip: "missing-body" };
   const settings = await studioActivePipelineSettings(env, [
     "R2_UPLOAD_WORKER_URL",
     "R2_UPLOAD_WORKER_SECRET",
   ]);
   const secret = String(settings.R2_UPLOAD_WORKER_SECRET || "").trim();
   if (!secret) return { url: "", skip: "missing-upload-secret" };
-  const contentType = studioImageContentType(buffer);
-  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
-  const key = `studio/previews/platform-output/${record.id}/cover.${ext}`;
+  const contentType = String(input.contentType || "application/octet-stream");
   const endpoints = [...new Set([
     String(settings.R2_UPLOAD_WORKER_URL || "").trim().replace(/\/+$/, ""),
     R2_UPLOAD_WORKER_PUBLIC,
   ].filter(Boolean))];
+  const headers = {
+    "Content-Type": contentType,
+    "x-pipeline-secret": secret,
+    "x-output-id": String(input.outputId || ""),
+    "x-retain-class": String(input.retainClass || "preview"),
+  };
+  const length = Number(input.contentLength || input.body?.byteLength || 0);
+  if (Number.isFinite(length) && length > 0) headers["Content-Length"] = String(length);
   let lastStatus = 0;
   for (const workerUrl of endpoints) {
     try {
       const response = await fetch(`${workerUrl}?key=${encodeURIComponent(key)}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": contentType,
-          "Content-Length": String(buffer.byteLength),
-          "x-pipeline-secret": secret,
-          "x-output-id": record.id,
-          "x-retain-class": "preview",
-        },
-        body: new Uint8Array(buffer),
+        headers,
+        body: body instanceof ArrayBuffer ? new Uint8Array(body) : body,
       });
       lastStatus = response.status;
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) {
-        console.warn("public jpeg upload worker failed", record.id, response.status);
+        console.warn("public object upload worker failed", key, response.status);
         continue;
       }
       return { url: String(payload.public_url || `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`).trim(), skip: "" };
     } catch (error) {
-      console.warn("public jpeg upload worker threw", record.id, error);
+      console.warn("public object upload worker threw", key, error);
     }
   }
   return { url: "", skip: lastStatus ? `upload-http-${lastStatus}` : "upload-worker-failed" };
+}
+
+async function studioPublicVideoIsReachable(url) {
+  const href = String(url || "").trim();
+  if (!item4UrlIsPublicPublishCdn(href)) return false;
+  try {
+    const response = await fetch(href, {
+      method: "GET",
+      headers: { Range: "bytes=0-15", "User-Agent": "chicagoshining-studio-api/finished-preview" },
+    });
+    const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+    try { await response.body?.cancel(); } catch {}
+    return (response.ok || response.status === 206) && !type.includes("text/html") && !type.startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
+async function studioEnsureFinishedVideoPublicPreview(env, context, cache) {
+  const requestRecord = context?.requestRecord;
+  if (!requestRecord?.id) return "";
+  const masters = item4AssetManifest(requestRecord);
+  const video = masters.find((asset) => item4LooksLikeVideoAsset(asset)) || masters[0];
+  if (!video) return "";
+  const existing = item4FinishedMasterPlayUrl(video, requestRecord);
+  if (existing && await studioPublicVideoIsReachable(existing)) {
+    if (context.po?.id && String(f(context.po, "Final_File_URL") || "").trim() !== existing) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, context.po.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Final_File_URL: existing,
+            Studio_Preview_URL: existing,
+            Publish_Asset_URL: existing,
+          },
+          typecast: true,
+        }),
+      }).catch(() => null);
+    }
+    return existing;
+  }
+  const previewKey = String(video.preview_r2_key || "").trim() || item4FinishedVideoPreviewKey(requestRecord.id, video.id);
+  const masterKey = String(video.r2_key || "").trim();
+  if (!masterKey || !env.STUDIO_MEDIA) return "";
+  const object = await env.STUDIO_MEDIA.get(masterKey);
+  if (!object) return "";
+  const staged = await studioPutPublicObjectViaUploadWorker(env, {
+    key: previewKey,
+    body: object.body,
+    contentType: object.httpMetadata?.contentType || video.mime_type || "video/mp4",
+    contentLength: object.size || Number(video.size_bytes || 0),
+    outputId: requestRecord.id,
+  });
+  if (!staged.url) return "";
+  const nextMasters = masters.map((asset) => String(asset?.id) === String(video.id)
+    ? { ...asset, preview_r2_key: previewKey, preview_public_url: staged.url, url: staged.url }
+    : asset);
+  const updatedRequest = await item4UpdateRequestState(env, requestRecord.id, {
+    Studio_Master_Assets_JSON: JSON.stringify(nextMasters),
+  }).catch(() => null);
+  if (updatedRequest && cache?.requests) cache.requests.set(requestRecord.id, updatedRequest);
+  if (context.requestRecord) {
+    context.requestRecord = updatedRequest || context.requestRecord;
+  }
+  if (context.po?.id) {
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, context.po.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Final_File_URL: staged.url,
+          Studio_Preview_URL: staged.url,
+          Publish_Asset_URL: staged.url,
+        },
+        typecast: true,
+      }),
+    }).catch(() => null);
+  }
+  return staged.url;
+}
+
+async function studioPutPublicJpegViaUploadWorker(env, record, buffer) {
+  const contentType = studioImageContentType(buffer);
+  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const key = `studio/previews/platform-output/${record.id}/cover.${ext}`;
+  return studioPutPublicObjectViaUploadWorker(env, {
+    key,
+    body: buffer,
+    contentType,
+    contentLength: buffer.byteLength,
+    outputId: record.id,
+  });
 }
 
 async function studioEnsurePublicJpegForPublish(env, record) {

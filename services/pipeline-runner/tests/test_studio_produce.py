@@ -248,7 +248,8 @@ def test_finished_video_package_skips_crops():
                 "order": 1,
                 "name": "final.mp4",
                 "mime_type": "video/mp4",
-                "url": "https://media.chicagoshining.com/studio/master-assets/final.mp4",
+                "url": "https://media.chicagoshining.com/studio/previews/finished-video/recPRFinished/v1.mp4",
+                "preview_public_url": "https://media.chicagoshining.com/studio/previews/finished-video/recPRFinished/v1.mp4",
             }]),
         },
     }
@@ -260,8 +261,55 @@ def test_finished_video_package_skips_crops():
     fields = stamp_fields(package, None)
     assert fields["Output_Status"] == "Ready for Review"
     assert fields["Render_Status"] == "Rendered"
-    assert fields["Final_File_URL"].endswith(".mp4")
+    assert fields["Final_File_URL"].endswith("/studio/previews/finished-video/recPRFinished/v1.mp4")
+    assert fields["Publish_Asset_URL"] == fields["Final_File_URL"]
     assert fields["Composition_ID"] is None
+
+
+def test_finished_video_package_prefers_public_preview_over_master_assets():
+    request = {
+        "id": "recPRPreview",
+        "fields": {
+            "Production_Notes": "origin=ez-wizard; ez-input=finished-video",
+            "Studio_Master_Assets_JSON": json.dumps([{
+                "id": "v1",
+                "order": 1,
+                "name": "final.mp4",
+                "mime_type": "video/mp4",
+                "url": "https://media.chicagoshining.com/studio/master-assets/recPRPreview/v1.mp4",
+                "preview_public_url": "https://media.chicagoshining.com/studio/previews/finished-video/recPRPreview/v1.mp4",
+            }]),
+        },
+    }
+    output = {"id": "recPOPreview", "fields": {"Platform": "YouTube", "Studio_Output_Type": "Short"}}
+    package = finished_source_package(request, output, None)
+    fields = stamp_fields(package, None)
+    assert fields["Final_File_URL"].endswith("/studio/previews/finished-video/recPRPreview/v1.mp4")
+    assert "master-assets" not in fields["Final_File_URL"]
+    assert fields["Publish_Asset_URL"] == fields["Final_File_URL"]
+
+
+def test_ensure_finished_preview_skips_put_when_public_url_present():
+    from studio_produce.public_preview import ensure_finished_preview_masters
+
+    class Dummy:
+        def update_record(self, *args, **kwargs):
+            raise AssertionError("public preview already exists")
+
+    request = {
+        "id": "recPR1",
+        "fields": {
+            "Studio_Master_Assets_JSON": json.dumps([{
+                "id": "v1",
+                "name": "a.mp4",
+                "mime_type": "video/mp4",
+                "url": "https://media.chicagoshining.com/studio/previews/finished-video/recPR1/v1.mp4",
+                "preview_public_url": "https://media.chicagoshining.com/studio/previews/finished-video/recPR1/v1.mp4",
+                "preview_r2_key": "studio/previews/finished-video/recPR1/v1.mp4",
+            }]),
+        },
+    }
+    assert ensure_finished_preview_masters(Dummy(), request) is request
 
 
 def test_drive_video_is_not_a_designed_cover():
