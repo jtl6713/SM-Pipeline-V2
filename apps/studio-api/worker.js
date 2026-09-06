@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.244-studio-compress",
+          version: "0.10.245-intake-drain",
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
@@ -27754,7 +27754,7 @@ async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
   void authorization;
   const startedAt = new Date().toISOString();
   const { response, payload } = await item4PulsePipelineStage(env, "a2", {
-    extra: { trigger_a2b: true, wait_for_next: false },
+    extra: { trigger_a2b: true, wait_for_next: false, drain: true },
   }, "A2");
   if (!response.ok || payload?.status === "error") {
     throw new HttpError(502, payload?.message || `Python A2 returned HTTP ${response.status}`);

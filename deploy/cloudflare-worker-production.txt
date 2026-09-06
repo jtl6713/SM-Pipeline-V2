@@ -333,5 +333,8 @@ Finished video public preview Worker deploy: 2026-09-06 - Copy finished uploads 
 
 Studio auto-compress Worker deploy: 2026-09-06 - Finished-video and clip uploads over 100 MB stay in Studio. The Worker stores the original on private R2 and pulses pipeline-runner studio-compress, which uses the local Video Compressor and then stages the compressed MP4 to studio/previews/. Do not send Studio files through the Drive ingestion folder. Files over 200 MB still cannot upload through the Worker. Worker 0.10.244-studio-compress.
 
+Ingestion drain Worker deploy: 2026-09-06 - Process intake folder starts an A2 drain. Eligible files keep moving until the ingestion folder is idle. Oversized clips start A1S immediately and the next file starts when the previous compressed replacement is verified. Worker 0.10.245-intake-drain.
+
+
 
 

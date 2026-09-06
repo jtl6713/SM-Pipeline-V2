@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Any
 
 from a2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
@@ -11,6 +13,7 @@ from airtable.client import AirtableClient
 from airtable.constants import MEDIA_ASSETS_TABLE
 from asset.chain import daisy_payload, trigger_next
 from asset.constants import (
+    A2_DRAIN_MAX_PASSES,
     A2_DRIVE_PAGE_SIZE,
     DEFAULT_EMAIL_TO,
     GDRIVE_FOLDERS,
@@ -26,6 +29,8 @@ from config import load_settings
 from integrations.gmail import GmailClient
 from integrations.google_drive import GoogleDriveClient
 
+logger = logging.getLogger(__name__)
+
 FOLDER_LABELS = {
     "video": "ChicagoShining / Assets / Video",
     "branding": "ChicagoShining / Assets / Branding",
@@ -33,6 +38,8 @@ FOLDER_LABELS = {
     "other": "ChicagoShining / Assets / Misc",
     "audio": "ChicagoShining / Assets / Music",
 }
+
+_INTAKE_LOCK = threading.Lock()
 
 
 def existing_intake_record(
@@ -76,39 +83,56 @@ def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> di
     }
 
 
-def process_request(
-    *,
-    dry_run: bool = False,
-    trigger_a2b: bool = True,
-    wait_for_next: bool = True,
-    test_run_id: str | None = None,
-) -> dict[str, Any]:
-    batch_id = chicago_now().strftime("%Y-%m-%d-%H") + "-AssetIntake"
-    preview: dict[str, Any] = {
-        "make_scenario_id": MAKE_SCENARIO_ID,
-        "make_scenario_name": MAKE_SCENARIO_NAME,
-        "intake_batch_id": batch_id,
-        "test_run_id": test_run_id,
-    }
-    drive = GoogleDriveClient()
-    files = drive.list_files(
+def _list_ingestion_files(drive: GoogleDriveClient) -> list[dict[str, Any]]:
+    return drive.list_files(
         query=f"'{GDRIVE_INGESTION_FOLDER}' in parents and trashed = false",
         page_size=A2_DRIVE_PAGE_SIZE,
     )
+
+
+def _preview_base(*, test_run_id: str | None = None) -> dict[str, Any]:
+    return {
+        "make_scenario_id": MAKE_SCENARIO_ID,
+        "make_scenario_name": MAKE_SCENARIO_NAME,
+        "intake_batch_id": chicago_now().strftime("%Y-%m-%d-%H") + "-AssetIntake",
+        "test_run_id": test_run_id,
+    }
+
+
+def _start_oversize_compression() -> dict[str, Any]:
+    from a1s.processor import process_request as process_a1s
+
+    return process_a1s()
+
+
+def _daisy_a2b(*, wait_for_next: bool, test_run_id: str | None) -> dict[str, Any]:
+    from a2b.processor import process_request as process_a2b
+
+    return trigger_next(
+        "a2b",
+        daisy_payload("a2b"),
+        python_call=lambda: process_a2b(
+            dry_run=False,
+            trigger_a3=True,
+            wait_for_next=wait_for_next,
+            drain=True,
+            test_run_id=test_run_id,
+        ),
+        wait=as_bool(wait_for_next, True),
+    )
+
+
+def _intake_pass(
+    *,
+    trigger_a2b: bool = False,
+    wait_for_next: bool = True,
+    test_run_id: str | None = None,
+) -> dict[str, Any]:
+    preview = _preview_base(test_run_id=test_run_id)
+    drive = GoogleDriveClient()
+    files = _list_ingestion_files(drive)
     preview["file_ids"] = [str(item.get("id") or "") for item in files]
     preview["files_found"] = bool(files)
-    if dry_run:
-        preview["routes"] = [
-            {
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "mime": item.get("mimeType"),
-                "route": classify_intake_file(str(item.get("name") or ""), str(item.get("mimeType") or "")),
-                "size": parse_bytes(item.get("size")),
-            }
-            for item in files
-        ]
-        return {"processed": False, "dry_run": True, **preview}
 
     intaken: list[str] = []
     skipped_oversize: list[str] = []
@@ -118,6 +142,7 @@ def process_request(
         gmail = GmailClient()
         settings = load_settings()
         to_addr = str(settings.get("a2_email_to") or DEFAULT_EMAIL_TO).strip()
+        batch_id = str(preview["intake_batch_id"])
         for item in files:
             file_id = str(item.get("id") or "")
             name = str(item.get("name") or "")
@@ -197,19 +222,7 @@ def process_request(
     preview["skipped_existing_ids"] = skipped_existing
     next_result = None
     if trigger_a2b:
-        from a2b.processor import process_request as process_a2b
-
-        next_result = trigger_next(
-            "a2b",
-            daisy_payload("a2b"),
-            python_call=lambda: process_a2b(
-                dry_run=False,
-                trigger_a3=True,
-                wait_for_next=wait_for_next,
-                test_run_id=test_run_id,
-            ),
-            wait=as_bool(wait_for_next, True),
-        )
+        next_result = _daisy_a2b(wait_for_next=wait_for_next, test_run_id=test_run_id)
     return {
         "processed": True,
         "files_found": bool(files),
@@ -219,3 +232,156 @@ def process_request(
         "a2b": next_result,
         **preview,
     }
+
+
+def _merge_pass(total: dict[str, Any], result: dict[str, Any]) -> None:
+    total["intaken_ids"].extend(result.get("intaken_ids") or [])
+    total["skipped_oversize_ids"].extend(result.get("skipped_oversize_ids") or [])
+    total["skipped_existing_ids"].extend(result.get("skipped_existing_ids") or [])
+    total["file_ids"] = list(result.get("file_ids") or [])
+    total["files_found"] = bool(total["files_found"] or result.get("files_found"))
+    total["intake_passes"] = int(total.get("intake_passes") or 0) + 1
+
+
+def drain_until_idle(
+    *,
+    trigger_a2b: bool = True,
+    wait_for_next: bool = True,
+    test_run_id: str | None = None,
+) -> dict[str, Any]:
+    preview = _preview_base(test_run_id=test_run_id)
+    total: dict[str, Any] = {
+        **preview,
+        "intaken_ids": [],
+        "skipped_oversize_ids": [],
+        "skipped_existing_ids": [],
+        "file_ids": [],
+        "files_found": False,
+        "intake_passes": 0,
+        "compression_started": False,
+        "a1s": None,
+        "a2b": None,
+    }
+    started_a1s = False
+    for _pass in range(A2_DRAIN_MAX_PASSES):
+        result = _intake_pass(trigger_a2b=False, wait_for_next=False, test_run_id=test_run_id)
+        _merge_pass(total, result)
+        if result.get("skipped_oversize_count") and not started_a1s:
+            try:
+                total["a1s"] = _start_oversize_compression()
+                started_a1s = True
+                total["compression_started"] = True
+            except Exception:
+                logger.exception("A2 drain could not start oversized compression")
+        if not result.get("intaken_count"):
+            break
+    if trigger_a2b:
+        total["a2b"] = _daisy_a2b(wait_for_next=True, test_run_id=test_run_id)
+    return {
+        "processed": True,
+        "drained": True,
+        "files_found": bool(total["files_found"]),
+        "intaken_count": len(total["intaken_ids"]),
+        "skipped_oversize_count": len(total["skipped_oversize_ids"]),
+        "skipped_existing_count": len(total["skipped_existing_ids"]),
+        **total,
+    }
+
+
+def process_request(
+    *,
+    dry_run: bool = False,
+    trigger_a2b: bool = True,
+    wait_for_next: bool = True,
+    test_run_id: str | None = None,
+    drain: bool = False,
+    wait: bool = False,
+) -> dict[str, Any]:
+    preview = _preview_base(test_run_id=test_run_id)
+    if dry_run:
+        drive = GoogleDriveClient()
+        files = _list_ingestion_files(drive)
+        preview["file_ids"] = [str(item.get("id") or "") for item in files]
+        preview["files_found"] = bool(files)
+        preview["routes"] = [
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "mime": item.get("mimeType"),
+                "route": classify_intake_file(str(item.get("name") or ""), str(item.get("mimeType") or "")),
+                "size": parse_bytes(item.get("size")),
+            }
+            for item in files
+        ]
+        return {"processed": False, "dry_run": True, **preview}
+
+    if drain:
+        if not _INTAKE_LOCK.acquire(blocking=False):
+            return {
+                "processed": False,
+                "reason": "intake_already_running",
+                "intaken_count": 0,
+                "skipped_oversize_count": 0,
+                "skipped_existing_count": 0,
+                "files_found": False,
+                **preview,
+            }
+        drive = GoogleDriveClient()
+        try:
+            files = _list_ingestion_files(drive)
+        except Exception:
+            _INTAKE_LOCK.release()
+            raise
+        preview["file_ids"] = [str(item.get("id") or "") for item in files]
+        preview["files_found"] = bool(files)
+
+        def _run() -> None:
+            try:
+                drain_until_idle(
+                    trigger_a2b=False,
+                    wait_for_next=False,
+                    test_run_id=test_run_id,
+                )
+            except Exception:
+                logger.exception("A2 intake drain failed")
+            finally:
+                _INTAKE_LOCK.release()
+            if trigger_a2b:
+                try:
+                    _daisy_a2b(wait_for_next=True, test_run_id=test_run_id)
+                except Exception:
+                    logger.exception("A2 drain could not daisy-chain A2B")
+
+        thread = threading.Thread(target=_run, daemon=True, name="a2-intake-drain")
+        thread.start()
+        if wait:
+            thread.join()
+        return {
+            "processed": True,
+            "draining": True,
+            "files_found": bool(files),
+            "intaken_count": 0,
+            "skipped_oversize_count": 0,
+            "skipped_existing_count": 0,
+            **preview,
+        }
+
+    acquired = _INTAKE_LOCK.acquire(blocking=True, timeout=15 * 60)
+    if not acquired:
+        return {
+            "processed": False,
+            "reason": "intake_already_running",
+            "intaken_count": 0,
+            "skipped_oversize_count": 0,
+            "skipped_existing_count": 0,
+            "files_found": False,
+            **preview,
+        }
+    try:
+        return _intake_pass(
+            trigger_a2b=trigger_a2b,
+            wait_for_next=wait_for_next,
+            test_run_id=test_run_id,
+        )
+    finally:
+        _INTAKE_LOCK.release()

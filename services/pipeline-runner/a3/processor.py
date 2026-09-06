@@ -12,7 +12,7 @@ from a3.prompt import audio_prompt, image_prompt, video_frames_prompt, video_met
 from airtable.client import AirtableClient
 from airtable.constants import MEDIA_ASSETS_TABLE
 from asset.chain import daisy_payload, trigger_next
-from asset.constants import A3_CLASSIFY_VIEW, A3_MAX_RECORDS
+from asset.constants import A3_CLASSIFY_VIEW, A3_DRAIN_MAX_PASSES, A3_MAX_RECORDS
 from asset.helpers import as_bool, join_list, parse_int, uc_download_url
 from asset.routing import a3_mime_route, audio_role_fallback
 from render.fields import field_str
@@ -172,6 +172,7 @@ def process_request(
     wait_for_next: bool = True,
     test_run_id: str | None = None,
     max_records: int | None = None,
+    drain: bool = False,
 ) -> dict[str, Any]:
     preview: dict[str, Any] = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -179,13 +180,18 @@ def process_request(
         "test_run_id": test_run_id,
     }
     client = AirtableClient()
-    rows = client.list_records(
-        MEDIA_ASSETS_TABLE,
-        view=A3_CLASSIFY_VIEW,
-        max_records=parse_int(max_records, A3_MAX_RECORDS) or A3_MAX_RECORDS,
-        sort_field="Intake_Date",
-        sort_direction="asc",
-    )
+    limit = parse_int(max_records, A3_MAX_RECORDS) or A3_MAX_RECORDS
+
+    def _load_rows() -> list[dict[str, Any]]:
+        return client.list_records(
+            MEDIA_ASSETS_TABLE,
+            view=A3_CLASSIFY_VIEW,
+            max_records=limit,
+            sort_field="Intake_Date",
+            sort_direction="asc",
+        )
+
+    rows = _load_rows()
     preview["candidate_ids"] = [row["id"] for row in rows]
     preview["routes"] = [
         {"id": row["id"], "mime": field_str(row, "MIME_Type"), "route": a3_mime_route(field_str(row, "MIME_Type"))}
@@ -195,9 +201,18 @@ def process_request(
         return {"processed": False, "dry_run": True, **preview}
 
     classified: list[dict[str, Any]] = []
-    for row in rows:
-        classified.append(_classify_one(client, row))
+    passes = 0
+    while True:
+        passes += 1
+        batch = rows if passes == 1 else _load_rows()
+        if not batch:
+            break
+        for row in batch:
+            classified.append(_classify_one(client, row))
+        if not drain or passes >= A3_DRAIN_MAX_PASSES:
+            break
     preview["classified"] = classified
+    preview["classify_passes"] = passes
     next_result = None
     if trigger_a4:
         from a4.processor import process_request as process_a4

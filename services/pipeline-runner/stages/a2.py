@@ -19,6 +19,8 @@ def run(request: StageRequest):
             "dry_run": as_bool(extra.get("dry_run")),
             "trigger_a2b": extra.get("trigger_a2b") is not False,
             "wait_for_next": extra.get("wait_for_next") is not False,
+            "drain": as_bool(extra.get("drain")),
+            "wait": as_bool(extra.get("wait")),
         },
         skip_message="A2 did not intake Drive files",
         ok_message="A2 intaken {intaken_count} files",

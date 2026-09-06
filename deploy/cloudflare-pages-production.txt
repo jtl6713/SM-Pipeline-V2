@@ -374,5 +374,8 @@ Studio auto-compress Pages deploy: 2026-09-06 - Home wizard keeps videos between
 
 Promote to production Pages deploy: 2026-09-06 - Ideas table and drawer show Promote to production. Sent for Review / Generated display as Ready to produce. No review email is required. UI 0.6.250-promote-to-production.
 
+Ingestion drain Pages deploy: 2026-09-06 - Library intake listener runs every 10 minutes and keeps draining until files are compressed if needed, recorded, and moved. UI 0.6.251-intake-drain.
+
+
 
 
