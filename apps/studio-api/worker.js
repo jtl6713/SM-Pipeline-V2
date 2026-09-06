@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.241-finished-passthrough-heal",
+          version: "0.10.242-finished-preview-play",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -1623,6 +1623,15 @@ function item4UrlIsPublicPublishCdn(url) {
   if (!href.startsWith("https://media.chicagoshining.com/")) return false;
   const path = href.slice("https://media.chicagoshining.com/".length);
   return path.startsWith("studio/previews/") || path.startsWith("publish/");
+}
+
+function item4UrlIsPublicPlayableVideo(url) {
+  const href = String(url || "").trim();
+  if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+  if (/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href)) return false;
+  const path = href.slice("https://media.chicagoshining.com/".length);
+  if (!(path.startsWith("studio/previews/") || path.startsWith("publish/") || path.startsWith("studio/master-assets/"))) return false;
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(href) || path.startsWith("studio/master-assets/");
 }
 
 function studioNativeClipsArePublicCdn(record) {
@@ -16449,7 +16458,7 @@ async function outputPreview(request, env, url, authorization) {
     f(record, "Publish_Asset_URL"),
     f(record, "Final_File_URL"),
     f(record, "Studio_Preview_URL"),
-  ].map((value) => String(value || "").trim()).find((href) => item4UrlIsPublicPublishCdn(href))
+  ].map((value) => String(value || "").trim()).find((href) => item4UrlIsPublicPlayableVideo(href) || item4UrlIsPublicPublishCdn(href) && !/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href))
     || "";
 
   // Preferred Phase 6 path: R5 writes a browser-playable MP4 copy to the existing
