@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.239-destination-relink",
+          version: "0.10.240-suggested-schedules",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -216,6 +216,7 @@ export default {
           studio_clip_frame_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
+          studio_prefill_suggested_schedules_v1: true,
           studio_insights_similar_times_v1: true,
           studio_insights_learning_db_v1: true,
           studio_prepare_unsaved_guard_v1: true,
@@ -3198,6 +3199,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   const requested = Array.isArray(payload?.outputs) ? payload.outputs : [];
   const normalized = [];
   const seen = new Set();
+  const scheduleOverrides = studioScheduleOverridesFromPayload(payload);
 
   for (const item of requested) {
     if (item?.enabled === false) continue;
@@ -3207,6 +3209,8 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
     if (seen.has(key)) continue;
     seen.add(key);
     normalized.push(pair);
+    const iso = String(item?.scheduled_at || "").trim();
+    if (iso && !Number.isNaN(Date.parse(iso))) scheduleOverrides.set(key, new Date(iso).toISOString());
   }
 
   if (!normalized.length) throw new HttpError(400, "Choose at least one platform output");
@@ -3218,12 +3222,23 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   ]));
 
   const now = new Date().toISOString();
+  const occupied = await studioOccupiedSchedulesOrEmpty(env);
+  const stamps = studioBuildSuggestedScheduleMap(normalized.map((item) => {
+    const key = `${item.platform}::${item.output_type}`;
+    const current = byKey.get(key);
+    return {
+      platform: item.platform,
+      output_type: item.output_type,
+      scheduled_at: scheduleOverrides.get(key) || (current ? f(current, "Scheduled_At") : "") || "",
+    };
+  }), occupied);
 
   for (let i = 0; i < normalized.length; i++) {
     const item = normalized[i];
     const key = `${item.platform}::${item.output_type}`;
     const current = byKey.get(key);
     const storyFields = item4CompanionStoryFields(item.output_type);
+    const scheduledAt = studioDestinationScheduleStamp(current, key, stamps, scheduleOverrides);
 
     if (current) {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, current.id, {
@@ -3235,6 +3250,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
             Output_Order: i + 1,
             Output_Status: "Draft",
             Updated_At: now,
+            ...(scheduledAt ? { Scheduled_At: scheduledAt } : {}),
             ...storyFields,
           },
           typecast: false,
@@ -3268,6 +3284,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
             Caption_Mode_Override: "Inherit",
             Script_Mode_Override: "Inherit",
             Publish_Mode: "Inherit",
+            Scheduled_At: scheduledAt || stamps.get(key) || null,
             Created_At: now,
             Updated_At: now,
             Active: true,
@@ -5703,22 +5720,34 @@ async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
   return item4RelinkVariantQueueOutputs(env, updated);
 }
 
-async function item4SyncPlanOutputs(env, requestRecord, items) {
+async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = null } = {}) {
   const productionRequestId = requestRecord.id;
   const existing = await outputRowsForProductionRequest(env, productionRequestId);
   const byKey = new Map(existing.map(row => [`${String(f(row,"Platform")||"").trim()}::${String(f(row,"Output_Type")||"").trim()}`, row]));
   const wanted = new Set();
   const now = new Date().toISOString();
+  const scheduleOverrides = studioScheduleOverridesFromPayload({ schedules });
+  const occupied = await studioOccupiedSchedulesOrEmpty(env);
+  const stamps = studioBuildSuggestedScheduleMap((items || []).map((item) => {
+    const key = `${item.platform}::${item.output_type}`;
+    const current = byKey.get(key);
+    return {
+      platform: item.platform,
+      output_type: item.output_type,
+      scheduled_at: scheduleOverrides.get(key) || (current ? f(current, "Scheduled_At") : "") || "",
+    };
+  }), occupied);
   for (let i=0; i<items.length; i++) {
     const item = items[i];
     const key = `${item.platform}::${item.output_type}`;
     wanted.add(key);
     const current = byKey.get(key);
     const storyFields = item4CompanionStoryFields(item.output_type);
+    const scheduledAt = studioDestinationScheduleStamp(current, key, stamps, scheduleOverrides);
     if (current) {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, current.id, {
         method:"PATCH",
-        body:JSON.stringify({fields:{Enabled:true,Active:true,Output_Order:i+1,Output_Status:"Draft",Carousel_Image_Mode_Override:"Manual Upload",...storyFields,Updated_At:now},typecast:false}),
+        body:JSON.stringify({fields:{Enabled:true,Active:true,Output_Order:i+1,Output_Status:"Draft",Carousel_Image_Mode_Override:"Manual Upload",...(scheduledAt ? { Scheduled_At: scheduledAt } : {}),...storyFields,Updated_At:now},typecast:false}),
       });
     } else {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
@@ -5728,7 +5757,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items) {
           Test_Run_ID:String(f(requestRecord,"Test_Run_ID")||"").trim()||null,
           Organization:arrayOrEmpty(f(requestRecord,"Organization")), Brand:arrayOrEmpty(f(requestRecord,"Brand")), Created_By:arrayOrEmpty(f(requestRecord,"Created_By")),
           Platform:item.platform, Output_Type:item.output_type, Output_Status:"Draft", Output_Order:i+1, Enabled:true, Active:true,
-          Carousel_Image_Mode_Override:"Manual Upload", ...storyFields, Created_At:now, Updated_At:now,
+          Carousel_Image_Mode_Override:"Manual Upload", Scheduled_At: scheduledAt || stamps.get(key) || null, ...storyFields, Created_At:now, Updated_At:now,
         },typecast:false}),
       });
     }
@@ -5791,7 +5820,7 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
     await item4EnsureFacebookSlideshowVoiceoverPayload(env, authorization);
   }
 
-  await item4SyncPlanOutputs(env,record,items);
+  await item4SyncPlanOutputs(env,record,items,{ schedules: payload.schedules });
   const keepAiMode = String(f(record, "Carousel_Image_Mode") || "").trim() === "Make AI Generated";
   const keepExact = keepAiMode && Number(f(record, "Carousel_Slide_Count_Exact") || 0) >= photoCount;
   const maxCount=Math.min(15,Math.max(1,photoCount));
@@ -10904,6 +10933,11 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
       ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
       : null,
     ...studioFinishedSeedOverlay(requestRecord, clips, nativeReady),
+    ...(function scheduledStamp() {
+      const raw = String(effective.scheduled_at || "").trim();
+      if (!raw || Number.isNaN(Date.parse(raw))) return {};
+      return { Scheduled_Post_Date: new Date(raw).toISOString() };
+    }()),
   };
 }
 
@@ -10949,15 +10983,133 @@ function studioIndustryBestWindows(platform, outputType) {
   return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"], label: "Reel midday or evening" };
 }
 
-function studioSuggestedLocalDatetime(windows) {
+function studioChicagoDateTimeParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+  };
+}
+
+function studioChicagoWallToUtcMs(year, month, day, hour, minute) {
+  const want = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  let ms = want;
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let i = 0; i < 8; i++) {
+    const parts = fmt.formatToParts(new Date(ms));
+    const get = (type) => Number(parts.find((part) => part.type === type)?.value);
+    const got = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), 0, 0);
+    const delta = want - got;
+    if (delta === 0) return ms;
+    ms += delta;
+  }
+  return ms;
+}
+
+function studioAddCivilDays(year, month, day, delta) {
+  const utc = Date.UTC(year, month - 1, day) + delta * 86400000;
+  const next = new Date(utc);
+  return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
+}
+
+function studioSuggestedLocalDatetime(windows, now = new Date()) {
   const first = String(windows?.[0] || "12:00-13:00");
   const start = first.split("-")[0] || "12:00";
-  const now = new Date();
   const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-  const suggested = new Date(now);
-  suggested.setHours(hh, mm, 0, 0);
-  if (suggested.getTime() <= now.getTime() + 10 * 60 * 1000) suggested.setDate(suggested.getDate() + 1);
-  return suggested.toISOString();
+  const chicago = studioChicagoDateTimeParts(now);
+  let civil = { year: chicago.year, month: chicago.month, day: chicago.day };
+  let ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
+  if (ms <= now.getTime() + 10 * 60 * 1000) {
+    civil = studioAddCivilDays(civil.year, civil.month, civil.day, 1);
+    ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
+  }
+  return new Date(ms).toISOString();
+}
+
+function studioScheduleStoryRank(outputType) {
+  return /story/i.test(String(outputType || "")) ? 1 : 0;
+}
+
+function studioScheduleOverridesFromPayload(payload) {
+  const overrides = new Map();
+  const schedules = payload?.schedules && typeof payload.schedules === "object" && !Array.isArray(payload.schedules)
+    ? payload.schedules
+    : {};
+  for (const [key, value] of Object.entries(schedules)) {
+    const iso = String(value || "").trim();
+    if (!key || !iso || Number.isNaN(Date.parse(iso))) continue;
+    overrides.set(String(key), new Date(iso).toISOString());
+  }
+  return overrides;
+}
+
+function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = new Date()) {
+  const reserved = {};
+  for (const [platform, times] of Object.entries(occupiedByPlatform || {})) {
+    reserved[platform] = [...(times || [])];
+  }
+  const indexed = (items || []).map((item, index) => ({ item, index }));
+  indexed.sort((a, b) => {
+    const rank = studioScheduleStoryRank(a.item.output_type) - studioScheduleStoryRank(b.item.output_type);
+    return rank || a.index - b.index;
+  });
+  const stamps = new Map();
+  for (const { item } of indexed) {
+    const platform = String(item.platform || "").trim();
+    const outputType = String(item.output_type || "").trim();
+    if (!platform || !outputType) continue;
+    const key = `${platform}::${outputType}`;
+    const existing = String(item.scheduled_at || "").trim();
+    if (existing && !Number.isNaN(Date.parse(existing))) {
+      const iso = new Date(existing).toISOString();
+      stamps.set(key, iso);
+      (reserved[platform] ||= []).push(Date.parse(iso));
+      continue;
+    }
+    const industry = studioIndustryBestWindows(platform, outputType);
+    const suggested = studioSuggestedLocalDatetime(industry.windows, now);
+    const iso = studioNextOpenScheduleIso(suggested, reserved[platform] || []);
+    stamps.set(key, iso);
+    (reserved[platform] ||= []).push(Date.parse(iso));
+  }
+  return stamps;
+}
+
+async function studioOccupiedSchedulesOrEmpty(env) {
+  try {
+    return await studioLoadOccupiedSchedules(env);
+  } catch (error) {
+    console.warn("suggested schedule occupancy read failed", error);
+    return {};
+  }
+}
+
+function studioDestinationScheduleStamp(current, key, stamps, overrides) {
+  const iso = stamps.get(key);
+  if (!iso) return null;
+  const currentIso = current ? String(f(current, "Scheduled_At") || "").trim() : "";
+  if (currentIso && !(overrides instanceof Map && overrides.has(key))) return null;
+  return iso;
 }
 
 const STUDIO_WATCHLIST_PLATFORMS = new Set(["instagram", "youtube", "tiktok", "facebook"]);

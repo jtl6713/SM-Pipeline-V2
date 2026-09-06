@@ -825,6 +825,8 @@ input, select, textarea, button {
 }
 .ez-wizard-form textarea{min-height:72px;resize:vertical}
 .ez-wizard-form .ez-wizard-form-actions{display:flex;flex-wrap:wrap;gap:8px}
+.ez-wizard-schedules{display:grid;gap:8px}
+.ez-wizard-schedules .ez-wizard-schedule-row{display:grid;gap:4px;text-transform:none;letter-spacing:0;font-size:.82rem;font-weight:650}
 .ez-wizard-custom{display:grid;gap:10px}
 .ez-wizard-custom fieldset{
   margin:0;

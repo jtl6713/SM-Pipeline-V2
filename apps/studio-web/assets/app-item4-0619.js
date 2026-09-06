@@ -3897,7 +3897,7 @@
       package: "Vertical video, or scrollable slides?",
       platforms: "Which platforms?",
       custom: "Pick the formats you want.",
-      confirm: "Ready to continue with this plan?",
+      confirm: "Suggested Chicago times are filled in. Change any before continuing.",
     };
     if (push && ezWizardStep && ezWizardStep !== step) {
       ezWizardHistory.push(ezWizardStep);
@@ -4231,10 +4231,47 @@
       return;
     }
 
-    prompt.textContent = "Ready to continue?";
-    renderEzWizardChips([
-      { label: "Continue", onClick: () => finishEzWizard() },
-    ]);
+    prompt.textContent = "Suggested Chicago times are filled in. Change any before continuing.";
+    renderEzWizardChips([]);
+    const planned = helpers?.ezWizardResolvePackage?.(ezWizardAnswers);
+    const scheduleItems = helpers?.ezPlanScheduleItems?.(planned) || [];
+    const saved = ezWizardAnswers.schedules && typeof ezWizardAnswers.schedules === "object"
+      ? ezWizardAnswers.schedules
+      : {};
+    const stamps = helpers?.ezBuildSuggestedScheduleMap?.(
+      scheduleItems.map((item) => ({
+        ...item,
+        scheduled_at: saved[`${item.platform}::${item.output_type}`] || "",
+      }))
+    ) || new Map();
+    const rows = scheduleItems.map((item) => {
+      const key = `${item.platform}::${item.output_type}`;
+      const iso = stamps.get(key) || saved[key] || "";
+      const value = formatDateTimeLocalInput(iso);
+      const field = `sched_${item.platform}_${String(item.output_type || "").replace(/\s+/g, "_")}`;
+      return `<label class="ez-wizard-schedule-row">${escapeHtml(item.platform)} · ${escapeHtml(item.output_type)}
+        <input type="datetime-local" name="${escapeHtml(field)}" data-schedule-key="${escapeHtml(key)}" value="${escapeHtml(value)}" required></label>`;
+    }).join("");
+    ezWizardShowForm(
+      `${rows ? `<div class="ez-wizard-schedules">${rows}</div>` : ""}
+       <p class="subtle">Same-platform posts stay at least 90 minutes apart. Publishing still waits for Ready for Review → Approve publish.</p>
+       <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
+      () => {
+        const schedules = {};
+        $("ezWizardForm")?.querySelectorAll("[data-schedule-key]").forEach((input) => {
+          const key = String(input.getAttribute("data-schedule-key") || "").trim();
+          const raw = String(input.value || "").trim();
+          if (!key || !raw) return;
+          const ms = Date.parse(raw);
+          if (Number.isNaN(ms)) return;
+          schedules[key] = new Date(ms).toISOString();
+        });
+        ezWizardLogAdd("user", "Suggested times");
+        Object.assign(ezWizardAnswers, { schedules });
+        finishEzWizard();
+      }
+    );
+    return;
   }
 
   async function finishEzWizard() {
@@ -7035,6 +7072,7 @@
           extras: item4EnabledExtraPairs(),
           package: currentEzPackageId(),
           skip_fbs1_guard: true,
+          schedules: ezWizardAnswers?.schedules || null,
         }),
         timeoutMs: 45000,
         retries: 0,
@@ -7159,11 +7197,20 @@
   }
 
   function selectedOutputMatrix() {
-    return outputMatrixInputs().filter(input => input.checked).map(input => ({
-      platform: input.dataset.platform,
-      output_type: input.value,
-      enabled: true,
-    }));
+    const schedules = ezWizardAnswers?.schedules && typeof ezWizardAnswers.schedules === "object"
+      ? ezWizardAnswers.schedules
+      : {};
+    return outputMatrixInputs().filter(input => input.checked).map(input => {
+      const platform = input.dataset.platform;
+      const output_type = input.value;
+      const scheduled_at = String(schedules[`${platform}::${output_type}`] || "").trim();
+      return {
+        platform,
+        output_type,
+        enabled: true,
+        ...(scheduled_at ? { scheduled_at } : {}),
+      };
+    });
   }
 
   function item4EnabledExtraPairs() {
@@ -7281,6 +7328,7 @@
         effective.voiceover_mode === "Yes"
           ? `VO ${activeProductionRequest?.voice_name || DEFAULT_VOICE_NAME}`
           : (effective.voiceover_mode ? `VO ${effective.voiceover_mode}` : null),
+        row.scheduled_at ? `Suggested ${formatStudioDateTime(row.scheduled_at)}` : null,
       ].filter(Boolean).join(" · ");
 
       return `<div class="requested-output-card">
@@ -9874,7 +9922,7 @@
     syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",
     promoteProductionRequest: "Approve this request and send it into the production pipeline. Publishing stays a later step.",
     pipelineApproveAll: "Approve every Ready for Review output on this page. Leave Use default schedules off to publish now; turn it on to fill empty times from each platform’s suggested slot. A time you already typed still wins.",
-    pipelineUseDefaultSchedules: "When on, Approve All uses each platform’s suggested publish window for any row that does not already have a time. Studio then moves a time later if that platform already has a post within 90 minutes. Off means empty times publish now, still staggered if two rows on the same platform would go at once.",
+    pipelineUseDefaultSchedules: "When on, Approve All uses each platform’s suggested publish window for any row that does not already have a time. Studio then moves a time later if that platform already has a post within 90 minutes. Off means empty times publish now, still staggered if two rows on the same platform would go at once. New requests already come with suggested times filled in.",
     prVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     prMusicPreview: "Play a preview of the selected music track.",
     savePrOverride: "Save overrides for this one platform output without changing the master defaults.",
@@ -11059,9 +11107,9 @@
     const box = $("pipelineUseDefaultSchedules");
     if (!box) return;
     try {
-      box.checked = window.sessionStorage.getItem(PIPELINE_DEFAULT_SCHEDULES_KEY) === "1";
+      box.checked = window.sessionStorage.getItem(PIPELINE_DEFAULT_SCHEDULES_KEY) !== "0";
     } catch {
-      box.checked = false;
+      box.checked = true;
     }
   }
 
