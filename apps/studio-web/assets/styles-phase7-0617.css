@@ -1029,6 +1029,16 @@ input, select, textarea, button {
 #outputsList .data-table tbody tr.pipeline-open-row .pipeline-schedule-cell,
 #outputsList .data-table tbody tr.pipeline-open-row .pipeline-schedule-cell input{cursor:auto}
 #outputsList .pipeline-schedule-cell{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:6px;max-width:220px;white-space:normal;line-height:1.35}
+#outputsList .data-table tbody tr.pipeline-open-row .pipeline-tiktok-complete,
+#outputsList .data-table tbody tr.pipeline-open-row .pipeline-tiktok-complete input{cursor:auto}
+#outputsList .pipeline-tiktok-complete{display:flex;flex-direction:column;align-items:stretch;gap:6px;margin-top:8px;max-width:240px;white-space:normal;line-height:1.35}
+#outputsList .pipeline-tiktok-complete label{display:grid;gap:4px;font-size:.72rem;font-weight:700;color:var(--muted)}
+#outputsList .pipeline-tiktok-complete input[type=url]{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:7px 8px;font:inherit;font-size:.78rem;font-weight:500;color:var(--ink);background:#fff}
+#outputsList .pipeline-tiktok-save{align-self:flex-start;padding:6px 10px;font-size:.78rem}
+#outputsList .pipeline-tiktok-complete-msg{font-size:.72rem;min-height:1em}
+.tiktok-complete-card{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:10px}
+.tiktok-complete-form{display:grid;gap:10px}
+.creative-editor-shell.watch-only .tiktok-complete-card{pointer-events:auto;opacity:1}
 #outputsList .pipeline-schedule-suggest{font-size:.72rem;color:var(--muted);max-width:220px}
 #creativeScheduleSuggest{margin:.35rem 0 0;max-width:36rem;line-height:1.4}
 #creativeUseSuggestedTime{margin-top:.25rem}
