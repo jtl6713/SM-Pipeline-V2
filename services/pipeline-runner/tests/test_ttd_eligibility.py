@@ -11,9 +11,12 @@ from ttd.package import (
     completion_url,
     cover_block,
     handoff_email_html,
+    handoff_email_subject,
     hash_completion_token,
+    is_az_finished_video,
     photo_description,
     photo_title,
+    sibling_status_line,
 )
 
 
@@ -133,3 +136,39 @@ def test_handoff_email_notes_missing_cover():
     html = handoff_email_html(_record(Output_ID="323", Output_Title="No cover"))
     assert "Not set on this output" in html
     assert "TikTok 3D grid cover" not in html
+
+
+def test_az_publish_package_email():
+    record = _record(
+        Output_ID="410",
+        Output_Title="Riverwalk sunset",
+        Output_Notes="origin=az-finished-video; ez-input=finished-video",
+        Output_Caption="Sunset on the river",
+        Output_Hashtags="#Chicago",
+        Thumbnail_URL="https://media.chicagoshining.com/publish/platform-output-410/cover.jpg",
+        TikTok_Manual_Completion_URL="https://pipeline.chicagoshining.com/hooks/ttd4?action=form",
+        TikTok_Draft_Publish_ID="pub-az",
+    )
+    assert is_az_finished_video(record) is True
+    assert handoff_email_subject(record) == "ChicagoShining publish package — Riverwalk sunset"
+    ig = _record(
+        Platform="Instagram",
+        Studio_Output_Type="Reel",
+        Publish_Status="Scheduled",
+        Scheduled_Post_Date="2026-09-08T16:30:00.000Z",
+    )
+    yt = _record(
+        Platform="YouTube",
+        Studio_Output_Type="Short",
+        Publish_Status="Published",
+        Platform_Post_URL="https://www.youtube.com/watch?v=abc123",
+    )
+    html = handoff_email_html(record, siblings=[ig, yt])
+    assert "ChicagoShining publish package" in html
+    assert "Sunset on the river" in html
+    assert "#Chicago" in html
+    assert "Mark as Published" in html
+    assert "TikTok Story" in html
+    assert "Instagram Reel" in html
+    assert "youtube.com/watch?v=abc123" in html
+    assert sibling_status_line(yt).startswith("<li><b>YouTube Short:</b> live")

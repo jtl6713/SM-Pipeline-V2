@@ -14,7 +14,39 @@ export function formatLibraryClipDuration(seconds) {
 
 export function libraryDurationLine(record) {
   if (String(record?.media_kind || "").toLowerCase() !== "video") return "";
-  return formatLibraryClipDuration(record?.duration_seconds);
+  const formatted = formatLibraryClipDuration(record?.duration_seconds);
+  return formatted ? `Length ${formatted}` : "";
+}
+
+export function libraryListClassName(mode) {
+  if (mode === "list") return "library-list library-list--text";
+  if (mode === "thumbs") return "library-list library-list--thumbs";
+  return "library-grid";
+}
+
+export function isBrowserSafeLibraryImageUrl(url) {
+  const href = String(url || "").trim();
+  if (!href) return false;
+  if (/drive\.google\.com|googleapis\.com\/drive|\/uc\?id=/i.test(href)) return false;
+  if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(href)) return false;
+  if (href.startsWith("/api/")) return true;
+  if (!/^https?:\/\//i.test(href)) return false;
+  if (/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href)) return true;
+  return href.startsWith("https://media.chicagoshining.com/");
+}
+
+export function publishedLibraryPosterUrl(record) {
+  const candidates = [record?.poster_url, record?.thumbnail_url, record?.studio_preview_url];
+  return candidates.map((value) => String(value || "").trim()).find(isBrowserSafeLibraryImageUrl) || "";
+}
+
+export function publishedLibraryStreamPath(record) {
+  if (String(record?.media_kind || "").toLowerCase() !== "video") return "";
+  const explicit = String(record?.preview_stream_url || "").trim();
+  if (explicit.startsWith("/api/")) return explicit;
+  const id = String(record?.id || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) return "";
+  return `/api/outputs/${id}/preview`;
 }
 
 export function libraryAddedLine(intakeDate, formatDate) {

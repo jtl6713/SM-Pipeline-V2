@@ -1,9 +1,11 @@
 from ap0.public_cover import (
+    cover_as_jpeg,
     cover_needs_public_stage,
     cover_r2_key,
     drive_file_id_from_url,
     graph_fetchable_cover_url,
     native_grid_cover_required,
+    youtube_short_needs_jpeg_cover,
 )
 
 
@@ -62,3 +64,17 @@ def test_native_grid_cover_required_for_rendered_video():
         {"fields": {"Studio_Output_Type": "Video Draft", "Platform": "TikTok"}}
     )
     assert not native_grid_cover_required({"fields": {"Platform_Output_Type": "TikTok Video Draft"}})
+
+
+def test_youtube_short_jpeg_stage_helpers():
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (32, 48), (20, 80, 160)).save(buf, format="PNG")
+    jpeg, mime = cover_as_jpeg(buf.getvalue())
+    assert mime == "image/jpeg"
+    assert jpeg[:2] == b"\xff\xd8"
+    assert youtube_short_needs_jpeg_cover("https://media.chicagoshining.com/publish/platform-output-363/cover.png")
+    assert not youtube_short_needs_jpeg_cover("https://media.chicagoshining.com/publish/platform-output-363/cover.jpg")

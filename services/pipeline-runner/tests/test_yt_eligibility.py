@@ -10,7 +10,7 @@ from yt.eligibility import (
 )
 from yt.constants import THUMB_NOT_NEEDED, THUMB_PENDING
 from yt.package import description_final, idempotency_key, thumbnail_status
-from yt.yts2 import thumbnail_fallback_source
+from yt.yts2 import thumbnail_fallback_source, vertical_still_attached
 
 
 def _record(**fields):
@@ -72,6 +72,12 @@ def test_ytp1_and_poll_gates():
     assert yts3_eligibility_reason(short) == "native_cover_not_uploaded"
     short["fields"]["YouTube_Thumbnail_Status"] = "Uploaded"
     assert yts3_eligibility_reason(short) is None
+
+
+def test_vertical_still_is_required_for_shorts():
+    assert vertical_still_attached({"studioVerticalStill": {"ok": True}}) is True
+    assert vertical_still_attached({"studioVerticalStillError": "studio vertical still failed 403"}) is False
+    assert vertical_still_attached({"kind": "youtube#thumbnailSetResponse"}) is False
 
 
 def test_package_helpers():

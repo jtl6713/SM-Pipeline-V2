@@ -41,6 +41,14 @@ def thumbnail_fallback_source(output: dict[str, Any], *, cover_required: bool) -
     return field_str(output, "Clip_1_URL") or field_str(output, "Selected_Clip_1_URL") or None
 
 
+def vertical_still_attached(body: Any) -> bool:
+    if not isinstance(body, dict):
+        return False
+    if body.get("studioVerticalStillError"):
+        return False
+    return bool(body.get("studioVerticalStill"))
+
+
 def process_request(
     *,
     output_record_id: str | None,
@@ -87,14 +95,20 @@ def process_request(
     now = iso_utc()
     thumb_status = field_str(output, "YouTube_Thumbnail_Status")
     thumb_url = field_str(output, "Thumbnail_URL")
-    from ap0.public_cover import ensure_public_cover_url, graph_fetchable_cover_url, native_grid_cover_required
+    from ap0.public_cover import (
+        ensure_public_cover_url,
+        ensure_youtube_short_cover_url,
+        graph_fetchable_cover_url,
+        native_grid_cover_required,
+    )
 
     cover_required = native_grid_cover_required(output)
     if 200 <= status_code <= 299 and status == "succeeded" and thumb_status.casefold() != "uploaded" and (
         cover_required or thumb_url
     ):
         try:
-            thumb_url = ensure_public_cover_url(client, output) or thumb_url
+            staged = ensure_youtube_short_cover_url(client, output) if cover_required else ensure_public_cover_url(client, output)
+            thumb_url = staged or thumb_url
         except Exception:
             thumb_url = field_str(output, "Thumbnail_URL")
         if cover_required and not graph_fetchable_cover_url(thumb_url):
@@ -125,7 +139,7 @@ def process_request(
             vertical=cover_required,
         )
         result["thumbnail_http_status"] = thumb_code
-        if 200 <= thumb_code <= 299:
+        if 200 <= thumb_code <= 299 and (not cover_required or vertical_still_attached(thumb_body)):
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
                 record_id,
@@ -146,6 +160,27 @@ def process_request(
             result["needs_finalize"] = True
             result["youtube_stage"] = STAGE_YT4
             return {"processed": True, **result}
+        if 200 <= thumb_code <= 299 and cover_required and not vertical_still_attached(thumb_body):
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                record_id,
+                {
+                    "YouTube_Stage": STAGE_YT2,
+                    "Publish_Locked_At": None,
+                    "Publish_Locked_By": "",
+                    "Publish_Error_Stage": "YTS2_VERTICAL_STILL",
+                    "Publish_Error_Message": "YouTube Short still needs the vertical 3D cover. Retrying until Studio accepts it.",
+                    "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
+                    "YouTube_Error_Message": f"YTS2 vertical still missing. HTTP {thumb_code}: {thumb_body}",
+                    "YouTube_Response_JSON": response_json(thumb_body),
+                    "Publish_Retry_Eligible": True,
+                    "YouTube_Last_Checked_At": now,
+                    "YouTube_Thumbnail_Status": THUMB_PENDING,
+                    "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+                },
+            )
+            result["still_processing"] = True
+            return {"processed": True, "retry": True, "reason": "missing_vertical_still", **result}
         if contains_invalid_grant(thumb_body):
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,

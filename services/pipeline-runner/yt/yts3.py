@@ -8,7 +8,7 @@ from airtable.client import AirtableClient
 from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from carousel.timeutil import iso_utc
 from render.fields import field_str
-from ap0.public_cover import ensure_public_cover_url, graph_fetchable_cover_url, native_grid_cover_required
+from ap0.public_cover import ensure_youtube_short_cover_url, graph_fetchable_cover_url, native_grid_cover_required
 from item4.settings import PipelineSettings
 from yt.client import YouTubeUploaderClient, load_uploader_settings
 from yt.common import preview, response_json, retry_at, valid_record_id
@@ -25,7 +25,7 @@ from yt.constants import (
     THUMB_UPLOADED,
 )
 from yt.eligibility import yts3_eligibility_reason
-from yt.yts2 import thumbnail_fallback_source
+from yt.yts2 import thumbnail_fallback_source, vertical_still_attached
 
 
 def process_request(
@@ -73,7 +73,7 @@ def process_request(
         settings = load_uploader_settings(PipelineSettings(client))
         uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
         try:
-            thumb_url = ensure_public_cover_url(client, output) or field_str(output, "Thumbnail_URL")
+            thumb_url = ensure_youtube_short_cover_url(client, output) or field_str(output, "Thumbnail_URL")
         except Exception:
             thumb_url = field_str(output, "Thumbnail_URL")
         if not graph_fetchable_cover_url(thumb_url):
@@ -99,16 +99,16 @@ def process_request(
             vertical=True,
         )
         result["thumbnail_http_status"] = thumb_code
-        if not (200 <= thumb_code <= 299):
+        if not (200 <= thumb_code <= 299) or not vertical_still_attached(thumb_body):
             client.update_record(
                 PLATFORM_OUTPUTS_TABLE,
                 record_id,
                 {
                     "YouTube_Stage": STAGE_YT4,
-                    "Publish_Error_Stage": "YTS3_THUMBNAIL",
+                    "Publish_Error_Stage": "YTS3_VERTICAL_STILL",
                     "Publish_Error_Message": "YouTube Short thumbnail did not attach. Keeping the video unpublished until the 3D cover is set.",
                     "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-                    "YouTube_Error_Message": f"YTS3 thumbnail upload failed. HTTP {thumb_code}: {thumb_body}",
+                    "YouTube_Error_Message": f"YTS3 vertical still missing. HTTP {thumb_code}: {thumb_body}",
                     "YouTube_Response_JSON": response_json(thumb_body),
                     "Publish_Retry_Eligible": True,
                     "YouTube_Last_Checked_At": now,

@@ -12,10 +12,15 @@ End-to-end autonomy applies **only** when the idea/request is stamped `origin=au
 - Do not leave an autonomous Production Request at `Request_Status=Submitted` (Studio “waiting for Production Approval”) when masters are Ready, the output plan is Ready, and frames/variants are Ready (`plan_complete` / `Studio_Variant_Status=Ready`).
 - Do not treat `Submitted` as a terminal autonomous state. Cron and `run-autonomous` must resume it through I3/I4 finalize, Platform Output fanout, and `enqueueStudioProductionJob`.
 - Do not harvest a new idea while an autonomous request is Draft, Ready, or Submitted.
-- Do not auto-approve or auto-produce requests that lack `origin=autonomous`.
+- Do not auto-approve or auto-produce requests that lack `origin=autonomous` **or** `origin=az-finished-video`.
 
 ## Always
 
-- Detect origin with `origin=autonomous` before applying through-approve / self-resume / produce enqueue.
-- After photos, platforms, and frames are ready, promote until `Request_Status=Promoted` and a studio-produce job exists. The human gate on this path is **Ready for Review → Approve publish**, not Production Approve.
-- Keep `Thumbnail_URL` / native grid cover rules. Nothing auto-publishes.
+- Detect origin with `origin=autonomous` before applying through-approve / self-resume / produce enqueue for the library-stills harvester.
+- After photos, platforms, and frames are ready, promote until `Request_Status=Promoted` and a studio-produce job exists.
+- Keep `Thumbnail_URL` / native grid cover rules.
+
+## Human publish gates
+
+- **Library-stills autonomous** (`origin=autonomous`): the human gate is **Ready for Review → Approve publish**. Nothing auto-publishes.
+- **AZ finished-video** (`origin=az-finished-video`, keep `ez-input=finished-video`): skip Production Approve **and** Ready for Review. After cover + caption + `Final_File_URL`, auto-schedule with 7-day occupancy scoring and auto-approve so outputs go Ready to Schedule / Ready to Publish. The operator can still change or cancel times in Pipeline before they fire. TikTok remains an inbox draft plus the publish-package email.

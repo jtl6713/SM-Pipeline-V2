@@ -3,11 +3,15 @@ import test from "node:test";
 
 import {
   formatLibraryClipDuration,
+  isBrowserSafeLibraryImageUrl,
   libraryAddedLine,
   libraryCardKindLabel,
   libraryCardMetaParts,
   libraryDurationLine,
+  libraryListClassName,
   publishedLibraryConfirmCopy,
+  publishedLibraryPosterUrl,
+  publishedLibraryStreamPath,
 } from "./library-cards.mjs";
 
 test("formatLibraryClipDuration uses m:ss and h:mm:ss", () => {
@@ -19,7 +23,7 @@ test("formatLibraryClipDuration uses m:ss and h:mm:ss", () => {
 });
 
 test("duration line is video-only and hides blank Duration_Seconds", () => {
-  assert.equal(libraryDurationLine({ media_kind: "video", duration_seconds: 42 }), "0:42");
+  assert.equal(libraryDurationLine({ media_kind: "video", duration_seconds: 42 }), "Length 0:42");
   assert.equal(libraryDurationLine({ media_kind: "photo", duration_seconds: 42 }), "");
   assert.equal(libraryDurationLine({ media_kind: "video", duration_seconds: null }), "");
   assert.equal(libraryDurationLine({ media_kind: "video", duration_seconds: 0 }), "");
@@ -48,9 +52,37 @@ test("published cards use Published badge and confirm copy", () => {
   }, { formatDate: () => "Sep 1, 2026" });
   assert.equal(parts.published, "Published Sep 1, 2026");
   assert.equal(parts.added, "");
-  assert.equal(parts.duration, "0:42");
+  assert.equal(parts.duration, "Length 0:42");
   assert.match(
     publishedLibraryConfirmCopy({ platform: "Instagram", outputType: "Reel" }),
     /Remove the Google Drive copy of this published Instagram Reel\?/,
   );
+});
+
+test("layout class names cover text, thumbnail list, and grid", () => {
+  assert.equal(libraryListClassName("list"), "library-list library-list--text");
+  assert.equal(libraryListClassName("thumbs"), "library-list library-list--thumbs");
+  assert.equal(libraryListClassName("grid"), "library-grid");
+  assert.equal(libraryListClassName(""), "library-grid");
+});
+
+test("published posters reject Drive URLs and videos use the output preview route", () => {
+  assert.equal(isBrowserSafeLibraryImageUrl("https://drive.google.com/uc?id=abc"), false);
+  assert.equal(isBrowserSafeLibraryImageUrl("https://media.chicagoshining.com/studio/previews/out.mp4"), false);
+  assert.equal(
+    isBrowserSafeLibraryImageUrl("https://media.chicagoshining.com/publish/cover.jpg"),
+    true,
+  );
+  assert.equal(publishedLibraryPosterUrl({
+    thumbnail_url: "https://drive.google.com/uc?id=abc",
+    studio_preview_url: "https://media.chicagoshining.com/publish/cover.jpg",
+  }), "https://media.chicagoshining.com/publish/cover.jpg");
+  assert.equal(publishedLibraryStreamPath({
+    id: "recOUT1",
+    media_kind: "video",
+  }), "/api/outputs/recOUT1/preview");
+  assert.equal(publishedLibraryStreamPath({
+    id: "recOUT1",
+    media_kind: "photo",
+  }), "");
 });

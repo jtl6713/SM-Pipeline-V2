@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-09-03-shorts-vertical-thumb";
+const SERVICE_VERSION = "2026-09-06-shorts-vertical-required";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -492,11 +492,7 @@ async function setThumbnail(videoId, sourceUrl, fallbackSourceUrl = null, { vert
   if (!response.ok) throw new Error(`thumbnails.set failed ${response.status}: ${text}`);
   const data = JSON.parse(text);
   if (vertical) {
-    try {
-      data.studioVerticalStill = await setStudioVerticalStill(videoId, asset, token);
-    } catch (error) {
-      data.studioVerticalStillError = error instanceof Error ? error.message : String(error);
-    }
+    data.studioVerticalStill = await setStudioVerticalStill(videoId, asset, token);
   }
   return data;
 }

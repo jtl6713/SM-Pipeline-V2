@@ -1,6 +1,7 @@
 (() => {
   const EZ_ORIGIN = "ez-button";
   const EZ_ORIGIN_WIZARD = "ez-wizard";
+  const EZ_ORIGIN_AZ = "az-finished-video";
   const EZ_INPUTS = Object.freeze({
     SINGLE_PHOTO: "single-photo",
     MULTIPLE_PHOTOS: "multiple-photos",
@@ -199,6 +200,7 @@
     const caption = String(captionMode || "ai").trim().toLowerCase() || "ai";
     const pkg = String(packageId || "").trim().toLowerCase();
     const parts = [`origin=${tag}`, `ez-input=${input}`, `ez-caption=${caption}`];
+    if (tag === EZ_ORIGIN_AZ) parts.push("az-auto-queue=1");
     if (pkg === EZ_PACKAGES.VIDEO || pkg === EZ_PACKAGES.SLIDES || pkg === EZ_PACKAGES.CUSTOM) {
       parts.push(`ez-package=${pkg}`);
     }
@@ -217,7 +219,7 @@
 
   function parseEzOriginNotes(value) {
     const text = String(value || "");
-    const originMatch = /origin=(ez-wizard|ez-button)/i.exec(text);
+    const originMatch = /origin=(az-finished-video|ez-wizard|ez-button)/i.exec(text);
     if (!originMatch) return null;
     const input = /ez-input=([a-z0-9-]+)/i.exec(text)?.[1] || "";
     const caption = /ez-caption=([a-z0-9-]+)/i.exec(text)?.[1] || "";
@@ -539,6 +541,7 @@
   window.ChicagoShiningEzPlan = {
     EZ_ORIGIN,
     EZ_ORIGIN_WIZARD,
+    EZ_ORIGIN_AZ,
     EZ_INPUTS,
     EZ_CAPTION_MODES,
     EZ_PHASE1_INPUTS,

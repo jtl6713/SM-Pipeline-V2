@@ -25,7 +25,12 @@ from ttd.constants import (
     STATUS_RETRY,
 )
 from ttd.eligibility import ttd3_eligibility_reason
-from ttd.package import handoff_email_html, handoff_email_subject
+from ttd.package import (
+    handoff_email_html,
+    handoff_email_subject,
+    is_az_finished_video,
+    sibling_platform_outputs,
+)
 
 
 def process_request(
@@ -79,6 +84,13 @@ def process_request(
     subject = handoff_email_subject(output)
     location = resolve_publish_location(client, output, settings=settings)
     result["location"] = location.as_dict() if location else None
+    siblings: list[dict] = []
+    if is_az_finished_video(output):
+        try:
+            siblings = sibling_platform_outputs(client, output)
+            result["sibling_count"] = len(siblings)
+        except Exception as exc:
+            result["sibling_error"] = str(exc)
     try:
         from ap0.public_cover import ensure_public_cover_url
 
@@ -87,7 +99,7 @@ def process_request(
             result["cover_url"] = public_cover
     except Exception as exc:
         result["cover_stage_error"] = str(exc)
-    html_body = handoff_email_html(output, location=location)
+    html_body = handoff_email_html(output, location=location, siblings=siblings)
     result["subject"] = subject
     try:
         send = GmailClient().send_html(to=to_addr, subject=subject, html_body=html_body)

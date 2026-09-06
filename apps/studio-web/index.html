@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.252-asset-library-published">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.254-az-finished-video">
 </head>
 <body>
  <header class="topbar">
@@ -54,6 +54,23 @@
  <h1>Start a post</h1>
  <p>Start from an idea or from media. Then pick Vertical video (Reels, Stories, Short, thumbnail) or Scrollable slides (carousel / album). YouTube slides become a rendered video.</p>
  </div>
+ <section class="az-drop" id="azFinishedDrop">
+ <h2>Publish a finished video</h2>
+ <p>Drop one MP4. Studio skips music and voiceover, makes the 3D cover, picks a 7-day window, and queues Instagram and Facebook Reels + Stories, YouTube Short, and a TikTok draft. After the file is on Drive, you can close this tab.</p>
+ <label class="form-field az-drop-title"><span>Title <em>optional</em></span>
+ <input id="azFinishedTitle" maxlength="160" placeholder="e.g. Riverwalk sunset reel" autocomplete="off">
+ </label>
+ <div class="item4-upload-zone az-drop-zone" id="azFinishedZone" tabindex="0" role="button" aria-label="Drop a finished MP4 to publish">
+ <input id="azFinishedInput" type="file" accept="video/mp4,video/quicktime,video/*,.mp4,.mov,.m4v" hidden>
+ <div class="item4-upload-icon">＋</div>
+ <div>
+ <strong>Drop a finished MP4</strong>
+ <span>Or click to choose. Ingesting → compressing → cover/caption → scheduled → queued.</span>
+ </div>
+ </div>
+ <p class="form-message" id="azFinishedMessage" aria-live="polite"></p>
+ <p class="az-drop-progress" id="azFinishedProgress" hidden></p>
+ </section>
  <div class="ez-wizard" id="ezWizard">
  <div class="ez-wizard-toolbar">
  <button type="button" class="ez-wizard-text" id="ezWizardBack" hidden>Back</button>
@@ -1035,6 +1052,13 @@
  <option value="published">Published files</option>
  </select>
  </label>
+ <label class="form-field"><span>Layout</span>
+ <select id="libraryViewMode">
+ <option value="list">Text list</option>
+ <option value="thumbs">Thumbnail list</option>
+ <option value="grid" selected>Large grid</option>
+ </select>
+ </label>
  <label class="form-field"><span>Show this many on page</span>
  <select id="libraryPageSize">
  <option value="5" selected>5</option>
@@ -1564,7 +1588,7 @@
  </aside>
 
  <script src="/assets/config.js?v=0.6.240-analytics-seq"></script>
- <script src="/assets/ez-plan.js?v=0.6.247-suggested-schedules"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.252-asset-library-published"></script>
+ <script src="/assets/ez-plan.js?v=0.6.254-az-finished-video"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.254-az-finished-video"></script>
 </body>
 </html>

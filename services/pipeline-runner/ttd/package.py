@@ -10,7 +10,7 @@ from ap0.public_cover import graph_fetchable_cover_url
 from carousel.timeutil import iso_utc, utc_now
 from config import load_settings
 from publish.location import PublishLocation, append_location_line
-from render.fields import field, field_str
+from render.fields import field, field_str, first_linked_id
 from rr1.email_builder import thumbnail_download_url
 from ttd.constants import (
     DEFAULT_TITLE,
@@ -70,9 +70,86 @@ def recommended_publish_label(record: dict[str, Any]) -> str:
     return local.strftime("%b %d, %Y %I:%M %p").replace(" 0", " ")
 
 
+def chicago_publish_label(raw: Any) -> str:
+    if not raw:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+
+        local = parsed.astimezone(ZoneInfo("America/Chicago"))
+        stamp = local.strftime("%a %b %d, %I:%M %p CT").replace(" 0", " ")
+        return stamp
+    except Exception:
+        return recommended_publish_label({"fields": {"Scheduled_Post_Date": raw}})
+
+
+def is_az_finished_video(record: dict[str, Any]) -> bool:
+    notes = "\n".join(
+        field_str(record, name)
+        for name in ("Output_Notes", "Production_Notes", "Internal_Notes")
+    ).casefold()
+    return "origin=az-finished-video" in notes or (
+        "az-auto-queue=1" in notes and "ez-input=finished-video" in notes
+    )
+
+
+def sibling_platform_outputs(client: Any, record: dict[str, Any]) -> list[dict[str, Any]]:
+    content_id = first_linked_id(field(record, "Content_Item"))
+    if not content_id or client is None:
+        return []
+    from airtable.constants import PLATFORM_OUTPUTS_TABLE
+
+    formula = (
+        f'AND({{Test_Run_ID}}=BLANK(),FIND("{content_id}", ARRAYJOIN({{Content_Item}})))'
+    )
+    rows = client.list_records(PLATFORM_OUTPUTS_TABLE, formula=formula, max_records=20)
+    current = str(record.get("id") or "")
+    return [row for row in rows if str(row.get("id") or "") != current]
+
+
+def _output_surface(record: dict[str, Any]) -> str:
+    platform = field_str(record, "Platform") or "Platform"
+    kind = field_str(record, "Studio_Output_Type") or field_str(record, "Format") or field_str(record, "Platform_Output_Type")
+    return f"{platform} {kind}".strip()
+
+
+def sibling_status_line(record: dict[str, Any]) -> str:
+    label = html.escape(_output_surface(record))
+    permalink = field_str(record, "Platform_Post_URL")
+    publish = field_str(record, "Publish_Status")
+    if permalink and publish.casefold() in {"published", "published privately"}:
+        safe = html.escape(permalink, quote=True)
+        return f"<li><b>{label}:</b> live — <a href=\"{safe}\">{html.escape(permalink)}</a></li>"
+    when = chicago_publish_label(field(record, "Scheduled_Post_Date") or field(record, "Recommended_Publication_At"))
+    if when:
+        return f"<li><b>{label}:</b> scheduled {html.escape(when)}</li>"
+    status = html.escape(publish or field_str(record, "Output_Status") or "in production")
+    return f"<li><b>{label}:</b> {status}</li>"
+
+
+def platform_status_block(siblings: list[dict[str, Any]] | None) -> str:
+    rows = [sibling_status_line(row) for row in (siblings or [])]
+    if not rows:
+        return (
+            "<p><b>Other platforms:</b> Instagram, Facebook, and YouTube are on the same campaign day. "
+            "Check Pipeline if a permalink is not listed yet.</p>"
+        )
+    return (
+        '<div style="margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px;background:#f9fafb;">'
+        "<p style=\"margin:0 0 8px 0;\"><b>Same-piece status</b></p>"
+        f"<ul style=\"margin:0;padding-left:18px;\">{''.join(rows)}</ul></div>"
+    )
+
+
 def handoff_email_subject(record: dict[str, Any]) -> str:
-    output_id = field(record, "Output_ID") or ""
     title = field_str(record, "Output_Title") or "TikTok draft"
+    if is_az_finished_video(record):
+        return f"ChicagoShining publish package — {title}"
+    output_id = field(record, "Output_ID") or ""
     return f"TikTok Draft #{output_id} Ready in Inbox - {title}"
 
 
@@ -109,7 +186,12 @@ def cover_block(record: dict[str, Any]) -> str:
     )
 
 
-def handoff_email_html(record: dict[str, Any], *, location: PublishLocation | None = None) -> str:
+def handoff_email_html(
+    record: dict[str, Any],
+    *,
+    location: PublishLocation | None = None,
+    siblings: list[dict[str, Any]] | None = None,
+) -> str:
     output_id = html.escape(str(field(record, "Output_ID") or ""))
     title = html.escape(field_str(record, "Output_Title") or "TikTok draft")
     draft_type = html.escape(field_str(record, "TikTok_Draft_Type") or "")
@@ -126,11 +208,29 @@ def handoff_email_html(record: dict[str, Any], *, location: PublishLocation | No
     completion = html.escape(field_str(record, "TikTok_Manual_Completion_URL"))
     when = html.escape(recommended_publish_label(record))
     count = html.escape(image_count_label(record))
+    az = is_az_finished_video(record)
+    heading = "ChicagoShining publish package" if az else "TikTok draft delivered — manual action required"
+    intro = (
+        '<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the <b>@chicago.shining</b> inbox. '
+        "Sibling Instagram, Facebook, and YouTube posts for this video share the same campaign day. "
+        "TikTok cannot tell us when the inbox draft goes public — use Mark as Published after you post. "
+        "TikTok Story is still manual in the app.</p>"
+        if az
+        else '<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the <b>@chicago.shining</b> inbox. It has not been marked Published in Airtable.</p>'
+    )
+    status_block = platform_status_block(siblings) if az else ""
+    story_note = (
+        '<p style="margin:12px 0;padding:10px;border:1px solid #fde68a;border-radius:8px;background:#fffbeb;">'
+        "<b>TikTok Story:</b> the Content Posting API has no Stories destination. Post that Story in the TikTok app after the draft is live.</p>"
+        if az
+        else ""
+    )
     return (
         '<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827;background:#f3f4f6;padding:20px;">'
         '<div style="max-width:820px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:22px;">'
-        "<h2 style=\"margin:0 0 8px;\">TikTok draft delivered — manual action required</h2>"
-        '<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the <b>@chicago.shining</b> inbox. It has not been marked Published in Airtable.</p>'
+        f"<h2 style=\"margin:0 0 8px;\">{heading}</h2>"
+        f"{intro}"
+        f"{status_block}"
         f'<div style="border:1px solid #ddd;border-radius:10px;padding:16px;"><h3 style="margin-top:0;">Output #{output_id} — {title}</h3>'
         f"<p><b>Draft type:</b> {draft_type}<br><b>Number of images:</b> {count}<br><b>Recommended publishing time:</b> {when}</p>"
         f"{location_block}"
@@ -139,6 +239,7 @@ def handoff_email_html(record: dict[str, Any], *, location: PublishLocation | No
         f'<div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{caption}\n\n{hashtags}</div>'
         '<p><b>Ordered asset manifest:</b></p>'
         f'<div style="white-space:pre-wrap;word-break:break-word;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">{assets}</div>'
+        f"{story_note}"
         "<ol><li>Open the TikTok inbox notification from <b>SM Pipeline Social Publisher</b>.</li>"
         "<li>Review and edit the images/video and caption.</li>"
         "<li>Download the 3D cover above and set it as the draft cover in TikTok.</li>"

@@ -210,9 +210,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.246-asset-library-published",
+          version: "0.10.249-az-finished-video",
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
+          studio_az_finished_video_v1: true,
+          studio_az_auto_queue_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -958,6 +960,11 @@ export default {
         await startOrphanedStudioProductionJobs(env);
       } catch (error) {
         console.warn("studio produce orphan kick failed", error);
+      }
+      try {
+        await resumeAzFinishedVideoRequests(env, ctx);
+      } catch (error) {
+        console.warn("AZ finished-video resume failed", error);
       }
       try {
         await item4PulsePipelineStage(env, "a1s", { extra: { live_status: true } }, "A1S");
@@ -4520,6 +4527,11 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
         console.warn("Item 4 studio-compress pulse deferred after upload", error);
       }));
     }
+    if (studioIsAzFinishedVideo(record) && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(advanceAzFinishedVideo(env, recordId, authorization, ctx).catch((error) => {
+        console.warn("AZ finished-video advance deferred after upload", recordId, error);
+      }));
+    }
 
     if (finishedVideo) {
       return respond(request, env, {
@@ -4532,8 +4544,12 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
         record: mapProductionRequest(record),
         compression_pending: needsCompress,
         message: needsCompress
-          ? "Studio is compressing this video automatically. Keep this tab open."
-          : "Finished video is stored and ready. Crops, Remotion, and Drive copies are skipped.",
+          ? (studioIsAzFinishedVideo(record)
+            ? "Studio is compressing this video automatically. You can close this tab."
+            : "Studio is compressing this video automatically. Keep this tab open.")
+          : (studioIsAzFinishedVideo(record)
+            ? "Finished video is stored. Studio will thumbnail, schedule, and queue all four platforms. You can close this tab."
+            : "Finished video is stored and ready. Crops, Remotion, and Drive copies are skipped."),
       }, 201);
     }
 
@@ -5264,10 +5280,18 @@ function item4MasterLooksLikeVideo(asset) {
 function studioRewriteFinishedOriginNotes(existing, kind) {
   const nextKind = studioNormalizeFinishedOriginKind(kind);
   if (!nextKind) return String(existing || "");
-  const stamp = `origin=ez-wizard; ez-input=${nextKind}; ez-caption=ai`;
+  const az = /origin=az-finished-video/i.test(String(existing || "")) || /az-auto-queue=1/i.test(String(existing || ""));
+  const stamp = az
+    ? `origin=az-finished-video; ez-input=${nextKind}; ez-caption=ai; az-auto-queue=1`
+    : `origin=ez-wizard; ez-input=${nextKind}; ez-caption=ai`;
   const text = String(existing || "").trim();
   if (!text) return stamp;
-  if (new RegExp(`ez-input=${nextKind}(?:;|\\s|$)`, "i").test(text)) return text;
+  if (new RegExp(`ez-input=${nextKind}(?:;|\\s|$)`, "i").test(text)) {
+    if (az && !/origin=az-finished-video/i.test(text)) {
+      return text.replace(/origin=ez-wizard/i, "origin=az-finished-video");
+    }
+    return text;
+  }
   const replaced = text.replace(/ez-input=[a-z0-9-]+/i, `ez-input=${nextKind}`);
   if (replaced !== text) return replaced;
   return `${stamp}\n\n${text}`;
@@ -6693,6 +6717,396 @@ async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}
     );
   }
   return { response, payload };
+}
+
+const AZ_DEFAULT_PLATFORMS = Object.freeze(["Instagram", "Facebook", "TikTok", "YouTube"]);
+const AZ_DEFAULT_OVERRIDES = Object.freeze({
+  Instagram: "Reel",
+  Facebook: "Reel",
+  TikTok: "Video Draft",
+  YouTube: "Short",
+});
+const AZ_DEFAULT_EXTRAS = Object.freeze(["Instagram::Story", "Facebook::Story"]);
+const AZ_HORIZON_DAYS = 7;
+const AZ_OTHER_CLUSTER_MS = 30 * 60 * 1000;
+const AZ_OTHER_NEAR_MS = 3 * 60 * 60 * 1000;
+const AZ_STORY_OFFSET_MS = 10 * 60 * 1000;
+const AZ_SCHEDULE_LEAD_MS = 10 * 60 * 1000;
+
+function studioRequestNotesText(record) {
+  return [
+    f(record, "Production_Notes"),
+    f(record, "Output_Notes"),
+    f(record, "Internal_Notes"),
+    f(record, "Production_Request_Notes"),
+  ].map((value) => String(value || "")).join("\n");
+}
+
+function studioIsAzFinishedVideo(record) {
+  const text = studioRequestNotesText(record);
+  return /origin=az-finished-video/i.test(text)
+    || (/az-auto-queue=1/i.test(text) && /ez-input=finished-video/i.test(text));
+}
+
+function skipsProductionApprove(text) {
+  return String(text || "").includes("origin=autonomous") || /origin=az-finished-video/i.test(String(text || ""));
+}
+
+function studioChicagoWeekdayShort(date = new Date()) {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(date);
+}
+
+function studioAzCivilKey(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function studioAzParseWindowStart(window) {
+  const first = String(window || "12:00-13:00").split("-")[0] || "12:00";
+  const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
+  return { hour: hh, minute: mm || 0 };
+}
+
+function studioAzCivilFromMs(ms) {
+  const parts = studioChicagoDateTimeParts(new Date(ms));
+  return { ...parts, weekday: studioChicagoWeekdayShort(new Date(ms)), key: studioAzCivilKey(parts.year, parts.month, parts.day) };
+}
+
+function studioAzIsStory(outputType) {
+  return /story/i.test(String(outputType || ""));
+}
+
+function studioAzScheduleKey(platform, outputType) {
+  return `${String(platform || "").trim()}::${String(outputType || "").trim()}`;
+}
+
+function studioAzTooClose(ms, occupiedMs, gapMs = AZ_OTHER_CLUSTER_MS) {
+  return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
+}
+
+function studioAzNearPenalty(ms, occupiedMs) {
+  let penalty = 0;
+  for (const other of occupiedMs || []) {
+    if (!Number.isFinite(other)) continue;
+    const gap = Math.abs(other - ms);
+    if (gap < AZ_OTHER_CLUSTER_MS) penalty += 80;
+    else if (gap < AZ_OTHER_NEAR_MS) penalty += 40;
+  }
+  return penalty;
+}
+
+function studioAzOccupiedOnDay(occupiedMs, civil) {
+  return (occupiedMs || []).filter((ms) => Number.isFinite(ms) && studioAzCivilFromMs(ms).key === civil.key);
+}
+
+function studioAzHorizon(now = new Date()) {
+  const chicago = studioChicagoDateTimeParts(now);
+  const days = [];
+  for (let i = 0; i < AZ_HORIZON_DAYS; i++) {
+    const civil = i === 0
+      ? { year: chicago.year, month: chicago.month, day: chicago.day }
+      : studioAddCivilDays(chicago.year, chicago.month, chicago.day, i);
+    const noonMs = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, 12, 0);
+    days.push({
+      ...civil,
+      index: i,
+      weekday: studioChicagoWeekdayShort(new Date(noonMs)),
+      key: studioAzCivilKey(civil.year, civil.month, civil.day),
+    });
+  }
+  return days;
+}
+
+function studioAzWindowSlots(civil, windows, now, occupiedMs) {
+  const nowMs = now.getTime() + AZ_SCHEDULE_LEAD_MS;
+  const slots = [];
+  for (let index = 0; index < (windows || []).length; index++) {
+    const { hour, minute } = studioAzParseWindowStart(windows[index]);
+    const ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, minute);
+    if (ms <= nowMs) continue;
+    if (studioAzTooClose(ms, occupiedMs)) continue;
+    slots.push({ ms, iso: new Date(ms).toISOString(), windowIndex: index, window: windows[index] });
+  }
+  return slots;
+}
+
+function studioAzScoreMain(civil, suggested, occupiedMs, now) {
+  const days = Array.isArray(suggested?.days) ? suggested.days : [];
+  const windows = Array.isArray(suggested?.windows) && suggested.windows.length ? suggested.windows : ["12:00-13:00"];
+  const preferred = !days.length || days.includes(civil.weekday);
+  const slots = studioAzWindowSlots(civil, windows, now, occupiedMs);
+  if (!slots.length) return { score: -1000, slot: null, preferred };
+  const slot = slots[0];
+  const crowding = studioAzOccupiedOnDay(occupiedMs, civil).length;
+  let score = 80 + (preferred ? 18 : 0) + Math.max(0, 24 - slot.windowIndex * 8);
+  score -= crowding * 22;
+  score -= studioAzNearPenalty(slot.ms, occupiedMs);
+  score -= civil.index * 3;
+  if (crowding === 0 && civil.index > 0) score += 8;
+  return { score, slot, preferred, crowding };
+}
+
+function studioBuildAzCampaignSchedule(items, { occupiedMs = [], bestTimesByKey = {}, now = new Date() } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const mains = list.filter((item) => !studioAzIsStory(item.output_type));
+  const stories = list.filter((item) => studioAzIsStory(item.output_type));
+  const days = studioAzHorizon(now);
+  let best = null;
+  for (const civil of days) {
+    const parts = mains.map((item) => {
+      const key = studioAzScheduleKey(item.platform, item.output_type);
+      return studioAzScoreMain(civil, bestTimesByKey[key] || studioIndustryBestWindows(item.platform, item.output_type), occupiedMs, now);
+    });
+    if (!parts.length) continue;
+    const worst = Math.min(...parts.map((part) => part.score));
+    const avg = parts.reduce((sum, part) => sum + part.score, 0) / parts.length;
+    const crowding = studioAzOccupiedOnDay(occupiedMs, civil).length;
+    const total = avg + Math.min(0, worst) * 0.15 - crowding * 6;
+    if (!best || total > best.total) best = { civil, total, parts, crowding };
+  }
+  const stamps = new Map();
+  if (!best?.civil) return { stamps, campaign: null, rationale: "no open campaign day" };
+  const reserved = [...occupiedMs];
+  for (const item of mains) {
+    const key = studioAzScheduleKey(item.platform, item.output_type);
+    const suggested = bestTimesByKey[key] || studioIndustryBestWindows(item.platform, item.output_type);
+    const scored = studioAzScoreMain(best.civil, suggested, reserved, now);
+    const slot = scored.slot || studioAzWindowSlots(best.civil, suggested.windows || ["12:00-13:00"], now, reserved)[0];
+    if (!slot) continue;
+    stamps.set(key, slot.iso);
+    reserved.push(slot.ms);
+  }
+  for (const story of stories) {
+    const reel = mains.find((item) => String(item.platform) === String(story.platform));
+    const reelIso = reel ? stamps.get(studioAzScheduleKey(reel.platform, reel.output_type)) : null;
+    const base = reelIso ? Date.parse(reelIso) : null;
+    if (!Number.isFinite(base)) continue;
+    stamps.set(studioAzScheduleKey(story.platform, story.output_type), new Date(base + AZ_STORY_OFFSET_MS).toISOString());
+  }
+  return {
+    stamps,
+    campaign: best.civil,
+    rationale: `campaign ${best.civil.key} (${best.civil.weekday}); spaced from other posts over ${AZ_HORIZON_DAYS} days`,
+  };
+}
+
+async function studioLoadAzOccupiedTimes(env, { excludeIds = [] } = {}) {
+  const skip = new Set((excludeIds || []).filter(Boolean));
+  const unpublished = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 200,
+    sortField: "Scheduled_Post_Date",
+    sortDirection: "asc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))',
+  }).catch(() => []);
+  const since = new Date(Date.now() - 7 * 86400000).toISOString();
+  const published = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 200,
+    sortField: "Published_At",
+    sortDirection: "desc",
+    filterFormula: `AND({Test_Run_ID}=BLANK(),{Published_At}>="${since}")`,
+  }).catch(() => []);
+  const allMs = [];
+  for (const row of [...unpublished, ...published]) {
+    if (skip.has(row.id)) continue;
+    const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Published_At");
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) allMs.push(ms);
+  }
+  return { allMs };
+}
+
+async function studioResolveAzBestTimes(env, platform, outputType) {
+  const industry = studioIndustryBestWindows(platform, outputType);
+  try {
+    const season = studioInsightsResolveSeason({ searchParams: new URLSearchParams() });
+    const [firstParty, learned] = await Promise.all([
+      studioInsightsLoadObservations(env, {
+        profile: "chicago",
+        platform,
+        output_type: outputType,
+        season,
+        source: "first_party",
+        limit: 120,
+      }).catch(() => []),
+      studioInsightsLoadLearned(env, {
+        profile: "chicago",
+        platform,
+        output_type: outputType,
+        season,
+        metric_type: "post_time",
+      }).catch(() => null),
+    ]);
+    const sample = (firstParty || []).filter((row) => row.views > 0 || row.likes > 0);
+    const heatmap = studioBuildSimilarHeatmap(sample);
+    if (heatmap.suggested && heatmap.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
+      return { ...heatmap.suggested, source: "first_party" };
+    }
+    if (learned?.days?.length && learned?.windows?.length && learned.sample_size >= STUDIO_SIMILAR_TIMES_MIN_SAMPLE) {
+      return { days: learned.days, windows: learned.windows, label: learned.label || "learned model", source: "learned_model" };
+    }
+  } catch (error) {
+    console.warn("AZ best-times lookup failed", platform, outputType, error);
+  }
+  return { ...industry, source: "industry_default" };
+}
+
+async function azPlatformOutputsForRequest(env, requestId) {
+  const outputRows = await outputRowsForProductionRequest(env, requestId);
+  const ids = outputRows.flatMap((row) => arrayOrEmpty(f(row, "Platform_Output"))).filter((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+  const records = [];
+  for (const id of ids) {
+    try { records.push(await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id)); } catch {}
+  }
+  if (records.length) return records;
+  const parent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const contentId = studioFirstLinkedId(f(parent, "Promoted_Content_Item"));
+  if (!contentId) return [];
+  return listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: 20,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${contentId}", ARRAYJOIN({Content_Item})))`,
+  }).catch(() => []);
+}
+
+function azOutputReadyToQueue(record) {
+  if (Boolean(f(record, "Do_Not_Publish"))) return false;
+  const publish = String(f(record, "Publish_Status") || "").trim();
+  if (["Published", "Publishing"].includes(publish)) return false;
+  const url = String(f(record, "Final_File_URL") || "").trim();
+  const caption = String(f(record, "Output_Caption") || "").trim();
+  const story = studioAzIsStory(f(record, "Studio_Output_Type") || f(record, "Format"));
+  const thumb = studioAiThumbnailUrl(f(record, "Thumbnail_URL"));
+  return Boolean(url && caption && (story || thumb));
+}
+
+async function azAutoApproveIfReady(env, requestId) {
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
+  const outputs = await azPlatformOutputsForRequest(env, requestId);
+  if (!outputs.length) return { waiting: "outputs" };
+  const pending = outputs.filter((row) => {
+    const review = String(f(row, "Review_Status") || "").trim();
+    const status = String(f(row, "Output_Status") || "").trim();
+    if (review === "Approved" || status === "Approved for Publishing") return false;
+    return true;
+  });
+  if (!pending.length) return { skipped: "already_queued", count: outputs.length };
+  if (pending.some((row) => !azOutputReadyToQueue(row))) return { waiting: "cover" };
+  const toApprove = pending.filter((row) => studioOutputReadyForPublishApproval(row));
+  if (!toApprove.length) return { waiting: "review_gate" };
+  const occupied = await studioLoadAzOccupiedTimes(env, { excludeIds: outputs.map((row) => row.id) });
+  const items = toApprove.map((row) => ({
+    platform: String(f(row, "Platform") || "").trim(),
+    output_type: String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim(),
+  }));
+  const bestTimesByKey = {};
+  for (const item of items.filter((row) => !studioAzIsStory(row.output_type))) {
+    const key = studioAzScheduleKey(item.platform, item.output_type);
+    if (!bestTimesByKey[key]) bestTimesByKey[key] = await studioResolveAzBestTimes(env, item.platform, item.output_type);
+  }
+  const planned = studioBuildAzCampaignSchedule(items, { occupiedMs: occupied.allMs, bestTimesByKey });
+  const stamp = new Date().toISOString();
+  const approved = [];
+  for (const row of toApprove) {
+    const key = studioAzScheduleKey(f(row, "Platform"), f(row, "Studio_Output_Type") || f(row, "Format"));
+    const iso = planned.stamps.get(key);
+    await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
+      scheduled_post_date: iso || undefined,
+    }, { occupiedMs: [] });
+    approved.push(row.id);
+  }
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (planned.rationale && !/az-schedule=/i.test(notes)) {
+    await item4UpdateRequestState(env, requestId, {
+      Production_Notes: `${notes}\n\naz-schedule=${planned.campaign?.key || ""}; ${planned.rationale}`.slice(0, 10000),
+    });
+  }
+  return { ok: true, approved_count: approved.length, campaign: planned.campaign, rationale: planned.rationale };
+}
+
+async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null) {
+  if (!requestId) return { skipped: "missing_request" };
+  let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  if (!studioIsAzFinishedVideo(record)) return { skipped: "not_az" };
+  let auth = authorization;
+  if (!auth?.organization?.record_id) {
+    auth = await resolveStudioCronAuthorization(env);
+  }
+  const assets = item4AssetManifest(record);
+  if (item4AssetsNeedStudioCompress(assets)) {
+    await item4PulseStudioCompressJob(env, requestId).catch((error) => {
+      console.warn("AZ compress pulse failed", requestId, error);
+    });
+    return { waiting: "compress", production_request_id: requestId };
+  }
+  if (!item4FinishedVideoMastersReady(record, assets)) {
+    return { waiting: "assets", production_request_id: requestId };
+  }
+  const planStatus = String(f(record, "Studio_Output_Plan_Status") || "").trim();
+  if (planStatus !== "Ready") {
+    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
+      platforms: [...AZ_DEFAULT_PLATFORMS],
+      overrides: { ...AZ_DEFAULT_OVERRIDES },
+      extras: [...AZ_DEFAULT_EXTRAS],
+      package: "video",
+    });
+    await buildItem4OutputPlan(planCall.request, env, planCall.url, auth);
+    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  }
+  if (studioIsFinishedPassthrough(record)) {
+    const variantStatus = String(f(record, "Studio_Variant_Status") || "").trim();
+    if (variantStatus !== "Ready" && variantStatus !== "Not Needed") {
+      record = await item4UpdateRequestState(env, requestId, { Studio_Variant_Status: "Not Needed" });
+    }
+  }
+  let status = String(f(record, "Request_Status") || "").trim();
+  if (["Draft", "Ready"].includes(status)) {
+    const promoteCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
+    await promoteProductionRequestViaI3I4(promoteCall.request, env, promoteCall.url, auth, ctx);
+    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    status = String(f(record, "Request_Status") || "").trim();
+  }
+  if (status === "Submitted") {
+    const ideaId = studioFirstLinkedId(f(record, "Idea_Candidate"));
+    if (ideaId) {
+      const ideaNow = await waitForPromotionResult(env, ideaId, 24, 1250);
+      if (promotionCompleted(ideaNow)) {
+        await finalizeProductionRequestPromotion(env, requestId, ideaNow);
+        record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+        status = String(f(record, "Request_Status") || "").trim();
+      }
+    }
+    if (status === "Submitted") return { waiting: "awaiting_i4", production_request_id: requestId };
+  }
+  if (status === "Promoted") {
+    try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
+      console.warn("AZ produce enqueue failed", requestId, error);
+    }
+    try { await advanceStudioProductionOutputs(env, { requestRecordId: requestId, waitMs: 0 }); } catch (error) {
+      console.warn("AZ continuation after produce failed", requestId, error);
+    }
+  }
+  return azAutoApproveIfReady(env, requestId);
+}
+
+async function resumeAzFinishedVideoRequests(env, ctx = null) {
+  const rows = await listRecords(env, PRODUCTION_REQUEST_TABLE, {
+    limit: 20,
+    sortField: "Created_At",
+    sortDirection: "desc",
+    filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("origin=az-finished-video",{Production_Notes}&""),{Request_Status}!="Cancelled")',
+  }).catch(() => []);
+  if (!rows.length) return { resumed: 0 };
+  const auth = await resolveStudioCronAuthorization(env).catch(() => null);
+  const results = [];
+  for (const row of rows.slice(0, 4)) {
+    try {
+      results.push(await advanceAzFinishedVideo(env, row.id, auth, ctx));
+    } catch (error) {
+      results.push({ id: row.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { resumed: results.length, results };
 }
 
 async function enqueueStudioProductionJob(env, requestId) {
@@ -8232,6 +8646,11 @@ async function getItem4WorkspaceStatus(request, env, url, authorization, ctx = n
         console.warn("Item 4 studio-compress pulse deferred from workspace status", error);
       }));
     }
+    if (studioIsAzFinishedVideo(record) && ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(advanceAzFinishedVideo(env, recordId, authorization, ctx).catch((error) => {
+        console.warn("AZ finished-video advance deferred from compress workspace", recordId, error);
+      }));
+    }
   } catch (error) {
     masterAuthorityResume = {
       attempted: false,
@@ -8654,13 +9073,15 @@ async function cleanProductionRequestPayload(payload, env) {
 }
 
 function productionRequestFields(input, nowIso, { status = "Draft" } = {}) {
+  const notes = String(input.production_notes || "");
+  const az = /origin=az-finished-video/i.test(notes);
   return {
     Request_Status: status,
     Master_Content_Type: input.content_type || null,
     Target_Platforms: input.platforms || [],
-    Voiceover_Mode: input.voiceover_mode,
-    Background_Music_Mode: input.background_music_mode,
-    Thumbnail_Mode: /ez-input=finished-(video|stills|carousel)/i.test(String(input.production_notes || ""))
+    Voiceover_Mode: az ? "No" : input.voiceover_mode,
+    Background_Music_Mode: az ? "No" : input.background_music_mode,
+    Thumbnail_Mode: /ez-input=finished-(video|stills|carousel)/i.test(notes)
       ? "Yes"
       : input.thumbnail_mode,
     Video_Duration_Seconds: input.video_duration_seconds,
@@ -11239,7 +11660,10 @@ function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
   const kind = studioFinishedOriginKind(requestRecord);
   if (!kind) return {};
   const firstUrl = String(clips[0]?.url || "").trim() || null;
-  const note = `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the colorful 3D block-letter thumbnail. AI may write the post caption only; do not burn text onto the finished file.`;
+  const az = studioIsAzFinishedVideo(requestRecord);
+  const note = az
+    ? `origin=az-finished-video; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the colorful 3D block-letter thumbnail. AI may write the post caption only; do not burn text onto the finished file. az-auto-queue=1.`
+    : `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the colorful 3D block-letter thumbnail. AI may write the post caption only; do not burn text onto the finished file.`;
   if (kind === "finished-video") {
     return {
       Output_Status: firstUrl ? "Ready for Review" : "In Production",
@@ -13575,7 +13999,7 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
   if (requestStatus === "Submitted") {
     // Manual path: wait briefly, do not resend I3. Autonomous path: I4 is not a
     // human Production Approve stop — wait long enough to attach the Content Item.
-    const autonomous = isAutonomousOrigin(f(requestRecord, "Production_Notes"));
+    const autonomous = skipsProductionApprove(f(requestRecord, "Production_Notes"));
     ideaRecord = await waitForPromotionResult(env, ideaRecordId, autonomous ? 24 : 4, autonomous ? 1250 : 750);
     if (promotionCompleted(ideaRecord)) {
       const finalized = await finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord);
@@ -13641,7 +14065,7 @@ async function promoteProductionRequestViaI3I4(request, env, url, authorization,
     throw error;
   }
 
-  const autonomousSubmit = isAutonomousOrigin(f(requestRecord, "Production_Notes"));
+  const autonomousSubmit = skipsProductionApprove(f(requestRecord, "Production_Notes"));
   ideaRecord = await waitForPromotionResult(
     env,
     ideaRecordId,
@@ -19191,6 +19615,12 @@ function continueParkedProductionAfterPromote(ctx, env, requestId = null) {
         await advanceStudioProductionOutputs(env, { requestRecordId: requestId, waitMs: 0 });
       } catch (error) {
         console.warn("studio continuation after promote failed", requestId, error);
+      }
+      try {
+        const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+        if (studioIsAzFinishedVideo(requestRecord)) await azAutoApproveIfReady(env, requestId);
+      } catch (error) {
+        console.warn("AZ auto-queue after promote failed", requestId, error);
       }
     }
   })();

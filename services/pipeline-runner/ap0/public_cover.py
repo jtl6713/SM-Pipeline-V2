@@ -39,6 +39,9 @@ NATIVE_GRID_COVER_OUTPUTS = {
 }
 
 
+YOUTUBE_THUMB_MAX_BYTES = 2 * 1024 * 1024
+
+
 def native_grid_cover_required(record: dict[str, Any]) -> bool:
     """True when publish must tell the platform to use the 3D still as the grid cover."""
     platform = field_str(record, "Platform").casefold()
@@ -140,16 +143,44 @@ def download_cover_bytes(client, record: dict[str, Any]) -> tuple[bytes, str]:
     return response.content, mime or "image/png"
 
 
-def ensure_public_cover_url(client, record: dict[str, Any]) -> str:
+def cover_as_jpeg(content: bytes, max_bytes: int = YOUTUBE_THUMB_MAX_BYTES) -> tuple[bytes, str]:
+    from io import BytesIO
+
+    from PIL import Image
+
+    image = Image.open(BytesIO(content)).convert("RGB")
+    quality = 88
+    data = b""
+    while quality >= 50:
+        buf = BytesIO()
+        image.save(buf, format="JPEG", quality=quality, optimize=True)
+        data = buf.getvalue()
+        if len(data) <= max_bytes:
+            return data, "image/jpeg"
+        quality -= 8
+    return data or content, "image/jpeg"
+
+
+def youtube_short_needs_jpeg_cover(url: str) -> bool:
+    path = urlparse(str(url or "")).path.lower()
+    if path.endswith(".jpg") or path.endswith(".jpeg"):
+        return False
+    return True
+
+
+def ensure_public_cover_url(client, record: dict[str, Any], *, prefer_jpeg: bool = False) -> str:
     from integrations.r2_upload import R2UploadClient
 
     existing = graph_fetchable_cover_url(field_str(record, "Thumbnail_URL"))
-    if existing:
+    if existing and not (prefer_jpeg and youtube_short_needs_jpeg_cover(existing)):
         return existing
-    if not cover_needs_public_stage(record):
+    if not existing and not cover_needs_public_stage(record):
         return ""
     content, mime = download_cover_bytes(client, record)
     ext = _ext_for_mime(mime, field_str(record, "Thumbnail_URL"))
+    if prefer_jpeg and (ext != "jpg" or len(content) > YOUTUBE_THUMB_MAX_BYTES):
+        content, mime = cover_as_jpeg(content)
+        ext = "jpg"
     key = cover_r2_key(record, ext)
     public = f"{PUBLIC_MEDIA_BASE}/{key}"
     R2UploadClient().put_object(key, content, mime or "image/png")
@@ -160,3 +191,7 @@ def ensure_public_cover_url(client, record: dict[str, Any]) -> str:
         fields = record.setdefault("fields", {})
         fields["Thumbnail_URL"] = public
     return public
+
+
+def ensure_youtube_short_cover_url(client, record: dict[str, Any]) -> str:
+    return ensure_public_cover_url(client, record, prefer_jpeg=True)

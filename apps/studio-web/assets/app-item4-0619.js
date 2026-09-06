@@ -124,6 +124,8 @@
   let ezWizardAnswers = {};
   let ezWizardHistory = [];
   let ezWizardBusy = false;
+  let azFinishedPath = false;
+  let azProgressTimer = 0;
   let ezAutoPlanAfterUpload = false;
   let ezPlanInFlight = false;
   const ezCaptionDrafts = new Map();
@@ -187,7 +189,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.252-asset-library-published";
+  const BUILD_ID = "item4-0.6.254-az-finished-video";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2303,6 +2305,11 @@
       ? labels[0]
       : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
     if (autoCompress) {
+      if (ezIsAzFinishedPath()) {
+        return oversized.length === 1
+          ? `${list} is over 100 MB. Studio will compress it automatically. You can close this tab.`
+          : `${oversized.length} videos are over 100 MB. Studio will compress them automatically. You can close this tab.`;
+      }
       return oversized.length === 1
         ? `${list} is over 100 MB. Studio will compress it automatically — keep this tab open.`
         : `${oversized.length} videos are over 100 MB. Studio will compress them automatically — keep this tab open.`;
@@ -2399,9 +2406,13 @@
     const name = asset?.name || "video";
     const pct = Number(asset?.compression_progress);
     if (Number.isFinite(pct) && pct > 0) {
-      return `Compressing ${name} · ${Math.round(pct)}%. Keep this tab open.`;
+      return ezIsAzFinishedPath()
+        ? `Compressing ${name} · ${Math.round(pct)}%. You can close this tab.`
+        : `Compressing ${name} · ${Math.round(pct)}%. Keep this tab open.`;
     }
-    return `Studio is compressing ${name}. Keep this tab open.`;
+    return ezIsAzFinishedPath()
+      ? `Studio is compressing ${name}. You can close this tab.`
+      : `Studio is compressing ${name}. Keep this tab open.`;
   }
 
   function item4AssetLooksLikeVideo(asset) {
@@ -2419,6 +2430,102 @@
     if (notes.includes("ez-input=finished-video")) return true;
     const assets = item4Workspace?.assets || [];
     return assets.length === 1 && assets.every(item4AssetLooksLikeVideo);
+  }
+
+  function ezIsAzFinishedPath() {
+    if (azFinishedPath) return true;
+    const pending = ezWizardPending || ezWizardAnswers;
+    const origin = String(pending?.origin || "").trim().toLowerCase();
+    if (origin === "az-finished-video") return true;
+    const notes = String(activeProductionRequest?.production_notes || item4Workspace?.production_notes || "");
+    return /origin=az-finished-video/i.test(notes) || (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes));
+  }
+
+  function setAzFinishedMessage(text = "", type = "") {
+    const node = $("azFinishedMessage");
+    if (!node) return;
+    node.textContent = text || "";
+    node.className = `form-message${type ? ` ${type}` : ""}`;
+  }
+
+  function setAzFinishedProgress(label = "") {
+    const node = $("azFinishedProgress");
+    if (!node) return;
+    if (!label) {
+      node.hidden = true;
+      node.textContent = "";
+      return;
+    }
+    node.hidden = false;
+    node.textContent = label;
+  }
+
+  function stopAzFinishedProgressPolling() {
+    if (azProgressTimer) {
+      window.clearTimeout(azProgressTimer);
+      azProgressTimer = 0;
+    }
+  }
+
+  function azProgressStage(workspace = item4Workspace, outputs = productionRequestOutputs) {
+    if (item4WorkspaceCompressionFailed(workspace)) return "error";
+    if (item4Uploading || ezStarting) return "ingesting";
+    if (item4WorkspaceNeedsCompression(workspace)) return "compressing";
+    const assetsReady = String(workspace?.assets_status || "") === "Ready";
+    if (!assetsReady) return "ingesting";
+    const rows = Array.isArray(outputs) ? outputs : [];
+    if (!rows.length) return "cover/caption";
+    const story = (row) => /story/i.test(String(row?.studio_output_type || row?.output_type || row?.format || ""));
+    const mains = rows.filter((row) => !story(row));
+    const hasCover = mains.length && mains.every((row) => String(row.thumbnail_url || "").trim());
+    const hasCaption = rows.every((row) => String(row.output_caption || "").trim());
+    const queued = rows.length && rows.every((row) => {
+      const review = String(row.review_status || "").trim();
+      const publish = String(row.publish_status || "").trim();
+      const status = String(row.output_status || "").trim();
+      return review === "Approved"
+        || status === "Approved for Publishing"
+        || /ready to (schedule|publish)|publishing|published/i.test(publish);
+    });
+    const scheduled = rows.some((row) => String(row.scheduled_post_date || "").trim());
+    if (queued) return "queued";
+    if (scheduled && hasCover && hasCaption) return "scheduled";
+    return "cover/caption";
+  }
+
+  async function pollAzFinishedProgress() {
+    if (!ezIsAzFinishedPath() || !activeProductionRequest?.id) return;
+    try {
+      await loadItem4Workspace(activeProductionRequest);
+      try { await loadProductionRequestOutputs(activeProductionRequest); } catch {}
+      const stage = azProgressStage(item4Workspace, productionRequestOutputs);
+      setAzFinishedProgress(stage);
+      const closeNote = "You can close this tab.";
+      if (stage === "error") {
+        const failed = (item4Workspace?.assets || []).find((asset) => String(asset?.compression_status || "").toLowerCase() === "failed");
+        setAzFinishedMessage(String(failed?.compression_error || "").trim() || "Studio could not compress this video automatically.", "error-text");
+        $("azFinishedDrop")?.classList.remove("is-busy");
+        stopAzFinishedProgressPolling();
+        return;
+      }
+      if (stage === "queued") {
+        setAzFinishedMessage(`Queued across Instagram, Facebook, YouTube, and TikTok. ${closeNote}`, "success");
+        $("azFinishedDrop")?.classList.remove("is-busy");
+        stopAzFinishedProgressPolling();
+        return;
+      }
+      if (stage === "scheduled") setAzFinishedMessage(`Times are set. Studio is queueing publishes. ${closeNote}`, "success");
+      else if (stage === "compressing") setAzFinishedMessage(item4CompressionProgressLabel(), "success");
+      else if (stage === "cover/caption") setAzFinishedMessage(`Making the 3D cover and caption. ${closeNote}`, "success");
+      else setAzFinishedMessage(`Ingesting the file. ${closeNote}`, "success");
+    } catch {}
+    azProgressTimer = window.setTimeout(pollAzFinishedProgress, 4000);
+  }
+
+  function startAzFinishedProgressPolling() {
+    if (!ezIsAzFinishedPath()) return;
+    stopAzFinishedProgressPolling();
+    pollAzFinishedProgress();
   }
 
   function item4MediaCountPhrase(counts) {
@@ -2981,7 +3088,9 @@
   function mergeEzProductionNotes() {
     const pending = ezWizardPending || ezWizardAnswers;
     const origin = ezPlanApi()?.ezOriginNotes({
-      origin: pending?.start ? ezPlanApi()?.EZ_ORIGIN_WIZARD : undefined,
+      origin: ezIsAzFinishedPath()
+        ? ezPlanApi()?.EZ_ORIGIN_AZ
+        : (pending?.start ? ezPlanApi()?.EZ_ORIGIN_WIZARD : undefined),
       inputKind: (ezIntakeKind === "photos-and-clips" || ezIntakeKind === "video-clips" || ezIntakeKind === "finished-video" || ezIntakeKind === "finished-stills")
         ? ezIntakeKind
         : (pending?.inputKind || ezIntakeKind || "single-photo"),
@@ -3337,6 +3446,7 @@
   }
 
   async function maybeAutoEzPlan(force = false) {
+    if (ezIsAzFinishedPath()) return;
     if (!activeProductionRequest?.id) return;
     if (!ezIsOriginRecord() && !ezAutoPlanAfterUpload && !ezStarting) return;
     if (!item4Workspace?.assets?.length && !ezWizardAllowsPlanWithoutAssets()) return;
@@ -3795,17 +3905,30 @@
 
   function resetEzWizard({ silent = false } = {}) {
     ezWizardStep = "start";
-    ezWizardAnswers = {};
+    ezWizardAnswers = azFinishedPath ? ezWizardAnswers : {};
     ezWizardHistory = [];
-    ezWizardPending = null;
+    if (!azFinishedPath) ezWizardPending = null;
     ezWizardBusy = false;
-    if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
-    if ($("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
+    if (!azFinishedPath && !$("azFinishedDrop")?.classList.contains("is-busy")) {
+      stopAzFinishedProgressPolling();
+      $("azFinishedDrop")?.classList.remove("is-busy");
+      setAzFinishedMessage();
+      setAzFinishedProgress("");
+    }
+    if (azFinishedPath) {
+      if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "No";
+      if ($("ezAudioMusic")) $("ezAudioMusic").value = "No";
+      if ($("prVoiceover")) $("prVoiceover").value = "No";
+      if ($("prMusicMode")) $("prMusicMode").value = "No";
+    } else {
+      if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "Yes";
+      if ($("ezAudioMusic")) $("ezAudioMusic").value = "Yes";
+      if ($("prVoiceover")) $("prVoiceover").value = "Yes";
+      if ($("prMusicMode")) $("prMusicMode").value = "Yes";
+      audioUserTouched.clear();
+    }
     if ($("ezThumbnail")) $("ezThumbnail").value = "Yes";
-    if ($("prVoiceover")) $("prVoiceover").value = "Yes";
-    if ($("prMusicMode")) $("prMusicMode").value = "Yes";
     if ($("prThumbnail")) $("prThumbnail").value = "Yes";
-    audioUserTouched.clear();
     const log = $("ezWizardLog");
     if (log) log.innerHTML = "";
     ezWizardSetMessage();
@@ -3885,16 +4008,19 @@
     const count = helpers?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || fileCount || 1;
     const slideMode = $("ezCarouselSlideMode")?.value || "Exact";
     const finished = ["finished-video", "finished-stills"].includes((ezWizardPending || ezWizardAnswers)?.inputKind || ezIntakeKind);
+    const az = ezIsAzFinishedPath();
     let captionFields = helpers?.ezCaptionFields(ezCaptionMode(), { captions: joinedManualSlideCaptions(), finished }) || {};
     if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
       captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
     }
     return {
-      content_type: planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set",
-      platforms: planned?.platforms || ezSelectedPlatforms(),
-      voiceover_mode: finished ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
-      background_music_mode: finished ? "No" : ($("ezAudioMusic")?.value || "Yes"),
-      thumbnail_mode: finished ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
+      content_type: az
+        ? "Vertical Short Video"
+        : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set"),
+      platforms: az ? ["Instagram", "Facebook", "TikTok", "YouTube"] : (planned?.platforms || ezSelectedPlatforms()),
+      voiceover_mode: (finished || az) ? "No" : ($("ezAudioVoiceover")?.value || "Yes"),
+      background_music_mode: (finished || az) ? "No" : ($("ezAudioMusic")?.value || "Yes"),
+      thumbnail_mode: (finished || az) ? "Yes" : ($("ezThumbnail")?.value || "Yes"),
       video_duration_seconds: $("ezVideoDuration")?.value || 30,
       video_clip_count_mode: (helpers?.ezWizardClipCount?.(ezWizardPending || ezWizardAnswers) || Number((ezWizardPending || ezWizardAnswers)?.clipCount) || 0) > 0
         ? "Exact"
@@ -4579,6 +4705,7 @@
     if (continueBtn) continueBtn.disabled = true;
     if (!item4OversizedClipNotice) {
       setEzMessage(allowEmpty ? "Saving the AI plan…" : "Saving in the background…");
+      if (ezIsAzFinishedPath()) setAzFinishedMessage("Saving the file to Drive. You can close this tab after it lands.");
     }
     try {
       const wizardPlanned = pending?.planned;
@@ -4607,9 +4734,10 @@
       if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
         captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
       }
+      const azTitle = ezIsAzFinishedPath() ? String($("azFinishedTitle")?.value || "").trim() : "";
       const defaultTitle = allowEmpty
         ? (String($("ezIdeaTitle")?.value || "").trim() || (photoCount > 1 ? "AI generated images" : "AI generated image"))
-        : titleFromFiles(nextFiles);
+        : (azTitle || titleFromFiles(nextFiles));
       const idea = await api("/api/ideas", {
         method: "POST",
         body: JSON.stringify({
@@ -4657,10 +4785,14 @@
         setRequestMessage("AI image plan saved. You can still add a title, script, or notes before promote.", "success");
         await maybeAutoEzPlan(true);
       } else {
-        ezAutoPlanAfterUpload = true;
-        if (!item4ShowOversizedClipNotice()) setEzMessage("Uploading originals…");
+        ezAutoPlanAfterUpload = !ezIsAzFinishedPath();
+        if (!item4ShowOversizedClipNotice()) {
+          setEzMessage("Uploading originals…");
+          if (ezIsAzFinishedPath()) setAzFinishedMessage("Uploading to Drive. You can close this tab after the file is stored.");
+        }
         await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
         renderEzPhotoStrip();
+        if (ezIsAzFinishedPath()) startAzFinishedProgressPolling();
       }
     } catch (error) {
       const saved = Boolean(activeProductionRequest?.id);
@@ -4669,6 +4801,10 @@
         : error.message;
       setEzMessage(message, "error-text");
       setRequestMessage(error.message, "error-text");
+      if (ezIsAzFinishedPath()) {
+        setAzFinishedMessage(error.message || "Could not start publish.", "error-text");
+        $("azFinishedDrop")?.classList.remove("is-busy");
+      }
     } finally {
       ezStarting = false;
       if (continueBtn) continueBtn.disabled = false;
@@ -4687,9 +4823,100 @@
     renderEzWizard();
   }
 
+  function lockAzFinishedDefaults() {
+    if ($("ezAudioVoiceover")) $("ezAudioVoiceover").value = "No";
+    if ($("ezAudioMusic")) $("ezAudioMusic").value = "No";
+    if ($("ezThumbnail")) $("ezThumbnail").value = "Yes";
+    if ($("prVoiceover")) $("prVoiceover").value = "No";
+    if ($("prMusicMode")) $("prMusicMode").value = "No";
+    if ($("prThumbnail")) $("prThumbnail").value = "Yes";
+    audioUserTouched.add("ezAudioVoiceover");
+    audioUserTouched.add("ezAudioMusic");
+    const title = String($("azFinishedTitle")?.value || "").trim();
+    if (title) {
+      if ($("ezIdeaTitle")) $("ezIdeaTitle").value = title;
+      if ($("ezTitleMode")) $("ezTitleMode").value = "Force exact";
+      if ($("ezRequestedTitle")) $("ezRequestedTitle").value = title;
+      if ($("prTitleMode")) $("prTitleMode").value = "Force exact";
+      if ($("prRequestedTitle")) $("prRequestedTitle").value = title;
+      ["ezTitleMode", "ezRequestedTitle"].forEach((id) => ezDirty.add(id));
+    }
+  }
+
+  async function beginAzFinishedVideo(fileList) {
+    const incoming = Array.from(fileList || []);
+    const videos = incoming.filter(item4FileLooksLikeVideo);
+    if (!videos.length) {
+      setAzFinishedMessage("Drop one MP4 (or MOV).", "error-text");
+      return;
+    }
+    if (item4Uploading || ezStarting) {
+      setAzFinishedMessage("This video is already uploading.", "error-text");
+      return;
+    }
+    azFinishedPath = true;
+    $("azFinishedDrop")?.classList.add("is-busy");
+    setAzFinishedProgress("ingesting");
+    setAzFinishedMessage("Saving the file to Drive…");
+    const helpers = ezPlanApi();
+    ezWizardAnswers = {
+      origin: helpers?.EZ_ORIGIN_AZ || "az-finished-video",
+      start: "content",
+      inputKind: "finished-video",
+      packageId: "video",
+      platforms: ["Instagram", "Facebook", "TikTok", "YouTube"],
+    };
+    applyEzWizardAnswersToIntake();
+    lockAzFinishedDefaults();
+    ezAutoPlanAfterUpload = false;
+    try {
+      await startEzProduction({ files: videos.slice(0, 1), preserveOversizedNotice: true });
+      startAzFinishedProgressPolling();
+    } catch (error) {
+      setAzFinishedMessage(error.message || "Could not start publish.", "error-text");
+      $("azFinishedDrop")?.classList.remove("is-busy");
+    }
+  }
+
+  function bindAzFinishedDrop() {
+    const zone = $("azFinishedZone");
+    const input = $("azFinishedInput");
+    if (!zone || !input) return;
+    const pick = () => {
+      if ($("azFinishedDrop")?.classList.contains("is-busy")) return;
+      input.click();
+    };
+    zone.addEventListener("click", (event) => {
+      if (event.target.closest("input, button, label")) return;
+      pick();
+    });
+    zone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        pick();
+      }
+    });
+    ["dragenter", "dragover"].forEach((type) => zone.addEventListener(type, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      zone.classList.add("dragging");
+    }));
+    ["dragleave", "drop"].forEach((type) => zone.addEventListener(type, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      zone.classList.remove("dragging");
+    }));
+    zone.addEventListener("drop", (event) => beginAzFinishedVideo(event.dataTransfer?.files));
+    input.addEventListener("change", (event) => {
+      beginAzFinishedVideo(event.target.files);
+      event.target.value = "";
+    });
+  }
+
   function bindEzIntake() {
     bindEzWizard();
     $("ezStartOver")?.addEventListener("click", () => {
+      azFinishedPath = false;
       resetEzWizard({ silent: true });
       revokeEzLocalPreviews();
       ezStagedFiles = [];
@@ -4829,7 +5056,7 @@
     document.querySelectorAll("[data-ez-platform]").forEach((input) => {
       input.addEventListener("change", () => {
         syncItem4PlatformsFromEz();
-        if ((ezIsOriginRecord() || ezStarting) && ezMasterSetReadyForPlan()) {
+        if ((ezIsOriginRecord() || ezStarting) && ezMasterSetReadyForPlan() && !ezIsAzFinishedPath()) {
           maybeAutoEzPlan(true);
         }
       });
@@ -4857,6 +5084,7 @@
       if (activeProductionRequest?.id && ezPersistedAssetCount()) return;
       startEzFromFiles(ezStagedFiles);
     });
+    bindAzFinishedDrop();
     const drop = $("ezUploadZone");
     if (!drop) return;
     drop.addEventListener("click", (event) => {
@@ -5131,6 +5359,18 @@
     return `${minutes}:${String(rest).padStart(2, "0")}`;
   }
 
+  function libraryDurationLine(record) {
+    if (String(record?.media_kind || "").toLowerCase() !== "video") return "";
+    const formatted = formatLibraryClipDuration(record?.duration_seconds);
+    return formatted ? `Length ${formatted}` : "";
+  }
+
+  function libraryListClassName(mode) {
+    if (mode === "list") return "library-list library-list--text";
+    if (mode === "thumbs") return "library-list library-list--thumbs";
+    return "library-grid";
+  }
+
   function item4RememberClipDuration(keys, seconds) {
     const value = Number(seconds);
     if (!Number.isFinite(value) || value <= 0) return;
@@ -5201,7 +5441,7 @@
     const card = wrap.closest("[data-item4-asset], .idea-library-card, .library-card");
     const durationLine = card?.querySelector("[data-library-duration]");
     if (durationLine) {
-      durationLine.textContent = label;
+      durationLine.textContent = `Length ${label}`;
       durationLine.hidden = false;
     } else {
       const nameLine = card?.querySelector(".item4-asset-meta span, .idea-library-card > span, h3");
@@ -5211,12 +5451,31 @@
     }
   }
 
+  function item4UnloadClipStream(wrap) {
+    const video = wrap?.querySelector("video");
+    if (!wrap || !video) return;
+    try { video.pause(); } catch {}
+    wrap.classList.remove("is-playing", "is-loading", "is-failed");
+    video.controls = false;
+    if (video.dataset.item4Stream) {
+      video.removeAttribute("src");
+      try { video.load(); } catch {}
+    }
+  }
+
   function item4PauseOtherClipPlayers(active) {
-    document.querySelectorAll("[data-item4-clip-player].is-playing").forEach((wrap) => {
+    document.querySelectorAll("[data-item4-clip-player]").forEach((wrap) => {
       if (wrap === active) return;
+      const inLibrary = Boolean(wrap.closest(".library-card"));
       const video = wrap.querySelector("video");
+      const busy = wrap.classList.contains("is-playing") || wrap.classList.contains("is-loading") || Boolean(video?.getAttribute("src"));
+      if (inLibrary) {
+        if (busy) item4UnloadClipStream(wrap);
+        return;
+      }
+      if (!wrap.classList.contains("is-playing")) return;
       try { video?.pause(); } catch {}
-      wrap.classList.remove("is-playing");
+      wrap.classList.remove("is-playing", "is-loading");
       if (video) video.controls = false;
     });
   }
@@ -5247,11 +5506,20 @@
       };
       const ensureSrc = () => {
         if (!video) return false;
-        if (video.currentSrc || video.src) return true;
         const pending = String(video.dataset.item4Stream || "").trim();
         if (!pending) return false;
+        if (video.dataset.item4Failed === "1") {
+          video.removeAttribute("src");
+          try { video.load(); } catch {}
+          delete video.dataset.item4Failed;
+        }
+        if (video.currentSrc || video.getAttribute("src")) return true;
         video.src = pending;
         return true;
+      };
+      const restorePoster = () => {
+        wrap.classList.remove("is-playing", "is-loading");
+        if (video) video.controls = false;
       };
       video?.addEventListener("loadedmetadata", applyDuration);
       play?.addEventListener("click", (event) => {
@@ -5259,25 +5527,37 @@
         event.stopPropagation();
         if (!video || !ensureSrc()) return;
         item4PauseOtherClipPlayers(wrap);
-        wrap.classList.add("is-playing");
-        video.controls = true;
+        wrap.classList.remove("is-failed");
+        wrap.classList.add("is-loading");
         video.muted = false;
-        video.play().catch(() => {});
+        video.play().catch(() => {
+          wrap.classList.add("is-failed");
+          restorePoster();
+        });
       });
       video?.addEventListener("play", () => {
         item4PauseOtherClipPlayers(wrap);
+      });
+      video?.addEventListener("playing", () => {
+        wrap.classList.remove("is-loading", "is-failed");
         wrap.classList.add("is-playing");
         video.controls = true;
       });
-      video?.addEventListener("pause", () => {
-        if (video.ended) {
-          wrap.classList.remove("is-playing");
-          video.controls = false;
+      video?.addEventListener("error", () => {
+        if (video.dataset.item4Failed === "1") return;
+        video.dataset.item4Failed = "1";
+        wrap.classList.add("is-failed");
+        restorePoster();
+        if (video.dataset.item4Stream) {
+          video.removeAttribute("src");
+          try { video.load(); } catch {}
         }
       });
+      video?.addEventListener("pause", () => {
+        if (video.ended) restorePoster();
+      });
       video?.addEventListener("ended", () => {
-        wrap.classList.remove("is-playing");
-        video.controls = false;
+        restorePoster();
       });
       if (video?.readyState >= 1) applyDuration();
     });
@@ -5287,6 +5567,7 @@
   function item4ProbeVisibleClipDurations(root) {
     const videos = [...(root?.querySelectorAll("video[data-item4-stream]") || [])]
       .filter((video) => !video.currentSrc && !video.dataset.probedDuration)
+      .filter((video) => !video.closest(".library-card"))
       .filter((video) => video.closest(".library-card")?.dataset.libraryNeedsDuration !== "0");
     if (!videos.length) return;
     const start = (video) => {
@@ -6241,10 +6522,20 @@
       if (item4WorkspaceNeedsCompression(item4Workspace)) {
         setRequestMessage(item4CompressionProgressLabel(item4Workspace), "success");
         setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        if (ezIsAzFinishedPath()) {
+          setAzFinishedProgress("compressing");
+          setAzFinishedMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        }
         const elapsed = Date.now() - item4MasterPollStartedAt;
         if (elapsed >= ITEM4_COMPRESS_POLL_TIMEOUT_MS) {
           stopItem4MasterPolling();
-          setRequestMessage("Compression is still running. Keep this tab open, or wait a minute and refresh.", "success");
+          setRequestMessage(ezIsAzFinishedPath()
+            ? "Compression is still running in the background. You can close this tab."
+            : "Compression is still running. Keep this tab open, or wait a minute and refresh.", "success");
+          if (ezIsAzFinishedPath()) {
+            setAzFinishedMessage("Compression is still running in the background. You can close this tab.", "success");
+            startAzFinishedProgressPolling();
+          }
           return;
         }
         item4MasterPollTimer = setTimeout(pollItem4MasterAssets, ITEM4_MASTER_POLL_MS);
@@ -6253,6 +6544,10 @@
       if (state === "Ready") {
         stopItem4MasterPolling();
         setRequestMessage(item4MasterReadyMessage(item4Workspace || {}), "success");
+        if (ezIsAzFinishedPath()) {
+          startAzFinishedProgressPolling();
+          return;
+        }
         await maybeAutoEzPlan();
         return;
       }
@@ -6536,6 +6831,7 @@
       renderItem4Workspace(status);
       syncPrMediaKindUi();
       if ((ezIsOriginRecord() || ezAutoPlanAfterUpload || ezStarting)
+        && !ezIsAzFinishedPath()
         && ezMasterSetReadyForPlan()
         && status?.plan_status !== "Ready") {
         Promise.resolve().then(() => maybeAutoEzPlan());
@@ -7061,6 +7357,7 @@
     updateItem4MasterProgress(item4Workspace || {});
     if (!item4OversizedClipNotice) {
       setRequestMessage(`Saving ${files.length} file${files.length === 1 ? "" : "s"} one at a time so the full set can finish.`, "success");
+      if (ezIsAzFinishedPath()) setAzFinishedMessage("Saving to Drive…");
     }
     const failed = [];
     const posterBlobs = [];
@@ -7125,13 +7422,19 @@
       } else {
         updateItem4MasterProgress(item4Workspace || {});
         setRequestMessage(ezIsFinishedVideo()
-          ? "Video is loading into the system. You can keep working or leave this screen."
+          ? (ezIsAzFinishedPath()
+            ? "Finished video is stored. Studio will thumbnail, schedule, and queue all four platforms. You can close this tab."
+            : "Video is loading into the system. You can keep working or leave this screen.")
           : (uploadingClips
             ? "Clip is loading into the system. Keep this tab open until it appears in the strip."
             : "Photos are loading into the system. You can keep working or leave this screen — Drive copies finish in the background."), "success");
+        if (ezIsAzFinishedPath()) {
+          setAzFinishedMessage("Finished video is stored. Studio will thumbnail, schedule, and queue all four platforms. You can close this tab.", "success");
+        }
         startItem4MasterPolling();
       }
-      if (!failed.length && !incomplete) await maybeAutoEzPlan();
+      if (!failed.length && !incomplete && !ezIsAzFinishedPath()) await maybeAutoEzPlan();
+      if (!failed.length && ezIsAzFinishedPath()) startAzFinishedProgressPolling();
       files.forEach((file, index) => {
         const blob = posterBlobs[index];
         if (!blob || !item4FileLooksLikeVideo(file)) return;
@@ -12171,6 +12474,8 @@
 
   const LIBRARY_PAGE_SIZES = [5, 10, 20, 50];
   const LIBRARY_DEFAULT_PAGE_SIZE = 5;
+  const LIBRARY_VIEW_KEY = "studioLibraryView";
+  const LIBRARY_VIEWS = ["list", "thumbs", "grid"];
   let libraryPage = {
     index: 0,
     offsets: [null],
@@ -12182,6 +12487,26 @@
   function libraryPageSize() {
     const raw = Number($("libraryPageSize")?.value || LIBRARY_DEFAULT_PAGE_SIZE);
     return LIBRARY_PAGE_SIZES.includes(raw) ? raw : LIBRARY_DEFAULT_PAGE_SIZE;
+  }
+
+  function libraryViewMode() {
+    const raw = String($("libraryViewMode")?.value || "grid").trim();
+    return LIBRARY_VIEWS.includes(raw) ? raw : "grid";
+  }
+
+  function applyLibraryViewMode() {
+    const target = $("libraryList");
+    const mode = libraryViewMode();
+    if (target) target.className = libraryListClassName(mode);
+    try { localStorage.setItem(LIBRARY_VIEW_KEY, mode); } catch { /* ignore */ }
+  }
+
+  function restoreLibraryViewMode() {
+    let saved = "grid";
+    try { saved = localStorage.getItem(LIBRARY_VIEW_KEY) || "grid"; } catch { /* ignore */ }
+    const select = $("libraryViewMode");
+    if (select && LIBRARY_VIEWS.includes(saved)) select.value = saved;
+    applyLibraryViewMode();
   }
 
   function resetLibraryPage() {
@@ -12320,12 +12645,34 @@
     return `${apiBase}/api/media-assets/${encodeURIComponent(id)}/stream`;
   }
 
-  function publishedLibraryPreviewUrl(record) {
-    const raw = String(record?.studio_preview_url || record?.thumbnail_url || "").trim();
+  function libraryPublicImageUrl(url) {
+    const raw = String(url || "").trim();
     if (!raw) return "";
-    if (raw.startsWith("http")) return raw;
+    if (/drive\.google\.com|googleapis\.com\/drive|\/uc\?id=/i.test(raw)) return "";
+    if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(raw)) return "";
     if (raw.startsWith("/")) return `${apiBase}${raw}`;
-    return raw;
+    if (!/^https?:\/\//i.test(raw)) return "";
+    if (/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(raw)) return raw;
+    return raw.startsWith("https://media.chicagoshining.com/") ? raw : "";
+  }
+
+  function publishedLibraryPosterUrl(record) {
+    return libraryPublicImageUrl(record?.poster_url)
+      || libraryPublicImageUrl(record?.thumbnail_url)
+      || libraryPublicImageUrl(record?.studio_preview_url);
+  }
+
+  function publishedLibraryStreamUrl(record) {
+    if (String(record?.media_kind || "").toLowerCase() !== "video") return "";
+    const path = String(record?.preview_stream_url || "").trim();
+    if (path.startsWith("/")) return `${apiBase}${path}`;
+    const id = String(record?.id || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) return "";
+    return `${apiBase}/api/outputs/${encodeURIComponent(id)}/preview`;
+  }
+
+  function libraryMissingPreviewHtml(label, detail = "Preview unavailable") {
+    return `<div class="item4-heic-placeholder item4-image-placeholder"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(detail)}</span></div>`;
   }
 
   function libraryKindFilterValue() {
@@ -12352,27 +12699,41 @@
 
   function renderPublishedLibraryCard(r) {
     const video = String(r.media_kind || "").toLowerCase() === "video";
-    const preview = publishedLibraryPreviewUrl(r);
-    const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(r)) : "";
+    const poster = publishedLibraryPosterUrl(r);
+    const stream = publishedLibraryStreamUrl(r);
+    const duration = libraryDurationLine({
+      media_kind: video ? "video" : "photo",
+      duration_seconds: item4KnownClipDuration(r),
+    });
     const publishedLine = r.published_at ? `Published ${formatStudioDate(r.published_at)}` : "";
     const badge = r.file_released ? "File removed" : "Published";
     const badgeClass = r.file_released ? "is-released" : "is-published";
-    const previewIsVideo = /\.mp4(\?|#|$)/i.test(preview);
     let media = "";
-    if (previewIsVideo) {
-      media = `<video muted playsinline preload="metadata" src="${escapeHtml(preview)}"></video>`;
-    } else if (preview) {
-      media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
+    let playAttrs = "";
+    if (video && stream) {
+      media = item4ClipPlayerHtml({
+        previewUrl: poster,
+        streamUrl: stream,
+        name: r.name || "Published file",
+        durationSeconds: r.duration_seconds,
+        asset: r,
+        preload: false,
+      });
+    } else if (poster) {
+      media = `<img src="${escapeHtml(poster)}" alt="" loading="lazy">`;
+      playAttrs = ` data-library-preview="image" data-library-image="${escapeHtml(poster)}" data-library-name="${escapeHtml(r.name || "Published file")}"`;
+    } else {
+      media = libraryMissingPreviewHtml(video ? "VIDEO" : "IMAGE");
     }
-    const playAttrs = preview
-      ? ` data-library-preview="${previewIsVideo ? "video" : "image"}" data-library-${previewIsVideo ? "stream" : "image"}="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Published file")}"`
-      : "";
     const meta = [
-      r.platform,
-      r.platform_output_type,
-      publishedLine,
-      duration,
-    ].filter(Boolean).map((part) => `<span>${escapeHtml(part)}</span>`).join("");
+      `<span class="library-kind-text ${badgeClass}">${escapeHtml(badge)}</span>`,
+      r.platform ? `<span>${escapeHtml(r.platform)}</span>` : "",
+      r.platform_output_type ? `<span>${escapeHtml(r.platform_output_type)}</span>` : "",
+      r.aspect_ratio ? `<span>${escapeHtml(r.aspect_ratio)}</span>` : "",
+      publishedLine ? `<span>${escapeHtml(publishedLine)}</span>` : "",
+      duration ? `<span data-library-duration>${escapeHtml(duration)}</span>` : (video ? `<span data-library-duration hidden></span>` : ""),
+      r.output_filename ? `<span>${escapeHtml(r.output_filename)}</span>` : "",
+    ].filter(Boolean).join("");
     const live = r.platform_post_url
       ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open live post</a>`
       : "";
@@ -12389,7 +12750,10 @@
     const preview = libraryPreviewUrl(r);
     const video = String(r.media_kind || "").toLowerCase() === "video";
     const sizeLabel = r.file_size_mb ? `${r.file_size_mb} MB` : (r.mime_type || (video ? "video" : "photo"));
-    const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(r)) : "";
+    const duration = libraryDurationLine({
+      media_kind: video ? "video" : "photo",
+      duration_seconds: item4KnownClipDuration(r),
+    });
     const added = r.intake_date ? `Added ${formatStudioDate(r.intake_date)}` : "";
     const needsDuration = video && !duration ? "1" : "0";
     let media = "";
@@ -12402,14 +12766,17 @@
         durationSeconds: r.duration_seconds,
         asset: r,
         preload: false,
-      });
+      }) || libraryMissingPreviewHtml("CLIP", "Clip saved");
     } else if (preview) {
       media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
+    } else {
+      media = libraryMissingPreviewHtml("IMAGE");
     }
     const playAttrs = video
       ? ""
       : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
     const meta = [
+      `<span class="library-kind-text">${video ? "Clip" : "Photo"}</span>`,
       added ? `<span>${escapeHtml(added)}</span>` : "",
       duration ? `<span data-library-duration>${escapeHtml(duration)}</span>` : (video ? `<span data-library-duration hidden></span>` : ""),
       `<span>${escapeHtml(sizeLabel)}</span>`,
@@ -12430,24 +12797,10 @@
       if (!img.isConnected) return;
       const id = String(img.dataset.libraryClipId || "");
       const name = String(img.dataset.libraryClipName || "");
-      const stream = String(img.dataset.libraryStream || "");
       const cached = item4LocalClipPoster(name) || item4LocalClipPoster(id);
       if (cached) {
         img.src = cached;
         img.removeAttribute("data-library-stream");
-        continue;
-      }
-      if (!stream) continue;
-      try {
-        const blob = await item4ClipPosterFromUrl(stream, { timeoutMs: 12000 });
-        if (!blob || !img.isConnected) continue;
-        const url = item4ApplyLocalClipPoster({ id, name }, blob);
-        if (url) {
-          img.src = url;
-          img.removeAttribute("data-library-stream");
-        }
-      } catch (error) {
-        console.warn("Asset Library clip frame deferred", error);
       }
     }
   }
@@ -12477,6 +12830,7 @@
     const target = $("libraryList");
     if (!target) return;
     syncLibraryPublishedMode();
+    applyLibraryViewMode();
     const query = String($("librarySearch")?.value || "").trim();
     const kind = libraryKindFilterValue();
     const published = kind === "published";
@@ -12621,6 +12975,7 @@
   }
 
   function bindLibraryUpload() {
+    restoreLibraryViewMode();
     const zone = $("libraryUploadZone");
     const inputs = libraryFileInputs();
     if (!inputs.length || (zone && zone.dataset.bound)) return;
@@ -12672,6 +13027,9 @@
     $("libraryPageSize")?.addEventListener("change", () => {
       resetLibraryPage();
       loadLibrary();
+    });
+    $("libraryViewMode")?.addEventListener("change", () => {
+      applyLibraryViewMode();
     });
     $("libraryPreviewClose")?.addEventListener("click", () => closeLibraryPreview());
     $("libraryPreviewBackdrop")?.addEventListener("click", (event) => {
