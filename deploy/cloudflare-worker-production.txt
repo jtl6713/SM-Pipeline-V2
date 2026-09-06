@@ -323,3 +323,6 @@ Variant-gap heal Worker deploy: 2026-09-05 - If photos are added after Prepare, 
 
 Destination relink Worker deploy: 2026-09-05 - Bridge preflight relinks late crops to destinations so 27 frames ready is not shown next to a linking error. Worker 0.10.239-destination-relink.
 
+Suggested schedules Worker deploy: 2026-09-05 - Prefill destination Scheduled_At from Chicago industry windows when the plan is built. Reels/Shorts/TikTok first, Stories 90 minutes later on the same platform. Copy that time onto Platform Output Scheduled_Post_Date at seed. Do not publish until Approve. Worker 0.10.240-suggested-schedules.
+
+
