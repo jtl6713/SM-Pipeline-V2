@@ -229,7 +229,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.250-library-tiktok",
+          version: "0.10.251-az-large-video",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,

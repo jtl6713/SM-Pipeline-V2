@@ -339,6 +339,5 @@ Asset Library published files Worker deploy: 2026-09-06 - GET /api/library?kind=
 
 Library layout, TikTok live URL, and AZ finished-video Worker deploy: 2026-09-06 - Asset Library list/grid plus clip playback. POST /api/outputs/:id/tiktok-complete marks a TikTok draft Published from a pasted live URL. origin=az-finished-video auto-queues IG/FB Reels+Stories, YouTube Short, and TikTok draft after cover/caption with 7-day occupancy scoring. YouTube Shorts require the vertical still. Worker 0.10.250-library-tiktok.
 
-
-
+AZ large video staging Worker deploy: 2026-09-06 - Finished videos up to 1 GB upload via R2 multipart sessions (upload-session/parts/complete). Masters over 100 MB still pulse studio_compress. AZ clears busy on early validation exits and no longer tells consumers the file is going to Drive. Worker 0.10.251-az-large-video.
 
