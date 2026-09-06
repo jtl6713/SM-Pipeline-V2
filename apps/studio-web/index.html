@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.252-asset-library-published">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.253-tiktok-complete">
 </head>
 <body>
  <header class="topbar">
@@ -891,6 +891,15 @@
  </div>
  </div>
  <div class="creative-output-meta" id="creativeOutputMeta"></div>
+ <div class="tiktok-complete-card" id="creativeTiktokComplete" hidden>
+ <div class="creative-section-heading"><div><h3>TikTok live URL</h3><p id="creativeTiktokCompleteCopy">After you post from the TikTok inbox, paste the public URL here. The email link still works if you prefer it.</p></div></div>
+ <form class="tiktok-complete-form" id="creativeTiktokCompleteForm">
+ <label class="form-field"><span>TikTok post URL</span><input type="url" id="creativeTiktokUrl" required placeholder="https://www.tiktok.com/@chicago.shining/video/…" autocomplete="url"></label>
+ <label class="form-field" id="creativeTiktokMusicWrap" hidden><span>Music handling</span><select id="creativeTiktokMusic"><option value="not_requested">No music requested / not applicable</option><option value="yes">Music selected or completed in TikTok</option><option value="no">Published without completing the requested music step</option></select></label>
+ <button type="submit" class="primary-button" id="creativeTiktokCompleteSave">Save TikTok URL</button>
+ </form>
+ <p class="subtle" id="creativeTiktokCompleteLive" hidden></p>
+ </div>
  </section>
 
  <section class="creative-global-card" id="creativeDefaultsSection">
@@ -1565,6 +1574,6 @@
 
  <script src="/assets/config.js?v=0.6.240-analytics-seq"></script>
  <script src="/assets/ez-plan.js?v=0.6.247-suggested-schedules"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.252-asset-library-published"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.253-tiktok-complete"></script>
 </body>
 </html>

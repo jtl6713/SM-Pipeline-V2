@@ -170,6 +170,7 @@
   let contentSort = { key: "content", dir: "desc" };
   const pipelineGroupOpen = new Map();
   const pipelineScheduleDrafts = new Map();
+  const pipelineTiktokUrlDrafts = new Map();
   let pipelineViewFilter = "all";
   let pipelineOpenSingleOnLoad = false;
   let dashboardCache = { metrics: {}, ideas: [], content: [], outputs: [] };
@@ -187,7 +188,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.252-asset-library-published";
+  const BUILD_ID = "item4-0.6.253-tiktok-complete";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -10407,6 +10408,72 @@
     target.innerHTML = html;
   }
 
+  function tiktokNeedsUrlEntry(record) {
+    if (String(record?.platform || "").trim().toLowerCase() !== "tiktok") return false;
+    if (record?.do_not_publish) return false;
+    const publish = String(record?.publish_status || "").trim().toLowerCase();
+    const output = String(record?.output_status || "").trim().toLowerCase();
+    const draft = String(record?.tiktok_draft_status || "").trim().toLowerCase();
+    if (publish === "published" || output === "published" || draft === "published") return false;
+    const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
+    const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
+    return manual === "required"
+      || studio.includes("manual action")
+      || studio === "draft delivered"
+      || draft.includes("manual action")
+      || draft.includes("draft delivered")
+      || draft.includes("manual completion received");
+  }
+
+  function tiktokLiveUrl(record) {
+    return String(record?.platform_post_url || record?.manual_published_url || "").trim();
+  }
+
+  function tiktokMusicChoice(record, selected) {
+    if (selected) return selected;
+    return /manual action/i.test(String(record?.music_status || "")) ? "no" : "not_requested";
+  }
+
+  async function submitTiktokComplete(recordId, { url, musicCompleted, record } = {}) {
+    const postUrl = String(url || "").trim();
+    if (!/tiktok\.com/i.test(postUrl)) throw new Error("Paste a live TikTok URL containing tiktok.com.");
+    return api(`/api/outputs/${encodeURIComponent(recordId)}/tiktok-complete`, {
+      method: "POST",
+      body: JSON.stringify({
+        platform_post_url: postUrl,
+        music_completed: tiktokMusicChoice(record, musicCompleted),
+      }),
+    });
+  }
+
+  function renderCreativeTiktokComplete(output) {
+    const card = $("creativeTiktokComplete");
+    const form = $("creativeTiktokCompleteForm");
+    const live = $("creativeTiktokCompleteLive");
+    const musicWrap = $("creativeTiktokMusicWrap");
+    const music = $("creativeTiktokMusic");
+    const input = $("creativeTiktokUrl");
+    if (!card || !form || !live || !input) return;
+    const tiktok = String(output?.platform || "").trim().toLowerCase() === "tiktok";
+    const awaiting = tiktokNeedsUrlEntry(output);
+    const posted = tiktokLiveUrl(output);
+    if (!tiktok || (!awaiting && !posted)) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+    form.hidden = !awaiting;
+    live.hidden = awaiting || !posted;
+    if (musicWrap) musicWrap.hidden = !awaiting || !/manual action/i.test(String(output?.music_status || ""));
+    if (music && awaiting) music.value = tiktokMusicChoice(output);
+    if (awaiting) input.value = posted;
+    if (!awaiting && posted) {
+      live.innerHTML = `Live post: <a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(posted)}">Open TikTok ↗</a>`;
+    } else if (!awaiting) {
+      live.hidden = true;
+    }
+  }
+
   function renderCreativeRatioPanel() {
     const target = $("creativeRatioPanel");
     if (!activeCreativeOutput) return target.innerHTML = "";
@@ -10953,6 +11020,7 @@
 
     showCreativeRenderedPreview(output);
     renderCreativeOutputMeta(output);
+    renderCreativeTiktokComplete(output);
     populateCreativeGlobalControls(output);
     renderCreativeSlides();
     renderCreativeChangeProgress(data.handoff || creativeHandoffStatus);
@@ -11268,6 +11336,67 @@
       const id = input.dataset.pipelineSchedule;
       if (!id) return;
       pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+    });
+    rememberPipelineTiktokUrlDrafts();
+  }
+
+  function rememberPipelineTiktokUrlDrafts() {
+    document.querySelectorAll("[data-tiktok-complete] input[type=url]").forEach((input) => {
+      const id = input.closest("[data-tiktok-complete]")?.dataset.tiktokComplete;
+      if (!id) return;
+      pipelineTiktokUrlDrafts.set(id, String(input.value || "").trim());
+    });
+  }
+
+  function pipelineTiktokUrlDraft(record) {
+    if (pipelineTiktokUrlDrafts.has(record.id)) return pipelineTiktokUrlDrafts.get(record.id);
+    return tiktokLiveUrl(record);
+  }
+
+  function pipelineTiktokCompleteCell(record) {
+    if (!tiktokNeedsUrlEntry(record)) return "";
+    const current = pipelineTiktokUrlDraft(record);
+    return `<form class="pipeline-tiktok-complete" data-tiktok-complete="${escapeHtml(record.id)}"><label><span>TikTok URL</span><input type="url" required placeholder="https://www.tiktok.com/@…/video/…" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`;
+  }
+
+  function bindPipelineTiktokComplete(root) {
+    (root || document).querySelectorAll("[data-tiktok-complete]").forEach((form) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      form.addEventListener("click", keepOnRow);
+      form.addEventListener("mousedown", keepOnRow);
+      form.addEventListener("pointerdown", keepOnRow);
+      const input = form.querySelector("input[type=url]");
+      input?.addEventListener("input", () => {
+        const id = form.dataset.tiktokComplete;
+        if (id) pipelineTiktokUrlDrafts.set(id, String(input.value || "").trim());
+      });
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = form.dataset.tiktokComplete;
+        const message = form.querySelector(".pipeline-tiktok-complete-msg");
+        const button = form.querySelector("button[type=submit]");
+        const record = (pipelineOutputs || []).find((row) => row.id === id);
+        if (!id || !input) return;
+        if (button) button.disabled = true;
+        if (message) {
+          message.classList.remove("error-text");
+          message.textContent = "Saving…";
+        }
+        try {
+          await submitTiktokComplete(id, { url: input.value, record });
+          pipelineTiktokUrlDrafts.delete(id);
+          if (message) message.textContent = "Saved";
+          await refreshPipelineOutputs({ silent: true });
+        } catch (error) {
+          if (message) {
+            message.textContent = error.message || "Could not save URL.";
+            message.classList.add("error-text");
+          }
+        } finally {
+          if (button) button.disabled = false;
+        }
+      });
     });
   }
 
@@ -11585,6 +11714,7 @@
         timeoutMs: 120000,
       });
       pipelineScheduleDrafts.clear();
+      pipelineTiktokUrlDrafts.clear();
       await refreshPipelineOutputs({ silent: true });
       const approved = Number(result.approved_count || 0);
       const failed = Number(result.failed_count || 0);
@@ -11811,7 +11941,7 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? pipelineTiktokCompleteCell(r) : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? groupedPipelineRecords(source).map((group, index) => {
@@ -11868,6 +11998,7 @@
         });
       });
       bindPipelineScheduleInputs(target);
+      bindPipelineTiktokComplete(target);
       target.querySelectorAll("[data-pipeline-use-suggested]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
@@ -11882,7 +12013,7 @@
       refreshPipelineScheduleSuggestions(source);
       target.querySelectorAll("[data-open-output-id]").forEach((row) => {
         row.addEventListener("click", (event) => {
-          if (event.target.closest("a, button, input, select, textarea, label, .pipeline-schedule-cell")) return;
+          if (event.target.closest("a, button, input, select, textarea, label, .pipeline-schedule-cell, .pipeline-tiktok-complete")) return;
           openCreativeEditor(row.dataset.openOutputId);
         });
         row.addEventListener("keydown", (event) => {
@@ -11912,6 +12043,9 @@
       r.creative_available,
       r.final_file_url,
       r.studio_preview_url,
+      r.platform_post_url,
+      r.tiktok_draft_status,
+      r.manual_completion_status,
     ]));
   }
 
@@ -13481,6 +13615,35 @@
       return;
     }
     if (window.confirm("Approve this preview? This records review approval and locks per-photo titles; it will not publish the output.")) reviewActiveCreative("approve");
+  });
+  $("creativeTiktokCompleteForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const record = activeCreativeOutput;
+    const id = activeCreativeOutputId || record?.id;
+    const input = $("creativeTiktokUrl");
+    const button = $("creativeTiktokCompleteSave");
+    if (!id || !input) return;
+    if (button) button.disabled = true;
+    try {
+      phase6Message("Saving TikTok URL…");
+      const result = await submitTiktokComplete(id, {
+        url: input.value,
+        musicCompleted: $("creativeTiktokMusic")?.value,
+        record,
+      });
+      if (result?.record) {
+        activeCreativeOutput = { ...record, ...result.record };
+        renderCreativeOutputMeta(activeCreativeOutput);
+        renderCreativeTiktokComplete(activeCreativeOutput);
+      }
+      pipelineTiktokUrlDrafts.delete(id);
+      phase6Message("TikTok URL saved. This output is marked Published.");
+      refreshPipelineOutputs({ silent: true }).catch(() => {});
+    } catch (error) {
+      phase6Message(error.message || "Could not save the TikTok URL.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
   });
   $("creativeDefaultVoicePreview")?.addEventListener("click", () => phase6PreviewSelectedVoice($("creativeDefaultVoice"), $("creativeDefaultVoicePreview")));
   $("creativeVoiceoverVolumeRange")?.addEventListener("input", () => syncCreativeAudioPair("creativeVoiceoverVolumeRange", "creativeVoiceoverVolume"));

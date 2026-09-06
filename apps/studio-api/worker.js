@@ -47,6 +47,7 @@ export default {
       const isOutputCreativeRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative$/.test(url.pathname);
       const isOutputCreativeReviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(url.pathname);
       const isOutputApproveAllRoute = url.pathname === "/api/outputs/approve-all";
+      const isOutputTiktokCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-complete$/.test(url.pathname);
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
@@ -110,6 +111,7 @@ export default {
       const isOutputCreativeEditWrite = isOutputCreativeRoute && request.method === "PATCH";
       const isOutputCreativeReviewWrite = isOutputCreativeReviewRoute && request.method === "POST";
       const isOutputApproveAllWrite = isOutputApproveAllRoute && request.method === "POST";
+      const isOutputTiktokCompleteWrite = isOutputTiktokCompleteRoute && request.method === "POST";
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
@@ -160,6 +162,7 @@ export default {
         isOutputCreativeEditWrite ||
         isOutputCreativeReviewWrite ||
         isOutputApproveAllWrite ||
+        isOutputTiktokCompleteWrite ||
         isOutputCreativeContinueWrite ||
         (isAdminMakeDeployRoute && request.method === "GET") ||
         (isAdminRepairControlRoute && request.method === "GET") ||
@@ -210,7 +213,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.246-asset-library-published",
+          version: "0.10.248-tiktok-complete",
+          studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
@@ -863,6 +867,12 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "outputs_review");
         return approveAllOutputsForPublishing(request, env, authorization, ctx);
+      }
+
+      if (isOutputTiktokCompleteWrite) {
+        assertWriteRequest(request, env);
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
+        return markStudioTiktokComplete(request, env, url);
       }
 
       if (isOutputCreativeReviewRoute) {
@@ -2452,6 +2462,9 @@ function mapOutput(record, job = null) {
     platform_post_url: f(record, "Platform_Post_URL"),
     published_at: f(record, "Published_At"),
     tiktok_draft_status: f(record, "TikTok_Draft_Status"),
+    manual_completion_status: f(record, "Manual_Completion_Status"),
+    manual_published_url: f(record, "Manual_Published_URL"),
+    music_status: f(record, "Music_Status"),
     facebook_publish_status: f(record, "FB_Publish_Status"),
     facebook_slideshow_status: f(record, "FB_Slideshow_Status"),
     youtube_stage: f(record, "YouTube_Stage"),
@@ -14304,6 +14317,7 @@ const OUTPUT_LIST_FIELDS = [
   "Platform_Post_URL",
   "Published_At",
   "TikTok_Draft_Status",
+  "Manual_Published_URL",
   "FB_Publish_Status",
   "FB_Slideshow_Status",
   "IG_Carousel_Status",
@@ -27855,6 +27869,135 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
   return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
 }
 
+function isTikTokPostUrl(url) {
+  // Keep aligned with apps/studio-api/tiktok-complete.mjs (Worker deploy is this file only).
+  const value = String(url || "").trim();
+  if (!value) return false;
+  return value.toLowerCase().includes("tiktok.com");
+}
+
+function tiktokCompleteEligibility(record = {}) {
+  const platform = String(record.platform || "").trim().toLowerCase();
+  if (platform !== "tiktok") return "not_tiktok";
+  if (record.do_not_publish) return "do_not_publish";
+  const publish = String(record.publish_status || "").trim().toLowerCase();
+  const output = String(record.output_status || "").trim().toLowerCase();
+  const draft = String(record.tiktok_draft_status || "").trim().toLowerCase();
+  if (publish === "published" || output === "published" || draft === "published") return "already_published";
+  const manual = String(record.manual_completion_status || "").trim().toLowerCase();
+  const studio = String(record.studio_state || "").trim().toLowerCase();
+  const awaiting = manual === "required"
+    || studio.includes("manual action")
+    || studio === "draft delivered"
+    || draft.includes("manual action")
+    || draft.includes("draft delivered")
+    || draft.includes("manual completion received");
+  if (!awaiting) return "manual_completion_not_required";
+  return null;
+}
+
+function tiktokMusicStatusFromChoice(choice, currentMusicStatus) {
+  const music = String(choice || "").trim().toLowerCase();
+  if (music === "yes") return { status: "Completed Manually", completedAt: true };
+  if (music === "no") return { status: "Manual Action Required", completedAt: false };
+  if (music === "not_requested") return { status: "Not Required", completedAt: false };
+  const current = String(currentMusicStatus || "").trim().toLowerCase();
+  if (current.includes("manual action")) return { status: "Manual Action Required", completedAt: false };
+  return { status: "Not Required", completedAt: false };
+}
+
+function tiktokManualPublishFields({
+  url,
+  now,
+  existingNotes = "",
+  musicStatus = "Not Required",
+  musicCompletedAt = null,
+} = {}) {
+  const stamp = String(now || "").trim() || new Date().toISOString();
+  const liveUrl = String(url || "").trim();
+  const note = `Studio TikTok publication confirmed at ${stamp}. URL: ${liveUrl}`;
+  const notes = String(existingNotes || "").trim() ? `${String(existingNotes).trim()}\n\n${note}` : note;
+  return {
+    Publish_Locked_At: null,
+    Publish_Locked_By: "",
+    Publish_Started_At: null,
+    Music_Status: musicStatus,
+    Music_Completion_At: musicCompletedAt ? stamp : null,
+    Output_Notes: notes.slice(0, 10000),
+    Published_At: stamp,
+    Output_Status: "Published",
+    Publish_Status: "Published",
+    Platform_Post_URL: liveUrl,
+    Publish_Error_Stage: "",
+    TikTok_Draft_Status: "Published",
+    Manual_Completion_At: stamp,
+    Manual_Published_URL: liveUrl,
+    Publish_Error_Message: "",
+    Publish_Next_Retry_At: null,
+    Publish_Retry_Eligible: false,
+    TikTok_Manual_Posted_At: stamp,
+    Manual_Completion_Status: "Completed",
+    Manual_Fallback_Required: false,
+    TikTok_Public_Confirmation_At: stamp,
+  };
+}
+
+function tiktokCompleteViewFromRecord(record) {
+  return {
+    platform: f(record, "Platform"),
+    do_not_publish: Boolean(f(record, "Do_Not_Publish")),
+    publish_status: f(record, "Publish_Status"),
+    output_status: f(record, "Output_Status"),
+    tiktok_draft_status: f(record, "TikTok_Draft_Status"),
+    manual_completion_status: f(record, "Manual_Completion_Status"),
+    studio_state: normalizedOutputState(record),
+    music_status: f(record, "Music_Status"),
+  };
+}
+
+const TIKTOK_COMPLETE_ERRORS = {
+  not_tiktok: "This output is not a TikTok draft.",
+  do_not_publish: "Publishing is blocked on this output.",
+  already_published: "This TikTok output is already marked Published.",
+  manual_completion_not_required: "This TikTok output is not waiting for a live post URL yet.",
+};
+
+async function patchTiktokManualPublish(env, record, { url, musicCompleted } = {}) {
+  const music = tiktokMusicStatusFromChoice(musicCompleted, f(record, "Music_Status"));
+  const fields = tiktokManualPublishFields({
+    url,
+    now: new Date().toISOString(),
+    existingNotes: f(record, "Output_Notes"),
+    musicStatus: music.status,
+    musicCompletedAt: music.completedAt,
+  });
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
+async function markStudioTiktokComplete(request, env, url) {
+  const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/tiktok-complete$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const postUrl = String(payload?.platform_post_url || payload?.tiktok_url || "").trim();
+  if (!isTikTokPostUrl(postUrl)) throw new HttpError(400, "Paste a live TikTok URL containing tiktok.com.");
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  if (!current?.id) throw new HttpError(404, "Platform Output was not found");
+  const reason = tiktokCompleteEligibility(tiktokCompleteViewFromRecord(current));
+  if (reason === "already_published") {
+    return respond(request, env, { ok: true, already_published: true, record: mapOutput(current) });
+  }
+  if (reason) throw new HttpError(reason === "do_not_publish" ? 409 : 400, TIKTOK_COMPLETE_ERRORS[reason] || reason);
+  const updated = await patchTiktokManualPublish(env, current, {
+    url: postUrl,
+    musicCompleted: payload?.music_completed,
+  });
+  return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
+}
+
 async function markStudioOutputPublished(request, env, url, authorization) {
   const match = /^\/api\/operations\/outputs\/(rec[A-Za-z0-9]+)\/published$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid output path");
@@ -27864,6 +28007,14 @@ async function markStudioOutputPublished(request, env, url, authorization) {
   if (!postUrl) throw new HttpError(400, "Platform post URL is required");
   const notes = String(payload?.notes || "").trim();
   const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  if (String(f(current, "Platform") || "").trim().toLowerCase() === "tiktok") {
+    if (!isTikTokPostUrl(postUrl)) throw new HttpError(400, "Paste a live TikTok URL containing tiktok.com.");
+    const updatedTikTok = await patchTiktokManualPublish(env, current, {
+      url: postUrl,
+      musicCompleted: payload?.music_completed,
+    });
+    return respond(request, env, { ok: true, record: mapOperationsOutput(updatedTikTok) });
+  }
   const existingNotes = String(f(current, "Output_Notes") || "").trim();
   const stamp = new Date().toISOString();
   const appended = [existingNotes, `Studio Operations publish confirmation at ${stamp}.\nPlatform post URL: ${postUrl}${notes ? `\nNotes: ${notes}` : ""}`].filter(Boolean).join("\n\n");
