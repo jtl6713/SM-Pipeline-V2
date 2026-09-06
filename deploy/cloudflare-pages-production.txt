@@ -368,3 +368,5 @@ Destination relink Pages deploy: 2026-09-05 - Do not show a red linking error ne
 
 Suggested schedules Pages deploy: 2026-09-05 - Home wizard confirm prefills IG/FB Reels and Stories, TikTok Video Draft, and YouTube Short. Times are Chicago windows shown in the local clock. Publishing still waits for Approve. UI 0.6.247-suggested-schedules.
 
+Finished video preview Pages deploy: 2026-09-05 - Play the uploaded finished MP4 in Preview instead of the 3D cover still. Length and copy describe the uploaded file, not a photo sequence. UI 0.6.248-finished-preview.
+

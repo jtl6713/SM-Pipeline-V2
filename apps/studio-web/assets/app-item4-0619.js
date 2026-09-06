@@ -187,7 +187,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.245-prepare-retry";
+  const BUILD_ID = "item4-0.6.248-finished-preview";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9330,6 +9330,40 @@
     return path.startsWith("studio/previews/") || path.startsWith("publish/");
   }
 
+  function phase6UrlLooksPublicVideo(url) {
+    const href = String(url || "").trim();
+    if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+    if (phase6PreviewLooksLikeImage(href)) return false;
+    const path = href.slice("https://media.chicagoshining.com/".length);
+    return path.startsWith("studio/previews/")
+      || path.startsWith("publish/")
+      || path.startsWith("studio/master-assets/");
+  }
+
+  function creativeIsFinishedVideo(output = activeCreativeOutput) {
+    const notes = [
+      output?.output_notes,
+      output?.production_notes,
+      activeProductionRequest?.production_notes,
+      item4Workspace?.production_notes,
+    ].map((value) => String(value || "")).join("\n");
+    if (/ez-input=finished-video/i.test(notes)) return true;
+    return typeof ezIsFinishedVideo === "function" && ezIsFinishedVideo();
+  }
+
+  function creativeFinishedVideoSeconds(output = activeCreativeOutput) {
+    const video = $("creativeRenderPreview");
+    const loaded = Number(video?.duration || 0);
+    if (Number.isFinite(loaded) && loaded > 1) return loaded;
+    const assets = item4Workspace?.assets || [];
+    const fromAsset = assets
+      .map((asset) => Number(asset?.duration_seconds || asset?.out_seconds || 0))
+      .find((value) => Number.isFinite(value) && value > 1);
+    if (fromAsset) return fromAsset;
+    const hinted = Number(output?.video_duration_seconds || output?.duration_seconds || 0);
+    return Number.isFinite(hinted) && hinted > 0 ? hinted : 0;
+  }
+
   function phase6CoverStillUrl(output) {
     const candidates = [output?.thumbnail_url, output?.native_still_url];
     for (const raw of candidates) {
@@ -9399,14 +9433,26 @@
   }
 
   function creativeVideoFactRows(output, kind) {
+    const finishedVideo = creativeIsFinishedVideo(output);
     const included = Array.isArray(creativeSlides) ? creativeSlides.filter((slide) => slide?.include !== false) : [];
     const photos = included.length;
     const slideSeconds = included.reduce((total, slide) => total + Number(slide?.duration_seconds || 0), 0);
-    const duration = kind === "story"
-      ? "5 seconds"
-      : (slideSeconds > 0
-        ? `${Math.round(slideSeconds)} seconds`
-        : `${Number($("creativeDefaultDuration")?.value || output?.creative_settings?.default_slide_duration_seconds || 30)} seconds`);
+    const finishedSeconds = creativeFinishedVideoSeconds(output);
+    const duration = finishedVideo
+      ? (finishedSeconds > 0 ? `${Math.round(finishedSeconds)} seconds` : "Your uploaded video")
+      : (kind === "story"
+        ? "5 seconds"
+        : (slideSeconds > 0
+          ? `${Math.round(slideSeconds)} seconds`
+          : `${Number($("creativeDefaultDuration")?.value || output?.creative_settings?.default_slide_duration_seconds || 30)} seconds`));
+    if (finishedVideo) {
+      return [
+        ["Length", duration],
+        ["Source", "Your uploaded video"],
+        ["Ratio", output?.aspect_ratio || "9:16"],
+        ["Cover", output?.thumbnail_url ? "3D still for the grid — not on the video" : "Missing"],
+      ];
+    }
     const labels = {
       story: [
         ["Length", duration],
@@ -9473,12 +9519,14 @@
     const story = kind === "story";
     const still = kind === "still";
     const voiceOn = creativeVoiceoverOn(output);
+    const finishedVideo = creativeIsFinishedVideo(output);
     const panel = $("creativeEditorPanel");
     if (panel) {
       panel.classList.toggle("simple-video-review", Boolean(kind));
-      panel.classList.toggle("story-teaser-mode", story);
+      panel.classList.toggle("story-teaser-mode", story && !finishedVideo);
       panel.classList.toggle("native-still-review", still);
-      panel.classList.toggle("no-voiceover-review", Boolean(kind) && !still && !voiceOn);
+      panel.classList.toggle("finished-video-review", finishedVideo);
+      panel.classList.toggle("no-voiceover-review", Boolean(kind) && !still && !voiceOn && !finishedVideo);
     }
     const navLabel = {
       story: "Story",
@@ -9507,13 +9555,25 @@
       }
     }
     const titles = {
-      story: ["This Story", "Fixed 5-second teaser. Music volume is the useful control."],
-      reel: ["This Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
-      slideshow: ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
-      tiktok: ["This TikTok video", "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok."],
-      short: ["This YouTube Short", "Photo sequence with your audio settings. Download the cover from Thumbnail in the details panel if YouTube needs a custom thumb."],
+      story: finishedVideo
+        ? ["This Story", "Your uploaded video. Stories do not use a profile grid cover."]
+        : ["This Story", "Fixed 5-second teaser. Music volume is the useful control."],
+      reel: finishedVideo
+        ? ["This Reel", "Your uploaded video. The 3D still is the grid cover only."]
+        : ["This Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
+      slideshow: finishedVideo
+        ? ["This Facebook Reel", "Your uploaded video. The 3D still is the grid cover only."]
+        : ["This Facebook Reel", "Photo sequence with your audio settings. Music volume is the useful control."],
+      tiktok: finishedVideo
+        ? ["This TikTok video", "Your uploaded video, saved as a TikTok draft after Approve. The 3D still is the cover to set in TikTok."]
+        : ["This TikTok video", "Finished file saved as a TikTok draft. Download the 3D cover from Thumbnail in the details panel, then set it in TikTok."],
+      short: finishedVideo
+        ? ["This YouTube Short", "Your uploaded video. The 3D still is the grid cover only."]
+        : ["This YouTube Short", "Photo sequence with your audio settings. Download the cover from Thumbnail in the details panel if YouTube needs a custom thumb."],
       still: ["This photo post", "These photos publish as stills. There is no video mix to edit."],
-      video: [`This ${String(output?.platform || "video").trim()} ${creativeOutputTypeLabel(output) || "output"}`.replace(/\s+/g, " ").trim(), "Play the render. Music volume is the useful control."],
+      video: finishedVideo
+        ? [`This ${String(output?.platform || "video").trim()} ${creativeOutputTypeLabel(output) || "output"}`.replace(/\s+/g, " ").trim(), "Your uploaded video. The 3D still is the grid cover only."]
+        : [`This ${String(output?.platform || "video").trim()} ${creativeOutputTypeLabel(output) || "output"}`.replace(/\s+/g, " ").trim(), "Play the render. Music volume is the useful control."],
     };
     if (heading) heading.textContent = kind ? titles[kind][0] : "This output";
     if (copy) {
@@ -9523,10 +9583,10 @@
     }
     const audioHeading = document.querySelector("#creativeAudioSection .creative-section-heading h3");
     const audioCopy = document.querySelector("#creativeAudioSection .creative-section-heading p");
-    if (audioHeading) audioHeading.textContent = still ? "Audio" : (voiceOn ? "Audio mix" : "Music");
+    if (audioHeading) audioHeading.textContent = still || finishedVideo ? "Audio" : (voiceOn ? "Audio mix" : "Music");
     if (audioCopy) {
-      audioCopy.textContent = still
-        ? "Photo posts do not use a video mix."
+      audioCopy.textContent = still || finishedVideo
+        ? (finishedVideo ? "This uploaded file already has its audio. There is no mix to rerender." : "Photo posts do not use a video mix.")
         : (voiceOn
           ? "Change volumes, then Apply mix & rerender to hear a new preview."
           : "No voiceover on this output. Change music volume, then Apply mix & rerender.");
@@ -10589,6 +10649,11 @@
       if (phase6IsNativeStillPreview(output)) {
         heading.textContent = "Photo preview";
         copy.textContent = "This output posts as native stills. Review the photo package below. There is no Remotion video.";
+      } else if (creativeIsFinishedVideo(output)) {
+        heading.textContent = videoKind === "short" ? "YouTube Short" : (videoKind === "reel" ? `${output?.platform || ""} Reel`.trim() : (videoKind === "slideshow" ? "Facebook Reel" : (videoKind === "tiktok" ? "TikTok video" : (storyOutput ? "Story" : "Finished video"))));
+        copy.textContent = storyOutput
+          ? "This is the video you uploaded. Stories do not use a profile grid cover."
+          : "This is the video you uploaded. The 3D lettering is the grid cover only — it is not burned into the file.";
       } else if (storyOutput) {
         heading.textContent = "Story teaser";
         copy.textContent = "A 5-second 9:16 clip from the first photo, with a slight zoom and the selected music.";
@@ -10614,7 +10679,7 @@
     }
 
     const stillUrl = phase6NativeStillUrl(output);
-    if (!storyOutput && (phase6IsNativeStillPreview(output) || (stillUrl && phase6PreviewLooksLikeImage(output?.studio_preview_url || stillUrl) && !output?.final_file_url && !output?.final_file_id))) {
+    if (!creativeIsFinishedVideo(output) && !storyOutput && (phase6IsNativeStillPreview(output) || (stillUrl && phase6PreviewLooksLikeImage(output?.studio_preview_url || stillUrl) && !output?.final_file_url && !output?.final_file_id))) {
       if (stillUrl && still) {
         still.alt = storyOutput ? "Story still preview" : "Native photo preview";
         still.src = stillUrl;
@@ -10644,7 +10709,7 @@
       output.publish_asset_url,
       output.final_file_url,
       output.studio_preview_url,
-    ].map((value) => String(value || "").trim()).find((href) => href && !phase6PreviewLooksLikeImage(href) && phase6UrlLooksPublicPublish(href)) || "";
+    ].map((value) => String(value || "").trim()).find((href) => href && phase6UrlLooksPublicVideo(href)) || "";
     const directPreview = publicVideo;
     if (!fileId && !output.final_file_url && !directPreview && !output.studio_preview_url) {
       if (showCoverStill()) return;
@@ -10661,7 +10726,7 @@
 
     empty.hidden = true;
     const fallbackToDrive = () => {
-      if (showCoverStill()) return;
+      if (!creativeIsFinishedVideo(output) && showCoverStill()) return;
       const embed = phase6DriveEmbedUrl(fileId);
       if (!embed) {
         empty.textContent = "Rendered file exists, but no playable preview source is available.";
@@ -10685,7 +10750,7 @@
       return output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "";
     })();
     if (playableSrc) {
-      if (coverUrl) video.setAttribute("poster", coverUrl);
+      if (coverUrl && !creativeIsFinishedVideo(output)) video.setAttribute("poster", coverUrl);
       else video.removeAttribute("poster");
       video.src = playableSrc;
       video.hidden = false;
@@ -10694,12 +10759,13 @@
         drive.removeAttribute("src");
         drive.hidden = true;
         video.hidden = false;
+        if (creativeIsFinishedVideo(output)) syncCreativeStoryTeaserChrome(output);
       };
       video.load();
       return;
     }
 
-    if (showCoverStill()) return;
+    if (!creativeIsFinishedVideo(output) && showCoverStill()) return;
     fallbackToDrive();
   }
 
@@ -10711,7 +10777,7 @@
     const output = activeCreativeOutput || {};
     const titleLocked = Boolean(creativeTitleLock?.locked);
     $("creativeEditorTitle").textContent = `Output ${output.output_id ?? ""} · ${output.platform || "Creative review"}`;
-    $("creativeEditorSubtitle").textContent = `${output.platform_output_type || output.format || "Photo sequence"}${output.aspect_ratio ? ` · ${output.aspect_ratio}` : ""} · creative review`;
+    $("creativeEditorSubtitle").textContent = `${creativeIsFinishedVideo(output) ? "Uploaded video" : (output.platform_output_type || output.format || "Photo sequence")}${output.aspect_ratio ? ` · ${output.aspect_ratio}` : ""} · creative review`;
     $("creativeSafetyBadge").textContent = output.do_not_publish
       ? (titleLocked ? "Titles locked" : "Publishing locked")
       : (creativePublishSettled(output)
@@ -10725,6 +10791,10 @@
           : (creativeCanApproveForPublishing(output)
             ? "<strong>Final publish approval.</strong> Review the still, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."
             : "<strong>Photo post.</strong> These photos publish as stills. There is no video mix to edit."))
+        : (creativeIsFinishedVideo(output)
+        ? (creativeCanApproveForPublishing(output)
+          ? "<strong>Final publish approval.</strong> Play your uploaded video, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft. The 3D still is the grid cover only."
+          : "<strong>Review the uploaded video.</strong> This file is already finished. There is no mix to rerender.")
         : (creativeMixInProgress(data.handoff || creativeHandoffStatus, output)
         ? "<strong>Rendering a new mix.</strong> This page will show Processing, then Ready when the new preview is available. Approve stays locked until then."
         : (creativeCanApproveForPublishing(output)
@@ -10733,7 +10803,7 @@
           : (creativeSimpleVideoKind(output)
             ? "<strong>Final publish approval.</strong> Play the render, change music volume under Audio if you want, then Approve for publishing."
             : "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."))
-        : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving.")))
+        : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving."))))
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
         : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
@@ -10757,7 +10827,7 @@
         radio.checked = radio.value === "schedule";
       });
     }
-    const finished = /ez-input=finished-/i.test(String(output.output_notes || ""));
+    const finished = creativeIsFinishedVideo(output) || /ez-input=finished-/i.test(String(output.output_notes || ""));
     if ($("creativeRequestChanges")) $("creativeRequestChanges").hidden = finished;
     const watchOnly = !output.do_not_publish;
     $("saveCreativeEditor").disabled = watchOnly;

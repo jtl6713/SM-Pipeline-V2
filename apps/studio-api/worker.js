@@ -204,7 +204,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.240-suggested-schedules",
+          version: "0.10.242-finished-preview-play",
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
@@ -213,6 +213,7 @@ export default {
           studio_library_browse_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
+          studio_finished_passthrough_resume_v1: true,
           studio_clip_frame_passthrough_v1: true,
           studio_review_schedule_override_v1: true,
           studio_insights_best_times_v1: true,
@@ -1622,6 +1623,15 @@ function item4UrlIsPublicPublishCdn(url) {
   if (!href.startsWith("https://media.chicagoshining.com/")) return false;
   const path = href.slice("https://media.chicagoshining.com/".length);
   return path.startsWith("studio/previews/") || path.startsWith("publish/");
+}
+
+function item4UrlIsPublicPlayableVideo(url) {
+  const href = String(url || "").trim();
+  if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+  if (/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href)) return false;
+  const path = href.slice("https://media.chicagoshining.com/".length);
+  if (!(path.startsWith("studio/previews/") || path.startsWith("publish/") || path.startsWith("studio/master-assets/"))) return false;
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(href) || path.startsWith("studio/master-assets/");
 }
 
 function studioNativeClipsArePublicCdn(record) {
@@ -5407,9 +5417,23 @@ function item4UrlIsStudioPhotoCrop(url) {
   return /ITEM4-VARIANT-fill-crop/i.test(String(url || ""));
 }
 
+function studioUrlLooksLikeVideoFile(url) {
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(String(url || "").trim());
+}
+
+function studioUrlLooksLikeDriveFetch(url) {
+  const href = String(url || "").trim();
+  if (!href) return false;
+  return /drive\.google\.com/i.test(href)
+    || /\/uc\?id=/i.test(href)
+    || /googleusercontent\.com/i.test(href);
+}
+
 function studioAiThumbnailUrl(value) {
   const url = String(value || "").trim();
   if (!url || item4UrlIsStudioPhotoCrop(url)) return "";
+  if (studioUrlLooksLikeVideoFile(url) || studioUrlLooksLikeDriveFetch(url)) return "";
+  if (/\/studio\/previews\/clip-posters\//i.test(url)) return "";
   return url;
 }
 
@@ -6508,9 +6532,6 @@ async function item4PulseStudioProduceJob(env, recordId, { resume = false } = {}
 async function enqueueStudioProductionJob(env, requestId) {
   if (!requestId) return null;
   const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
-  if (studioIsFinishedPassthrough(record)) {
-    return { skipped: "finished-passthrough", request_id: requestId };
-  }
   const existing = parseStudioProductionJob(record);
   const step = String(existing?.step || "").trim();
   if (!existing?.job_id) {
@@ -10432,7 +10453,109 @@ function item4PickSourceVariantForRatio(source, requestedRatio, options = {}) {
   return null;
 }
 
+function item4FinishedSourcePackageForOutput(requestRecord, outputRow, effective, parentContentItem = null) {
+  const kind = studioFinishedOriginKind(requestRecord);
+  if (!kind) return null;
+  const masters = item4AssetManifest(requestRecord);
+  if (!masters.length) return null;
+  const platform = String(f(outputRow, "Platform") || effective?.platform || "").trim();
+  const outputType = String(
+    f(outputRow, "Output_Type")
+    || f(outputRow, "Studio_Output_Type")
+    || effective?.output_type
+    || ""
+  ).trim();
+  const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
+  const planItem = (Array.isArray(plan?.items) ? plan.items : []).find((item) =>
+    item4BridgePlanKey(item?.platform, item?.output_type) === item4BridgePlanKey(platform, outputType)
+  ) || {};
+  let ratio = String(planItem.aspect_ratio || f(outputRow, "Aspect_Ratio") || "").trim();
+  let chosen = masters;
+  if (kind === "finished-video") {
+    ratio = ratio || "9:16";
+    const video = masters.find(item4LooksLikeVideoAsset) || masters[0];
+    chosen = [video];
+  } else {
+    ratio = ratio || (masters.length === 1 ? "4:5" : "1:1");
+    const photos = masters.filter((asset) => !item4LooksLikeVideoAsset(asset));
+    chosen = photos.length ? photos : masters;
+  }
+  const clips = [];
+  for (let index = 0; index < chosen.length; index += 1) {
+    const master = chosen[index];
+    const url = String(master?.url || master?.preview_url || "").trim();
+    if (!url) return null;
+    clips.push({
+      id: `finished-source-${index + 1}`,
+      order: Number(master?.order || index + 1),
+      media_asset_record_id: String(master?.media_asset_record_id || "").trim(),
+      source_asset_id: String(master?.id || "").trim() || null,
+      asset_name: String(master?.name || `finished-${index + 1}`),
+      google_drive_url: String(master?.google_drive_url || "").trim() || null,
+      url,
+      src: url,
+      startFrame: 0,
+      durationFrames: 1,
+      motionStyle: "none",
+      source: "finished_passthrough",
+      aspect_ratio: ratio,
+      google_drive_file_id: String(master?.google_drive_file_id || "").trim() || null,
+      overlay: undefined,
+      caption: "",
+    });
+  }
+  if (!clips.length) return null;
+  const native = kind !== "finished-video";
+  const selected = {
+    schema_version: "studio.source-selection.2",
+    authority: "studio_finished_passthrough",
+    production_request_record_id: requestRecord.id,
+    platform,
+    output_type: outputType,
+    aspect_ratio: ratio,
+    selection_status: "Selected",
+    selected_clips: clips,
+    fps: 30,
+    target_total_frames: 1,
+    render_prep: {
+      render_status: kind === "finished-video" ? "Rendered" : "Native Photo Route",
+      composition_id: null,
+      output_filename: null,
+      render_total_frames: 1,
+      render_clip_list_json: "[]",
+    },
+  };
+  return {
+    status: "Ready",
+    ratio,
+    clips,
+    clip_count: clips.length,
+    total_frames: 1,
+    composition_id: null,
+    output_filename: null,
+    selected_assets_json: JSON.stringify(selected),
+    render_clip_list_json: JSON.stringify(clips.map((clip) => ({
+      id: clip.id,
+      order: clip.order,
+      mediaAssetRecordId: clip.media_asset_record_id || null,
+      assetName: clip.asset_name,
+      url: clip.url,
+      src: clip.src,
+      startFrame: 0,
+      durationFrames: 1,
+      motionStyle: "none",
+      overlay: null,
+      caption: "",
+    }))),
+    native,
+    finished: true,
+    finished_kind: kind,
+  };
+}
+
 function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, parentContentItem = null) {
+  const finished = item4FinishedSourcePackageForOutput(requestRecord, outputRow, effective, parentContentItem);
+  if (finished) return finished;
   if (String(f(requestRecord, "Studio_Variant_Status") || "").trim() !== "Ready") return null;
   const plan = item4ParseJson(f(requestRecord, "Studio_Output_Plan_JSON"), null);
   const manifest = item4VariantManifest(requestRecord);
@@ -16335,7 +16458,7 @@ async function outputPreview(request, env, url, authorization) {
     f(record, "Publish_Asset_URL"),
     f(record, "Final_File_URL"),
     f(record, "Studio_Preview_URL"),
-  ].map((value) => String(value || "").trim()).find((href) => item4UrlIsPublicPublishCdn(href))
+  ].map((value) => String(value || "").trim()).find((href) => item4UrlIsPublicPlayableVideo(href) || item4UrlIsPublicPublishCdn(href) && !/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(href))
     || "";
 
   // Preferred Phase 6 path: R5 writes a browser-playable MP4 copy to the existing
@@ -18895,10 +19018,9 @@ async function studioContinuationStampPackage(env, po, context) {
   const fields = {
     ...studioContinuationClearRetryFields(),
     Output_Caption: seed.Output_Caption || String(f(parent, "Caption") || "").trim() || null,
-    Thumbnail_URL: seed.Thumbnail_URL
-      || (!item4UrlIsStudioPhotoCrop(f(po, "Thumbnail_URL")) && String(f(po, "Thumbnail_URL") || "").trim())
-      || (!item4UrlIsStudioPhotoCrop(f(parent, "Thumbnail_URL")) && String(f(parent, "Thumbnail_URL") || "").trim())
-      || f(po, "Thumbnail_URL")
+    Thumbnail_URL: studioAiThumbnailUrl(seed.Thumbnail_URL)
+      || studioAiThumbnailUrl(f(po, "Thumbnail_URL"))
+      || studioAiThumbnailUrl(f(parent, "Thumbnail_URL"))
       || null,
     Aspect_Ratio: seed.Aspect_Ratio || f(po, "Aspect_Ratio") || null,
     Asset_Need_Status: "Not Needed",
@@ -18934,7 +19056,19 @@ async function studioContinuationStampPackage(env, po, context) {
       ? (String(f(parent, "Voiceover_URL") || f(po, "Voiceover_URL") || "").trim() || null)
       : null,
   };
-  if (nativePhoto && (sourcePackage?.clips || []).length) {
+  if (sourcePackage?.finished || studioIsFinishedPassthrough(requestRecord)) {
+    const overlay = studioFinishedSeedOverlay(requestRecord, sourcePackage?.clips || [], nativePhoto && (sourcePackage?.clips || []).length);
+    fields.Output_Status = overlay.Output_Status || seed.Output_Status || "In Production";
+    fields.Render_Status = overlay.Render_Status || seed.Render_Status || null;
+    fields.Final_File_URL = overlay.Final_File_URL || seed.Final_File_URL || null;
+    fields.Studio_Preview_URL = overlay.Studio_Preview_URL || seed.Studio_Preview_URL || null;
+    fields.Publish_Asset_URL = overlay.Publish_Asset_URL || seed.Publish_Asset_URL || null;
+    fields.Asset_Need_Status = overlay.Asset_Need_Status || "Not Needed";
+    fields.Asset_Selection_Status = null;
+    fields.Composition_ID = null;
+    fields.Output_Filename = null;
+    fields.Output_Notes = overlay.Output_Notes || seed.Output_Notes || f(po, "Output_Notes") || null;
+  } else if (nativePhoto && (sourcePackage?.clips || []).length) {
     fields.Output_Status = "Ready for Review";
     fields.Render_Status = "Native Photo Route";
     fields.Asset_Selection_Status = null;
@@ -18975,16 +19109,43 @@ async function studioContinuationStampPackage(env, po, context) {
 async function studioContinuationInspectOutput(env, po, cache) {
   if (studioOutputIsTerminalForContinuation(po)) return { action: "stop", reason: "terminal" };
   if (studioIsFinishedPassthrough(po)) {
+    const context = await studioContinuationLoadContext(env, po, cache).catch(() => null);
+    if (!context) return { action: "wait_variants", reason: "finished_context_missing" };
+    const nativePhoto = studioOutputIsNativePhoto(po)
+      || studioOutputIsNativePhotoRoute(
+        context.effective.platform,
+        context.effective.output_type,
+        context.effective.route?.proven_mapping || f(po, "Platform_Output_Type")
+      );
+    let finalUrl = String(f(po, "Final_File_URL") || "").trim();
+    if (!finalUrl && !nativePhoto) {
+      await studioContinuationStampPackage(env, po, context);
+      const sourcePackage = item4StudioSourcePackageForOutput(
+        context.requestRecord,
+        context.outputRow,
+        context.effective,
+        context.parent
+      );
+      finalUrl = String(sourcePackage?.clips?.[0]?.url || "").trim();
+      if (!finalUrl) return { action: "wait_variants", reason: "finished_file_missing" };
+    }
+    if (studioNeedsAiThumbnail(context.parent, context.requestRecord)) {
+      return {
+        action: "wait_thumbnail",
+        reason: "missing_ai_cover",
+        contentItemId: context.parent?.id || null,
+      };
+    }
+    if (context.parent) {
+      await studioStampParentAiCoverOnOutput(env, po, context.parent).catch(() => null);
+    }
     const status = String(f(po, "Output_Status") || "");
-    if (!/^ready for review$/i.test(status) && (String(f(po, "Final_File_URL") || "").trim() || studioOutputIsNativePhoto(po))) {
+    if (!/^ready for review$/i.test(status) && (finalUrl || nativePhoto)) {
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, po.id, {
         method: "PATCH",
         body: JSON.stringify({ fields: { Output_Status: "Ready for Review" }, typecast: true }),
       }).catch(() => null);
-    }
-    const thumbContext = await studioContinuationLoadContext(env, po, cache).catch(() => null);
-    if (thumbContext?.parent) {
-      await studioStampParentAiCoverOnOutput(env, po, thumbContext.parent).catch(() => null);
+      return { action: "opened_review", reason: "finished_passthrough" };
     }
     return { action: "reviewable", reason: "finished_passthrough" };
   }
@@ -19374,8 +19535,18 @@ async function studioContinuationMediaGate(env, po, cache) {
   if (wantVoiceover && !String(f(parent, "Voiceover_URL") || "").trim()) {
     return { action: "wait_voiceover", reason: "missing_voiceover", contentItemId: parentId };
   }
-  if (studioNeedsAiThumbnail(parent, null)) {
-    return { action: "wait_thumbnail", reason: "missing_ai_cover", contentItemId: parentId };
+  const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+    || studioFirstLinkedId(f(parent, "Production Requests"))
+    || studioFirstLinkedId(f(parent, "Production_Requests"));
+  let requestRecord = null;
+  if (requestId) {
+    if (!cache.requests.has(requestId)) {
+      cache.requests.set(requestId, await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null));
+    }
+    requestRecord = cache.requests.get(requestId);
+  }
+  if (studioNeedsAiThumbnail(parent, requestRecord)) {
+    return { action: "wait_thumbnail", reason: "missing_ai_cover", contentItemId: parentId, requestRecordId: requestId || null };
   }
   const outputStatus = String(f(po, "Output_Status") || "");
   const native = studioOutputIsNativePhotoRoute(
@@ -19387,19 +19558,11 @@ async function studioContinuationMediaGate(env, po, cache) {
     const stamped = await studioStampParentAiCoverOnOutput(env, po, parent).catch(() => false);
     if (stamped) return { action: "stamped_cover", reason: "parent_ai_cover", contentItemId: parentId };
   }
-  const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
-    || studioFirstLinkedId(f(parent, "Production Requests"));
-  if (requestId) {
-    if (!cache.requests.has(requestId)) {
-      cache.requests.set(requestId, await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null));
-    }
-    const requestRecord = cache.requests.get(requestId);
-    if (requestRecord) {
-      const assets = item4AssetManifest(requestRecord);
-      const expected = item4EffectivePhotoCount(requestRecord, assets);
-      if (expected > assets.length) {
-        return { action: "wait_ai", reason: "missing_ai_masters", contentItemId: parentId, requestRecordId: requestId };
-      }
+  if (requestRecord) {
+    const assets = item4AssetManifest(requestRecord);
+    const expected = item4EffectivePhotoCount(requestRecord, assets);
+    if (expected > assets.length) {
+      return { action: "wait_ai", reason: "missing_ai_masters", contentItemId: parentId, requestRecordId: requestId };
     }
   }
   return { action: "media_ok", contentItemId: parentId };
@@ -19409,7 +19572,8 @@ async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
   for (const parentId of parentIds) {
     try {
       const parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
-      const requestId = studioFirstLinkedId(f(parent, "Production Requests"))
+      const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+        || studioFirstLinkedId(f(parent, "Production Requests"))
         || studioFirstLinkedId(f(parent, "Production_Requests"));
       const requestRecord = requestId
         ? await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId)
@@ -19421,6 +19585,14 @@ async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
       }
       await pulseStudioP2Handoff(env, parentId, requestRecord);
       pulses.push({ key: "P2", pulsed: true, content_item: parentId, rearmed: rearm });
+      if (requestId) {
+        try {
+          const produced = await enqueueStudioProductionJob(env, requestId);
+          pulses.push({ key: "STUDIO_PRODUCE", request: requestId, produced: produced || true });
+        } catch (error) {
+          pulses.push({ key: "STUDIO_PRODUCE", request: requestId, error: error instanceof Error ? error.message : String(error) });
+        }
+      }
     } catch (error) {
       pulses.push({ key: "P2", error: error instanceof Error ? error.message : String(error) });
     }
@@ -19440,7 +19612,7 @@ async function advanceStudioProductionOutputs(env, options = {}) {
     if (!/^ready for review$/i.test(status)) return false;
     const thumb = String(f(po, "Thumbnail_URL") || "").trim();
     const caption = String(f(po, "Output_Caption") || "").trim();
-    return !thumb || item4UrlIsStudioPhotoCrop(thumb) || !caption;
+    return !studioAiThumbnailUrl(thumb) || !caption;
   });
   const remainder = (candidates || []).filter((po) => !missingCover.some((row) => row.id === po.id));
   for (const po of [...missingCover, ...remainder].slice(0, 12)) {
@@ -19494,7 +19666,11 @@ async function advanceStudioProductionOutputs(env, options = {}) {
   let inspectedRemotion = 0;
   for (const po of candidates || []) {
     const gate = media.find((row) => row.id === po.id);
-    if (!gate || gate.action !== "media_ok") continue;
+    const finishedNeedsStamp = studioIsFinishedPassthrough(po)
+      && !studioOutputIsNativePhoto(po)
+      && !String(f(po, "Final_File_URL") || "").trim();
+    if (!gate) continue;
+    if (gate.action !== "media_ok" && !finishedNeedsStamp) continue;
     if (inspectedRemotion >= 4) break;
     try {
       const result = await studioContinuationInspectOutput(env, po, cache);

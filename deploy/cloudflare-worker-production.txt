@@ -325,4 +325,8 @@ Destination relink Worker deploy: 2026-09-05 - Bridge preflight relinks late cro
 
 Suggested schedules Worker deploy: 2026-09-05 - Prefill destination Scheduled_At from Chicago industry windows when the plan is built. Reels/Shorts/TikTok first, Stories 90 minutes later on the same platform. Copy that time onto Platform Output Scheduled_Post_Date at seed. Do not publish until Approve. Worker 0.10.240-suggested-schedules.
 
+Finished passthrough heal Worker deploy: 2026-09-05 - Finished video seed/inspect no longer treats a missing Final_File_URL as reviewable. Attach the master CDN file even when variants are skipped, reject Drive/video URLs as 3D covers, and enqueue produce so the colorful still actually generates. Worker 0.10.241-finished-passthrough-heal.
+
+Finished video preview Worker deploy: 2026-09-05 - Treat studio/master-assets and studio/previews MP4s as playable preview sources. Graph/YouTube covers still require studio/previews or publish images only. Worker 0.10.242-finished-preview-play.
+
 

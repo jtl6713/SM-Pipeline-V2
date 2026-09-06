@@ -264,6 +264,42 @@ def test_finished_video_package_skips_crops():
     assert fields["Composition_ID"] is None
 
 
+def test_drive_video_is_not_a_designed_cover():
+    from studio_produce.thumbnail import is_designed_cover_url
+
+    assert is_designed_cover_url("") is False
+    assert is_designed_cover_url("https://drive.google.com/uc?id=abc&export=download") is False
+    assert is_designed_cover_url("https://media.chicagoshining.com/studio/master-assets/x.mp4") is False
+    assert is_designed_cover_url("https://media.chicagoshining.com/studio/previews/clip-posters/x.jpg") is False
+    assert is_designed_cover_url(
+        "https://media.chicagoshining.com/studio/previews/thumbnails/recX/cover-9x16.png"
+    ) is True
+
+
+def test_stamp_fields_ignores_drive_video_thumbnail():
+    request = {
+        "id": "recPRDriveThumb",
+        "fields": {
+            "Production_Notes": "origin=ez-wizard; ez-input=finished-video",
+            "Studio_Master_Assets_JSON": json.dumps([{
+                "id": "v1",
+                "order": 1,
+                "name": "final.mp4",
+                "mime_type": "video/mp4",
+                "url": "https://media.chicagoshining.com/studio/master-assets/final.mp4",
+            }]),
+        },
+    }
+    output = {"id": "recPODrive", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel"}}
+    package = finished_source_package(request, output, None)
+    fields = stamp_fields(
+        package,
+        {"fields": {"Thumbnail_URL": "https://drive.google.com/uc?id=abc&export=download"}},
+    )
+    assert not fields.get("Thumbnail_URL")
+    assert fields["Final_File_URL"].endswith(".mp4")
+
+
 def test_finished_stills_package_is_native():
     request = {
         "id": "recPRStills",

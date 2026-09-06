@@ -17,6 +17,26 @@ from studio_produce.thumbnail_prompt import build_finished_thumbnail_prompt
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
+VIDEO_COVER_SUFFIXES = (".mp4", ".mov", ".m4v", ".webm")
+
+
+def is_designed_cover_url(url: Any) -> bool:
+    """True only for a generated 3D still. Drive fetches and video files are not covers."""
+    href = str(url or "").strip()
+    if not href:
+        return False
+    lower = href.lower()
+    if "item4-variant-fill-crop" in lower:
+        return False
+    if "drive.google.com" in lower or "/uc?id=" in lower or "googleusercontent.com" in lower:
+        return False
+    path = lower.split("?", 1)[0]
+    if path.endswith(VIDEO_COVER_SUFFIXES):
+        return False
+    if "/studio/previews/clip-posters/" in lower:
+        return False
+    return True
+
 
 def _public_thumb_url(client, parent_id: str, png_bytes: bytes, *, ratio_token: str = "9x16") -> str | None:
     try:
@@ -64,7 +84,7 @@ def ensure_finished_thumbnail(
         raise RuntimeError("A promoted Content Item is required before the finished 3D thumbnail can be generated")
     ratio = _normalize_ratio(aspect_ratio)
     existing = field_str(parent, "Thumbnail_URL")
-    if existing and not force:
+    if is_designed_cover_url(existing) and not force:
         _stamp_outputs(client, outputs or [], existing)
         return {"url": existing, "generated": False, "aspect_ratio": ratio}
 
@@ -127,7 +147,7 @@ def ensure_platform_thumbnails(
         if (
             not force
             and ratio == "9:16"
-            and field_str(parent, "Thumbnail_URL")
+            and is_designed_cover_url(field_str(parent, "Thumbnail_URL"))
             and "cover-9x16" in field_str(parent, "Thumbnail_URL")
         ):
             url = field_str(parent, "Thumbnail_URL")
