@@ -13,9 +13,39 @@ from i1.openai_ideas import generate_ideas
 from studio_music.processor import ingest_studio_music, trash_studio_music
 from airtable.client import AirtableClient
 from item4.clip_poster import ensure_request_clip_posters
+from item4.settings import pipeline_settings
+from item4.sources import download_via_media_bridge, is_studio_master_key
 from integrations.google_drive import GoogleDriveClient
 from studio_produce.ops_alert import send_produce_escalation
 from studio_produce.processor import resume_job, start_job
+from studio_compress.processor import start_job as start_studio_compress
+
+logger = logging.getLogger("pipeline-runner")
+settings = load_settings()
+
+app = Flask(__name__)
+
+
+def _verify_secret() -> tuple[dict | None, int | None]:
+    expected = settings.get("pipeline_runner_shared_secret", "").strip()
+    if not expected:
+        return None, None
+    provided = request.headers.get("X-Pipeline-Secret", "")
+    if provided != expected:
+        return jsonify({"error": "Invalid pipeline secret"}), 401
+    return None, None
+
+
+def _require_loopback() -> tuple[dict | None, int | None]:
+    if request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For"):
+        return jsonify({"error": "Direct loopback access required"}), 403
+    try:
+        caller = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return jsonify({"error": "Loopback access required"}), 403
+    if not caller.is_loopback:
+        return jsonify({"error": "Loopback access required"}), 403
+    return None, None
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()
@@ -45,6 +75,7 @@ def health():
             "public_base_url": settings.get("public_base_url") or None,
             "jobs": [
                 {"name": "studio-clip-poster", "path": "/jobs/studio-clip-poster"},
+                {"name": "studio-compress", "path": "/jobs/studio-compress"},
                 {"name": "studio-produce", "path": "/jobs/studio-produce"},
                 {"name": "studio-produce-resume", "path": "/jobs/studio-produce/resume"},
                 {"name": "studio-produce-ops-alert", "path": "/jobs/studio-produce/ops-alert"},
@@ -58,20 +89,31 @@ def health():
 
 @app.get("/internal/drive-media/<file_id>")
 def internal_drive_media(file_id: str):
-    if request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For"):
-        return jsonify({"error": "Direct loopback access required"}), 403
-    try:
-        caller = ipaddress.ip_address(request.remote_addr or "")
-    except ValueError:
-        return jsonify({"error": "Loopback access required"}), 403
-    if not caller.is_loopback:
-        return jsonify({"error": "Loopback access required"}), 403
+    denied, status = _require_loopback()
+    if denied is not None:
+        return denied, status
     if not file_id or len(file_id) > 256 or not all(char.isalnum() or char in "_-" for char in file_id):
         return jsonify({"error": "Invalid Drive file ID"}), 400
     content, mime_type = GoogleDriveClient().download_file(file_id)
     return Response(
         content,
         mimetype=mime_type or "application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/internal/studio-master")
+def internal_studio_master():
+    denied, status = _require_loopback()
+    if denied is not None:
+        return denied, status
+    key = str(request.args.get("key") or "").strip()
+    if not is_studio_master_key(key) or ".." in key or len(key) > 512:
+        return jsonify({"error": "Invalid key"}), 400
+    content, mime_type = download_via_media_bridge(key, pipeline_settings())
+    return Response(
+        content,
+        mimetype=mime_type or "video/mp4",
         headers={"Cache-Control": "no-store"},
     )
 
@@ -477,6 +519,37 @@ def run_studio_clip_poster():
         result.get("already_ready"),
     )
     return jsonify(result), 200
+
+
+@app.post("/jobs/studio-compress")
+def run_studio_compress():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    record_id = str(
+        payload.get("production_request_record_id")
+        or payload.get("record_id")
+        or ""
+    ).strip()
+    source_asset_id = str(payload.get("source_asset_id") or payload.get("asset_id") or "").strip()
+    if not record_id.startswith("rec"):
+        return jsonify({"error": "production_request_record_id is required"}), 422
+    try:
+        result = start_studio_compress(record_id, source_asset_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-compress start failed")
+        return jsonify({"error": str(exc)}), 500
+    logger.info(
+        "job=studio-compress accepted=%s request=%s asset=%s running=%s",
+        result.get("accepted"),
+        record_id,
+        source_asset_id or "*",
+        not result.get("already_running"),
+    )
+    return jsonify({"ok": True, **result}), 202
 
 
 @app.post("/jobs/studio-produce")

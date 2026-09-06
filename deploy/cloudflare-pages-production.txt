@@ -370,3 +370,6 @@ Suggested schedules Pages deploy: 2026-09-05 - Home wizard confirm prefills IG/F
 
 Finished video preview Pages deploy: 2026-09-05 - Play the uploaded finished MP4 in Preview instead of the 3D cover still. Length and copy describe the uploaded file, not a photo sequence. UI 0.6.248-finished-preview.
 
+Studio auto-compress Pages deploy: 2026-09-06 - Home wizard keeps videos between 100 MB and 200 MB and compresses them automatically. Keep the tab open until compression finishes. Do not send the operator to the Drive ingestion folder. UI 0.6.249-studio-compress.
+
+

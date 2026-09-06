@@ -331,4 +331,7 @@ Finished video preview Worker deploy: 2026-09-05 - Treat studio/master-assets an
 
 Finished video public preview Worker deploy: 2026-09-06 - Copy finished uploads onto studio/previews/ on the public media host at intake. master-assets is private and 404s on media.chicagoshining.com. Produce and the continuation listener restage from Drive or private R2 if that public copy is missing. Worker 0.10.243-finished-preview-public.
 
+Studio auto-compress Worker deploy: 2026-09-06 - Finished-video and clip uploads over 100 MB stay in Studio. The Worker stores the original on private R2 and pulses pipeline-runner studio-compress, which uses the local Video Compressor and then stages the compressed MP4 to studio/previews/. Do not send Studio files through the Drive ingestion folder. Files over 200 MB still cannot upload through the Worker. Worker 0.10.244-studio-compress.
+
+
 

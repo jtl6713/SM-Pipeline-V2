@@ -187,7 +187,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.248-finished-preview";
+  const BUILD_ID = "item4-0.6.249-studio-compress";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2267,23 +2267,46 @@
   }
 
   const ITEM4_CLIP_EDGE_MAX_BYTES = 100 * 1024 * 1024;
+  const ITEM4_CLIP_HARD_MAX_BYTES = 200 * 1024 * 1024;
+  const ITEM4_COMPRESS_POLL_TIMEOUT_MS = 20 * 60 * 1000;
   let item4OversizedClipNotice = "";
+  let item4OversizedNoticeKind = "error-text";
 
   function item4ClipFileMb(file) {
     return Math.max(1, Math.round(Number(file?.size || 0) / (1024 * 1024)));
   }
 
-  function item4OversizedClipFiles(files) {
-    return Array.from(files || []).filter((file) => item4FileLooksLikeVideo(file) && Number(file.size || 0) > ITEM4_CLIP_EDGE_MAX_BYTES);
+  function item4OversizedClipFiles(files, limitBytes = ITEM4_CLIP_EDGE_MAX_BYTES) {
+    return Array.from(files || []).filter((file) => item4FileLooksLikeVideo(file) && Number(file.size || 0) > limitBytes);
   }
 
-  function item4OversizedClipMessage(oversized, keptCount = 0) {
+  function item4OversizedClipMessage(oversized, keptCount = 0, { autoCompress = false } = {}) {
+    const labels = oversized.map((file) => `${file.name || "clip"} (${item4ClipFileMb(file)} MB)`);
+    const list = labels.length === 1
+      ? labels[0]
+      : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+    if (autoCompress) {
+      return oversized.length === 1
+        ? `${list} is over 100 MB. Studio will compress it automatically — keep this tab open.`
+        : `${oversized.length} videos are over 100 MB. Studio will compress them automatically — keep this tab open.`;
+    }
+    const need = oversized.length === 1
+      ? `${list} is over 200 MB and cannot be uploaded in Studio.`
+      : `${oversized.length} files are over 200 MB and cannot be uploaded: ${list}.`;
+    const how = " Use a file under 200 MB.";
+    const kept = keptCount
+      ? ` Uploading the other ${keptCount} file${keptCount === 1 ? "" : "s"} that ${keptCount === 1 ? "is" : "are"} under the limit.`
+      : "";
+    return `${need}${how}${kept}`;
+  }
+
+  function item4LibraryOversizedClipMessage(oversized, keptCount = 0) {
     const labels = oversized.map((file) => `${file.name || "clip"} (${item4ClipFileMb(file)} MB)`);
     const list = labels.length === 1
       ? labels[0]
       : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
     const need = oversized.length === 1
-      ? `${list} is over 100 MB and needs to be compressed before Studio can upload it.`
+      ? `${list} is over 100 MB and needs to be compressed before the library can store it.`
       : `${oversized.length} clips are over 100 MB and need to be compressed: ${list}.`;
     const how = oversized.length === 1
       ? " Compress the file first, or add it to the Drive ingestion folder so Operations can compress it."
@@ -2296,21 +2319,72 @@
 
   function item4ShowOversizedClipNotice() {
     if (!item4OversizedClipNotice) return false;
-    setEzMessage(item4OversizedClipNotice, "error-text");
-    setRequestMessage(item4OversizedClipNotice, "error-text");
+    setEzMessage(item4OversizedClipNotice, item4OversizedNoticeKind);
+    setRequestMessage(item4OversizedClipNotice, item4OversizedNoticeKind);
     return true;
   }
 
-  function item4DropOversizedClips(files, { resetNotice = false } = {}) {
+  function item4DropOversizedClips(files, { resetNotice = false, autoCompress = true } = {}) {
     const incoming = Array.from(files || []);
-    const oversized = item4OversizedClipFiles(incoming);
-    const allowed = incoming.filter((file) => !oversized.includes(file));
-    if (resetNotice && !oversized.length) item4OversizedClipNotice = "";
-    if (oversized.length) {
-      item4OversizedClipNotice = item4OversizedClipMessage(oversized, allowed.length);
+    if (!autoCompress) {
+      const oversized = item4OversizedClipFiles(incoming, ITEM4_CLIP_EDGE_MAX_BYTES);
+      const allowed = incoming.filter((file) => !oversized.includes(file));
+      if (resetNotice && !oversized.length) {
+        item4OversizedClipNotice = "";
+        item4OversizedNoticeKind = "error-text";
+      }
+      if (oversized.length) {
+        item4OversizedClipNotice = item4LibraryOversizedClipMessage(oversized, allowed.length);
+        item4OversizedNoticeKind = "error-text";
+        item4ShowOversizedClipNotice();
+      }
+      return { oversized, allowed, compressable: [] };
+    }
+    const tooLarge = item4OversizedClipFiles(incoming, ITEM4_CLIP_HARD_MAX_BYTES);
+    const compressable = item4OversizedClipFiles(incoming, ITEM4_CLIP_EDGE_MAX_BYTES)
+      .filter((file) => Number(file.size || 0) <= ITEM4_CLIP_HARD_MAX_BYTES);
+    const allowed = incoming.filter((file) => !tooLarge.includes(file));
+    if (resetNotice && !tooLarge.length && !compressable.length) {
+      item4OversizedClipNotice = "";
+      item4OversizedNoticeKind = "error-text";
+    }
+    if (tooLarge.length) {
+      item4OversizedClipNotice = item4OversizedClipMessage(tooLarge, allowed.length, { autoCompress: false });
+      item4OversizedNoticeKind = "error-text";
+      item4ShowOversizedClipNotice();
+    } else if (compressable.length) {
+      item4OversizedClipNotice = item4OversizedClipMessage(compressable, 0, { autoCompress: true });
+      item4OversizedNoticeKind = "success";
       item4ShowOversizedClipNotice();
     }
-    return { oversized, allowed };
+    return { oversized: tooLarge, allowed, compressable };
+  }
+
+  function item4WorkspaceNeedsCompression(status = item4Workspace) {
+    return (Array.isArray(status?.assets) ? status.assets : []).some((asset) => {
+      const state = String(asset?.compression_status || "").toLowerCase();
+      if (["pending", "queued", "compressing", "downloading"].includes(state)) return true;
+      return asset?.compression_needed === true && state !== "ready" && state !== "failed";
+    });
+  }
+
+  function item4WorkspaceCompressionFailed(status = item4Workspace) {
+    return (Array.isArray(status?.assets) ? status.assets : []).some((asset) => (
+      String(asset?.compression_status || "").toLowerCase() === "failed"
+    ));
+  }
+
+  function item4CompressionProgressLabel(status = item4Workspace) {
+    const asset = (Array.isArray(status?.assets) ? status.assets : []).find((row) => {
+      const state = String(row?.compression_status || "").toLowerCase();
+      return ["pending", "queued", "compressing", "downloading"].includes(state) || row?.compression_needed === true;
+    });
+    const name = asset?.name || "video";
+    const pct = Number(asset?.compression_progress);
+    if (Number.isFinite(pct) && pct > 0) {
+      return `Compressing ${name} · ${Math.round(pct)}%. Keep this tab open.`;
+    }
+    return `Studio is compressing ${name}. Keep this tab open.`;
   }
 
   function item4AssetLooksLikeVideo(asset) {
@@ -2401,11 +2475,11 @@
       if (choose) choose.textContent = "Choose photos";
     } else if (nextKind === "video-clips") {
       if (title) title.textContent = "Drop clips";
-      if (hint) hint.textContent = "Raw mp4/mov clips only. Studio cuts them into a Reel — not a finished file. Clips over 100 MB need to be compressed first.";
+      if (hint) hint.textContent = "Raw mp4/mov clips only. Studio cuts them into a Reel — not a finished file. Files over 100 MB are compressed automatically.";
       if (choose) choose.textContent = "Choose clips";
     } else if (nextKind === "photos-and-clips") {
       if (title) title.textContent = "Drop photos and clips";
-      if (hint) hint.textContent = "Pick stills and clips together. Studio saves them one file at a time in the background. Clips over 100 MB need to be compressed first.";
+      if (hint) hint.textContent = "Pick stills and clips together. Studio saves them one file at a time in the background. Files over 100 MB are compressed automatically.";
       if (choose) choose.textContent = "Choose files";
     } else if (nextKind === "multiple-photos") {
       if (title) title.textContent = "Drop photos";
@@ -2596,6 +2670,7 @@
     const kind = pending?.inputKind || ezIntakeKind;
     const total = ezPersistedAssetCount();
     if (kind === "single-ai" || kind === "multiple-ai") return ezWizardAllowsPlanWithoutAssets();
+    if (item4WorkspaceNeedsCompression()) return false;
     if (kind === "mixed") return total >= (ezPlanApi()?.ezWizardExpectedUploads?.(pending) || 1);
     if (kind === "photos-and-clips" || kind === "video-clips") {
       const counts = ezPersistedKindCounts();
@@ -3217,7 +3292,7 @@
     if (button) {
       button.hidden = false;
       button.textContent = planReady ? "Update formats" : "Recommend formats";
-      button.disabled = !hasAssets || item4Uploading || ezPlanInFlight;
+      button.disabled = !hasAssets || item4Uploading || ezPlanInFlight || item4WorkspaceNeedsCompression();
     }
     if (!hint) return;
     if (ezPlanInFlight) {
@@ -3229,8 +3304,10 @@
       return;
     }
     if (hasAssets && !ezMasterSetReadyForPlan()) {
-      hint.textContent = ezIncompleteSetMessage(ezPersistedAssetCount())
-        || "Add the rest of the set, or tap Recommend formats to plan with what you have.";
+      hint.textContent = item4WorkspaceNeedsCompression()
+        ? item4CompressionProgressLabel()
+        : (ezIncompleteSetMessage(ezPersistedAssetCount())
+          || "Add the rest of the set, or tap Recommend formats to plan with what you have.");
       return;
     }
     if (hasAssets) {
@@ -5999,6 +6076,21 @@
     const state = String(status?.assets_status || (item4Uploading ? "Uploading" : "None"));
     const loading = item4Uploading || state === "Uploading" || state === "Processing" || (target && state !== "Ready" && state !== "Error");
     if (!target && !loading) return null;
+    if (item4WorkspaceCompressionFailed(status)) {
+      return {
+        heal: "error",
+        title: "Video compression needs attention.",
+        body: (status?.assets || []).find((asset) => String(asset?.compression_status || "").toLowerCase() === "failed")?.compression_error
+          || "Studio could not compress this video automatically. Keep this tab open and try the same file again.",
+      };
+    }
+    if (item4WorkspaceNeedsCompression(status)) {
+      return {
+        heal: "uploading",
+        title: "Studio is compressing this video.",
+        body: item4CompressionProgressLabel(status),
+      };
+    }
     if (!item4Uploading && state === "Ready" && item4WaitingForClips(status)) {
       const counts = item4ClipCountsFromStatus(status);
       const wantClips = Math.max(1, ezTargetClipCount());
@@ -6112,6 +6204,27 @@
       await loadItem4Workspace(activeProductionRequest);
       const state = String(item4Workspace?.assets_status || "None");
       updateItem4MasterProgress(item4Workspace || {});
+      if (item4WorkspaceCompressionFailed(item4Workspace)) {
+        stopItem4MasterPolling();
+        const failed = (item4Workspace?.assets || []).find((asset) => String(asset?.compression_status || "").toLowerCase() === "failed");
+        const detail = String(failed?.compression_error || "").trim()
+          || "Studio could not compress this video automatically. Try the same file again.";
+        setRequestMessage(detail, "error-text");
+        setEzMessage(detail, "error-text");
+        return;
+      }
+      if (item4WorkspaceNeedsCompression(item4Workspace)) {
+        setRequestMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        setEzMessage(item4CompressionProgressLabel(item4Workspace), "success");
+        const elapsed = Date.now() - item4MasterPollStartedAt;
+        if (elapsed >= ITEM4_COMPRESS_POLL_TIMEOUT_MS) {
+          stopItem4MasterPolling();
+          setRequestMessage("Compression is still running. Keep this tab open, or wait a minute and refresh.", "success");
+          return;
+        }
+        item4MasterPollTimer = setTimeout(pollItem4MasterAssets, ITEM4_MASTER_POLL_MS);
+        return;
+      }
       if (state === "Ready") {
         stopItem4MasterPolling();
         setRequestMessage(item4MasterReadyMessage(item4Workspace || {}), "success");
@@ -6973,9 +7086,9 @@
       } else if (item4OversizedClipNotice) {
         updateItem4MasterProgress(item4Workspace || {});
         const extra = incomplete || (item4Workspace?.assets_status === "Ready" ? item4MasterReadyMessage(item4Workspace) : "");
-        setRequestMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
-        setEzMessage(item4OversizedClipNotice, "error-text");
-        if (item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
+        setRequestMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, item4OversizedNoticeKind);
+        setEzMessage(item4OversizedClipNotice, item4OversizedNoticeKind);
+        if (item4WorkspaceNeedsCompression(item4Workspace) || item4Workspace?.assets_status !== "Ready") startItem4MasterPolling();
       } else if (incomplete) {
         updateItem4MasterProgress(item4Workspace || {});
         setRequestMessage(incomplete, "success");
@@ -9966,12 +10079,12 @@
   const PRODUCTION_BUTTON_HELP = {
     ezStartOver: "Return to the Production home without deleting photos that already uploaded.",
     ezChooseMedia: "Open a file picker for stills and clips. Studio saves each file in the background.",
-    ezChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
+    ezChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Files over 100 MB are compressed automatically.",
     ezContinue: "Save these photos into a production request and continue to platform planning.",
     ezAudioVoicePreview: "Play a short sample of the selected voice. This does not generate your script.",
     ezAudioTrackPreview: "Play a preview of the selected music track.",
     item4ChooseMedia: "Open a file picker for stills and clips together. Studio saves each file in the background. You can also drop files onto the dashed box.",
-    item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Clips over 100 MB need to be compressed first.",
+    item4ChooseClip: "Open the phone or computer video library. Use this to add an MP4 or MOV clip next to the photos. Files over 100 MB are compressed automatically.",
     item4ChooseLibrary: "Review suggested Drive stills, uncheck to remove, or search the library to add more.",
     item4LibraryAddButton: "Apply checked Drive stills: add new checks and remove unchecked ones.",
     item4LibraryCancelButton: "Close the Drive library picker without attaching more stills.",
@@ -12278,7 +12391,7 @@
         : "Choose one or more photos or video clips.", "error-text");
       return;
     }
-    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: true });
+    const oversizedSplit = item4DropOversizedClips(files, { resetNotice: true, autoCompress: false });
     if (oversizedSplit.oversized.length) {
       files = oversizedSplit.allowed;
       setLibraryUploadMessage(item4OversizedClipNotice, "error-text");
