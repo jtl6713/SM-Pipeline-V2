@@ -2186,7 +2186,13 @@ body{
   margin-bottom:20px;
 }
 .library-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:18px}
-.library-card{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fbfdfd}
+.library-card .library-meta{font-size:.78rem;color:var(--muted);margin:0 0 8px;display:flex;flex-wrap:wrap;gap:4px 10px}
+.library-card .library-meta span[hidden]{display:none}
+.library-kind.is-published{background:#087a65}
+.library-kind.is-released{background:#5d6b7d}
+.library-card .text-button.danger{color:var(--red)}
+.library-card .text-button.danger:hover{color:#8a1c14}
+#libraryDropBlock[hidden]{display:none}
 .library-card h3{font-size:.95rem;margin:0 0 6px}
 .library-card-media{position:relative;aspect-ratio:4/5;background:#eef3f2;border-radius:10px;overflow:hidden;margin-bottom:10px}
 .library-card-media img,.library-card-media video{width:100%;height:100%;object-fit:cover;display:block}

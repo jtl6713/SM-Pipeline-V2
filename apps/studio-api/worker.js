@@ -83,6 +83,10 @@ export default {
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isAssetLibraryDeleteWrite = isAssetLibraryRecordRoute && request.method === "DELETE";
+      const isAssetLibraryDurationRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/duration$/.test(url.pathname);
+      const isAssetLibraryDurationWrite = isAssetLibraryDurationRoute && request.method === "POST";
+      const isPublishedLibraryReleaseRoute = /^\/api\/library\/published\/rec[A-Za-z0-9]+\/release-file$/.test(url.pathname);
+      const isPublishedLibraryReleaseWrite = isPublishedLibraryReleaseRoute && request.method === "POST";
       const isIdeaCreateRoute = url.pathname === "/api/ideas" && request.method === "POST";
       const isIdeaGenerateWrite = isIdeaGenerateRoute && request.method === "POST";
       const isIdeaEditRoute = isIdeaRecordRoute && request.method === "PATCH";
@@ -146,6 +150,8 @@ export default {
         isMusicDeleteWrite ||
         isAssetLibraryUploadWrite ||
         isAssetLibraryDeleteWrite ||
+        isAssetLibraryDurationWrite ||
+        isPublishedLibraryReleaseWrite ||
         isItem4AssetDeleteWrite ||
         isItem4AssetPosterWrite ||
         isItem4PlanWrite ||
@@ -204,7 +210,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.245-intake-drain",
+          version: "0.10.246-asset-library-published",
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_ig_carousel_due_publish_v1: true,
@@ -212,6 +218,7 @@ export default {
           studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
           studio_library_browse_v1: true,
+          studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
           studio_finished_passthrough_resume_v1: true,
@@ -897,6 +904,16 @@ export default {
           return uploadMusicLibraryTracks(request, env, authorization);
         }
         return listMusic(request, env, url);
+      }
+
+      if (isAssetLibraryDurationWrite) {
+        assertWriteRequest(request, env);
+        return patchAssetLibraryDuration(request, env, url);
+      }
+
+      if (isPublishedLibraryReleaseWrite) {
+        assertWriteRequest(request, env);
+        return releasePublishedLibraryFile(request, env, url);
       }
 
       if (isAssetLibraryDeleteWrite) {
@@ -14655,6 +14672,178 @@ const ASSET_LIBRARY_MAX_FILES = 8;
 const ASSET_LIBRARY_LIST_FORMULA = "AND(OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video'),OR({Asset_Role}!='Music',{Asset_Role}=BLANK()),NOT(FIND('fill-crop',LOWER({Asset Name}&''))))";
 const ASSET_LIBRARY_PAGE_SIZE = 5;
 const ASSET_LIBRARY_MAX_PAGE_SIZE = 50;
+const PUBLISHED_LIBRARY_LIST_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Published_At}!="")';
+
+function coerceLibraryDurationSeconds(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const rounded = Math.round(value);
+  if (rounded < 1 || rounded > 12 * 60 * 60) return null;
+  return rounded;
+}
+
+function publishedLibraryFilterFormula(query) {
+  const parts = [PUBLISHED_LIBRARY_LIST_FORMULA];
+  const needle = String(query || "").trim().toLowerCase();
+  if (needle) {
+    const escaped = ideaLibraryAirtableEscape(needle);
+    const hay = "LOWER(CONCATENATE({Output_Title},' ',{Platform},' ',{Platform_Output_Type},' ',{Studio_Output_Type},' ',{Output_Filename}))";
+    parts.push(`FIND("${escaped}", ${hay})`);
+  }
+  return parts.length === 1 ? parts[0] : `AND(${parts.join(",")})`;
+}
+
+function publishedFinalFileId(record) {
+  return String(
+    f(record, "Final_File_ID")
+    || extractGoogleDriveFileId(f(record, "Final_File_URL"))
+    || extractGoogleDriveFileId(f(record, "Output_URL"))
+    || ""
+  ).trim();
+}
+
+function publishedDurationSeconds(record) {
+  const stored = Number(f(record, "Duration_Seconds") || 0);
+  if (Number.isFinite(stored) && stored > 0) return stored;
+  const frames = Number(f(record, "Render_Total_Frames") || 0);
+  if (Number.isFinite(frames) && frames > 0) return Math.round(frames / 30);
+  return null;
+}
+
+function collectJsonDriveIds(raw, { finishedOnly = false } = {}) {
+  const ids = [];
+  let parsed = raw;
+  if (typeof raw === "string" && raw.trim()) {
+    try { parsed = JSON.parse(raw); } catch { parsed = null; }
+  }
+  const walk = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const source = String(value.source || value.authority || "").toLowerCase();
+    const transfer = String(value.transfer_id || value.Transfer_ID || "").trim();
+    const isMaster = source.includes("finished_passthrough")
+      || source.includes("studio_master")
+      || transfer.startsWith("ITEM4-MASTER")
+      || transfer.startsWith("STUDIO_MASTER");
+    if (!finishedOnly || isMaster) {
+      const driveId = String(value.google_drive_file_id || value.googleDriveFileId || "").trim();
+      if (driveId) ids.push(driveId);
+    }
+    Object.values(value).forEach((child) => {
+      if (child && typeof child === "object") walk(child);
+    });
+  };
+  walk(parsed);
+  return [...new Set(ids)];
+}
+
+function mapPublishedLibraryFile(record) {
+  const platform = String(f(record, "Platform") || "").trim();
+  const outputType = String(f(record, "Platform_Output_Type") || f(record, "Studio_Output_Type") || "").trim();
+  const title = String(f(record, "Output_Title") || "").trim() || [platform, outputType].filter(Boolean).join(" ") || "Published file";
+  const finalFileId = publishedFinalFileId(record);
+  const finalFileUrl = String(f(record, "Final_File_URL") || f(record, "Output_URL") || "").trim();
+  const fileReleased = !finalFileId && !String(f(record, "Final_File_URL") || "").trim();
+  const nativeStill = studioOutputIsNativePhoto(record) && !finalFileId;
+  const duration = nativeStill ? null : publishedDurationSeconds(record);
+  return {
+    record_type: "platform_output",
+    id: record.id,
+    name: title,
+    platform: platform || null,
+    platform_output_type: outputType || null,
+    aspect_ratio: String(f(record, "Aspect_Ratio") || "").trim() || null,
+    published_at: f(record, "Published_At") || null,
+    platform_post_url: String(f(record, "Platform_Post_URL") || "").trim() || null,
+    platform_post_id: String(f(record, "Platform_Post_ID") || "").trim() || null,
+    final_file_id: finalFileId || null,
+    final_file_url: fileReleased ? null : (finalFileUrl || null),
+    studio_preview_url: String(f(record, "Studio_Preview_URL") || "").trim() || null,
+    thumbnail_url: String(f(record, "Thumbnail_URL") || "").trim() || null,
+    duration_seconds: duration,
+    file_released: fileReleased,
+    media_kind: nativeStill ? "photo" : "video",
+    output_status: String(f(record, "Output_Status") || "").trim() || null,
+    output_filename: String(f(record, "Output_Filename") || "").trim() || null,
+  };
+}
+
+function publishedFileReleaseGuard(record, { masterDriveIds = [] } = {}) {
+  if (!String(f(record, "Published_At") || "").trim()) {
+    return { ok: false, status: 409, error: "Only published Platform Outputs can release a Drive copy." };
+  }
+  if (!String(f(record, "Platform_Post_URL") || "").trim() && !String(f(record, "Platform_Post_ID") || "").trim()) {
+    return { ok: false, status: 409, error: "This output has no live post URL or platform post ID, so the Drive copy cannot be removed yet." };
+  }
+  const outputStatus = String(f(record, "Output_Status") || "").trim().toLowerCase();
+  const renderStatus = String(f(record, "Render_Status") || "").trim().toLowerCase();
+  if (outputStatus === "in production" || outputStatus === "rendering" || renderStatus === "rendering") {
+    return { ok: false, status: 409, error: "This output is still in production or rendering, so the Drive copy cannot be removed." };
+  }
+  const finalFileId = publishedFinalFileId(record);
+  const finalFileUrl = String(f(record, "Final_File_URL") || "").trim();
+  if (!finalFileId && !finalFileUrl) {
+    return { ok: true, already_released: true };
+  }
+  const masters = new Set((masterDriveIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+  if (finalFileId && masters.has(finalFileId)) {
+    return {
+      ok: false,
+      status: 409,
+      error: "This Drive file is the Production Request master (ITEM4-MASTER / STUDIO_MASTER). Only a dedicated final-output file can be removed.",
+    };
+  }
+  return { ok: true, final_file_id: finalFileId || null, already_released: false };
+}
+
+async function collectPublishedMasterDriveIds(env, record) {
+  const ids = new Set(collectJsonDriveIds(f(record, "Selected_Assets_JSON"), { finishedOnly: true }));
+  collectJsonDriveIds(f(record, "Render_Clip_List_JSON"), { finishedOnly: true }).forEach((id) => ids.add(id));
+  const outputRowId = studioFirstLinkedId(f(record, "Production_Request_Output"));
+  if (outputRowId) {
+    const outputRow = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, outputRowId).catch(() => null);
+    const requestId = studioFirstLinkedId(f(outputRow, "Production_Request"));
+    if (requestId) {
+      const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null);
+      for (const asset of item4AssetManifest(requestRecord || {})) {
+        const driveId = String(asset?.google_drive_file_id || "").trim();
+        if (driveId) ids.add(driveId);
+      }
+    }
+  }
+  return [...ids];
+}
+
+async function listPublishedLibraryFiles(request, env, url) {
+  if (!env.AIRTABLE_OUTPUT_TABLE_ID) throw new HttpError(503, "Platform Outputs table is not configured");
+  const query = String(url.searchParams.get("q") || "").trim();
+  const requestedLimit = Number(url.searchParams.get("limit"));
+  const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
+  const offset = String(url.searchParams.get("offset") || "").trim() || null;
+  const page = await listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit,
+    offset,
+    sortField: "Published_At",
+    sortDirection: "desc",
+    filterFormula: publishedLibraryFilterFormula(query),
+  });
+  const mapped = page.records.map(mapPublishedLibraryFile);
+  return respond(request, env, {
+    ok: true,
+    idle: false,
+    query: query || null,
+    kind: "published",
+    count: mapped.length,
+    has_more: Boolean(page.offset),
+    offset: page.offset || null,
+    limit,
+    records: mapped,
+  });
+}
 
 function assetLibraryFilterFormula(query, kind) {
   const parts = [ASSET_LIBRARY_LIST_FORMULA];
@@ -14679,6 +14868,7 @@ function mapLibraryAsset(record) {
   const transferId = String(f(record, "Studio_Transfer_ID") || "");
   const doNotUse = Boolean(f(record, "Do_Not_Use"));
   return {
+    record_type: "media_asset",
     id: record.id,
     name: f(record, "Asset Name"),
     media_kind: video ? "video" : "photo",
@@ -14700,9 +14890,10 @@ function mapLibraryAsset(record) {
 }
 
 async function listAssetLibrary(request, env, url) {
+  const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
+  if (kind === "published") return listPublishedLibraryFiles(request, env, url);
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
-  const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
   const requestedLimit = Number(url.searchParams.get("limit"));
   const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
   const offset = String(url.searchParams.get("offset") || "").trim() || null;
@@ -14773,6 +14964,7 @@ async function uploadAssetLibraryItems(request, env, authorization) {
   }
   const location = String(form.get("location") || "").trim();
   const description = String(form.get("description") || "").trim();
+  const formDuration = coerceLibraryDurationSeconds(form.get("duration_seconds"));
   for (const file of files) {
     const isVideo = item4IsSupportedVideoFile(file);
     const isImage = item4IsSupportedImageFile(file);
@@ -14797,6 +14989,9 @@ async function uploadAssetLibraryItems(request, env, authorization) {
       bytes,
       contentType: item4NormalizedMimeType(file),
     });
+    const durationSeconds = isVideo
+      ? (coerceLibraryDurationSeconds(drive.duration_seconds) || formDuration)
+      : null;
     const created = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
       method: "POST",
       body: JSON.stringify({
@@ -14809,6 +15004,7 @@ async function uploadAssetLibraryItems(request, env, authorization) {
             MIME_Type: drive.mime_type || item4NormalizedMimeType(file),
             File_Extension: item4FileExtension(file.name),
             File_Size_Bytes: Number(drive.file_size_bytes || file.size || 0) || null,
+            Duration_Seconds: durationSeconds,
             Intake_Status: "Created",
             Intake_Date: new Date().toISOString().slice(0, 10),
             Drive_Access_Status: "Public",
@@ -14900,6 +15096,78 @@ async function deleteAssetLibraryItem(request, env, url) {
     deleted: Boolean(deleted?.deleted),
     record_id: recordId,
     name: f(record, "Asset Name"),
+    drive,
+  });
+}
+
+async function patchAssetLibraryDuration(request, env, url) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const recordId = String(url.pathname.split("/")[3] || "");
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "Invalid library record");
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const seconds = coerceLibraryDurationSeconds(payload?.duration_seconds);
+  if (!seconds) throw new HttpError(400, "duration_seconds must be a positive number of seconds");
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  const mime = String(f(record, "MIME_Type") || "").trim().toLowerCase();
+  const video = mediaClass === "video" || mime.startsWith("video/");
+  if (!video) throw new HttpError(409, "Duration can only be stored on video clips");
+  const existing = coerceLibraryDurationSeconds(f(record, "Duration_Seconds"));
+  if (existing) {
+    return respond(request, env, { ok: true, id: recordId, duration_seconds: existing, updated: false });
+  }
+  await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({ fields: { Duration_Seconds: seconds }, typecast: true }),
+  });
+  return respond(request, env, { ok: true, id: recordId, duration_seconds: seconds, updated: true });
+}
+
+function driveTrashLooksGone(result) {
+  const error = String(result?.error || result?.reason || "").toLowerCase();
+  return /404|410|not found|trashed|already/.test(error);
+}
+
+async function stampPublishedFileReleased(env, recordId) {
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Final_File_ID: null,
+        Final_File_URL: null,
+        Output_URL: null,
+        Final_File_Storage_Status: "Released",
+      },
+      typecast: true,
+    }),
+  });
+}
+
+async function releasePublishedLibraryFile(request, env, url) {
+  if (!env.AIRTABLE_OUTPUT_TABLE_ID) throw new HttpError(503, "Platform Outputs table is not configured");
+  const outputId = String(url.pathname.split("/")[4] || "");
+  if (!/^rec[A-Za-z0-9]+$/.test(outputId)) throw new HttpError(400, "Invalid published file record");
+  const record = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId);
+  const masterDriveIds = await collectPublishedMasterDriveIds(env, record);
+  const guard = publishedFileReleaseGuard(record, { masterDriveIds });
+  if (!guard.ok) throw new HttpError(guard.status || 409, guard.error);
+  let drive = { ok: true, skipped: true, reason: "already_released" };
+  if (!guard.already_released && guard.final_file_id) {
+    drive = await trashStudioAssetOnDrive(env, guard.final_file_id).catch((error) => ({
+      ok: false,
+      error: error?.message || String(error),
+    }));
+    if (!drive.ok && !driveTrashLooksGone(drive)) {
+      throw new HttpError(502, drive.error || "Could not trash the Google Drive copy");
+    }
+  }
+  const updated = await stampPublishedFileReleased(env, outputId);
+  return respond(request, env, {
+    ok: true,
+    released: true,
+    already_released: Boolean(guard.already_released || driveTrashLooksGone(drive)),
+    record: mapPublishedLibraryFile(updated || record),
     drive,
   });
 }

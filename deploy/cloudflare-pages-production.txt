@@ -376,6 +376,8 @@ Promote to production Pages deploy: 2026-09-06 - Ideas table and drawer show Pro
 
 Ingestion drain Pages deploy: 2026-09-06 - Library intake listener runs every 10 minutes and keeps draining until files are compressed if needed, recorded, and moved. UI 0.6.251-intake-drain.
 
+Asset Library published files Pages deploy: 2026-09-06 - Asset Library cards show Added date and clip duration. Show → Published files lists live Platform Outputs with Open live post and Remove Drive copy. UI 0.6.252-asset-library-published.
+
 
 
 

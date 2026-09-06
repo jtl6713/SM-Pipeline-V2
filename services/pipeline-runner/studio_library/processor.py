@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from asset.constants import GDRIVE_PHOTOS_FOLDER, GDRIVE_VIDEO_FOLDER
+from asset.helpers import drive_video_duration_seconds
 from integrations.google_drive import GoogleDriveClient
 
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
@@ -47,6 +50,32 @@ def classify_library_file(*, filename: str, mime_type: str = "") -> dict[str, An
     raise ValueError(f"{name} is not a supported photo or video clip")
 
 
+def probe_library_video_duration(content: bytes, filename: str) -> int | None:
+    if not content:
+        return None
+    suffix = Path(str(filename or "clip.mp4")).suffix.lower() or ".mp4"
+    if suffix not in VIDEO_EXTENSIONS:
+        suffix = ".mp4"
+    try:
+        from audio.leading_silence import _probe_duration
+    except Exception:
+        return None
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            handle.write(content)
+            path = Path(handle.name)
+        seconds = float(_probe_duration(path) or 0)
+        if seconds > 0:
+            return max(1, int(round(seconds)))
+    except Exception:
+        return None
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
+    return None
+
+
 def ingest_studio_library_asset(*, content: bytes, filename: str, mime_type: str = "") -> dict[str, Any]:
     payload = content or b""
     if not payload:
@@ -55,11 +84,18 @@ def ingest_studio_library_asset(*, content: bytes, filename: str, mime_type: str
     if len(payload) > spec["max_bytes"]:
         raise ValueError(f"{filename or 'File'} exceeds the upload limit")
 
+    duration = probe_library_video_duration(payload, filename) if spec["kind"] == "video" else None
     drive = GoogleDriveClient()
     uploaded = drive.upload_and_share(spec["folder_id"], filename or "asset", payload, spec["mime_type"])
     file_id = str(uploaded.get("id") or "").strip()
     if not file_id:
         raise RuntimeError("Google Drive upload did not return a file id")
+    if spec["kind"] == "video" and not duration:
+        try:
+            meta = drive.get_file(file_id, fields="id,videoMediaMetadata")
+            duration = drive_video_duration_seconds(meta)
+        except Exception:
+            duration = None
     return {
         "ok": True,
         "kind": spec["kind"],
@@ -72,6 +108,7 @@ def ingest_studio_library_asset(*, content: bytes, filename: str, mime_type: str
         "filename": filename,
         "mime_type": spec["mime_type"],
         "file_size_bytes": len(payload),
+        "duration_seconds": duration,
     }
 
 
@@ -80,7 +117,19 @@ def trash_studio_library_asset(*, file_id: str) -> dict[str, Any]:
     if not drive_id:
         raise ValueError("google_drive_file_id is required")
     drive = GoogleDriveClient()
-    result = drive.trash_file(drive_id)
+    try:
+        result = drive.trash_file(drive_id)
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", 0)
+        message = str(exc).lower()
+        if status in (404, 410) or "404" in message or "not found" in message:
+            return {
+                "ok": True,
+                "google_drive_file_id": drive_id,
+                "trashed": True,
+                "already_gone": True,
+            }
+        raise
     return {
         "ok": True,
         "google_drive_file_id": drive_id,

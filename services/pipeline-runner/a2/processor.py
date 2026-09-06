@@ -20,7 +20,7 @@ from asset.constants import (
     GDRIVE_INGESTION_FOLDER,
     MAX_FILE_BYTES,
 )
-from asset.helpers import as_bool, parse_bytes
+from asset.helpers import as_bool, drive_video_duration_seconds, parse_bytes
 from asset.routing import a2_route_fields, classify_intake_file
 from audio.leading_silence import STATUS_FAILED, apply_drive_leading_silence, is_voiceover_audio
 from audio.wav_to_mp3 import apply_drive_wav_to_mp3
@@ -63,7 +63,7 @@ def existing_intake_record(
 
 
 def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> dict[str, Any]:
-    return {
+    fields = {
         "Asset Name": str(file.get("name") or "").strip(),
         "Google Drive File ID": str(file.get("id") or ""),
         "Google Drive URL": share_url,
@@ -81,12 +81,17 @@ def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> di
         "Drive_Access_Status": "Public",
         "Asset_Status": "Available",
     }
+    duration = drive_video_duration_seconds(file)
+    if duration:
+        fields["Duration_Seconds"] = duration
+    return fields
 
 
 def _list_ingestion_files(drive: GoogleDriveClient) -> list[dict[str, Any]]:
     return drive.list_files(
         query=f"'{GDRIVE_INGESTION_FOLDER}' in parents and trashed = false",
         page_size=A2_DRIVE_PAGE_SIZE,
+        fields="files(id,name,mimeType,size,fileExtension,webContentLink,webViewLink,createdTime,modifiedTime,parents,videoMediaMetadata)",
     )
 
 

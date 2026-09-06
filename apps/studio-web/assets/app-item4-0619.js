@@ -187,7 +187,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.251-intake-drain";
+  const BUILD_ID = "item4-0.6.252-asset-library-published";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -5199,9 +5199,15 @@
       badge.hidden = false;
     }
     const card = wrap.closest("[data-item4-asset], .idea-library-card, .library-card");
-    const nameLine = card?.querySelector(".item4-asset-meta span, .idea-library-card > span, h3");
-    if (nameLine && !/\d+:\d{2}/.test(String(nameLine.textContent || ""))) {
-      nameLine.textContent = `${String(nameLine.textContent || "").replace(/\s+$/, "")} · ${label}`;
+    const durationLine = card?.querySelector("[data-library-duration]");
+    if (durationLine) {
+      durationLine.textContent = label;
+      durationLine.hidden = false;
+    } else {
+      const nameLine = card?.querySelector(".item4-asset-meta span, .idea-library-card > span, h3");
+      if (nameLine && !/\d+:\d{2}/.test(String(nameLine.textContent || ""))) {
+        nameLine.textContent = `${String(nameLine.textContent || "").replace(/\s+$/, "")} · ${label}`;
+      }
     }
   }
 
@@ -5235,6 +5241,7 @@
           item4RememberClipDuration(libraryId, seconds);
           const row = item4LibraryItems.find((item) => item.id === libraryId) || ideaLibraryPickerItems.find((item) => item.id === libraryId);
           if (row) row.duration_seconds = seconds;
+          persistLibraryClipDuration(libraryId, seconds, wrap.closest(".library-card"));
         }
         item4PaintClipDuration(wrap, seconds);
       };
@@ -5279,7 +5286,8 @@
 
   function item4ProbeVisibleClipDurations(root) {
     const videos = [...(root?.querySelectorAll("video[data-item4-stream]") || [])]
-      .filter((video) => !video.currentSrc && !video.dataset.probedDuration);
+      .filter((video) => !video.currentSrc && !video.dataset.probedDuration)
+      .filter((video) => video.closest(".library-card")?.dataset.libraryNeedsDuration !== "0");
     if (!videos.length) return;
     const start = (video) => {
       if (!video.isConnected || video.dataset.probedDuration || video.currentSrc) return;
@@ -12255,37 +12263,165 @@
     });
   }
 
+  function publishedLibraryConfirmCopy(record) {
+    const platform = String(record?.platform || "this").trim() || "this";
+    const outputType = String(record?.platform_output_type || "output").trim() || "output";
+    return `Remove the Google Drive copy of this published ${platform} ${outputType}? The Platform Output record, publish date, and live post link stay for reporting. Source library stills and clips are not affected.`;
+  }
+
+  function bindLibraryReleaseButtons(target) {
+    target.querySelectorAll("[data-library-release]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.dataset.libraryRelease;
+        const name = button.dataset.libraryName || "this published file";
+        const platform = button.dataset.libraryPlatform || "this";
+        const outputType = button.dataset.libraryOutputType || "output";
+        if (!window.confirm(publishedLibraryConfirmCopy({ platform, platform_output_type: outputType }))) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          await api(`/api/library/published/${encodeURIComponent(id)}/release-file`, { method: "POST", body: JSON.stringify({}) });
+          setLibraryUploadMessage(`Removed the Drive copy of ${name}. The live post link stays.`, "success");
+          await loadLibrary();
+        } catch (error) {
+          setLibraryUploadMessage(error.message, "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
+  const libraryDurationPersistPending = new Set();
+
+  function persistLibraryClipDuration(recordId, seconds, card) {
+    const id = String(recordId || "").trim();
+    if (!/^rec[A-Za-z0-9]+$/.test(id)) return;
+    if (card && card.dataset.libraryRecordType === "platform_output") return;
+    if (card && card.dataset.libraryNeedsDuration !== "1") return;
+    const value = Math.round(Number(seconds));
+    if (!Number.isFinite(value) || value <= 0) return;
+    if (libraryDurationPersistPending.has(id)) return;
+    libraryDurationPersistPending.add(id);
+    if (card) card.dataset.libraryNeedsDuration = "0";
+    api(`/api/library/${encodeURIComponent(id)}/duration`, {
+      method: "POST",
+      body: JSON.stringify({ duration_seconds: value }),
+    }).catch(() => {
+      libraryDurationPersistPending.delete(id);
+      if (card) card.dataset.libraryNeedsDuration = "1";
+    });
+  }
+
   function libraryStreamUrl(record) {
+    if (String(record?.record_type || "") === "platform_output") return "";
     const id = String(record?.id || "").trim();
     if (!/^rec[A-Za-z0-9]+$/.test(id)) return "";
     return `${apiBase}/api/media-assets/${encodeURIComponent(id)}/stream`;
   }
 
+  function publishedLibraryPreviewUrl(record) {
+    const raw = String(record?.studio_preview_url || record?.thumbnail_url || "").trim();
+    if (!raw) return "";
+    if (raw.startsWith("http")) return raw;
+    if (raw.startsWith("/")) return `${apiBase}${raw}`;
+    return raw;
+  }
+
+  function libraryKindFilterValue() {
+    return String($("libraryKindFilter")?.value || "").trim();
+  }
+
+  function syncLibraryPublishedMode() {
+    const published = libraryKindFilterValue() === "published";
+    const add = $("libraryAddButton");
+    const drop = $("libraryDropBlock");
+    const eyebrow = $("libraryEyebrow");
+    const blurb = $("libraryBlurb");
+    const search = $("librarySearch");
+    if (add) add.hidden = published;
+    if (drop) drop.hidden = published;
+    if (eyebrow) eyebrow.textContent = published ? "Published Platform Outputs" : "Photos and clips";
+    if (blurb) {
+      blurb.textContent = published
+        ? "These are published Platform Outputs, not source stills or clips. Confirm the live post, then Remove Drive copy to trash the rendered Drive file. The Airtable row, publish date, and post link stay for reporting."
+        : "Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
+    }
+    if (search) search.placeholder = published ? "Title, platform, or filename" : "Name or location";
+  }
+
+  function renderPublishedLibraryCard(r) {
+    const video = String(r.media_kind || "").toLowerCase() === "video";
+    const preview = publishedLibraryPreviewUrl(r);
+    const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(r)) : "";
+    const publishedLine = r.published_at ? `Published ${formatStudioDate(r.published_at)}` : "";
+    const badge = r.file_released ? "File removed" : "Published";
+    const badgeClass = r.file_released ? "is-released" : "is-published";
+    const previewIsVideo = /\.mp4(\?|#|$)/i.test(preview);
+    let media = "";
+    if (previewIsVideo) {
+      media = `<video muted playsinline preload="metadata" src="${escapeHtml(preview)}"></video>`;
+    } else if (preview) {
+      media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
+    }
+    const playAttrs = preview
+      ? ` data-library-preview="${previewIsVideo ? "video" : "image"}" data-library-${previewIsVideo ? "stream" : "image"}="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Published file")}"`
+      : "";
+    const meta = [
+      r.platform,
+      r.platform_output_type,
+      publishedLine,
+      duration,
+    ].filter(Boolean).map((part) => `<span>${escapeHtml(part)}</span>`).join("");
+    const live = r.platform_post_url
+      ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.platform_post_url)}">Open live post</a>`
+      : "";
+    const drive = !r.file_released && r.final_file_url
+      ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.final_file_url)}">Open in Drive</a>`
+      : "";
+    const release = r.file_released
+      ? ""
+      : `<button type="button" class="text-button danger" data-library-release="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this published file")}" data-library-platform="${escapeHtml(r.platform || "this")}" data-library-output-type="${escapeHtml(r.platform_output_type || "output")}">Remove Drive copy</button>`;
+    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="platform_output"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind ${badgeClass}">${badge}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="music-actions">${live}${drive}${release}</div></article>`;
+  }
+
+  function renderSourceLibraryCard(r) {
+    const preview = libraryPreviewUrl(r);
+    const video = String(r.media_kind || "").toLowerCase() === "video";
+    const sizeLabel = r.file_size_mb ? `${r.file_size_mb} MB` : (r.mime_type || (video ? "video" : "photo"));
+    const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(r)) : "";
+    const added = r.intake_date ? `Added ${formatStudioDate(r.intake_date)}` : "";
+    const needsDuration = video && !duration ? "1" : "0";
+    let media = "";
+    if (video) {
+      const local = item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id);
+      media = item4ClipPlayerHtml({
+        previewUrl: local || preview,
+        streamUrl: libraryStreamUrl(r),
+        name: r.name || "Clip",
+        durationSeconds: r.duration_seconds,
+        asset: r,
+        preload: false,
+      });
+    } else if (preview) {
+      media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
+    }
+    const playAttrs = video
+      ? ""
+      : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
+    const meta = [
+      added ? `<span>${escapeHtml(added)}</span>` : "",
+      duration ? `<span data-library-duration>${escapeHtml(duration)}</span>` : (video ? `<span data-library-duration hidden></span>` : ""),
+      `<span>${escapeHtml(sizeLabel)}</span>`,
+      r.location ? `<span>${value(r.location)}</span>` : "",
+    ].filter(Boolean).join("");
+    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+  }
+
   function renderLibraryCards(records) {
-    return records.map((r) => {
-      const preview = libraryPreviewUrl(r);
-      const video = String(r.media_kind || "").toLowerCase() === "video";
-      const sizeLabel = r.file_size_mb ? `${value(r.file_size_mb)} MB` : (r.mime_type || (video ? "video" : "photo"));
-      let media = "";
-      if (video) {
-        const local = item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id);
-        media = item4ClipPlayerHtml({
-          previewUrl: local || preview,
-          streamUrl: libraryStreamUrl(r),
-          name: r.name || "Clip",
-          durationSeconds: r.duration_seconds,
-          asset: r,
-          preload: false,
-        });
-      } else if (preview) {
-        media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
-      }
-      const playAttrs = video
-        ? ""
-        : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
-      const duration = video ? formatLibraryClipDuration(item4KnownClipDuration(r)) : "";
-      return `<article class="library-card"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}${duration ? ` · ${escapeHtml(duration)}` : ""}</h3><div class="music-meta">${escapeHtml(sizeLabel)}${r.location ? ` · ${value(r.location)}` : ""}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
-    }).join("");
+    return records.map((r) => String(r.record_type || "") === "platform_output"
+      ? renderPublishedLibraryCard(r)
+      : renderSourceLibraryCard(r)).join("");
   }
 
   async function fillLibraryClipPosters(target) {
@@ -12340,8 +12476,10 @@
   async function loadLibrary() {
     const target = $("libraryList");
     if (!target) return;
+    syncLibraryPublishedMode();
     const query = String($("librarySearch")?.value || "").trim();
-    const kind = String($("libraryKindFilter")?.value || "").trim();
+    const kind = libraryKindFilterValue();
+    const published = kind === "published";
     const pager = $("libraryPager");
     if (pager) pager.hidden = true;
     target.innerHTML = '<div class="empty">Loading this page…</div>';
@@ -12358,17 +12496,22 @@
       libraryPage.count = records.length;
       if (!records.length) {
         target.innerHTML = query
-          ? '<div class="empty">No library photos or clips matched that search.</div>'
-          : '<div class="empty">No library photos or clips on this page.</div>';
+          ? (published
+            ? '<div class="empty">No published files matched that search.</div>'
+            : '<div class="empty">No library photos or clips matched that search.</div>')
+          : (published
+            ? '<div class="empty">No published Platform Outputs on this page.</div>'
+            : '<div class="empty">No library photos or clips on this page.</div>');
         updateLibraryPager();
         return;
       }
       target.innerHTML = renderLibraryCards(records);
       bindLibraryDeleteButtons(target);
+      bindLibraryReleaseButtons(target);
       bindLibraryPreview(target);
       item4BindClipPlayers(target);
       updateLibraryPager();
-      fillLibraryClipPosters(target);
+      if (!published) fillLibraryClipPosters(target);
     } catch (e) {
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
       if (pager) pager.hidden = true;
@@ -12435,6 +12578,15 @@
         const form = new FormData();
         form.append("files", file, file.name);
         if (location) form.append("location", location);
+        if (item4FileLooksLikeVideo(file)) {
+          try {
+            const meta = await imageMetadataForFiles([file]);
+            const seconds = Number(meta[0]?.duration_seconds || 0);
+            if (Number.isFinite(seconds) && seconds > 0) {
+              form.append("duration_seconds", String(Math.round(seconds)));
+            }
+          } catch {}
+        }
         try {
           await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
           uploaded += 1;
@@ -12514,6 +12666,7 @@
     });
     $("libraryKindFilter")?.addEventListener("change", () => {
       resetLibraryPage();
+      syncLibraryPublishedMode();
       loadLibrary();
     });
     $("libraryPageSize")?.addEventListener("change", () => {

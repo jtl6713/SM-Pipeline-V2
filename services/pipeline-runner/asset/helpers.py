@@ -31,6 +31,17 @@ def parse_bytes(value: Any) -> int:
     return parse_int(value, 0) or 0
 
 
+def drive_video_duration_seconds(file: dict[str, Any] | None) -> int | None:
+    metadata = (file or {}).get("videoMediaMetadata") or {}
+    try:
+        millis = float(metadata.get("durationMillis") or 0)
+    except (TypeError, ValueError):
+        return None
+    if millis <= 0:
+        return None
+    return max(1, int(round(millis / 1000.0)))
+
+
 def uc_download_url(file_id: str) -> str:
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
