@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.273-tiktok-url-gate";
+  const BUILD_ID = "item4-0.6.274-ops-activity-detail";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -252,6 +252,8 @@
   let operationsTimezone = null;
   let operationsAnalyticsAccounts = [];
   const operationsAnalyticsQueue = { running: false, stop: false };
+  const operationsActivityOpenKeys = new Set();
+  let operationsActivityLogsBound = false;
   const PIPELINE_POLL_MS = 8000;
   const PRODUCTION_POLL_MS = 8000;
   let productionPollTimer = null;
@@ -14063,50 +14065,341 @@
   }
 
   function isOperationsTestActivityEvent(row) {
-    const type = String(row?.type || "").trim();
+    return opsActivityIsTest(row);
+  }
+
+  const OPS_ACTIVITY_DETAIL_KEYS = [
+    ["fingerprint", "Fingerprint"],
+    ["class", "Class"],
+    ["kind", "Kind"],
+    ["record_id", "Record"],
+    ["status", "Status"],
+    ["diagnosis", "Diagnosis"],
+    ["suite", "Suite"],
+    ["workflow", "Workflow"],
+    ["job", "Job"],
+    ["conclusion", "Result"],
+    ["detail", "Detail"],
+    ["message", "Message"],
+  ];
+  const OPS_ACTIVITY_LINK_KEYS = [
+    ["run_url", "Open Actions run"],
+    ["html_url", "Open Actions run"],
+    ["pr_url", "Open pull request"],
+    ["pull_request_url", "Open pull request"],
+    ["record_url", "Open record"],
+    ["airtable_url", "Open record"],
+  ];
+
+  function opsActivityPayload(row = {}) {
+    return row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+      ? row.payload
+      : {};
+  }
+
+  function opsActivityIsTest(row = {}) {
+    const type = String(row.type || "").trim();
     return type === "test_result" || type === "github_actions" || type === "regression";
   }
 
-  function safeHttpUrl(value) {
-    try {
-      const parsed = new URL(String(value || ""));
-      if (parsed.protocol === "https:" || parsed.protocol === "http:") return parsed.href;
-    } catch {
-      return "";
+  function opsActivityEventKey(row = {}, index = 0) {
+    if (row.id != null && String(row.id).trim()) return `id:${row.id}`;
+    return `row:${index}`;
+  }
+
+  function opsActivityHeadline(row = {}) {
+    const body = opsActivityPayload(row);
+    if (opsActivityIsTest(row)) {
+      return body.conclusion || body.job || row.type || "test";
     }
+    return body.class || row.type || "desk_incident";
+  }
+
+  function opsActivitySubhead(row = {}) {
+    const body = opsActivityPayload(row);
+    if (opsActivityIsTest(row)) {
+      return body.suite || body.workflow || body.message || row.type || "test";
+    }
+    if (body.fingerprint) return body.fingerprint;
+    if (body.record_id) return body.record_id;
+    if (row.id != null) return `${row.type || "desk_incident"} · #${row.id}`;
+    return "—";
+  }
+
+  function opsActivitySummary(row = {}) {
+    const body = opsActivityPayload(row);
+    if (opsActivityIsTest(row)) {
+      return [body.job, body.detail, body.message].filter(Boolean).join(" · ");
+    }
+    return String(body.diagnosis || body.status || "").trim();
+  }
+
+  function opsActivityWhen(row = {}) {
+    const body = opsActivityPayload(row);
+    return String(row.created_at || body.at || "").trim();
+  }
+
+  function opsActivityPushField(fields, label, value, seen) {
+    if (value == null || value === "") return;
+    const text = typeof value === "object" ? JSON.stringify(value, null, 2) : String(value).trim();
+    if (!text) return;
+    const key = `${label}:${text}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    fields.push({ label, value: text, json: typeof value === "object" });
+  }
+
+  function opsActivityDetailFields(row = {}) {
+    const body = opsActivityPayload(row);
+    const fields = [];
+    const seen = new Set();
+    opsActivityPushField(fields, "Type", row.type, seen);
+    if (row.id != null) opsActivityPushField(fields, "Event", `#${row.id}`, seen);
+    opsActivityPushField(fields, "Agent", row.agent_id, seen);
+    opsActivityPushField(fields, "Task", row.task_id, seen);
+    opsActivityPushField(fields, "When", opsActivityWhen(row), seen);
+    for (const [key, label] of OPS_ACTIVITY_DETAIL_KEYS) {
+      opsActivityPushField(fields, label, body[key], seen);
+    }
+    for (const [key, value] of Object.entries(body)) {
+      if (OPS_ACTIVITY_DETAIL_KEYS.some(([name]) => name === key)) continue;
+      if (OPS_ACTIVITY_LINK_KEYS.some(([name]) => name === key) || key === "at") continue;
+      if (["parts", "jobs", "checks", "steps"].includes(key)) continue;
+      opsActivityPushField(fields, key.replace(/_/g, " "), value, seen);
+    }
+    return fields;
+  }
+
+  function opsActivityNormalizeConclusion(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function opsActivityNormalizePart(raw = {}, fallbackName = "result") {
+    if (raw == null) return null;
+    if (typeof raw !== "object") {
+      return { name: String(raw), conclusion: "", detail: "" };
+    }
+    const name = raw.name || raw.job || raw.check || raw.suite || fallbackName;
+    const status = opsActivityNormalizeConclusion(raw.status);
+    const conclusion = opsActivityNormalizeConclusion(raw.conclusion || raw.result)
+      || (["success", "failure", "failed", "cancelled", "skipped", "timed_out", "startup_failure", "passed", "neutral"].includes(status) ? status : "");
+    return {
+      name: String(name || fallbackName),
+      conclusion,
+      detail: String(raw.detail || raw.message || "").trim(),
+    };
+  }
+
+  function opsActivityPartsFromEvent(row = {}) {
+    const body = opsActivityPayload(row);
+    const lists = [body.parts, body.jobs, body.checks, body.steps].find(Array.isArray);
+    const fromList = (lists || [])
+      .map((item) => opsActivityNormalizePart(item, body.job || body.suite || "result"))
+      .filter(Boolean);
+    if (fromList.length) return fromList;
+    if (body.job || body.conclusion || body.message) {
+      const part = opsActivityNormalizePart({
+        name: body.job || body.suite || body.workflow || body.message || "result",
+        conclusion: body.conclusion,
+        detail: body.detail || "",
+      });
+      return part ? [part] : [];
+    }
+    return [];
+  }
+
+  function opsActivityPartTone(conclusion) {
+    const value = opsActivityNormalizeConclusion(conclusion);
+    if (["failure", "failed", "cancelled", "timed_out", "startup_failure"].includes(value)) return "fail";
+    if (["success", "passed"].includes(value)) return "ok";
+    if (["skipped", "neutral"].includes(value)) return "skip";
     return "";
   }
 
-  function renderOperationsActivityItems(events, emptyCopy) {
+  function opsActivityPartCounts(parts = []) {
+    const counts = { passed: 0, failed: 0, skipped: 0, other: 0 };
+    for (const part of parts) {
+      const tone = opsActivityPartTone(part?.conclusion);
+      if (tone === "ok") counts.passed += 1;
+      else if (tone === "fail") counts.failed += 1;
+      else if (tone === "skip") counts.skipped += 1;
+      else counts.other += 1;
+    }
+    return counts;
+  }
+
+  function opsActivityOverall(parts = []) {
+    const counts = opsActivityPartCounts(parts);
+    if (counts.failed) return "failure";
+    if (counts.passed && !counts.other) return "success";
+    return "";
+  }
+
+  function opsActivityCountsLabel(parts = []) {
+    const counts = opsActivityPartCounts(parts);
+    const bits = [];
+    if (counts.passed) bits.push(`${counts.passed} passed`);
+    if (counts.failed) bits.push(`${counts.failed} failed`);
+    if (counts.skipped) bits.push(`${counts.skipped} skipped`);
+    if (counts.other) bits.push(`${counts.other} running`);
+    return bits.join(" · ");
+  }
+
+  function opsActivityLinks(row = {}) {
+    const body = opsActivityPayload(row);
+    const links = [];
+    const seen = new Set();
+    for (const [key, label] of OPS_ACTIVITY_LINK_KEYS) {
+      try {
+        const parsed = new URL(String(body[key] || ""));
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") continue;
+        if (seen.has(parsed.href)) continue;
+        seen.add(parsed.href);
+        links.push({ label, href: parsed.href });
+      } catch {
+        // ignore invalid URLs
+      }
+    }
+    return links;
+  }
+
+  function opsActivityGroupKey(row = {}, index = 0) {
+    const body = opsActivityPayload(row);
+    if (opsActivityIsTest(row)) {
+      if (body.run_id) return `run:${body.run_id}`;
+      if (body.sha) return `sha:${body.sha}`;
+    }
+    return opsActivityEventKey(row, index);
+  }
+
+  function opsActivityGroupEvents(events = []) {
+    const groups = [];
+    const map = new Map();
+    events.forEach((row, index) => {
+      const key = opsActivityGroupKey(row, index);
+      if (!map.has(key)) {
+        const group = { key, events: [], parts: [] };
+        map.set(key, group);
+        groups.push(group);
+      }
+      const group = map.get(key);
+      group.events.push(row);
+      for (const part of opsActivityPartsFromEvent(row)) {
+        const existing = group.parts.find((item) => item.name === part.name);
+        if (!existing) group.parts.push(part);
+        else if (opsActivityPartTone(part.conclusion) && !opsActivityPartTone(existing.conclusion)) {
+          Object.assign(existing, part);
+        }
+      }
+    });
+    return groups.map((group) => {
+      const primary = group.events[0];
+      const body = opsActivityPayload(primary);
+      const links = [];
+      const seen = new Set();
+      const suites = [];
+      for (const row of group.events) {
+        const payload = opsActivityPayload(row);
+        const suite = payload.suite || payload.workflow || payload.message || "";
+        if (suite && !suites.includes(suite)) suites.push(suite);
+        for (const link of opsActivityLinks(row)) {
+          if (seen.has(link.href)) continue;
+          seen.add(link.href);
+          links.push(link);
+        }
+      }
+      const conclusion = opsActivityOverall(group.parts) || opsActivityNormalizeConclusion(body.conclusion);
+      return {
+        key: group.key,
+        events: group.events,
+        parts: group.parts,
+        counts: opsActivityPartCounts(group.parts),
+        primary,
+        title: conclusion || opsActivityHeadline(primary),
+        subhead: suites.join(" · ") || opsActivitySubhead(primary),
+        conclusion,
+        summary: opsActivityCountsLabel(group.parts) || opsActivitySummary(primary),
+        when: group.events.map((row) => opsActivityWhen(row)).filter(Boolean).sort().reverse()[0] || "",
+        links,
+      };
+    });
+  }
+
+  function bindOperationsActivityLogs() {
+    if (operationsActivityLogsBound) return;
+    operationsActivityLogsBound = true;
+    ["operationsAgentActivityLog", "operationsAgentTestLog"].forEach((id) => {
+      $(id)?.addEventListener("click", (event) => {
+        const toggle = event.target.closest(".ops-log-toggle");
+        if (!toggle) return;
+        const item = toggle.closest(".ops-log-item");
+        if (!item) return;
+        const key = item.dataset.eventKey || "";
+        const open = !item.classList.contains("is-open");
+        item.classList.toggle("is-open", open);
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        const detail = item.querySelector(".ops-log-detail");
+        if (detail) detail.hidden = !open;
+        if (key) {
+          if (open) operationsActivityOpenKeys.add(key);
+          else operationsActivityOpenKeys.delete(key);
+        }
+      });
+    });
+  }
+
+  function renderOperationsActivityItems(events, emptyCopy, { grouped = false } = {}) {
     if (!events.length) {
       return `<li class="subtle">${emptyCopy}</li>`;
     }
-    return events.slice(0, 40).map((row) => {
-      const body = row.payload && typeof row.payload === "object" ? row.payload : {};
-      const test = isOperationsTestActivityEvent(row);
-      const fingerprint = test
-        ? (body.suite || body.workflow || body.message || row.type || "test")
-        : (body.fingerprint || body.record_id || row.id || "—");
-      const klass = test
-        ? (body.conclusion || body.job || row.type || "test")
-        : (body.class || row.type || "desk_incident");
-      const diagnosis = test
-        ? [body.job, body.detail, body.message].filter(Boolean).join(" · ")
-        : String(body.diagnosis || body.status || "").trim();
-      const when = row.created_at || body.at || "";
-      const runUrl = safeHttpUrl(body.run_url);
-      const conclusion = String(body.conclusion || "").toLowerCase();
-      const tone = conclusion === "failure" || conclusion === "failed" || conclusion === "cancelled"
-        ? "fail"
-        : conclusion === "success" || conclusion === "passed"
-          ? "ok"
-          : "";
-      return `<li${tone ? ` data-tone="${tone}"` : ""}>
-        <strong>${escapeHtml(String(klass).replace(/_/g, " "))}</strong>
-        <span>${escapeHtml(String(fingerprint))}</span>
-        ${diagnosis ? `<p>${escapeHtml(diagnosis.slice(0, 400))}</p>` : ""}
-        ${runUrl ? `<p><a href="${escapeHtml(runUrl)}" target="_blank" rel="noopener noreferrer">Open Actions run</a></p>` : ""}
-        ${when ? `<em>${escapeHtml(String(when))}</em>` : ""}
+    const cards = grouped
+      ? opsActivityGroupEvents(events.slice(0, 80))
+      : events.slice(0, 40).map((row, index) => ({
+        key: opsActivityEventKey(row, index),
+        events: [row],
+        parts: [],
+        primary: row,
+        title: opsActivityHeadline(row),
+        subhead: opsActivitySubhead(row),
+        conclusion: opsActivityNormalizeConclusion(opsActivityPayload(row).conclusion),
+        summary: opsActivitySummary(row),
+        when: opsActivityWhen(row),
+        links: opsActivityLinks(row),
+      }));
+    return cards.slice(0, 40).map((card) => {
+      const open = operationsActivityOpenKeys.has(card.key);
+      const tone = opsActivityPartTone(card.conclusion);
+      const hint = card.parts.length
+        ? "Click for each job’s pass/fail"
+        : "Click for the full diagnosis";
+      const partsHtml = card.parts.length
+        ? `<ol class="ops-log-parts">${card.parts.map((part) => {
+          const partTone = opsActivityPartTone(part.conclusion);
+          const result = String(part.conclusion || "unknown").replace(/_/g, " ");
+          const extra = part.detail ? ` — ${part.detail}` : "";
+          return `<li class="ops-log-part"${partTone ? ` data-tone="${partTone}"` : ""}><strong>${escapeHtml(part.name)}</strong><span>${escapeHtml(result)}${escapeHtml(extra)}</span></li>`;
+        }).join("")}</ol>`
+        : "";
+      const fields = opsActivityDetailFields(card.primary);
+      const fieldsHtml = fields.length
+        ? `<dl>${fields.map((field) => `<dt>${escapeHtml(field.label)}</dt><dd>${escapeHtml(field.value)}</dd>`).join("")}</dl>`
+        : "";
+      const linksHtml = card.links.length
+        ? `<p class="ops-log-detail-links">${card.links.map((link) => `<a href="${escapeHtml(link.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)}</a>`).join("")}</p>`
+        : "";
+      return `<li class="ops-log-item"${tone ? ` data-tone="${tone}"` : ""} data-event-key="${escapeHtml(card.key)}">
+        <button type="button" class="ops-log-toggle" aria-expanded="${open ? "true" : "false"}">
+          <strong>${escapeHtml(String(card.title || "").replace(/_/g, " "))}</strong>
+          <span>${escapeHtml(String(card.subhead || "—"))}</span>
+          ${card.summary ? `<p>${escapeHtml(String(card.summary).slice(0, 400))}</p>` : ""}
+          ${card.when ? `<em>${escapeHtml(String(card.when))}</em>` : ""}
+          <span class="ops-log-hint">${hint}</span>
+        </button>
+        <div class="ops-log-detail"${open ? "" : " hidden"}>
+          ${partsHtml}
+          ${fieldsHtml}
+          ${linksHtml}
+        </div>
       </li>`;
     }).join("");
   }
@@ -14131,7 +14424,7 @@
         const bits = [];
         if (deskEvents.length) bits.push(`${deskEvents.length} desk ticket${deskEvents.length === 1 ? "" : "s"}`);
         if (testEvents.length) bits.push(`${testEvents.length} test result${testEvents.length === 1 ? "" : "s"}`);
-        meta.textContent = `${bits.join(" · ")} from Task Organizer.`;
+        meta.textContent = `${bits.join(" · ")} from Task Organizer. Click a test card for each job’s pass/fail.`;
       }
     }
     if (log) {
@@ -14143,9 +14436,11 @@
     if (tests) {
       tests.innerHTML = renderOperationsActivityItems(
         testEvents,
-        "Regression and GitHub Actions results appear here after a run finishes."
+        "Regression and GitHub Actions results appear here after a run finishes.",
+        { grouped: true }
       );
     }
+    bindOperationsActivityLogs();
   }
 
   function renderOperationsProfiles(profiles, canEdit) {

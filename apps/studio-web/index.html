@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.273-tiktok-url-gate">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.274-ops-activity-detail">
 </head>
 <body>
  <header class="topbar">
@@ -1289,7 +1289,7 @@
  <div id="operationsAgentDeskCounts" class="ops-desk-counts"></div>
  </div>
  <div class="ops-tab-panel" id="operationsAgentActivityPanel" data-ops-tab-panel="activity" role="tabpanel" aria-labelledby="operationsTabActivity" hidden>
- <div class="panel-heading"><div><h2>Activity log</h2><p class="ops-heading-copy">Service-desk tickets and automated test results. Open the <a id="operationsAgentOrganizerLink" href="https://tasks.chicagoshining.com/logs" target="_blank" rel="noopener noreferrer">full log</a> on Task Organizer. Worker transient heals are not listed here.</p></div>
+ <div class="panel-heading"><div><h2>Activity log</h2><p class="ops-heading-copy">Service-desk tickets and automated test results. Click a test card for each job’s pass/fail. Open the <a id="operationsAgentOrganizerLink" href="https://tasks.chicagoshining.com/logs" target="_blank" rel="noopener noreferrer">full log</a> on Task Organizer. Worker transient heals are not listed here.</p></div>
  </div>
  <p class="subtle" id="operationsAgentActivityMeta">Loading activity…</p>
  <h3 class="ops-log-heading">Service desk</h3>
@@ -1590,7 +1590,7 @@
  <p>Operations → Autonomous Service Agent → Activity log. This is the operator view. It has two lists:</p>
  <ul>
  <li><strong>Service desk</strong> — recent <code>desk_incident</code> tickets (agent 3, task 1). Each row is a fingerprint, class, record, and diagnosis after Worker heal did not clear the job.</li>
- <li><strong>Automated tests</strong> — Regression functional, the nightly regression suite, and Task Organizer connectivity checks. Each row shows pass/fail, the job name, and a link to the GitHub Actions run.</li>
+ <li><strong>Automated tests</strong> — Regression functional, the nightly regression suite, and Task Organizer connectivity checks. Click a card to see each job: hermetic success, health failure, and so on, plus the Actions run link.</li>
  </ul>
  <h3>Task Organizer</h3>
  <p>The durable store behind those lists is the <a href="https://tasks.chicagoshining.com/logs" target="_blank" rel="noopener noreferrer">Task Organizer activity log</a>. That page is the event history, not the API schema. <a href="https://tasks.chicagoshining.com/docs" target="_blank" rel="noopener noreferrer">/docs</a> is only OpenAPI. Worker transient heals are not copied here.</p>
@@ -1775,8 +1775,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.273-tiktok-url-gate"></script>
- <script src="/assets/ez-plan.js?v=0.6.273-tiktok-url-gate"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.273-tiktok-url-gate"></script>
+ <script src="/assets/config.js?v=0.6.274-ops-activity-detail"></script>
+ <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.274-ops-activity-detail"></script>
 </body>
 </html>
