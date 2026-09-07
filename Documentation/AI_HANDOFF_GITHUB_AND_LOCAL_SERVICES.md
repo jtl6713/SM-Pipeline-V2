@@ -60,9 +60,12 @@ Files:
 
 Friendly launchers:
 
+- `SYNC Local Git Checkout.bat`
 - `PLAN Local Service Deployment.bat`
 - `DEPLOY Local Service.bat`
+- `DEPLOY Pipeline Runner.bat`
 - `ROLLBACK Local Service.bat`
+- `INSTALL Operator Shortcuts.bat` (also creates pipeline-root shortcuts beside START / STOP / VERIFY)
 
 Framework proof state:
 
