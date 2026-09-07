@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.267-agent-links">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.268-ops-tabs">
 </head>
 <body>
  <header class="topbar">
@@ -1137,22 +1137,22 @@
  </div>
  <p class="subtle" id="operationsDeskMeta">Loading desk inventory…</p>
  <div id="operationsDeskCounts" class="ops-desk-counts"></div>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsIdeasPanel" data-ops-tab-panel="ideas" role="tabpanel" aria-labelledby="operationsTabIdeas" hidden>
  <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, Studio generates a daily batch of ideas around 1:00 a.m. Chicago for that profile only.</p></div>
  <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run today now</button>
  </div>
  <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
  <div id="operationsProfiles" class="ops-profile-list"></div>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsProducePanel" data-ops-tab-panel="produce" role="tabpanel" aria-labelledby="operationsTabProduce" hidden>
  <div class="panel-heading"><div><h2>Autonomous produce</h2><p>When a profile toggle is on, Studio harvests Chicago trends, picks one idea the library can shoot, produces the standard template, and stops at Ready for Review. Nothing publishes. Runs around 8:00 a.m. and 4:00 p.m. Chicago.</p></div>
  <button type="button" class="secondary-button" id="operationsRunAutonomous">Run autonomous now</button>
  </div>
  <label class="form-field" style="max-width:22rem"><span>Pin next run to a landmark</span><input id="operationsAutonomousSubject" type="text" maxlength="80" placeholder="e.g. Chicago Theatre"></label>
  <p class="subtle" id="operationsAutonomousMeta">Loading autonomous status…</p>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsIntakePanel" data-ops-tab-panel="intake" role="tabpanel" aria-labelledby="operationsTabIntake" hidden>
  <div class="panel-heading"><div><h2>Library intake</h2><p>Studio scans the Drive ingestion folder every 10 minutes. If files remain after the first batch, intake keeps going until every file is compressed if needed, recorded, and moved out of the folder. Process intake if you want that drain to start now.</p></div>
  <div class="ops-inline-form" style="margin-top:0">
  <button type="button" class="secondary-button" id="operationsRunIntake">Process intake folder</button>
@@ -1166,15 +1166,9 @@
  <ol id="operationsIntakeStages" class="ops-intake-stages"></ol>
  </div>
  <p class="subtle" id="operationsIntakeMeta"></p>
- </section>
- <section class="panel ops-analytics-panel">
- <details class="ops-collapse" id="operationsAnalyticsPanel">
- <summary class="ops-collapse-summary">
- <div>
- <h2>Analytics</h2>
- <p>Seasonal posting-time and caption guidance from similar accounts. The grid counts their public posts by weekday and Chicago time. Gold marks your upcoming scheduled posts. Expand to refresh data or manage handles.</p>
  </div>
- </summary>
+ <div class="ops-tab-panel ops-analytics-panel" id="operationsAnalyticsPanel" data-ops-tab-panel="analytics" role="tabpanel" aria-labelledby="operationsTabAnalytics" hidden>
+ <div class="panel-heading"><div><h2>Analytics</h2><p>Seasonal posting-time and caption guidance from similar accounts. The grid counts their public posts by weekday and Chicago time. Gold marks your upcoming scheduled posts.</p></div></div>
  <div class="ops-analytics-body">
  <div class="ops-inline-form ops-analytics-toolbar">
  <label class="subtle" for="operationsInsightsSeason">Season</label>
@@ -1226,33 +1220,39 @@
  <div id="operationsWatchlist" class="ops-profile-list"></div>
  </details>
  </div>
- </details>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsSchedulePanel" data-ops-tab-panel="schedule" role="tabpanel" aria-labelledby="operationsTabSchedule" hidden>
  <div class="panel-heading"><div><h2>Ready to schedule</h2><p>Approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</p></div></div>
  <div id="operationsScheduleList" class="table-wrap"></div>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsPublishPanel" data-ops-tab-panel="publish" role="tabpanel" aria-labelledby="operationsTabPublish" hidden>
  <div class="panel-heading"><div><h2>Ready to publish</h2><p>Due packages. Auto-publish still runs from Pipeline review. Use this when you posted by hand and need to mark them published.</p></div></div>
  <div id="operationsPublishList" class="table-wrap"></div>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsOversizedPanel" data-ops-tab-panel="oversized" role="tabpanel" aria-labelledby="operationsTabOversized" hidden>
  <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or Asset Manager. Compress runs A1S one file at a time. When a clip finishes, the next oversized file starts immediately, then intake records and moves the compressed file without waiting for the next 10-minute scan. Compress all starts the queue now.</p></div>
  <button type="button" class="secondary-button" id="operationsCompressAllOversized" hidden>Compress all in intake folder</button>
  </div>
  <div id="operationsCompressionStatus" class="ops-compression-status" hidden></div>
  <div id="operationsOversizedList" class="table-wrap"></div>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsRepairPanel" data-ops-tab-panel="repair" role="tabpanel" aria-labelledby="operationsTabRepair" hidden>
  <div class="panel-heading"><div><h2>Render repair</h2><p>Use these when Remotion moved URL or asset selection failed. They do not run on a clock.</p></div></div>
  <div class="ops-repair-actions">
  <button type="button" class="secondary-button" id="operationsResetRenderUrls">Reset stale render URLs</button>
  <button type="button" class="secondary-button" id="operationsRetryAssetSelection">Retry failed asset selection</button>
  </div>
+ </div>
  </section>
  </div>
  <div id="operationsAgentView" hidden>
- <section class="panel" id="operationsAgentGuidePanel">
+ <section class="panel ops-tabbed-panel">
+ <nav class="ops-card-tabs" role="tablist" aria-label="Autonomous Service Agent">
+ <button type="button" class="ops-card-tab active" role="tab" id="operationsTabGuide" data-ops-tab="guide" aria-controls="operationsAgentGuidePanel" aria-selected="true">Guide</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabInventory" data-ops-tab="inventory" aria-controls="operationsAgentInventoryPanel" aria-selected="false" tabindex="-1">Desk inventory</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabActivity" data-ops-tab="activity" aria-controls="operationsAgentActivityPanel" aria-selected="false" tabindex="-1">Activity log</button>
+ </nav>
+ <div class="ops-tab-panel" id="operationsAgentGuidePanel" data-ops-tab-panel="guide" role="tabpanel" aria-labelledby="operationsTabGuide">
  <div class="panel-heading">
  <div>
  <h2>Autonomous Service Agent</h2>
@@ -1269,8 +1269,8 @@
  </ul>
  <p>You still Approve publish for library-stills autonomous work, set TikTok covers in the TikTok app, and can change AZ times in Pipeline before they fire. Full instructions are in the <a id="operationsAgentGuideLink" href="/docs/Autonomous-Service-Agent.docx" download="Autonomous-Service-Agent.docx">Word guide</a>.</p>
  </div>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsAgentInventoryPanel" data-ops-tab-panel="inventory" role="tabpanel" aria-labelledby="operationsTabInventory" hidden>
  <div class="panel-heading"><div><h2>Desk mode and live inventory</h2><p>Same kill switch as Control. Fingerprints reuse one incident so the same parked job is not five tickets.</p></div>
  <label class="form-field" style="max-width:14rem"><span>Desk mode</span>
  <select id="operationsAgentDeskMode" aria-label="Autonomous service desk mode on agent page">
@@ -1284,12 +1284,13 @@
  </div>
  <p class="subtle" id="operationsAgentDeskMeta">Loading desk inventory…</p>
  <div id="operationsAgentDeskCounts" class="ops-desk-counts"></div>
- </section>
- <section class="panel">
+ </div>
+ <div class="ops-tab-panel" id="operationsAgentActivityPanel" data-ops-tab-panel="activity" role="tabpanel" aria-labelledby="operationsTabActivity" hidden>
  <div class="panel-heading"><div><h2>Activity log</h2><p class="ops-heading-copy">Recent <code>desk_incident</code> tickets from <a id="operationsAgentOrganizerLink" href="https://tasks.chicagoshining.com" target="_blank" rel="noopener noreferrer">Task Organizer</a> (agent 3, task 1). Worker transient heals are not listed here.</p></div>
  </div>
  <p class="subtle" id="operationsAgentActivityMeta">Loading activity…</p>
  <ol id="operationsAgentActivityLog" class="ops-agent-log"></ol>
+ </div>
  </section>
  </div>
  </section>
@@ -1672,8 +1673,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.267-agent-links"></script>
- <script src="/assets/ez-plan.js?v=0.6.267-agent-links"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.267-agent-links"></script>
+ <script src="/assets/config.js?v=0.6.268-ops-tabs"></script>
+ <script src="/assets/ez-plan.js?v=0.6.268-ops-tabs"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.268-ops-tabs"></script>
 </body>
 </html>
