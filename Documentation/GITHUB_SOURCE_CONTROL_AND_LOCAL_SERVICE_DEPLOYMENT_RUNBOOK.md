@@ -173,8 +173,15 @@ Friendly launchers under `Production Start-Stop-Verify Services`:
 - `DEPLOY Local Service.bat`
 - `DEPLOY Pipeline Runner.bat`
 - `ROLLBACK Local Service.bat`
+- `INSTALL Operator Shortcuts.bat`
 
-Re-run `deploy\local-services\Install-Deployment-Shortcuts.ps1` after pulling if the SYNC launcher is missing from that folder.
+ChicagoShining Pipeline **root** should also have shortcuts for START / STOP / VERIFY plus SYNC / PLAN / DEPLOY / DEPLOY Pipeline Runner / ROLLBACK. Re-run after pulling:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\deploy\local-services\Install-Deployment-Shortcuts.ps1"
+```
+
+That archives known unused Start-Stop-Verify docs/one-time scripts under `_legacy_archive\`, removes pipeline-root `.pytest_cache`, and refreshes the root shortcuts without overwriting working START / STOP / VERIFY targets.
 
 ## 9. PLAN — safe/read-only
 

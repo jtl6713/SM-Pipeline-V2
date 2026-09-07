@@ -74,8 +74,31 @@ Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo
 - `DEPLOY Local Service.bat` (menu; pick **6 Pipeline Runner**)
 - `DEPLOY Pipeline Runner.bat` (pipeline-runner only)
 - `ROLLBACK Local Service.bat`
+- `INSTALL Operator Shortcuts.bat` (refresh bats + pipeline-root `.lnk` files)
 
-`SYNC-Git-Main.bat` and `DEPLOY-pipeline-runner.bat` also live next to `Deploy-SMService.ps1` in this folder after `git pull` on SM-Pipeline-V2. SYNC updates the Git checkout only; it does not deploy or restart live services. VERIFY only checks that :3350 answers 200. It does not copy new Flask routes.
+`SYNC-Git-Main.bat`, `INSTALL-Operator-Shortcuts.bat`, and `DEPLOY-pipeline-runner.bat` also live next to `Deploy-SMService.ps1` in this folder after `git pull` on SM-Pipeline-V2.
+
+After pulling this tooling, run once:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\deploy\local-services\Install-Deployment-Shortcuts.ps1"
+```
+
+That script:
+
+1. Writes/refreshes the operator `.bat` launchers
+2. Archives known unused/one-time Start-Stop-Verify files under `_legacy_archive\`
+3. Removes pipeline-root `.pytest_cache`
+4. Archives the one-time `Complete DB and Google Asset Refresh` folder if present
+5. Creates/refreshes ChicagoShining Pipeline **root** shortcuts beside START / STOP / VERIFY:
+   - `SYNC Local Git Checkout`
+   - `PLAN Local Service Deployment`
+   - `DEPLOY Local Service`
+   - `DEPLOY Pipeline Runner`
+   - `ROLLBACK Local Service`
+   - Existing START / STOP / VERIFY shortcuts are preserved (they may target Windows Terminal tabs)
+
+SYNC updates the Git checkout only; it does not deploy or restart live services. VERIFY only checks that :3350 answers 200. It does not copy new Flask routes.
 
 Task Organizer (standalone repo, port `3360`) is not a deployable SM service. Add it to the existing START / STOP / VERIFY windows with:
 

@@ -21,7 +21,8 @@ if not exist "%REPO%\.git\" (
   exit /b 1
 )
 
-cd /d "%REPO%" || (
+cd /d "%REPO%"
+if errorlevel 1 (
   echo FAIL - could not open:
   echo   %REPO%
   echo.
