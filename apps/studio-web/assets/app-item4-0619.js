@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.265-oversized-list";
+  const BUILD_ID = "item4-0.6.266-service-agent";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -378,6 +378,7 @@
     if (page !== "outputs") stopPipelinePoll();
     if (page !== "content") stopProductionPoll();
     if (page === "support") showSupportDoc("walkthrough");
+    if (page === "operations") showOperationsView(location.hash.replace(/^#/, "") === "agent" ? "agent" : "control");
     loadPage(isHubPage(page) ? "home" : page);
   }
 
@@ -508,17 +509,10 @@
       setOperationsMessage(error.message || "Could not add handle.", "error-text");
     }
   });
-  $("operationsDeskMode")?.addEventListener("change", async (event) => {
-    const mode = String(event.target.value || "").trim();
-    if (!mode) return;
-    try {
-      setOperationsMessage(`Setting desk mode to ${mode}…`);
-      const desk = await api("/api/ops/desk/mode", { method: "PATCH", body: JSON.stringify({ mode }) });
-      renderOperationsDesk(desk, true);
-      setOperationsMessage(`Desk mode is ${desk.desk_mode || mode}.`);
-    } catch (error) {
-      setOperationsMessage(error.message || "Could not update desk mode.", "error-text");
-    }
+  $("operationsDeskMode")?.addEventListener("change", (event) => patchOperationsDeskMode(event.target.value));
+  $("operationsAgentDeskMode")?.addEventListener("change", (event) => patchOperationsDeskMode(event.target.value));
+  document.querySelectorAll("[data-ops-view]").forEach((button) => {
+    button.addEventListener("click", () => showOperationsView(button.dataset.opsView));
   });
 
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
@@ -13830,27 +13824,59 @@
     });
   }
 
+  function showOperationsView(view) {
+    const agent = view === "agent";
+    const control = $("operationsControlView");
+    const agentView = $("operationsAgentView");
+    if (control) control.hidden = agent;
+    if (agentView) agentView.hidden = !agent;
+    document.querySelectorAll("[data-ops-view]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.opsView === (agent ? "agent" : "control"));
+    });
+    if (agent) history.replaceState(null, "", "#agent");
+    else if (location.hash === "#agent") history.replaceState(null, "", location.pathname + location.search);
+  }
+
+  async function patchOperationsDeskMode(rawMode) {
+    const mode = String(rawMode || "").trim();
+    if (!mode) return;
+    try {
+      setOperationsMessage(`Setting desk mode to ${mode}…`);
+      const desk = await api("/api/ops/desk/mode", { method: "PATCH", body: JSON.stringify({ mode }) });
+      renderOperationsDesk(desk, true);
+      setOperationsMessage(`Desk mode is ${desk.desk_mode || mode}.`);
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not update desk mode.", "error-text");
+    }
+  }
+
   function renderOperationsDesk(desk, canEdit) {
     const meta = $("operationsDeskMeta");
     const counts = $("operationsDeskCounts");
-    const modeSelect = $("operationsDeskMode");
-    if (modeSelect && desk?.desk_mode) modeSelect.value = desk.desk_mode;
-    if (modeSelect) modeSelect.disabled = !canEdit;
+    const modeSelects = [$("operationsDeskMode"), $("operationsAgentDeskMode")].filter(Boolean);
+    for (const modeSelect of modeSelects) {
+      if (desk?.desk_mode) modeSelect.value = desk.desk_mode;
+      modeSelect.disabled = !canEdit;
+    }
     if (!desk) {
       if (meta) meta.textContent = "Desk inventory is unavailable.";
       if (counts) counts.innerHTML = "";
+      const agentMeta = $("operationsAgentDeskMeta");
+      const agentCounts = $("operationsAgentDeskCounts");
+      if (agentMeta) agentMeta.textContent = "Desk inventory is unavailable.";
+      if (agentCounts) agentCounts.innerHTML = "";
       return;
     }
     const summary = desk.summary || {};
     const escalate = summary.last_escalate;
-    if (meta) {
-      const bits = [`Mode ${desk.desk_mode || "observe"}`, `${Number(summary.total) || 0} open`];
-      if (escalate?.record_id) bits.push(`last escalate ${escalate.record_id}`);
-      const down = (desk.health || []).filter((row) => row && row.ok === false).map((row) => row.id);
-      if (down.length) bits.push(`health down: ${down.join(", ")}`);
-      meta.textContent = `${bits.join(" · ")}.`;
-    }
-    if (!counts) return;
+    const bits = [`Mode ${desk.desk_mode || "observe"}`, `${Number(summary.total) || 0} open`];
+    if (escalate?.record_id) bits.push(`last escalate ${escalate.record_id}`);
+    const down = (desk.health || []).filter((row) => row && row.ok === false).map((row) => row.id);
+    if (down.length) bits.push(`health down: ${down.join(", ")}`);
+    const summaryText = `${bits.join(" · ")}.`;
+    if (meta) meta.textContent = summaryText;
+    const agentMeta = $("operationsAgentDeskMeta");
+    if (agentMeta) agentMeta.textContent = summaryText;
     const chips = [];
     const entries = Object.entries(summary.counts || {});
     if (!entries.length) chips.push({ label: "No stuck rows", tone: "ok" });
@@ -13858,7 +13884,43 @@
       const tone = kind.includes("escalat") || kind.includes("stalled") || kind === "health_down" ? "alert" : "";
       chips.push({ label: `${kind.replace(/_/g, " ")} ${count}`, tone });
     }
-    counts.innerHTML = chips.map((chip) => `<span class="ops-desk-chip"${chip.tone ? ` data-tone="${chip.tone}"` : ""}>${escapeHtml(chip.label)}</span>`).join("");
+    const chipHtml = chips.map((chip) => `<span class="ops-desk-chip"${chip.tone ? ` data-tone="${chip.tone}"` : ""}>${escapeHtml(chip.label)}</span>`).join("");
+    if (counts) counts.innerHTML = chipHtml;
+    const agentCounts = $("operationsAgentDeskCounts");
+    if (agentCounts) agentCounts.innerHTML = chipHtml;
+  }
+
+  function renderOperationsAgentActivity(payload) {
+    const meta = $("operationsAgentActivityMeta");
+    const log = $("operationsAgentActivityLog");
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    if (meta) {
+      if (payload?.source === "unavailable") {
+        meta.textContent = `Task Organizer tickets are unavailable${payload.error ? ` (${payload.error})` : ""}. Live inventory above is still current. Open Task Organizer for the durable log.`;
+      } else if (!events.length) {
+        meta.textContent = "No desk_incident tickets yet. Observe mode writes them here when a fingerprint is not transient.";
+      } else {
+        meta.textContent = `${events.length} recent ticket${events.length === 1 ? "" : "s"} from Task Organizer.`;
+      }
+    }
+    if (!log) return;
+    if (!events.length) {
+      log.innerHTML = '<li class="subtle">When the desk tickets an incident, the fingerprint, class, and diagnosis appear here.</li>';
+      return;
+    }
+    log.innerHTML = events.slice(0, 40).map((row) => {
+      const body = row.payload && typeof row.payload === "object" ? row.payload : {};
+      const fingerprint = body.fingerprint || body.record_id || row.id || "—";
+      const klass = body.class || row.type || "desk_incident";
+      const diagnosis = String(body.diagnosis || body.status || "").trim();
+      const when = row.created_at || body.at || "";
+      return `<li>
+        <strong>${escapeHtml(String(klass).replace(/_/g, " "))}</strong>
+        <span>${escapeHtml(String(fingerprint))}</span>
+        ${diagnosis ? `<p>${escapeHtml(diagnosis.slice(0, 400))}</p>` : ""}
+        ${when ? `<em>${escapeHtml(String(when))}</em>` : ""}
+      </li>`;
+    }).join("");
   }
 
   function renderOperationsProfiles(profiles, canEdit) {
@@ -14033,12 +14095,14 @@
     initOperationsInsightsSeason();
     if (meta) meta.textContent = "Loading operations…";
     try {
-      const [data, desk] = await Promise.all([
+      const [data, desk, activity] = await Promise.all([
         api("/api/operations"),
         api("/api/ops/desk/inventory").catch(() => null),
+        api("/api/ops/desk/activity").catch(() => null),
       ]);
       operationsTimezone = data.timezone || null;
       renderOperationsDesk(desk, Boolean(data.can_edit_profiles));
+      renderOperationsAgentActivity(activity);
       if (meta) {
         const tz = data.timezone || studioTimezone();
         const today = data.chicago_date ? formatStudioDate(data.chicago_date, { timeZone: tz, weekday: true }) : "—";

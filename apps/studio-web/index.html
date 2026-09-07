@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.265-oversized-list">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.266-service-agent">
 </head>
 <body>
  <header class="topbar">
@@ -1102,10 +1102,15 @@
 
  <section id="page-operations" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, autonomous produce, library intake, publish queues, oversized compression, render retries, and the service-desk stuck inventory.</p></div>
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, autonomous produce, library intake, publish queues, oversized compression, render retries, the service-desk inventory, and the Autonomous Service Agent guide and activity log.</p></div>
  <button class="secondary-button" data-refresh="operations">Refresh</button>
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
+ <nav class="ops-subnav" aria-label="Operations pages">
+ <button type="button" class="ops-subnav-link active" data-ops-view="control" id="operationsViewControl">Control</button>
+ <button type="button" class="ops-subnav-link" data-ops-view="agent" id="operationsViewAgent">Autonomous Service Agent</button>
+ </nav>
+ <div id="operationsControlView">
  <section class="panel" id="operationsDeskPanel">
  <div class="panel-heading"><div><h2>Service desk</h2><p>Stuck produce, render, crop, autonomous, and public /health counts. Worker cron still self-heals transients. Mode is the desk kill switch.</p></div>
  <label class="form-field" style="max-width:14rem"><span>Desk mode</span>
@@ -1233,6 +1238,50 @@
  <button type="button" class="secondary-button" id="operationsRetryAssetSelection">Retry failed asset selection</button>
  </div>
  </section>
+ </div>
+ <div id="operationsAgentView" hidden>
+ <section class="panel" id="operationsAgentGuidePanel">
+ <div class="panel-heading">
+ <div>
+ <h2>Autonomous Service Agent</h2>
+ <p>How auto-review and bounded auto-correction work, what you still approve, and where to read the activity log.</p>
+ </div>
+ <a class="primary-button" id="operationsAgentGuideLink" href="/docs/Autonomous-Service-Agent.docx" download="Autonomous-Service-Agent.docx">Download Word guide</a>
+ </div>
+ <div class="ops-agent-copy">
+ <p>The Worker heals transient stuck produce, render, crop, and AZ jobs every two minutes. The desk agent only tickets after that, then may restart a down service or open a <code>cursor/desk-*</code> PR depending on Desk mode. It never auto-publishes.</p>
+ <ul>
+ <li><strong>observe</strong> (default) — ticket diagnosis packs only.</li>
+ <li><strong>infra</strong> — also SYNC / VERIFY / one-service DEPLOY when public <code>/health</code> is down.</li>
+ <li><strong>patch</strong> — also open PRs. You merge.</li>
+ <li><strong>automerge</strong> — leave off. Allowlisted heals only, after proof.</li>
+ </ul>
+ <p>You still Approve publish for library-stills autonomous work, set TikTok covers in the TikTok app, and can change AZ times in Pipeline before they fire. Full instructions are in the Word guide (also in Git at <code>docs/handoffs/Autonomous-Service-Agent.docx</code>).</p>
+ </div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Desk mode and live inventory</h2><p>Same kill switch as Control. Fingerprints reuse one incident so the same parked job is not five tickets.</p></div>
+ <label class="form-field" style="max-width:14rem"><span>Desk mode</span>
+ <select id="operationsAgentDeskMode" aria-label="Autonomous service desk mode on agent page">
+ <option value="off">off</option>
+ <option value="observe">observe</option>
+ <option value="infra">infra</option>
+ <option value="patch">patch</option>
+ <option value="automerge">automerge</option>
+ </select>
+ </label>
+ </div>
+ <p class="subtle" id="operationsAgentDeskMeta">Loading desk inventory…</p>
+ <div id="operationsAgentDeskCounts" class="ops-desk-counts"></div>
+ </section>
+ <section class="panel">
+ <div class="panel-heading"><div><h2>Activity log</h2><p>Recent <code>desk_incident</code> tickets from Task Organizer (agent 3, task 1). Worker transient heals are not listed here.</p></div>
+ <a class="secondary-button" href="https://tasks.chicagoshining.com" target="_blank" rel="noopener noreferrer">Open Task Organizer</a>
+ </div>
+ <p class="subtle" id="operationsAgentActivityMeta">Loading activity…</p>
+ <ol id="operationsAgentActivityLog" class="ops-agent-log"></ol>
+ </section>
+ </div>
  </section>
 
  <section id="page-support" class="page">
@@ -1442,6 +1491,7 @@
  </figure>
  <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles.</p>
  <ul>
+ <li><strong>Autonomous Service Agent</strong> — Operations sub-page with the Word operator guide, desk mode, live stuck inventory, and Task Organizer activity log. Worker heal still runs every two minutes; the desk never auto-publishes.</li>
  <li><strong>Daily ideas</strong> — per-profile daily batch around 1:00 a.m. Chicago, or Run today now.</li>
  <li><strong>Library intake</strong> — A GitHub ticker starts A2 every 10 minutes. Process intake folder runs the same drain now. Oversized clips compress one at a time, then the next file starts immediately; A0 stays off.</li>
  <li><strong>Ready to schedule / publish</strong> — set a post time or mark a hand-posted package published.</li>
@@ -1612,8 +1662,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.265-oversized-list"></script>
- <script src="/assets/ez-plan.js?v=0.6.265-oversized-list"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.265-oversized-list"></script>
+ <script src="/assets/config.js?v=0.6.266-service-agent"></script>
+ <script src="/assets/ez-plan.js?v=0.6.266-service-agent"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.266-service-agent"></script>
 </body>
 </html>
