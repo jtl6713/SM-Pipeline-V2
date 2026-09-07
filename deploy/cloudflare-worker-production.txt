@@ -389,3 +389,5 @@ Activity log Worker deploy: 2026-09-07 - GET /api/ops/desk/activity includes des
 Review plays rendered MP4 Worker deploy: 2026-09-07 - Do not map the cover PNG into studio_preview_url when a Drive/R2 final exists. Preview kind stays video. Worker 0.10.275-play-rendered-mp4.
 
 YouTube public source Worker deploy: 2026-09-07 - Do not start YTP1 on a Drive view URL. Restage AP0 after Source download failed 401, then upload the public MP4. Worker 0.10.276-youtube-public-source.
+
+Autonomous topic-dedupe Worker deploy: 2026-09-07 - Occupied harvest sorts Create_Date, named-place conflict, AM/PM slot stays claimed after skipped+idea_id, desk flags same-place extras and YouTube YT1 Drive Failed, heal AP0 those Shorts. Worker 0.10.277-autonomous-topic-dedupe.
