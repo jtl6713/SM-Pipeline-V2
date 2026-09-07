@@ -1,5 +1,6 @@
 // Keep these helpers aligned with apps/studio-web/assets/app-item4-0619.js
-// and apps/studio-api/worker.js (studioMappedPreviewUrl, studioPreviewKind).
+// and apps/studio-api/worker.js (studioMappedPreviewUrl, studioPreviewKind)
+// plus renderCreativeTiktokComplete / tiktokNeedsUrlEntry.
 
 export function item4LooksLikeImage(url) {
   return /\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(String(url || ""));
@@ -58,6 +59,36 @@ export function item4ReviewWatchUrl(output = {}) {
 export function item4PreviewPlayerFallback(output = {}) {
   if (item4OutputHasVideoFinal(output)) return "drive";
   return "cover";
+}
+
+export function item4IsTikTokOutput(output = {}) {
+  return String(output.platform || "").trim().toLowerCase() === "tiktok";
+}
+
+export function item4TiktokLiveUrl(output = {}) {
+  return String(output.platform_post_url || output.manual_published_url || "").trim();
+}
+
+export function item4TiktokNeedsUrlEntry(output = {}) {
+  if (!item4IsTikTokOutput(output)) return false;
+  if (output.do_not_publish) return false;
+  const publish = String(output.publish_status || "").trim().toLowerCase();
+  const status = String(output.output_status || "").trim().toLowerCase();
+  const draft = String(output.tiktok_draft_status || "").trim().toLowerCase();
+  if (publish === "published" || status === "published" || draft === "published") return false;
+  const manual = String(output.manual_completion_status || "").trim().toLowerCase();
+  const studio = String(output.studio_state || "").trim().toLowerCase();
+  return manual === "required"
+    || studio.includes("manual action")
+    || studio === "draft delivered"
+    || draft.includes("manual action")
+    || draft.includes("draft delivered")
+    || draft.includes("manual completion received");
+}
+
+export function item4ShowTiktokCompleteCard(output = {}) {
+  if (!item4IsTikTokOutput(output)) return false;
+  return item4TiktokNeedsUrlEntry(output) || Boolean(item4TiktokLiveUrl(output));
 }
 
 export function item4MixInProgress(output = {}, handoff = null) {

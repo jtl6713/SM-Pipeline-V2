@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.272-play-rendered-mp4";
+  const BUILD_ID = "item4-0.6.273-tiktok-url-gate";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11082,10 +11082,15 @@
     const input = $("creativeTiktokUrl");
     if (!card || !form || !live || !input) return;
     const tiktok = String(output?.platform || "").trim().toLowerCase() === "tiktok";
-    const awaiting = tiktokNeedsUrlEntry(output);
-    const posted = tiktokLiveUrl(output);
+    const awaiting = tiktok && tiktokNeedsUrlEntry(output);
+    const posted = tiktok ? tiktokLiveUrl(output) : "";
     if (!tiktok || (!awaiting && !posted)) {
       card.hidden = true;
+      form.hidden = true;
+      live.hidden = true;
+      live.innerHTML = "";
+      if (musicWrap) musicWrap.hidden = true;
+      input.value = "";
       return;
     }
     card.hidden = false;

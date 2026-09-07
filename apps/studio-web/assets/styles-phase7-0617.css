@@ -1037,6 +1037,7 @@ input, select, textarea, button {
 #outputsList .pipeline-tiktok-save{align-self:flex-start;padding:6px 10px;font-size:.78rem}
 #outputsList .pipeline-tiktok-complete-msg{font-size:.72rem;min-height:1em}
 .tiktok-complete-card{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:10px}
+.tiktok-complete-card[hidden],.tiktok-complete-form[hidden]{display:none!important}
 .tiktok-complete-form{display:grid;gap:10px}
 .creative-editor-shell.watch-only .tiktok-complete-card{pointer-events:auto;opacity:1}
 #outputsList .pipeline-schedule-suggest{font-size:.72rem;color:var(--muted);max-width:220px}
