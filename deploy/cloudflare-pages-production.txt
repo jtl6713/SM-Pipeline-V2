@@ -397,3 +397,5 @@ AZ ready-destinations schedule Pages deploy: 2026-09-07 - Stronger AZ Auto-sched
 Autonomous service desk Operations strip Pages deploy: 2026-09-07 - Stuck-count strip and Desk_Mode selector on Operations. UI 0.6.263-desk-inventory.
 
 Asset Manager rename and oversized list Pages deploy: 2026-09-07 - Asset Manager/Music Manager labels, Rename on stills/clips, Operations oversized table refreshes after compression. UI 0.6.265-oversized-list.
+
+Autonomous Service Agent Pages deploy: 2026-09-07 - Operations sub-page with Word guide, desk inventory, and activity log. Copies Autonomous-Service-Agent.docx to /docs/. UI 0.6.266-service-agent.

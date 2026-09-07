@@ -6,6 +6,8 @@ This does **not** replace the Studio Worker cron self-heal in `apps/studio-api/w
 
 There is **no `development` branch**. Authority is `main`. Shipping is `cursor/desk-*` PR → merge `main` → Cloudflare trigger bump and/or `deploy/local-services/Deploy-SMService.ps1`.
 
+Operator Word guide: `docs/handoffs/Autonomous-Service-Agent.docx` (Studio → Operations → Autonomous Service Agent).
+
 ## Kill switch
 
 Airtable Pipeline Settings row `STUDIO_DESK_MODE` (also editable on Studio Operations).

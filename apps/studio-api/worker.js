@@ -93,6 +93,7 @@ export default {
       const isOperationsCompressionStatusRoute = url.pathname === "/api/operations/compression";
       const isOpsAzNavyPierKickRoute = url.pathname === "/api/ops/az-navy-pier-kick";
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
+      const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
@@ -260,8 +261,9 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.270-a3-heic-classify",
+          version: "0.10.271-service-agent",
           studio_desk_inventory_v1: true,
+          studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -564,6 +566,12 @@ export default {
         if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
         return getStudioDeskInventory(request, env);
+      }
+
+      if (isOpsDeskActivityRoute) {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        return getStudioDeskActivity(request, env);
       }
 
       if (isOpsDeskModeRoute) {
@@ -28373,6 +28381,32 @@ async function gatherStudioDeskInventory(env) {
 async function getStudioDeskInventory(request, env) {
   const payload = await gatherStudioDeskInventory(env);
   return respond(request, env, payload);
+}
+
+async function getStudioDeskActivity(request, env) {
+  const endpoint = String(env.TASKS_ACTIVITY_URL || "https://tasks.chicagoshining.com/agent-activity/log-event").replace(/\/$/, "");
+  const sep = endpoint.includes("?") ? "&" : "?";
+  try {
+    const res = await fetch(`${endpoint}${sep}type=desk_incident&task_id=1&limit=40`, { headers: { Accept: "application/json" } });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body || body.ok === false) {
+      return respond(request, env, {
+        ok: true,
+        events: [],
+        source: "unavailable",
+        error: body?.error || `tasks_http_${res.status}`,
+      });
+    }
+    const events = Array.isArray(body.events) ? body.events : Array.isArray(body) ? body : [];
+    return respond(request, env, { ok: true, events, source: "tasks" });
+  } catch (error) {
+    return respond(request, env, {
+      ok: true,
+      events: [],
+      source: "unavailable",
+      error: String(error?.message || error),
+    });
+  }
 }
 
 async function patchStudioDeskMode(request, env) {

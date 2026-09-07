@@ -377,3 +377,5 @@ Asset Manager rename and oversized list Worker deploy: 2026-09-07 - PATCH /api/l
 Asset Manager HEIC preview Worker deploy: 2026-09-07 - Library photo preview uses Drive JPEG thumbnails instead of serving HEIC originals that Chrome cannot paint. Worker 0.10.269-library-heic-preview.
 
 A3 HEIC classify Worker deploy: 2026-09-07 - Intake no longer reports A3 finished while the classify view still has rows. Empty A2 pulses A3. Worker 0.10.270-a3-heic-classify.
+
+Autonomous Service Agent Worker deploy: 2026-09-07 - GET /api/ops/desk/activity proxies Task Organizer desk_incident events. Worker 0.10.271-service-agent.
