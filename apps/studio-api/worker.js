@@ -232,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.263-az-ready-schedule",
+          version: "0.10.264-az-approve-one",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -7624,7 +7624,7 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     ready: studioOutputReadyForPublishApproval(row) && !azOutputQueueBlockers(row).length,
   }));
   const notReady = assessed.filter((item) => !item.ready);
-  const approveLimit = Math.max(1, Math.min(6, Number(options.approveLimit) || 4));
+  const approveLimit = Math.max(1, Math.min(2, Number(options.approveLimit) || 1));
   const toApprove = assessed.filter((item) => item.ready).slice(0, approveLimit).map((item) => item.row);
   if (!toApprove.length) {
     if (notReady.some((item) => item.blockers.includes("cover") || item.blockers.includes("caption"))) {
@@ -7644,32 +7644,32 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     };
   }
   const remainingApprove = Math.max(0, assessed.filter((item) => item.ready).length - toApprove.length);
-  const occupied = await studioLoadAzOccupiedTimes(env, { excludeIds: outputs.map((row) => row.id) });
-  const items = toApprove.map((row) => ({
-    platform: String(f(row, "Platform") || "").trim(),
-    output_type: String(f(row, "Studio_Output_Type") || f(row, "Format") || "").trim(),
-  }));
-  const bestTimesByKey = {};
-  for (const item of items.filter((row) => !studioAzIsStory(row.output_type))) {
-    const key = studioAzScheduleKey(item.platform, item.output_type);
-    if (!bestTimesByKey[key]) bestTimesByKey[key] = await studioResolveAzBestTimes(env, item.platform, item.output_type);
-  }
-  const planned = studioBuildAzCampaignSchedule(items, { occupiedMs: occupied.allMs, bestTimesByKey });
+  // Prefer times already on the row (Pipeline schedule fields). Avoid insights + occupancy
+  // list scans that blow the Worker subrequest budget during AZ kick.
   const stamp = new Date().toISOString();
   const approved = [];
+  const scheduled = {};
   for (const row of toApprove) {
     const key = studioAzScheduleKey(f(row, "Platform"), f(row, "Studio_Output_Type") || f(row, "Format"));
-    const iso = planned.stamps.get(key);
+    const existingIso = String(f(row, "Scheduled_Post_Date") || "").trim();
+    let iso = existingIso && !Number.isNaN(Date.parse(existingIso))
+      ? new Date(existingIso).toISOString()
+      : "";
+    if (!iso) {
+      const industry = studioIndustryBestWindows(f(row, "Platform"), f(row, "Studio_Output_Type") || f(row, "Format"));
+      iso = studioSuggestedLocalDatetime(industry.windows || ["12:00-13:00"]);
+    }
     await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
-      scheduled_post_date: iso || undefined,
+      scheduled_post_date: iso,
     }, { occupiedMs: [] });
     approved.push(row.id);
+    scheduled[key] = iso;
   }
   const notes = String(f(requestRecord, "Production_Notes") || "");
-  if (planned.rationale && !/az-schedule=/i.test(notes)) {
+  if (!/az-schedule=/i.test(notes)) {
     await item4UpdateRequestState(env, requestId, {
-      Production_Notes: `${notes}\n\naz-schedule=${planned.campaign?.key || ""}; ${planned.rationale}`.slice(0, 10000),
-    });
+      Production_Notes: `${notes}\n\naz-schedule=ready-now; auto-queued without Approve gate`.slice(0, 10000),
+    }).catch(() => null);
   }
   const stillPendingStories = notReady.filter((item) => item.story).length;
   return {
@@ -7677,11 +7677,9 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     approved_count: approved.length,
     remaining_approve: remainingApprove,
     waiting: stillPendingStories || remainingApprove ? (stillPendingStories ? "story_render" : "approve") : undefined,
-    campaign: planned.campaign,
-    rationale: planned.rationale,
     cover,
     finals,
-    scheduled: planned.stamps ? Object.fromEntries(planned.stamps) : null,
+    scheduled,
     not_ready: notReady.slice(0, 8).map((item) => ({
       id: item.id,
       platform: item.platform,
@@ -7909,7 +7907,7 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
     const approve = await azAutoApproveIfReady(env, requestId, {
       skipCover: true,
       skipFinals: true,
-      approveLimit: 3,
+      approveLimit: 1,
     });
     return { ...approve, phase };
   }
@@ -7937,12 +7935,13 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
       };
     }
     // Prefer scheduling ready destinations before (or without waiting on) Story remotion.
+    // One approval per invoke — approveOutputRecordForPublishing is subrequest-heavy.
     const approveFirst = await azAutoApproveIfReady(env, requestId, {
       skipCover: true,
       skipFinals: true,
       cover,
       finals,
-      approveLimit: 4,
+      approveLimit: 1,
     });
     if (Number(approveFirst?.approved_count || 0) > 0 || approveFirst?.skipped === "already_queued") {
       return ensureOutputs
@@ -7975,7 +7974,7 @@ async function opsForceAzNavyPierTitle(env, options = {}) {
   const currentTitle = String(f(record, "Requested_Title") || "").trim();
   const currentMode = String(f(record, "Title_Mode") || "").trim();
   const already = currentMode === "Force exact" && currentTitle === title;
-  if (!already) {
+  if (!already && phase !== "approve") {
     record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
       method: "PATCH",
       body: JSON.stringify({
@@ -7985,13 +7984,15 @@ async function opsForceAzNavyPierTitle(env, options = {}) {
     });
   }
 
-  const assets = item4AssetManifest(record);
   let compress = null;
-  if (item4AssetsNeedStudioCompress(assets) && (phase === "auto" || phase === "compress")) {
-    try {
-      compress = await item4PulseStudioCompressJob(env, requestId);
-    } catch (error) {
-      compress = { error: error instanceof Error ? error.message : String(error) };
+  if (phase === "auto" || phase === "compress") {
+    const assets = item4AssetManifest(record);
+    if (item4AssetsNeedStudioCompress(assets)) {
+      try {
+        compress = await item4PulseStudioCompressJob(env, requestId);
+      } catch (error) {
+        compress = { error: error instanceof Error ? error.message : String(error) };
+      }
     }
   }
 
@@ -8004,53 +8005,25 @@ async function opsForceAzNavyPierTitle(env, options = {}) {
     console.warn("ops az navy pier advance failed", requestId, error);
   }
 
-  // Light diagnostic only — avoid listing every PRO row + content re-fetch when possible.
-  record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
-  const assetsAfter = item4AssetManifest(record);
-  const proAfter = await outputRowsForProductionRequest(env, requestId).catch(() => []);
-  const enabled = proAfter.filter((row) => Boolean(f(row, "Enabled")));
-  const linked = enabled.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
-  const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
-  let contentSnapshot = null;
-  if (contentId && env.AIRTABLE_CONTENT_TABLE_ID && phase === "status") {
-    const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
-    if (content) {
-      contentSnapshot = {
-        id: contentId,
-        content_title: String(f(content, "Content_Title") || "").trim() || title,
-        thumbnail_url: Boolean(studioAiThumbnailUrl(f(content, "Thumbnail_URL"))),
-        platform_outputs: arrayOrEmpty(f(content, "Platform Outputs")).length,
-      };
-    }
-  }
+  // Minimal diagnostic — never list PRO rows after approve (subrequest budget).
   const diagnostic = {
     requestId,
     title,
     already,
     phase,
     request_status: f(record, "Request_Status") || null,
-    plan_status: f(record, "Studio_Output_Plan_Status") || null,
-    variant_status: f(record, "Studio_Variant_Status") || null,
-    needs_compress: item4AssetsNeedStudioCompress(assetsAfter),
-    masters_ready: item4FinishedVideoMastersReady(record, assetsAfter),
-    asset_count: Array.isArray(assetsAfter) ? assetsAfter.length : 0,
-    preview_public: Boolean(item4UrlIsPublicPublishCdn(
-      item4FinishedMasterPlayUrl(
-        (Array.isArray(assetsAfter) ? assetsAfter : []).find((asset) => item4LooksLikeVideoAsset(asset))
-          || (Array.isArray(assetsAfter) ? assetsAfter[0] : null),
-        record
-      )
-    )),
-    pro_rows: {
-      active: proAfter.length,
-      enabled: enabled.length,
-      with_platform_output: linked.length,
-    },
-    platform_output_count: linked.length,
-    content: contentSnapshot,
+    approved_count: Number(advance?.approved_count || 0) || 0,
+    waiting: advance?.waiting || null,
+    skipped: advance?.skipped || null,
+    advance_ok: Boolean(advance?.ok),
   };
   console.log(`ops az navy pier diagnostic ${JSON.stringify({ diagnostic, advance })}`);
-  return { ok: true, diagnostic, compress, advance };
+  return {
+    ok: !advance?.error,
+    diagnostic,
+    compress,
+    advance,
+  };
 }
 
 async function resumeAzFinishedVideoRequests(env, ctx = null) {

@@ -365,3 +365,5 @@ AZ finished-video auto-schedule Worker deploy: 2026-09-07 - Stage Drive 3D cover
 AZ finished-video story clip Worker deploy: 2026-09-07 - Finished-video Stories render a 5s Remotion teaser (not full master). Phased AZ kick: covers → public finals → story restamp → auto-approve without subrequest blowups. Worker 0.10.262-az-story-clip.
 
 AZ ready-destinations schedule Worker deploy: 2026-09-07 - Auto-approve ready mains while Story teasers still render; no human Approve gate. Worker 0.10.263-az-ready-schedule.
+
+AZ approve-one Worker deploy: 2026-09-07 - Auto-approve one ready AZ destination per invoke using existing schedule times; skip occupancy/insights scans. Worker 0.10.264-az-approve-one.
