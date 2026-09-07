@@ -1,6 +1,7 @@
 Trigger Kick AZ Navy Pier Compress/Advance.
 
 Calls POST /api/ops/az-navy-pier-kick through a temporary service-binding
-bridge so we can see compress/advance state for reca7v6zi1b9QNanJ / Content 124.
+bridge so we can recover Platform Outputs for reca7v6zi1b9QNanJ / Content 124
+(Production Configuring with zero outputs).
 
-Triggered: 2026-09-07T03:18Z
+Triggered: 2026-09-07T03:30Z (az-navy-outputs fanout recovery)

@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-navy-unstick then kick via service binding
+      - name: Wait for Worker version az-navy-outputs then kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -81,17 +81,17 @@ jobs:
           READY=0
           for i in $(seq 1 40); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-navy-unstick"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-navy-outputs"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-navy-unstick (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-navy-outputs (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
           echo "worker_ready=$(jq -r '.version' /tmp/health.json)"
 
-          KICK_CODE=$(curl -sS --max-time 120 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick" || true)
+          KICK_CODE=$(curl -sS --max-time 180 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick" || true)
           echo "kick_http=$KICK_CODE"
           cat /tmp/az-kick.json
           test "$KICK_CODE" = "200"
@@ -105,6 +105,8 @@ jobs:
           print('needs_compress=', d.get('needs_compress'))
           print('masters_ready=', d.get('masters_ready'))
           print('plan_status=', d.get('plan_status'))
+          print('pro_rows=', d.get('pro_rows'))
+          print('platform_output_count=', d.get('platform_output_count'))
           print('content=', d.get('content'))
           print('compress=', data.get('compress'))
           print('advance=', data.get('advance'))

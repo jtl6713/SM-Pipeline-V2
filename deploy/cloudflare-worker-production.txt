@@ -355,3 +355,5 @@ AZ Navy Pier Force-exact title Worker deploy: 2026-09-07 - Cron one-shot sets Re
 AZ Navy Pier diagnose+kick Worker deploy: 2026-09-07 - Log full AZ state for reca7v6zi1b9QNanJ and call advanceAzFinishedVideo each cron. Worker 0.10.257-az-navy-kick.
 
 AZ Navy Pier unstick Worker deploy: 2026-09-07 - POST /api/ops/az-navy-pier-kick pulses studio_compress, advances AZ, returns diagnostic JSON. Worker 0.10.258-az-navy-unstick.
+
+AZ Navy Pier outputs fanout Worker deploy: 2026-09-07 - When AZ is Promoted with zero Platform Outputs, rebuild/sync plan PRO rows and re-run single-parent fanout so Content 124 leaves Configuring into Pipeline. Worker 0.10.259-az-navy-outputs.
