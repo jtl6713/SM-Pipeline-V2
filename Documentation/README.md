@@ -11,7 +11,10 @@ This folder is the durable operational documentation for the SM Pipeline V2 repo
    Compact handoff for a new AI assistant. It identifies the authority boundaries, exact paths, safety rules, deployment framework, and first validation steps.
 
 3. **`DEFERRED_TODO.md`**  
-   Deferred housekeeping items that are intentionally not being implemented yet.
+   Deferred housekeeping items that are intentionally not being implemented yet, plus the service-desk Phase 4 automerge gate.
+
+4. **`docs/handoffs/autonomous-service-desk.md`**  
+   Autonomous service desk runbook (inventory, modes, companion, ship playbook).
 
 ## Repository
 

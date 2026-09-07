@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.262-az-ready-schedule";
+  const BUILD_ID = "item4-0.6.263-desk-inventory";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -508,6 +508,19 @@
       setOperationsMessage(error.message || "Could not add handle.", "error-text");
     }
   });
+  $("operationsDeskMode")?.addEventListener("change", async (event) => {
+    const mode = String(event.target.value || "").trim();
+    if (!mode) return;
+    try {
+      setOperationsMessage(`Setting desk mode to ${mode}…`);
+      const desk = await api("/api/ops/desk/mode", { method: "PATCH", body: JSON.stringify({ mode }) });
+      renderOperationsDesk(desk, true);
+      setOperationsMessage(`Desk mode is ${desk.desk_mode || mode}.`);
+    } catch (error) {
+      setOperationsMessage(error.message || "Could not update desk mode.", "error-text");
+    }
+  });
+
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
     try {
       setOperationsMessage("Starting daily idea run…");
@@ -13780,6 +13793,37 @@
     });
   }
 
+  function renderOperationsDesk(desk, canEdit) {
+    const meta = $("operationsDeskMeta");
+    const counts = $("operationsDeskCounts");
+    const modeSelect = $("operationsDeskMode");
+    if (modeSelect && desk?.desk_mode) modeSelect.value = desk.desk_mode;
+    if (modeSelect) modeSelect.disabled = !canEdit;
+    if (!desk) {
+      if (meta) meta.textContent = "Desk inventory is unavailable.";
+      if (counts) counts.innerHTML = "";
+      return;
+    }
+    const summary = desk.summary || {};
+    const escalate = summary.last_escalate;
+    if (meta) {
+      const bits = [`Mode ${desk.desk_mode || "observe"}`, `${Number(summary.total) || 0} open`];
+      if (escalate?.record_id) bits.push(`last escalate ${escalate.record_id}`);
+      const down = (desk.health || []).filter((row) => row && row.ok === false).map((row) => row.id);
+      if (down.length) bits.push(`health down: ${down.join(", ")}`);
+      meta.textContent = `${bits.join(" · ")}.`;
+    }
+    if (!counts) return;
+    const chips = [];
+    const entries = Object.entries(summary.counts || {});
+    if (!entries.length) chips.push({ label: "No stuck rows", tone: "ok" });
+    for (const [kind, count] of entries) {
+      const tone = kind.includes("escalat") || kind.includes("stalled") || kind === "health_down" ? "alert" : "";
+      chips.push({ label: `${kind.replace(/_/g, " ")} ${count}`, tone });
+    }
+    counts.innerHTML = chips.map((chip) => `<span class="ops-desk-chip"${chip.tone ? ` data-tone="${chip.tone}"` : ""}>${escapeHtml(chip.label)}</span>`).join("");
+  }
+
   function renderOperationsProfiles(profiles, canEdit) {
     const target = $("operationsProfiles");
     if (!target) return;
@@ -13952,8 +13996,12 @@
     initOperationsInsightsSeason();
     if (meta) meta.textContent = "Loading operations…";
     try {
-      const data = await api("/api/operations");
+      const [data, desk] = await Promise.all([
+        api("/api/operations"),
+        api("/api/ops/desk/inventory").catch(() => null),
+      ]);
       operationsTimezone = data.timezone || null;
+      renderOperationsDesk(desk, Boolean(data.can_edit_profiles));
       if (meta) {
         const tz = data.timezone || studioTimezone();
         const today = data.chicago_date ? formatStudioDate(data.chicago_date, { timeZone: tz, weekday: true }) : "—";
@@ -13999,6 +14047,8 @@
       if (run) run.hidden = !data.can_edit_profiles;
       const runAuto = $("operationsRunAutonomous");
       if (runAuto) runAuto.hidden = !data.can_edit_profiles;
+      const deskMode = $("operationsDeskMode");
+      if (deskMode) deskMode.hidden = !data.can_edit_profiles;
       const intake = $("operationsRunIntake");
       if (intake) intake.hidden = !data.can_edit_profiles;
       const capSilence = $("operationsCapAudioSilence");

@@ -70,6 +70,8 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsRunAllAnalytics: "Fetch public posts for every handle in the selected platform, one after another. Use Stop to halt after the current handle. Suggested times never auto-apply.",
     operationsStopAnalytics: "Stop the sequential analytics run after the handle currently in flight finishes.",
     operationsIdeaMeta: "Shows the current Daily Ideas timing/profile summary returned by the Operations API.",
+    operationsDeskMeta: "Stuck-job counts from /api/ops/desk/inventory. Worker cron still heals transients. Escalated produce needs investigation.",
+    operationsDeskMode: "Service-desk kill switch. off = inventory only. observe = ticket. infra = local restart/deploy. patch = PRs, you merge. automerge = Phase 4 allowlisted merge only.",
     operationsIntakeMeta: "Shows the latest library-intake summary returned by the Operations API.",
     operationsIntakeProgress: "Live progress for the current library-intake run, including intake, video backfill, classification, and reconciliation stages."
   };

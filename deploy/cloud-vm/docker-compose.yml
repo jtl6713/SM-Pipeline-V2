@@ -1,0 +1,219 @@
+name: sm-pipeline-media
+
+x-service-build: &service-build
+  context: ../../services
+
+services:
+  watermark:
+    build:
+      <<: *service-build
+      dockerfile: watermark/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3011"
+    ports:
+      - "127.0.0.1:3011:3011"
+    mem_limit: 512m
+    cpus: "0.25"
+
+  voiceover-normalizer:
+    build:
+      <<: *service-build
+      dockerfile: voiceover-normalizer/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3012"
+      FFMPEG_PATH: ffmpeg
+      FILE_TTL_MS: "900000"
+    ports:
+      - "127.0.0.1:3012:3012"
+    mem_limit: 512m
+    cpus: "0.5"
+
+  frame-extractor:
+    build:
+      <<: *service-build
+      dockerfile: frame-extractor/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3334"
+      PUBLIC_BASE_URL: ${FRAME_EXTRACTOR_PUBLIC_URL:-https://frames.chicagoshining.com}
+      WORK_DIR: /scratch/frame-extractor/work
+      FRAME_DIR: /scratch/frame-extractor/frames
+      FRAME_EXTRACTOR_TTL_HOURS: "24"
+    volumes:
+      - media_scratch:/scratch
+    ports:
+      - "127.0.0.1:3334:3334"
+    mem_limit: 768m
+    cpus: "0.5"
+
+  video-compressor:
+    build:
+      <<: *service-build
+      dockerfile: video-compressor/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3335"
+      PUBLIC_BASE_URL: ${VIDEO_COMPRESSOR_PUBLIC_URL:-https://compress.chicagoshining.com}
+      WORK_DIR: /scratch/video-compressor/work
+      OUTPUT_DIR: /scratch/video-compressor/compressed
+      MAX_CONCURRENT_JOBS: "1"
+      VIDEO_COMPRESSOR_TTL_HOURS: "24"
+      GOOGLE_DRIVE_CREDENTIALS_FILE: /secrets/google-drive-service-account.json
+    volumes:
+      - media_scratch:/scratch
+      - ./secrets:/secrets:ro
+    ports:
+      - "127.0.0.1:3335:3335"
+    mem_limit: 2560m
+    cpus: "1.0"
+
+  timing-engine:
+    build:
+      <<: *service-build
+      dockerfile: timing-engine/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3336"
+      HOST: 0.0.0.0
+      PUBLIC_BASE_URL: ${TIMING_ENGINE_PUBLIC_URL:-https://timing.chicagoshining.com}
+      WORK_DIR: /scratch/timing-engine/work
+      TIMING_ENGINE_TTL_HOURS: "24"
+    volumes:
+      - media_scratch:/scratch
+    ports:
+      - "127.0.0.1:3336:3336"
+    mem_limit: 1g
+    cpus: "0.5"
+
+  remotion-renderer:
+    build:
+      <<: *service-build
+      dockerfile: remotion-renderer/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3333"
+      PIPELINE_RUNNER_INTERNAL_URL: http://pipeline-runner:3350
+      REMOTION_STALE_CLEANUP_HOURS: "72"
+      REMOTION_STALE_SWEEP_INTERVAL_MS: "3600000"
+    volumes:
+      - media_scratch:/scratch
+      - remotion_out:/app/out
+      - remotion_props:/app/render-props
+      - remotion_assets:/app/public/render-assets
+    ports:
+      - "127.0.0.1:3333:3333"
+    mem_limit: 5g
+    cpus: "1.5"
+    shm_size: 1gb
+
+  youtube-uploader:
+    build:
+      <<: *service-build
+      dockerfile: youtube-uploader/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3340"
+      YOUTUBE_TEMP_DIR: /scratch/youtube/tmp
+      YOUTUBE_JOB_STORE: /scratch/youtube/data/youtube-jobs.json
+      YOUTUBE_JOB_RETENTION_HOURS: "24"
+    volumes:
+      - media_scratch:/scratch
+    ports:
+      - "127.0.0.1:3340:3340"
+    mem_limit: 512m
+    cpus: "0.25"
+
+  pipeline-runner:
+    build:
+      <<: *service-build
+      dockerfile: pipeline-runner/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3350"
+      HOST: 0.0.0.0
+      ALLOW_DOCKER_INTERNAL: "1"
+      PUBLIC_BASE_URL: ${PIPELINE_RUNNER_PUBLIC_URL:-https://pipeline.chicagoshining.com}
+      REMOTION_RENDERER_URL: http://remotion-renderer:3333
+      TIMING_ENGINE_URL: http://timing-engine:3336
+      VOICEOVER_NORMALIZER_URL: http://voiceover-normalizer:3012
+      YOUTUBE_UPLOADER_URL: http://youtube-uploader:3340
+      VIDEO_COMPRESSOR_URL: http://video-compressor:3335
+      VIDEO_COMPRESSOR_PUBLIC_URL: ${VIDEO_COMPRESSOR_PUBLIC_URL:-https://compress.chicagoshining.com}
+      WATERMARK_SERVICE_URL: http://watermark:3011
+    volumes:
+      - media_scratch:/scratch
+    ports:
+      - "127.0.0.1:3350:3350"
+    mem_limit: 1g
+    cpus: "0.5"
+    depends_on:
+      - remotion-renderer
+      - timing-engine
+      - voiceover-normalizer
+      - youtube-uploader
+      - video-compressor
+      - watermark
+      - frame-extractor
+
+  scratch-ttl:
+    build:
+      context: ./scratch-ttl
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SCRATCH_ROOT: /scratch
+      SCRATCH_TTL_INTERVAL_SECONDS: "3600"
+      FRAME_EXTRACTOR_TTL_HOURS: "24"
+      VIDEO_COMPRESSOR_TTL_HOURS: "24"
+      TIMING_ENGINE_TTL_HOURS: "24"
+      REMOTION_STALE_CLEANUP_HOURS: "72"
+      YOUTUBE_JOB_RETENTION_HOURS: "24"
+    volumes:
+      - media_scratch:/scratch
+      - remotion_out:/scratch/remotion/out
+      - remotion_props:/scratch/remotion/render-props
+      - remotion_assets:/scratch/remotion/render-assets
+    mem_limit: 128m
+    cpus: "0.10"
+
+  cloudflared:
+    profiles: ["vm"]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
+    depends_on:
+      - pipeline-runner
+      - remotion-renderer
+      - frame-extractor
+      - video-compressor
+      - timing-engine
+      - watermark
+      - voiceover-normalizer
+      - youtube-uploader
+
+volumes:
+  media_scratch:
+  remotion_out:
+  remotion_props:
+  remotion_assets:

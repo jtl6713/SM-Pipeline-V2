@@ -96,3 +96,6 @@ evidence-*/
 p3-body.txt
 p3-payload.json
 apps/studio-web/scripts/
+
+# Regression runner local state
+tests/regression/state/

@@ -16,6 +16,7 @@ from timing_engine.sources import TimingContext
 from timing_engine.timeline import build_timeline, merge_sources
 
 APP_PORT = int(os.environ.get("PORT", "3336"))
+HOST = os.environ.get("HOST", "127.0.0.1")
 WORK_DIR = Path(os.environ.get("WORK_DIR", "work")).resolve()
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 VERSION = "2026-08-30-timing-engine"
@@ -75,6 +76,7 @@ def health() -> dict[str, Any]:
         "service": "SM Pipeline V2 Timing Engine",
         "version": VERSION,
         "port": APP_PORT,
+        "host": HOST,
     }
 
 
@@ -132,8 +134,18 @@ def create_timeline(body: TimelineRequest) -> dict[str, Any]:
 
 def main() -> None:
     import uvicorn
+    from scratch_ttl import env_hours, env_int, start_hourly_sweep, sweep_root
 
-    uvicorn.run("app:app", host="127.0.0.1", port=APP_PORT, reload=False)
+    start_hourly_sweep(
+        lambda: sweep_root(
+            WORK_DIR,
+            ttl_hours=env_hours("TIMING_ENGINE_TTL_HOURS", 24),
+            max_jobs=env_int("TIMING_ENGINE_SWEEP_MAX_JOBS", 50),
+            files_as_jobs=True,
+        ),
+        interval_seconds=env_int("TIMING_ENGINE_SWEEP_INTERVAL_SECONDS", 3600),
+    )
+    uvicorn.run("app:app", host=HOST, port=APP_PORT, reload=False)
 
 
 if __name__ == "__main__":

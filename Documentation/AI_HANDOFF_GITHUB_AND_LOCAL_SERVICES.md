@@ -64,6 +64,7 @@ Friendly launchers:
 - `PLAN Local Service Deployment.bat`
 - `DEPLOY Local Service.bat`
 - `DEPLOY Pipeline Runner.bat`
+- `DESK Companion.bat` (public `/health` probe; restart/deploy only when `STUDIO_DESK_MODE` is `infra` or higher)
 - `ROLLBACK Local Service.bat`
 - `INSTALL Operator Shortcuts.bat` (also creates pipeline-root shortcuts beside START / STOP / VERIFY)
 
@@ -117,3 +118,5 @@ Future design should combine:
 - logging and reclaimed-space reporting.
 
 See `Documentation/DEFERRED_TODO.md`.
+
+The autonomous service desk inventory, Operations strip, companion, and observe/patch skills are implemented. Phase 4 auto-merge stays gated (`STUDIO_DESK_MODE` must not be `automerge` until proven). See `docs/handoffs/autonomous-service-desk.md`.

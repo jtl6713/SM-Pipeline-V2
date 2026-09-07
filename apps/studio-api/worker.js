@@ -1,3 +1,19 @@
+import {
+  DESK_SETTING_NAME,
+  DESK_CAPS_SETTING_NAME,
+  DESK_MODES,
+  PUBLIC_HEALTH_TARGETS,
+  buildDeskInventoryPayload,
+  classifyAutonomousRequest,
+  classifyCropRow,
+  classifyHealthTarget,
+  classifyPreparingGap,
+  classifyProduceJob,
+  classifyRenderRow,
+  parseDeskCaps,
+  parseDeskMode,
+} from "./desk-inventory.mjs";
+
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
   "Cache-Control": "no-store",
@@ -70,6 +86,8 @@ export default {
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
       const isOperationsCompressionStatusRoute = url.pathname === "/api/operations/compression";
       const isOpsAzNavyPierKickRoute = url.pathname === "/api/ops/az-navy-pier-kick";
+      const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
+      const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
@@ -136,6 +154,7 @@ export default {
       const isOperationsOutputPublishKickWrite = isOperationsOutputPublishKickRoute && request.method === "POST";
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
       const isOpsAzNavyPierKickWrite = isOpsAzNavyPierKickRoute && request.method === "POST";
+      const isOpsDeskModeWrite = isOpsDeskModeRoute && request.method === "PATCH";
       const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
       const isOperationsMakeAdminBridgeWrite = isOperationsMakeAdminBridgeRoute && request.method === "POST";
@@ -195,6 +214,7 @@ export default {
         isOperationsOutputPublishKickWrite ||
         isOperationsCompressWrite ||
         isOpsAzNavyPierKickWrite ||
+        isOpsDeskModeWrite ||
         isOperationsResetRenderUrlsWrite ||
         isOperationsRetryAssetSelectionWrite ||
         isOperationsMakeAdminBridgeWrite ||
@@ -232,7 +252,8 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.265-az-mains-queued",
+          version: "0.10.266-desk-inventory",
+          studio_desk_inventory_v1: true,
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -525,6 +546,19 @@ export default {
         if (request.method === "GET") return await adminRepairControlStatus(request, env);
         assertWriteRequest(request, env);
         return await adminRepairControl(request, env, authorization);
+      }
+
+      if (isOpsDeskInventoryRoute) {
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
+        return getStudioDeskInventory(request, env);
+      }
+
+      if (isOpsDeskModeRoute) {
+        if (request.method !== "PATCH") throw new HttpError(405, "Method not allowed");
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return patchStudioDeskMode(request, env);
       }
 
       if (isOperationsRoute) {
@@ -28032,6 +28066,165 @@ async function studioUpsertSetting(env, name, value, notes) {
     body: JSON.stringify({ records: [{ fields }], typecast: true }),
   });
   return created?.records?.[0] || null;
+}
+
+async function probeDeskHealthTarget(target) {
+  try {
+    const response = await fetch(target.url, { method: "GET", signal: AbortSignal.timeout(4000) });
+    return { id: target.id, url: target.url, ok: response.ok, status: response.status, local_port: target.local_port };
+  } catch (error) {
+    return {
+      id: target.id,
+      url: target.url,
+      ok: false,
+      status: 0,
+      local_port: target.local_port,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function gatherStudioDeskInventory(env) {
+  const chicago = chicagoNowParts();
+  const nowMs = Date.now();
+  const [modeRow, capsRow, produceRows, readyNoJob, longRendering, orphans, preparing, cropProcessing, cropError, autonomousRows, azRows] = await Promise.all([
+    studioSettingsByName(env, DESK_SETTING_NAME).catch(() => null),
+    studioSettingsByName(env, DESK_CAPS_SETTING_NAME).catch(() => null),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 25,
+      sortField: "Created_At",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Production_Job_JSON}!="")',
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Render_Status}="Ready for Render",{Remotion_Job_ID}="")',
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: `AND({Test_Run_ID}=BLANK(),{Render_Status}="Rendering",{Remotion_Job_ID}!="",{Final_File_URL}="",${studioLastModifiedStaleFormula(15)})`,
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="In Production",{Remotion_Job_ID}="",{Published_At}=BLANK())',
+    }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Studio_Variant_Status}="Preparing")',
+    }).catch(() => []),
+    listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Transfer_Status}="Processing")',
+    }).catch(() => []),
+    listRecords(env, ITEM4_VARIANT_QUEUE_TABLE, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Transfer_Status}="Error")',
+    }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 8,
+      filterFormula: "AND(OR({Request_Status}='Draft',{Request_Status}='Ready',{Request_Status}='Submitted'),FIND('origin=autonomous',{Production_Notes}&'')>0,{Test_Run_ID}=BLANK())",
+    }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("origin=az-finished-video",{Production_Notes}&""),{Request_Status}!="Cancelled")',
+    }).catch(() => []),
+  ]);
+
+  const mode = parseDeskMode(f(modeRow, "Setting_Value"));
+  const caps = parseDeskCaps(f(capsRow, "Setting_Value"), chicago.date);
+  const incidents = [];
+  const seen = new Set();
+  const push = (row) => {
+    if (!row?.fingerprint || seen.has(row.fingerprint)) return;
+    seen.add(row.fingerprint);
+    incidents.push(row);
+  };
+
+  for (const record of produceRows || []) {
+    const job = parseStudioProductionJob(record) || {};
+    push(classifyProduceJob({ ...job, request_id: record.id }, nowMs));
+  }
+  for (const record of readyNoJob || []) {
+    push(classifyRenderRow({
+      id: record.id,
+      render_status: f(record, "Render_Status"),
+      remotion_job_id: f(record, "Remotion_Job_ID"),
+      final_file_url: f(record, "Final_File_URL"),
+      output_status: f(record, "Output_Status"),
+    }, nowMs));
+  }
+  for (const record of longRendering || []) {
+    push(classifyRenderRow({
+      id: record.id,
+      render_status: f(record, "Render_Status"),
+      remotion_job_id: f(record, "Remotion_Job_ID"),
+      final_file_url: f(record, "Final_File_URL"),
+      last_modified: "1970-01-01T00:00:00Z",
+    }, nowMs));
+  }
+  for (const record of orphans || []) {
+    push(classifyRenderRow({
+      id: record.id,
+      output_status: f(record, "Output_Status"),
+      remotion_job_id: f(record, "Remotion_Job_ID"),
+      published_at: f(record, "Published_At"),
+    }, nowMs));
+  }
+  for (const record of preparing || []) {
+    push(classifyPreparingGap({ id: record.id, studio_variant_status: f(record, "Studio_Variant_Status") }));
+  }
+  for (const record of [...(cropProcessing || []), ...(cropError || [])]) {
+    push(classifyCropRow({
+      id: record.id,
+      transfer_status: f(record, "Transfer_Status"),
+      attempt_count: f(record, "Attempt_Count"),
+      last_attempt_at: f(record, "Last_Attempt_At"),
+      updated_at: f(record, "Updated_At"),
+    }, nowMs));
+  }
+  for (const record of [...(autonomousRows || []), ...(azRows || [])]) {
+    const job = parseStudioProductionJob(record) || {};
+    push(classifyAutonomousRequest({
+      status: f(record, "Request_Status"),
+      notes: studioRequestNotesText(record),
+      job: { ...job, request_id: record.id },
+      nowMs,
+    }));
+  }
+
+  const health = [];
+  for (const target of PUBLIC_HEALTH_TARGETS) {
+    const probe = await probeDeskHealthTarget(target);
+    health.push(probe);
+    push(classifyHealthTarget(target, probe));
+  }
+
+  return buildDeskInventoryPayload({
+    mode,
+    chicagoDate: chicago.date,
+    chicagoHour: chicago.hour,
+    incidents,
+    health,
+    caps,
+  });
+}
+
+async function getStudioDeskInventory(request, env) {
+  const payload = await gatherStudioDeskInventory(env);
+  return respond(request, env, payload);
+}
+
+async function patchStudioDeskMode(request, env) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const requested = String(payload.mode || "").trim().toLowerCase();
+  if (!DESK_MODES.includes(requested)) {
+    throw new HttpError(400, "Desk_Mode must be off, observe, infra, patch, or automerge");
+  }
+  const mode = requested;
+  await studioUpsertSetting(env, DESK_SETTING_NAME, mode, "Autonomous service desk kill switch / phase");
+  const inventory = await gatherStudioDeskInventory(env);
+  return respond(request, env, { ok: true, ...inventory });
 }
 
 function parseA1JobValue(value) {
