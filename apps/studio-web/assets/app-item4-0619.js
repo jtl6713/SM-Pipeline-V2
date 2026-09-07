@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.261-az-story-clip";
+  const BUILD_ID = "item4-0.6.262-az-ready-schedule";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9988,10 +9988,12 @@
   }
 
   function pipelineIsAzAutoQueueGroup(records = pipelineOutputs) {
-    return (records || []).some((record) => {
-      const notes = String(record?.output_notes || record?.production_notes || "").trim();
-      return /origin=az-finished-video/i.test(notes) || /az-auto-queue=1/i.test(notes);
-    });
+    const notesBlob = [
+      activeProductionRequest?.production_notes,
+      item4Workspace?.production_notes,
+      ...(records || []).flatMap((record) => [record?.output_notes, record?.production_notes]),
+    ].map((value) => String(value || "")).join("\n");
+    return /origin=az-finished-video/i.test(notesBlob) || /az-auto-queue=1/i.test(notesBlob);
   }
 
   function creativeFinishedVideoSeconds(output = activeCreativeOutput) {
