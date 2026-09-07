@@ -384,3 +384,5 @@ AZ large video staging Pages deploy: 2026-09-06 - Home finished-video drop accep
 
 AZ 1.2 GB finished-video Pages deploy: 2026-09-06 - Home finished-video drop accepts up to 1.2 GB. UI 0.6.257-az-1-2gb.
 
+AZ 1.5 GB finished-video Pages deploy: 2026-09-07 - Home finished-video drop accepts up to 1.5 GB. UI 0.6.258-az-1-5gb.
+

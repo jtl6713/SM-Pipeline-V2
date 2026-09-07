@@ -343,3 +343,5 @@ AZ large video staging Worker deploy: 2026-09-06 - Finished videos up to 1 GB up
 
 AZ 1.2 GB finished-video Worker deploy: 2026-09-06 - Raise finished-video / AZ multipart hard max from 1 GB to 1.2 GB. Worker 0.10.252-az-1-2gb.
 
+AZ 1.5 GB finished-video Worker deploy: 2026-09-07 - Raise finished-video / AZ multipart hard max from 1.2 GB to 1.5 GB for iPhone HEVC re-exports. Worker 0.10.253-az-1-5gb.
+
