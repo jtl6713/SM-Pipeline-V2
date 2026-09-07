@@ -367,3 +367,5 @@ AZ finished-video story clip Worker deploy: 2026-09-07 - Finished-video Stories 
 AZ ready-destinations schedule Worker deploy: 2026-09-07 - Auto-approve ready mains while Story teasers still render; no human Approve gate. Worker 0.10.263-az-ready-schedule.
 
 AZ approve-one Worker deploy: 2026-09-07 - Auto-approve one ready AZ destination per invoke using existing schedule times; skip occupancy/insights scans. Worker 0.10.264-az-approve-one.
+
+AZ mains-queued Worker deploy: 2026-09-07 - When AZ mains are already Approved/Scheduled and only Stories remotion, treat as success (no Approve gate). Worker 0.10.265-az-mains-queued.

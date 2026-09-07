@@ -1,6 +1,6 @@
 Trigger Kick AZ Navy Pier Compress/Advance.
 
-Approve one ready destination per invoke (keep existing Pipeline times).
+Mains already queued + Stories still remotioning = success.
 No Approve-publish gate.
 
-Triggered: 2026-09-07T04:40Z (az-approve-one)
+Triggered: 2026-09-07T04:45:19Z (az-mains-queued)

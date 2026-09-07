@@ -232,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.264-az-approve-one",
+          version: "0.10.265-az-mains-queued",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -7627,14 +7627,34 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
   const approveLimit = Math.max(1, Math.min(2, Number(options.approveLimit) || 1));
   const toApprove = assessed.filter((item) => item.ready).slice(0, approveLimit).map((item) => item.row);
   if (!toApprove.length) {
-    if (notReady.some((item) => item.blockers.includes("cover") || item.blockers.includes("caption"))) {
+    if (notReady.some((item) => !item.story && (item.blockers.includes("cover") || item.blockers.includes("caption") || item.blockers.includes("final_file")))) {
       try { await enqueueStudioProductionJob(env, requestId); } catch {}
     }
     const onlyStoriesRendering = notReady.length > 0 && notReady.every((item) => item.story);
+    const pendingMains = pending.filter((row) => !studioAzIsStory(studioOutputTypeLabel(row)));
+    // Mains already approved/queued — Stories still remotioning is success for AZ.
+    if (onlyStoriesRendering && !pendingMains.length) {
+      return {
+        ok: true,
+        skipped: "mains_queued",
+        waiting: "story_render",
+        approved_count: 0,
+        cover,
+        finals,
+        not_ready: notReady.slice(0, 8).map((item) => ({
+          id: item.id,
+          platform: item.platform,
+          blockers: item.blockers,
+          story: item.story,
+        })),
+      };
+    }
     return {
       waiting: onlyStoriesRendering ? "story_render" : "cover",
       cover,
       finals,
+      pending_count: pending.length,
+      ready_count: 0,
       not_ready: notReady.slice(0, 8).map((item) => ({
         id: item.id,
         platform: item.platform,
@@ -7943,14 +7963,37 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
       finals,
       approveLimit: 1,
     });
-    if (Number(approveFirst?.approved_count || 0) > 0 || approveFirst?.skipped === "already_queued") {
+    if (
+      Number(approveFirst?.approved_count || 0) > 0
+      || approveFirst?.skipped === "already_queued"
+      || approveFirst?.skipped === "mains_queued"
+    ) {
       return ensureOutputs
         ? { ...approveFirst, ensure_outputs: ensureOutputs, phase }
         : { ...approveFirst, phase };
     }
     const stories = await azRestampFinishedStories(env, requestId, { limit: 1 });
     if (Number(stories?.restamped || 0) > 0 || Number(stories?.remaining || 0) > 0) {
-      return { waiting: "story_render", cover, finals, stories, ensure_outputs: ensureOutputs, phase };
+      // Do not mask a real main-destination blocker (cover/final) as story_render success.
+      if (approveFirst?.waiting && approveFirst.waiting !== "story_render") {
+        return {
+          ...approveFirst,
+          stories,
+          ensure_outputs: ensureOutputs,
+          phase,
+        };
+      }
+      return {
+        ok: Boolean(approveFirst?.ok),
+        skipped: approveFirst?.skipped,
+        waiting: "story_render",
+        cover,
+        finals,
+        stories,
+        not_ready: approveFirst?.not_ready,
+        ensure_outputs: ensureOutputs,
+        phase,
+      };
     }
     return ensureOutputs
       ? { ...approveFirst, ensure_outputs: ensureOutputs, phase }
