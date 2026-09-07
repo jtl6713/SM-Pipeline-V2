@@ -21,6 +21,7 @@ def run(request: StageRequest):
             "wait_for_next": extra.get("wait_for_next") is not False,
             "max_records": extra.get("max_records"),
             "drain": as_bool(extra.get("drain")),
+            "record_ids": extra.get("record_ids") or extra.get("record_id"),
         },
         skip_message="A3 did not classify media assets",
         ok_message="A3 classified {classified_count} assets",

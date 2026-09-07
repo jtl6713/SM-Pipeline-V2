@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.263-desk-inventory";
+  const BUILD_ID = "item4-0.6.265-oversized-list";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -646,7 +646,16 @@
     try {
       const data = await api("/api/operations/compression");
       const jobs = data.jobs || [];
-      renderOperationsOversized(operationsOversizedCache, operationsCanCompress, jobs);
+      const previousJobs = operationsCompressionJobs;
+      const oversized = Array.isArray(data.oversized_media)
+        ? data.oversized_media
+        : operationsOversizedCache.filter((row) => {
+          const id = String(row?.google_drive_file_id || "");
+          const finished = previousJobs.some((job) => job.google_drive_file_id === id)
+            && !jobs.some((job) => job.google_drive_file_id === id);
+          return !finished && !/_compressed/i.test(String(row?.name || ""));
+        });
+      renderOperationsOversized(oversized, operationsCanCompress, jobs);
       syncCompressionPoll(jobs.length > 0 || operationsOversizedCache.length > 0);
     } catch {
       /* keep the last banner until the next refresh */
@@ -12696,7 +12705,7 @@
 
   async function loadMusic() {
     const target = $("musicList");
-    target.innerHTML = '<div class="empty">Loading music library…</div>';
+    target.innerHTML = '<div class="empty">Loading Music Manager…</div>';
     try {
       const { records = [] } = await api("/api/music?limit=100");
       if (!records.length) return target.innerHTML = '<div class="empty">No Music assets were returned.</div>';
@@ -12728,7 +12737,7 @@
         button.addEventListener("click", async () => {
           const id = button.dataset.musicDelete;
           const name = button.dataset.musicName || "this track";
-          if (!window.confirm(`Delete “${name}” from the music library and Google Drive?\n\nThis is permanent. If a Production Request or Content Item still has this track selected, Studio will refuse and you should unpick it first.`)) {
+          if (!window.confirm(`Delete “${name}” from Music Manager and Google Drive?\n\nThis is permanent. If a Production Request or Content Item still has this track selected, Studio will refuse and you should unpick it first.`)) {
             return;
           }
           button.disabled = true;
@@ -12769,7 +12778,7 @@
       if ($("musicDisplayName")) $("musicDisplayName").value = "";
       if ($("musicFileInput")) $("musicFileInput").value = "";
       invalidateMusicCatalog();
-      setMusicUploadMessage(result.message || "Track added to the music library.", "success");
+      setMusicUploadMessage(result.message || "Track added to Music Manager.", "success");
       await loadMusic();
     } catch (error) {
       setMusicUploadMessage(error.message, "error-text");
@@ -12924,12 +12933,39 @@
     });
   }
 
+  function bindLibraryRenameButtons(target) {
+    target.querySelectorAll("[data-library-rename]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.dataset.libraryRename;
+        const name = button.dataset.libraryName || "";
+        const next = window.prompt(`Rename “${name || "this asset"}”`, name);
+        if (next == null) return;
+        const trimmed = String(next).trim();
+        if (!trimmed || trimmed === name) return;
+        button.disabled = true;
+        try {
+          const result = await api(`/api/library/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ name: trimmed }),
+            timeoutMs: 60000,
+            retries: 0,
+          });
+          setLibraryUploadMessage(result.message || `Renamed to ${trimmed}. Reclassifying in the background — refresh to see updated tags.`, "success");
+          await loadLibrary();
+        } catch (error) {
+          setLibraryUploadMessage(error.message, "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
   function bindLibraryDeleteButtons(target) {
     target.querySelectorAll("[data-library-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
         const id = button.dataset.libraryDelete;
         const name = button.dataset.libraryName || "this asset";
-        if (!window.confirm(`Delete “${name}” from the asset library and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
+        if (!window.confirm(`Delete “${name}” from Asset Manager and Google Drive?\n\nThis is permanent. If a Production Request still has this asset attached, Studio will refuse.`)) {
           return;
         }
         button.disabled = true;
@@ -13141,7 +13177,7 @@
       size ? `<span>${escapeHtml(size)}</span>` : "",
       r.location ? `<span>${value(r.location)}</span>` : "",
     ].filter(Boolean).join("");
-    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
   }
 
   function renderLibraryCards(records) {
@@ -13219,6 +13255,7 @@
         return;
       }
       target.innerHTML = renderLibraryCards(records);
+      bindLibraryRenameButtons(target);
       bindLibraryDeleteButtons(target);
       bindLibraryReleaseButtons(target);
       bindLibraryPreview(target);
@@ -13959,7 +13996,7 @@
       <tr>
         <td><div class="title-cell">${value(record.name)}</div>${record.google_drive_url ? `<a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(record.google_drive_url)}">Open in Drive</a>` : ""}</td>
         <td>${value(record.file_size_mb)} MB</td>
-        <td>${record.source === "intake_folder" ? "Ingestion folder" : "Asset library"}</td>
+        <td>${record.source === "intake_folder" ? "Ingestion folder" : "Asset Manager"}</td>
         <td>${status}</td>
         <td>${action}</td>
       </tr>`;

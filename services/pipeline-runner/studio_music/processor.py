@@ -1,4 +1,4 @@
-"""Store Studio Music Library uploads in Drive Assets/Music. No R2."""
+"""Store Studio Music Manager uploads in Drive Assets/Music. No R2."""
 
 from __future__ import annotations
 

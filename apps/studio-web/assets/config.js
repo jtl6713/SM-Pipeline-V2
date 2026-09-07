@@ -165,8 +165,8 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     ideas: "Ideas",
     content: "Production",
     outputs: "Pipeline",
-    music: "Music Library",
-    library: "Asset Library",
+    music: "Music Manager",
+    library: "Asset Manager",
     operations: "Operations",
     support: "Support"
   };

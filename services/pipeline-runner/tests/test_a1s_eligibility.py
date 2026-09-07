@@ -69,7 +69,7 @@ class _FakeAirtable:
         return self.jobs
 
 
-def test_a1s_dry_run_and_active_job_skip(monkeypatch):
+def test_a1s_dry_run_lists_active_jobs_and_live_skips_them(monkeypatch):
     import a1s.processor as a1s_processor
 
     monkeypatch.setattr(a1s_processor, "GoogleDriveClient", _FakeDrive)
@@ -80,8 +80,12 @@ def test_a1s_dry_run_and_active_job_skip(monkeypatch):
     assert preview["eligible"][0]["id"] == "drive-file"
 
     monkeypatch.setattr(a1s_processor, "AirtableClient", lambda: _FakeAirtable(jobs=[{"id": "recJOB"}]))
-    skipped = process_request(drive_file_id="drive-file", dry_run=True)
-    assert skipped["skipped"][0]["reason"] == "active_job"
+    listed = process_request(drive_file_id="drive-file", dry_run=True)
+    assert listed["eligible"][0]["id"] == "drive-file"
+    assert listed["skipped"] == []
+
+    live = process_request(drive_file_id="drive-file", inline=True)
+    assert live["skipped"][0]["reason"] == "active_job"
 
 
 class _TwoFileDrive:

@@ -34,9 +34,12 @@ jobs:
           set -euo pipefail
           test -s apps/studio-api/worker.js
           test -s apps/studio-api/desk-inventory.mjs
+          test -s apps/studio-api/asset-library.mjs
+          test -s apps/studio-api/operations-oversized.mjs
           mkdir -p /tmp/studio-check
           cp apps/studio-api/worker.js /tmp/studio-check/worker.mjs
-          cp apps/studio-api/desk-inventory.mjs /tmp/studio-check/desk-inventory.mjs
+          cp apps/studio-api/*.mjs /tmp/studio-check/
+          rm -f /tmp/studio-check/*.test.mjs
           node --check /tmp/studio-check/worker.mjs
           mkdir -p /tmp/wrangler-production
           cd /tmp/wrangler-production
@@ -82,7 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           cp apps/studio-api/worker.js /tmp/wrangler-production/worker.js
-          cp apps/studio-api/desk-inventory.mjs /tmp/wrangler-production/desk-inventory.mjs
+          cp apps/studio-api/*.mjs /tmp/wrangler-production/
+          rm -f /tmp/wrangler-production/*.test.mjs
           python - <<'PY'
           import json, os
           from pathlib import Path

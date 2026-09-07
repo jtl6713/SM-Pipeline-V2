@@ -13,6 +13,11 @@ import {
   parseDeskCaps,
   parseDeskMode,
 } from "./desk-inventory.mjs";
+import {
+  libraryDriveFilename,
+  sanitizeLibraryAssetName,
+} from "./asset-library.mjs";
+import { attachCompressionJobs } from "./operations-oversized.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -111,6 +116,7 @@ export default {
       const isAssetLibraryUploadWrite = isAssetLibraryRoute && request.method === "POST";
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isAssetLibraryDeleteWrite = isAssetLibraryRecordRoute && request.method === "DELETE";
+      const isAssetLibraryRenameWrite = isAssetLibraryRecordRoute && request.method === "PATCH";
       const isAssetLibraryDurationRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/duration$/.test(url.pathname);
       const isAssetLibraryDurationWrite = isAssetLibraryDurationRoute && request.method === "POST";
       const isPublishedLibraryReleaseRoute = /^\/api\/library\/published\/rec[A-Za-z0-9]+\/release-file$/.test(url.pathname);
@@ -189,6 +195,7 @@ export default {
         isMusicDeleteWrite ||
         isAssetLibraryUploadWrite ||
         isAssetLibraryDeleteWrite ||
+        isAssetLibraryRenameWrite ||
         isAssetLibraryDurationWrite ||
         isPublishedLibraryReleaseWrite ||
         isItem4AssetDeleteWrite ||
@@ -252,7 +259,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.266-desk-inventory",
+          version: "0.10.268-oversized-list",
           studio_desk_inventory_v1: true,
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
@@ -265,6 +272,8 @@ export default {
           studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
           studio_library_browse_v1: true,
+          studio_library_rename_v1: true,
+          studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
           studio_finished_passthrough_v1: true,
@@ -1016,6 +1025,11 @@ export default {
       if (isPublishedLibraryReleaseWrite) {
         assertWriteRequest(request, env);
         return releasePublishedLibraryFile(request, env, url);
+      }
+
+      if (isAssetLibraryRenameWrite) {
+        assertWriteRequest(request, env);
+        return renameAssetLibraryItem(request, env, url, ctx);
       }
 
       if (isAssetLibraryDeleteWrite) {
@@ -16061,7 +16075,7 @@ async function deleteMusicLibraryTrack(request, env, url) {
 
   const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
   if (String(f(record, "Asset_Role") || "") !== "Music") {
-    throw new HttpError(409, "Only music assets can be deleted from the music library");
+    throw new HttpError(409, "Only music assets can be deleted from Music Manager");
   }
 
   const usages = await findMusicLibraryUsages(env, recordId);
@@ -16204,7 +16218,7 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
               Rights_Status: "Owned",
               Asset_Role: "Music",
               Raw_Source_Eligibility: "Not Applicable",
-              Asset_Description: description || "Studio Music Library upload stored in Google Drive Assets/Music.",
+              Asset_Description: description || "Studio Music Manager upload stored in Google Drive Assets/Music.",
               Studio_Transfer_ID: `MUSIC-${id}`,
             },
           }],
@@ -16221,8 +16235,8 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
     uploaded: uploaded.length,
     records: uploaded,
     message: uploaded.length === 1
-      ? "Track added to the music library."
-      : `${uploaded.length} tracks added to the music library.`,
+      ? "Track added to Music Manager."
+      : `${uploaded.length} tracks added to Music Manager.`,
   }, 201);
 }
 
@@ -16625,7 +16639,7 @@ async function uploadAssetLibraryItems(request, env, authorization) {
             Asset_Role: isVideo ? "Raw Footage" : "Other",
             Raw_Source_Eligibility: isVideo ? "Eligible" : "Not Applicable",
             Location: location || null,
-            Asset_Description: description || "Studio Asset Library upload stored in Google Drive.",
+            Asset_Description: description || "Studio Asset Manager upload stored in Google Drive.",
             Studio_Transfer_ID: `LIB-${id}`,
           },
         }],
@@ -16676,6 +16690,111 @@ async function trashStudioAssetOnDrive(env, fileId) {
   return { ok: true, trashed: Boolean(payload?.trashed), google_drive_file_id: driveId };
 }
 
+async function renameStudioAssetOnDrive(env, fileId, filename) {
+  const driveId = String(fileId || "").trim();
+  const name = String(filename || "").trim();
+  if (!driveId) return { ok: false, skipped: true, reason: "no_drive_file" };
+  if (!name) return { ok: false, skipped: true, reason: "no_filename" };
+  const runnerUrl = String(env.PIPELINE_RUNNER_URL || "").trim().replace(/\/+$/, "");
+  if (!runnerUrl) return { ok: false, skipped: true, reason: "no_runner" };
+  const secret = String(env.PIPELINE_RUNNER_SHARED_SECRET || "");
+  const response = await fetch(`${runnerUrl}/jobs/studio-asset-library-rename`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+    },
+    body: JSON.stringify({ google_drive_file_id: driveId, filename: name }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, error: payload?.error || payload?.message || `Drive rename failed (${response.status})` };
+  }
+  return {
+    ok: true,
+    google_drive_file_id: driveId,
+    filename: String(payload?.filename || name),
+  };
+}
+
+async function pulseLibraryAssetClassification(env, recordId) {
+  const { response, payload } = await item4PulsePipelineStage(env, "a3", {
+    extra: {
+      record_ids: [recordId],
+      trigger_a4: false,
+      wait_for_next: false,
+      drain: false,
+    },
+  }, "A3");
+  if (!response.ok || payload?.status === "error") {
+    console.warn("library rename classify failed", payload?.message || payload?.error || response.status);
+  }
+  return payload;
+}
+
+async function renameAssetLibraryItem(request, env, url, ctx) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const recordId = String(url.pathname.split("/")[3] || "");
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "Invalid library record");
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const sanitized = sanitizeLibraryAssetName(payload?.name);
+  if (!sanitized.ok) throw new HttpError(400, sanitized.error);
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  const role = String(f(record, "Asset_Role") || "").trim();
+  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  if (role === "Music") throw new HttpError(409, "Rename music tracks from the Music Manager tab");
+  if (!["image", "graphic", "video"].includes(mediaClass) && role !== "Raw Footage") {
+    throw new HttpError(409, "Only photo and video library assets can be renamed here");
+  }
+  const currentName = String(f(record, "Asset Name") || "").trim();
+  if (sanitized.name === currentName) {
+    throw new HttpError(400, "Choose a different name");
+  }
+  const extension = String(f(record, "File_Extension") || "").trim() || item4FileExtension(currentName);
+  const driveName = libraryDriveFilename(sanitized.name, extension);
+  const updated = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        "Asset Name": sanitized.name,
+        Classification_Status: "Needs Classification",
+      },
+      typecast: true,
+    }),
+  });
+  const driveId = googleDriveFileId(record);
+  let drive = { ok: false, skipped: true, reason: "no_drive_file" };
+  if (driveId) {
+    drive = await renameStudioAssetOnDrive(env, driveId, driveName).catch((error) => ({
+      ok: false,
+      error: error?.message || String(error),
+    }));
+  }
+  const classify = (async () => {
+    try {
+      await pulseLibraryAssetClassification(env, recordId);
+    } catch (error) {
+      console.warn("library rename classify failed", error?.message || String(error));
+    }
+  })();
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(classify);
+  else await classify.catch(() => {});
+  const renamedOk = drive.ok || drive.skipped;
+  const message = renamedOk
+    ? `Renamed to ${sanitized.name}. Reclassifying in the background — refresh to see updated tags.`
+    : `Renamed to ${sanitized.name}, but Google Drive rename failed (${drive.error || "unknown error"}). Reclassifying in the background.`;
+  return respond(request, env, {
+    ok: true,
+    classifying: true,
+    id: recordId,
+    name: sanitized.name,
+    drive,
+    record: mapLibraryAsset(updated || record),
+    message,
+  });
+}
+
 async function deleteAssetLibraryItem(request, env, url) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const recordId = String(url.pathname.split("/")[3] || "");
@@ -16683,7 +16802,7 @@ async function deleteAssetLibraryItem(request, env, url) {
   const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
   const role = String(f(record, "Asset_Role") || "").trim();
   const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
-  if (role === "Music") throw new HttpError(409, "Delete music tracks from the Music Library tab");
+  if (role === "Music") throw new HttpError(409, "Delete music tracks from the Music Manager tab");
   if (!["image", "graphic", "video"].includes(mediaClass) && role !== "Raw Footage") {
     throw new HttpError(409, "Only photo and video library assets can be deleted here");
   }
@@ -28341,19 +28460,15 @@ async function listActiveA1CompressionJobs(env) {
   return enrichCompressionJobsLive(env, records.map(mapA1CompressionJob).filter(Boolean));
 }
 
-function attachCompressionJobs(oversized, jobs) {
-  const byId = new Map((jobs || []).map((job) => [job.google_drive_file_id, job]));
-  return (oversized || []).map((row) => ({
-    ...row,
-    compression: byId.get(row.google_drive_file_id) || null,
-  }));
-}
-
 async function getStudioCompressionStatus(request, env) {
-  const jobs = await listActiveA1CompressionJobs(env).catch(() => []);
+  const [jobs, oversized] = await Promise.all([
+    listActiveA1CompressionJobs(env).catch(() => []),
+    listOversizedMedia(env).catch(() => []),
+  ]);
   return respond(request, env, {
     ok: true,
     jobs,
+    oversized_media: attachCompressionJobs(oversized, jobs),
     active_count: jobs.length,
     headline: jobs[0]?.headline || null,
   });
@@ -29879,6 +29994,19 @@ async function pulseA1SForDriveFile(request, env, authorization, ctx) {
     throw new HttpError(400, "drive_file_id is required unless compress_all is true");
   }
   const pulse = await pulseA1SCompression(env, { driveFileId: driveFileId || null, ctx });
+  if (compressAll && !pulse.driveFileId) {
+    const intakeSmallFiles = (async () => {
+      try {
+        await item4PulsePipelineStage(env, "a2", {
+          extra: { drain: true, trigger_a2b: true, wait_for_next: false },
+        }, "A2");
+      } catch (error) {
+        console.error("A2 drain after compress-all failed", error);
+      }
+    })();
+    if (ctx?.waitUntil) ctx.waitUntil(intakeSmallFiles);
+    else await intakeSmallFiles;
+  }
   return respond(request, env, {
     ok: true,
     triggered: pulse.backend === "python" ? "a1s-python" : "on-demand-run",
