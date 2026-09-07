@@ -345,3 +345,5 @@ AZ 1.2 GB finished-video Worker deploy: 2026-09-06 - Raise finished-video / AZ m
 
 AZ 1.5 GB finished-video Worker deploy: 2026-09-07 - Raise finished-video / AZ multipart hard max from 1.2 GB to 1.5 GB for iPhone HEVC re-exports. Worker 0.10.253-az-1-5gb.
 
+Asset Library file size Worker deploy: 2026-09-07 - GET /api/library returns file_size_bytes from File_Size_Bytes, with File_Size_MB as fallback, so Studio cards can show KB/MB/GB. Worker 0.10.254-library-size.
+
