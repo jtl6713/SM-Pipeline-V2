@@ -18,6 +18,8 @@ The supplied Frame Extractor archive already contained 41 historical frame-job f
 
 Use **both** transaction-aware cleanup and an independent TTL safety sweep.
 
+Canonical Python helper: [`services/_shared/scratch_ttl.py`](../services/_shared/scratch_ttl.py). Vendored copies stay next to the ffmpeg services and in `deploy/cloud-vm/scratch-ttl/` so Windows one-folder deploy and the sidecar Docker context still work.
+
 Implemented:
 
 - Frame Extractor: `POST /cleanup/<job_id>`, `GET /cleanup/report`, `POST /cleanup/sweep`, hourly in-process sweep (`FRAME_EXTRACTOR_TTL_HOURS`, default 24).

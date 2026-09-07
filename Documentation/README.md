@@ -5,7 +5,7 @@ This folder is the durable operational documentation for the SM Pipeline V2 repo
 ## Start here
 
 1. **`GITHUB_SOURCE_CONTROL_AND_LOCAL_SERVICE_DEPLOYMENT_RUNBOOK.md`**  
-   Complete human/operator runbook for GitHub, the local source-control checkout, the five local services, PLAN/DEPLOY/ROLLBACK, troubleshooting, and recovery.
+   Complete human/operator runbook for GitHub, the local source-control checkout, the eight local services, PLAN/DEPLOY/ROLLBACK, troubleshooting, and recovery.
 
 2. **`AI_HANDOFF_GITHUB_AND_LOCAL_SERVICES.md`**  
    Compact handoff for a new AI assistant. It identifies the authority boundaries, exact paths, safety rules, deployment framework, and first validation steps.
@@ -15,6 +15,15 @@ This folder is the durable operational documentation for the SM Pipeline V2 repo
 
 4. **`docs/handoffs/autonomous-service-desk.md`**  
    Autonomous service desk runbook (inventory, modes, companion, ship playbook).
+
+5. **`deploy/cloud-vm/README.md`**  
+   Linux/ARM Docker home for the eight Windows media services (Oracle Always Free path). Windows START/STOP/VERIFY stays production until that cutover.
+
+6. **`tests/regression/`**  
+   Daily one-at-a-time Studio + local-service suite (`python tests/regression/runner.py`, `.github/workflows/regression-suite.yml`). Runtime pointer `tests/regression/state/` is gitignored.
+
+7. **`docs/LOCAL_SERVICE_ARTIFACT_CLEANUP_TODO.md`**  
+   Implemented scratch TTL (canonical `services/_shared/scratch_ttl.py`).
 
 ## Repository
 
@@ -32,6 +41,6 @@ Changes move from GitHub to a live service through the controlled deployment fra
 
 `deploy\local-services\`
 
-The framework has been proven with PLAN, deploy, backup, rollback, redeploy, and full five-service verification.
+The framework has been proven with PLAN, deploy, backup, rollback, redeploy, and local-service verification. Video Compressor uses `Install-VideoCompressor.ps1` rather than the `Deploy-SMService.ps1` selector.
 
 Do not commit secrets, credentials, OAuth tokens, generated media, virtual environments, dependency directories, caches, logs, runtime job state, or temporary render/frame data.

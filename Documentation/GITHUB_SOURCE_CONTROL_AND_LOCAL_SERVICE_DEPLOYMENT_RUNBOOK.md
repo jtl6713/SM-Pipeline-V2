@@ -14,7 +14,7 @@ Legacy junction (existing shortcuts): `D:\Content Creation\ChicagoShining Pipeli
 
 ## 1. Purpose
 
-This runbook documents how SM Pipeline V2 uses GitHub for source control and how approved source is promoted to the five Windows-hosted local services.
+This runbook documents how SM Pipeline V2 uses GitHub for source control and how approved source is promoted to the eight Windows-hosted local services.
 
 It is written for the owner/operator, a future ChatGPT session, another AI assistant, and a future human maintainer who may be more familiar with older centralized tools such as Visual SourceSafe than with Git.
 
@@ -48,7 +48,7 @@ Git is distributed. The folder under `Source Control\SM-Pipeline-V2` is a real l
 Repository: `jtl6713/SM-Pipeline-V2`  
 Approved branch: `main`
 
-The `services/` subtree contains source and reproducible non-secret configuration for the five local services.
+The `services/` subtree contains source and reproducible non-secret configuration for the eight local services.
 
 ### Local Git checkout: source-control working copy only
 

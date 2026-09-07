@@ -1,5 +1,11 @@
 """Path-confined scratch cleanup for local / cloud-vm media services.
 
+Canonical copy: services/_shared/scratch_ttl.py
+Windows Deploy-SMService copies only the service folder, so identical
+vendored copies live next to frame-extractor, timing-engine, and
+video-compressor, plus deploy/cloud-vm/scratch-ttl. Keep them byte-identical;
+services/_shared/test_scratch_ttl.py enforces that.
+
 Drive remains the DAM. This module only deletes working copies under an
 explicit root (frames, compressor output, timing work, Remotion scratch).
 """

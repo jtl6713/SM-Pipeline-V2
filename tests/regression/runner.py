@@ -70,6 +70,7 @@ def hermetic() -> None:
     python = _service_python()
     _run([node, "--test", *collect_node_tests()], cwd=ROOT)
     _run([python, "-m", "pytest", "tests", "-q"], cwd=ROOT / "services" / "pipeline-runner")
+    _run([python, "-m", "pytest", "services/_shared/test_scratch_ttl.py", "-q"], cwd=ROOT)
     timing_probe = subprocess.run([python, "-c", "import librosa, fastapi"], capture_output=True)
     if timing_probe.returncode == 0:
         _run([python, "-m", "pytest", "tests", "-q"], cwd=ROOT / "services" / "timing-engine")

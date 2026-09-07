@@ -9,7 +9,7 @@ This directory contains **source code and reproducible configuration only** for 
 - `D:\Content Creation\ChicagoShining Pipeline\Services\...`: production runtime location on the Windows host.
 - Runtime dependencies, secrets, virtual environments, generated media, caches, logs, backups, runtime job state, and temporary files are never committed.
 
-Linux/ARM containers for a free-tier VM live next to each service (`Dockerfile`) and are composed from [`deploy/cloud-vm/`](../deploy/cloud-vm/README.md). Windows START/STOP/VERIFY remains production until that cutover.
+Linux/ARM containers for a free-tier VM live next to each service (`Dockerfile`) and are composed from [`deploy/cloud-vm/`](../deploy/cloud-vm/README.md). Windows START/STOP/VERIFY remains production until that cutover. Scratch TTL lives in [`services/_shared/scratch_ttl.py`](_shared/scratch_ttl.py); see [`_shared/README.md`](_shared/README.md) for the vendored copies Windows deploy and the cloud-vm sidecar still need.
 
 ## Captured and managed services
 
