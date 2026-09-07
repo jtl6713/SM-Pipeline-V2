@@ -349,3 +349,5 @@ Asset Library file size Worker deploy: 2026-09-07 - GET /api/library returns fil
 
 Published library file size Worker deploy: 2026-09-07 - Published files read MP4 size from the R2 preview object because Platform Outputs have no File_Size_Bytes. Worker 0.10.255-library-pub-size.
 
+
+AZ Navy Pier Force-exact title Worker deploy: 2026-09-07 - Cron one-shot sets Requested_Title on reca7v6zi1b9QNanJ to "Final Navy Pier Fireworks - Full Video", syncs idea/content titles, and clears stale thumbs for regen. Worker 0.10.256-az-navy-title.

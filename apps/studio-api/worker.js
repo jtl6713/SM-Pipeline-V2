@@ -229,7 +229,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.255-library-pub-size",
+          version: "0.10.256-az-navy-title",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -1001,6 +1001,11 @@ export default {
     // dispatch in the same tick when budget remains. Daily ideas stay on a
     // separate waitUntil so they cannot block P2/Remotion.
     ctx.waitUntil((async () => {
+      try {
+        await opsForceAzNavyPierTitle(env);
+      } catch (error) {
+        console.warn("ops az navy pier title patch failed", error);
+      }
       try {
         await healStuckStudioRenders(env);
       } catch (error) {
@@ -7426,6 +7431,117 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
     }
   }
   return azAutoApproveIfReady(env, requestId);
+}
+
+async function opsForceAzNavyPierTitle(env) {
+  const requestId = "reca7v6zi1b9QNanJ";
+  const title = "Final Navy Pier Fireworks - Full Video";
+  if (!env?.AIRTABLE_PAT) return { skipped: true, reason: "no_pat" };
+
+  const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const notes = String(f(record, "Production_Notes") || "");
+  if (!/origin=az-finished-video/i.test(notes) && !/az-auto-queue=1/i.test(notes)) {
+    return { skipped: true, reason: "not_az", requestId };
+  }
+
+  const currentTitle = String(f(record, "Requested_Title") || "").trim();
+  const currentMode = String(f(record, "Title_Mode") || "").trim();
+  const already = currentMode === "Force exact" && currentTitle === title;
+
+  if (!already) {
+    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Title_Mode: "Force exact",
+          Requested_Title: title,
+        },
+        typecast: true,
+      }),
+    });
+  }
+
+  const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
+  let ideaId = studioFirstLinkedId(f(record, "Idea_Candidate"))
+    || studioFirstLinkedId(f(record, "Idea Candidates"))
+    || studioFirstLinkedId(f(record, "Idea_Candidate_Link"));
+  if (!ideaId) {
+    for (const [key, value] of Object.entries(record.fields || {})) {
+      if (ideaId) break;
+      if (/idea/i.test(key) && Array.isArray(value) && value.length) {
+        ideaId = studioFirstLinkedId(value);
+      }
+    }
+  }
+
+  if (ideaId && env.AIRTABLE_IDEA_TABLE_ID) {
+    await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Candidate_Title: title }, typecast: true }),
+    }).catch((error) => console.warn("ops az title idea sync failed", ideaId, error));
+  }
+
+  let outputIds = [];
+  if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
+    const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Content_Title: title,
+          Thumbnail_Prompt: null,
+          Thumbnail_Status: "Not Started",
+          Thumbnail_URL: null,
+        },
+        typecast: true,
+      }),
+    }).catch((error) => {
+      console.warn("ops az title content sync failed", contentId, error);
+      return null;
+    });
+    const links = arrayOrEmpty(f(content || {}, "Platform Outputs"))
+      .concat(arrayOrEmpty(f(record, "Platform Outputs")));
+    outputIds = links.map((id) => String(id || "").trim()).filter(Boolean);
+  }
+
+  if (!outputIds.length && contentId && env.AIRTABLE_OUTPUT_TABLE_ID) {
+    const listed = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 20,
+      filterFormula: `FIND("${contentId}", ARRAYJOIN({Content_Item} & ""))`,
+    }).catch(() => []);
+    outputIds = listed.map((row) => row.id);
+  }
+
+  for (const outputId of outputIds) {
+    if (!env.AIRTABLE_OUTPUT_TABLE_ID) break;
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Output_Title: title,
+          Thumbnail_URL: null,
+        },
+        typecast: true,
+      }),
+    }).catch((error) => console.warn("ops az title output sync failed", outputId, error));
+  }
+
+  console.log("ops az navy pier title forced", {
+    requestId,
+    title,
+    already,
+    contentId: contentId || null,
+    ideaId: ideaId || null,
+    outputs: outputIds.length,
+  });
+  return {
+    ok: true,
+    requestId,
+    title,
+    already,
+    contentId: contentId || null,
+    ideaId: ideaId || null,
+    outputs: outputIds.length,
+  };
 }
 
 async function resumeAzFinishedVideoRequests(env, ctx = null) {
