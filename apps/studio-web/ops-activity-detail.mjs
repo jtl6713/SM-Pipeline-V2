@@ -179,7 +179,6 @@ export function opsActivityCountsLabel(parts = []) {
   if (counts.passed) bits.push(`${counts.passed} passed`);
   if (counts.failed) bits.push(`${counts.failed} failed`);
   if (counts.skipped) bits.push(`${counts.skipped} skipped`);
-  if (counts.other) bits.push(`${counts.other} running`);
   return bits.join(" · ");
 }
 
