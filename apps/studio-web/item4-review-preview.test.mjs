@@ -8,6 +8,7 @@ import {
   item4PreviewKind,
   item4PreviewPlayerFallback,
   item4ReviewWatchUrl,
+  item4ShowTiktokCompleteCard,
 } from "./item4-review-preview.mjs";
 
 const COVER = "https://media.chicagoshining.com/studio/previews/thumbnails/recN5gK7L7ToiF7Uw/cover-9x16.png";
@@ -59,4 +60,32 @@ test("stale Rendering does not cover a finished Drive MP4", () => {
   assert.equal(item4MixInProgress(DRIVE_MP4), false);
   assert.equal(item4MixInProgress({ render_status: "Rendering" }), true);
   assert.equal(item4MixInProgress(DRIVE_MP4, { active: true, overall_status: "active" }), true);
+});
+
+test("TikTok live URL card stays off Instagram, Facebook, and YouTube Review", () => {
+  const leftoverTiktokUrl = "https://www.tiktok.com/@chicago.shining/video/123";
+  for (const platform of ["Instagram", "Facebook", "YouTube"]) {
+    assert.equal(item4ShowTiktokCompleteCard({
+      platform,
+      platform_post_url: leftoverTiktokUrl,
+      manual_completion_status: "Required",
+      studio_state: "Draft Delivered",
+    }), false);
+  }
+});
+
+test("TikTok Review shows the live URL card when a URL is needed or already pasted", () => {
+  assert.equal(item4ShowTiktokCompleteCard({
+    platform: "TikTok",
+    manual_completion_status: "Required",
+  }), true);
+  assert.equal(item4ShowTiktokCompleteCard({
+    platform: "tiktok",
+    platform_post_url: "https://www.tiktok.com/@chicago.shining/video/123",
+    publish_status: "Published",
+  }), true);
+  assert.equal(item4ShowTiktokCompleteCard({
+    platform: "TikTok",
+    output_status: "Ready for Review",
+  }), false);
 });
