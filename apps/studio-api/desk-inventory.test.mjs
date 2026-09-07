@@ -103,6 +103,10 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     { ok: false, status: 502 },
   ).class, "infra_down");
   assert.equal(classifyHealthTarget({ id: "pipeline-runner" }, { ok: true }), null);
+  assert.equal(classifyHealthTarget(
+    { id: "timing-engine", public: false },
+    { ok: false, status: 0, error: "Could not resolve host" },
+  ), null);
 });
 
 test("phase 4 automerge stays gated to allowlisted paths, caps, and mode", () => {

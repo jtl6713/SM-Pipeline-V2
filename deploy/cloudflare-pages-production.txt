@@ -399,3 +399,5 @@ Autonomous service desk Operations strip Pages deploy: 2026-09-07 - Stuck-count 
 Asset Manager rename and oversized list Pages deploy: 2026-09-07 - Asset Manager/Music Manager labels, Rename on stills/clips, Operations oversized table refreshes after compression. UI 0.6.265-oversized-list.
 
 Autonomous Service Agent Pages deploy: 2026-09-07 - Operations sub-page with Word guide, desk inventory, and activity log. Copies Autonomous-Service-Agent.docx to /docs/. UI 0.6.266-service-agent.
+
+Autonomous Service Agent inline-link Pages deploy: 2026-09-07 - Word guide and Task Organizer are inline text links. Timing Engine is local-only until timing.chicagoshining.com exists. UI 0.6.267-agent-links.

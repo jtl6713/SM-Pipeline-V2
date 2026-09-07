@@ -261,7 +261,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.271-service-agent",
+          version: "0.10.272-agent-links",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -28238,6 +28238,15 @@ async function studioUpsertSetting(env, name, value, notes) {
 }
 
 async function probeDeskHealthTarget(target) {
+  if (target?.public === false) {
+    return {
+      id: target.id,
+      url: target.url,
+      ok: true,
+      skipped: "no_public_hostname",
+      local_port: target.local_port,
+    };
+  }
   try {
     const response = await fetch(target.url, { method: "GET", signal: AbortSignal.timeout(4000) });
     return { id: target.id, url: target.url, ok: response.ok, status: response.status, local_port: target.local_port };

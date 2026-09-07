@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.266-service-agent";
+  const BUILD_ID = "item4-0.6.268-ops-tabs";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13896,7 +13896,7 @@
     const events = Array.isArray(payload?.events) ? payload.events : [];
     if (meta) {
       if (payload?.source === "unavailable") {
-        meta.textContent = `Task Organizer tickets are unavailable${payload.error ? ` (${payload.error})` : ""}. Live inventory above is still current. Open Task Organizer for the durable log.`;
+        meta.textContent = `Task Organizer tickets are unavailable${payload.error ? ` (${payload.error})` : ""}. Live inventory above is still current. Use the Task Organizer link above for the durable log.`;
       } else if (!events.length) {
         meta.textContent = "No desk_incident tickets yet. Observe mode writes them here when a fingerprint is not transient.";
       } else {

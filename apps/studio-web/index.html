@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.266-service-agent">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.267-agent-links">
 </head>
 <body>
  <header class="topbar">
@@ -1102,7 +1102,7 @@
 
  <section id="page-operations" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, autonomous produce, library intake, publish queues, oversized compression, render retries, the service-desk inventory, and the Autonomous Service Agent guide and activity log.</p></div>
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Open one Control tool at a time from the text links. Autonomous Service Agent has its own page for the guide, desk inventory, and activity log.</p></div>
  <button class="secondary-button" data-refresh="operations">Refresh</button>
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
@@ -1111,7 +1111,19 @@
  <button type="button" class="ops-subnav-link" data-ops-view="agent" id="operationsViewAgent">Autonomous Service Agent</button>
  </nav>
  <div id="operationsControlView">
- <section class="panel" id="operationsDeskPanel">
+ <section class="panel ops-tabbed-panel">
+ <nav class="ops-card-tabs" role="tablist" aria-label="Control tools">
+ <button type="button" class="ops-card-tab active" role="tab" id="operationsTabDesk" data-ops-tab="desk" aria-controls="operationsDeskPanel" aria-selected="true">Service desk</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabIdeas" data-ops-tab="ideas" aria-controls="operationsIdeasPanel" aria-selected="false" tabindex="-1">Daily ideas</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabProduce" data-ops-tab="produce" aria-controls="operationsProducePanel" aria-selected="false" tabindex="-1">Autonomous produce</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabIntake" data-ops-tab="intake" aria-controls="operationsIntakePanel" aria-selected="false" tabindex="-1">Library intake</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabAnalytics" data-ops-tab="analytics" aria-controls="operationsAnalyticsPanel" aria-selected="false" tabindex="-1">Analytics</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabSchedule" data-ops-tab="schedule" aria-controls="operationsSchedulePanel" aria-selected="false" tabindex="-1">Ready to schedule</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabPublish" data-ops-tab="publish" aria-controls="operationsPublishPanel" aria-selected="false" tabindex="-1">Ready to publish</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabOversized" data-ops-tab="oversized" aria-controls="operationsOversizedPanel" aria-selected="false" tabindex="-1">Oversized videos</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabRepair" data-ops-tab="repair" aria-controls="operationsRepairPanel" aria-selected="false" tabindex="-1">Render repair</button>
+ </nav>
+ <div class="ops-tab-panel" id="operationsDeskPanel" data-ops-tab-panel="desk" role="tabpanel" aria-labelledby="operationsTabDesk">
  <div class="panel-heading"><div><h2>Service desk</h2><p>Stuck produce, render, crop, autonomous, and public /health counts. Worker cron still self-heals transients. Mode is the desk kill switch.</p></div>
  <label class="form-field" style="max-width:14rem"><span>Desk mode</span>
  <select id="operationsDeskMode" aria-label="Autonomous service desk mode">
@@ -1246,7 +1258,6 @@
  <h2>Autonomous Service Agent</h2>
  <p>How auto-review and bounded auto-correction work, what you still approve, and where to read the activity log.</p>
  </div>
- <a class="primary-button" id="operationsAgentGuideLink" href="/docs/Autonomous-Service-Agent.docx" download="Autonomous-Service-Agent.docx">Download Word guide</a>
  </div>
  <div class="ops-agent-copy">
  <p>The Worker heals transient stuck produce, render, crop, and AZ jobs every two minutes. The desk agent only tickets after that, then may restart a down service or open a <code>cursor/desk-*</code> PR depending on Desk mode. It never auto-publishes.</p>
@@ -1256,7 +1267,7 @@
  <li><strong>patch</strong> — also open PRs. You merge.</li>
  <li><strong>automerge</strong> — leave off. Allowlisted heals only, after proof.</li>
  </ul>
- <p>You still Approve publish for library-stills autonomous work, set TikTok covers in the TikTok app, and can change AZ times in Pipeline before they fire. Full instructions are in the Word guide (also in Git at <code>docs/handoffs/Autonomous-Service-Agent.docx</code>).</p>
+ <p>You still Approve publish for library-stills autonomous work, set TikTok covers in the TikTok app, and can change AZ times in Pipeline before they fire. Full instructions are in the <a id="operationsAgentGuideLink" href="/docs/Autonomous-Service-Agent.docx" download="Autonomous-Service-Agent.docx">Word guide</a>.</p>
  </div>
  </section>
  <section class="panel">
@@ -1275,8 +1286,7 @@
  <div id="operationsAgentDeskCounts" class="ops-desk-counts"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Activity log</h2><p>Recent <code>desk_incident</code> tickets from Task Organizer (agent 3, task 1). Worker transient heals are not listed here.</p></div>
- <a class="secondary-button" href="https://tasks.chicagoshining.com" target="_blank" rel="noopener noreferrer">Open Task Organizer</a>
+ <div class="panel-heading"><div><h2>Activity log</h2><p class="ops-heading-copy">Recent <code>desk_incident</code> tickets from <a id="operationsAgentOrganizerLink" href="https://tasks.chicagoshining.com" target="_blank" rel="noopener noreferrer">Task Organizer</a> (agent 3, task 1). Worker transient heals are not listed here.</p></div>
  </div>
  <p class="subtle" id="operationsAgentActivityMeta">Loading activity…</p>
  <ol id="operationsAgentActivityLog" class="ops-agent-log"></ol>
@@ -1489,7 +1499,7 @@
  <img src="/assets/support/operations.jpg?v=0.6.102" alt="Operations control page" width="1440" height="920">
  <figcaption>Admin-only control room. Buttons pulse on-demand work; they do not turn interval scanners back on.</figcaption>
  </figure>
- <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles.</p>
+ <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles. Control tools sit behind the small text links at the top of the card so only one section is open at a time.</p>
  <ul>
  <li><strong>Autonomous Service Agent</strong> — Operations sub-page with the Word operator guide, desk mode, live stuck inventory, and Task Organizer activity log. Worker heal still runs every two minutes; the desk never auto-publishes.</li>
  <li><strong>Daily ideas</strong> — per-profile daily batch around 1:00 a.m. Chicago, or Run today now.</li>
@@ -1662,8 +1672,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.266-service-agent"></script>
- <script src="/assets/ez-plan.js?v=0.6.266-service-agent"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.266-service-agent"></script>
+ <script src="/assets/config.js?v=0.6.267-agent-links"></script>
+ <script src="/assets/ez-plan.js?v=0.6.267-agent-links"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.267-agent-links"></script>
 </body>
 </html>
