@@ -229,7 +229,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.252-az-1-2gb",
+          version: "0.10.253-az-1-5gb",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -3553,7 +3553,7 @@ const ITEM4_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ITEM4_MAX_TOTAL_BYTES = 150 * 1024 * 1024;
 const ITEM4_MAX_CLIP_FILES = 10;
 const ITEM4_MAX_CLIP_FILE_BYTES = 200 * 1024 * 1024;
-const ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES = Math.round(1.2 * 1024 * 1024 * 1024);
+const ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES = Math.round(1.5 * 1024 * 1024 * 1024);
 const ITEM4_LARGE_UPLOAD_PART_BYTES = 16 * 1024 * 1024;
 const ITEM4_COMPRESS_THRESHOLD_BYTES = 100 * 1024 * 1024;
 const ITEM4_MAX_MIXED_TOTAL_BYTES = 1500 * 1024 * 1024;
@@ -4460,7 +4460,7 @@ async function createItem4LargeVideoUploadSession(request, env, url, authorizati
   const originKind = String(body?.origin_kind || "finished-video").trim().toLowerCase();
   if (!sizeBytes || sizeBytes < 1) throw new HttpError(400, "size_bytes is required");
   if (sizeBytes > ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES) {
-    throw new HttpError(413, "Finished videos must be 1.2 GB or smaller. Compress longer masters before uploading.");
+    throw new HttpError(413, "Finished videos must be 1.5 GB or smaller. Compress longer masters before uploading.");
   }
   if (!(mimeType.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(filename))) {
     throw new HttpError(415, "Large upload sessions are only for finished videos");

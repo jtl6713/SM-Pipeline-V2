@@ -39,12 +39,12 @@ test("findLargeUploadDraft requires multipart pending + r2 key", () => {
   assert.equal(findLargeUploadDraft(assets, "missing"), null);
 });
 
-test("finished-video hard max is 1.2 GB and direct upload stays under Worker body limit", () => {
-  const finishedHardMax = Math.round(1.2 * 1024 * 1024 * 1024);
+test("finished-video hard max is 1.5 GB and direct upload stays under Worker body limit", () => {
+  const finishedHardMax = Math.round(1.5 * 1024 * 1024 * 1024);
   const directMax = 95 * 1024 * 1024;
   const clipHardMax = 200 * 1024 * 1024;
   assert.ok(directMax < 100 * 1024 * 1024);
   assert.ok(directMax < clipHardMax);
   assert.ok(clipHardMax < finishedHardMax);
-  assert.equal(finishedHardMax, 1288490189);
+  assert.equal(finishedHardMax, 1610612736);
 });
