@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.268-ops-tabs";
+  const BUILD_ID = "item4-0.6.269-help-tabs";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -363,26 +363,54 @@
     return page === "home" || page === "dashboard";
   }
 
-  function showStudioPage(page) {
+  let studioPage = "home";
+
+  function supportDocForPage(page) {
+    const map = {
+      home: "home",
+      dashboard: "dashboard",
+      ideas: "ideas",
+      content: "production",
+      outputs: "pipeline",
+      music: "music",
+      library: "library",
+      operations: "operations",
+    };
+    return map[page] || "walkthrough";
+  }
+
+  function currentSupportDoc() {
+    return document.querySelector("[data-support-doc].active")?.dataset.supportDoc || "walkthrough";
+  }
+
+  function showStudioPage(page, options = {}) {
+    const next = String(page || "home");
+    const previous = studioPage;
+    studioPage = next;
     document.querySelectorAll(".nav-item").forEach((button) => {
-      button.classList.toggle("active", isHubPage(page) ? button.dataset.page === "home" : button.dataset.page === page);
+      button.classList.toggle("active", isHubPage(next) ? button.dataset.page === "home" : button.dataset.page === next);
     });
     document.querySelectorAll(".page").forEach((section) => section.classList.remove("active"));
-    if (isHubPage(page)) {
+    if (isHubPage(next)) {
       $("page-home")?.classList.add("active");
       $("page-dashboard")?.classList.add("active");
     } else {
-      $(`page-${page}`)?.classList.add("active");
+      $(`page-${next}`)?.classList.add("active");
     }
-    if (page === "outputs") pipelineViewFilter = "all";
-    if (page !== "outputs") stopPipelinePoll();
-    if (page !== "content") stopProductionPoll();
-    if (page === "support") showSupportDoc("walkthrough");
-    if (page === "operations") {
+    if (next === "support") $("studioHelpLink")?.setAttribute("aria-current", "page");
+    else $("studioHelpLink")?.removeAttribute("aria-current");
+    if (next === "outputs") pipelineViewFilter = "all";
+    if (next !== "outputs") stopPipelinePoll();
+    if (next !== "content") stopProductionPoll();
+    if (next === "support") {
+      const requested = String(options.supportDoc || "").trim();
+      showSupportDoc(requested || (previous === "support" ? currentSupportDoc() : supportDocForPage(previous)));
+    }
+    if (next === "operations") {
       const parsed = parseOperationsLocation();
       showOperationsView(parsed.view, parsed.tab);
     }
-    loadPage(isHubPage(page) ? "home" : page);
+    loadPage(isHubPage(next) ? "home" : next);
   }
 
   document.querySelectorAll(".nav-item").forEach((button) => {
@@ -2119,7 +2147,10 @@
   function showSupportDoc(id) {
     const doc = String(id || "walkthrough").trim() || "walkthrough";
     document.querySelectorAll("[data-support-doc]").forEach((button) => {
-      button.classList.toggle("active", button.dataset.supportDoc === doc);
+      const on = button.dataset.supportDoc === doc;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-selected", on ? "true" : "false");
+      button.tabIndex = on ? 0 : -1;
     });
     document.querySelectorAll("[data-support-article]").forEach((article) => {
       article.hidden = article.dataset.supportArticle !== doc;
@@ -2128,6 +2159,24 @@
 
   document.querySelectorAll("[data-support-doc]").forEach((button) => {
     button.addEventListener("click", () => showSupportDoc(button.dataset.supportDoc));
+  });
+  document.querySelector(".support-toc")?.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
+    const tabs = [...document.querySelectorAll("[data-support-doc]")];
+    const index = tabs.indexOf(document.activeElement);
+    if (index < 0) return;
+    let next = index;
+    if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+    if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = tabs.length - 1;
+    tabs[next].focus();
+    tabs[next].click();
+    event.preventDefault();
+  });
+  $("studioHelpLink")?.addEventListener("click", () => {
+    if (!phase6ConfirmDiscardUnsaved("leave this editor")) return;
+    showStudioPage("support");
   });
   document.querySelectorAll("[data-open-page]").forEach((button) => {
     button.addEventListener("click", () => {

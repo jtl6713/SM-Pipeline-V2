@@ -1225,8 +1225,33 @@ input, select, textarea, button {
 .ops-intake-meta{padding:0 20px 16px}
 .ops-repair-actions{padding:0 20px 20px;display:flex;flex-wrap:wrap;gap:10px}
 
-.topbar-profile{
+.topbar-actions{
   margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.topbar-help{
+  border:0;
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  font-size:.82rem;
+  font-weight:750;
+  cursor:pointer;
+  padding:8px 14px;
+  border-radius:999px;
+  white-space:nowrap;
+}
+.topbar-help:hover,
+.topbar-help[aria-current="page"]{
+  background:rgba(255,255,255,.12);
+}
+.topbar-help:focus-visible{
+  outline:2px solid var(--gold);
+  outline-offset:2px;
+}
+.topbar-profile{
   display:flex;
   align-items:center;
   gap:8px;
@@ -1301,11 +1326,14 @@ html[data-studio-theme="nyc"]{
 .support-shot{margin:14px 0 8px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#0b1220}
 .support-shot img{width:100%;height:auto;display:block;vertical-align:middle}
 .support-shot figcaption{padding:8px 12px;font-size:.78rem;line-height:1.4;color:var(--muted);background:#f7fafa}
-.support-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px;align-items:start}
-.support-toc{display:flex;flex-direction:column;gap:6px;position:sticky;top:88px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px}
-.support-toc-link{border:0;background:transparent;text-align:left;padding:10px 12px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer;color:var(--ink)}
-.support-toc-link:hover,.support-toc-link.active{background:var(--teal-soft);color:var(--teal-dark)}
-.support-docs{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 24px}
+.support-layout{display:block}
+.support-docs{background:#fff;border:1px solid var(--line);border-radius:16px;padding:0;overflow:hidden}
+.support-toc{display:flex;flex-wrap:wrap;gap:0 2px;position:static;background:rgba(255,255,255,.5);border:0;border-bottom:1px solid var(--line);border-radius:0;padding:6px 12px 0}
+.support-toc-link{border:0;background:transparent;text-align:left;padding:9px 10px 10px;margin-bottom:-1px;border-radius:0;font:inherit;font-size:.76rem;font-weight:650;line-height:1.2;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.support-toc-link:hover{color:var(--ink)}
+.support-toc-link.active,.support-toc-link[aria-selected="true"]{background:transparent;color:var(--teal-dark);font-weight:800;border-bottom-color:var(--teal-dark)}
+.support-toc-link:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:6px}
+.support-docs-body{padding:22px 24px}
 .support-article[hidden]{display:none!important}
 .support-article h2{margin:0 0 10px;font-size:1.35rem}
 .support-article p,.support-article li{line-height:1.55;font-size:.92rem}
@@ -1313,7 +1341,7 @@ html[data-studio-theme="nyc"]{
 .support-steps{display:grid;gap:16px;padding-left:1.2rem}
 .support-steps li{display:grid;gap:6px}
 .support-steps .text-button,.support-article .primary-button{justify-self:start;width:fit-content;margin-top:4px}
-@media(max-width:860px){.support-layout{grid-template-columns:1fr}.support-toc{position:static;flex-direction:row;flex-wrap:wrap}}
+@media(max-width:860px){.support-layout{grid-template-columns:1fr}.support-docs-body{padding:16px}}
 
 .similar-heatmap{padding:0 20px 18px}
 .similar-heatmap-head{display:grid;gap:10px;margin:0 0 12px}
@@ -2056,10 +2084,20 @@ body{
   box-shadow:0 8px 24px rgba(15,35,70,.04);
 }
 .brand-name{color:#012559}
+.topbar-help{
+  color:#012559;
+  background:#f4f7fb;
+}
+.topbar-help:hover,
+.topbar-help[aria-current="page"]{
+  background:#e8eef7;
+  color:var(--teal-dark);
+}
 .topbar-profile{
   background:#f4f7fb;
   border-radius:999px;
   padding:6px 12px;
+  color:#5d6b7d;
 }
 .shell{
   grid-template-columns:232px minmax(0,1fr);
@@ -2418,6 +2456,8 @@ body:has(#page-content.active) .studio-footer-links button:hover{
     padding:0 12px;
   }
   .brand-name{font-size:.88rem}
+  .topbar-help{padding:6px 10px;font-size:.78rem}
+  .topbar-profile select{min-width:132px}
   .shell{
     display:block;
     grid-template-columns:1fr;
