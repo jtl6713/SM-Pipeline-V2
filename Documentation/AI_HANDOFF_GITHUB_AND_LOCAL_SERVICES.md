@@ -24,7 +24,7 @@ Read these before making changes:
 3. `services/README.md`
 4. `deploy/local-services/README.md`
 
-## Five services
+## Eight local services
 
 | # | Service | Git path | Runtime path | Port |
 |---:|---|---|---|---:|
@@ -33,14 +33,11 @@ Read these before making changes:
 | 3 | Watermark | `services/watermark` | `Services\Watermark` | 3011 |
 | 4 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 |
 | 5 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 |
+| 6 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 |
+| 7 | Video Compressor | `services/video-compressor` | `Services\Video_Compressor` | 3335 |
+| 8 | Timing Engine | `services/timing-engine` | `Services\timing-engine\service` | 3336 |
 
-Required window titles remain:
-
-- `1 LOC Frame Extractor :3334`
-- `2 LOC Remotion Renderer :3333`
-- `3 LOC Watermark :3011`
-- `4 LOC Voiceover Normalizer :3012`
-- `5 LOC YouTube Uploader :3340`
+Required window titles remain `1 LOC` through `8 LOC` with those ports. Video Compressor deploys via `Install-VideoCompressor.ps1`; the other seven use `Deploy-SMService.ps1`.
 
 ## Permanent public hostnames
 
@@ -49,6 +46,9 @@ Required window titles remain:
 - `https://watermark.chicagoshining.com`
 - `https://voiceover.chicagoshining.com`
 - `https://youtube-upload.chicagoshining.com`
+- `https://pipeline.chicagoshining.com`
+- `https://compress.chicagoshining.com`
+- `https://timing.chicagoshining.com`
 
 ## Deployment framework
 
@@ -73,8 +73,9 @@ Framework proof state:
 - framework added: `13a731737708192c50c75ac65d1f47ef09ef5c4a`
 - Windows PowerShell 5.1 fix: `051b6251bad51f797f39765096b68008de08fce1`
 - Watermark PLAN/deploy/rollback/redeploy proved
-- all five services subsequently verified in the managed model
-- final production verifier reported all five local services and all five permanent routes reachable
+- all five original services subsequently verified in the managed model
+- Video Compressor and Timing Engine later joined the same LOC contract (7 and 8)
+- final production verifier reported local services and their permanent routes reachable
 
 ## Safety invariants
 
@@ -105,18 +106,12 @@ Framework proof state:
 11. Verify local `/health` and permanent public `/health`.
 12. Run full production VERIFY for material changes.
 
-## Deferred TODO — do not implement yet
+## Implemented cleanup and gated desk work
 
-Frame Extractor and Remotion working-file cleanup remains intentionally deferred.
-
-Future design should combine:
-- post-success cleanup;
-- scheduled orphan cleanup;
-- active-job protection;
-- age/retention rules;
-- dry-run;
-- logging and reclaimed-space reporting.
-
-See `Documentation/DEFERRED_TODO.md`.
+Frame Extractor / Remotion / compressor / timing scratch cleanup is implemented (`services/_shared/scratch_ttl.py`, `docs/LOCAL_SERVICE_ARTIFACT_CLEANUP_TODO.md`). Do not persist media on R2; Drive is the DAM.
 
 The autonomous service desk inventory, Operations strip, companion, and observe/patch skills are implemented. Phase 4 auto-merge stays gated (`STUDIO_DESK_MODE` must not be `automerge` until proven). See `docs/handoffs/autonomous-service-desk.md`.
+
+Linux/ARM compose for a later Oracle VM is `deploy/cloud-vm/`. Daily regression is `tests/regression/` (`.github/workflows/regression-suite.yml`).
+
+Cloudflare ↔ GitHub inventory/drift audit remains deferred. See `Documentation/DEFERRED_TODO.md`.

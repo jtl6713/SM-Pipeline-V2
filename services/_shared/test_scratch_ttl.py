@@ -1,4 +1,9 @@
+import sys
 from pathlib import Path
+
+SHARED = Path(__file__).resolve().parent
+if str(SHARED) not in sys.path:
+    sys.path.insert(0, str(SHARED))
 
 from scratch_ttl import confined_path, is_safe_job_id, remove_job_dir, sweep_root
 
@@ -51,19 +56,6 @@ def test_sweep_skips_active_and_fresh(tmp_path: Path, monkeypatch):
 
 
 def test_vendored_copies_match_canonical():
-    canonical = Path(__file__).resolve().parent / "scratch_ttl.py"
-    root = Path(__file__).resolve().parents[2]
-    copies = [
-        root / "services" / "frame-extractor" / "scratch_ttl.py",
-        root / "services" / "timing-engine" / "scratch_ttl.py",
-        root / "services" / "video-compressor" / "scratch_ttl.py",
-        root / "deploy" / "cloud-vm" / "scratch-ttl" / "scratch_ttl.py",
-    ]
-    expected = canonical.read_bytes()
-    missing = [str(path) for path in copies if not path.is_file()]
-    assert not missing, f"missing vendored scratch_ttl copies: {missing}"
-    drifted = [str(path) for path in copies if path.read_bytes() != expected]
-    assert not drifted, f"scratch_ttl copies drifted from services/_shared: {drifted}"
     canonical = Path(__file__).resolve().parent / "scratch_ttl.py"
     root = Path(__file__).resolve().parents[2]
     copies = [

@@ -17,7 +17,7 @@ Task Organizer stays on the Windows PC until this stack is stable.
 | YouTube Uploader | `youtube-uploader` | 3340 | `https://youtube-upload.chicagoshining.com` |
 | Pipeline Runner | `pipeline-runner` | 3350 | `https://pipeline.chicagoshining.com` |
 
-Scratch TTL: each Python/ffmpeg service sweeps its work dirs, Remotion keeps its 72-hour sweeper, and `scratch-ttl` is an independent hourly sidecar. Do not persist photos, video, music, voiceovers, or thumbnails on the VM. Drive remains authority.
+Scratch TTL: each Python/ffmpeg service sweeps its work dirs, Remotion keeps its 72-hour sweeper, and `scratch-ttl` is an independent hourly sidecar. The Python helper is canonical at `services/_shared/scratch_ttl.py`; this folder keeps a matching copy because its Docker context is `./scratch-ttl`. Do not persist photos, video, music, voiceovers, or thumbnails on the VM. Drive remains authority.
 
 ## Phase 1 — Docker on this PC (no Tunnel change)
 
