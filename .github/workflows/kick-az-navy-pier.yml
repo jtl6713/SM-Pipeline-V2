@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-approve-one then phased kick via service binding
+      - name: Wait for Worker version az-mains-queued then phased kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -84,11 +84,11 @@ jobs:
           READY=0
           for i in $(seq 1 50); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-approve-one"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-mains-queued"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-approve-one (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-mains-queued (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
@@ -137,11 +137,16 @@ jobs:
             # shellcheck source=/tmp/az-kick-summary.env
             . /tmp/az-kick-summary.env
             TOTAL_APPROVED=$((TOTAL_APPROVED + APPROVED))
-            if [[ "${SKIPPED:-}" == "already_queued" ]]; then
+            if [[ "${SKIPPED:-}" == "already_queued" || "${SKIPPED:-}" == "mains_queued" ]]; then
               FINAL_OK=1
               break
             fi
             if [[ "${TOTAL_APPROVED:-0}" -gt 0 ]]; then
+              FINAL_OK=1
+              break
+            fi
+            # Stories remotioning after mains are queued is success for AZ.
+            if [[ "${WAITING:-}" == "story_render" && "${ADVANCE_OK:-0}" == "1" ]]; then
               FINAL_OK=1
               break
             fi
