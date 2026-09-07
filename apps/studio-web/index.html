@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.255-library-tiktok">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.256-library-size">
 </head>
 <body>
  <header class="topbar">
@@ -1036,7 +1036,7 @@
  </section>
 
  <section id="page-library" class="page">
- <div class="page-heading"><div><span class="eyebrow" id="libraryEyebrow">Photos and clips</span><h1>Asset library</h1><p id="libraryBlurb">Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow" id="libraryEyebrow">Photos and clips</span><h1>Asset library</h1><p id="libraryBlurb">Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="libraryUploadPanel">
  <div id="libraryDropBlock">
  <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Files go to Google Drive (photos or video folders), register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
@@ -1410,7 +1410,7 @@
  <h2>Asset Library</h2>
  <p>Asset Library is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
  <ul>
- <li>The tab opens on the 5 newest assets. Cards show an Added date when Intake_Date is known, and clips show duration (0:42 or 1:02:03) when Duration_Seconds is stored or can be measured. Use Show this many on page, then Previous and Next. Search by name or location. Opening the tab does not load every thumbnail.</li>
+ <li>The tab opens on the 5 newest assets. Cards show an Added date when Intake_Date is known, file size when File_Size_Bytes or File_Size_MB is stored, and clips show duration (0:42 or 1:02:03) when Duration_Seconds is stored or can be measured. Use Show this many on page, then Previous and Next. Search by name or location. Opening the tab does not load every thumbnail.</li>
  <li>Use + Add assets or drop files on this page. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
  <li>Delete removes the Airtable row and trashes the Drive file when nothing still has that asset attached.</li>
  <li>Show → Published files lists live Platform Outputs, not source stills or clips. Open live post confirms the public URL. Remove Drive copy trashes the rendered Drive file and keeps the Platform Output row, publish date, and post link for reporting.</li>
@@ -1597,7 +1597,7 @@
  </aside>
 
  <script src="/assets/config.js?v=0.6.240-analytics-seq"></script>
- <script src="/assets/ez-plan.js?v=0.6.255-library-tiktok"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.255-library-tiktok"></script>
+ <script src="/assets/ez-plan.js?v=0.6.256-library-size"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.256-library-size"></script>
 </body>
 </html>

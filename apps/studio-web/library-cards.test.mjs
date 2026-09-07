@@ -3,12 +3,15 @@ import test from "node:test";
 
 import {
   formatLibraryClipDuration,
+  formatLibraryFileSize,
   isBrowserSafeLibraryImageUrl,
   libraryAddedLine,
   libraryCardKindLabel,
   libraryCardMetaParts,
   libraryDurationLine,
+  libraryFileBytes,
   libraryListClassName,
+  librarySizeLine,
   publishedLibraryConfirmCopy,
   publishedLibraryPosterUrl,
   publishedLibraryStreamPath,
@@ -39,6 +42,27 @@ test("source cards show Added from intake_date", () => {
   const parts = libraryCardMetaParts({ media_kind: "photo", intake_date: "2026-09-01" }, { formatDate });
   assert.equal(parts.added, "Added Sep 1, 2026");
   assert.equal(parts.duration, "");
+  assert.equal(parts.size, "");
+});
+
+test("cards show a human file size from bytes or MB", () => {
+  assert.equal(formatLibraryFileSize(0), "");
+  assert.equal(formatLibraryFileSize(512), "512 B");
+  assert.equal(formatLibraryFileSize(3400), "3.3 KB");
+  assert.equal(formatLibraryFileSize(3100243), "3 MB");
+  assert.equal(formatLibraryFileSize(13002342), "12.4 MB");
+  assert.equal(formatLibraryFileSize(104857600), "100 MB");
+  assert.equal(formatLibraryFileSize(1610612736), "1.5 GB");
+  assert.equal(libraryFileBytes({ file_size_bytes: 3100243 }), 3100243);
+  assert.equal(libraryFileBytes({ file_size_mb: 2.96 }), 3103785);
+  assert.equal(librarySizeLine({ file_size_bytes: 512 }), "512 B");
+  const photo = libraryCardMetaParts({ media_kind: "photo", file_size_bytes: 3100243 });
+  assert.equal(photo.size, "3 MB");
+  const published = libraryCardMetaParts({
+    record_type: "platform_output",
+    file_size_mb: 12.4,
+  });
+  assert.equal(published.size, "12.4 MB");
 });
 
 test("published cards use Published badge and confirm copy", () => {

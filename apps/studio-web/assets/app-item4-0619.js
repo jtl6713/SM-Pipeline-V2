@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.255-library-tiktok";
+  const BUILD_ID = "item4-0.6.256-library-size";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -5364,6 +5364,31 @@
     if (String(record?.media_kind || "").toLowerCase() !== "video") return "";
     const formatted = formatLibraryClipDuration(record?.duration_seconds);
     return formatted ? `Length ${formatted}` : "";
+  }
+
+  function libraryFileBytes(record) {
+    const bytes = Number(record?.file_size_bytes || 0);
+    if (Number.isFinite(bytes) && bytes > 0) return Math.round(bytes);
+    const mb = Number(record?.file_size_mb || 0);
+    if (Number.isFinite(mb) && mb > 0) return Math.round(mb * 1024 * 1024);
+    return 0;
+  }
+
+  function formatLibraryFileSize(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return "";
+    const kb = 1024;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    const trim = (n) => (n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
+    if (value < kb) return `${Math.round(value)} B`;
+    if (value < mb) return `${trim(value / kb)} KB`;
+    if (value < gb) return `${trim(value / mb)} MB`;
+    return `${trim(value / gb)} GB`;
+  }
+
+  function librarySizeLine(record) {
+    return formatLibraryFileSize(libraryFileBytes(record));
   }
 
   function libraryListClassName(mode) {
@@ -12826,7 +12851,7 @@
     if (blurb) {
       blurb.textContent = published
         ? "These are published Platform Outputs, not source stills or clips. Confirm the live post, then Remove Drive copy to trash the rendered Drive file. The Airtable row, publish date, and post link stay for reporting."
-        : "Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
+        : "Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
     }
     if (search) search.placeholder = published ? "Title, platform, or filename" : "Name or location";
   }
@@ -12839,6 +12864,7 @@
       media_kind: video ? "video" : "photo",
       duration_seconds: item4KnownClipDuration(r),
     });
+    const size = librarySizeLine(r);
     const publishedLine = r.published_at ? `Published ${formatStudioDate(r.published_at)}` : "";
     const badge = r.file_released ? "File removed" : "Published";
     const badgeClass = r.file_released ? "is-released" : "is-published";
@@ -12866,6 +12892,7 @@
       r.aspect_ratio ? `<span>${escapeHtml(r.aspect_ratio)}</span>` : "",
       publishedLine ? `<span>${escapeHtml(publishedLine)}</span>` : "",
       duration ? `<span data-library-duration>${escapeHtml(duration)}</span>` : (video ? `<span data-library-duration hidden></span>` : ""),
+      size ? `<span>${escapeHtml(size)}</span>` : "",
       r.output_filename ? `<span>${escapeHtml(r.output_filename)}</span>` : "",
     ].filter(Boolean).join("");
     const live = r.platform_post_url
@@ -12883,7 +12910,7 @@
   function renderSourceLibraryCard(r) {
     const preview = libraryPreviewUrl(r);
     const video = String(r.media_kind || "").toLowerCase() === "video";
-    const sizeLabel = r.file_size_mb ? `${r.file_size_mb} MB` : (r.mime_type || (video ? "video" : "photo"));
+    const size = librarySizeLine(r);
     const duration = libraryDurationLine({
       media_kind: video ? "video" : "photo",
       duration_seconds: item4KnownClipDuration(r),
@@ -12913,7 +12940,7 @@
       `<span class="library-kind-text">${video ? "Clip" : "Photo"}</span>`,
       added ? `<span>${escapeHtml(added)}</span>` : "",
       duration ? `<span data-library-duration>${escapeHtml(duration)}</span>` : (video ? `<span data-library-duration hidden></span>` : ""),
-      `<span>${escapeHtml(sizeLabel)}</span>`,
+      size ? `<span>${escapeHtml(size)}</span>` : "",
       r.location ? `<span>${value(r.location)}</span>` : "",
     ].filter(Boolean).join("");
     return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;

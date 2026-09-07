@@ -1,5 +1,5 @@
 // Keep these helpers aligned with apps/studio-web/assets/app-item4-0619.js
-// (Asset Library card date, duration, and published-file labels).
+// (Asset Library card date, duration, file size, and published-file labels).
 
 export function formatLibraryClipDuration(seconds) {
   const value = Number(seconds);
@@ -16,6 +16,31 @@ export function libraryDurationLine(record) {
   if (String(record?.media_kind || "").toLowerCase() !== "video") return "";
   const formatted = formatLibraryClipDuration(record?.duration_seconds);
   return formatted ? `Length ${formatted}` : "";
+}
+
+export function libraryFileBytes(record) {
+  const bytes = Number(record?.file_size_bytes || 0);
+  if (Number.isFinite(bytes) && bytes > 0) return Math.round(bytes);
+  const mb = Number(record?.file_size_mb || 0);
+  if (Number.isFinite(mb) && mb > 0) return Math.round(mb * 1024 * 1024);
+  return 0;
+}
+
+export function formatLibraryFileSize(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const kb = 1024;
+  const mb = kb * 1024;
+  const gb = mb * 1024;
+  const trim = (n) => (n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
+  if (value < kb) return `${Math.round(value)} B`;
+  if (value < mb) return `${trim(value / kb)} KB`;
+  if (value < gb) return `${trim(value / mb)} MB`;
+  return `${trim(value / gb)} GB`;
+}
+
+export function librarySizeLine(record) {
+  return formatLibraryFileSize(libraryFileBytes(record));
 }
 
 export function libraryListClassName(mode) {
@@ -82,11 +107,13 @@ export function libraryCardMetaParts(record, { formatDate } = {}) {
       added: "",
       duration: libraryDurationLine(record),
       published: libraryPublishedLine(record.published_at, formatDate),
+      size: librarySizeLine(record),
     };
   }
   return {
     added: libraryAddedLine(record?.intake_date, formatDate),
     duration: libraryDurationLine(record),
     published: "",
+    size: librarySizeLine(record),
   };
 }
