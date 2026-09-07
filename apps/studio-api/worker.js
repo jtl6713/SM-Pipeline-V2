@@ -7438,7 +7438,7 @@ async function opsForceAzNavyPierTitle(env) {
   const title = "Final Navy Pier Fireworks - Full Video";
   if (!env?.AIRTABLE_PAT) return { skipped: true, reason: "no_pat" };
 
-  const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const notes = String(f(record, "Production_Notes") || "");
   if (!/origin=az-finished-video/i.test(notes) && !/az-auto-queue=1/i.test(notes)) {
     return { skipped: true, reason: "not_az", requestId };
@@ -7449,7 +7449,7 @@ async function opsForceAzNavyPierTitle(env) {
   const already = currentMode === "Force exact" && currentTitle === title;
 
   if (!already) {
-    await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
+    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
       method: "PATCH",
       body: JSON.stringify({
         fields: {
@@ -7461,6 +7461,7 @@ async function opsForceAzNavyPierTitle(env) {
     });
   }
 
+  const assets = item4AssetManifest(record);
   const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
   let ideaId = studioFirstLinkedId(f(record, "Idea_Candidate"))
     || studioFirstLinkedId(f(record, "Idea Candidates"))
@@ -7481,67 +7482,65 @@ async function opsForceAzNavyPierTitle(env) {
     }).catch((error) => console.warn("ops az title idea sync failed", ideaId, error));
   }
 
-  let outputIds = [];
+  let contentSnapshot = null;
   if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
-    const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
-      method: "PATCH",
-      body: JSON.stringify({
-        fields: {
-          Content_Title: title,
-          Thumbnail_Prompt: null,
-          Thumbnail_Status: "Not Started",
-          Thumbnail_URL: null,
-        },
-        typecast: true,
-      }),
-    }).catch((error) => {
-      console.warn("ops az title content sync failed", contentId, error);
-      return null;
-    });
-    const links = arrayOrEmpty(f(content || {}, "Platform Outputs"))
-      .concat(arrayOrEmpty(f(record, "Platform Outputs")));
-    outputIds = links.map((id) => String(id || "").trim()).filter(Boolean);
+    const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+    if (content) {
+      const contentTitle = String(f(content, "Content_Title") || "").trim();
+      if (contentTitle !== title) {
+        await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+          method: "PATCH",
+          body: JSON.stringify({ fields: { Content_Title: title }, typecast: true }),
+        }).catch((error) => console.warn("ops az title content sync failed", contentId, error));
+      }
+      contentSnapshot = {
+        id: contentId,
+        content_title: contentTitle || title,
+        content_status: f(content, "Content_Status") || null,
+        thumbnail_status: f(content, "Thumbnail_Status") || null,
+        thumbnail_url: Boolean(studioAiThumbnailUrl(f(content, "Thumbnail_URL"))),
+        platform_outputs: arrayOrEmpty(f(content, "Platform Outputs")).length,
+      };
+    }
   }
 
-  if (!outputIds.length && contentId && env.AIRTABLE_OUTPUT_TABLE_ID) {
-    const listed = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-      limit: 20,
-      filterFormula: `FIND("${contentId}", ARRAYJOIN({Content_Item} & ""))`,
-    }).catch(() => []);
-    outputIds = listed.map((row) => row.id);
-  }
-
-  for (const outputId of outputIds) {
-    if (!env.AIRTABLE_OUTPUT_TABLE_ID) break;
-    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, outputId, {
-      method: "PATCH",
-      body: JSON.stringify({
-        fields: {
-          Output_Title: title,
-          Thumbnail_URL: null,
-        },
-        typecast: true,
-      }),
-    }).catch((error) => console.warn("ops az title output sync failed", outputId, error));
-  }
-
-  console.log("ops az navy pier title forced", {
+  const job = parseStudioProductionJob(record);
+  const diagnostic = {
     requestId,
     title,
     already,
-    contentId: contentId || null,
-    ideaId: ideaId || null,
-    outputs: outputIds.length,
-  });
-  return {
-    ok: true,
-    requestId,
-    title,
-    already,
-    contentId: contentId || null,
-    ideaId: ideaId || null,
-    outputs: outputIds.length,
+    request_status: f(record, "Request_Status") || null,
+    plan_status: f(record, "Studio_Output_Plan_Status") || null,
+    variant_status: f(record, "Studio_Variant_Status") || null,
+    needs_compress: item4AssetsNeedStudioCompress(assets),
+    masters_ready: item4FinishedVideoMastersReady(record, assets),
+    asset_count: Array.isArray(assets) ? assets.length : 0,
+    assets: (Array.isArray(assets) ? assets : []).map((asset) => ({
+      id: asset?.id || null,
+      name: asset?.name || null,
+      size_bytes: Number(asset?.size_bytes || 0) || null,
+      compress_pending: item4AssetCompressionPending(asset),
+      drive_id: Boolean(asset?.google_drive_file_id),
+      media_asset: Boolean(asset?.media_asset_record_id),
+      public_url: Boolean(item4FinishedPublicUrl(asset)),
+    })),
+    production_job_step: job?.step || null,
+    production_job_detail: job?.detail || null,
+    production_job_error: job?.error || null,
+    content: contentSnapshot,
   };
+  console.log("ops az navy pier diagnostic", diagnostic);
+
+  let advance = null;
+  try {
+    const auth = await resolveStudioCronAuthorization(env).catch(() => null);
+    advance = await advanceAzFinishedVideo(env, requestId, auth, null);
+  } catch (error) {
+    advance = { error: error instanceof Error ? error.message : String(error) };
+    console.warn("ops az navy pier advance failed", requestId, error);
+  }
+  console.log("ops az navy pier advance", { requestId, advance });
+  return { ok: true, diagnostic, advance };
 }
 
 async function resumeAzFinishedVideoRequests(env, ctx = null) {

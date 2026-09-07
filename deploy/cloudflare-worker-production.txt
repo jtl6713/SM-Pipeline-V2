@@ -351,3 +351,5 @@ Published library file size Worker deploy: 2026-09-07 - Published files read MP4
 
 
 AZ Navy Pier Force-exact title Worker deploy: 2026-09-07 - Cron one-shot sets Requested_Title on reca7v6zi1b9QNanJ to "Final Navy Pier Fireworks - Full Video", syncs idea/content titles, and clears stale thumbs for regen. Worker 0.10.256-az-navy-title.
+
+AZ Navy Pier diagnose+kick Worker deploy: 2026-09-07 - Log full AZ state for reca7v6zi1b9QNanJ and call advanceAzFinishedVideo each cron. Worker 0.10.257-az-navy-kick.
