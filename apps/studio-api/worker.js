@@ -229,7 +229,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.253-az-1-5gb",
+          version: "0.10.254-library-size",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -5200,9 +5200,11 @@ function ideaLibraryIntakeDate(record) {
 }
 
 function ideaLibraryFileBytes(record) {
-  const bytes = Number(f(record, "File_Size_Bytes") || 0);
-  if (Number.isFinite(bytes) && bytes > 0) return bytes;
-  const mb = Number(f(record, "File_Size_MB") || 0);
+  const rawBytes = f(record, "File_Size_Bytes");
+  const bytes = Number(Array.isArray(rawBytes) ? rawBytes[0] : rawBytes || 0);
+  if (Number.isFinite(bytes) && bytes > 0) return Math.round(bytes);
+  const rawMb = f(record, "File_Size_MB");
+  const mb = Number(Array.isArray(rawMb) ? rawMb[0] : rawMb || 0);
   if (Number.isFinite(mb) && mb > 0) return Math.round(mb * 1024 * 1024);
   return 0;
 }
@@ -15527,6 +15529,7 @@ function mapPublishedLibraryFile(record) {
     studio_preview_url: String(f(record, "Studio_Preview_URL") || "").trim() || null,
     thumbnail_url: String(f(record, "Thumbnail_URL") || "").trim() || null,
     duration_seconds: duration,
+    file_size_bytes: ideaLibraryFileBytes(record) || null,
     file_released: fileReleased,
     media_kind: nativeStill ? "photo" : "video",
     output_status: String(f(record, "Output_Status") || "").trim() || null,
@@ -15629,6 +15632,7 @@ function mapLibraryAsset(record) {
     || String(f(record, "MIME_Type") || "").trim().toLowerCase().startsWith("video/");
   const transferId = String(f(record, "Studio_Transfer_ID") || "");
   const doNotUse = Boolean(f(record, "Do_Not_Use"));
+  const sizeBytes = ideaLibraryFileBytes(record);
   return {
     record_type: "media_asset",
     id: record.id,
@@ -15636,7 +15640,8 @@ function mapLibraryAsset(record) {
     media_kind: video ? "video" : "photo",
     mime_type: String(f(record, "MIME_Type") || "").trim() || null,
     duration_seconds: Number(f(record, "Duration_Seconds") || 0) || null,
-    file_size_mb: f(record, "File_Size_MB"),
+    file_size_bytes: sizeBytes || null,
+    file_size_mb: sizeBytes ? Math.round((sizeBytes / 1048576) * 100) / 100 : null,
     location: f(record, "Location") || null,
     description: f(record, "Asset_Description") || null,
     google_drive_file_id: googleDriveFileId(record),

@@ -130,6 +130,7 @@ export function mapPublishedLibraryFile(record) {
     studio_preview_url: text(record, "Studio_Preview_URL") || null,
     thumbnail_url: text(record, "Thumbnail_URL") || null,
     duration_seconds: duration,
+    file_size_bytes: libraryRecordFileBytes(record) || null,
     file_released: fileReleased,
     media_kind: nativeStill ? "photo" : "video",
     output_status: text(record, "Output_Status") || null,
@@ -183,4 +184,18 @@ export function coerceLibraryDurationSeconds(raw) {
   const rounded = Math.round(value);
   if (rounded < 1 || rounded > 12 * 60 * 60) return null;
   return rounded;
+}
+
+function firstPositiveNumber(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function libraryRecordFileBytes(record) {
+  const bytes = firstPositiveNumber(field(record, "File_Size_Bytes"));
+  if (bytes) return Math.round(bytes);
+  const mb = firstPositiveNumber(field(record, "File_Size_MB"));
+  if (mb) return Math.round(mb * 1024 * 1024);
+  return 0;
 }

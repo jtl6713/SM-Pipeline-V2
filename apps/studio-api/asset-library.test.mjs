@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   collectJsonDriveIds,
   coerceLibraryDurationSeconds,
+  libraryRecordFileBytes,
   mapPublishedLibraryFile,
   publishedDurationSeconds,
   publishedFileReleaseGuard,
@@ -36,12 +37,14 @@ test("published mapper marks released rows and omits invented 30s duration", () 
     Final_File_URL: "https://drive.google.com/file/d/driveFinal1/view",
     Studio_Preview_URL: "https://media.chicagoshining.com/studio/previews/recOUT1/out.mp4",
     Render_Total_Frames: 1260,
+    File_Size_Bytes: 3100243,
   }));
   assert.equal(live.record_type, "platform_output");
   assert.equal(live.media_kind, "video");
   assert.equal(live.file_released, false);
   assert.equal(live.duration_seconds, 42);
   assert.equal(live.platform_post_url, "https://instagram.com/p/abc");
+  assert.equal(live.file_size_bytes, 3100243);
 
   const released = mapPublishedLibraryFile(output({
     Platform: "Instagram",
@@ -115,6 +118,13 @@ test("release-file refuses unpublished, missing live URL, and master-id collisio
   }));
   assert.equal(gone.ok, true);
   assert.equal(gone.already_released, true);
+});
+
+test("library file bytes prefer File_Size_Bytes and fall back to File_Size_MB", () => {
+  assert.equal(libraryRecordFileBytes(output({ File_Size_Bytes: 3100243, File_Size_MB: 2.96 })), 3100243);
+  assert.equal(libraryRecordFileBytes(output({ File_Size_MB: 2.96 })), 3103785);
+  assert.equal(libraryRecordFileBytes(output({ File_Size_Bytes: [512000] })), 512000);
+  assert.equal(libraryRecordFileBytes(output({})), 0);
 });
 
 test("release stamp clears Drive fields and keeps reporting fields out of the patch", () => {
