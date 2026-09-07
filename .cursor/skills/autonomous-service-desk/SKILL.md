@@ -90,6 +90,6 @@ Auto-correct:
 
 ### `youtube_private_source_fail` (`transient` → Worker heal)
 
-YouTube Approved for Publishing, no `YouTube_Video_ID`, `YouTube_Stage` is YT1+Failed or Terminal Error, Drive `Final_File_URL`, no public `Publish_Asset_URL`. Output 375 (Worth the trip Short `recRxp28DYcT9SEMW`) stuck this way because heal only matched Terminal Error + 401 text.
+YouTube Approved for Publishing, no `YouTube_Video_ID`, `YouTube_Stage` is YT1 (Failed **or Ready to Publish**) or Terminal Error, Drive `Final_File_URL`, no public `Publish_Asset_URL`. Output 375 (Worth the trip Short `recRxp28DYcT9SEMW`) stuck this way: heal matched only Failed, Windows AP0 aborted a 121MB one-shot PUT (`10053`), then YTP1 saw a stale upload job id.
 
-Auto-correct: leave to Worker `studioHealFailedYoutubeSourceDownloads` (AP0 public MP4 → reset YT1 → YTP1). After processing, `thumbnails.set` the 3D cover. Do **not** send `thumb_offset`. If the row is still Failed after a later tick, that is a `code_bug`.
+Auto-correct: leave to Worker `studioHealFailedYoutubeSourceDownloads` (Drive Range GET → R2 multipart `publish/` → reset YT1 → YTP1). After processing, `thumbnails.set` the 3D cover. Do **not** send `thumb_offset`. If the row is still missing a public MP4 after a later tick, that is a `code_bug`.

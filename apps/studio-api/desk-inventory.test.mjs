@@ -146,6 +146,20 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
   assert.equal(yt375.kind, "youtube_private_source_fail");
   assert.equal(yt375.class, "transient");
   assert.equal(yt375.actor, "worker_heal");
+  const yt375Ready = classifyYoutubePrivateSourceFail({
+    id: "recRxp28DYcT9SEMW",
+    platform: "YouTube",
+    output_status: "Approved for Publishing",
+    publish_status: "Ready to Publish",
+    youtube_stage: "YT1",
+    youtube_video_id: "",
+    final_file_url: "https://drive.google.com/file/d/1aM4EYlL0OXEGdP6O8lUzmmFEdCqs8UMI/view",
+    publish_asset_url: "",
+    studio_preview_url: "",
+    publish_asset_error: "AP0 Worker/R2 upload failed. ('Connection aborted.', ConnectionAbortedError(10053, 'An established connection was aborted by the software in your host machine'))",
+  });
+  assert.equal(yt375Ready.kind, "youtube_private_source_fail");
+  assert.equal(yt375Ready.fingerprint, fingerprint("youtube_private_source_fail", "recRxp28DYcT9SEMW", "yt1_drive"));
   assert.equal(classifyYoutubePrivateSourceFail({
     id: "recPublicYt",
     platform: "YouTube",

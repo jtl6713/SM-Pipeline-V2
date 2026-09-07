@@ -223,21 +223,24 @@ export function classifyYoutubePrivateSourceFail(row) {
   if (outputStatus && outputStatus !== "Approved for Publishing") return null;
   const stage = String(row.youtube_stage || "").trim();
   const publishStatus = String(row.publish_status || "").trim();
-  const err = `${row.youtube_error || ""} ${row.publish_error || ""} ${row.publish_error_stage || ""}`;
+  const err = `${row.youtube_error || ""} ${row.publish_error || ""} ${row.publish_error_stage || ""} ${row.publish_asset_error || ""}`;
   const publicSrc = deskUrlIsPublicPublishCdn(row.publish_asset_url) || deskUrlIsPublicPublishCdn(row.studio_preview_url);
   const driveFinal = deskUrlLooksLikeDrive(row.final_file_url);
   const explicit401 = /source download failed 401/i.test(err) || /YTS1_UPLOAD/i.test(String(row.publish_error_stage || ""));
-  const stuckYt1 = /^YT1$/i.test(stage) && /^failed$/i.test(publishStatus) && driveFinal && !publicSrc;
+  const ap0Abort = /ap0 worker\/r2 upload failed|connection aborted|10053/i.test(err);
+  const publishStuck = !publishStatus || /^(failed|ready to publish)$/i.test(publishStatus);
+  const stuckYt1 = /^YT1$/i.test(stage) && driveFinal && !publicSrc && publishStuck;
   const terminal = /^terminal error$/i.test(stage) && (explicit401 || (driveFinal && !publicSrc));
-  if (!explicit401 && !stuckYt1 && !terminal) return null;
+  if (!explicit401 && !stuckYt1 && !terminal && !ap0Abort) return null;
+  if (!stuckYt1 && !terminal && ap0Abort && !driveFinal) return null;
   const recordId = String(row.id || row.record_id || "").trim();
   return {
     kind: "youtube_private_source_fail",
     class: "transient",
     record_id: recordId || null,
-    fingerprint: fingerprint("youtube_private_source_fail", recordId, stuckYt1 ? "yt1_drive" : "source_401"),
+    fingerprint: fingerprint("youtube_private_source_fail", recordId, stuckYt1 ? "yt1_drive" : (ap0Abort ? "ap0_abort" : "source_401")),
     actor: "worker_heal",
-    diagnosis: "YouTube Approved for Publishing has no video id and no public MP4; Graph/YouTube cannot fetch Drive. Stage AP0 then reset YT1 and pulse YTP1. Keep the native 3D cover; do not send thumb_offset.",
+    diagnosis: "YouTube Approved for Publishing has no video id and no public MP4; Graph/YouTube cannot fetch Drive. Stream the Drive final to publish/ (not a one-shot Windows PUT), clear a stale YouTube_Upload_Job_ID, then pulse YTP1. Keep the native 3D cover; do not send thumb_offset.",
   };
 }
 

@@ -73,16 +73,16 @@ Keep row for the 2026-09-07 zoo fixture: [Lincoln Park Zoo - Worth the trip?](ht
 
 Fixture that already failed this way: Platform Output `recRxp28DYcT9SEMW` (Output 375, Worth the trip YouTube Short).
 
-Cause: upload used Drive `Final_File_URL`. Graph/YouTube cannot fetch `uc?id=` / `webContentLink`. Heal used to match only `YouTube_Stage=Terminal Error` plus `source download failed 401` / `YTS1_UPLOAD`, so a YT1 + Failed + Drive-final row sat at 0% forever. Reconcile also skips `Publish_Status=Failed`.
+Cause: YouTube cannot fetch Drive `uc?id=` / `webContentLink`. Heal used to match only `YouTube_Stage=Terminal Error` plus 401 text, so a YT1 + Drive-final row sat forever. A later heal pulsed Windows AP0 with the whole 121MB in one `requests.put`; Windows aborted (`ConnectionAbortedError 10053`). Heal then `continue`d without YTP1 and required `Publish_Status=Failed`, so Ready to Publish dropped out. Reconcile skipped a stale `YouTube_Upload_Job_ID` (`already_has_upload_job`). Cloudflare Workers also cannot PUT >100MB in one request.
 
 Auto-correct (Worker heal `studioHealFailedYoutubeSourceDownloads` / desk leaves `class=transient` to cron):
 
-1. Stage a short-lived public MP4 onto `https://media.chicagoshining.com/publish/` or `studio/previews/` (AP0). Drive stays DAM. Do not `STUDIO_MEDIA.put` a permanent original.
-2. `studioResetYoutubeUploadForRetry`, then pulse **YTP1**.
+1. Scan YT1 **Failed or Ready to Publish** (and Terminal Error). Stage Drive `alt=media` onto `https://media.chicagoshining.com/publish/` in **16MB multipart parts** (R2 upload worker `mpu-create` / `mpu-part` / `mpu-complete`). Direct PUT only under 95MB. Drive stays DAM. Do not `STUDIO_MEDIA.put` a permanent original.
+2. Clear stale `YouTube_Upload_Job_ID`, `studioResetYoutubeUploadForRetry`, then pulse **YTP1** in the same tick when the public URL exists. If Worker staging fails, pulse AP0 (Windows now streams to a tempfile and uses the same multipart API) and retry YTP1 on the next tick.
 3. After processing, YouTube Shorts **`thumbnails.set`** with the public 3D cover. Do **not** send `thumb_offset` (offset wins and shows a video frame).
 4. Do not Approve or publish library-stills autonomous work. 375 was already Approved for Publishing (human gate already passed). Leave siblings 370–374 unless Joseph names them.
 
-If heal still ignores YT1/Failed, that is a `code_bug`: widen the scan the same way as Terminal Error, then re-run tests.
+If heal still ignores YT1 + Ready to Publish + Drive-final, that is a `code_bug`.
 
 ## Do not
 

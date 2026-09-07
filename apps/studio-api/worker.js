@@ -23,6 +23,12 @@ import {
 } from "./asset-library.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
 import {
+  YOUTUBE_PRIVATE_SOURCE_HEAL_INNER,
+  mpuPartRanges,
+  shouldUseMultipart,
+  youtubePublishAssetKey,
+} from "./youtube-public-mp4.mjs";
+import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
@@ -300,7 +306,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.277-autonomous-topic-dedupe",
+          version: "0.10.278-youtube-375-public-mp4",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1868,11 +1874,83 @@ function mapYoutubePrivateSourceDeskRow(record) {
     youtube_error: f(record, "YouTube_Error_Message"),
     publish_error: f(record, "Publish_Error_Message"),
     publish_error_stage: f(record, "Publish_Error_Stage"),
+    publish_asset_error: f(record, "Publish_Asset_Error_Message"),
+    youtube_upload_job_id: f(record, "YouTube_Upload_Job_ID"),
   };
 }
 
 function studioYoutubeFailedPrivateSource(record) {
   return Boolean(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
+}
+
+function studioYoutubePublishAssetKey(record) {
+  return youtubePublishAssetKey(f(record, "Output_ID"), f(record, "Final_File_ID"));
+}
+
+async function studioStageYoutubePublicMp4FromDrive(env, record) {
+  const existing = studioYoutubePublicSourceUrl(record);
+  if (existing) return { url: existing, skip: "already-public" };
+  const driveId = String(f(record, "Final_File_ID") || extractGoogleDriveFileId(f(record, "Final_File_URL")) || "").trim();
+  if (!driveId) return { url: "", skip: "missing-drive-id" };
+  const token = await item4GoogleAccessToken(env);
+  if (!token) return { url: "", skip: "missing-google-token" };
+  const auth = { Authorization: `Bearer ${token}` };
+  const metaResponse = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveId)}?fields=size,mimeType,name&supportsAllDrives=true`,
+    { method: "GET", headers: auth }
+  );
+  const meta = await metaResponse.json().catch(() => ({}));
+  if (!metaResponse.ok) return { url: "", skip: `drive-meta-${metaResponse.status}` };
+  const size = Number(meta.size || 0);
+  const key = studioYoutubePublishAssetKey(record);
+  const outputId = String(f(record, "Output_ID") || record.id || "");
+  const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveId)}?alt=media&supportsAllDrives=true`;
+  let staged = { url: "", skip: "not-attempted" };
+  if (!shouldUseMultipart(size)) {
+    const response = await fetch(mediaUrl, { method: "GET", headers: auth, redirect: "follow" });
+    const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+    if (!response.ok || type.includes("text/html") || !response.body) {
+      try { await response.body?.cancel(); } catch {}
+      staged = { url: "", skip: `drive-http-${response.status}` };
+    } else {
+      staged = await studioPutPublicObjectViaUploadWorker(env, {
+        key,
+        body: response.body,
+        contentType: "video/mp4",
+        contentLength: size,
+        outputId,
+        finalFileId: driveId,
+        retainClass: "publish",
+      });
+    }
+  } else {
+    staged = await studioPutPublicObjectMultipartFromDrive(env, {
+      key,
+      driveId,
+      token,
+      size,
+      outputId,
+      finalFileId: driveId,
+      retainClass: "publish",
+    });
+  }
+  if (!staged.url) return { url: "", skip: staged.skip || "upload-failed" };
+  const fileName = `platform-output-${outputId || "output"}-${driveId}.mp4`;
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Publish_Asset_URL: staged.url,
+        Publish_Asset_Host: "Cloudflare R2",
+        Publish_Asset_File_Name: fileName,
+        Publish_Asset_Error_Message: "",
+        Publish_Error_Message: "",
+        Studio_Preview_URL: staged.url,
+      },
+      typecast: true,
+    }),
+  });
+  return { url: staged.url, skip: "" };
 }
 
 function item4FinishedVideoPreviewKey(requestId, assetId) {
@@ -22978,28 +23056,41 @@ function studioImageContentType(buffer) {
 }
 
 const R2_UPLOAD_WORKER_PUBLIC = "https://chicagoshining-r2-upload.joseph-t-logan.workers.dev";
+const STUDIO_UPLOAD_WORKER_UA = "chicagoshining-studio-api/publish-dispatch";
 
-async function studioPutPublicObjectViaUploadWorker(env, input) {
-  const key = String(input?.key || "").trim().replace(/^\/+/, "");
-  const body = input?.body;
-  if (!key || body == null) return { url: "", skip: "missing-body" };
+async function studioR2UploadWorkerConfig(env) {
   const settings = await studioActivePipelineSettings(env, [
     "R2_UPLOAD_WORKER_URL",
     "R2_UPLOAD_WORKER_SECRET",
   ]);
   const secret = String(settings.R2_UPLOAD_WORKER_SECRET || "").trim();
-  if (!secret) return { url: "", skip: "missing-upload-secret" };
-  const contentType = String(input.contentType || "application/octet-stream");
   const endpoints = [...new Set([
     String(settings.R2_UPLOAD_WORKER_URL || "").trim().replace(/\/+$/, ""),
     R2_UPLOAD_WORKER_PUBLIC,
   ].filter(Boolean))];
+  return { secret, endpoints };
+}
+
+function studioR2UploadWorkerHeaders(secret, input = {}, extra = {}) {
   const headers = {
-    "Content-Type": contentType,
     "x-pipeline-secret": secret,
     "x-output-id": String(input.outputId || ""),
+    "x-final-file-id": String(input.finalFileId || ""),
     "x-retain-class": String(input.retainClass || "preview"),
+    "User-Agent": STUDIO_UPLOAD_WORKER_UA,
+    ...extra,
   };
+  return headers;
+}
+
+async function studioPutPublicObjectViaUploadWorker(env, input) {
+  const key = String(input?.key || "").trim().replace(/^\/+/, "");
+  const body = input?.body;
+  if (!key || body == null) return { url: "", skip: "missing-body" };
+  const { secret, endpoints } = await studioR2UploadWorkerConfig(env);
+  if (!secret) return { url: "", skip: "missing-upload-secret" };
+  const contentType = String(input.contentType || "application/octet-stream");
+  const headers = studioR2UploadWorkerHeaders(secret, input, { "Content-Type": contentType });
   const length = Number(input.contentLength || input.body?.byteLength || 0);
   if (Number.isFinite(length) && length > 0) headers["Content-Length"] = String(length);
   let lastStatus = 0;
@@ -23022,6 +23113,107 @@ async function studioPutPublicObjectViaUploadWorker(env, input) {
     }
   }
   return { url: "", skip: lastStatus ? `upload-http-${lastStatus}` : "upload-worker-failed" };
+}
+
+async function studioPutPublicObjectMultipartFromDrive(env, input) {
+  const key = String(input?.key || "").trim().replace(/^\/+/, "");
+  const driveId = String(input?.driveId || "").trim();
+  const token = String(input?.token || "").trim();
+  const size = Number(input?.size || 0);
+  if (!key || !driveId || !token) return { url: "", skip: "missing-multipart-source" };
+  if (!Number.isFinite(size) || size <= 0 || size > 250 * 1024 * 1024) {
+    return { url: "", skip: "multipart-size-unsupported" };
+  }
+  const ranges = mpuPartRanges(size);
+  if (!ranges.length) return { url: "", skip: "multipart-no-ranges" };
+  const { secret, endpoints } = await studioR2UploadWorkerConfig(env);
+  if (!secret) return { url: "", skip: "missing-upload-secret" };
+  const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveId)}?alt=media&supportsAllDrives=true`;
+  let lastSkip = "upload-worker-failed";
+  for (const workerUrl of endpoints) {
+    let uploadId = "";
+    try {
+      const created = await fetch(`${workerUrl}?key=${encodeURIComponent(key)}&action=mpu-create`, {
+        method: "POST",
+        headers: studioR2UploadWorkerHeaders(secret, input, { "Content-Type": "video/mp4" }),
+      });
+      const createdPayload = await created.json().catch(() => ({}));
+      uploadId = String(createdPayload.uploadId || "").trim();
+      if (!created.ok || createdPayload.ok === false || !uploadId) {
+        lastSkip = `mpu-create-${created.status || "failed"}`;
+        continue;
+      }
+      const parts = [];
+      let partFailed = false;
+      for (const range of ranges) {
+        const chunk = await fetch(mediaUrl, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Range: `bytes=${range.start}-${range.end}`,
+          },
+          redirect: "follow",
+        });
+        const got = Number(chunk.headers.get("Content-Length") || 0);
+        if (!(chunk.status === 206 || chunk.status === 200) || !chunk.body || (got > 0 && got > range.length)) {
+          try { await chunk.body?.cancel(); } catch {}
+          lastSkip = `drive-range-${chunk.status || "failed"}`;
+          partFailed = true;
+          break;
+        }
+        const uploaded = await fetch(
+          `${workerUrl}?key=${encodeURIComponent(key)}&action=mpu-part&uploadId=${encodeURIComponent(uploadId)}&partNumber=${range.partNumber}`,
+          {
+            method: "PUT",
+            headers: studioR2UploadWorkerHeaders(secret, input, {
+              "Content-Type": "application/octet-stream",
+              "Content-Length": String(range.length),
+            }),
+            body: chunk.body,
+          }
+        );
+        const partPayload = await uploaded.json().catch(() => ({}));
+        const etag = String(partPayload.etag || "").trim();
+        if (!uploaded.ok || partPayload.ok === false || !etag) {
+          lastSkip = `mpu-part-${uploaded.status || "failed"}`;
+          partFailed = true;
+          break;
+        }
+        parts.push({ partNumber: range.partNumber, etag });
+      }
+      if (partFailed || parts.length !== ranges.length) {
+        await fetch(
+          `${workerUrl}?key=${encodeURIComponent(key)}&action=mpu-abort&uploadId=${encodeURIComponent(uploadId)}`,
+          { method: "POST", headers: studioR2UploadWorkerHeaders(secret, input) }
+        ).catch(() => null);
+        continue;
+      }
+      const completed = await fetch(
+        `${workerUrl}?key=${encodeURIComponent(key)}&action=mpu-complete&uploadId=${encodeURIComponent(uploadId)}`,
+        {
+          method: "POST",
+          headers: studioR2UploadWorkerHeaders(secret, input, { "Content-Type": "application/json" }),
+          body: JSON.stringify({ parts }),
+        }
+      );
+      const done = await completed.json().catch(() => ({}));
+      if (!completed.ok || done.ok === false) {
+        lastSkip = `mpu-complete-${completed.status || "failed"}`;
+        continue;
+      }
+      return { url: String(done.public_url || `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`).trim(), skip: "" };
+    } catch (error) {
+      console.warn("public object multipart upload threw", key, error);
+      lastSkip = "mpu-threw";
+      if (uploadId) {
+        await fetch(
+          `${workerUrl}?key=${encodeURIComponent(key)}&action=mpu-abort&uploadId=${encodeURIComponent(uploadId)}`,
+          { method: "POST", headers: studioR2UploadWorkerHeaders(secret, input) }
+        ).catch(() => null);
+      }
+    }
+  }
+  return { url: "", skip: lastSkip };
 }
 
 async function studioPublicVideoIsReachable(url) {
@@ -24512,10 +24704,9 @@ async function studioResetYoutubeUploadForRetry(env, record) {
 async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
   const limit = Number(options.limit || 3);
   const recordId = String(options.recordId || "").trim();
-  const stuckFormula = 'AND({YouTube_Video_ID}="",{Output_Status}="Approved for Publishing",OR({YouTube_Stage}="Terminal Error",AND({YouTube_Stage}="YT1",{Publish_Status}="Failed")))';
   const formula = recordId
-    ? `AND(RECORD_ID()="${recordId}",${stuckFormula})`
-    : `AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,${stuckFormula})`;
+    ? `AND(RECORD_ID()="${recordId}",${YOUTUBE_PRIVATE_SOURCE_HEAL_INNER})`
+    : `AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,${YOUTUBE_PRIVATE_SOURCE_HEAL_INNER})`;
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
@@ -24527,27 +24718,41 @@ async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
   for (const row of rows) {
     if (!studioYoutubeFailedPrivateSource(row)) continue;
     try {
-      if (!studioYoutubePublicSourceUrl(row)) {
-        await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
-          method: "PATCH",
-          body: JSON.stringify({
-            fields: {
-              Publish_Status: "Ready to Publish",
-              Publish_Retry_Eligible: true,
-              Publish_Asset_Error_Message: "",
-            },
-            typecast: true,
-          }),
-        });
-        const staged = await studioPulseAp0PublicAsset(env, row);
-        results.push({
-          id: row.id,
-          stage: "ap0",
-          ok: staged?.ok !== false,
-          skipped: staged?.skipped || false,
-          healed: "missing_public_publish_url",
-        });
-        continue;
+      let publicUrl = studioYoutubePublicSourceUrl(row);
+      let stagedVia = publicUrl ? "existing_public_url" : "";
+      if (!publicUrl) {
+        const staged = await studioStageYoutubePublicMp4FromDrive(env, row);
+        if (staged.url) {
+          publicUrl = staged.url;
+          stagedVia = "worker_drive_mpu";
+        } else {
+          await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+            method: "PATCH",
+            body: JSON.stringify({
+              fields: {
+                Publish_Status: "Ready to Publish",
+                Publish_Retry_Eligible: true,
+                YouTube_Upload_Job_ID: "",
+              },
+              typecast: true,
+            }),
+          }).catch(() => null);
+          const ap0 = await studioPulseAp0PublicAsset(env, row);
+          const afterAp0 = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id).catch(() => row);
+          publicUrl = studioYoutubePublicSourceUrl(afterAp0);
+          stagedVia = "ap0";
+          if (!publicUrl) {
+            results.push({
+              id: row.id,
+              stage: "ap0",
+              ok: ap0?.ok !== false,
+              skipped: ap0?.skipped || staged.skip || false,
+              healed: "waiting_public_url",
+              worker_skip: staged.skip || "",
+            });
+            continue;
+          }
+        }
       }
       await studioResetYoutubeUploadForRetry(env, row);
       const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
@@ -24558,6 +24763,9 @@ async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
         ok: pulsed?.ok !== false,
         skipped: pulsed?.skipped || false,
         healed: "source-download-401",
+        staged_via: stagedVia,
+        public_url: publicUrl,
+        ytp1: pulsed,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -28614,7 +28822,7 @@ async function gatherStudioDeskInventory(env) {
   try {
     const youtubeFailed = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit: 8,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Output_Status}="Approved for Publishing",OR({YouTube_Stage}="Terminal Error",AND({YouTube_Stage}="YT1",{Publish_Status}="Failed")))',
+      filterFormula: `AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,${YOUTUBE_PRIVATE_SOURCE_HEAL_INNER})`,
     }).catch(() => []);
     for (const record of youtubeFailed || []) {
       push(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));

@@ -391,3 +391,6 @@ Review plays rendered MP4 Worker deploy: 2026-09-07 - Do not map the cover PNG i
 YouTube public source Worker deploy: 2026-09-07 - Do not start YTP1 on a Drive view URL. Restage AP0 after Source download failed 401, then upload the public MP4. Worker 0.10.276-youtube-public-source.
 
 Autonomous topic-dedupe Worker deploy: 2026-09-07 - Occupied harvest sorts Create_Date, named-place conflict, AM/PM slot stays claimed after skipped+idea_id, desk flags same-place extras and YouTube YT1 Drive Failed, heal AP0 those Shorts. Worker 0.10.277-autonomous-topic-dedupe.
+
+YouTube 375 public MP4 Worker deploy: 2026-09-07 - Heal YT1 Ready to Publish as well as Failed. Stream Drive finals onto publish/ in 16MB multipart parts (Worker isolate, not a 121MB Windows PUT). Clear stale YouTube_Upload_Job_ID then pulse YTP1. Keep thumbnails.set; do not send thumb_offset. Worker 0.10.278-youtube-375-public-mp4.
+
