@@ -66,6 +66,10 @@ public/frames/
 # Studio Support screen grabs
 !apps/studio-web/assets/support/*.jpg
 
+# Regression runner rotation pointer and local pytest venv
+tests/regression/state/
+tests/regression/.venv/
+
 # OS / IDE
 .DS_Store
 Thumbs.db

@@ -2,6 +2,12 @@
   "name": "sm-pipeline-v2",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --test apps/studio-api/*.test.mjs apps/studio-ez-plan/*.test.mjs apps/studio-web/*.test.mjs apps/studio-variant-service/worker.test.mjs apps/tasks-api/worker.test.mjs apps/studio-title-edit/contract.test.mjs apps/studio-upload-preview/contract.test.mjs apps/tiktok-overlay/contract.test.mjs tests/regression/*.test.mjs",
+    "test:regression": "python tests/regression/runner.py hermetic",
+    "test:regression:health": "python tests/regression/runner.py health",
+    "test:regression:list": "python tests/regression/runner.py list"
+  },
   "dependencies": {
     "ai-activity-logger": "file:ai-activity-logger"
   }

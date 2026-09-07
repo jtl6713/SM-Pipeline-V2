@@ -1,0 +1,257 @@
+name: Regression suite
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: What to run
+        required: true
+        default: next
+        type: choice
+        options:
+          - next
+          - functional_only
+          - health_only
+          - svc-pipeline
+          - svc-youtube
+          - svc-watermark
+          - svc-voiceover
+          - svc-timing
+          - svc-frames
+          - svc-compressor
+          - svc-remotion
+          - mx1-single-native
+          - mx2-single-reel
+          - mx3-multi-slideshow
+          - mx4-stories-plus-feed
+          - mx5-youtube-standard
+          - cu-still-body
+          - cu-cover-first
+          - ez-finished-video
+          - ez-finished-stills
+          - ez-photos-and-clips
+          - ez-mixed-ai
+          - auto-reel
+          - auto-carousel
+          - idea-photo-wait
+          - ez-thumb-mode-no
+          - ez-caption-none
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-regression
+  cancel-in-progress: false
+
+jobs:
+  hermetic:
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.target != 'health_only' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r services/pipeline-runner/requirements.txt
+          pip install -r services/timing-engine/requirements.txt
+      - name: Hermetic packs
+        run: python tests/regression/runner.py hermetic
+
+  health:
+    needs: [hermetic]
+    if: ${{ always() && (needs.hermetic.result == 'success' || needs.hermetic.result == 'skipped') && (github.event_name == 'schedule' || github.event.inputs.target != 'functional_only') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Public local-service health sweep
+        run: python tests/regression/runner.py --public health
+
+  live:
+    needs: [health]
+    if: ${{ always() && needs.health.result == 'success' && (github.event_name == 'schedule' || (github.event.inputs.target != 'functional_only' && github.event.inputs.target != 'health_only')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-regression-bridge
+      BRIDGE_RETRY_MAX: "12"
+      BRIDGE_RETRY_SLEEP_S: "3"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/cache@v4
+        with:
+          path: tests/regression/state
+          key: regression-rotation
+
+      - name: Resolve live id
+        id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET="${{ github.event.inputs.target || 'next' }}"
+          if [[ "$TARGET" == "next" || "$TARGET" == "" ]]; then
+            ID=$(python tests/regression/runner.py pick)
+          else
+            ID="$TARGET"
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "picked=$ID"
+
+      - name: Run service smoke
+        if: ${{ startsWith(steps.pick.outputs.id, 'svc-') }}
+        run: python tests/regression/runner.py --public run ${{ steps.pick.outputs.id }}
+
+      - name: Capture production version
+        if: ${{ !startsWith(steps.pick.outputs.id, 'svc-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
+          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
+
+      - name: Build and upload one-time service bridge
+        if: ${{ !startsWith(steps.pick.outputs.id, 'svc-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, secrets
+          from pathlib import Path
+          token = secrets.token_urlsafe(36)
+          Path("/tmp/token").write_text(token)
+          js = r'''export default { async fetch(request, env) {
+            const u = new URL(request.url);
+            if (u.pathname !== ROUTE) return new Response("Not found", { status: 404 });
+            if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+            try {
+              const spec = await request.json();
+              const m = String(spec.method || "GET").toUpperCase();
+              const path = String(spec.path || "");
+              if (!(path === "/health" || path === "/api/health" || path.startsWith("/api/"))) {
+                return Response.json({ ok: false, error: "path-not-allowed" }, { status: 400 });
+              }
+              const h = new Headers({
+                "Cf-Access-Authenticated-User-Email": "joseph.t.logan@gmail.com",
+                "Accept": "application/json",
+                "Origin": "https://studio.chicagoshining.com",
+              });
+              let body;
+              if (m !== "GET" && m !== "HEAD") {
+                if (Array.isArray(spec.files) && spec.files.length) {
+                  const form = new FormData();
+                  for (const f of spec.files) {
+                    const bin = atob(String(f.b64 || ""));
+                    const bytes = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+                    form.append(String(f.field || "files"), new Blob([bytes], { type: f.content_type || "image/jpeg" }), String(f.filename || "photo.jpg"));
+                  }
+                  body = form;
+                } else {
+                  h.set("Content-Type", "application/json");
+                  body = JSON.stringify(spec.body ?? {});
+                }
+              }
+              const r = await env.STUDIO_API.fetch(new Request("https://studio.chicagoshining.com" + path, { method: m, headers: h, body }));
+              const t = await r.text();
+              let parsed;
+              try { parsed = t ? JSON.parse(t) : null; } catch { parsed = { raw: t.slice(0, 20000) }; }
+              return Response.json({ ok: r.ok, status: r.status, path, method: m, body: parsed }, { headers: { "Cache-Control": "no-store" } });
+            } catch (err) {
+              return Response.json({ ok: false, status: 500, error: String(err && err.message || err), retryable: true }, { status: 200, headers: { "Cache-Control": "no-store" } });
+            }
+          } };'''
+          js = js.replace("ROUTE", json.dumps("/" + token))
+          Path("/tmp/worker.js").write_text(js)
+          PY
+          node --check /tmp/worker.js
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/meta.json
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/content" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/meta.json;type=application/json' \
+            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300 && jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' \
+            --data '{"enabled":true,"previews_enabled":false}' -o /tmp/sub.json
+          jq -e '.success==true and .result.enabled==true' /tmp/sub.json >/dev/null
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-sub.json
+          jq -er '.result.subdomain' /tmp/account-sub.json >/tmp/subdomain
+
+      - name: Seed one Studio scenario
+        if: ${{ !startsWith(steps.pick.outputs.id, 'svc-') }}
+        shell: bash
+        env:
+          SEED_SCENARIO: ${{ steps.pick.outputs.id }}
+          SEED_RESULT_PATH: /tmp/seed-result.json
+        run: |
+          set -euo pipefail
+          URL="https://$BRIDGE_WORKER.$(cat /tmp/subdomain).workers.dev/$(cat /tmp/token)"
+          export BRIDGE_URL="$URL"
+          code=000
+          for i in $(seq 1 "$BRIDGE_RETRY_MAX"); do
+            code=$(curl -sS --max-time 30 -o /tmp/bridge-probe.json -w '%{http_code}' \
+              -H 'Content-Type: application/json' \
+              -d '{"method":"GET","path":"/api/session"}' "$URL" || true)
+            [[ "$code" == "200" ]] && break
+            sleep "$BRIDGE_RETRY_SLEEP_S"
+          done
+          test "$code" -eq 200
+          python tests/regression/runner.py run "$SEED_SCENARIO"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-${{ steps.pick.outputs.id }}
+          path: |
+            /tmp/seed-result.json
+            tests/regression/state/
+          if-no-files-found: ignore
+
+      - name: Delete temporary bridge
+        if: ${{ always() && !startsWith(steps.pick.outputs.id, 'svc-') }}
+        shell: bash
+        run: |
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+
+      - name: Verify production unchanged
+        if: ${{ always() && !startsWith(steps.pick.outputs.id, 'svc-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f /tmp/active-before.txt
+          BEFORE=$(cat /tmp/active-before.txt)
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
+          AFTER=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)
+          test "$BEFORE" = "$AFTER"
