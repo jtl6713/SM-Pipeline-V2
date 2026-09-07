@@ -232,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.258-az-navy-unstick",
+          version: "0.10.259-az-navy-outputs",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -7378,6 +7378,111 @@ async function azAutoApproveIfReady(env, requestId) {
   return { ok: true, approved_count: approved.length, campaign: planned.campaign, rationale: planned.rationale };
 }
 
+async function azBuildPlanItems(env, record) {
+  const assets = item4AssetManifest(record);
+  const photoCount = Math.max(1, item4EffectivePhotoCount(record, assets) || assets.length || 1);
+  const hasVideo = true;
+  const mappingIndex = await item4MappingIndex(env);
+  const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
+  const existingItems = Array.isArray(existingPlan?.items) ? existingPlan.items : [];
+  if (existingItems.length) {
+    return existingItems
+      .map((item) => ({
+        platform: String(item?.platform || "").trim(),
+        output_type: String(item?.output_type || "").trim(),
+        aspect_ratio: String(item?.aspect_ratio || "").trim() || null,
+        companion: Boolean(item?.companion) || item4IsCompanionOutputType(item?.output_type),
+      }))
+      .filter((item) => item.platform && item.output_type);
+  }
+  const items = [];
+  for (const platform of AZ_DEFAULT_PLATFORMS) {
+    const requested = AZ_DEFAULT_OVERRIDES[platform] || "";
+    try {
+      const chosen = item4PlanChoice(platform, requested, photoCount, { hasVideo, packageId: "video" });
+      items.push(item4PlanItemFromChoice(platform, chosen, photoCount, mappingIndex));
+    } catch (error) {
+      console.warn("AZ default plan item failed", platform, error);
+    }
+  }
+  const extras = item4NormalizePlanExtras([...AZ_DEFAULT_EXTRAS], [...AZ_DEFAULT_PLATFORMS], items);
+  for (const extra of extras) {
+    try {
+      const chosen = item4PlanChoice(extra.platform, extra.output_type, photoCount, { hasVideo, packageId: "video" });
+      items.push(item4PlanItemFromChoice(extra.platform, chosen, photoCount, mappingIndex, { companion: extra.companion }));
+    } catch {
+      continue;
+    }
+  }
+  return items;
+}
+
+async function azEnsurePlatformOutputs(env, requestRecord) {
+  if (!requestRecord?.id) return { skipped: "missing_request" };
+  const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+  if (!contentId) return { waiting: "content", production_request_id: requestRecord.id };
+
+  let proRows = await outputRowsForProductionRequest(env, requestRecord.id);
+  let enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
+  let synced = false;
+  if (!enabled.length) {
+    const items = await azBuildPlanItems(env, requestRecord);
+    if (!items.length) return { error: "no_plan_items", production_request_id: requestRecord.id };
+    await item4SyncPlanOutputs(env, requestRecord, items);
+    const needsReview = items.some((item) => !item.aspect_ratio);
+    const plan = {
+      schema_version: "item4.output-plan.1",
+      generated_at: new Date().toISOString(),
+      production_request_record_id: requestRecord.id,
+      source_asset_count: Math.max(1, item4AssetManifest(requestRecord).length),
+      photo_count_kind: "exact",
+      items,
+      recovered_by: "az-ensure-outputs",
+    };
+    requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
+      Studio_Output_Plan_JSON: JSON.stringify(plan),
+      Studio_Output_Plan_Status: needsReview ? "Needs Review" : "Ready",
+      Target_Platforms: [...new Set(items.map((item) => item.platform))],
+    });
+    proRows = await outputRowsForProductionRequest(env, requestRecord.id);
+    enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
+    synced = true;
+  }
+
+  const missingPo = enabled.filter((row) => !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
+  const existingPo = await azPlatformOutputsForRequest(env, requestRecord.id);
+  if (existingPo.length && !missingPo.length) {
+    return {
+      ok: true,
+      already: true,
+      synced,
+      enabled_output_count: enabled.length,
+      platform_output_count: existingPo.length,
+      production_request_id: requestRecord.id,
+      content_item_id: contentId,
+    };
+  }
+
+  const fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, contentId);
+  const after = await azPlatformOutputsForRequest(env, requestRecord.id);
+  console.log(`AZ ensure platform outputs ${JSON.stringify({
+    requestId: requestRecord.id,
+    synced,
+    enabled: enabled.length,
+    fanout,
+    platform_outputs: after.length,
+  })}`);
+  return {
+    ok: true,
+    synced,
+    fanout,
+    enabled_output_count: enabled.length,
+    platform_output_count: after.length,
+    production_request_id: requestRecord.id,
+    content_item_id: contentId,
+  };
+}
+
 async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null) {
   if (!requestId) return { skipped: "missing_request" };
   let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
@@ -7398,14 +7503,17 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
   }
   const planStatus = String(f(record, "Studio_Output_Plan_Status") || "").trim();
   if (planStatus !== "Ready") {
-    const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
-      platforms: [...AZ_DEFAULT_PLATFORMS],
-      overrides: { ...AZ_DEFAULT_OVERRIDES },
-      extras: [...AZ_DEFAULT_EXTRAS],
-      package: "video",
-    });
-    await buildItem4OutputPlan(planCall.request, env, planCall.url, auth);
-    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    const editable = ["Draft", "Ready"].includes(String(f(record, "Request_Status") || "").trim());
+    if (editable) {
+      const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
+        platforms: [...AZ_DEFAULT_PLATFORMS],
+        overrides: { ...AZ_DEFAULT_OVERRIDES },
+        extras: [...AZ_DEFAULT_EXTRAS],
+        package: "video",
+      });
+      await buildItem4OutputPlan(planCall.request, env, planCall.url, auth);
+      record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    }
   }
   if (studioIsFinishedPassthrough(record)) {
     const variantStatus = String(f(record, "Studio_Variant_Status") || "").trim();
@@ -7432,7 +7540,18 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
     }
     if (status === "Submitted") return { waiting: "awaiting_i4", production_request_id: requestId };
   }
+  let ensureOutputs = null;
   if (status === "Promoted") {
+    const existingOutputs = await azPlatformOutputsForRequest(env, requestId);
+    if (!existingOutputs.length) {
+      try {
+        ensureOutputs = await azEnsurePlatformOutputs(env, record);
+        record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+      } catch (error) {
+        ensureOutputs = { error: error instanceof Error ? error.message : String(error) };
+        console.warn("AZ ensure platform outputs failed", requestId, error);
+      }
+    }
     try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
       console.warn("AZ produce enqueue failed", requestId, error);
     }
@@ -7440,7 +7559,8 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
       console.warn("AZ continuation after produce failed", requestId, error);
     }
   }
-  return azAutoApproveIfReady(env, requestId);
+  const approve = await azAutoApproveIfReady(env, requestId);
+  return ensureOutputs ? { ...approve, ensure_outputs: ensureOutputs } : approve;
 }
 
 async function opsForceAzNavyPierTitle(env) {
@@ -7515,6 +7635,8 @@ async function opsForceAzNavyPierTitle(env) {
   }
 
   const job = parseStudioProductionJob(record);
+  const proRows = await outputRowsForProductionRequest(env, requestId).catch(() => []);
+  const platformOutputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
   const diagnostic = {
     requestId,
     title,
@@ -7534,6 +7656,20 @@ async function opsForceAzNavyPierTitle(env) {
       media_asset: Boolean(asset?.media_asset_record_id),
       public_url: Boolean(item4FinishedPublicUrl(asset)),
     })),
+    pro_rows: {
+      active: proRows.length,
+      enabled: proRows.filter((row) => Boolean(f(row, "Enabled"))).length,
+      with_platform_output: proRows.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length,
+      rows: proRows.slice(0, 12).map((row) => ({
+        id: row.id,
+        platform: f(row, "Platform") || null,
+        output_type: f(row, "Output_Type") || null,
+        enabled: Boolean(f(row, "Enabled")),
+        platform_output: studioFirstLinkedId(f(row, "Platform_Output")) || null,
+        route_status: f(row, "Pipeline_Route_Status") || null,
+      })),
+    },
+    platform_output_count: platformOutputs.length,
     production_job_step: job?.step || null,
     production_job_detail: job?.detail || null,
     production_job_error: job?.error || null,
@@ -7561,6 +7697,49 @@ async function opsForceAzNavyPierTitle(env) {
     console.warn("ops az navy pier advance failed", requestId, error);
   }
   console.log(`ops az navy pier advance ${JSON.stringify({ requestId, advance })}`);
+
+  try {
+    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    const proAfter = await outputRowsForProductionRequest(env, requestId).catch(() => []);
+    const poAfter = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
+    const jobAfter = parseStudioProductionJob(record);
+    diagnostic.request_status = f(record, "Request_Status") || null;
+    diagnostic.plan_status = f(record, "Studio_Output_Plan_Status") || null;
+    diagnostic.variant_status = f(record, "Studio_Variant_Status") || null;
+    diagnostic.pro_rows = {
+      active: proAfter.length,
+      enabled: proAfter.filter((row) => Boolean(f(row, "Enabled"))).length,
+      with_platform_output: proAfter.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length,
+      rows: proAfter.slice(0, 12).map((row) => ({
+        id: row.id,
+        platform: f(row, "Platform") || null,
+        output_type: f(row, "Output_Type") || null,
+        enabled: Boolean(f(row, "Enabled")),
+        platform_output: studioFirstLinkedId(f(row, "Platform_Output")) || null,
+        route_status: f(row, "Pipeline_Route_Status") || null,
+      })),
+    };
+    diagnostic.platform_output_count = poAfter.length;
+    diagnostic.production_job_step = jobAfter?.step || null;
+    diagnostic.production_job_detail = jobAfter?.detail || null;
+    diagnostic.production_job_error = jobAfter?.error || null;
+    if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
+      const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+      if (content) {
+        diagnostic.content = {
+          id: contentId,
+          content_title: String(f(content, "Content_Title") || "").trim() || title,
+          content_status: f(content, "Content_Status") || null,
+          thumbnail_status: f(content, "Thumbnail_Status") || null,
+          thumbnail_url: Boolean(studioAiThumbnailUrl(f(content, "Thumbnail_URL"))),
+          platform_outputs: arrayOrEmpty(f(content, "Platform Outputs")).length,
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("ops az navy pier post-advance diagnostic refresh failed", requestId, error);
+  }
+
   return { ok: true, diagnostic, compress, advance };
 }
 
