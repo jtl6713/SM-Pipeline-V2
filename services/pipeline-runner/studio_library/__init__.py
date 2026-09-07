@@ -1,1 +1,1 @@
-"""Studio Asset Library Drive ingest."""
+"""Studio Asset Manager Drive ingest."""

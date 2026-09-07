@@ -1,4 +1,4 @@
-"""Store Studio Asset Library uploads in Drive photos/video folders. No R2."""
+"""Store Studio Asset Manager uploads in Drive photos/video folders. No R2."""
 
 from __future__ import annotations
 
@@ -134,4 +134,20 @@ def trash_studio_library_asset(*, file_id: str) -> dict[str, Any]:
         "ok": True,
         "google_drive_file_id": drive_id,
         "trashed": bool(result.get("trashed")),
+    }
+
+
+def rename_studio_library_asset(*, file_id: str, filename: str) -> dict[str, Any]:
+    drive_id = str(file_id or "").strip()
+    name = str(filename or "").strip()
+    if not drive_id:
+        raise ValueError("google_drive_file_id is required")
+    if not name:
+        raise ValueError("filename is required")
+    drive = GoogleDriveClient()
+    result = drive.rename_file(drive_id, name)
+    return {
+        "ok": True,
+        "google_drive_file_id": drive_id,
+        "filename": str(result.get("name") or name),
     }

@@ -61,6 +61,23 @@ def _classification_fields(parsed: dict[str, Any], *, overrides: dict[str, Any] 
     return {key: value for key, value in fields.items() if value is not None}
 
 
+def normalize_record_ids(value: Any) -> list[str]:
+    if value is None or value is False:
+        return []
+    if isinstance(value, str):
+        items = [value]
+    elif isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        items = [value]
+    ids: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if text.startswith("rec") and text not in ids:
+            ids.append(text)
+    return ids
+
+
 def _frame_urls(payload: dict[str, Any]) -> tuple[int, list[str], list[str]]:
     count = parse_int(payload.get("frames_analyzed_count"), 0) or 0
     frames = payload.get("frames") or []
@@ -173,6 +190,7 @@ def process_request(
     test_run_id: str | None = None,
     max_records: int | None = None,
     drain: bool = False,
+    record_ids: Any = None,
 ) -> dict[str, Any]:
     preview: dict[str, Any] = {
         "make_scenario_id": MAKE_SCENARIO_ID,
@@ -181,6 +199,7 @@ def process_request(
     }
     client = AirtableClient()
     limit = parse_int(max_records, A3_MAX_RECORDS) or A3_MAX_RECORDS
+    targeted = normalize_record_ids(record_ids)
 
     def _load_rows() -> list[dict[str, Any]]:
         return client.list_records(
@@ -191,6 +210,41 @@ def process_request(
             sort_direction="asc",
         )
 
+    classified: list[dict[str, Any]] = []
+    if targeted:
+        rows: list[dict[str, Any]] = []
+        for record_id in targeted:
+            try:
+                rows.append(client.get_record(MEDIA_ASSETS_TABLE, record_id))
+            except Exception as exc:
+                classified.append({"id": record_id, "status": "missing", "error": str(exc)})
+        preview["candidate_ids"] = [row["id"] for row in rows]
+        preview["requested_ids"] = targeted
+        preview["routes"] = [
+            {"id": row["id"], "mime": field_str(row, "MIME_Type"), "route": a3_mime_route(field_str(row, "MIME_Type"))}
+            for row in rows
+        ]
+        if dry_run:
+            return {"processed": False, "dry_run": True, **preview}
+        for row in rows:
+            classified.append(_classify_one(client, row))
+        preview["classified"] = classified
+        preview["classify_passes"] = 1
+        classified_ok = [item for item in classified if item.get("status") not in {"missing", "unsupported"}]
+        if not classified_ok and not any(item.get("status") == "unsupported" for item in classified):
+            return {
+                "processed": False,
+                "reason": "record_not_found",
+                "classified_count": 0,
+                **preview,
+            }
+        return {
+            "processed": True,
+            "classified_count": len(classified_ok),
+            "a4": None,
+            **preview,
+        }
+
     rows = _load_rows()
     preview["candidate_ids"] = [row["id"] for row in rows]
     preview["routes"] = [
@@ -200,7 +254,6 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **preview}
 
-    classified: list[dict[str, Any]] = []
     passes = 0
     while True:
         passes += 1

@@ -85,6 +85,7 @@ def health():
                 {"name": "studio-produce-ops-alert", "path": "/jobs/studio-produce/ops-alert"},
                 {"name": "studio-music-library", "path": "/jobs/studio-music-library"},
                 {"name": "studio-asset-library", "path": "/jobs/studio-asset-library"},
+                {"name": "studio-asset-library-rename", "path": "/jobs/studio-asset-library-rename"},
                 {"name": "autonomous-pick", "path": "/jobs/autonomous-pick"},
             ],
         }
@@ -436,6 +437,30 @@ def run_studio_asset_library_delete():
         logger.exception("studio-asset-library-delete failed")
         return jsonify({"error": str(exc)}), 502
     logger.info("job=studio-asset-library-delete drive=%s", result.get("google_drive_file_id"))
+    return jsonify(result), 200
+
+
+@app.post("/jobs/studio-asset-library-rename")
+def run_studio_asset_library_rename():
+    error_response, status = _verify_secret()
+    if error_response is not None:
+        return error_response, status
+    payload = request.get_json(silent=True) or {}
+    file_id = str(payload.get("google_drive_file_id") or payload.get("file_id") or "").strip()
+    filename = str(payload.get("filename") or payload.get("name") or "").strip()
+    from studio_library.processor import rename_studio_library_asset
+    try:
+        result = rename_studio_library_asset(file_id=file_id, filename=filename)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        logger.exception("studio-asset-library-rename failed")
+        return jsonify({"error": str(exc)}), 502
+    logger.info(
+        "job=studio-asset-library-rename drive=%s file=%s",
+        result.get("google_drive_file_id"),
+        result.get("filename"),
+    )
     return jsonify(result), 200
 
 

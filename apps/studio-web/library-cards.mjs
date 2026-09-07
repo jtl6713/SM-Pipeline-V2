@@ -1,5 +1,5 @@
 // Keep these helpers aligned with apps/studio-web/assets/app-item4-0619.js
-// (Asset Library card date, duration, file size, and published-file labels).
+// (Asset Manager card date, duration, file size, and published-file labels).
 
 export function formatLibraryClipDuration(seconds) {
   const value = Number(seconds);

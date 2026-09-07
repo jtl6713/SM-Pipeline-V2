@@ -203,6 +203,15 @@ class GoogleDriveClient:
         response.raise_for_status()
         return response.json()
 
+    def rename_file(self, file_id: str, name: str) -> dict[str, Any]:
+        filename = str(name or "").strip()
+        drive_id = str(file_id or "").strip()
+        if not drive_id:
+            raise ValueError("file_id is required")
+        if not filename:
+            raise ValueError("name is required")
+        return self.update_metadata(drive_id, name=filename)
+
     def search_trash_by_name(self, name: str) -> list[dict[str, Any]]:
         escaped = (name or "").replace("\\", "\\\\").replace("'", "\\'")
         return self.list_files(

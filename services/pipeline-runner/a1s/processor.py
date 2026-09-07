@@ -282,7 +282,12 @@ def process_request(
     for item in files:
         file_id = str(item.get("id") or "")
         has_job = bool(_active_job(client, file_id)) if file_id else False
-        reason = eligibility_reason(item, threshold_bytes=threshold, has_active_job=has_job)
+        reason = eligibility_reason(
+            item,
+            threshold_bytes=threshold,
+            has_active_job=has_job,
+            check_job=not dry_run,
+        )
         row = {"id": file_id, "name": item.get("name"), "size": parse_bytes(item.get("size"))}
         if reason:
             skipped.append({**row, "reason": reason})

@@ -224,3 +224,24 @@ export function publishedLibraryObjectKey(record) {
   }
   return "";
 }
+
+const LIBRARY_ASSET_NAME_MAX = 120;
+
+export function sanitizeLibraryAssetName(raw) {
+  let name = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!name) return { ok: false, error: "Name is required" };
+  if (/[\\/\0]/.test(name)) {
+    return { ok: false, error: "Name cannot contain path characters" };
+  }
+  name = name.replace(/\.[A-Za-z0-9]{1,8}$/, "").trim();
+  if (!name) return { ok: false, error: "Name is required" };
+  if (name.length > LIBRARY_ASSET_NAME_MAX) name = name.slice(0, LIBRARY_ASSET_NAME_MAX).trim();
+  if (!name) return { ok: false, error: "Name is required" };
+  return { ok: true, name };
+}
+
+export function libraryDriveFilename(stem, extension) {
+  const safe = String(stem || "asset").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, LIBRARY_ASSET_NAME_MAX) || "asset";
+  const ext = String(extension || "").replace(/^\./, "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 8);
+  return ext ? `${safe}.${ext}` : safe;
+}

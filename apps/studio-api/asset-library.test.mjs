@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   collectJsonDriveIds,
   coerceLibraryDurationSeconds,
+  libraryDriveFilename,
   libraryRecordFileBytes,
   mapPublishedLibraryFile,
   publishedDurationSeconds,
@@ -12,6 +13,7 @@ import {
   publishedLibraryObjectKey,
   publicMediaObjectKey,
   publishedReleaseFields,
+  sanitizeLibraryAssetName,
 } from "./asset-library.mjs";
 
 function output(fields) {
@@ -168,4 +170,12 @@ test("blank duration is not coerced to zero", () => {
   assert.equal(coerceLibraryDurationSeconds(0), null);
   assert.equal(coerceLibraryDurationSeconds(42.4), 42);
   assert.equal(publishedDurationSeconds({ fields: { Studio_Effective_Video_Duration_Seconds: 30 } }), null);
+});
+
+test("library rename sanitizes stem and Drive filename", () => {
+  assert.deepEqual(sanitizeLibraryAssetName("  Oak Street Beach.jpg "), { ok: true, name: "Oak Street Beach" });
+  assert.equal(sanitizeLibraryAssetName("").ok, false);
+  assert.equal(sanitizeLibraryAssetName("a/b").ok, false);
+  assert.equal(libraryDriveFilename("Oak Street Beach", "jpg"), "Oak-Street-Beach.jpg");
+  assert.equal(libraryDriveFilename("Oak Street Beach", ".PNG"), "Oak-Street-Beach.png");
 });

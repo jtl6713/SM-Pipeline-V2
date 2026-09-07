@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.263-desk-inventory">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.265-oversized-list">
 </head>
 <body>
  <header class="topbar">
@@ -35,8 +35,8 @@
  <button class="nav-item" data-page="ideas">Ideas</button>
  <button class="nav-item" data-page="content">Production</button>
  <button class="nav-item" data-page="outputs">Pipeline</button>
- <button class="nav-item" data-page="music">Music Library</button>
- <button class="nav-item" data-page="library">Asset Library</button>
+ <button class="nav-item" data-page="music">Music Manager</button>
+ <button class="nav-item" data-page="library">Asset Manager</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
  <button class="nav-item nav-item-footer-only" data-page="support">Support</button>
  </nav>
@@ -1018,7 +1018,7 @@
  </section>
 
  <section id="page-music" class="page">
- <div class="page-heading"><div><span class="eyebrow">Background audio</span><h1>Music library</h1><p>Add MP3 or WAV tracks, star favorites so they sit at the top of Production music dropdowns, preview a bed, or delete a track that nothing still uses.</p></div><div class="heading-actions"><button type="button" class="primary-button" id="musicAddButton">+ Add tracks</button><button class="secondary-button" data-refresh="music">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow">Background audio</span><h1>Music Manager</h1><p>Add MP3 or WAV tracks, star favorites so they sit at the top of Production music dropdowns, preview a bed, or delete a track that nothing still uses.</p></div><div class="heading-actions"><button type="button" class="primary-button" id="musicAddButton">+ Add tracks</button><button class="secondary-button" data-refresh="music">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="musicUploadPanel">
  <div class="panel-heading"><div><h2>Add tracks</h2><p>Drop MP3 or WAV files here. WAV files are converted to MP3, then stored in Google Drive Assets/Music, registered as Media Assets, and become selectable in Production.</p></div></div>
  <div class="music-upload-body">
@@ -1036,7 +1036,7 @@
  </section>
 
  <section id="page-library" class="page">
- <div class="page-heading"><div><span class="eyebrow" id="libraryEyebrow">Photos and clips</span><h1>Asset library</h1><p id="libraryBlurb">Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow" id="libraryEyebrow">Photos and clips</span><h1>Asset Manager</h1><p id="libraryBlurb">Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, rename a still or clip to refresh classification, or delete an unused Studio upload. Production and the wizard attach from this same catalogue. Published files is a separate list of live Platform Outputs.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,video/*,.heic,.heif,.mp4,.mov,.m4v,.webm" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="libraryUploadPanel">
  <div id="libraryDropBlock">
  <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Files go to Google Drive (photos or video folders), register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
@@ -1220,7 +1220,7 @@
  <div id="operationsPublishList" class="table-wrap"></div>
  </section>
  <section class="panel">
- <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or asset library. Compress runs A1S one file at a time. When a clip finishes, the next oversized file starts immediately, then intake records and moves the compressed file without waiting for the next 10-minute scan. Compress all starts the queue now.</p></div>
+ <div class="panel-heading"><div><h2>Oversized library videos</h2><p>Files over 100 MB in the ingestion folder or Asset Manager. Compress runs A1S one file at a time. When a clip finishes, the next oversized file starts immediately, then intake records and moves the compressed file without waiting for the next 10-minute scan. Compress all starts the queue now.</p></div>
  <button type="button" class="secondary-button" id="operationsCompressAllOversized" hidden>Compress all in intake folder</button>
  </div>
  <div id="operationsCompressionStatus" class="ops-compression-status" hidden></div>
@@ -1247,8 +1247,8 @@
  <button type="button" class="support-toc-link" data-support-doc="ideas">Ideas</button>
  <button type="button" class="support-toc-link" data-support-doc="production">Production</button>
  <button type="button" class="support-toc-link" data-support-doc="pipeline">Pipeline</button>
- <button type="button" class="support-toc-link" data-support-doc="music">Music Library</button>
- <button type="button" class="support-toc-link" data-support-doc="library">Asset Library</button>
+ <button type="button" class="support-toc-link" data-support-doc="music">Music Manager</button>
+ <button type="button" class="support-toc-link" data-support-doc="library">Asset Manager</button>
  <button type="button" class="support-toc-link" data-support-doc="operations">Operations</button>
  </nav>
  <div class="support-docs">
@@ -1387,7 +1387,7 @@
  <li><strong>Promoted content items</strong> — work that already entered render. Open Pipeline to review those outputs.</li>
  <li><strong>Advanced</strong> — exact titles, voiceover tail, extra output types. Empty EZ defaults do not overwrite saved Pipeline direction.</li>
  </ul>
- <p>Save often while uploading. Approve &amp; Promote is the handoff into render. Music tracks shown here come from the Music Library catalogue.</p>
+ <p>Save often while uploading. Approve &amp; Promote is the handoff into render. Music tracks shown here come from the Music Manager catalogue.</p>
  <button type="button" class="primary-button" data-open-page="content">Go to Production</button>
  </article>
  <article class="support-article" data-support-article="pipeline" hidden>
@@ -1407,31 +1407,32 @@
  <button type="button" class="primary-button" data-open-page="outputs">Go to Pipeline</button>
  </article>
  <article class="support-article" data-support-article="music" hidden>
- <h2>Music Library</h2>
+ <h2>Music Manager</h2>
  <figure class="support-shot">
- <img src="/assets/support/music.jpg?v=0.6.102" alt="Music library track cards" width="1440" height="920">
+ <img src="/assets/support/music.jpg?v=0.6.102" alt="Music Manager track cards" width="1440" height="920">
  <figcaption>Cleared tracks from the Airtable catalogue. Production still decides Yes/No and the mix in Pipeline review.</figcaption>
  </figure>
- <p>Music Library is the Airtable background-music catalogue plus tracks you add as MP3 or WAV files.</p>
+ <p>Music Manager is the Airtable background-music catalogue plus tracks you add as MP3 or WAV files.</p>
  <ul>
  <li>Browse and preview tracks before or during Production.</li>
  <li>Use + Add tracks or drop MP3/WAV files on this page. WAV files convert to MP3. New tracks show up in Production music pickers.</li>
  <li>Delete removes the Airtable row and trashes the Drive file. Studio blocks delete if a Production Request or Content Item still selects that track.</li>
  <li>It does not start a render. Production still decides Include background music Yes/No and the mix in Pipeline review.</li>
  </ul>
- <button type="button" class="primary-button" data-open-page="music">Go to Music Library</button>
+ <button type="button" class="primary-button" data-open-page="music">Go to Music Manager</button>
  </article>
  <article class="support-article" data-support-article="library" hidden>
- <h2>Asset Library</h2>
- <p>Asset Library is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
+ <h2>Asset Manager</h2>
+ <p>Asset Manager is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
  <ul>
  <li>The tab opens on the 5 newest assets. Cards show an Added date when Intake_Date is known, file size when File_Size_Bytes or File_Size_MB is stored, and clips show duration (0:42 or 1:02:03) when Duration_Seconds is stored or can be measured. Use Show this many on page, then Previous and Next. Search by name or location. Opening the tab does not load every thumbnail.</li>
  <li>Use + Add assets or drop files on this page. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
+ <li>Rename updates the Airtable name and the Drive file, then re-runs classification so tags, location, and description pick up the new name.</li>
  <li>Delete removes the Airtable row and trashes the Drive file when nothing still has that asset attached.</li>
  <li>Show → Published files lists live Platform Outputs, not source stills or clips. Open live post confirms the public URL. Remove Drive copy trashes the rendered Drive file and keeps the Platform Output row, publish date, and post link for reporting.</li>
  <li>Library intake on Operations still scans the Drive intake folder for files that did not come through this page.</li>
  </ul>
- <button type="button" class="primary-button" data-open-page="library">Go to Asset Library</button>
+ <button type="button" class="primary-button" data-open-page="library">Go to Asset Manager</button>
  </article>
  <article class="support-article" data-support-article="operations" hidden>
  <h2>Operations</h2>
@@ -1611,8 +1612,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.263-desk-inventory"></script>
- <script src="/assets/ez-plan.js?v=0.6.263-desk-inventory"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.263-desk-inventory"></script>
+ <script src="/assets/config.js?v=0.6.265-oversized-list"></script>
+ <script src="/assets/ez-plan.js?v=0.6.265-oversized-list"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.265-oversized-list"></script>
 </body>
 </html>
