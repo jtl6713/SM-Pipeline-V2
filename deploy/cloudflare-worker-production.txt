@@ -381,3 +381,5 @@ A3 HEIC classify Worker deploy: 2026-09-07 - Intake no longer reports A3 finishe
 Autonomous Service Agent Worker deploy: 2026-09-07 - GET /api/ops/desk/activity proxies Task Organizer desk_incident events. Worker 0.10.271-service-agent.
 
 Autonomous Service Agent inline-link Worker deploy: 2026-09-07 - Skip timing-engine public health until the hostname exists. Activity log still uses GET /api/ops/desk/activity. Worker 0.10.272-agent-links.
+
+Intake parked Worker deploy: 2026-09-07 - Cron drains leftover Drive Ingestion files through A2 so a single failed clip cannot stall the folder. Desk inventory classifies under-100 MB residue as intake_parked. Worker 0.10.273-intake-parked.

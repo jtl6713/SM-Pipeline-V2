@@ -44,6 +44,90 @@ def test_process_request_skips_and_trashes_existing_files(monkeypatch):
     assert airtable.create_records.call_count == 1
 
 
+def test_process_request_continues_after_one_file_fails(monkeypatch):
+    drive = MagicMock()
+    drive.list_files.return_value = [
+        {"id": "bad1", "name": "Broken.MOV", "mimeType": "video/quicktime", "size": "100", "fileExtension": "MOV"},
+        {"id": "ok1", "name": "Fine.MOV", "mimeType": "video/quicktime", "size": "200", "fileExtension": "MOV"},
+    ]
+    drive.share_anyone_reader.return_value = {"webContentLink": "https://drive.example/ok"}
+    drive.move_file.return_value = {"id": "ok1", "webContentLink": "https://drive.example/moved"}
+    airtable = MagicMock()
+    airtable.list_records.return_value = []
+    airtable.create_records.side_effect = [RuntimeError("unknown field"), [{"id": "recOK"}]]
+    gmail = MagicMock()
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "video")
+    monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
+        "Media_Class": "Video",
+        "Asset_Role": "Raw Footage",
+        "Raw_Source_Eligibility": "Eligible",
+    })
+    monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
+
+    result = process_request(dry_run=False, trigger_a2b=False)
+    assert result["intaken_count"] == 1
+    assert result["skipped_error_count"] == 1
+    assert result["skipped_error_ids"] == ["bad1"]
+    assert result["intaken_ids"] == ["recOK"]
+    drive.move_file.assert_called_once()
+
+
+def test_process_request_intakes_when_gmail_fails(monkeypatch):
+    drive = MagicMock()
+    drive.list_files.return_value = [
+        {"id": "ok1", "name": "Fine.MOV", "mimeType": "video/quicktime", "size": "200", "fileExtension": "MOV"},
+    ]
+    drive.share_anyone_reader.return_value = {"webContentLink": "https://drive.example/ok"}
+    drive.move_file.return_value = {"id": "ok1", "webContentLink": "https://drive.example/moved"}
+    airtable = MagicMock()
+    airtable.list_records.return_value = []
+    airtable.create_records.return_value = [{"id": "recOK"}]
+    gmail = MagicMock()
+    gmail.send_html.side_effect = RuntimeError("gmail down")
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "video")
+    monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
+        "Media_Class": "Video",
+        "Asset_Role": "Raw Footage",
+        "Raw_Source_Eligibility": "Eligible",
+    })
+    monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
+
+    result = process_request(dry_run=False, trigger_a2b=False)
+    assert result["intaken_count"] == 1
+    assert result["intaken_ids"] == ["recOK"]
+    drive.move_file.assert_called_once()
+
+
+def test_create_intake_records_drops_unknown_duration_field():
+    from a2.processor import create_intake_records
+
+    client = MagicMock()
+
+    def create(table, records, **_kwargs):
+        fields = records[0]
+        if "Duration_Seconds" in fields:
+            response = MagicMock(text='UNKNOWN_FIELD_NAME: Unknown field name: "Duration_Seconds"', status_code=422)
+            exc = RuntimeError("422 Client Error")
+            exc.response = response
+            raise exc
+        return [{"id": "recOK"}]
+
+    client.create_records.side_effect = create
+    created = create_intake_records(client, {"Asset Name": "clip.mov", "Duration_Seconds": 12})
+    assert created[0]["id"] == "recOK"
+    assert "Duration_Seconds" not in client.create_records.call_args_list[-1].args[1][0]
+
+
 def test_drain_until_idle_processes_a_second_batch(monkeypatch):
     from a2.processor import drain_until_idle
 

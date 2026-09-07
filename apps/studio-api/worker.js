@@ -7,6 +7,7 @@ import {
   classifyAutonomousRequest,
   classifyCropRow,
   classifyHealthTarget,
+  classifyIntakeResidue,
   classifyPreparingGap,
   classifyProduceJob,
   classifyRenderRow,
@@ -261,7 +262,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.272-agent-links",
+          version: "0.10.273-intake-parked",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -278,6 +279,7 @@ export default {
           studio_library_rename_v1: true,
           studio_library_heic_preview_v1: true,
           studio_a3_heic_jpeg_v1: true,
+          studio_intake_parked_heal_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -1221,6 +1223,15 @@ export default {
         await item4PulsePipelineStage(env, "a1s", { extra: {} }, "A1S");
       } catch (error) {
         console.warn("a1s ingestion scan failed", error);
+      }
+      try {
+        // Eligible leftover files (already-small clips, HEICs, compressed replacements)
+        // must leave Ingestion without a human clicking Process intake.
+        await item4PulsePipelineStage(env, "a2", {
+          extra: { drain: true, trigger_a2b: true, wait_for_next: false },
+        }, "A2");
+      } catch (error) {
+        console.warn("a2 ingestion drain failed", error);
       }
     })());
     ctx.waitUntil(runStudioDailyIdeas(null, env, { permissions: { tenant_admin: true } }, ctx, {
@@ -28368,6 +28379,14 @@ async function gatherStudioDeskInventory(env) {
       job: { ...job, request_id: record.id },
       nowMs,
     }));
+  }
+
+  try {
+    const { response, payload } = await item4PulsePipelineStage(env, "a2", { extra: { dry_run: true } }, "A2");
+    const routes = response.ok ? (payload?.details?.run?.routes || []) : [];
+    for (const file of routes) push(classifyIntakeResidue(file));
+  } catch (error) {
+    console.warn("desk intake residue scan failed", error);
   }
 
   const health = [];

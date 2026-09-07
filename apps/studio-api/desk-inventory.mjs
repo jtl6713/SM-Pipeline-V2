@@ -225,6 +225,23 @@ export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now
   return null;
 }
 
+export const INTAKE_MAX_FILE_BYTES = 100000000;
+
+export function classifyIntakeResidue(file) {
+  const id = String(file?.id || "").trim();
+  if (!id) return null;
+  const size = Number(file?.size);
+  if (Number.isFinite(size) && size > INTAKE_MAX_FILE_BYTES) return null;
+  return {
+    kind: "intake_parked",
+    class: "transient",
+    record_id: id,
+    fingerprint: fingerprint("intake_parked", id, "ingestion_residue"),
+    name: String(file?.name || "").trim() || null,
+    actor: "worker_heal",
+  };
+}
+
 export function classifyHealthTarget(target, probe) {
   if (target?.public === false || probe?.skipped) return null;
   const id = String(target?.id || "service").trim();
