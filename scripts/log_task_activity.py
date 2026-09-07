@@ -64,7 +64,10 @@ def main() -> int:
         url,
         data=body,
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; ChicagoShiningStudio/1.0; +https://studio.chicagoshining.com)",
+        },
     )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
