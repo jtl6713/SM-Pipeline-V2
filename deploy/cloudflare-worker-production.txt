@@ -347,3 +347,5 @@ AZ 1.5 GB finished-video Worker deploy: 2026-09-07 - Raise finished-video / AZ m
 
 Asset Library file size Worker deploy: 2026-09-07 - GET /api/library returns file_size_bytes from File_Size_Bytes, with File_Size_MB as fallback, so Studio cards can show KB/MB/GB. Worker 0.10.254-library-size.
 
+Published library file size Worker deploy: 2026-09-07 - Published files read MP4 size from the R2 preview object because Platform Outputs have no File_Size_Bytes. Worker 0.10.255-library-pub-size.
+

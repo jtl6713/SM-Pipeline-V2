@@ -199,3 +199,28 @@ export function libraryRecordFileBytes(record) {
   if (mb) return Math.round(mb * 1024 * 1024);
   return 0;
 }
+
+export function publicMediaObjectKey(urlOrKey) {
+  let path = String(urlOrKey || "").trim();
+  if (!path) return "";
+  const host = "https://media.chicagoshining.com/";
+  if (path.startsWith(host)) path = path.slice(host.length);
+  path = path.split("?")[0].replace(/^\/+/, "");
+  if (!path || /\.(jpe?g|png|webp|gif)$/i.test(path)) return "";
+  if (path.startsWith("studio/previews/") || path.startsWith("publish/") || path.startsWith("studio/master-assets/")) return path;
+  return "";
+}
+
+export function publishedLibraryObjectKey(record) {
+  const candidates = [
+    field(record, "Studio_Preview_R2_Key"),
+    field(record, "Studio_Preview_URL"),
+    field(record, "Publish_Asset_URL"),
+    field(record, "Final_File_URL"),
+  ];
+  for (const value of candidates) {
+    const key = publicMediaObjectKey(value);
+    if (key) return key;
+  }
+  return "";
+}
