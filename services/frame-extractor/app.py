@@ -3,6 +3,7 @@ import uuid
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -10,16 +11,21 @@ import requests
 from flask import Flask, request, jsonify, send_from_directory
 
 from image_metadata import extract_image_metadata
+from scratch_ttl import env_hours, env_int, is_safe_job_id, remove_job_dir, start_hourly_sweep, sweep_root
 
 APP_PORT = int(os.environ.get("PORT", "3334"))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 WORK_DIR = Path(os.environ.get("WORK_DIR", "work")).resolve()
 FRAME_DIR = Path(os.environ.get("FRAME_DIR", "public/frames")).resolve()
+SCRATCH_TTL_HOURS = env_hours("FRAME_EXTRACTOR_TTL_HOURS", 24)
+SCRATCH_SWEEP_MAX_JOBS = env_int("FRAME_EXTRACTOR_SWEEP_MAX_JOBS", 50)
 
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 FRAME_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
+_active_jobs: set[str] = set()
+_active_lock = threading.Lock()
 
 
 def run_cmd(cmd):
@@ -178,6 +184,7 @@ def health():
         "supports_frame_selection_mode": True,
         "frame_selection_modes": ["even", "scene", "hybrid"],
         "supports_image_metadata": True,
+        "scratch_ttl_hours": SCRATCH_TTL_HOURS,
     })
 
 
@@ -212,6 +219,8 @@ def extract():
     video_path = WORK_DIR / f"{job_id}.mp4"
     job_frame_dir = FRAME_DIR / job_id
     job_frame_dir.mkdir(parents=True, exist_ok=True)
+    with _active_lock:
+        _active_jobs.add(job_id)
 
     try:
         download_file(download_url, video_path)
@@ -276,6 +285,8 @@ def extract():
         }), 200
 
     finally:
+        with _active_lock:
+            _active_jobs.discard(job_id)
         try:
             if video_path.exists():
                 video_path.unlink()
@@ -331,5 +342,67 @@ def frames(filename):
     return send_from_directory(FRAME_DIR, filename)
 
 
+def _active_job_ids() -> set[str]:
+    with _active_lock:
+        return set(_active_jobs)
+
+
+@app.get("/cleanup/report")
+@app.post("/cleanup/sweep")
+def cleanup_sweep():
+    payload = request.get_json(silent=True) or {}
+    dry_run = request.method == "GET" or bool(payload.get("dry_run"))
+    with _active_lock:
+        active = set(_active_jobs)
+    frames_report = sweep_root(
+        FRAME_DIR,
+        ttl_hours=SCRATCH_TTL_HOURS,
+        active_ids=active,
+        max_jobs=SCRATCH_SWEEP_MAX_JOBS,
+        dry_run=dry_run,
+    )
+    work_report = sweep_root(
+        WORK_DIR,
+        ttl_hours=SCRATCH_TTL_HOURS,
+        active_ids=active,
+        max_jobs=SCRATCH_SWEEP_MAX_JOBS,
+        dry_run=dry_run,
+        files_as_jobs=True,
+    )
+    return jsonify({
+        "ok": frames_report["ok"] and work_report["ok"],
+        "dry_run": dry_run,
+        "frames": frames_report,
+        "work": work_report,
+    })
+
+
+@app.post("/cleanup/<job_id>")
+def cleanup_job(job_id: str):
+    if not is_safe_job_id(job_id):
+        return jsonify({"ok": False, "duplicate_safe": True, "error": "unsafe or invalid job id"}), 400
+    if job_id in _active_job_ids():
+        return jsonify({"ok": False, "duplicate_safe": True, "error": "Refusing cleanup while job is active", "job_id": job_id}), 409
+    frames_result = remove_job_dir(FRAME_DIR, job_id)
+    work_result = remove_job_dir(WORK_DIR, job_id)
+    ok = frames_result["ok"] and work_result["ok"]
+    return jsonify({
+        "ok": ok,
+        "duplicate_safe": True,
+        "job_id": job_id,
+        "frames": frames_result,
+        "work": work_result,
+    }), 200
+
+
 if __name__ == "__main__":
+    start_hourly_sweep(
+        lambda: sweep_root(
+            FRAME_DIR,
+            ttl_hours=SCRATCH_TTL_HOURS,
+            active_ids=_active_job_ids(),
+            max_jobs=SCRATCH_SWEEP_MAX_JOBS,
+        ),
+        interval_seconds=env_int("FRAME_EXTRACTOR_SWEEP_INTERVAL_SECONDS", 3600),
+    )
     app.run(host="0.0.0.0", port=APP_PORT)

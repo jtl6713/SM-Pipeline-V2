@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 
 from flask import Flask, Response, jsonify, request
 
@@ -43,9 +44,12 @@ def _require_loopback() -> tuple[dict | None, int | None]:
         caller = ipaddress.ip_address(request.remote_addr or "")
     except ValueError:
         return jsonify({"error": "Loopback access required"}), 403
-    if not caller.is_loopback:
-        return jsonify({"error": "Loopback access required"}), 403
-    return None, None
+    if caller.is_loopback:
+        return None, None
+    allow_docker = os.environ.get("ALLOW_DOCKER_INTERNAL", "").strip().lower() in {"1", "true", "yes"}
+    if allow_docker and (caller.is_private or caller.is_link_local):
+        return None, None
+    return jsonify({"error": "Loopback access required"}), 403
 
 logger = logging.getLogger("pipeline-runner")
 settings = load_settings()

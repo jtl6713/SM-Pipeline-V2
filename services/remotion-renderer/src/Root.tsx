@@ -1,4 +1,5 @@
 import { Composition } from 'remotion';
+import { ArmSmoke } from './ArmSmoke';
 import { TestRemotion } from './TestRemotion';
 import {
     TestRemotionV2,
@@ -21,6 +22,14 @@ import {
 export const RemotionRoot: React.FC = () => {
     return (
         <>
+            <Composition
+                id="ARM-SMOKE"
+                component={ArmSmoke}
+                durationInFrames={15}
+                fps={30}
+                width={1080}
+                height={1920}
+            />
             <Composition
                 id="TEST-REMOTION-V2"
                 component={TestRemotionV2}

@@ -10,7 +10,7 @@ const { registerRemotionCleanup } = require('./remotion-cleanup');
 
 const app = express();
 
-const PORT = 3333;
+const PORT = Number(process.env.PORT || 3333);
 const DEFAULT_FPS = 30;
 const DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
 const DEFAULT_MUSIC_BOOST_DELTA = 0.05;
@@ -645,6 +645,14 @@ async function rewriteVoiceoverAsset({ voiceover, jobAssetDir, job }) {
 }
 
 async function buildRewrittenProps({ body, jobId, job }) {
+    if (String(body.compositionId || '') === 'ARM-SMOKE') {
+        const filename = sanitizeOutputFilename(body.filename || 'arm-smoke.mp4');
+        return {
+            filename,
+            props: { filename },
+        };
+    }
+
     const jobAssetDir = path.join(RENDER_ASSETS_DIR, jobId);
 
     await fsp.mkdir(jobAssetDir, { recursive: true });
@@ -891,11 +899,13 @@ function runRemotionRender({ jobId, compositionId, filename, propsFilePath }) {
         const outputRelative = `out/${filename}`;
         const propsRelative = `./${toProjectRelative(propsFilePath)}`;
 
+        const browser = String(process.env.REMOTION_BROWSER_EXECUTABLE || '').trim();
+        const browserFlag = browser ? ` --browser-executable="${browser}"` : '';
         const command =
             `npx remotion render src/index.ts ${compositionId} ` +
             `"${outputRelative}" ` +
             `"--props=${propsRelative}" ` +
-            `--overwrite`;
+            `--overwrite${browserFlag}`;
 
         job.status = 'rendering';
         job.renderCommand = command;
@@ -1065,7 +1075,7 @@ app.post('/render', async (req, res) => {
     }
 });
 
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
     await ensureDirectories();
     await remotionCleanup.runStartupSweep();
     remotionCleanup.startStaleSweepTimer();

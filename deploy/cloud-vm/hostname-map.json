@@ -1,0 +1,64 @@
+{
+  "tunnel_id": "f7a22f0f-f760-4e16-a085-3538d22981f1",
+  "account_id": "cbb5651c94e9bd2efc4594dc87229acb",
+  "cutover_order": [
+    "watermark",
+    "voiceover",
+    "compressor",
+    "frames",
+    "timing",
+    "pipeline",
+    "youtube",
+    "remotion"
+  ],
+  "services": {
+    "watermark": {
+      "hostname": "watermark.chicagoshining.com",
+      "port": 3011,
+      "windows_origin": "http://localhost:3011",
+      "vm_origin": "http://localhost:3011"
+    },
+    "voiceover": {
+      "hostname": "voiceover.chicagoshining.com",
+      "port": 3012,
+      "windows_origin": "http://localhost:3012",
+      "vm_origin": "http://localhost:3012"
+    },
+    "frames": {
+      "hostname": "frames.chicagoshining.com",
+      "port": 3334,
+      "windows_origin": "http://localhost:3334",
+      "vm_origin": "http://localhost:3334"
+    },
+    "compressor": {
+      "hostname": "compress.chicagoshining.com",
+      "port": 3335,
+      "windows_origin": "http://localhost:3335",
+      "vm_origin": "http://localhost:3335"
+    },
+    "timing": {
+      "hostname": "timing.chicagoshining.com",
+      "port": 3336,
+      "windows_origin": "http://localhost:3336",
+      "vm_origin": "http://localhost:3336"
+    },
+    "remotion": {
+      "hostname": "render.chicagoshining.com",
+      "port": 3333,
+      "windows_origin": "http://localhost:3333",
+      "vm_origin": "http://localhost:3333"
+    },
+    "youtube": {
+      "hostname": "youtube-upload.chicagoshining.com",
+      "port": 3340,
+      "windows_origin": "http://localhost:3340",
+      "vm_origin": "http://localhost:3340"
+    },
+    "pipeline": {
+      "hostname": "pipeline.chicagoshining.com",
+      "port": 3350,
+      "windows_origin": "http://localhost:3350",
+      "vm_origin": "http://localhost:3350"
+    }
+  }
+}

@@ -30,6 +30,7 @@ def load_settings() -> dict[str, Any]:
         "port": int(os.environ.get("PORT", "3350")),
         "host": os.environ.get("HOST", "127.0.0.1"),
         "log_level": os.environ.get("LOG_LEVEL", "info"),
+        "allow_docker_internal": os.environ.get("ALLOW_DOCKER_INTERNAL", "").strip().lower() in {"1", "true", "yes"},
         "public_base_url": os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
         "pipeline_runner_shared_secret": os.environ.get("PIPELINE_RUNNER_SHARED_SECRET", ""),
         "airtable_pat": os.environ.get("AIRTABLE_PAT", ""),

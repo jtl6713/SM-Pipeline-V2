@@ -9,6 +9,8 @@ This directory contains **source code and reproducible configuration only** for 
 - `D:\Content Creation\ChicagoShining Pipeline\Services\...`: production runtime location on the Windows host.
 - Runtime dependencies, secrets, virtual environments, generated media, caches, logs, backups, runtime job state, and temporary files are never committed.
 
+Linux/ARM containers for a free-tier VM live next to each service (`Dockerfile`) and are composed from [`deploy/cloud-vm/`](../deploy/cloud-vm/README.md). Windows START/STOP/VERIFY remains production until that cutover.
+
 ## Captured and managed services
 
 | Service | GitHub path | Local runtime path | Port | Status |

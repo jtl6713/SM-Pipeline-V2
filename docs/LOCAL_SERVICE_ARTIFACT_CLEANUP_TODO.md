@@ -1,7 +1,9 @@
-# TODO — Local Working-Artifact Cleanup
+# Local Working-Artifact Cleanup
 
-Status: **Planned / not yet implemented as a complete cross-service policy**  
+Status: **Implemented** (in-process TTL + independent sidecar for the cloud-vm scratch volume)
+
 Created: 2026-08-17
+Updated: 2026-09-06
 
 ## Problem
 
@@ -15,6 +17,15 @@ The supplied Frame Extractor archive already contained 41 historical frame-job f
 ## Required design: hybrid cleanup
 
 Use **both** transaction-aware cleanup and an independent TTL safety sweep.
+
+Implemented:
+
+- Frame Extractor: `POST /cleanup/<job_id>`, `GET /cleanup/report`, `POST /cleanup/sweep`, hourly in-process sweep (`FRAME_EXTRACTOR_TTL_HOURS`, default 24).
+- Video Compressor: same endpoints plus `VIDEO_COMPRESSOR_TTL_HOURS` (default 24).
+- Timing Engine: hourly sweep of `WORK_DIR` leftovers.
+- Remotion: existing `remotion-cleanup.js` stale sweep (default 72 hours) plus hourly timer already started from `render-server.js`.
+- Voiceover: existing `FILE_TTL_MS` (15 minutes).
+- Cloud VM: `scratch-ttl` sidecar in [`deploy/cloud-vm`](../deploy/cloud-vm/README.md) sweeps the shared volume independently.
 
 ### A. Frame Extractor — post-consumption cleanup
 

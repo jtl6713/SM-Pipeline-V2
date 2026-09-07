@@ -1,0 +1,3 @@
+# Runtime secrets for the cloud VM. Never commit filled copies.
+.env
+secrets/*.json

@@ -12,6 +12,7 @@ import requests
 from flask import Flask, jsonify, request, send_from_directory
 from google.auth.transport.requests import AuthorizedSession
 from google.oauth2 import service_account
+from scratch_ttl import env_hours, env_int, is_safe_job_id, remove_job_dir, start_hourly_sweep, sweep_root
 
 APP_PORT = int(os.environ.get("PORT", "3335"))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
@@ -24,6 +25,8 @@ DEFAULT_MAX_HEIGHT = int(os.environ.get("DEFAULT_MAX_HEIGHT", "1920"))
 DEFAULT_AUDIO_KBPS = int(os.environ.get("DEFAULT_AUDIO_KBPS", "128"))
 MAX_CONCURRENT_JOBS = max(1, int(os.environ.get("MAX_CONCURRENT_JOBS", "1")))
 DOWNLOAD_TIMEOUT_SECONDS = int(os.environ.get("DOWNLOAD_TIMEOUT_SECONDS", "900"))
+SCRATCH_TTL_HOURS = env_hours("VIDEO_COMPRESSOR_TTL_HOURS", 24)
+SCRATCH_SWEEP_MAX_JOBS = env_int("VIDEO_COMPRESSOR_SWEEP_MAX_JOBS", 50)
 GOOGLE_DRIVE_CREDENTIALS_FILE = os.environ.get("GOOGLE_DRIVE_CREDENTIALS_FILE", "").strip()
 GOOGLE_DRIVE_CREDENTIALS_PATH = (
     Path(GOOGLE_DRIVE_CREDENTIALS_FILE).expanduser().resolve()
@@ -448,6 +451,7 @@ def health():
         "google_drive_private_downloads": google_drive_configured(),
         "active_job_count": len(list_public_jobs(active_only=True)),
         "jobs": list_public_jobs(active_only=True),
+        "scratch_ttl_hours": SCRATCH_TTL_HOURS,
     })
 
 
@@ -545,10 +549,76 @@ def delete_job(job_id):
     return jsonify({"ok": True, "job_id": job_id, "deleted": True})
 
 
+def _active_compressor_ids() -> set[str]:
+    active = set()
+    with jobs_lock:
+        for job_id, job in jobs.items():
+            if str(job.get("status") or "") not in {"complete", "failed"}:
+                active.add(job_id)
+    return active
+
+
+@app.get("/cleanup/report")
+@app.post("/cleanup/sweep")
+def cleanup_sweep():
+    payload = request.get_json(silent=True) or {}
+    dry_run = request.method == "GET" or bool(payload.get("dry_run"))
+    active = _active_compressor_ids()
+    output_report = sweep_root(
+        OUTPUT_DIR,
+        ttl_hours=SCRATCH_TTL_HOURS,
+        active_ids=active,
+        max_jobs=SCRATCH_SWEEP_MAX_JOBS,
+        dry_run=dry_run,
+    )
+    work_report = sweep_root(
+        WORK_DIR,
+        ttl_hours=SCRATCH_TTL_HOURS,
+        active_ids=active,
+        max_jobs=SCRATCH_SWEEP_MAX_JOBS,
+        dry_run=dry_run,
+        files_as_jobs=True,
+    )
+    return jsonify({
+        "ok": output_report["ok"] and work_report["ok"],
+        "dry_run": dry_run,
+        "output": output_report,
+        "work": work_report,
+    })
+
+
+@app.post("/cleanup/<job_id>")
+def cleanup_job(job_id: str):
+    if not is_safe_job_id(job_id):
+        return jsonify({"ok": False, "duplicate_safe": True, "error": "unsafe or invalid job id"}), 400
+    if job_id in _active_compressor_ids():
+        return jsonify({"ok": False, "duplicate_safe": True, "error": "Refusing cleanup while job is active", "job_id": job_id}), 409
+    output_result = remove_job_dir(OUTPUT_DIR, job_id)
+    work_result = remove_job_dir(WORK_DIR, job_id)
+    with jobs_lock:
+        jobs.pop(job_id, None)
+    return jsonify({
+        "ok": output_result["ok"] and work_result["ok"],
+        "duplicate_safe": True,
+        "job_id": job_id,
+        "output": output_result,
+        "work": work_result,
+    })
+
+
 @app.get("/files/<job_id>/<path:filename>")
 def files(job_id, filename):
     return send_from_directory(OUTPUT_DIR / job_id, filename, as_attachment=True)
 
 
 if __name__ == "__main__":
+    start_hourly_sweep(
+        lambda: sweep_root(
+            OUTPUT_DIR,
+            ttl_hours=SCRATCH_TTL_HOURS,
+            active_ids=_active_compressor_ids(),
+            max_jobs=SCRATCH_SWEEP_MAX_JOBS,
+        ),
+        interval_seconds=env_int("VIDEO_COMPRESSOR_SWEEP_INTERVAL_SECONDS", 3600),
+    )
     app.run(host="0.0.0.0", port=APP_PORT, threaded=True)
