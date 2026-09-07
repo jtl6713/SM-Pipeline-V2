@@ -1,0 +1,205 @@
+# One-shot: set Force-exact title on the current AZ Navy Pier finished-video run.
+# Trigger: push deploy/patch-az-navy-pier-title.txt to main
+
+name: Patch AZ Navy Pier Fireworks Title
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/patch-az-navy-pier-title.txt'
+      - '.github/workflows/patch-az-navy-pier-title.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patch-az-navy-pier-title
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set Force exact title on AZ finished-video request
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:CLOUDFLARE_API_TOKEN \
+            -in deploy/credential-envelope/private.pem.enc \
+            -out /tmp/key.pem
+          base64 -d deploy/credential-envelope/airtable_pat.ciphertext.b64 >/tmp/pat.enc
+          openssl pkeyutl -decrypt \
+            -inkey /tmp/key.pem \
+            -in /tmp/pat.enc \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -pkeyopt rsa_mgf1_md:sha256 \
+            -out /tmp/pat.txt
+          export AIRTABLE_PAT="$(tr -d '\r\n' </tmp/pat.txt)"
+          python - <<'PY'
+          import json, os, urllib.error, urllib.parse, urllib.request
+
+          BASE = "appe33zkZn35yirTL"
+          PR_TABLE = "tbl75nxNi6PMUjBQE"
+          CONTENT_TABLE = "tblwzN9AXWvmKVKPs"
+          OUTPUT_TABLE = "tblrlPeboBthkplH0"
+          IDEA_TABLE = "tblTQapddqD47GOIG"
+          PR_ID = "reca7v6zi1b9QNanJ"
+          TITLE = "Final Navy Pier Fireworks - Full Video"
+          PAT = os.environ["AIRTABLE_PAT"]
+
+          def req(method, path, body=None, params=None):
+              url = f"https://api.airtable.com/v0/{BASE}/{path}"
+              if params:
+                  url += "?" + urllib.parse.urlencode(params, doseq=True)
+              data = None if body is None else json.dumps(body).encode("utf-8")
+              headers = {
+                  "Authorization": f"Bearer {PAT}",
+                  "Content-Type": "application/json",
+                  "User-Agent": "SM-Pipeline-AZ-Title-Patch/1.0",
+              }
+              r = urllib.request.Request(url, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(r, timeout=60) as x:
+                      raw = x.read().decode("utf-8", "replace")
+                      return x.status, json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  raw = e.read().decode("utf-8", "replace")
+                  try:
+                      payload = json.loads(raw) if raw else {}
+                  except Exception:
+                      payload = {"raw": raw[:800]}
+                  raise SystemExit(f"HTTP {e.code} {method} {path}: {payload}")
+
+          def first_link(value):
+              if isinstance(value, list) and value:
+                  return str(value[0] or "").strip() or None
+              return None
+
+          status, pr = req("GET", f"{PR_TABLE}/{PR_ID}")
+          assert status == 200, status
+          fields = pr.get("fields") or {}
+          print("before", json.dumps({
+              "id": pr.get("id"),
+              "Request_Status": fields.get("Request_Status"),
+              "Title_Mode": fields.get("Title_Mode"),
+              "Requested_Title": fields.get("Requested_Title"),
+              "Primary_Location": fields.get("Primary_Location"),
+              "Production_Notes": str(fields.get("Production_Notes") or "")[:180],
+          }, indent=2))
+
+          notes = str(fields.get("Production_Notes") or "")
+          if "origin=az-finished-video" not in notes and "az-auto-queue=1" not in notes:
+              raise SystemExit("Refuse: record is not an AZ finished-video request")
+
+          _, patched = req(
+              "PATCH",
+              f"{PR_TABLE}/{PR_ID}",
+              {
+                  "fields": {
+                      "Title_Mode": "Force exact",
+                      "Requested_Title": TITLE,
+                  },
+                  "typecast": True,
+              },
+          )
+          pf = patched.get("fields") or {}
+          print("production_request", json.dumps({
+              "Title_Mode": pf.get("Title_Mode"),
+              "Requested_Title": pf.get("Requested_Title"),
+              "Request_Status": pf.get("Request_Status"),
+          }, indent=2))
+
+          content_id = first_link(fields.get("Promoted_Content_Item"))
+          idea_id = first_link(fields.get("Idea_Candidate") or fields.get("Idea Candidates") or fields.get("Idea_Candidate_Link"))
+          # Common link field names on this base
+          for key, val in fields.items():
+              if idea_id is None and "idea" in key.lower() and isinstance(val, list) and val:
+                  idea_id = first_link(val)
+              if content_id is None and "content" in key.lower() and "item" in key.lower() and isinstance(val, list) and val:
+                  content_id = first_link(val)
+
+          if idea_id:
+              _, idea = req(
+                  "PATCH",
+                  f"{IDEA_TABLE}/{idea_id}",
+                  {"fields": {"Candidate_Title": TITLE}, "typecast": True},
+              )
+              print("idea", idea_id, (idea.get("fields") or {}).get("Candidate_Title"))
+
+          if content_id:
+              content_fields = {
+                  "Content_Title": TITLE,
+                  "Thumbnail_Prompt": None,
+                  "Thumbnail_Status": "Not Started",
+                  "Thumbnail_URL": None,
+              }
+              _, content = req(
+                  "PATCH",
+                  f"{CONTENT_TABLE}/{content_id}",
+                  {"fields": content_fields, "typecast": True},
+              )
+              cf = content.get("fields") or {}
+              print("content", content_id, json.dumps({
+                  "Content_Title": cf.get("Content_Title"),
+                  "Thumbnail_Status": cf.get("Thumbnail_Status"),
+                  "Thumbnail_URL": cf.get("Thumbnail_URL"),
+              }, indent=2))
+
+              # Refresh platform-output effective titles and clear stale covers so the new 3D title can stamp.
+              formula = f"FIND('{content_id}', ARRAYJOIN({{Content_Item}}))"
+              # Prefer linked Production Request when present
+              formula = (
+                  f"OR("
+                  f"FIND('{PR_ID}', ARRAYJOIN({{Production_Request_Output}}&'')),"
+                  f"FIND('{content_id}', ARRAYJOIN({{Content_Item}}&''))"
+                  f")"
+              )
+              _, listed = req(
+                  "GET",
+                  OUTPUT_TABLE,
+                  params=[
+                      ("filterByFormula", formula),
+                      ("pageSize", "50"),
+                      ("fields[]", "Output_ID"),
+                      ("fields[]", "Output_Title"),
+                      ("fields[]", "Studio_Effective_Requested_Title"),
+                      ("fields[]", "Thumbnail_URL"),
+                      ("fields[]", "Output_Status"),
+                      ("fields[]", "Platform"),
+                  ],
+              )
+              outputs = listed.get("records") or []
+              print("outputs_found", len(outputs))
+              for row in outputs:
+                  oid = row["id"]
+                  ofields = {
+                      "Output_Title": TITLE,
+                      "Studio_Effective_Title_Mode": "Force exact",
+                      "Studio_Effective_Requested_Title": TITLE,
+                      "Thumbnail_URL": None,
+                  }
+                  _, updated = req(
+                      "PATCH",
+                      f"{OUTPUT_TABLE}/{oid}",
+                      {"fields": ofields, "typecast": True},
+                  )
+                  uf = updated.get("fields") or {}
+                  print("output", oid, uf.get("Platform"), uf.get("Output_Title"), uf.get("Output_Status"))
+
+          print("PASS title patched to:", TITLE)
+          PY
+
+      - name: Destroy transient credentials
+        if: always()
+        shell: bash
+        run: rm -f /tmp/key.pem /tmp/pat.enc /tmp/pat.txt
