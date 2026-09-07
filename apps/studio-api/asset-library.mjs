@@ -245,3 +245,10 @@ export function libraryDriveFilename(stem, extension) {
   const ext = String(extension || "").replace(/^\./, "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 8);
   return ext ? `${safe}.${ext}` : safe;
 }
+
+export function mediaAssetIsHeic({ mimeType, fileExtension, name } = {}) {
+  const mime = String(mimeType || "").toLowerCase();
+  const ext = String(fileExtension || "").toLowerCase().replace(/^\./, "");
+  const filename = String(name || "").toLowerCase();
+  return mime.includes("heic") || mime.includes("heif") || ext === "heic" || ext === "heif" || /\.(heic|heif)$/.test(filename);
+}

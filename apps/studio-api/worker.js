@@ -15,6 +15,7 @@ import {
 } from "./desk-inventory.mjs";
 import {
   libraryDriveFilename,
+  mediaAssetIsHeic,
   sanitizeLibraryAssetName,
 } from "./asset-library.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
@@ -259,7 +260,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.268-oversized-list",
+          version: "0.10.269-library-heic-preview",
           studio_desk_inventory_v1: true,
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
@@ -273,6 +274,7 @@ export default {
           studio_idea_library_pick_v1: true,
           studio_library_browse_v1: true,
           studio_library_rename_v1: true,
+          studio_library_heic_preview_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -18361,6 +18363,21 @@ async function fetchStudioR2Preview(previewUrl, request) {
   return response;
 }
 
+async function mediaAssetDriveThumbnailPreview(record, env, request, source = "drive-photo-thumbnail") {
+  const driveId = googleDriveFileId(record);
+  if (!driveId) return null;
+  const grabbed = await item4FetchDriveThumbnailBytes(driveId, env);
+  if (!grabbed) return null;
+  const headers = {
+    "Content-Type": grabbed.contentType || "image/jpeg",
+    "Cache-Control": "private, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+    "X-Studio-Preview-Source": source,
+  };
+  if (request.method === "HEAD") return new Response(null, { status: 200, headers });
+  return new Response(grabbed.bytes, { status: 200, headers });
+}
+
 async function mediaAssetImagePreview(request, env, url, authorization) {
   if (!authorization?.authenticated || !authorization?.authorized) {
     throw new HttpError(401, "Authenticated Studio session required");
@@ -18446,7 +18463,31 @@ async function mediaAssetImagePreview(request, env, url, authorization) {
     }
   }
 
-  // Retain Drive fallback for any file whose Drive permissions already allow it.
+  try {
+    const thumb = await mediaAssetDriveThumbnailPreview(record, env, request);
+    if (thumb) return thumb;
+  } catch (error) {
+    console.warn("Library photo Drive thumbnail preview failed", error);
+  }
+
+  if (mediaAssetIsHeic({
+    mimeType: f(record, "MIME_Type"),
+    fileExtension: f(record, "File_Extension"),
+    name: f(record, "Asset Name"),
+  })) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="400"><rect fill="#eef3f2" width="100%" height="100%"/><text x="50%" y="48%" fill="#0c5b54" text-anchor="middle" font-family="sans-serif" font-size="18">HEIC</text><text x="50%" y="58%" fill="#627b77" text-anchor="middle" font-family="sans-serif" font-size="12">Preview catching up</text></svg>`;
+    return new Response(svg, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Cache-Control": "private, max-age=60",
+        "X-Content-Type-Options": "nosniff",
+        "X-Studio-Preview-Source": "heic-placeholder",
+      },
+    });
+  }
+
+  // Retain Drive fallback for browser-safe originals whose Drive permissions already allow it.
   if (request.method === "HEAD") {
     const upstream = await fetchGoogleDriveInlineImage(
       record,
