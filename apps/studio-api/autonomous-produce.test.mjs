@@ -32,6 +32,7 @@ import {
   buildAutonomousPickerPrompt,
   autonomousPreferredSubject,
   collectAutonomousOccupiedFromIdeas,
+  collectAutonomousTopicCollisions,
   mapAutonomousOccupiedRequest,
   mergeAutonomousOccupied,
 } from "./autonomous-produce.mjs";
@@ -250,6 +251,43 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     })],
   ]);
   assert.equal(merged.some((row) => row.location === "Lincoln Park Zoo"), true);
+  const collisions = collectAutonomousTopicCollisions([
+    {
+      id: "recEMuJACqAnqsRPu",
+      title: "Lincoln Park Zoo - Worth the trip?",
+      location: "Lincoln Park Zoo",
+      notes: "manual library stills",
+      createdTime: "2026-09-07T11:36:41.000Z",
+    },
+    {
+      id: "recdGHU0uHq3ktPje",
+      title: "Free Zoo Escape",
+      location: "Lincoln Park Zoo",
+      notes: "origin=autonomous cited_trend=library",
+      createdTime: "2026-09-07T21:05:56.000Z",
+    },
+    {
+      id: "recPy3fzh3rdnsVta",
+      title: "Lincoln Park Zoo Stroll: Birds to Rhinos",
+      location: "Lincoln Park Zoo",
+      notes: "origin=autonomous",
+      createdTime: "2026-09-07T21:31:00.000Z",
+    },
+    {
+      id: "recNavyPierOnly",
+      title: "Navy Pier sunset sail",
+      location: "Navy Pier",
+      notes: "origin=autonomous",
+      createdTime: "2026-09-07T21:40:00.000Z",
+    },
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].place, "lincoln park zoo");
+  assert.equal(collisions[0].keep.id, "recEMuJACqAnqsRPu");
+  assert.deepEqual(collisions[0].extras.map((row) => row.id), [
+    "recdGHU0uHq3ktPje",
+    "recPy3fzh3rdnsVta",
+  ]);
 });
 
 test("JSON fences unwrap and last-run notes stay readable", () => {

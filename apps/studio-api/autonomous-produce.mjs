@@ -448,6 +448,60 @@ export function mergeAutonomousOccupied(groups = []) {
   return occupied;
 }
 
+function autonomousPrimaryPlace(title, location, notes) {
+  return autonomousPlaceSubjects(title, location, notes)[0] || "";
+}
+
+/** Group recent packages that share a named place when at least one extra is origin=autonomous. */
+export function collectAutonomousTopicCollisions(packages = []) {
+  const groups = new Map();
+  for (const row of packages || []) {
+    const title = String(row?.title || "").trim();
+    const location = String(row?.location || "").trim();
+    const notes = String(row?.notes || "").trim();
+    const place = autonomousPrimaryPlace(title, location, notes);
+    if (!place) continue;
+    const id = String(row?.id || row?.record_id || "").trim();
+    const created = Date.parse(row?.createdTime || row?.created_at || "") || 0;
+    const originAutonomous = row?.origin === "autonomous" || isAutonomousOrigin(notes);
+    if (!groups.has(place)) groups.set(place, []);
+    groups.get(place).push({
+      id,
+      title,
+      location,
+      notes,
+      origin_autonomous: originAutonomous,
+      created,
+      status: String(row?.status || "").trim(),
+    });
+  }
+  const collisions = [];
+  for (const [place, rows] of groups) {
+    const unique = [];
+    const seen = new Set();
+    for (const row of rows) {
+      const key = row.id || `${row.title}|${row.location}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(row);
+    }
+    if (unique.length < 2) continue;
+    unique.sort((left, right) => {
+      if (left.origin_autonomous !== right.origin_autonomous) return left.origin_autonomous ? 1 : -1;
+      return left.created - right.created;
+    });
+    const extras = unique.slice(1).filter((row) => row.origin_autonomous);
+    if (!extras.length) continue;
+    collisions.push({
+      place,
+      keep: unique[0],
+      extras,
+      packages: unique,
+    });
+  }
+  return collisions;
+}
+
 export function autonomousRecordIsRecent(record, nowMs = Date.now(), maxAgeMs = 14 * 24 * 60 * 60 * 1000) {
   const ts = Date.parse(record?.createdTime || record?.fields?.Create_Date || record?.Create_Date || "");
   if (!Number.isFinite(ts)) return true;

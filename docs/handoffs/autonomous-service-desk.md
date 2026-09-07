@@ -88,6 +88,10 @@ Leave mode at `observe` or `patch` until those rules have been proven on real in
 - Google Drive remains media authority. Do not persist photos/video/music/thumbnails on R2 except the short-lived public cover copy.
 - Repair Make leases stay a separate program.
 
+## Recurrence watches
+
+Same-place autonomous harvest and YouTube Drive-source Failed rows: `docs/handoffs/autonomous-same-topic-harvest.md`. Inventory kinds `autonomous_topic_collision` (`data_repair`) and `youtube_private_source_fail` (`transient` → Worker AP0 + YT reset). Keep manual packages; do not recreate 2026-09-07 zoo extras; never `thumb_offset` when a native cover is required.
+
 ## Out of scope
 
 - Replacing Worker self-heal

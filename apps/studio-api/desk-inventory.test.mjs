@@ -8,6 +8,8 @@ import {
   classifyRenderRow,
   classifyCropRow,
   classifyAutonomousRequest,
+  classifyAutonomousTopicCollision,
+  classifyYoutubePrivateSourceFail,
   classifyHealthTarget,
   classifyIntakeResidue,
   fingerprint,
@@ -117,6 +119,41 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     id: "driveHuge",
     name: "Huge.MOV",
     size: 150000000,
+  }), null);
+  const zooCollision = classifyAutonomousTopicCollision({
+    place: "lincoln park zoo",
+    keep: { id: "recEMuJACqAnqsRPu", title: "Lincoln Park Zoo - Worth the trip?" },
+    extras: [
+      { id: "recdGHU0uHq3ktPje", title: "Free Zoo Escape" },
+      { id: "recPy3fzh3rdnsVta", title: "Lincoln Park Zoo Stroll: Birds to Rhinos" },
+    ],
+  });
+  assert.equal(zooCollision.kind, "autonomous_topic_collision");
+  assert.equal(zooCollision.class, "data_repair");
+  assert.equal(zooCollision.fingerprint, fingerprint("autonomous_topic_collision", "lincoln_park_zoo", "same_place"));
+  assert.deepEqual(zooCollision.extra_record_ids, ["recdGHU0uHq3ktPje", "recPy3fzh3rdnsVta"]);
+  const yt375 = classifyYoutubePrivateSourceFail({
+    id: "recRxp28DYcT9SEMW",
+    platform: "YouTube",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    youtube_stage: "YT1",
+    youtube_video_id: "",
+    final_file_url: "https://drive.google.com/file/d/1aM4EYlL0OXEGdP6O8lUzmmFEdCqs8UMI/view",
+    publish_asset_url: "",
+    studio_preview_url: "",
+  });
+  assert.equal(yt375.kind, "youtube_private_source_fail");
+  assert.equal(yt375.class, "transient");
+  assert.equal(yt375.actor, "worker_heal");
+  assert.equal(classifyYoutubePrivateSourceFail({
+    id: "recPublicYt",
+    platform: "YouTube",
+    output_status: "Approved for Publishing",
+    publish_status: "Failed",
+    youtube_stage: "YT1",
+    final_file_url: "https://drive.google.com/file/d/abc/view",
+    publish_asset_url: "https://media.chicagoshining.com/publish/recPublicYt.mp4",
   }), null);
 });
 

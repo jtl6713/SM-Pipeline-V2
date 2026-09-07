@@ -5,12 +5,14 @@ import {
   PUBLIC_HEALTH_TARGETS,
   buildDeskInventoryPayload,
   classifyAutonomousRequest,
+  classifyAutonomousTopicCollision,
   classifyCropRow,
   classifyHealthTarget,
   classifyIntakeResidue,
   classifyPreparingGap,
   classifyProduceJob,
   classifyRenderRow,
+  classifyYoutubePrivateSourceFail,
   parseDeskCaps,
   parseDeskMode,
 } from "./desk-inventory.mjs";
@@ -45,6 +47,7 @@ import {
   autonomousUnusedLibraryAssets,
   buildAutonomousPickerPrompt,
   collectAutonomousOccupiedFromIdeas,
+  collectAutonomousTopicCollisions,
   isAutonomousOrigin,
   mapAutonomousOccupiedRequest,
   mapYoutubeSearchItems,
@@ -1851,9 +1854,25 @@ function studioYoutubePublicSourceUrl(record) {
     .find((href) => item4UrlIsPublicPublishCdn(href)) || "";
 }
 
+function mapYoutubePrivateSourceDeskRow(record) {
+  return {
+    id: record?.id,
+    platform: f(record, "Platform"),
+    output_status: f(record, "Output_Status"),
+    publish_status: f(record, "Publish_Status"),
+    youtube_stage: f(record, "YouTube_Stage"),
+    youtube_video_id: f(record, "YouTube_Video_ID"),
+    final_file_url: f(record, "Final_File_URL"),
+    publish_asset_url: f(record, "Publish_Asset_URL"),
+    studio_preview_url: f(record, "Studio_Preview_URL"),
+    youtube_error: f(record, "YouTube_Error_Message"),
+    publish_error: f(record, "Publish_Error_Message"),
+    publish_error_stage: f(record, "Publish_Error_Stage"),
+  };
+}
+
 function studioYoutubeFailedPrivateSource(record) {
-  const err = `${f(record, "YouTube_Error_Message") || ""} ${f(record, "Publish_Error_Message") || ""}`;
-  return /source download failed 401/i.test(err) || /YTS1_UPLOAD/i.test(String(f(record, "Publish_Error_Stage") || ""));
+  return Boolean(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
 }
 
 function item4FinishedVideoPreviewKey(requestId, assetId) {
@@ -23738,7 +23757,7 @@ async function studioEnsureYoutubePublish(env, record) {
   if (/^complete$/i.test(stage) && videoId) {
     return { ok: true, skipped: "already-complete", target: "YT0", backend: "python", video_id: videoId };
   }
-  if (!videoId && /^terminal error$/i.test(stage) && studioYoutubeFailedPrivateSource(record)) {
+  if (!videoId && studioYoutubeFailedPrivateSource(record)) {
     const healed = await studioHealFailedYoutubeSourceDownloads(env, { limit: 1, recordId: record.id });
     return healed[0] || { ok: false, skipped: "heal-miss", target: "AP0" };
   }
@@ -24493,9 +24512,10 @@ async function studioResetYoutubeUploadForRetry(env, record) {
 async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
   const limit = Number(options.limit || 3);
   const recordId = String(options.recordId || "").trim();
+  const stuckFormula = 'AND({YouTube_Video_ID}="",{Output_Status}="Approved for Publishing",OR({YouTube_Stage}="Terminal Error",AND({YouTube_Stage}="YT1",{Publish_Status}="Failed")))';
   const formula = recordId
-    ? `AND(RECORD_ID()="${recordId}",{YouTube_Stage}="Terminal Error",{YouTube_Video_ID}="")`
-    : 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Video_ID}="",{YouTube_Stage}="Terminal Error",{Output_Status}="Approved for Publishing")';
+    ? `AND(RECORD_ID()="${recordId}",${stuckFormula})`
+    : `AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,${stuckFormula})`;
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
@@ -28560,6 +28580,47 @@ async function gatherStudioDeskInventory(env) {
       job: { ...job, request_id: record.id },
       nowMs,
     }));
+  }
+
+  try {
+    const ideaQuery = {
+      limit: 50,
+      sortField: AUTONOMOUS_IDEA_CREATED_FIELD,
+      sortDirection: "desc",
+      filterFormula: "{Test_Run_ID}=BLANK()",
+    };
+    let ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, ideaQuery).catch(() => null);
+    if (!ideas) {
+      ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+        ...ideaQuery,
+        sortField: undefined,
+      }).catch(() => []);
+    }
+    const packages = (ideas || []).map((record) => ({
+      id: record.id,
+      title: f(record, "Candidate_Title"),
+      location: f(record, "Primary_Location") || f(record, "Neighborhood_or_Area"),
+      notes: f(record, "Production_Config_Notes") || f(record, "Idea_Summary"),
+      status: f(record, "Candidate_Status"),
+      createdTime: record.createdTime,
+    }));
+    for (const collision of collectAutonomousTopicCollisions(packages)) {
+      push(classifyAutonomousTopicCollision(collision));
+    }
+  } catch (error) {
+    console.warn("desk autonomous topic collision scan failed", error);
+  }
+
+  try {
+    const youtubeFailed = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Output_Status}="Approved for Publishing",OR({YouTube_Stage}="Terminal Error",AND({YouTube_Stage}="YT1",{Publish_Status}="Failed")))',
+    }).catch(() => []);
+    for (const record of youtubeFailed || []) {
+      push(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
+    }
+  } catch (error) {
+    console.warn("desk youtube private-source scan failed", error);
   }
 
   try {
