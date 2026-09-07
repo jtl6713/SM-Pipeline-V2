@@ -4,7 +4,9 @@ AI activity logging posts to:
 
 `https://tasks.chicagoshining.com/agent-activity/log-event`
 
-That hostname must return JSON. A Cloudflare Access login page is a misconfiguration for this POST.
+Operators read the log at `https://tasks.chicagoshining.com/logs` (service-desk tickets and automated test results). `/docs` is the FastAPI schema, not the activity log.
+
+That hostname's `/agent-activity/log-event` and `/health` paths must return JSON. A Cloudflare Access login page is a misconfiguration for those POSTs.
 
 ## What GitHub Actions can do
 

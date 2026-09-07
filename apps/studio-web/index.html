@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.270-ops-help">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.271-activity-logs">
 </head>
 <body>
  <header class="topbar">
@@ -1289,10 +1289,13 @@
  <div id="operationsAgentDeskCounts" class="ops-desk-counts"></div>
  </div>
  <div class="ops-tab-panel" id="operationsAgentActivityPanel" data-ops-tab-panel="activity" role="tabpanel" aria-labelledby="operationsTabActivity" hidden>
- <div class="panel-heading"><div><h2>Activity log</h2><p class="ops-heading-copy">Recent <code>desk_incident</code> tickets from <a id="operationsAgentOrganizerLink" href="https://tasks.chicagoshining.com/docs" target="_blank" rel="noopener noreferrer">Task Organizer</a> (agent 3, task 1). Worker transient heals are not listed here.</p></div>
+ <div class="panel-heading"><div><h2>Activity log</h2><p class="ops-heading-copy">Service-desk tickets and automated test results. Open the <a id="operationsAgentOrganizerLink" href="https://tasks.chicagoshining.com/logs" target="_blank" rel="noopener noreferrer">full log</a> on Task Organizer. Worker transient heals are not listed here.</p></div>
  </div>
  <p class="subtle" id="operationsAgentActivityMeta">Loading activity…</p>
+ <h3 class="ops-log-heading">Service desk</h3>
  <ol id="operationsAgentActivityLog" class="ops-agent-log"></ol>
+ <h3 class="ops-log-heading">Automated tests</h3>
+ <ol id="operationsAgentTestLog" class="ops-agent-log"></ol>
  </div>
  </section>
  </div>
@@ -1581,12 +1584,16 @@
  <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
  </article>
  <article class="support-article" id="helpArticleLogs" data-support-article="logs" role="tabpanel" aria-labelledby="helpTabLogs" hidden>
- <h2>Testing logs</h2>
- <p>Logs for Operations live in four places. Worker heals that succeed quietly do not show up as desk tickets.</p>
+ <h2>Activity logs</h2>
+ <p>Logs for Operations live in Studio first. Worker heals that succeed quietly do not show up as desk tickets.</p>
  <h3>Studio activity log</h3>
- <p>Operations → Autonomous Service Agent → Activity log. This lists recent <code>desk_incident</code> tickets (agent 3, task 1). Each row is a fingerprint, class, record, and diagnosis. It is the operator view of what the desk decided after Worker heal did not clear the job.</p>
+ <p>Operations → Autonomous Service Agent → Activity log. This is the operator view. It has two lists:</p>
+ <ul>
+ <li><strong>Service desk</strong> — recent <code>desk_incident</code> tickets (agent 3, task 1). Each row is a fingerprint, class, record, and diagnosis after Worker heal did not clear the job.</li>
+ <li><strong>Automated tests</strong> — Regression functional, the nightly regression suite, and Task Organizer connectivity checks. Each row shows pass/fail, the job name, and a link to the GitHub Actions run.</li>
+ </ul>
  <h3>Task Organizer</h3>
- <p>The durable store behind that list is <a href="https://tasks.chicagoshining.com/docs" target="_blank" rel="noopener noreferrer">Task Organizer</a>. Open it for the full event history, not only the last few rows Studio shows. Worker transient heals are not copied here.</p>
+ <p>The durable store behind those lists is the <a href="https://tasks.chicagoshining.com/logs" target="_blank" rel="noopener noreferrer">Task Organizer activity log</a>. That page is the event history, not the API schema. <a href="https://tasks.chicagoshining.com/docs" target="_blank" rel="noopener noreferrer">/docs</a> is only OpenAPI. Worker transient heals are not copied here.</p>
  <h3>On-page progress</h3>
  <ul>
  <li><strong>Library intake</strong> — stage list (intake, compress, classify, reconcile) and the progress bar while a drain is running.</li>
@@ -1600,7 +1607,7 @@
  <ul>
  <li>Deploy Studio Pages Production — frontend, including this Help UI.</li>
  <li>Deploy Studio API Worker Production — API/cron healer.</li>
- <li>Regression functional — hermetic tests on a pull request.</li>
+ <li>Regression functional — hermetic tests on a pull request. Pass/fail is also copied into the Activity log.</li>
  <li>End-to-end seed / API control workflows — print idea, production request, and content IDs when a review fixture is created.</li>
  </ul>
  <p>If a Pages or Worker deploy fails, read that Actions run before pulsing Make or re-running autonomous produce. Local companion deploy logs stay on this Windows machine under Deployment Logs.</p>
@@ -1768,8 +1775,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.270-ops-help"></script>
- <script src="/assets/ez-plan.js?v=0.6.270-ops-help"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.270-ops-help"></script>
+ <script src="/assets/config.js?v=0.6.271-activity-logs"></script>
+ <script src="/assets/ez-plan.js?v=0.6.271-activity-logs"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.271-activity-logs"></script>
 </body>
 </html>

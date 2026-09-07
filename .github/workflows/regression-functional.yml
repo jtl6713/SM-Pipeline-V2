@@ -38,3 +38,10 @@ jobs:
 
       - name: Hermetic packs
         run: python tests/regression/runner.py hermetic
+
+      - name: Log result to Task Organizer
+        if: always()
+        continue-on-error: true
+        env:
+          CONCLUSION: ${{ job.status }}
+        run: python scripts/log_task_activity.py --suite "Regression functional" --job hermetic --conclusion "$CONCLUSION"

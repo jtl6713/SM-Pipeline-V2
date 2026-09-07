@@ -121,7 +121,7 @@ foreach ($ToolsRoot in $toolsRoots) {
     $openDocsText = @"
 `$ErrorActionPreference = 'Continue'
 `$healthUrl = 'http://localhost:$Port/health'
-`$docsUrl = 'http://localhost:$Port/docs'
+`$docsUrl = 'http://localhost:$Port/logs'
 `$deadline = (Get-Date).AddSeconds(90)
 do {
     try {
@@ -212,7 +212,7 @@ throw 'Task Organizer port $Port is still listening after stop attempt.'
 
 REM ============================================================
 REM $Marker
-REM Managed local service #9; docs open at http://localhost:$Port/docs
+REM Managed local service #9; activity log opens at http://localhost:$Port/logs
 REM ============================================================
 wt.exe new-tab --title "9 LOC Task Organizer :3360" powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File "%~dp0_startup_helpers\91-task-organizer-local.ps1"
 
@@ -285,6 +285,6 @@ if errorlevel 1 (
 Write-Host ''
 Write-Host 'PASS - Task Organizer is integrated into every Start/Stop folder that was found.' -ForegroundColor Green
 Write-Host "Window: $WindowTitle" -ForegroundColor Green
-Write-Host "Docs:   http://localhost:$Port/docs (opens only after /health is ready)" -ForegroundColor Green
+Write-Host "Logs:   http://localhost:$Port/logs (opens only after /health is ready)" -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next: STOP ALL, then START ALL from the pipeline-root shortcuts.' -ForegroundColor Cyan

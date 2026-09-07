@@ -262,7 +262,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.273-intake-parked",
+          version: "0.10.274-activity-logs",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -28411,26 +28411,70 @@ async function getStudioDeskInventory(request, env) {
   return respond(request, env, payload);
 }
 
+function isStudioTestActivityEvent(row) {
+  const type = String(row?.type || "").trim();
+  return type === "test_result" || type === "github_actions" || type === "regression";
+}
+
+function sortStudioActivityEvents(rows) {
+  return [...rows].sort((left, right) => {
+    const byId = Number(right?.id || 0) - Number(left?.id || 0);
+    if (byId) return byId;
+    return Date.parse(right?.created_at || 0) - Date.parse(left?.created_at || 0);
+  });
+}
+
+async function fetchTaskActivityEvents(endpoint, type, limit = 40) {
+  const sep = endpoint.includes("?") ? "&" : "?";
+  const res = await fetch(`${endpoint}${sep}type=${encodeURIComponent(type)}&task_id=1&limit=${limit}`, {
+    headers: { Accept: "application/json" },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body || body.ok === false) {
+    return { ok: false, error: body?.error || `tasks_http_${res.status}`, events: [] };
+  }
+  const events = Array.isArray(body.events) ? body.events : Array.isArray(body) ? body : [];
+  return { ok: true, events };
+}
+
 async function getStudioDeskActivity(request, env) {
   const endpoint = String(env.TASKS_ACTIVITY_URL || "https://tasks.chicagoshining.com/agent-activity/log-event").replace(/\/$/, "");
-  const sep = endpoint.includes("?") ? "&" : "?";
   try {
-    const res = await fetch(`${endpoint}${sep}type=desk_incident&task_id=1&limit=40`, { headers: { Accept: "application/json" } });
-    const body = await res.json().catch(() => null);
-    if (!res.ok || !body || body.ok === false) {
-      return respond(request, env, {
-        ok: true,
-        events: [],
-        source: "unavailable",
-        error: body?.error || `tasks_http_${res.status}`,
-      });
+    const results = await Promise.all([
+      fetchTaskActivityEvents(endpoint, "desk_incident"),
+      fetchTaskActivityEvents(endpoint, "test_result"),
+      fetchTaskActivityEvents(endpoint, "github_actions"),
+    ]);
+    const seen = new Set();
+    const events = [];
+    const errors = [];
+    for (const result of results) {
+      if (!result.ok) errors.push(result.error);
+      for (const row of result.events) {
+        const key = row?.id != null ? `id:${row.id}` : JSON.stringify(row);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        events.push(row);
+      }
     }
-    const events = Array.isArray(body.events) ? body.events : Array.isArray(body) ? body : [];
-    return respond(request, env, { ok: true, events, source: "tasks" });
+    const sorted = sortStudioActivityEvents(events);
+    const deskEvents = sorted.filter((row) => !isStudioTestActivityEvent(row));
+    const testEvents = sorted.filter(isStudioTestActivityEvent);
+    const failedAll = results.every((result) => !result.ok);
+    return respond(request, env, {
+      ok: true,
+      events: sorted,
+      desk_events: deskEvents,
+      test_events: testEvents,
+      source: failedAll ? "unavailable" : "tasks",
+      error: failedAll ? errors[0] : undefined,
+    });
   } catch (error) {
     return respond(request, env, {
       ok: true,
       events: [],
+      desk_events: [],
+      test_events: [],
       source: "unavailable",
       error: String(error?.message || error),
     });

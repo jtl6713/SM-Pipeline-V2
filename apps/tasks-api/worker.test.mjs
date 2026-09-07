@@ -18,6 +18,17 @@ test("GET log-event lists desk incidents when supabase is missing", async () => 
   assert.equal(body.error, "tasks_worker_missing_supabase");
 });
 
+test("GET /logs is an HTML activity page, not Swagger", async () => {
+  const res = await worker.fetch(new Request("https://tasks.chicagoshining.com/logs"), {});
+  assert.equal(res.status, 503);
+  assert.match(String(res.headers.get("content-type") || ""), /text\/html/);
+  const body = await res.text();
+  assert.match(body, /Task activity log/);
+  assert.match(body, /Service desk/);
+  assert.match(body, /Automated tests/);
+  assert.doesNotMatch(body, /swagger/i);
+});
+
 test("log-event requires supabase bindings when origin is the worker", async () => {
   const res = await worker.fetch(
     new Request("https://tasks.chicagoshining.com/agent-activity/log-event", {
