@@ -322,13 +322,19 @@ def process_request(
 
     if drain:
         if not _INTAKE_LOCK.acquire(blocking=False):
+            files = []
+            try:
+                files = _list_ingestion_files(GoogleDriveClient())
+            except Exception:
+                logger.exception("A2 could not list ingestion folder while intake already running")
             return {
                 "processed": False,
                 "reason": "intake_already_running",
                 "intaken_count": 0,
                 "skipped_oversize_count": 0,
                 "skipped_existing_count": 0,
-                "files_found": False,
+                "files_found": bool(files),
+                "file_ids": [str(item.get("id") or "") for item in files],
                 **preview,
             }
         drive = GoogleDriveClient()

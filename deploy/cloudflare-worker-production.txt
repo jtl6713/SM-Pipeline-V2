@@ -375,3 +375,5 @@ Autonomous service desk inventory Worker deploy: 2026-09-07 - Read-only GET /api
 Asset Manager rename and oversized list Worker deploy: 2026-09-07 - PATCH /api/library/:id renames Drive and reclassifies via A3. Compression status returns a fresh oversized list so finished clips drop off. Ship asset-library.mjs and operations-oversized.mjs with the Worker. Worker 0.10.268-oversized-list.
 
 Asset Manager HEIC preview Worker deploy: 2026-09-07 - Library photo preview uses Drive JPEG thumbnails instead of serving HEIC originals that Chrome cannot paint. Worker 0.10.269-library-heic-preview.
+
+A3 HEIC classify Worker deploy: 2026-09-07 - Intake no longer reports A3 finished while the classify view still has rows. Empty A2 pulses A3. Worker 0.10.270-a3-heic-classify.

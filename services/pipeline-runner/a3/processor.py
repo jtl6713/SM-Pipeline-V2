@@ -6,6 +6,7 @@ from typing import Any
 
 from a3.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME, VIDEO_NO_FRAMES_NOTES
 from a3.frames import extract_frames, image_metadata
+from a3.images import classification_image_url
 from a3.metadata_merge import merge_photo_metadata_fields
 from a3.openai_classify import classify_asset
 from a3.prompt import audio_prompt, image_prompt, video_frames_prompt, video_metadata_prompt
@@ -14,7 +15,7 @@ from airtable.constants import MEDIA_ASSETS_TABLE
 from asset.chain import daisy_payload, trigger_next
 from asset.constants import A3_CLASSIFY_VIEW, A3_DRAIN_MAX_PASSES, A3_MAX_RECORDS
 from asset.helpers import as_bool, join_list, parse_int, uc_download_url
-from asset.routing import a3_mime_route, audio_role_fallback
+from asset.routing import a3_mime_route, a3_needs_jpeg_preview, audio_role_fallback
 from render.fields import field_str
 
 
@@ -96,6 +97,22 @@ def _frame_urls(payload: dict[str, Any]) -> tuple[int, list[str], list[str]]:
 
 def _classify_one(client: AirtableClient, record: dict[str, Any]) -> dict[str, Any]:
     client.update_record(MEDIA_ASSETS_TABLE, record["id"], {"Classification_Status": "Processing"})
+    try:
+        return _classify_one_body(client, record)
+    except Exception as exc:
+        client.update_record(
+            MEDIA_ASSETS_TABLE,
+            record["id"],
+            {
+                "Classification_Status": "Classification Error",
+                "Potential_Match_Notes": f"A3 failed: {exc}"[:1500],
+            },
+            typecast=True,
+        )
+        return {"id": record["id"], "status": "error", "error": str(exc)}
+
+
+def _classify_one_body(client: AirtableClient, record: dict[str, Any]) -> dict[str, Any]:
     fresh = client.get_record(MEDIA_ASSETS_TABLE, record["id"])
     route = a3_mime_route(field_str(fresh, "MIME_Type"))
     if route == "audio":
@@ -136,11 +153,16 @@ def _classify_one(client: AirtableClient, record: dict[str, Any]) -> dict[str, A
         return {"id": fresh["id"], "route": route, "status": "unsupported"}
     if route == "image":
         meta = {}
-        try:
-            meta = image_metadata(fresh)
-        except Exception as exc:
-            meta = {"error": str(exc)}
-        image_url = uc_download_url(field_str(fresh, "Google Drive File ID"))
+        if not a3_needs_jpeg_preview(
+            field_str(fresh, "MIME_Type"),
+            field_str(fresh, "Asset Name"),
+            field_str(fresh, "File_Extension"),
+        ):
+            try:
+                meta = image_metadata(fresh)
+            except Exception as exc:
+                meta = {"error": str(exc)}
+        image_url = classification_image_url(fresh)
         result = classify_asset(image_prompt(fresh, image_metadata=meta), image_urls=[image_url], max_output_tokens=4500)
         fields = _classification_fields(
             result["parsed"],
