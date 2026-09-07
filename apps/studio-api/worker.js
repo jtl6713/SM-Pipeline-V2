@@ -232,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.262-az-story-clip",
+          version: "0.10.263-az-ready-schedule",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -7611,20 +7611,39 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     return true;
   });
   if (!pending.length) return { skipped: "already_queued", count: outputs.length, cover, finals };
-  const notReady = pending
-    .map((row) => ({ id: row.id, platform: f(row, "Platform"), blockers: azOutputQueueBlockers(row) }))
-    .filter((row) => row.blockers.length);
-  if (notReady.length) {
-    // Do not call full continuation here — that blows the Worker subrequest budget.
-    if (notReady.some((row) => row.blockers.includes("cover") || row.blockers.includes("caption") || row.blockers.includes("final_file"))) {
+
+  // Approve whichever destinations are ready now. Stories still rendering must not
+  // hold Reels/Shorts/TikTok at Ready for Review (no human Approve gate on AZ).
+  const assessed = pending.map((row) => ({
+    row,
+    id: row.id,
+    platform: f(row, "Platform"),
+    output_type: studioOutputTypeLabel(row),
+    story: studioAzIsStory(studioOutputTypeLabel(row)),
+    blockers: azOutputQueueBlockers(row),
+    ready: studioOutputReadyForPublishApproval(row) && !azOutputQueueBlockers(row).length,
+  }));
+  const notReady = assessed.filter((item) => !item.ready);
+  const approveLimit = Math.max(1, Math.min(6, Number(options.approveLimit) || 4));
+  const toApprove = assessed.filter((item) => item.ready).slice(0, approveLimit).map((item) => item.row);
+  if (!toApprove.length) {
+    if (notReady.some((item) => item.blockers.includes("cover") || item.blockers.includes("caption"))) {
       try { await enqueueStudioProductionJob(env, requestId); } catch {}
     }
-    return { waiting: "cover", cover, finals, not_ready: notReady.slice(0, 8) };
+    const onlyStoriesRendering = notReady.length > 0 && notReady.every((item) => item.story);
+    return {
+      waiting: onlyStoriesRendering ? "story_render" : "cover",
+      cover,
+      finals,
+      not_ready: notReady.slice(0, 8).map((item) => ({
+        id: item.id,
+        platform: item.platform,
+        blockers: item.blockers,
+        story: item.story,
+      })),
+    };
   }
-  const approveLimit = Math.max(1, Math.min(6, Number(options.approveLimit) || 3));
-  const toApprove = pending.filter((row) => studioOutputReadyForPublishApproval(row)).slice(0, approveLimit);
-  if (!toApprove.length) return { waiting: "review_gate", cover, finals };
-  const remainingApprove = pending.filter((row) => studioOutputReadyForPublishApproval(row)).length - toApprove.length;
+  const remainingApprove = Math.max(0, assessed.filter((item) => item.ready).length - toApprove.length);
   const occupied = await studioLoadAzOccupiedTimes(env, { excludeIds: outputs.map((row) => row.id) });
   const items = toApprove.map((row) => ({
     platform: String(f(row, "Platform") || "").trim(),
@@ -7652,15 +7671,23 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
       Production_Notes: `${notes}\n\naz-schedule=${planned.campaign?.key || ""}; ${planned.rationale}`.slice(0, 10000),
     });
   }
+  const stillPendingStories = notReady.filter((item) => item.story).length;
   return {
     ok: true,
     approved_count: approved.length,
-    remaining_approve: Math.max(0, remainingApprove),
+    remaining_approve: remainingApprove,
+    waiting: stillPendingStories || remainingApprove ? (stillPendingStories ? "story_render" : "approve") : undefined,
     campaign: planned.campaign,
     rationale: planned.rationale,
     cover,
     finals,
     scheduled: planned.stamps ? Object.fromEntries(planned.stamps) : null,
+    not_ready: notReady.slice(0, 8).map((item) => ({
+      id: item.id,
+      platform: item.platform,
+      blockers: item.blockers,
+      story: item.story,
+    })),
   };
 }
 
@@ -7888,6 +7915,7 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
   }
 
   // auto: one light step per invoke — never cover+final+approve+continuation together.
+  // Ready mains must auto-schedule even while Story teasers are still rendering.
   if (status === "Promoted") {
     const cover = await azEnsurePublicCovers(env, requestId, { stampLimit: 2 });
     if (cover?.waiting || Number(cover?.remaining || 0) > 0 || Number(cover?.stamped || 0) > 0) {
@@ -7908,18 +7936,26 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
         phase,
       };
     }
-    const stories = await azRestampFinishedStories(env, requestId, { limit: 1 });
-    if (Number(stories?.restamped || 0) > 0 || Number(stories?.remaining || 0) > 0) {
-      return { waiting: "story_render", cover, finals, stories, ensure_outputs: ensureOutputs, phase };
-    }
-    const approve = await azAutoApproveIfReady(env, requestId, {
+    // Prefer scheduling ready destinations before (or without waiting on) Story remotion.
+    const approveFirst = await azAutoApproveIfReady(env, requestId, {
       skipCover: true,
       skipFinals: true,
       cover,
       finals,
-      approveLimit: 2,
+      approveLimit: 4,
     });
-    return ensureOutputs ? { ...approve, ensure_outputs: ensureOutputs, phase } : { ...approve, phase };
+    if (Number(approveFirst?.approved_count || 0) > 0 || approveFirst?.skipped === "already_queued") {
+      return ensureOutputs
+        ? { ...approveFirst, ensure_outputs: ensureOutputs, phase }
+        : { ...approveFirst, phase };
+    }
+    const stories = await azRestampFinishedStories(env, requestId, { limit: 1 });
+    if (Number(stories?.restamped || 0) > 0 || Number(stories?.remaining || 0) > 0) {
+      return { waiting: "story_render", cover, finals, stories, ensure_outputs: ensureOutputs, phase };
+    }
+    return ensureOutputs
+      ? { ...approveFirst, ensure_outputs: ensureOutputs, phase }
+      : { ...approveFirst, phase };
   }
   return { waiting: status || "unknown", production_request_id: requestId, phase };
 }
