@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-navy-outputs then kick via service binding
+      - name: Wait for Worker version az-navy-fanout2 then kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -81,39 +81,62 @@ jobs:
           READY=0
           for i in $(seq 1 40); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-navy-outputs"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-navy-fanout2"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-navy-outputs (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-navy-fanout2 (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
           echo "worker_ready=$(jq -r '.version' /tmp/health.json)"
 
-          KICK_CODE=$(curl -sS --max-time 180 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick" || true)
-          echo "kick_http=$KICK_CODE"
-          cat /tmp/az-kick.json
-          test "$KICK_CODE" = "200"
-          jq -e '.ok==true and .diagnostic.requestId=="reca7v6zi1b9QNanJ"' /tmp/az-kick.json >/dev/null
-          python - <<'PY'
+          FINAL_OK=0
+          for k in $(seq 1 8); do
+            KICK_CODE=$(curl -sS --max-time 180 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick" || true)
+            echo "kick_try=$k kick_http=$KICK_CODE"
+            cat /tmp/az-kick.json
+            test "$KICK_CODE" = "200"
+            jq -e '.ok==true and .diagnostic.requestId=="reca7v6zi1b9QNanJ"' /tmp/az-kick.json >/dev/null
+            python - <<'PY'
           import json
           from pathlib import Path
           data=json.loads(Path('/tmp/az-kick.json').read_text())
           d=data.get('diagnostic') or {}
+          advance=data.get('advance') or {}
+          ensure=(advance.get('ensure_outputs') if isinstance(advance, dict) else None) or {}
+          pro=d.get('pro_rows') or {}
           print('request_status=', d.get('request_status'))
-          print('needs_compress=', d.get('needs_compress'))
-          print('masters_ready=', d.get('masters_ready'))
-          print('plan_status=', d.get('plan_status'))
-          print('pro_rows=', d.get('pro_rows'))
           print('platform_output_count=', d.get('platform_output_count'))
-          print('content=', d.get('content'))
-          print('compress=', data.get('compress'))
-          print('advance=', data.get('advance'))
-          assets=d.get('assets') or []
-          for a in assets:
-              print('asset=', a)
+          print('pro_with_po=', pro.get('with_platform_output'))
+          print('pro_enabled=', pro.get('enabled'))
+          print('advance=', advance)
+          print('ensure_remaining=', ensure.get('remaining'))
+          Path('/tmp/az-kick-summary.env').write_text(
+            f"PO={d.get('platform_output_count') or 0}\n"
+            f"LINKED={pro.get('with_platform_output') or 0}\n"
+            f"ENABLED={pro.get('enabled') or 0}\n"
+            f"REMAINING={ensure.get('remaining') if ensure.get('remaining') is not None else -1}\n"
+            f"WAITING={advance.get('waiting') if isinstance(advance, dict) else ''}\n"
+          )
           PY
+            # shellcheck source=/tmp/az-kick-summary.env
+            . /tmp/az-kick-summary.env
+            if [[ "${LINKED:-0}" -ge "${ENABLED:-6}" && "${ENABLED:-0}" -gt 0 ]]; then
+              FINAL_OK=1
+              break
+            fi
+            if [[ "${PO:-0}" -ge 6 ]]; then
+              FINAL_OK=1
+              break
+            fi
+            if [[ "${WAITING:-}" != "outputs" && "${REMAINING:-1}" -le 0 && "${LINKED:-0}" -gt 0 ]]; then
+              FINAL_OK=1
+              break
+            fi
+            sleep 3
+          done
+          test "$FINAL_OK" = "1"
 
       - name: Upload kick evidence
         if: always()

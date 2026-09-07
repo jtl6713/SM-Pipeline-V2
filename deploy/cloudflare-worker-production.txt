@@ -357,3 +357,5 @@ AZ Navy Pier diagnose+kick Worker deploy: 2026-09-07 - Log full AZ state for rec
 AZ Navy Pier unstick Worker deploy: 2026-09-07 - POST /api/ops/az-navy-pier-kick pulses studio_compress, advances AZ, returns diagnostic JSON. Worker 0.10.258-az-navy-unstick.
 
 AZ Navy Pier outputs fanout Worker deploy: 2026-09-07 - When AZ is Promoted with zero Platform Outputs, rebuild/sync plan PRO rows and re-run single-parent fanout so Content 124 leaves Configuring into Pipeline. Worker 0.10.259-az-navy-outputs.
+
+AZ Navy Pier batched fanout Worker deploy: 2026-09-07 - Fan out at most 2 missing Platform Outputs per Worker invoke to stay under subrequest limits; kick loops until all plan outputs are linked. Worker 0.10.260-az-navy-fanout2.

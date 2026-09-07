@@ -232,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.259-az-navy-outputs",
+          version: "0.10.260-az-navy-fanout2",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -7417,10 +7417,11 @@ async function azBuildPlanItems(env, record) {
   return items;
 }
 
-async function azEnsurePlatformOutputs(env, requestRecord) {
+async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
   if (!requestRecord?.id) return { skipped: "missing_request" };
   const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
   if (!contentId) return { waiting: "content", production_request_id: requestRecord.id };
+  const batchLimit = Math.max(1, Math.min(3, Number(options.limit) || 2));
 
   let proRows = await outputRowsForProductionRequest(env, requestRecord.id);
   let enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
@@ -7450,34 +7451,43 @@ async function azEnsurePlatformOutputs(env, requestRecord) {
   }
 
   const missingPo = enabled.filter((row) => !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
-  const existingPo = await azPlatformOutputsForRequest(env, requestRecord.id);
-  if (existingPo.length && !missingPo.length) {
+  if (!missingPo.length) {
     return {
       ok: true,
       already: true,
       synced,
+      remaining: 0,
       enabled_output_count: enabled.length,
-      platform_output_count: existingPo.length,
+      platform_output_count: enabled.length,
       production_request_id: requestRecord.id,
       content_item_id: contentId,
     };
   }
 
-  const fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, contentId);
-  const after = await azPlatformOutputsForRequest(env, requestRecord.id);
+  const fanout = await fanoutProductionRequestOutputsToContentItems(env, requestRecord, contentId, {
+    onlyMissing: true,
+    limit: batchLimit,
+  });
+  const remaining = Number(fanout?.remaining || 0);
+  const linkedAfter = (await outputRowsForProductionRequest(env, requestRecord.id))
+    .filter((row) => Boolean(f(row, "Enabled")))
+    .filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length;
   console.log(`AZ ensure platform outputs ${JSON.stringify({
     requestId: requestRecord.id,
     synced,
     enabled: enabled.length,
+    missing_before: missingPo.length,
     fanout,
-    platform_outputs: after.length,
+    linked_after: linkedAfter,
+    remaining,
   })}`);
   return {
     ok: true,
     synced,
     fanout,
+    remaining,
     enabled_output_count: enabled.length,
-    platform_output_count: after.length,
+    platform_output_count: linkedAfter,
     production_request_id: requestRecord.id,
     content_item_id: contentId,
   };
@@ -7542,14 +7552,23 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
   }
   let ensureOutputs = null;
   if (status === "Promoted") {
-    const existingOutputs = await azPlatformOutputsForRequest(env, requestId);
-    if (!existingOutputs.length) {
+    const proRows = await outputRowsForProductionRequest(env, requestId).catch(() => []);
+    const enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
+    const linked = enabled.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
+    if (!enabled.length || linked.length < enabled.length) {
       try {
-        ensureOutputs = await azEnsurePlatformOutputs(env, record);
+        ensureOutputs = await azEnsurePlatformOutputs(env, record, { limit: 2 });
         record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       } catch (error) {
         ensureOutputs = { error: error instanceof Error ? error.message : String(error) };
         console.warn("AZ ensure platform outputs failed", requestId, error);
+      }
+      if (Number(ensureOutputs?.remaining || 0) > 0 || ensureOutputs?.error) {
+        return {
+          waiting: "outputs",
+          production_request_id: requestId,
+          ensure_outputs: ensureOutputs,
+        };
       }
     }
     try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
@@ -7612,7 +7631,6 @@ async function opsForceAzNavyPierTitle(env) {
     }).catch((error) => console.warn("ops az title idea sync failed", ideaId, error));
   }
 
-  let contentSnapshot = null;
   if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
     const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
     if (content) {
@@ -7623,62 +7641,11 @@ async function opsForceAzNavyPierTitle(env) {
           body: JSON.stringify({ fields: { Content_Title: title }, typecast: true }),
         }).catch((error) => console.warn("ops az title content sync failed", contentId, error));
       }
-      contentSnapshot = {
-        id: contentId,
-        content_title: contentTitle || title,
-        content_status: f(content, "Content_Status") || null,
-        thumbnail_status: f(content, "Thumbnail_Status") || null,
-        thumbnail_url: Boolean(studioAiThumbnailUrl(f(content, "Thumbnail_URL"))),
-        platform_outputs: arrayOrEmpty(f(content, "Platform Outputs")).length,
-      };
     }
   }
 
-  const job = parseStudioProductionJob(record);
-  const proRows = await outputRowsForProductionRequest(env, requestId).catch(() => []);
-  const platformOutputs = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
-  const diagnostic = {
-    requestId,
-    title,
-    already,
-    request_status: f(record, "Request_Status") || null,
-    plan_status: f(record, "Studio_Output_Plan_Status") || null,
-    variant_status: f(record, "Studio_Variant_Status") || null,
-    needs_compress: item4AssetsNeedStudioCompress(assets),
-    masters_ready: item4FinishedVideoMastersReady(record, assets),
-    asset_count: Array.isArray(assets) ? assets.length : 0,
-    assets: (Array.isArray(assets) ? assets : []).map((asset) => ({
-      id: asset?.id || null,
-      name: asset?.name || null,
-      size_bytes: Number(asset?.size_bytes || 0) || null,
-      compress_pending: item4AssetCompressionPending(asset),
-      drive_id: Boolean(asset?.google_drive_file_id),
-      media_asset: Boolean(asset?.media_asset_record_id),
-      public_url: Boolean(item4FinishedPublicUrl(asset)),
-    })),
-    pro_rows: {
-      active: proRows.length,
-      enabled: proRows.filter((row) => Boolean(f(row, "Enabled"))).length,
-      with_platform_output: proRows.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length,
-      rows: proRows.slice(0, 12).map((row) => ({
-        id: row.id,
-        platform: f(row, "Platform") || null,
-        output_type: f(row, "Output_Type") || null,
-        enabled: Boolean(f(row, "Enabled")),
-        platform_output: studioFirstLinkedId(f(row, "Platform_Output")) || null,
-        route_status: f(row, "Pipeline_Route_Status") || null,
-      })),
-    },
-    platform_output_count: platformOutputs.length,
-    production_job_step: job?.step || null,
-    production_job_detail: job?.detail || null,
-    production_job_error: job?.error || null,
-    content: contentSnapshot,
-  };
-  console.log(`ops az navy pier diagnostic ${JSON.stringify(diagnostic)}`);
-
   let compress = null;
-  if (diagnostic.needs_compress) {
+  if (item4AssetsNeedStudioCompress(assets)) {
     try {
       compress = await item4PulseStudioCompressJob(env, requestId);
       console.log(`ops az navy pier compress ${JSON.stringify(compress)}`);
@@ -7698,15 +7665,44 @@ async function opsForceAzNavyPierTitle(env) {
   }
   console.log(`ops az navy pier advance ${JSON.stringify({ requestId, advance })}`);
 
-  try {
-    record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
-    const proAfter = await outputRowsForProductionRequest(env, requestId).catch(() => []);
-    const poAfter = await azPlatformOutputsForRequest(env, requestId).catch(() => []);
-    const jobAfter = parseStudioProductionJob(record);
-    diagnostic.request_status = f(record, "Request_Status") || null;
-    diagnostic.plan_status = f(record, "Studio_Output_Plan_Status") || null;
-    diagnostic.variant_status = f(record, "Studio_Variant_Status") || null;
-    diagnostic.pro_rows = {
+  record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  const assetsAfter = item4AssetManifest(record);
+  const proAfter = await outputRowsForProductionRequest(env, requestId).catch(() => []);
+  const jobAfter = parseStudioProductionJob(record);
+  let contentSnapshot = null;
+  if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
+    const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
+    if (content) {
+      contentSnapshot = {
+        id: contentId,
+        content_title: String(f(content, "Content_Title") || "").trim() || title,
+        content_status: f(content, "Content_Status") || null,
+        thumbnail_status: f(content, "Thumbnail_Status") || null,
+        thumbnail_url: Boolean(studioAiThumbnailUrl(f(content, "Thumbnail_URL"))),
+        platform_outputs: arrayOrEmpty(f(content, "Platform Outputs")).length,
+      };
+    }
+  }
+  const diagnostic = {
+    requestId,
+    title,
+    already,
+    request_status: f(record, "Request_Status") || null,
+    plan_status: f(record, "Studio_Output_Plan_Status") || null,
+    variant_status: f(record, "Studio_Variant_Status") || null,
+    needs_compress: item4AssetsNeedStudioCompress(assetsAfter),
+    masters_ready: item4FinishedVideoMastersReady(record, assetsAfter),
+    asset_count: Array.isArray(assetsAfter) ? assetsAfter.length : 0,
+    assets: (Array.isArray(assetsAfter) ? assetsAfter : []).map((asset) => ({
+      id: asset?.id || null,
+      name: asset?.name || null,
+      size_bytes: Number(asset?.size_bytes || 0) || null,
+      compress_pending: item4AssetCompressionPending(asset),
+      drive_id: Boolean(asset?.google_drive_file_id),
+      media_asset: Boolean(asset?.media_asset_record_id),
+      public_url: Boolean(item4FinishedPublicUrl(asset)),
+    })),
+    pro_rows: {
       active: proAfter.length,
       enabled: proAfter.filter((row) => Boolean(f(row, "Enabled"))).length,
       with_platform_output: proAfter.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length,
@@ -7718,27 +7714,14 @@ async function opsForceAzNavyPierTitle(env) {
         platform_output: studioFirstLinkedId(f(row, "Platform_Output")) || null,
         route_status: f(row, "Pipeline_Route_Status") || null,
       })),
-    };
-    diagnostic.platform_output_count = poAfter.length;
-    diagnostic.production_job_step = jobAfter?.step || null;
-    diagnostic.production_job_detail = jobAfter?.detail || null;
-    diagnostic.production_job_error = jobAfter?.error || null;
-    if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
-      const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
-      if (content) {
-        diagnostic.content = {
-          id: contentId,
-          content_title: String(f(content, "Content_Title") || "").trim() || title,
-          content_status: f(content, "Content_Status") || null,
-          thumbnail_status: f(content, "Thumbnail_Status") || null,
-          thumbnail_url: Boolean(studioAiThumbnailUrl(f(content, "Thumbnail_URL"))),
-          platform_outputs: arrayOrEmpty(f(content, "Platform Outputs")).length,
-        };
-      }
-    }
-  } catch (error) {
-    console.warn("ops az navy pier post-advance diagnostic refresh failed", requestId, error);
-  }
+    },
+    platform_output_count: proAfter.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length,
+    production_job_step: jobAfter?.step || null,
+    production_job_detail: jobAfter?.detail || null,
+    production_job_error: jobAfter?.error || null,
+    content: contentSnapshot,
+  };
+  console.log(`ops az navy pier diagnostic ${JSON.stringify(diagnostic)}`);
 
   return { ok: true, diagnostic, compress, advance };
 }
@@ -10908,9 +10891,12 @@ async function catalogFallbackMusic(env) {
 }
 
 async function resolveStudioRenderMusic(env, outputRow, requestRecord, effective) {
+  const mode = String(effective?.background_music_mode || "").trim().toLowerCase();
+  const overrideLinks = arrayOrEmpty(f(outputRow, "Selected_Music_Asset_Override"));
+  const masterLinks = arrayOrEmpty(f(requestRecord, "Selected_Music_Asset"));
+  if (mode !== "yes" && !overrideLinks.length && !masterLinks.length) return emptyStudioMusic();
   const preferred = await preferredMusicForProductionRequestOutput(env, outputRow, requestRecord);
   if (preferred.url) return preferred;
-  const mode = String(effective?.background_music_mode || "").trim().toLowerCase();
   if (mode !== "yes") return preferred;
   return catalogFallbackMusic(env);
 }
@@ -14301,9 +14287,28 @@ async function markParentContentItemAsStudioUmbrella(env, parentContentItem, out
   });
 }
 
-async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId) {
+async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId, options = {}) {
+  const onlyMissing = Boolean(options.onlyMissing);
+  const limit = Number(options.limit);
+  const batchLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
   const outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
-  if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,work_items:[],single_parent_mode:true};
+  if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true};
+  const candidates = onlyMissing
+    ? outputRows.filter((row) => !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))
+    : outputRows;
+  const batch = batchLimit == null ? candidates : candidates.slice(0, batchLimit);
+  const remaining = Math.max(0, candidates.length - batch.length);
+  if (!batch.length) {
+    return {
+      enabled_output_count: outputRows.length,
+      routed_count: 0,
+      blocked_count: 0,
+      remaining: 0,
+      work_items: [],
+      single_parent_mode: true,
+      already: true,
+    };
+  }
   let parent=await airtableFetch(env,env.AIRTABLE_CONTENT_TABLE_ID,parentContentItemId);
   const filledAssets = item4FillAiOverlayFallbacks(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []), requestRecord, parent);
   if (JSON.stringify(filledAssets) !== JSON.stringify(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []))) {
@@ -14315,7 +14320,7 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
   parent=await restoreParentContentItemFromStudioUmbrella(env,parent);
   const profileDefaults=await productionProfileDefaultsForParentContentItem(env,parent);
   const workItems=[]; let routed=0,blocked=0;
-  for(const outputRow of outputRows){
+  for(const outputRow of batch){
     const effective=await buildOutputWorkItemEffective(env,outputRow,requestRecord,parent,profileDefaults);
     const route=effective.route;
     if(effective.issues.length){
@@ -14328,7 +14333,7 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
     const seed=platformOutputSeedFields(parent,requestRecord,outputRow,effective,sourcePackage);
     const existingLinks=arrayOrEmpty(f(outputRow,"Platform_Output"));
     let poId=existingLinks.find(id=>/^rec[A-Za-z0-9]+$/.test(String(id||"")))||null;
-    if(!poId){
+    if(!poId && !onlyMissing){
       const proId=String(f(outputRow,"Production_Request_Output_ID")||"").replace(/'/g,"\\'");
       if(proId){
         const found=await listRecords(env,STUDIO_PLATFORM_OUTPUT_TABLE,{limit:1,filterFormula:`FIND(',${proId},', ',' & ARRAYJOIN({Production_Request_Output}) & ',') > 0`});
@@ -14343,7 +14348,7 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
     routed++;
     workItems.push({production_request_output_record_id:outputRow.id,platform:effective.platform,output_type:effective.output_type,content_item_record_id:parent.id,platform_output_record_id:po.id,routed:true});
   }
-  if (studioIsFinishedPassthrough(requestRecord) && parent?.id) {
+  if (studioIsFinishedPassthrough(requestRecord) && parent?.id && routed > 0) {
     await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parent.id, {
       method: "PATCH",
       body: JSON.stringify({
@@ -14358,7 +14363,7 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
       }),
     }).catch(() => null);
   }
-  return {enabled_output_count:outputRows.length,routed_count:routed,blocked_count:blocked,work_items:workItems,single_parent_mode:true};
+  return {enabled_output_count:outputRows.length,routed_count:routed,blocked_count:blocked,remaining,work_items:workItems,single_parent_mode:true};
 }
 
 async function finalizeProductionRequestPromotion(env, requestRecordId, ideaRecord) {
