@@ -7974,7 +7974,15 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
     }
     const stories = await azRestampFinishedStories(env, requestId, { limit: 1 });
     if (Number(stories?.restamped || 0) > 0 || Number(stories?.remaining || 0) > 0) {
-      // Preserve approve diagnostics (e.g. story_render wait) when restamping.
+      // Do not mask a real main-destination blocker (cover/final) as story_render success.
+      if (approveFirst?.waiting && approveFirst.waiting !== "story_render") {
+        return {
+          ...approveFirst,
+          stories,
+          ensure_outputs: ensureOutputs,
+          phase,
+        };
+      }
       return {
         ok: Boolean(approveFirst?.ok),
         skipped: approveFirst?.skipped,
