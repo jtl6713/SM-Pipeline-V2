@@ -152,6 +152,11 @@ def a3_mime_route(mime: str) -> str:
     return "unsupported"
 
 
+def a3_needs_jpeg_preview(mime: str = "", name: str = "", extension: str = "") -> bool:
+    blob = f"{mime} {name} {extension}".casefold()
+    return any(token in blob for token in ("heic", "heif", "avif"))
+
+
 def audio_role_fallback(ai_role: str, filename: str) -> str:
     role = (ai_role or "").strip()
     if role:

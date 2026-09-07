@@ -4,6 +4,7 @@ from asset.routing import (
     a2b_capture_source,
     a2b_route,
     a3_mime_route,
+    a3_needs_jpeg_preview,
     a4_is_healthy,
     a4_is_missing,
     audio_role_fallback,
@@ -68,13 +69,16 @@ def test_a2b_skip_and_backfill_rules():
 def test_a3_mime_and_audio_fallback():
     assert a3_mime_route("audio/mpeg") == "audio"
     assert a3_mime_route("video/mp4") == "video"
-    assert a3_mime_route("image/png") == "image"
+    assert a3_mime_route("image/heic") == "image"
+    assert a3_mime_route("image/heif") == "image"
     assert a3_mime_route("application/pdf") == "unsupported"
     assert audio_role_fallback("", "ElevenLabs_Kate - English Female Voice With Soft Accent_pvc.mp3") == "Voiceover"
     assert audio_role_fallback("", "recABC_voice_normalized.mp3") == "Voiceover"
     assert audio_role_fallback("", "background-loop.mp3") == "Music"
     assert audio_role_fallback("Voiceover", "track.mp3") == "Voiceover"
     assert audio_role_fallback("", "untitled.wav") == "Other"
+    assert a3_needs_jpeg_preview("image/heif", "Lincoln Park Zoo 4.HEIC", "HEIC") is True
+    assert a3_needs_jpeg_preview("image/jpeg", "Lincoln Park Zoo 4.jpg", "jpg") is False
 
 
 def test_a4_formula_and_health_checks():

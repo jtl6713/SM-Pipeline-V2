@@ -260,7 +260,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.269-library-heic-preview",
+          version: "0.10.270-a3-heic-classify",
           studio_desk_inventory_v1: true,
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
@@ -275,6 +275,7 @@ export default {
           studio_library_browse_v1: true,
           studio_library_rename_v1: true,
           studio_library_heic_preview_v1: true,
+          studio_a3_heic_jpeg_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -30156,7 +30157,7 @@ async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
   const knownA2 = {
     id: "python-a2",
     timestamp: startedAt,
-    operations: filesFound ? (intakenCount > 0 ? 20 : (skippedOversizeCount > 0 ? 6 : 2)) : 2,
+    operations: filesFound ? 20 : 2,
     state: "success",
     status_code: 1,
     intaken_count: intakenCount,
@@ -30164,6 +30165,14 @@ async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
     compression_triggered: compressionTriggered,
   };
   const status = await buildLibraryIntakeStatus(env, startedAt, knownA2);
+  const waitingClassify = (status.library_intake?.needing_classification || []).length;
+  if (!filesFound && waitingClassify) {
+    const classifyTask = item4PulsePipelineStage(env, "a3", {
+      extra: { drain: true, trigger_a4: true, wait_for_next: false },
+    }, "A3");
+    if (ctx?.waitUntil) ctx.waitUntil(classifyTask);
+    else await classifyTask;
+  }
   return respond(request, env, {
     ok: true,
     triggered: "a2-python",
@@ -30353,21 +30362,27 @@ async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const a3 = firstRunSince(a3Runs, startedAt) || (a2 && a3Python ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
   const a4 = firstRunSince(a4Runs, startedAt) || (a2 && a4Python ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
   const a2Result = describeA2Run(a2);
-  const skipped = a2Result.files_found === false ? "Skipped — no files to intake." : null;
+  const classifyCount = (needingClassification || []).length;
+  const skipped = a2Result.files_found === false && !classifyCount ? "Skipped — no files to intake." : null;
+  const a3Detail = a3
+    ? (a3.state === "error" ? "A3 failed." : (classifyCount ? `${classifyCount} still waiting for classification.` : "A3 finished."))
+    : (skipped || (a2b ? "Starting A3…" : "Queued"));
   const stages = [
     { key: "A2", label: "Intake", run: a2, ...a2Result },
     { key: "A2B", label: "Video backfill", run: a2b, detail: a2b ? (a2b.state === "error" ? "A2B failed." : "A2B finished.") : (skipped || (a2 ? "Starting A2B…" : "Queued")) },
-    { key: "A3", label: "Classification", run: a3, detail: a3 ? (a3.state === "error" ? "A3 failed." : "A3 finished.") : (skipped || (a2b ? "Starting A3…" : "Queued")) },
-    { key: "A4", label: "Reconciliation", run: a4, detail: a4 ? (a4.state === "error" ? "A4 failed." : "A4 finished.") : (skipped || (a3 ? "Starting A4…" : "Queued")) },
+    { key: "A3", label: "Classification", run: a3, detail: a3Detail },
+    { key: "A4", label: "Reconciliation", run: a4, detail: a4 ? (a4.state === "error" ? "A4 failed." : (classifyCount ? "Waiting on A3." : "A4 finished.")) : (skipped || (a3 ? "Starting A4…" : "Queued")) },
   ];
   const failed = a2Result.result === "error" || [a2b, a3, a4].some((run) => run?.state === "error");
-  const empty = a2Result.files_found === false;
-  const processedDone = Boolean(a2Result.files_found && (a4 || (a3 && Date.now() - Date.parse(a3.timestamp || "") > 45000)));
+  const empty = a2Result.files_found === false && !classifyCount;
+  const processedDone = Boolean(a2Result.files_found && (a4 || (a3 && Date.now() - Date.parse(a3.timestamp || "") > 45000))) && !classifyCount;
   const complete = failed || empty || processedDone;
-  const percent = empty || (complete && !failed) ? 100 : failed ? 40 : a2Result.files_found ? 55 : 12;
+  const percent = empty || (complete && !failed) ? 100 : failed ? 40 : classifyCount ? 70 : a2Result.files_found ? 55 : 12;
   const summary = empty
     ? "A2 completed with no assets to process"
-    : a2Result.result === "oversize_only"
+    : classifyCount
+      ? `${classifyCount} asset${classifyCount === 1 ? "" : "s"} still waiting for classification.`
+      : a2Result.result === "oversize_only"
       ? a2Result.detail
       : failed
         ? a2Result.detail
