@@ -42,8 +42,18 @@ def test_yt0_gates():
 
 
 def test_ytp1_and_poll_gates():
-    yt1 = _record(Platform="YouTube", YouTube_Stage="YT1")
+    yt1 = _record(
+        Platform="YouTube",
+        YouTube_Stage="YT1",
+        Publish_Asset_URL="https://media.chicagoshining.com/publish/platform-output-375/file.mp4",
+    )
     assert ytp1_eligibility_reason(yt1) is None
+    assert ytp1_eligibility_reason(_record(Platform="YouTube", YouTube_Stage="YT1")) == "missing_public_publish_url"
+    assert ytp1_eligibility_reason(_record(
+        Platform="YouTube",
+        YouTube_Stage="YT1",
+        Final_File_URL="https://drive.google.com/file/d/1aM4EYlL0OXEGdP6O8lUzmmFEdCqs8UMI/view",
+    )) == "missing_public_publish_url"
     assert ytp1_eligibility_reason(_record(Platform="YouTube", YouTube_Stage="YT2")) == "youtube_stage_not_yt1"
     assert ytp1_eligibility_reason(_record(Platform="YouTube", YouTube_Stage="YT1", YouTube_Upload_Job_ID="job")) == (
         "already_has_upload_job"

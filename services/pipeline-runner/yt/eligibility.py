@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ap0.public_cover import native_grid_cover_required
+from ap0.public_mp4 import is_public_publish_url
 from asset.helpers import as_bool
 from render.fields import field_str
 from yt.constants import STAGE_YT1, STAGE_YT2, STAGE_YT4
@@ -79,6 +80,8 @@ def ytp1_eligibility_reason(
         return "already_has_upload_job"
     if field_str(record, "YouTube_Video_ID"):
         return "already_has_youtube_video"
+    if not is_public_publish_url(upload_source_url(record)):
+        return "missing_public_publish_url"
     if replace_mismatch(
         record,
         replace_transaction_id=replace_transaction_id,
