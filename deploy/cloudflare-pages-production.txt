@@ -408,3 +408,6 @@ Task Organizer docs link Pages deploy: 2026-09-07 - Activity log Task Organizer 
 
 Help header Pages deploy: 2026-09-07 - Header Help left of Profile; tabbed guides for each Studio area. UI 0.6.269-help-tabs.
 
+Operations Help Pages deploy: 2026-09-07 - Expand Operations guides: Control tabs, autonomous service desk, testing, and testing logs. UI 0.6.270-ops-help.
+
+

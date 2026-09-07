@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.269-help-tabs">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.270-ops-help">
 </head>
 <body>
  <header class="topbar">
@@ -1314,6 +1314,9 @@
  <button type="button" class="support-toc-link" role="tab" id="helpTabMusic" data-support-doc="music" aria-controls="helpArticleMusic" aria-selected="false" tabindex="-1">Music</button>
  <button type="button" class="support-toc-link" role="tab" id="helpTabLibrary" data-support-doc="library" aria-controls="helpArticleLibrary" aria-selected="false" tabindex="-1">Assets</button>
  <button type="button" class="support-toc-link" role="tab" id="helpTabOperations" data-support-doc="operations" aria-controls="helpArticleOperations" aria-selected="false" tabindex="-1">Operations</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabDesk" data-support-doc="desk" aria-controls="helpArticleDesk" aria-selected="false" tabindex="-1">Service desk</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabTesting" data-support-doc="testing" aria-controls="helpArticleTesting" aria-selected="false" tabindex="-1">Testing</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabLogs" data-support-doc="logs" aria-controls="helpArticleLogs" aria-selected="false" tabindex="-1">Logs</button>
  </nav>
  <div class="support-docs-body">
  <article class="support-article" id="helpArticleWalkthrough" data-support-article="walkthrough" role="tabpanel" aria-labelledby="helpTabWalkthrough">
@@ -1502,18 +1505,105 @@
  <h2>Operations</h2>
  <figure class="support-shot">
  <img src="/assets/support/operations.jpg?v=0.6.102" alt="Operations control page" width="1440" height="920">
- <figcaption>Admin-only control room. Buttons pulse on-demand work; they do not turn interval scanners back on.</figcaption>
+ <figcaption>Admin-only control room. Control and Autonomous Service Agent are separate pages. Control tools are text tabs so only one section is open at a time.</figcaption>
  </figure>
- <p>Operations is the control room. The nav item is limited to tenant admin, publishing, and production-configure roles. Control tools sit behind the small text links at the top of the card so only one section is open at a time.</p>
+ <p>Operations is the control room. The sidebar item is limited to tenant admin, publishing, and production-configure roles. Use <strong>Control</strong> for daily jobs and queues. Use <strong>Autonomous Service Agent</strong> for the desk guide, stuck inventory, and activity log. Refresh reloads the current page from the API.</p>
+ <h3>Control tabs</h3>
  <ul>
- <li><strong>Autonomous Service Agent</strong> — Operations sub-page with the Word operator guide, desk mode, live stuck inventory, and Task Organizer activity log. Worker heal still runs every two minutes; the desk never auto-publishes.</li>
- <li><strong>Daily ideas</strong> — per-profile daily batch around 1:00 a.m. Chicago, or Run today now.</li>
- <li><strong>Library intake</strong> — A GitHub ticker starts A2 every 10 minutes. Process intake folder runs the same drain now. Oversized clips compress one at a time, then the next file starts immediately; A0 stays off.</li>
- <li><strong>Ready to schedule / publish</strong> — set a post time or mark a hand-posted package published.</li>
- <li><strong>Oversized library videos</strong> — compress via A1S/A1M for Drive files over 100 MB.</li>
- <li><strong>Render repair</strong> — reset stale Remotion URLs (M1) and retry failed asset selection (R2B).</li>
+ <li><strong>Service desk</strong> — stuck produce, render, crop, autonomous, and public health counts. Desk mode is the kill switch. Worker cron still heals transients every two minutes. Full desk behavior is on the Service desk Help tab.</li>
+ <li><strong>Daily ideas</strong> — per-profile overnight batch around 1:00 a.m. Chicago. Toggle a profile on, or use Run today now for enabled profiles only.</li>
+ <li><strong>Autonomous produce</strong> — harvests a Chicago trend the library can shoot, produces the standard template, and <em>stops at Ready for Review</em>. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or Run autonomous now. Optional landmark pin applies to the next run. Studio will not pick a new autonomous idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
+ <li><strong>Library intake</strong> — Drive ingestion folder scan every 10 minutes. Process intake folder starts the same drain now. Oversized clips compress one at a time, then the next file starts immediately. Cap music leading silence rewrites catalog audio so the intro is no longer than 0.5 seconds.</li>
+ <li><strong>Analytics</strong> — posting-time heatmap from similar public accounts (Chicago weekday/hour). Gold marks your upcoming scheduled posts. YouTube timing is live; Instagram timing is paused pending Meta permission; TikTok and Facebook stay reference-only. Run sequentially fetches one handle at a time. Suggested times never auto-apply.</li>
+ <li><strong>Ready to schedule</strong> — approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</li>
+ <li><strong>Ready to publish</strong> — due packages. Auto-publish still starts from Pipeline review. Use mark published only after you posted by hand.</li>
+ <li><strong>Oversized videos</strong> — Drive files over 100 MB. Compress all starts the A1S queue now. The banner shows which clip is compressing.</li>
+ <li><strong>Render repair</strong> — Reset stale render URLs after Remotion moved. Retry failed asset selection only retries that failed stage. These do not run on a clock.</li>
  </ul>
- <p>These buttons do not turn interval scanners back on. They pulse the matching on-demand scenario when work exists.</p>
+ <p>Control buttons pulse on-demand work when something is waiting. They do not turn interval scanners back on.</p>
+ <p>See also the <button type="button" class="text-button" data-support-doc="desk">Service desk</button>, <button type="button" class="text-button" data-support-doc="testing">Testing</button>, and <button type="button" class="text-button" data-support-doc="logs">Logs</button> Help tabs.</p>
+ <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
+ </article>
+ <article class="support-article" id="helpArticleDesk" data-support-article="desk" role="tabpanel" aria-labelledby="helpTabDesk" hidden>
+ <h2>Autonomous service desk</h2>
+ <p>The desk watches stuck Studio work after the Worker has already tried to heal it. Open it from Operations → Control → Service desk, or Operations → Autonomous Service Agent.</p>
+ <h3>Two layers</h3>
+ <ul>
+ <li><strong>Worker heal</strong> — every two minutes. Resumes stale produce, render, crop, and finished-video jobs, and drains leftover Drive ingestion files. This is the first responder. Transient items never become desk tickets.</li>
+ <li><strong>Desk agent</strong> — reads the live inventory, classifies what is still stuck, and writes a <code>desk_incident</code> ticket. Depending on Desk mode it may restart a down local service or open a <code>cursor/desk-*</code> pull request. It never Approves publish and never sets a video-frame cover when a 3D grid cover is required.</li>
+ </ul>
+ <h3>Desk mode</h3>
+ <p>The same selector appears on Control and on the Agent inventory tab. Missing value is observe.</p>
+ <ul>
+ <li><strong>off</strong> — inventory only. No tickets, no restarts, no PRs.</li>
+ <li><strong>observe</strong> (default) — ticket a diagnosis pack only.</li>
+ <li><strong>infra</strong> — also SYNC / VERIFY / one-service deploy when public health is down. Local companion on this Windows machine only. Dirty git checkout stops the companion; it never hard-resets.</li>
+ <li><strong>patch</strong> — also open PRs. You merge. After merge, ship Worker/Pages via the production trigger files, or PLAN/DEPLOY one local service.</li>
+ <li><strong>automerge</strong> — leave off until proven. Allowlisted heal paths only, CI green, caps remain, and the same fingerprint is not repeating.</li>
+ </ul>
+ <h3>Inventory and fingerprints</h3>
+ <p>Counts cover stuck produce, render, crop, autonomous, intake parked, and public health. A fingerprint is kind + record + error class. The same parked job reuses one incident instead of five tickets. A fingerprint that repeats within 24 hours emails Joseph and stops; it does not open another PR.</p>
+ <h3>Agent page</h3>
+ <ul>
+ <li><strong>Guide</strong> — short operator copy plus the downloadable Word guide for auto-review, bounded auto-correction, and what you still approve.</li>
+ <li><strong>Desk inventory</strong> — live stuck counts and the same Desk mode switch.</li>
+ <li><strong>Activity log</strong> — recent desk tickets. See the Logs Help tab.</li>
+ </ul>
+ <p>You still Approve publish for library-stills autonomous work. Finished-video (AZ) may auto-schedule; you can still change or cancel times in Pipeline before they fire. TikTok covers are set in the TikTok app.</p>
+ <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
+ </article>
+ <article class="support-article" id="helpArticleTesting" data-support-article="testing" role="tabpanel" aria-labelledby="helpTabTesting" hidden>
+ <h2>Testing</h2>
+ <p>Studio testing means proving a path to Ready for Review without posting live, unless you explicitly Approve. Operations is where you pulse a run; Pipeline is where you inspect the result.</p>
+ <h3>Safe Studio tests</h3>
+ <ul>
+ <li><strong>Autonomous produce</strong> — Operations → Autonomous produce → Run autonomous now. It must stop at Ready for Review. Nothing publishes. Do not harvest a second idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
+ <li><strong>Daily ideas</strong> — Run today now only for profiles whose Daily Ideas toggle is on. Candidates land on Ideas; they are not production and not publish.</li>
+ <li><strong>Finished video (AZ)</strong> — Home drop of one MP4. Studio makes the 3D cover, captions, and a 7-day schedule. You can still change or cancel times in Pipeline before they fire. TikTok stays a draft.</li>
+ <li><strong>Library intake / compress</strong> — Process intake or Compress all only when files are waiting. Watch the intake stages and the oversized banner instead of assuming it finished.</li>
+ <li><strong>Analytics</strong> — Run sequentially or Refresh similar times. This stores public-post observations. It never writes a publish time onto an output.</li>
+ <li><strong>Render repair</strong> — Reset stale render URLs or Retry failed asset selection only on failed/waiting rows. Healthy outputs are left alone.</li>
+ </ul>
+ <h3>What a pass looks like</h3>
+ <ul>
+ <li>Pipeline rows reach Ready for Review with a real preview (rendered MP4 or native stills) and the 3D grid cover where the platform has a separate cover.</li>
+ <li>Instagram Reels keep <code>cover_url</code> and do not fall back to a video-frame offset.</li>
+ <li>TikTok remains an inbox draft plus the publish-package email.</li>
+ <li>Do not Approve for publishing, and do not Approve All, unless this test is meant to go live.</li>
+ </ul>
+ <h3>GitHub and local checks</h3>
+ <ul>
+ <li><strong>Regression functional</strong> — runs on pull requests that touch apps, services, or tests. Hermetic packs only; it does not publish.</li>
+ <li><strong>End-to-end seed workflows</strong> — used to create a Studio idea/request that stops at review. Test-tagged rows must not mutate unrelated production. Leave Test Run ID blank on real autonomous work.</li>
+ <li><strong>Local services</strong> — Frame Extractor, Remotion, pipeline-runner, and related Windows services. Public <code>/health</code> on each hostname is the desk’s infra signal. Restart one service at a time.</li>
+ </ul>
+ <p>Seeded matrix or e2e outputs are review fixtures until you say otherwise. Do not Approve leftover test content from an old run.</p>
+ <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
+ </article>
+ <article class="support-article" id="helpArticleLogs" data-support-article="logs" role="tabpanel" aria-labelledby="helpTabLogs" hidden>
+ <h2>Testing logs</h2>
+ <p>Logs for Operations live in four places. Worker heals that succeed quietly do not show up as desk tickets.</p>
+ <h3>Studio activity log</h3>
+ <p>Operations → Autonomous Service Agent → Activity log. This lists recent <code>desk_incident</code> tickets (agent 3, task 1). Each row is a fingerprint, class, record, and diagnosis. It is the operator view of what the desk decided after Worker heal did not clear the job.</p>
+ <h3>Task Organizer</h3>
+ <p>The durable store behind that list is <a href="https://tasks.chicagoshining.com/docs" target="_blank" rel="noopener noreferrer">Task Organizer</a>. Open it for the full event history, not only the last few rows Studio shows. Worker transient heals are not copied here.</p>
+ <h3>On-page progress</h3>
+ <ul>
+ <li><strong>Library intake</strong> — stage list (intake, compress, classify, reconcile) and the progress bar while a drain is running.</li>
+ <li><strong>Oversized videos</strong> — color banner with the file name, percent, and how many clips are waiting.</li>
+ <li><strong>Analytics</strong> — status line per sequential handle; Stop waits for the current handle to finish.</li>
+ <li><strong>Autonomous produce</strong> — meta line under Run autonomous now (running, resuming drafts, skipped, or waiting on frames).</li>
+ <li><strong>Pipeline</strong> — live studio state, render, review, and the countdown refresh while that page is open.</li>
+ </ul>
+ <h3>GitHub Actions</h3>
+ <p>Production deploys and PR checks write run logs on GitHub:</p>
+ <ul>
+ <li>Deploy Studio Pages Production — frontend, including this Help UI.</li>
+ <li>Deploy Studio API Worker Production — API/cron healer.</li>
+ <li>Regression functional — hermetic tests on a pull request.</li>
+ <li>End-to-end seed / API control workflows — print idea, production request, and content IDs when a review fixture is created.</li>
+ </ul>
+ <p>If a Pages or Worker deploy fails, read that Actions run before pulsing Make or re-running autonomous produce. Local companion deploy logs stay on this Windows machine under Deployment Logs.</p>
  <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
  </article>
  </div>
@@ -1678,8 +1768,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.269-help-tabs"></script>
- <script src="/assets/ez-plan.js?v=0.6.269-help-tabs"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.269-help-tabs"></script>
+ <script src="/assets/config.js?v=0.6.270-ops-help"></script>
+ <script src="/assets/ez-plan.js?v=0.6.270-ops-help"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.270-ops-help"></script>
 </body>
 </html>
