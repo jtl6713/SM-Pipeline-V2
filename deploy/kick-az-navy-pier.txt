@@ -1,6 +1,6 @@
 Trigger Kick AZ Navy Pier Compress/Advance.
 
-Stage public 3D covers and auto-schedule/approve Platform Outputs for
-reca7v6zi1b9QNanJ / Content 124 (no Approve-publish gate).
+Phased kick: public covers → public finals → story 5s teasers → auto-schedule
+(no Approve-publish gate). Content 124 / reca7v6zi1b9QNanJ.
 
-Triggered: 2026-09-07T04:10Z (az-auto-schedule)
+Triggered: 2026-09-07T04:30Z (az-story-clip)

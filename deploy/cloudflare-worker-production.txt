@@ -361,3 +361,5 @@ AZ Navy Pier outputs fanout Worker deploy: 2026-09-07 - When AZ is Promoted with
 AZ Navy Pier batched fanout Worker deploy: 2026-09-07 - Fan out at most 2 missing Platform Outputs per Worker invoke to stay under subrequest limits; kick loops until all plan outputs are linked. Worker 0.10.260-az-navy-fanout2.
 
 AZ finished-video auto-schedule Worker deploy: 2026-09-07 - Stage Drive 3D covers onto public media CDN, then auto-approve + 7-day schedule with no Approve-publish gate. Worker 0.10.261-az-auto-schedule.
+
+AZ finished-video story clip Worker deploy: 2026-09-07 - Finished-video Stories render a 5s Remotion teaser (not full master). Phased AZ kick: covers → public finals → story restamp → auto-approve without subrequest blowups. Worker 0.10.262-az-story-clip.

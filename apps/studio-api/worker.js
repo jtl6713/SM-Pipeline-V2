@@ -232,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.261-az-auto-schedule",
+          version: "0.10.262-az-story-clip",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -582,7 +582,8 @@ export default {
       if (isOpsAzNavyPierKickRoute) {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
-        const result = await opsForceAzNavyPierTitle(env);
+        const phase = String(url.searchParams.get("phase") || "auto").trim().toLowerCase() || "auto";
+        const result = await opsForceAzNavyPierTitle(env, { phase });
         return respond(request, env, result);
       }
 
@@ -5698,6 +5699,22 @@ function studioIsFinishedPassthrough(record) {
   return Boolean(studioFinishedOriginKind(record));
 }
 
+function studioOutputTypeLabel(record) {
+  return String(
+    f(record, "Studio_Output_Type")
+    || f(record, "Output_Type")
+    || f(record, "Format")
+    || f(record, "Platform_Output_Type")
+    || ""
+  ).trim();
+}
+
+/** Full finished-video file passthrough (Reels/Shorts/TikTok). Stories use a short Remotion teaser instead. */
+function studioIsFinishedVideoFilePassthrough(record) {
+  if (studioFinishedOriginKind(record) !== "finished-video") return false;
+  return !studioAzIsStory(studioOutputTypeLabel(record));
+}
+
 function item4FinishedPublicUrl(asset) {
   return String(asset?.url || "").startsWith("https://media.chicagoshining.com/");
 }
@@ -7404,7 +7421,8 @@ async function azStagePublicCoverFromSource(env, parent, sourceUrl, driveFileId 
   return { url: uploaded.url, skip: "" };
 }
 
-async function azEnsurePublicCovers(env, requestId) {
+async function azEnsurePublicCovers(env, requestId, options = {}) {
+  const stampLimit = Math.max(1, Math.min(6, Number(options.stampLimit) || 3));
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
   const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
@@ -7445,49 +7463,168 @@ async function azEnsurePublicCovers(env, requestId) {
   }
 
   let stamped = 0;
+  let remaining = 0;
   for (const row of outputs) {
     const current = studioAiThumbnailUrl(f(row, "Thumbnail_URL"));
     if (current === publicUrl) continue;
+    if (stamped >= stampLimit) {
+      remaining += 1;
+      continue;
+    }
     await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
       method: "PATCH",
       body: JSON.stringify({ fields: { Thumbnail_URL: publicUrl }, typecast: true }),
     });
     stamped += 1;
   }
-  return { ok: true, url: publicUrl, stamped, parent_id: contentId };
+  return { ok: true, url: publicUrl, stamped, remaining, parent_id: contentId };
 }
 
-async function azAutoApproveIfReady(env, requestId) {
+async function azEnsurePublicFinalFiles(env, requestId, options = {}) {
+  const stampLimit = Math.max(1, Math.min(6, Number(options.stampLimit) || 3));
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
-  let cover = null;
-  try {
-    cover = await azEnsurePublicCovers(env, requestId);
-  } catch (error) {
-    cover = { error: error instanceof Error ? error.message : String(error) };
-    console.warn("AZ ensure public covers failed", requestId, error);
+  const masters = item4AssetManifest(requestRecord);
+  const video = masters.find((asset) => item4LooksLikeVideoAsset(asset)) || masters[0];
+  if (!video) return { waiting: "assets", reason: "no_master" };
+  let publicUrl = item4FinishedMasterPlayUrl(video, requestRecord);
+  if (!item4UrlIsPublicPublishCdn(publicUrl)) {
+    // Avoid staging a huge master inside the kick path — produce job / continuation owns that.
+    try { await enqueueStudioProductionJob(env, requestId); } catch {}
+    return { waiting: "preview", reason: "finished_preview_not_public", current: publicUrl || null };
   }
   const outputs = await azPlatformOutputsForRequest(env, requestId);
-  if (!outputs.length) return { waiting: "outputs", cover };
+  const mains = outputs.filter((row) => studioIsFinishedVideoFilePassthrough(row) || (
+    !studioAzIsStory(studioOutputTypeLabel(row)) && studioFinishedOriginKind(requestRecord) === "finished-video"
+  ));
+  let stamped = 0;
+  let remaining = 0;
+  for (const row of mains) {
+    const finalUrl = String(f(row, "Final_File_URL") || "").trim();
+    const preview = String(f(row, "Studio_Preview_URL") || "").trim();
+    const publish = String(f(row, "Publish_Asset_URL") || "").trim();
+    if (
+      item4UrlIsPublicPublishCdn(finalUrl)
+      && finalUrl === publicUrl
+      && (!preview || preview === publicUrl)
+      && (!publish || publish === publicUrl)
+    ) continue;
+    if (stamped >= stampLimit) {
+      remaining += 1;
+      continue;
+    }
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Final_File_URL: publicUrl,
+          Studio_Preview_URL: publicUrl,
+          Publish_Asset_URL: publicUrl,
+          Render_Status: String(f(row, "Render_Status") || "").trim() || "Rendered",
+          Output_Status: /^ready for review$/i.test(String(f(row, "Output_Status") || ""))
+            ? f(row, "Output_Status")
+            : "Ready for Review",
+        },
+        typecast: true,
+      }),
+    });
+    stamped += 1;
+  }
+  return { ok: true, url: publicUrl, stamped, remaining, mains: mains.length };
+}
+
+async function azRestampFinishedStories(env, requestId, options = {}) {
+  const limit = Math.max(1, Math.min(4, Number(options.limit) || 2));
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  if (!studioIsAzFinishedVideo(requestRecord) && studioFinishedOriginKind(requestRecord) !== "finished-video") {
+    return { skipped: "not_finished_video" };
+  }
+  const outputs = await azPlatformOutputsForRequest(env, requestId);
+  const stories = outputs.filter((row) => studioAzIsStory(studioOutputTypeLabel(row)));
+  let restamped = 0;
+  let remaining = 0;
+  const ids = [];
+  const cache = {
+    requests: new Map([[requestId, requestRecord]]),
+    outputRows: new Map(),
+    parents: new Map(),
+    profiles: new Map(),
+  };
+  for (const row of stories) {
+    const notes = String(f(row, "Output_Notes") || "");
+    const render = String(f(row, "Render_Status") || "").trim();
+    const alreadyTeaser = /story teaser|finished_story_teaser/i.test(notes)
+      && /ready for render|rendering|rendered/i.test(render)
+      && String(f(row, "Composition_ID") || "").trim() === "ChicagoShiningPhotoSequence";
+    const needsTeaser = !alreadyTeaser && (
+      /Finished passthrough/i.test(notes)
+      || (render === "Rendered" && Boolean(String(f(row, "Final_File_URL") || "").trim()))
+      || !String(f(row, "Render_Clip_List_JSON") || "").trim()
+    );
+    if (!needsTeaser) continue;
+    if (restamped >= limit) {
+      remaining += 1;
+      continue;
+    }
+    const context = await studioContinuationLoadContext(env, row, cache).catch(() => null);
+    if (!context) {
+      remaining += 1;
+      continue;
+    }
+    await studioContinuationStampPackage(env, row, context);
+    restamped += 1;
+    ids.push(row.id);
+  }
+  if (restamped) {
+    try { await enqueueStudioProductionJob(env, requestId); } catch {}
+  }
+  return { ok: true, restamped, remaining, ids };
+}
+
+async function azAutoApproveIfReady(env, requestId, options = {}) {
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
+  let cover = options.cover || null;
+  if (!options.skipCover) {
+    try {
+      cover = await azEnsurePublicCovers(env, requestId, { stampLimit: options.coverStampLimit || 3 });
+    } catch (error) {
+      cover = { error: error instanceof Error ? error.message : String(error) };
+      console.warn("AZ ensure public covers failed", requestId, error);
+    }
+  }
+  let finals = options.finals || null;
+  if (!options.skipFinals) {
+    try {
+      finals = await azEnsurePublicFinalFiles(env, requestId, { stampLimit: options.finalStampLimit || 3 });
+    } catch (error) {
+      finals = { error: error instanceof Error ? error.message : String(error) };
+      console.warn("AZ ensure public finals failed", requestId, error);
+    }
+  }
+  const outputs = await azPlatformOutputsForRequest(env, requestId);
+  if (!outputs.length) return { waiting: "outputs", cover, finals };
   const pending = outputs.filter((row) => {
     const review = String(f(row, "Review_Status") || "").trim();
     const status = String(f(row, "Output_Status") || "").trim();
     if (review === "Approved" || status === "Approved for Publishing") return false;
     return true;
   });
-  if (!pending.length) return { skipped: "already_queued", count: outputs.length, cover };
+  if (!pending.length) return { skipped: "already_queued", count: outputs.length, cover, finals };
   const notReady = pending
     .map((row) => ({ id: row.id, platform: f(row, "Platform"), blockers: azOutputQueueBlockers(row) }))
     .filter((row) => row.blockers.length);
   if (notReady.length) {
-    if (notReady.some((row) => row.blockers.includes("cover") || row.blockers.includes("caption"))) {
+    // Do not call full continuation here — that blows the Worker subrequest budget.
+    if (notReady.some((row) => row.blockers.includes("cover") || row.blockers.includes("caption") || row.blockers.includes("final_file"))) {
       try { await enqueueStudioProductionJob(env, requestId); } catch {}
-      try { await advanceStudioProductionOutputs(env, { requestRecordId: requestId, waitMs: 0 }); } catch {}
     }
-    return { waiting: "cover", cover, not_ready: notReady.slice(0, 8) };
+    return { waiting: "cover", cover, finals, not_ready: notReady.slice(0, 8) };
   }
-  const toApprove = pending.filter((row) => studioOutputReadyForPublishApproval(row));
-  if (!toApprove.length) return { waiting: "review_gate", cover };
+  const approveLimit = Math.max(1, Math.min(6, Number(options.approveLimit) || 3));
+  const toApprove = pending.filter((row) => studioOutputReadyForPublishApproval(row)).slice(0, approveLimit);
+  if (!toApprove.length) return { waiting: "review_gate", cover, finals };
+  const remainingApprove = pending.filter((row) => studioOutputReadyForPublishApproval(row)).length - toApprove.length;
   const occupied = await studioLoadAzOccupiedTimes(env, { excludeIds: outputs.map((row) => row.id) });
   const items = toApprove.map((row) => ({
     platform: String(f(row, "Platform") || "").trim(),
@@ -7518,9 +7655,11 @@ async function azAutoApproveIfReady(env, requestId) {
   return {
     ok: true,
     approved_count: approved.length,
+    remaining_approve: Math.max(0, remainingApprove),
     campaign: planned.campaign,
     rationale: planned.rationale,
     cover,
+    finals,
     scheduled: planned.stamps ? Object.fromEntries(planned.stamps) : null,
   };
 }
@@ -7640,8 +7779,9 @@ async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
   };
 }
 
-async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null) {
+async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null, options = {}) {
   if (!requestId) return { skipped: "missing_request" };
+  const phase = String(options.phase || "auto").trim().toLowerCase() || "auto";
   let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   if (!studioIsAzFinishedVideo(record)) return { skipped: "not_az" };
   let auth = authorization;
@@ -7653,13 +7793,13 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
     await item4PulseStudioCompressJob(env, requestId).catch((error) => {
       console.warn("AZ compress pulse failed", requestId, error);
     });
-    return { waiting: "compress", production_request_id: requestId };
+    return { waiting: "compress", production_request_id: requestId, phase };
   }
   if (!item4FinishedVideoMastersReady(record, assets)) {
-    return { waiting: "assets", production_request_id: requestId };
+    return { waiting: "assets", production_request_id: requestId, phase };
   }
   const planStatus = String(f(record, "Studio_Output_Plan_Status") || "").trim();
-  if (planStatus !== "Ready") {
+  if (planStatus !== "Ready" && (phase === "auto" || phase === "plan" || phase === "outputs")) {
     const editable = ["Draft", "Ready"].includes(String(f(record, "Request_Status") || "").trim());
     if (editable) {
       const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
@@ -7679,13 +7819,13 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
     }
   }
   let status = String(f(record, "Request_Status") || "").trim();
-  if (["Draft", "Ready"].includes(status)) {
+  if (["Draft", "Ready"].includes(status) && (phase === "auto" || phase === "promote")) {
     const promoteCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/promote`, {});
     await promoteProductionRequestViaI3I4(promoteCall.request, env, promoteCall.url, auth, ctx);
     record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
     status = String(f(record, "Request_Status") || "").trim();
   }
-  if (status === "Submitted") {
+  if (status === "Submitted" && (phase === "auto" || phase === "promote")) {
     const ideaId = studioFirstLinkedId(f(record, "Idea_Candidate"));
     if (ideaId) {
       const ideaNow = await waitForPromotionResult(env, ideaId, 24, 1250);
@@ -7695,10 +7835,10 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
         status = String(f(record, "Request_Status") || "").trim();
       }
     }
-    if (status === "Submitted") return { waiting: "awaiting_i4", production_request_id: requestId };
+    if (status === "Submitted") return { waiting: "awaiting_i4", production_request_id: requestId, phase };
   }
   let ensureOutputs = null;
-  if (status === "Promoted") {
+  if (status === "Promoted" && (phase === "auto" || phase === "outputs")) {
     const proRows = await outputRowsForProductionRequest(env, requestId).catch(() => []);
     const enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
     const linked = enabled.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
@@ -7715,23 +7855,79 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null)
           waiting: "outputs",
           production_request_id: requestId,
           ensure_outputs: ensureOutputs,
+          phase,
         };
       }
     }
-    try { await enqueueStudioProductionJob(env, requestId); } catch (error) {
-      console.warn("AZ produce enqueue failed", requestId, error);
-    }
-    try { await advanceStudioProductionOutputs(env, { requestRecordId: requestId, waitMs: 0 }); } catch (error) {
-      console.warn("AZ continuation after produce failed", requestId, error);
-    }
   }
-  const approve = await azAutoApproveIfReady(env, requestId);
-  return ensureOutputs ? { ...approve, ensure_outputs: ensureOutputs } : approve;
+
+  if (phase === "cover") {
+    const cover = await azEnsurePublicCovers(env, requestId, { stampLimit: 3 });
+    return { ok: Boolean(cover?.ok), waiting: cover?.waiting || (cover?.remaining ? "cover_stamp" : undefined), cover, phase };
+  }
+  if (phase === "final" || phase === "finals") {
+    const finals = await azEnsurePublicFinalFiles(env, requestId, { stampLimit: 3 });
+    return { ok: Boolean(finals?.ok), waiting: finals?.waiting || (finals?.remaining ? "final_stamp" : undefined), finals, phase };
+  }
+  if (phase === "stories") {
+    const stories = await azRestampFinishedStories(env, requestId, { limit: 2 });
+    return {
+      ok: Boolean(stories?.ok),
+      waiting: stories?.restamped || stories?.remaining ? "story_render" : undefined,
+      stories,
+      phase,
+    };
+  }
+  if (phase === "approve") {
+    const approve = await azAutoApproveIfReady(env, requestId, {
+      skipCover: true,
+      skipFinals: true,
+      approveLimit: 3,
+    });
+    return { ...approve, phase };
+  }
+
+  // auto: one light step per invoke — never cover+final+approve+continuation together.
+  if (status === "Promoted") {
+    const cover = await azEnsurePublicCovers(env, requestId, { stampLimit: 2 });
+    if (cover?.waiting || Number(cover?.remaining || 0) > 0 || Number(cover?.stamped || 0) > 0) {
+      return {
+        waiting: cover?.waiting || "cover_stamp",
+        cover,
+        ensure_outputs: ensureOutputs,
+        phase,
+      };
+    }
+    const finals = await azEnsurePublicFinalFiles(env, requestId, { stampLimit: 2 });
+    if (finals?.waiting || Number(finals?.remaining || 0) > 0 || Number(finals?.stamped || 0) > 0) {
+      return {
+        waiting: finals?.waiting || "final_stamp",
+        cover,
+        finals,
+        ensure_outputs: ensureOutputs,
+        phase,
+      };
+    }
+    const stories = await azRestampFinishedStories(env, requestId, { limit: 1 });
+    if (Number(stories?.restamped || 0) > 0 || Number(stories?.remaining || 0) > 0) {
+      return { waiting: "story_render", cover, finals, stories, ensure_outputs: ensureOutputs, phase };
+    }
+    const approve = await azAutoApproveIfReady(env, requestId, {
+      skipCover: true,
+      skipFinals: true,
+      cover,
+      finals,
+      approveLimit: 2,
+    });
+    return ensureOutputs ? { ...approve, ensure_outputs: ensureOutputs, phase } : { ...approve, phase };
+  }
+  return { waiting: status || "unknown", production_request_id: requestId, phase };
 }
 
-async function opsForceAzNavyPierTitle(env) {
+async function opsForceAzNavyPierTitle(env, options = {}) {
   const requestId = "reca7v6zi1b9QNanJ";
   const title = "Final Navy Pier Fireworks - Full Video";
+  const phase = String(options.phase || "auto").trim().toLowerCase() || "auto";
   if (!env?.AIRTABLE_PAT) return { skipped: true, reason: "no_pat" };
 
   let record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
@@ -7743,88 +7939,49 @@ async function opsForceAzNavyPierTitle(env) {
   const currentTitle = String(f(record, "Requested_Title") || "").trim();
   const currentMode = String(f(record, "Title_Mode") || "").trim();
   const already = currentMode === "Force exact" && currentTitle === title;
-
   if (!already) {
     record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId, {
       method: "PATCH",
       body: JSON.stringify({
-        fields: {
-          Title_Mode: "Force exact",
-          Requested_Title: title,
-        },
+        fields: { Title_Mode: "Force exact", Requested_Title: title },
         typecast: true,
       }),
     });
   }
 
   const assets = item4AssetManifest(record);
-  const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
-  let ideaId = studioFirstLinkedId(f(record, "Idea_Candidate"))
-    || studioFirstLinkedId(f(record, "Idea Candidates"))
-    || studioFirstLinkedId(f(record, "Idea_Candidate_Link"));
-  if (!ideaId) {
-    for (const [key, value] of Object.entries(record.fields || {})) {
-      if (ideaId) break;
-      if (/idea/i.test(key) && Array.isArray(value) && value.length) {
-        ideaId = studioFirstLinkedId(value);
-      }
-    }
-  }
-
-  if (ideaId && env.AIRTABLE_IDEA_TABLE_ID) {
-    await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: { Candidate_Title: title }, typecast: true }),
-    }).catch((error) => console.warn("ops az title idea sync failed", ideaId, error));
-  }
-
-  if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
-    const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
-    if (content) {
-      const contentTitle = String(f(content, "Content_Title") || "").trim();
-      if (contentTitle !== title) {
-        await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
-          method: "PATCH",
-          body: JSON.stringify({ fields: { Content_Title: title }, typecast: true }),
-        }).catch((error) => console.warn("ops az title content sync failed", contentId, error));
-      }
-    }
-  }
-
   let compress = null;
-  if (item4AssetsNeedStudioCompress(assets)) {
+  if (item4AssetsNeedStudioCompress(assets) && (phase === "auto" || phase === "compress")) {
     try {
       compress = await item4PulseStudioCompressJob(env, requestId);
-      console.log(`ops az navy pier compress ${JSON.stringify(compress)}`);
     } catch (error) {
       compress = { error: error instanceof Error ? error.message : String(error) };
-      console.warn(`ops az navy pier compress failed ${JSON.stringify(compress)}`);
     }
   }
 
   let advance = null;
   try {
     const auth = await resolveStudioCronAuthorization(env).catch(() => null);
-    advance = await advanceAzFinishedVideo(env, requestId, auth, null);
+    advance = await advanceAzFinishedVideo(env, requestId, auth, null, { phase });
   } catch (error) {
     advance = { error: error instanceof Error ? error.message : String(error) };
     console.warn("ops az navy pier advance failed", requestId, error);
   }
-  console.log(`ops az navy pier advance ${JSON.stringify({ requestId, advance })}`);
 
+  // Light diagnostic only — avoid listing every PRO row + content re-fetch when possible.
   record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const assetsAfter = item4AssetManifest(record);
   const proAfter = await outputRowsForProductionRequest(env, requestId).catch(() => []);
-  const jobAfter = parseStudioProductionJob(record);
+  const enabled = proAfter.filter((row) => Boolean(f(row, "Enabled")));
+  const linked = enabled.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
+  const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
   let contentSnapshot = null;
-  if (contentId && env.AIRTABLE_CONTENT_TABLE_ID) {
+  if (contentId && env.AIRTABLE_CONTENT_TABLE_ID && phase === "status") {
     const content = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId).catch(() => null);
     if (content) {
       contentSnapshot = {
         id: contentId,
         content_title: String(f(content, "Content_Title") || "").trim() || title,
-        content_status: f(content, "Content_Status") || null,
-        thumbnail_status: f(content, "Thumbnail_Status") || null,
         thumbnail_url: Boolean(studioAiThumbnailUrl(f(content, "Thumbnail_URL"))),
         platform_outputs: arrayOrEmpty(f(content, "Platform Outputs")).length,
       };
@@ -7834,42 +7991,29 @@ async function opsForceAzNavyPierTitle(env) {
     requestId,
     title,
     already,
+    phase,
     request_status: f(record, "Request_Status") || null,
     plan_status: f(record, "Studio_Output_Plan_Status") || null,
     variant_status: f(record, "Studio_Variant_Status") || null,
     needs_compress: item4AssetsNeedStudioCompress(assetsAfter),
     masters_ready: item4FinishedVideoMastersReady(record, assetsAfter),
     asset_count: Array.isArray(assetsAfter) ? assetsAfter.length : 0,
-    assets: (Array.isArray(assetsAfter) ? assetsAfter : []).map((asset) => ({
-      id: asset?.id || null,
-      name: asset?.name || null,
-      size_bytes: Number(asset?.size_bytes || 0) || null,
-      compress_pending: item4AssetCompressionPending(asset),
-      drive_id: Boolean(asset?.google_drive_file_id),
-      media_asset: Boolean(asset?.media_asset_record_id),
-      public_url: Boolean(item4FinishedPublicUrl(asset)),
-    })),
+    preview_public: Boolean(item4UrlIsPublicPublishCdn(
+      item4FinishedMasterPlayUrl(
+        (Array.isArray(assetsAfter) ? assetsAfter : []).find((asset) => item4LooksLikeVideoAsset(asset))
+          || (Array.isArray(assetsAfter) ? assetsAfter[0] : null),
+        record
+      )
+    )),
     pro_rows: {
       active: proAfter.length,
-      enabled: proAfter.filter((row) => Boolean(f(row, "Enabled"))).length,
-      with_platform_output: proAfter.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length,
-      rows: proAfter.slice(0, 12).map((row) => ({
-        id: row.id,
-        platform: f(row, "Platform") || null,
-        output_type: f(row, "Output_Type") || null,
-        enabled: Boolean(f(row, "Enabled")),
-        platform_output: studioFirstLinkedId(f(row, "Platform_Output")) || null,
-        route_status: f(row, "Pipeline_Route_Status") || null,
-      })),
+      enabled: enabled.length,
+      with_platform_output: linked.length,
     },
-    platform_output_count: proAfter.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")))).length,
-    production_job_step: jobAfter?.step || null,
-    production_job_detail: jobAfter?.detail || null,
-    production_job_error: jobAfter?.error || null,
+    platform_output_count: linked.length,
     content: contentSnapshot,
   };
-  console.log(`ops az navy pier diagnostic ${JSON.stringify(diagnostic)}`);
-
+  console.log(`ops az navy pier diagnostic ${JSON.stringify({ diagnostic, advance })}`);
   return { ok: true, diagnostic, compress, advance };
 }
 
@@ -11858,6 +12002,103 @@ function item4FinishedSourcePackageForOutput(requestRecord, outputRow, effective
     ratio = ratio || (masters.length === 1 ? "4:5" : "1:1");
     const photos = masters.filter((asset) => !item4LooksLikeVideoAsset(asset));
     chosen = photos.length ? photos : masters;
+  }
+  // Finished-video Stories: short Remotion teaser from the start of the master, not full passthrough.
+  if (kind === "finished-video" && studioAzIsStory(outputType)) {
+    const master = chosen[0];
+    const url = item4FinishedMasterPlayUrl(master, requestRecord);
+    if (!url) return null;
+    const frames = Math.max(1, Math.round(ITEM4_STORY_TEASER_SECONDS * 30));
+    const sourceDuration = Number(master?.duration_seconds || master?.source_duration_seconds || 0) || ITEM4_STORY_TEASER_SECONDS;
+    const clip = {
+      id: "finished-story-teaser-1",
+      order: Number(master?.order || 1),
+      media_asset_record_id: String(master?.media_asset_record_id || "").trim(),
+      source_asset_id: String(master?.id || "").trim() || null,
+      asset_name: String(master?.name || "finished-story.mp4"),
+      google_drive_url: String(master?.google_drive_url || "").trim() || null,
+      url,
+      src: url,
+      startFrame: 0,
+      durationFrames: frames,
+      motionStyle: "none",
+      fitMode: null,
+      media_kind: "video",
+      mediaKind: "video",
+      in_seconds: 0,
+      out_seconds: ITEM4_STORY_TEASER_SECONDS,
+      inSeconds: 0,
+      outSeconds: ITEM4_STORY_TEASER_SECONDS,
+      startFromSeconds: 0,
+      sourceDurationSeconds: sourceDuration,
+      source_duration_seconds: sourceDuration,
+      sourceInSeconds: 0,
+      sourceOutSeconds: Math.min(sourceDuration, ITEM4_STORY_TEASER_SECONDS),
+      source: "finished_story_teaser",
+      aspect_ratio: ratio,
+      google_drive_file_id: String(master?.google_drive_file_id || "").trim() || null,
+      overlay: undefined,
+      caption: "",
+    };
+    const filename = `studio-${String(f(requestRecord, "Production_Request_ID") || requestRecord.id)}-${platform.toLowerCase() || "platform"}-story-teaser.mp4`;
+    const clipList = [{
+      id: clip.id,
+      order: clip.order,
+      mediaAssetRecordId: clip.media_asset_record_id || null,
+      assetName: clip.asset_name,
+      url: clip.url,
+      src: clip.src,
+      startFrame: 0,
+      durationFrames: frames,
+      motionStyle: "none",
+      fitMode: null,
+      mediaKind: "video",
+      media_kind: "video",
+      googleDriveFileId: clip.google_drive_file_id || null,
+      inSeconds: 0,
+      outSeconds: ITEM4_STORY_TEASER_SECONDS,
+      startFromSeconds: 0,
+      sourceDurationSeconds: sourceDuration,
+      sourceInSeconds: 0,
+      sourceOutSeconds: Math.min(sourceDuration, ITEM4_STORY_TEASER_SECONDS),
+      overlay: null,
+      caption: "",
+    }];
+    const selected = {
+      schema_version: "studio.source-selection.2",
+      authority: "studio_finished_story_teaser",
+      production_request_record_id: requestRecord.id,
+      platform,
+      output_type: outputType,
+      aspect_ratio: ratio,
+      selection_status: "Selected",
+      selected_clips: [clip],
+      fps: 30,
+      target_total_frames: frames,
+      render_prep: {
+        render_status: "Ready for Render",
+        composition_id: "ChicagoShiningPhotoSequence",
+        output_filename: filename,
+        render_total_frames: frames,
+        render_clip_list_json: JSON.stringify(clipList),
+      },
+    };
+    return {
+      status: "Ready",
+      ratio,
+      clips: [clip],
+      clip_count: 1,
+      total_frames: frames,
+      composition_id: "ChicagoShiningPhotoSequence",
+      output_filename: filename,
+      selected_assets_json: JSON.stringify(selected),
+      render_clip_list_json: JSON.stringify(clipList),
+      native: false,
+      finished: false,
+      finished_kind: kind,
+      story: true,
+      story_teaser: true,
+    };
   }
   const clips = [];
   for (let index = 0; index < chosen.length; index += 1) {
@@ -20765,7 +21006,7 @@ async function studioContinuationStampPackage(env, po, context) {
       ? (String(f(parent, "Voiceover_URL") || f(po, "Voiceover_URL") || "").trim() || null)
       : null,
   };
-  if (sourcePackage?.finished || studioIsFinishedPassthrough(requestRecord)) {
+  if ((sourcePackage?.finished || studioIsFinishedVideoFilePassthrough(requestRecord)) && !sourcePackage?.story_teaser) {
     const overlay = studioFinishedSeedOverlay(requestRecord, sourcePackage?.clips || [], nativePhoto && (sourcePackage?.clips || []).length);
     fields.Output_Status = overlay.Output_Status || seed.Output_Status || "In Production";
     fields.Render_Status = overlay.Render_Status || seed.Render_Status || null;
@@ -20777,6 +21018,27 @@ async function studioContinuationStampPackage(env, po, context) {
     fields.Composition_ID = null;
     fields.Output_Filename = null;
     fields.Output_Notes = overlay.Output_Notes || seed.Output_Notes || f(po, "Output_Notes") || null;
+  } else if (sourcePackage?.story_teaser) {
+    const az = studioIsAzFinishedVideo(requestRecord);
+    fields.Output_Status = "In Production";
+    fields.Render_Status = "Ready for Render";
+    fields.Asset_Selection_Status = "Selected";
+    fields.Composition_ID = "ChicagoShiningPhotoSequence";
+    fields.Output_Filename = sourcePackage.output_filename || seed.Output_Filename || null;
+    fields.Render_Total_Frames = sourcePackage.total_frames || seed.Render_Total_Frames || Math.round(ITEM4_STORY_TEASER_SECONDS * 30);
+    fields.Render_Clip_List_JSON = sourcePackage.render_clip_list_json || seed.Render_Clip_List_JSON || null;
+    fields.Selected_Assets_JSON = sourcePackage.selected_assets_json || seed.Selected_Assets_JSON || null;
+    fields.Timing_Status = "Skipped";
+    fields.Final_File_URL = null;
+    fields.Final_File_ID = null;
+    fields.Studio_Preview_URL = null;
+    fields.Publish_Asset_URL = null;
+    fields.Remotion_Job_ID = null;
+    fields.Review_Status = null;
+    fields.Review_Email_Sent_At = null;
+    fields.Output_Notes = az
+      ? `origin=az-finished-video; ez-input=finished-video. Story teaser: first ${ITEM4_STORY_TEASER_SECONDS}s of the finished file (Remotion). Skip P1/voiceover. az-auto-queue=1.`
+      : `origin=ez-wizard; ez-input=finished-video. Story teaser: first ${ITEM4_STORY_TEASER_SECONDS}s of the finished file (Remotion). Skip P1/voiceover.`;
   } else if (nativePhoto && (sourcePackage?.clips || []).length) {
     fields.Output_Status = "Ready for Review";
     fields.Render_Status = "Native Photo Route";
@@ -20817,7 +21079,10 @@ async function studioContinuationStampPackage(env, po, context) {
 
 async function studioContinuationInspectOutput(env, po, cache) {
   if (studioOutputIsTerminalForContinuation(po)) return { action: "stop", reason: "terminal" };
-  if (studioIsFinishedPassthrough(po)) {
+  // Finished-video Stories render a short teaser via Remotion — not full-file passthrough.
+  if (studioIsFinishedVideoFilePassthrough(po) || (
+    studioIsFinishedPassthrough(po) && !studioAzIsStory(studioOutputTypeLabel(po))
+  )) {
     const context = await studioContinuationLoadContext(env, po, cache).catch(() => null);
     if (!context) return { action: "wait_variants", reason: "finished_context_missing" };
     const nativePhoto = studioOutputIsNativePhoto(po)
@@ -20869,6 +21134,20 @@ async function studioContinuationInspectOutput(env, po, cache) {
       return { action: "opened_review", reason: "finished_passthrough" };
     }
     return { action: "reviewable", reason: "finished_passthrough" };
+  }
+  // If a finished-video Story still has full-file passthrough stamped, force teaser restamp.
+  if (studioIsFinishedPassthrough(po) && studioAzIsStory(studioOutputTypeLabel(po))) {
+    const notes = String(f(po, "Output_Notes") || "");
+    const render = String(f(po, "Render_Status") || "").trim();
+    const needsTeaser = /Finished passthrough/i.test(notes)
+      || (render === "Rendered" && !/story teaser|finished_story_teaser/i.test(notes));
+    if (needsTeaser) {
+      const context = await studioContinuationLoadContext(env, po, cache).catch(() => null);
+      if (context) {
+        await studioContinuationStampPackage(env, po, context);
+        return { action: "start_render", reason: "finished_story_teaser" };
+      }
+    }
   }
   const outputStatus = String(f(po, "Output_Status") || "");
   const renderStatus = String(f(po, "Render_Status") || "");

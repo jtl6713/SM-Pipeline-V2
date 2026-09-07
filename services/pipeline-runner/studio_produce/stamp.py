@@ -316,6 +316,105 @@ def finished_source_package(
             item for item in masters
             if not str(item.get("mime_type") or "").lower().startswith("video/")
         ] or masters
+    story = effective["output_type"] in STORY_OUTPUT_TYPES
+    # Finished-video Stories are short teasers (first N seconds), not full-file passthrough.
+    if kind == "finished-video" and story:
+        master = masters[0]
+        url = _public_master_url(master)
+        if not url:
+            return None
+        frames = int(STORY_TEASER_SECONDS * FPS)
+        source_duration = float(source_duration_seconds(master, default_duration=STORY_TEASER_SECONDS) or STORY_TEASER_SECONDS)
+        clip = {
+            "id": "finished-story-teaser-1",
+            "order": int(master.get("order") or 1),
+            "media_asset_record_id": str(master.get("media_asset_record_id") or ""),
+            "source_asset_id": str(master.get("id") or "") or None,
+            "asset_name": str(master.get("name") or "finished-story.mp4"),
+            "url": url,
+            "src": url,
+            "startFrame": 0,
+            "durationFrames": frames,
+            "motionStyle": "none",
+            "fitMode": None,
+            "media_kind": "video",
+            "mediaKind": "video",
+            "in_seconds": 0,
+            "out_seconds": STORY_TEASER_SECONDS,
+            "inSeconds": 0,
+            "outSeconds": STORY_TEASER_SECONDS,
+            "startFromSeconds": 0,
+            "sourceDurationSeconds": source_duration,
+            "source_duration_seconds": source_duration,
+            "sourceInSeconds": 0,
+            "sourceOutSeconds": min(source_duration, STORY_TEASER_SECONDS),
+            "source": "finished_story_teaser",
+            "aspect_ratio": ratio,
+            "google_drive_file_id": str(master.get("google_drive_file_id") or "") or None,
+            "overlay": None,
+            "caption": "",
+        }
+        safe_type = "story"
+        filename = f"studio-{field_str(request, 'Production_Request_ID') or request['id']}-{str(effective['platform'] or 'platform').lower()}-{safe_type}-teaser.mp4"
+        clip_list = [{
+            "id": clip["id"],
+            "order": clip["order"],
+            "mediaAssetRecordId": clip["media_asset_record_id"] or None,
+            "assetName": clip["asset_name"],
+            "url": clip["url"],
+            "src": clip["src"],
+            "startFrame": 0,
+            "durationFrames": frames,
+            "motionStyle": "none",
+            "fitMode": None,
+            "mediaKind": "video",
+            "media_kind": "video",
+            "googleDriveFileId": clip.get("google_drive_file_id") or None,
+            "inSeconds": 0,
+            "outSeconds": STORY_TEASER_SECONDS,
+            "startFromSeconds": 0,
+            "sourceDurationSeconds": source_duration,
+            "sourceInSeconds": 0,
+            "sourceOutSeconds": min(source_duration, STORY_TEASER_SECONDS),
+            "overlay": None,
+            "caption": "",
+        }]
+        selected = {
+            "schema_version": "studio.source-selection.2",
+            "authority": "studio_finished_story_teaser",
+            "production_request_record_id": request["id"],
+            "platform": effective["platform"],
+            "output_type": effective["output_type"],
+            "aspect_ratio": ratio,
+            "selection_status": "Selected",
+            "selected_clips": [clip],
+            "fps": FPS,
+            "target_total_frames": frames,
+            "render_prep": {
+                "render_status": "Ready for Render",
+                "composition_id": "ChicagoShiningPhotoSequence",
+                "output_filename": filename,
+                "render_total_frames": frames,
+                "render_clip_list_json": json.dumps(clip_list),
+            },
+        }
+        return {
+            "status": "Ready",
+            "ratio": ratio,
+            "clips": [clip],
+            "clip_count": 1,
+            "total_frames": frames,
+            "composition_id": "ChicagoShiningPhotoSequence",
+            "output_filename": filename,
+            "selected_assets_json": json.dumps(selected),
+            "render_clip_list_json": json.dumps(clip_list),
+            "native": False,
+            "finished": False,
+            "finished_kind": kind,
+            "story": True,
+            "story_teaser": True,
+            "effective": effective,
+        }
     clips = []
     for index, master in enumerate(masters):
         url = _public_master_url(master)
@@ -388,7 +487,7 @@ def finished_source_package(
         "native": native,
         "finished": True,
         "finished_kind": kind,
-        "story": effective["output_type"] in STORY_OUTPUT_TYPES,
+        "story": story,
         "effective": effective,
     }
 
@@ -673,6 +772,23 @@ def stamp_fields(
             "Composition_ID": None,
             "Output_Filename": None,
             "Review_Status": None,
+        })
+        return fields
+    if package.get("story_teaser"):
+        fields.update({
+            "Output_Status": "In Production",
+            "Render_Status": "Ready for Render",
+            "Asset_Selection_Status": "Selected",
+            "Composition_ID": "ChicagoShiningPhotoSequence",
+            "Output_Filename": package.get("output_filename"),
+            "Render_Total_Frames": package.get("total_frames"),
+            "Timing_Status": "Skipped",
+            "Final_File_URL": None,
+            "Final_File_ID": None,
+            "Studio_Preview_URL": None,
+            "Publish_Asset_URL": None,
+            "Review_Status": None,
+            "Review_Email_Sent_At": None,
         })
         return fields
     if native:

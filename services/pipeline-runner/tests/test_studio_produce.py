@@ -237,6 +237,37 @@ def test_native_photo_detection():
     assert not is_native_photo("TikTok", "Video Draft")
 
 
+def test_finished_video_story_is_five_second_teaser():
+    request = {
+        "id": "recPRStoryTeaser",
+        "fields": {
+            "Production_Notes": "origin=az-finished-video; ez-input=finished-video; az-auto-queue=1",
+            "Studio_Variant_Status": "Not Needed",
+            "Studio_Master_Assets_JSON": json.dumps([{
+                "id": "v1",
+                "order": 1,
+                "name": "final.mp4",
+                "mime_type": "video/mp4",
+                "duration_seconds": 120,
+                "url": "https://media.chicagoshining.com/studio/previews/finished-video/recPRStoryTeaser/v1.mp4",
+                "preview_public_url": "https://media.chicagoshining.com/studio/previews/finished-video/recPRStoryTeaser/v1.mp4",
+            }]),
+        },
+    }
+    output = {"id": "recPOStory", "fields": {"Platform": "Instagram", "Studio_Output_Type": "Story", "Aspect_Ratio": "9:16"}}
+    package = finished_source_package(request, output, None)
+    assert package["finished"] is False
+    assert package["story_teaser"] is True
+    assert package["composition_id"] == "ChicagoShiningPhotoSequence"
+    assert package["total_frames"] == 150
+    assert package["clips"][0]["startFromSeconds"] == 0
+    assert package["clips"][0]["outSeconds"] == 5
+    fields = stamp_fields(package, None)
+    assert fields["Render_Status"] == "Ready for Render"
+    assert fields["Composition_ID"] == "ChicagoShiningPhotoSequence"
+    assert fields.get("Final_File_URL") in (None, "")
+
+
 def test_finished_video_package_skips_crops():
     request = {
         "id": "recPRFinished",

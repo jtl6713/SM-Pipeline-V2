@@ -18,7 +18,7 @@ concurrency:
 jobs:
   kick:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-auto-schedule then kick via service binding
+      - name: Wait for Worker version az-story-clip then phased kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -44,7 +44,10 @@ jobs:
               const url = new URL(request.url);
               if (url.pathname !== "/$TOKEN") return new Response("Not found", {status:404});
               const want = url.searchParams.get("mode") || "kick";
-              const path = want === "health" ? "/api/health" : "/api/ops/az-navy-pier-kick";
+              const phase = url.searchParams.get("phase") || "auto";
+              const path = want === "health"
+                ? "/api/health"
+                : "/api/ops/az-navy-pier-kick?phase=" + encodeURIComponent(phase);
               const method = want === "health" ? "GET" : "POST";
               const internal = new Request("https://studio.chicagoshining.com" + path, {
                 method,
@@ -79,21 +82,22 @@ jobs:
           URL="https://$VERIFY_BRIDGE.$SUBDOMAIN.workers.dev/$TOKEN"
 
           READY=0
-          for i in $(seq 1 40); do
+          for i in $(seq 1 50); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-auto-schedule"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-story-clip"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-auto-schedule (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-story-clip (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
           echo "worker_ready=$(jq -r '.version' /tmp/health.json)"
 
           FINAL_OK=0
-          for k in $(seq 1 8); do
-            KICK_CODE=$(curl -sS --max-time 180 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick" || true)
+          TOTAL_APPROVED=0
+          for k in $(seq 1 20); do
+            KICK_CODE=$(curl -sS --max-time 180 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick&phase=auto" || true)
             echo "kick_try=$k kick_http=$KICK_CODE"
             cat /tmp/az-kick.json
             test "$KICK_CODE" = "200"
@@ -106,8 +110,11 @@ jobs:
           advance=data.get('advance') or {}
           ensure=(advance.get('ensure_outputs') if isinstance(advance, dict) else None) or {}
           cover=(advance.get('cover') if isinstance(advance, dict) else None) or {}
+          finals=(advance.get('finals') if isinstance(advance, dict) else None) or {}
+          stories=(advance.get('stories') if isinstance(advance, dict) else None) or {}
           pro=d.get('pro_rows') or {}
           approved=int(advance.get('approved_count') or 0) if isinstance(advance, dict) else 0
+          remaining_approve=int(advance.get('remaining_approve') or 0) if isinstance(advance, dict) else 0
           waiting=str(advance.get('waiting') or '') if isinstance(advance, dict) else ''
           skipped=str(advance.get('skipped') or '') if isinstance(advance, dict) else ''
           print('request_status=', d.get('request_status'))
@@ -117,7 +124,11 @@ jobs:
           print('advance=', advance)
           print('ensure_remaining=', ensure.get('remaining'))
           print('cover=', cover)
+          print('finals=', finals)
+          print('stories=', stories)
           print('approved_count=', approved)
+          print('remaining_approve=', remaining_approve)
+          print('waiting=', waiting)
           Path('/tmp/az-kick-summary.env').write_text(
             f"PO={d.get('platform_output_count') or 0}\n"
             f"LINKED={pro.get('with_platform_output') or 0}\n"
@@ -125,22 +136,33 @@ jobs:
             f"REMAINING={ensure.get('remaining') if ensure.get('remaining') is not None else -1}\n"
             f"WAITING={waiting}\n"
             f"APPROVED={approved}\n"
+            f"REMAINING_APPROVE={remaining_approve}\n"
             f"SKIPPED={skipped}\n"
             f"ADVANCE_OK={1 if isinstance(advance, dict) and advance.get('ok') else 0}\n"
+            f"PREVIEW_PUBLIC={1 if d.get('preview_public') else 0}\n"
           )
           PY
             # shellcheck source=/tmp/az-kick-summary.env
             . /tmp/az-kick-summary.env
-            if [[ "${APPROVED:-0}" -gt 0 || "${SKIPPED:-}" == "already_queued" || "${ADVANCE_OK:-0}" == "1" ]]; then
+            TOTAL_APPROVED=$((TOTAL_APPROVED + APPROVED))
+            if [[ "${SKIPPED:-}" == "already_queued" ]]; then
               FINAL_OK=1
               break
             fi
-            if [[ "${WAITING:-}" == "cover" || "${WAITING:-}" == "outputs" ]]; then
-              echo "still waiting on ${WAITING}; continuing"
-              sleep 4
+            if [[ "${APPROVED:-0}" -gt 0 && "${REMAINING_APPROVE:-0}" -le 0 && -z "${WAITING:-}" ]]; then
+              FINAL_OK=1
+              break
+            fi
+            if [[ "${ADVANCE_OK:-0}" == "1" && -z "${WAITING:-}" && "${REMAINING_APPROVE:-0}" -le 0 ]]; then
+              FINAL_OK=1
+              break
+            fi
+            if [[ -n "${WAITING:-}" ]]; then
+              echo "still waiting on ${WAITING}; continuing (total_approved=${TOTAL_APPROVED})"
+              sleep 5
               continue
             fi
-            if [[ "${LINKED:-0}" -ge "${ENABLED:-6}" && "${ENABLED:-0}" -gt 0 && "${WAITING:-}" != "cover" ]]; then
+            if [[ "${LINKED:-0}" -ge "${ENABLED:-6}" && "${ENABLED:-0}" -gt 0 && "${TOTAL_APPROVED:-0}" -gt 0 ]]; then
               FINAL_OK=1
               break
             fi

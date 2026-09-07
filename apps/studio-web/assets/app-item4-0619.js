@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.260-az-auto-schedule";
+  const BUILD_ID = "item4-0.6.261-az-story-clip";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9974,14 +9974,24 @@
   }
 
   function creativeIsFinishedVideo(output = activeCreativeOutput) {
+    const type = String(output?.studio_output_type || output?.format || output?.platform_output_type || "").trim();
+    if (/story/i.test(type)) return false;
     const notes = [
       output?.output_notes,
       output?.production_notes,
       activeProductionRequest?.production_notes,
       item4Workspace?.production_notes,
     ].map((value) => String(value || "")).join("\n");
+    if (/story teaser|finished_story_teaser/i.test(notes)) return false;
     if (/ez-input=finished-video/i.test(notes)) return true;
     return typeof ezIsFinishedVideo === "function" && ezIsFinishedVideo();
+  }
+
+  function pipelineIsAzAutoQueueGroup(records = pipelineOutputs) {
+    return (records || []).some((record) => {
+      const notes = String(record?.output_notes || record?.production_notes || "").trim();
+      return /origin=az-finished-video/i.test(notes) || /az-auto-queue=1/i.test(notes);
+    });
   }
 
   function creativeFinishedVideoSeconds(output = activeCreativeOutput) {
@@ -12163,6 +12173,18 @@
   function updatePipelineApproveAllButton() {
     const button = $("pipelineApproveAll");
     if (!button) return;
+    if (pipelineIsAzAutoQueueGroup()) {
+      const ready = pipelineApprovableOutputs();
+      button.disabled = true;
+      button.dataset.azAuto = "true";
+      button.textContent = ready.length
+        ? `Auto-scheduling (${ready.length})…`
+        : "Auto-scheduling…";
+      button.title = "AZ finished-video queues itself after the public cover and caption are ready. You can still open a row to edit times.";
+      return;
+    }
+    button.dataset.azAuto = "";
+    button.title = "";
     const ready = pipelineApprovableOutputs();
     const count = ready.length;
     button.disabled = !count || button.dataset.busy === "true";
