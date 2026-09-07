@@ -3,7 +3,7 @@ name: Configure tasks.chicagoshining.com
 on:
   push:
     branches:
-      - cursor/ai-activity-logging-fd02
+      - main
     paths:
       - "apps/tasks-api/**"
       - ".github/workflows/configure-tasks-hostname.yml"

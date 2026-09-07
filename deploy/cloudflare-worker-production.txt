@@ -379,3 +379,5 @@ Asset Manager HEIC preview Worker deploy: 2026-09-07 - Library photo preview use
 A3 HEIC classify Worker deploy: 2026-09-07 - Intake no longer reports A3 finished while the classify view still has rows. Empty A2 pulses A3. Worker 0.10.270-a3-heic-classify.
 
 Autonomous Service Agent Worker deploy: 2026-09-07 - GET /api/ops/desk/activity proxies Task Organizer desk_incident events. Worker 0.10.271-service-agent.
+
+Autonomous Service Agent inline-link Worker deploy: 2026-09-07 - Skip timing-engine public health until the hostname exists. Activity log still uses GET /api/ops/desk/activity. Worker 0.10.272-agent-links.

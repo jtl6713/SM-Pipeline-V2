@@ -29,7 +29,7 @@ export const PUBLIC_HEALTH_TARGETS = Object.freeze([
   { id: "remotion-renderer", url: "https://render.chicagoshining.com/health", local_port: 3333 },
   { id: "frame-extractor", url: "https://frames.chicagoshining.com/health", local_port: 3334 },
   { id: "video-compressor", url: "https://compress.chicagoshining.com/health", local_port: 3335 },
-  { id: "timing-engine", url: "https://timing.chicagoshining.com/health", local_port: 3336 },
+  { id: "timing-engine", url: "https://timing.chicagoshining.com/health", local_port: 3336, public: false },
   { id: "watermark", url: "https://watermark.chicagoshining.com/health", local_port: 3011 },
   { id: "voiceover-normalizer", url: "https://voiceover.chicagoshining.com/health", local_port: 3012 },
   { id: "youtube-uploader", url: "https://youtube-upload.chicagoshining.com/health", local_port: 3340 },
@@ -226,6 +226,7 @@ export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now
 }
 
 export function classifyHealthTarget(target, probe) {
+  if (target?.public === false || probe?.skipped) return null;
   const id = String(target?.id || "service").trim();
   if (probe?.ok) return null;
   const errorClass = errorClassFromText(probe?.error || probe?.status || "down");

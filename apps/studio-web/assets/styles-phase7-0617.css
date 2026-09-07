@@ -1179,9 +1179,20 @@ input, select, textarea, button {
 .ops-subnav-link{border:0;background:transparent;padding:8px 14px;border-radius:10px;font:inherit;font-weight:700;font-size:.86rem;color:var(--muted);cursor:pointer}
 .ops-subnav-link:hover{color:var(--ink);background:#fff}
 .ops-subnav-link.active{background:#fff;color:var(--teal-dark);box-shadow:0 1px 0 rgba(15,92,87,.12)}
+.ops-tabbed-panel{padding:0}
+.ops-card-tabs{display:flex;flex-wrap:wrap;gap:0 2px;margin:0;padding:6px 12px 0;border-bottom:1px solid var(--line);background:rgba(255,255,255,.5)}
+.ops-card-tab{border:0;background:transparent;padding:9px 10px 10px;margin-bottom:-1px;font:inherit;font-size:.76rem;font-weight:650;line-height:1.2;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.ops-card-tab:hover{color:var(--ink)}
+.ops-card-tab.active,.ops-card-tab[aria-selected="true"]{color:var(--teal-dark);font-weight:800;border-bottom-color:var(--teal-dark)}
+.ops-card-tab:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:6px}
+.ops-tab-panel[hidden]{display:none!important}
+.ops-tab-panel>.panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.ops-tab-panel>.subtle,.ops-tab-panel>.form-field{padding:12px 20px 16px;margin:0}
 .ops-agent-copy{padding:0 20px 16px;max-width:46rem;line-height:1.5}
 .ops-agent-copy ul{margin:8px 0 12px;padding-left:1.2rem}
 .ops-agent-copy code{font-size:.86em}
+.ops-agent-copy a,.ops-heading-copy a{color:var(--teal-dark);font-weight:750;text-underline-offset:2px}
+.ops-agent-copy a:hover,.ops-heading-copy a:hover{text-decoration-thickness:2px}
 .ops-agent-log{list-style:none;margin:0;padding:0 20px 18px;display:grid;gap:10px}
 .ops-agent-log li{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fbfdfd}
 .ops-agent-log strong{display:block;font-size:.82rem;text-transform:capitalize}
