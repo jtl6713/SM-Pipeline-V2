@@ -373,3 +373,5 @@ AZ mains-queued Worker deploy: 2026-09-07 - When AZ mains are already Approved/S
 Autonomous service desk inventory Worker deploy: 2026-09-07 - Read-only GET /api/ops/desk/inventory, Desk_Mode kill switch, health probes. Does not add a second heal cron. Worker 0.10.266-desk-inventory.
 
 Asset Manager rename and oversized list Worker deploy: 2026-09-07 - PATCH /api/library/:id renames Drive and reclassifies via A3. Compression status returns a fresh oversized list so finished clips drop off. Ship asset-library.mjs and operations-oversized.mjs with the Worker. Worker 0.10.268-oversized-list.
+
+Asset Manager HEIC preview Worker deploy: 2026-09-07 - Library photo preview uses Drive JPEG thumbnails instead of serving HEIC originals that Chrome cannot paint. Worker 0.10.269-library-heic-preview.

@@ -6,6 +6,7 @@ import {
   coerceLibraryDurationSeconds,
   libraryDriveFilename,
   libraryRecordFileBytes,
+  mediaAssetIsHeic,
   mapPublishedLibraryFile,
   publishedDurationSeconds,
   publishedFileReleaseGuard,
@@ -178,4 +179,11 @@ test("library rename sanitizes stem and Drive filename", () => {
   assert.equal(sanitizeLibraryAssetName("a/b").ok, false);
   assert.equal(libraryDriveFilename("Oak Street Beach", "jpg"), "Oak-Street-Beach.jpg");
   assert.equal(libraryDriveFilename("Oak Street Beach", ".PNG"), "Oak-Street-Beach.png");
+});
+
+test("library HEIC originals are flagged so previews use Drive JPEG thumbs", () => {
+  assert.equal(mediaAssetIsHeic({ name: "Lincoln Park Zoo 4.HEIC" }), true);
+  assert.equal(mediaAssetIsHeic({ mimeType: "image/heic", fileExtension: "HEIC" }), true);
+  assert.equal(mediaAssetIsHeic({ mimeType: "image/heif", name: "walk.heif" }), true);
+  assert.equal(mediaAssetIsHeic({ mimeType: "image/jpeg", name: "Lincoln Park Zoo 4.jpg" }), false);
 });
