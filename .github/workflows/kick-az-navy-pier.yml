@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-story-clip then phased kick via service binding
+      - name: Wait for Worker version az-ready-schedule then phased kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -84,11 +84,11 @@ jobs:
           READY=0
           for i in $(seq 1 50); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-story-clip"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-ready-schedule"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-story-clip (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-ready-schedule (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
@@ -149,11 +149,16 @@ jobs:
               FINAL_OK=1
               break
             fi
-            if [[ "${APPROVED:-0}" -gt 0 && "${REMAINING_APPROVE:-0}" -le 0 && -z "${WAITING:-}" ]]; then
+            # Mains can schedule while Stories still render — that is success for AZ.
+            if [[ "${TOTAL_APPROVED:-0}" -gt 0 ]]; then
               FINAL_OK=1
               break
             fi
-            if [[ "${ADVANCE_OK:-0}" == "1" && -z "${WAITING:-}" && "${REMAINING_APPROVE:-0}" -le 0 ]]; then
+            if [[ "${APPROVED:-0}" -gt 0 && "${REMAINING_APPROVE:-0}" -le 0 ]]; then
+              FINAL_OK=1
+              break
+            fi
+            if [[ "${ADVANCE_OK:-0}" == "1" && ("${WAITING:-}" == "story_render" || -z "${WAITING:-}") ]]; then
               FINAL_OK=1
               break
             fi
@@ -161,10 +166,6 @@ jobs:
               echo "still waiting on ${WAITING}; continuing (total_approved=${TOTAL_APPROVED})"
               sleep 5
               continue
-            fi
-            if [[ "${LINKED:-0}" -ge "${ENABLED:-6}" && "${ENABLED:-0}" -gt 0 && "${TOTAL_APPROVED:-0}" -gt 0 ]]; then
-              FINAL_OK=1
-              break
             fi
             sleep 3
           done
