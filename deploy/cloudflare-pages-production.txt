@@ -416,4 +416,6 @@ Review plays rendered MP4 Pages deploy: 2026-09-07 - Open Review plays the Drive
 
 TikTok URL gate Pages deploy: 2026-09-07 - Open Review shows TikTok live URL only on TikTok. CSS hidden no longer loses to display:grid. UI 0.6.273-tiktok-url-gate.
 
+Ops activity detail Pages deploy: 2026-09-07 - Activity log cards expand. Test cards list each job pass/fail. UI 0.6.274-ops-activity-detail.
+
 
