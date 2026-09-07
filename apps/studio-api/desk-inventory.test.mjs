@@ -9,6 +9,7 @@ import {
   classifyCropRow,
   classifyAutonomousRequest,
   classifyHealthTarget,
+  classifyIntakeResidue,
   fingerprint,
   pathIsAutoMergeAllowlisted,
   deskMayAutomerge,
@@ -107,6 +108,16 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     { id: "timing-engine", public: false },
     { ok: false, status: 0, error: "Could not resolve host" },
   ), null);
+  assert.equal(classifyIntakeResidue({
+    id: "driveSmall",
+    name: "Lincoln Park Zoo 20.MOV",
+    size: 16148070,
+  }).kind, "intake_parked");
+  assert.equal(classifyIntakeResidue({
+    id: "driveHuge",
+    name: "Huge.MOV",
+    size: 150000000,
+  }), null);
 });
 
 test("phase 4 automerge stays gated to allowlisted paths, caps, and mode", () => {

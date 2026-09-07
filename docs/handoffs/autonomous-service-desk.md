@@ -2,7 +2,7 @@
 
 Runbook for the Chicago Shining **service desk**: detect stuck pipeline work, classify it, ticket a diagnosis pack, and (by mode) restart local services, open a PR, or — only when explicitly enabled — auto-merge an allowlisted heal.
 
-This does **not** replace the Studio Worker cron self-heal in `apps/studio-api/worker.js`. The Worker still resumes stale produce/render/crop/AZ work every two minutes. The desk acts only after that layer has failed, or when a Windows service is down.
+This does **not** replace the Studio Worker cron self-heal in `apps/studio-api/worker.js`. The Worker still resumes stale produce/render/crop/AZ work every two minutes **and drains leftover Drive Ingestion files through A2**. The desk acts only after that layer has failed, or when a Windows service is down.
 
 There is **no `development` branch**. Authority is `main`. Shipping is `cursor/desk-*` PR → merge `main` → Cloudflare trigger bump and/or `deploy/local-services/Deploy-SMService.ps1`.
 
@@ -26,7 +26,7 @@ Set `STUDIO_DESK_MODE=off` to freeze the agents. Inventory and Worker heal keep 
 
 | Actor | Where | Does | Must not |
 |---|---|---|---|
-| Runtime healer | Studio Worker cron `*/2 * * * *` | Resume stale jobs, pulse T1/R4/R5, orphan enqueue, AZ resume | Patch git, merge, deploy, restart Windows |
+| Runtime healer | Studio Worker cron `*/2 * * * *` | Resume stale jobs, pulse T1/R4/R5, orphan enqueue, AZ resume, A1S oversized scan, **A2 drain of leftover Ingestion files** | Patch git, merge, deploy, restart Windows |
 | Desk agent | Cursor Automation (15 min) or a local agent with this skill | Read inventory, classify, ticket, optionally PR | `git reset --hard`, force-push, edit live `Services\`, auto-publish, send `thumb_offset` as a cover |
 | Local companion | This Windows machine (`Invoke-DeskCompanion.ps1`) | Probe public `/health`, SYNC, START/STOP/VERIFY, PLAN/DEPLOY **one** service | Broad `Services\` overwrite, skip PLAN on first/risky deploys, merge unless mode is `automerge` |
 
@@ -38,7 +38,7 @@ Fingerprints: `kind + record_id + error_class`. Reuse the fingerprint; do not op
 
 Class → actor:
 
-- `transient` → leave to Worker heal
+- `transient` → leave to Worker heal (`intake_parked` is leftover Drive Ingestion files under 100 MB; cron pulses A2 so Process intake is not required)
 - `infra_down` → local companion
 - `data_repair` → bounded Airtable field fix (no schema, no publish)
 - `code_bug` → desk agent PR

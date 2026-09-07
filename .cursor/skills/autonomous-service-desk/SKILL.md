@@ -17,7 +17,7 @@ Read `STUDIO_DESK_MODE` from inventory (`desk_mode`) or Airtable Pipeline Settin
 
 ## Every tick
 
-1. `GET /api/ops/desk/inventory` when Studio Access works. Else classify Airtable rows with `apps/studio-api/desk-inventory.mjs` rules plus public `*.chicagoshining.com/health`.
+1. `GET /api/ops/desk/inventory` when Studio Access works. Else classify Airtable rows with `apps/studio-api/desk-inventory.mjs` rules plus public `*.chicagoshining.com/health`. `intake_parked` means eligible files are still in the Drive ingestion folder; Worker heal should drain them via A2.
 2. Skip `class=transient` (Worker cron already heals).
 3. Reuse `fingerprint`. Same fingerprint twice in 24h → email Joseph, stop. Do not PR.
 4. Ticket via `POST https://tasks.chicagoshining.com/agent-activity/log-event`:

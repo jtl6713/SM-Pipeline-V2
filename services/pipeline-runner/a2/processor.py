@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from typing import Any
 
@@ -60,6 +61,29 @@ def existing_intake_record(
         if rows:
             return rows[0]
     return None
+
+
+def unknown_airtable_fields(exc: BaseException) -> list[str]:
+    chunks = [str(exc)]
+    response = getattr(exc, "response", None)
+    if response is not None:
+        chunks.append(str(getattr(response, "text", "") or ""))
+    return re.findall(r'Unknown field name:\s*"([^"]+)"', "\n".join(chunks), flags=re.I)
+
+
+def create_intake_records(client: AirtableClient, fields: dict[str, Any]) -> list[dict[str, Any]]:
+    pending = dict(fields)
+    for _attempt in range(5):
+        try:
+            return client.create_records(MEDIA_ASSETS_TABLE, [pending], typecast=True)
+        except Exception as exc:
+            dropped = [name for name in unknown_airtable_fields(exc) if name in pending]
+            if not dropped:
+                raise
+            for name in dropped:
+                pending.pop(name, None)
+            logger.warning("A2 retrying intake without unknown Airtable fields: %s", ", ".join(dropped))
+    return client.create_records(MEDIA_ASSETS_TABLE, [pending], typecast=True)
 
 
 def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> dict[str, Any]:
@@ -142,6 +166,7 @@ def _intake_pass(
     intaken: list[str] = []
     skipped_oversize: list[str] = []
     skipped_existing: list[str] = []
+    skipped_errors: list[str] = []
     if files:
         client = AirtableClient()
         gmail = GmailClient()
@@ -153,78 +178,86 @@ def _intake_pass(
             name = str(item.get("name") or "")
             mime = str(item.get("mimeType") or "")
             size = parse_bytes(item.get("size"))
-            existing = existing_intake_record(client, file_id=file_id, name=name, size=size)
-            if existing:
-                skipped_existing.append(file_id)
-                if file_id:
+            try:
+                existing = existing_intake_record(client, file_id=file_id, name=name, size=size)
+                if existing:
+                    skipped_existing.append(file_id)
+                    if file_id:
+                        try:
+                            drive.trash_file(file_id)
+                        except Exception:
+                            pass
+                    continue
+                shared = drive.share_anyone_reader(file_id)
+                share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
+                if size > MAX_FILE_BYTES:
+                    skipped_oversize.append(file_id)
+                    continue
+                created = create_intake_records(
+                    client,
+                    _intake_fields(item, share_url=share_url, batch_id=batch_id),
+                )
+                record_id = created[0]["id"] if created else ""
+                route = classify_intake_file(name, mime)
+                dest = GDRIVE_FOLDERS[route]
+                moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
+                moved_id = str(moved.get("id") or file_id)
+                overlay = a2_route_fields(route, name, moved_id)
+                if route == "audio":
                     try:
-                        drive.trash_file(file_id)
+                        converted = apply_drive_wav_to_mp3(drive, moved_id, filename=name, mime_type=mime)
+                        if converted.changed:
+                            name = converted.filename
+                            mime = converted.mime_type
+                            overlay["Asset Name"] = name
+                            overlay["MIME_Type"] = converted.mime_type
+                            overlay["File_Extension"] = "mp3"
+                            overlay["File_Size_Bytes"] = converted.file_size_bytes
+                            size = converted.file_size_bytes
                     except Exception:
                         pass
-                continue
-            shared = drive.share_anyone_reader(file_id)
-            share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
-            if size > MAX_FILE_BYTES:
-                skipped_oversize.append(file_id)
-                continue
-            created = client.create_records(
-                MEDIA_ASSETS_TABLE,
-                [_intake_fields(item, share_url=share_url, batch_id=batch_id)],
-                typecast=True,
-            )
-            record_id = created[0]["id"] if created else ""
-            route = classify_intake_file(name, mime)
-            dest = GDRIVE_FOLDERS[route]
-            moved = drive.move_file(file_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
-            moved_id = str(moved.get("id") or file_id)
-            overlay = a2_route_fields(route, name, moved_id)
-            if route == "audio":
+                if route == "audio" and not is_voiceover_audio(filename=name, role=str(overlay.get("Asset_Role") or "")):
+                    try:
+                        silence = apply_drive_leading_silence(drive, moved_id, filename=name, mime_type=mime)
+                        overlay.update(silence.airtable_fields())
+                        if silence.content:
+                            overlay["File_Size_Bytes"] = len(silence.content)
+                            size = len(silence.content)
+                    except Exception:
+                        overlay["Leading_Silence_Status"] = STATUS_FAILED
+                        overlay["Leading_Silence_Removed_Seconds"] = 0
+                client.update_record(MEDIA_ASSETS_TABLE, record_id, overlay, typecast=True)
+                size_mb = round(size / 1048576, 2)
                 try:
-                    converted = apply_drive_wav_to_mp3(drive, moved_id, filename=name, mime_type=mime)
-                    if converted.changed:
-                        name = converted.filename
-                        mime = converted.mime_type
-                        overlay["Asset Name"] = name
-                        overlay["MIME_Type"] = converted.mime_type
-                        overlay["File_Extension"] = "mp3"
-                        overlay["File_Size_Bytes"] = converted.file_size_bytes
-                        size = converted.file_size_bytes
+                    gmail.send_html(
+                        to=to_addr,
+                        subject=intake_subject(route, name),
+                        html_body=intake_email_html(
+                            route=route,
+                            name=name,
+                            media_class=str(overlay["Media_Class"]),
+                            asset_role=str(overlay["Asset_Role"]),
+                            eligibility=str(overlay["Raw_Source_Eligibility"]),
+                            folder_label=FOLDER_LABELS[route],
+                            size_mb=size_mb,
+                            mime=mime,
+                            drive_link=str(moved.get("webContentLink") or share_url),
+                            record_id=record_id,
+                            batch_id=batch_id,
+                        ),
+                    )
                 except Exception:
-                    pass
-            if route == "audio" and not is_voiceover_audio(filename=name, role=str(overlay.get("Asset_Role") or "")):
-                try:
-                    silence = apply_drive_leading_silence(drive, moved_id, filename=name, mime_type=mime)
-                    overlay.update(silence.airtable_fields())
-                    if silence.content:
-                        overlay["File_Size_Bytes"] = len(silence.content)
-                        size = len(silence.content)
-                except Exception:
-                    overlay["Leading_Silence_Status"] = STATUS_FAILED
-                    overlay["Leading_Silence_Removed_Seconds"] = 0
-            client.update_record(MEDIA_ASSETS_TABLE, record_id, overlay, typecast=True)
-            size_mb = round(size / 1048576, 2)
-            gmail.send_html(
-                to=to_addr,
-                subject=intake_subject(route, name),
-                html_body=intake_email_html(
-                    route=route,
-                    name=name,
-                    media_class=str(overlay["Media_Class"]),
-                    asset_role=str(overlay["Asset_Role"]),
-                    eligibility=str(overlay["Raw_Source_Eligibility"]),
-                    folder_label=FOLDER_LABELS[route],
-                    size_mb=size_mb,
-                    mime=mime,
-                    drive_link=str(moved.get("webContentLink") or share_url),
-                    record_id=record_id,
-                    batch_id=batch_id,
-                ),
-            )
-            intaken.append(record_id)
+                    logger.exception("A2 intake email failed for %s", name)
+                intaken.append(record_id)
+            except Exception:
+                logger.exception("A2 intake failed for %s (%s); continuing remaining files", name, file_id)
+                if file_id:
+                    skipped_errors.append(file_id)
 
     preview["intaken_ids"] = intaken
     preview["skipped_oversize_ids"] = skipped_oversize
     preview["skipped_existing_ids"] = skipped_existing
+    preview["skipped_error_ids"] = skipped_errors
     next_result = None
     if trigger_a2b:
         next_result = _daisy_a2b(wait_for_next=wait_for_next, test_run_id=test_run_id)
@@ -234,6 +267,7 @@ def _intake_pass(
         "intaken_count": len(intaken),
         "skipped_oversize_count": len(skipped_oversize),
         "skipped_existing_count": len(skipped_existing),
+        "skipped_error_count": len(skipped_errors),
         "a2b": next_result,
         **preview,
     }
@@ -243,6 +277,7 @@ def _merge_pass(total: dict[str, Any], result: dict[str, Any]) -> None:
     total["intaken_ids"].extend(result.get("intaken_ids") or [])
     total["skipped_oversize_ids"].extend(result.get("skipped_oversize_ids") or [])
     total["skipped_existing_ids"].extend(result.get("skipped_existing_ids") or [])
+    total["skipped_error_ids"].extend(result.get("skipped_error_ids") or [])
     total["file_ids"] = list(result.get("file_ids") or [])
     total["files_found"] = bool(total["files_found"] or result.get("files_found"))
     total["intake_passes"] = int(total.get("intake_passes") or 0) + 1
@@ -260,6 +295,7 @@ def drain_until_idle(
         "intaken_ids": [],
         "skipped_oversize_ids": [],
         "skipped_existing_ids": [],
+        "skipped_error_ids": [],
         "file_ids": [],
         "files_found": False,
         "intake_passes": 0,
@@ -289,6 +325,7 @@ def drain_until_idle(
         "intaken_count": len(total["intaken_ids"]),
         "skipped_oversize_count": len(total["skipped_oversize_ids"]),
         "skipped_existing_count": len(total["skipped_existing_ids"]),
+        "skipped_error_count": len(total["skipped_error_ids"]),
         **total,
     }
 
