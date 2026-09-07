@@ -13,6 +13,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
   const explicitTooltips = {
     apiStatus: "Studio API connection status. If this reports an error, data refreshes and admin actions may not work until the API is reachable again.",
     studioProfileSelect: "Choose the content profile/city used for new work, branding, defaults, and library filtering. Changing profiles does not modify existing records.",
+    studioHelpLink: "Open Studio help. Tabs cover the walkthrough plus a guide for the page you came from.",
     refreshDashboard: "Reload dashboard counts and recent output states from the Studio API without changing any records.",
     generateIdeasButton: "Open AI idea generation. You can choose how many ideas to create and the generation quality before anything is added.",
     newIdeaButton: "Open the idea form. Creating an idea does not start production or publishing.",
@@ -172,7 +173,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     music: "Music Manager",
     library: "Asset Manager",
     operations: "Operations",
-    support: "Support"
+    support: "Help"
   };
 
   function cleanText(value) {

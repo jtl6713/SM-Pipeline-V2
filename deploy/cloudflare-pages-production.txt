@@ -405,3 +405,6 @@ Autonomous Service Agent inline-link Pages deploy: 2026-09-07 - Word guide and T
 Operations tabs Pages deploy: 2026-09-07 - Control and Agent cards become small text tabs so only one tool is open at a time. UI 0.6.268-ops-tabs.
 
 Task Organizer docs link Pages deploy: 2026-09-07 - Activity log Task Organizer link opens /docs (Swagger) instead of FastAPI root 404.
+
+Help header Pages deploy: 2026-09-07 - Header Help left of Profile; tabbed guides for each Studio area. UI 0.6.269-help-tabs.
+

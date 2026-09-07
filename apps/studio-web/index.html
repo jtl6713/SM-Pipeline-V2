@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.268-ops-tabs">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.269-help-tabs">
 </head>
 <body>
  <header class="topbar">
@@ -22,10 +22,13 @@
  <div class="brand-subtitle" id="brandSubtitle">Pipeline administration</div>
  </div>
  </div>
+ <div class="topbar-actions">
+ <button type="button" class="topbar-help" id="studioHelpLink">Help</button>
  <label class="topbar-profile" id="studioProfileWrap" hidden>
  <span>Profile</span>
  <select id="studioProfileSelect" aria-label="Working content profile"></select>
  </label>
+ </div>
  </header>
 
  <div class="shell">
@@ -38,7 +41,7 @@
  <button class="nav-item" data-page="music">Music Manager</button>
  <button class="nav-item" data-page="library">Asset Manager</button>
  <button class="nav-item" data-page="operations" id="navOperations" hidden>Operations <span class="ops-nav-badge" id="navOperationsBadge" hidden></span></button>
- <button class="nav-item nav-item-footer-only" data-page="support">Support</button>
+ <button class="nav-item nav-item-footer-only" data-page="support">Help</button>
  </nav>
 
  <main class="main" id="main">
@@ -1297,22 +1300,23 @@
 
  <section id="page-support" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Help</span><h1>Support</h1><p>A full idea-to-publish walkthrough, then a guide for each Studio page.</p></div>
+ <div><span class="eyebrow">Guides</span><h1>Help</h1><p>Every Studio area has a guide. Open Help from a page to land on that area’s tab.</p></div>
  </div>
  <div class="support-layout">
- <nav class="support-toc" aria-label="Support topics">
- <button type="button" class="support-toc-link active" data-support-doc="walkthrough">End-to-end walkthrough</button>
- <button type="button" class="support-toc-link" data-support-doc="home">Home</button>
- <button type="button" class="support-toc-link" data-support-doc="dashboard">Dashboard</button>
- <button type="button" class="support-toc-link" data-support-doc="ideas">Ideas</button>
- <button type="button" class="support-toc-link" data-support-doc="production">Production</button>
- <button type="button" class="support-toc-link" data-support-doc="pipeline">Pipeline</button>
- <button type="button" class="support-toc-link" data-support-doc="music">Music Manager</button>
- <button type="button" class="support-toc-link" data-support-doc="library">Asset Manager</button>
- <button type="button" class="support-toc-link" data-support-doc="operations">Operations</button>
- </nav>
  <div class="support-docs">
- <article class="support-article" data-support-article="walkthrough">
+ <nav class="support-toc" role="tablist" aria-label="Help topics">
+ <button type="button" class="support-toc-link active" role="tab" id="helpTabWalkthrough" data-support-doc="walkthrough" aria-controls="helpArticleWalkthrough" aria-selected="true">Walkthrough</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabHome" data-support-doc="home" aria-controls="helpArticleHome" aria-selected="false" tabindex="-1">Home</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabDashboard" data-support-doc="dashboard" aria-controls="helpArticleDashboard" aria-selected="false" tabindex="-1">Dashboard</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabIdeas" data-support-doc="ideas" aria-controls="helpArticleIdeas" aria-selected="false" tabindex="-1">Ideas</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabProduction" data-support-doc="production" aria-controls="helpArticleProduction" aria-selected="false" tabindex="-1">Production</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabPipeline" data-support-doc="pipeline" aria-controls="helpArticlePipeline" aria-selected="false" tabindex="-1">Pipeline</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabMusic" data-support-doc="music" aria-controls="helpArticleMusic" aria-selected="false" tabindex="-1">Music</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabLibrary" data-support-doc="library" aria-controls="helpArticleLibrary" aria-selected="false" tabindex="-1">Assets</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabOperations" data-support-doc="operations" aria-controls="helpArticleOperations" aria-selected="false" tabindex="-1">Operations</button>
+ </nav>
+ <div class="support-docs-body">
+ <article class="support-article" id="helpArticleWalkthrough" data-support-article="walkthrough" role="tabpanel" aria-labelledby="helpTabWalkthrough">
  <h2>Idea through publish on every platform</h2>
  <p>This is the photo-based path ChicagoShining Studio uses today: write or pick an idea, attach stills, let Studio plan the packages, review the renders, then approve. Instagram, Facebook, and YouTube publish publicly. TikTok is saved as a draft.</p>
  <figure class="support-shot">
@@ -1385,7 +1389,7 @@
  </ol>
  <p>Other entry: Home can skip the Ideas table when you start with photos or AI images. Name the piece on Production if needed, and the rest of this walkthrough is the same from step 4.</p>
  </article>
- <article class="support-article" data-support-article="home" hidden>
+ <article class="support-article" id="helpArticleHome" data-support-article="home" role="tabpanel" aria-labelledby="helpTabHome" hidden>
  <h2>Home</h2>
  <figure class="support-shot">
  <img src="/assets/support/home.jpg?v=0.6.102" alt="Home page with the publishing wizard" width="1440" height="920">
@@ -1399,7 +1403,7 @@
  <p>Come back here anytime to begin a new piece. The top-bar Profile selector is the city/brand for new work.</p>
  <button type="button" class="primary-button" data-open-page="home">Go to Home</button>
  </article>
- <article class="support-article" data-support-article="dashboard" hidden>
+ <article class="support-article" id="helpArticleDashboard" data-support-article="dashboard" role="tabpanel" aria-labelledby="helpTabDashboard" hidden>
  <h2>Dashboard</h2>
  <figure class="support-shot">
  <img src="/assets/support/dashboard.jpg?v=0.6.102" alt="Dashboard metric cards and recent outputs table" width="1440" height="920">
@@ -1414,7 +1418,7 @@
  <p>Open an idea or output from the filtered list, or switch to Ideas / Production / Pipeline when you need the full workspace.</p>
  <button type="button" class="primary-button" data-open-page="dashboard">Go to Dashboard</button>
  </article>
- <article class="support-article" data-support-article="ideas" hidden>
+ <article class="support-article" id="helpArticleIdeas" data-support-article="ideas" role="tabpanel" aria-labelledby="helpTabIdeas" hidden>
  <h2>Ideas</h2>
  <figure class="support-shot">
  <img src="/assets/support/ideas.jpg?v=0.6.102" alt="Ideas intake table and start form" width="1440" height="920">
@@ -1434,7 +1438,7 @@
  <p>Ready to produce means the idea is in the queue. Promote it here; nothing publishes until Ready for Review → Approve publish.</p>
  <button type="button" class="primary-button" data-open-page="ideas">Go to Ideas</button>
  </article>
- <article class="support-article" data-support-article="production" hidden>
+ <article class="support-article" id="helpArticleProduction" data-support-article="production" role="tabpanel" aria-labelledby="helpTabProduction" hidden>
  <h2>Production</h2>
  <figure class="support-shot">
  <img src="/assets/support/production.jpg?v=0.6.102" alt="Production photo intake and platform checks" width="1440" height="920">
@@ -1450,7 +1454,7 @@
  <p>Save often while uploading. Approve &amp; Promote is the handoff into render. Music tracks shown here come from the Music Manager catalogue.</p>
  <button type="button" class="primary-button" data-open-page="content">Go to Production</button>
  </article>
- <article class="support-article" data-support-article="pipeline" hidden>
+ <article class="support-article" id="helpArticlePipeline" data-support-article="pipeline" role="tabpanel" aria-labelledby="helpTabPipeline" hidden>
  <h2>Pipeline</h2>
  <figure class="support-shot">
  <img src="/assets/support/pipeline.jpg?v=0.6.102" alt="Platform pipeline with Open review on each output" width="1440" height="920">
@@ -1466,7 +1470,7 @@
  <p>Publishing stays locked until that approve step. Preview-approve (when shown) records review without posting.</p>
  <button type="button" class="primary-button" data-open-page="outputs">Go to Pipeline</button>
  </article>
- <article class="support-article" data-support-article="music" hidden>
+ <article class="support-article" id="helpArticleMusic" data-support-article="music" role="tabpanel" aria-labelledby="helpTabMusic" hidden>
  <h2>Music Manager</h2>
  <figure class="support-shot">
  <img src="/assets/support/music.jpg?v=0.6.102" alt="Music Manager track cards" width="1440" height="920">
@@ -1481,7 +1485,7 @@
  </ul>
  <button type="button" class="primary-button" data-open-page="music">Go to Music Manager</button>
  </article>
- <article class="support-article" data-support-article="library" hidden>
+ <article class="support-article" id="helpArticleLibrary" data-support-article="library" role="tabpanel" aria-labelledby="helpTabLibrary" hidden>
  <h2>Asset Manager</h2>
  <p>Asset Manager is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
  <ul>
@@ -1494,7 +1498,7 @@
  </ul>
  <button type="button" class="primary-button" data-open-page="library">Go to Asset Manager</button>
  </article>
- <article class="support-article" data-support-article="operations" hidden>
+ <article class="support-article" id="helpArticleOperations" data-support-article="operations" role="tabpanel" aria-labelledby="helpTabOperations" hidden>
  <h2>Operations</h2>
  <figure class="support-shot">
  <img src="/assets/support/operations.jpg?v=0.6.102" alt="Operations control page" width="1440" height="920">
@@ -1514,13 +1518,14 @@
  </article>
  </div>
  </div>
+ </div>
  </section>
  </main>
  </div>
 
  <footer class="studio-footer">
  <nav class="studio-footer-links" aria-label="Secondary">
- <button type="button" data-open-page="support">Support</button>
+ <button type="button" data-open-page="support">Help</button>
  <button type="button" data-open-page="music">Music</button>
  <button type="button" data-open-page="library">Assets</button>
  <button type="button" data-open-page="operations" id="footerOperations" hidden>Operations</button>
@@ -1673,8 +1678,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.268-ops-tabs"></script>
- <script src="/assets/ez-plan.js?v=0.6.268-ops-tabs"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.268-ops-tabs"></script>
+ <script src="/assets/config.js?v=0.6.269-help-tabs"></script>
+ <script src="/assets/ez-plan.js?v=0.6.269-help-tabs"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.269-help-tabs"></script>
 </body>
 </html>
