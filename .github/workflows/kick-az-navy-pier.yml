@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-ready-schedule then phased kick via service binding
+      - name: Wait for Worker version az-approve-one then phased kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -84,11 +84,11 @@ jobs:
           READY=0
           for i in $(seq 1 50); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-ready-schedule"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-approve-one"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-ready-schedule (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-approve-one (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
@@ -96,50 +96,42 @@ jobs:
 
           FINAL_OK=0
           TOTAL_APPROVED=0
-          for k in $(seq 1 20); do
-            KICK_CODE=$(curl -sS --max-time 180 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick&phase=auto" || true)
-            echo "kick_try=$k kick_http=$KICK_CODE"
-            cat /tmp/az-kick.json
-            test "$KICK_CODE" = "200"
-            jq -e '.ok==true and .diagnostic.requestId=="reca7v6zi1b9QNanJ"' /tmp/az-kick.json >/dev/null
+          for k in $(seq 1 24); do
+            # Prefer phase=approve (one destination per invoke). Retry 500 subrequest aborts.
+            PHASE="approve"
+            if [[ "$k" -eq 1 ]]; then PHASE="auto"; fi
+            KICK_CODE=$(curl -sS --max-time 180 -o /tmp/az-kick.json -w '%{http_code}' "$URL?mode=kick&phase=$PHASE" || true)
+            echo "kick_try=$k phase=$PHASE kick_http=$KICK_CODE"
+            cat /tmp/az-kick.json || true
+            if [[ "$KICK_CODE" != "200" ]]; then
+              echo "non-200 kick; retrying"
+              sleep 4
+              continue
+            fi
+            jq -e '.diagnostic.requestId=="reca7v6zi1b9QNanJ"' /tmp/az-kick.json >/dev/null
             python - <<'PY'
           import json
           from pathlib import Path
           data=json.loads(Path('/tmp/az-kick.json').read_text())
           d=data.get('diagnostic') or {}
           advance=data.get('advance') or {}
-          ensure=(advance.get('ensure_outputs') if isinstance(advance, dict) else None) or {}
-          cover=(advance.get('cover') if isinstance(advance, dict) else None) or {}
-          finals=(advance.get('finals') if isinstance(advance, dict) else None) or {}
-          stories=(advance.get('stories') if isinstance(advance, dict) else None) or {}
-          pro=d.get('pro_rows') or {}
-          approved=int(advance.get('approved_count') or 0) if isinstance(advance, dict) else 0
+          approved=int(advance.get('approved_count') or d.get('approved_count') or 0) if isinstance(advance, dict) or d else 0
+          if isinstance(advance, dict):
+            approved=max(approved, int(advance.get('approved_count') or 0))
           remaining_approve=int(advance.get('remaining_approve') or 0) if isinstance(advance, dict) else 0
-          waiting=str(advance.get('waiting') or '') if isinstance(advance, dict) else ''
+          waiting=str((advance.get('waiting') if isinstance(advance, dict) else None) or d.get('waiting') or '')
           skipped=str(advance.get('skipped') or '') if isinstance(advance, dict) else ''
-          print('request_status=', d.get('request_status'))
-          print('platform_output_count=', d.get('platform_output_count'))
-          print('pro_with_po=', pro.get('with_platform_output'))
-          print('pro_enabled=', pro.get('enabled'))
           print('advance=', advance)
-          print('ensure_remaining=', ensure.get('remaining'))
-          print('cover=', cover)
-          print('finals=', finals)
-          print('stories=', stories)
           print('approved_count=', approved)
           print('remaining_approve=', remaining_approve)
           print('waiting=', waiting)
+          print('skipped=', skipped)
           Path('/tmp/az-kick-summary.env').write_text(
-            f"PO={d.get('platform_output_count') or 0}\n"
-            f"LINKED={pro.get('with_platform_output') or 0}\n"
-            f"ENABLED={pro.get('enabled') or 0}\n"
-            f"REMAINING={ensure.get('remaining') if ensure.get('remaining') is not None else -1}\n"
             f"WAITING={waiting}\n"
             f"APPROVED={approved}\n"
             f"REMAINING_APPROVE={remaining_approve}\n"
             f"SKIPPED={skipped}\n"
             f"ADVANCE_OK={1 if isinstance(advance, dict) and advance.get('ok') else 0}\n"
-            f"PREVIEW_PUBLIC={1 if d.get('preview_public') else 0}\n"
           )
           PY
             # shellcheck source=/tmp/az-kick-summary.env
@@ -149,25 +141,16 @@ jobs:
               FINAL_OK=1
               break
             fi
-            # Mains can schedule while Stories still render — that is success for AZ.
             if [[ "${TOTAL_APPROVED:-0}" -gt 0 ]]; then
-              FINAL_OK=1
-              break
-            fi
-            if [[ "${APPROVED:-0}" -gt 0 && "${REMAINING_APPROVE:-0}" -le 0 ]]; then
-              FINAL_OK=1
-              break
-            fi
-            if [[ "${ADVANCE_OK:-0}" == "1" && ("${WAITING:-}" == "story_render" || -z "${WAITING:-}") ]]; then
               FINAL_OK=1
               break
             fi
             if [[ -n "${WAITING:-}" ]]; then
               echo "still waiting on ${WAITING}; continuing (total_approved=${TOTAL_APPROVED})"
-              sleep 5
+              sleep 3
               continue
             fi
-            sleep 3
+            sleep 2
           done
           test "$FINAL_OK" = "1"
 
