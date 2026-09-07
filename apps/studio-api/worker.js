@@ -262,7 +262,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.275-play-rendered-mp4",
+          version: "0.10.276-youtube-public-source",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1808,6 +1808,17 @@ function item4UrlIsPublicPublishCdn(url) {
   if (studioUrlLooksLikeImage(href)) return false;
   const path = href.slice("https://media.chicagoshining.com/".length);
   return path.startsWith("studio/previews/") || path.startsWith("publish/");
+}
+
+function studioYoutubePublicSourceUrl(record) {
+  return ["Publish_Asset_URL", "Studio_Preview_URL"]
+    .map((name) => String(f(record, name) || "").trim())
+    .find((href) => item4UrlIsPublicPublishCdn(href)) || "";
+}
+
+function studioYoutubeFailedPrivateSource(record) {
+  const err = `${f(record, "YouTube_Error_Message") || ""} ${f(record, "Publish_Error_Message") || ""}`;
+  return /source download failed 401/i.test(err) || /YTS1_UPLOAD/i.test(String(f(record, "Publish_Error_Stage") || ""));
 }
 
 function item4FinishedVideoPreviewKey(requestId, assetId) {
@@ -23692,6 +23703,14 @@ async function studioEnsureYoutubePublish(env, record) {
   if (/^complete$/i.test(stage) && videoId) {
     return { ok: true, skipped: "already-complete", target: "YT0", backend: "python", video_id: videoId };
   }
+  if (!videoId && /^terminal error$/i.test(stage) && studioYoutubeFailedPrivateSource(record)) {
+    const healed = await studioHealFailedYoutubeSourceDownloads(env, { limit: 1, recordId: record.id });
+    return healed[0] || { ok: false, skipped: "heal-miss", target: "AP0" };
+  }
+  if (!videoId && !studioYoutubePublicSourceUrl(record)) {
+    const staged = await studioPulseAp0PublicAsset(env, record);
+    if (!staged?.ok || staged.skipped) return { ...staged, blocked: "missing_public_publish_url" };
+  }
   if (/^yt4$/i.test(stage)) return studioPulseYtRecord(env, "yts3", "YTS3", record);
   if (/^yt2$/i.test(stage) && videoId) {
     const processed = await studioPulseYtRecord(env, "yts2", "YTS2", record);
@@ -24413,10 +24432,96 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
   + 'OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),'
   + 'OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
 
+async function studioResetYoutubeUploadForRetry(env, record) {
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        YouTube_Stage: "YT1",
+        YouTube_Upload_Job_ID: "",
+        YouTube_Upload_Status: "Not Started",
+        YouTube_Upload_Progress_Percent: 0,
+        YouTube_Error_Message: "",
+        YouTube_Response_JSON: "",
+        Publish_Status: "Ready to Publish",
+        Publish_Error_Stage: "",
+        Publish_Error_Message: "",
+        Publish_Retry_Eligible: true,
+        YouTube_Package_Status: "Ready",
+        YouTube_Scheduled_Publish_At: null,
+      },
+      typecast: true,
+    }),
+  });
+}
+
+async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
+  const limit = Number(options.limit || 3);
+  const recordId = String(options.recordId || "").trim();
+  const formula = recordId
+    ? `AND(RECORD_ID()="${recordId}",{YouTube_Stage}="Terminal Error",{YouTube_Video_ID}="")`
+    : 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Video_ID}="",{YouTube_Stage}="Terminal Error",{Output_Status}="Approved for Publishing")';
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
+  } catch (error) {
+    console.warn("youtube source-download heal scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    if (!studioYoutubeFailedPrivateSource(row)) continue;
+    try {
+      if (!studioYoutubePublicSourceUrl(row)) {
+        await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            fields: {
+              Publish_Status: "Ready to Publish",
+              Publish_Retry_Eligible: true,
+              Publish_Asset_Error_Message: "",
+            },
+            typecast: true,
+          }),
+        });
+        const staged = await studioPulseAp0PublicAsset(env, row);
+        results.push({
+          id: row.id,
+          stage: "ap0",
+          ok: staged?.ok !== false,
+          skipped: staged?.skipped || false,
+          healed: "missing_public_publish_url",
+        });
+        continue;
+      }
+      await studioResetYoutubeUploadForRetry(env, row);
+      const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const pulsed = await studioPulseYtRecord(env, "ytp1", "YTP1", refreshed);
+      results.push({
+        id: row.id,
+        stage: "ytp1",
+        ok: pulsed?.ok !== false,
+        skipped: pulsed?.skipped || false,
+        healed: "source-download-401",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("youtube source-download heal failed", row.id, error);
+      results.push({ id: row.id, stage: "heal", error: message });
+    }
+  }
+  return results;
+}
+
 async function studioReconcileYoutubePublishes(env, options = {}) {
   if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
   const results = [];
+  try {
+    results.push(...await studioHealFailedYoutubeSourceDownloads(env, { limit }));
+  } catch (error) {
+    console.warn("youtube source-download heal failed", error);
+  }
   const scans = [
     {
       stage: "yt0",
@@ -24454,6 +24559,17 @@ async function studioReconcileYoutubePublishes(env, options = {}) {
     }
     for (const row of rows) {
       try {
+        if (scan.stage === "ytp1" && !studioYoutubePublicSourceUrl(row)) {
+          const staged = await studioPulseAp0PublicAsset(env, row);
+          results.push({
+            id: row.id,
+            stage: "ap0",
+            ok: staged?.ok !== false,
+            skipped: staged?.skipped || false,
+            blocked: "missing_public_publish_url",
+          });
+          continue;
+        }
         const pulsed = await studioPulseYtRecord(env, scan.stage, scan.target, row);
         results.push({
           id: row.id,
