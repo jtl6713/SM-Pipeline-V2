@@ -232,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.260-az-navy-fanout2",
+          version: "0.10.261-az-auto-schedule",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -7333,21 +7333,161 @@ function azOutputReadyToQueue(record) {
   return Boolean(url && caption && (story || thumb));
 }
 
+function azOutputQueueBlockers(record) {
+  const blockers = [];
+  if (Boolean(f(record, "Do_Not_Publish"))) blockers.push("do_not_publish");
+  if (["Published", "Publishing"].includes(String(f(record, "Publish_Status") || "").trim())) blockers.push("already_publishing");
+  if (!String(f(record, "Final_File_URL") || "").trim()) blockers.push("final_file");
+  if (!String(f(record, "Output_Caption") || "").trim()) blockers.push("caption");
+  const story = studioAzIsStory(f(record, "Studio_Output_Type") || f(record, "Format"));
+  if (!story && !studioAiThumbnailUrl(f(record, "Thumbnail_URL"))) blockers.push("cover");
+  return blockers;
+}
+
+async function azStagePublicCoverFromSource(env, parent, sourceUrl, driveFileId = "") {
+  const parentId = String(parent?.id || "").trim();
+  if (!parentId) return { url: "", skip: "missing_parent" };
+  let buffer = null;
+  const driveId = String(driveFileId || extractGoogleDriveFileId(sourceUrl) || "").trim();
+  if (driveId) {
+    const token = await item4GoogleAccessToken(env);
+    if (token) {
+      try {
+        const response = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveId)}?alt=media&supportsAllDrives=true`,
+          { headers: { Authorization: `Bearer ${token}` }, redirect: "follow" }
+        );
+        const type = String(response.headers.get("Content-Type") || "").toLowerCase();
+        if (response.ok && type.startsWith("image/") && !type.includes("svg")) {
+          const bytes = await response.arrayBuffer();
+          if (bytes && bytes.byteLength >= 80) buffer = bytes;
+        } else {
+          try { await response.body?.cancel(); } catch {}
+        }
+      } catch (error) {
+        console.warn("AZ Drive cover download failed", driveId, error);
+      }
+    }
+    if (!buffer) {
+      const fetched = await item4FetchDriveThumbnailBytes(driveId, env).catch(() => null);
+      if (fetched?.bytes) buffer = fetched.bytes;
+    }
+  }
+  if (!buffer) buffer = await studioFetchImageBytes(sourceUrl);
+  if (!buffer) return { url: "", skip: "missing_source_bytes" };
+  const contentType = studioImageContentType(buffer);
+  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const key = `studio/previews/thumbnails/${parentId}/cover-9x16.${ext}`;
+  let uploaded = await studioPutPublicObjectViaUploadWorker(env, {
+    key,
+    body: buffer,
+    contentType,
+    contentLength: buffer.byteLength,
+    outputId: parentId,
+    retainClass: "preview",
+  });
+  if (!uploaded.url && env.STUDIO_MEDIA) {
+    try {
+      await env.STUDIO_MEDIA.put(key, buffer, {
+        httpMetadata: { contentType, cacheControl: "public, max-age=300" },
+        customMetadata: { contentItemId: parentId, purpose: "az-grid-cover" },
+      });
+      uploaded = { url: `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`, skip: "" };
+    } catch (error) {
+      console.warn("AZ cover STUDIO_MEDIA put failed", parentId, error);
+    }
+  }
+  if (!uploaded.url) return { url: "", skip: uploaded.skip || "upload_failed" };
+  if (!(await studioPublicJpegIsReachable(uploaded.url))) {
+    return { url: "", skip: "cover_not_public" };
+  }
+  return { url: uploaded.url, skip: "" };
+}
+
+async function azEnsurePublicCovers(env, requestId) {
+  const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+  if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
+  const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
+  if (!contentId) return { waiting: "content" };
+  let parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+  const outputs = await azPlatformOutputsForRequest(env, requestId);
+  const parentAi = studioAiThumbnailUrl(f(parent, "Thumbnail_URL"));
+  const mains = outputs.filter((row) => !studioAzIsStory(f(row, "Studio_Output_Type") || f(row, "Format")));
+  const missing = mains.filter((row) => !studioAiThumbnailUrl(f(row, "Thumbnail_URL")));
+  if (parentAi && !missing.length) return { ok: true, already: true, url: parentAi, stamped: 0 };
+
+  let publicUrl = parentAi;
+  if (!publicUrl) {
+    const source = String(f(parent, "Thumbnail_URL") || "").trim();
+    const driveId = String(f(parent, "Thumbnail_Google_Drive_File_ID") || "").trim();
+    if (!source && !driveId) {
+      try { await enqueueStudioProductionJob(env, requestId); } catch {}
+      return { waiting: "generate", reason: "no_thumbnail_source" };
+    }
+    const staged = await azStagePublicCoverFromSource(env, parent, source, driveId);
+    if (!staged.url) {
+      try { await enqueueStudioProductionJob(env, requestId); } catch {}
+      return { waiting: "stage", reason: staged.skip || "stage_failed" };
+    }
+    publicUrl = staged.url;
+    parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: {
+          Thumbnail_URL: publicUrl,
+          Thumbnail_Status: "Generated",
+          Include_Thumbnail: "Yes",
+          Content_Status: "Thumbnail Ready",
+        },
+        typecast: true,
+      }),
+    });
+  }
+
+  let stamped = 0;
+  for (const row of outputs) {
+    const current = studioAiThumbnailUrl(f(row, "Thumbnail_URL"));
+    if (current === publicUrl) continue;
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Thumbnail_URL: publicUrl }, typecast: true }),
+    });
+    stamped += 1;
+  }
+  return { ok: true, url: publicUrl, stamped, parent_id: contentId };
+}
+
 async function azAutoApproveIfReady(env, requestId) {
   const requestRecord = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   if (!studioIsAzFinishedVideo(requestRecord)) return { skipped: "not_az" };
+  let cover = null;
+  try {
+    cover = await azEnsurePublicCovers(env, requestId);
+  } catch (error) {
+    cover = { error: error instanceof Error ? error.message : String(error) };
+    console.warn("AZ ensure public covers failed", requestId, error);
+  }
   const outputs = await azPlatformOutputsForRequest(env, requestId);
-  if (!outputs.length) return { waiting: "outputs" };
+  if (!outputs.length) return { waiting: "outputs", cover };
   const pending = outputs.filter((row) => {
     const review = String(f(row, "Review_Status") || "").trim();
     const status = String(f(row, "Output_Status") || "").trim();
     if (review === "Approved" || status === "Approved for Publishing") return false;
     return true;
   });
-  if (!pending.length) return { skipped: "already_queued", count: outputs.length };
-  if (pending.some((row) => !azOutputReadyToQueue(row))) return { waiting: "cover" };
+  if (!pending.length) return { skipped: "already_queued", count: outputs.length, cover };
+  const notReady = pending
+    .map((row) => ({ id: row.id, platform: f(row, "Platform"), blockers: azOutputQueueBlockers(row) }))
+    .filter((row) => row.blockers.length);
+  if (notReady.length) {
+    if (notReady.some((row) => row.blockers.includes("cover") || row.blockers.includes("caption"))) {
+      try { await enqueueStudioProductionJob(env, requestId); } catch {}
+      try { await advanceStudioProductionOutputs(env, { requestRecordId: requestId, waitMs: 0 }); } catch {}
+    }
+    return { waiting: "cover", cover, not_ready: notReady.slice(0, 8) };
+  }
   const toApprove = pending.filter((row) => studioOutputReadyForPublishApproval(row));
-  if (!toApprove.length) return { waiting: "review_gate" };
+  if (!toApprove.length) return { waiting: "review_gate", cover };
   const occupied = await studioLoadAzOccupiedTimes(env, { excludeIds: outputs.map((row) => row.id) });
   const items = toApprove.map((row) => ({
     platform: String(f(row, "Platform") || "").trim(),
@@ -7375,7 +7515,14 @@ async function azAutoApproveIfReady(env, requestId) {
       Production_Notes: `${notes}\n\naz-schedule=${planned.campaign?.key || ""}; ${planned.rationale}`.slice(0, 10000),
     });
   }
-  return { ok: true, approved_count: approved.length, campaign: planned.campaign, rationale: planned.rationale };
+  return {
+    ok: true,
+    approved_count: approved.length,
+    campaign: planned.campaign,
+    rationale: planned.rationale,
+    cover,
+    scheduled: planned.stamps ? Object.fromEntries(planned.stamps) : null,
+  };
 }
 
 async function azBuildPlanItems(env, record) {

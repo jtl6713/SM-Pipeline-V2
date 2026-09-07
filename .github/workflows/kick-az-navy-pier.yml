@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-navy-fanout2 then kick via service binding
+      - name: Wait for Worker version az-auto-schedule then kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -81,11 +81,11 @@ jobs:
           READY=0
           for i in $(seq 1 40); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-navy-fanout2"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-auto-schedule"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-navy-fanout2 (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-auto-schedule (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
@@ -130,7 +130,13 @@ jobs:
               FINAL_OK=1
               break
             fi
-            if [[ "${WAITING:-}" != "outputs" && "${REMAINING:-1}" -le 0 && "${LINKED:-0}" -gt 0 ]]; then
+            if [[ "${WAITING:-}" == "cover" ]]; then
+              echo "still waiting on cover/caption; continuing"
+            elif [[ "${WAITING:-}" == "" && "${ADVANCE_OK:-0}" == "1" ]]; then
+              FINAL_OK=1
+              break
+            fi
+            if [[ "${WAITING:-}" != "outputs" && "${REMAINING:-1}" -le 0 && "${LINKED:-0}" -gt 0 && "${WAITING:-}" != "cover" ]]; then
               FINAL_OK=1
               break
             fi
