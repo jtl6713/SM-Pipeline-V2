@@ -378,7 +378,10 @@
     if (page !== "outputs") stopPipelinePoll();
     if (page !== "content") stopProductionPoll();
     if (page === "support") showSupportDoc("walkthrough");
-    if (page === "operations") showOperationsView(location.hash.replace(/^#/, "") === "agent" ? "agent" : "control");
+    if (page === "operations") {
+      const parsed = parseOperationsLocation();
+      showOperationsView(parsed.view, parsed.tab);
+    }
     loadPage(isHubPage(page) ? "home" : page);
   }
 
@@ -513,6 +516,33 @@
   $("operationsAgentDeskMode")?.addEventListener("change", (event) => patchOperationsDeskMode(event.target.value));
   document.querySelectorAll("[data-ops-view]").forEach((button) => {
     button.addEventListener("click", () => showOperationsView(button.dataset.opsView));
+  });
+  document.querySelectorAll("[data-ops-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = button.closest("#operationsAgentView") ? "agent" : "control";
+      showOperationsView(view, button.dataset.opsTab);
+    });
+  });
+  document.querySelectorAll(".ops-card-tabs").forEach((tablist) => {
+    tablist.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
+      const tabs = [...tablist.querySelectorAll("[data-ops-tab]")];
+      const index = tabs.indexOf(document.activeElement);
+      if (index < 0) return;
+      let next = index;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabs.length - 1;
+      tabs[next].focus();
+      tabs[next].click();
+      event.preventDefault();
+    });
+  });
+  window.addEventListener("hashchange", () => {
+    if (!$("page-operations")?.classList.contains("active")) return;
+    const parsed = parseOperationsLocation();
+    showOperationsView(parsed.view, parsed.tab, { skipHash: true });
   });
 
   $("operationsRunDailyIdeas")?.addEventListener("click", async () => {
@@ -13824,7 +13854,45 @@
     });
   }
 
-  function showOperationsView(view) {
+  const OPS_CONTROL_TABS = ["desk", "ideas", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
+  const OPS_AGENT_TABS = ["guide", "inventory", "activity"];
+  let operationsControlTab = "desk";
+  let operationsAgentTab = "guide";
+
+  function parseOperationsLocation() {
+    const raw = location.hash.replace(/^#/, "").trim().toLowerCase();
+    if (raw === "agent" || raw === "agent-guide") return { view: "agent", tab: "guide" };
+    if (raw === "agent-inventory") return { view: "agent", tab: "inventory" };
+    if (raw === "agent-activity") return { view: "agent", tab: "activity" };
+    if (OPS_CONTROL_TABS.includes(raw)) return { view: "control", tab: raw };
+    return { view: "control", tab: operationsControlTab || "desk" };
+  }
+
+  function operationsHashFor(view, tab) {
+    if (view === "agent") {
+      if (tab === "inventory") return "#agent-inventory";
+      if (tab === "activity") return "#agent-activity";
+      return "#agent";
+    }
+    if (tab && tab !== "desk") return `#${tab}`;
+    return "";
+  }
+
+  function applyOperationsTabs(rootId, tab) {
+    const root = $(rootId);
+    if (!root) return;
+    root.querySelectorAll("[data-ops-tab]").forEach((button) => {
+      const on = button.dataset.opsTab === tab;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-selected", on ? "true" : "false");
+      button.tabIndex = on ? 0 : -1;
+    });
+    root.querySelectorAll("[data-ops-tab-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.opsTabPanel !== tab;
+    });
+  }
+
+  function showOperationsView(view, tab, options = {}) {
     const agent = view === "agent";
     const control = $("operationsControlView");
     const agentView = $("operationsAgentView");
@@ -13833,8 +13901,19 @@
     document.querySelectorAll("[data-ops-view]").forEach((button) => {
       button.classList.toggle("active", button.dataset.opsView === (agent ? "agent" : "control"));
     });
-    if (agent) history.replaceState(null, "", "#agent");
-    else if (location.hash === "#agent") history.replaceState(null, "", location.pathname + location.search);
+    if (agent) {
+      if (OPS_AGENT_TABS.includes(tab)) operationsAgentTab = tab;
+      applyOperationsTabs("operationsAgentView", operationsAgentTab);
+    } else {
+      if (OPS_CONTROL_TABS.includes(tab)) operationsControlTab = tab;
+      applyOperationsTabs("operationsControlView", operationsControlTab);
+    }
+    if (!options.skipHash) {
+      const nextHash = operationsHashFor(agent ? "agent" : "control", agent ? operationsAgentTab : operationsControlTab);
+      const current = location.hash.replace(/^#/, "");
+      const next = nextHash.replace(/^#/, "");
+      if (current !== next) history.replaceState(null, "", nextHash || (location.pathname + location.search));
+    }
   }
 
   async function patchOperationsDeskMode(rawMode) {
