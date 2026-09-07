@@ -16,6 +16,9 @@ This folder is the durable operational documentation for the SM Pipeline V2 repo
 4. **`docs/handoffs/autonomous-service-desk.md`**  
    Autonomous service desk runbook (inventory, modes, companion, ship playbook).
 
+5. **`deploy/cloud-vm/README.md`**  
+   Linux/ARM Docker home for the eight Windows media services (Oracle Always Free path). Windows START/STOP/VERIFY stays production until that cutover.
+
 ## Repository
 
 - GitHub repository: `jtl6713/SM-Pipeline-V2`

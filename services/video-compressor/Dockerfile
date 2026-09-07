@@ -5,10 +5,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY _shared/scratch_ttl.py /app/scratch_ttl.py
 COPY video-compressor/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY video-compressor/ /app/
+COPY _shared/scratch_ttl.py /app/scratch_ttl.py
 
 ENV PORT=3335 \
     HOST=0.0.0.0 \

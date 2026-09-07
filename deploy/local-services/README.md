@@ -25,8 +25,9 @@ For the complete operator and AI-handoff procedure, read:
 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 |
 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 |
 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 |
+| Video Compressor | `services/video-compressor` | `Services\Video_Compressor` | 3335 |
 
-The numbered operational tab contract is `1 LOC` through `8 LOC` (Video Compressor is 7; Timing Engine is 8).
+The numbered operational tab contract is `1 LOC` through `8 LOC` (Video Compressor is 7; Timing Engine is 8). Linux/ARM compose for a later Oracle VM is [`deploy/cloud-vm/`](../cloud-vm/README.md); do not mix that into this Windows PLAN/DEPLOY path.
 
 ## Safety contract
 
