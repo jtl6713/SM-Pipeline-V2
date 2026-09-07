@@ -1,0 +1,10 @@
+Trigger Patch AZ Navy Pier Fireworks Title workflow.
+
+Sets Production Request reca7v6zi1b9QNanJ to:
+  Title_Mode = Force exact
+  Requested_Title = Final Navy Pier Fireworks - Full Video
+
+Also syncs Idea Candidate_Title / Content_Title when linked, and clears stale
+thumbnail URLs so the 3D cover can regenerate with the new lettering.
+
+Triggered: 2026-09-07T02:37Z
