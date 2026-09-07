@@ -69,6 +69,7 @@ export default {
       const isOperationsOutputPublishKickRoute = /^\/api\/operations\/outputs\/rec[A-Za-z0-9]+\/publish-kick$/.test(url.pathname);
       const isOperationsCompressRoute = url.pathname === "/api/operations/compress";
       const isOperationsCompressionStatusRoute = url.pathname === "/api/operations/compression";
+      const isOpsAzNavyPierKickRoute = url.pathname === "/api/ops/az-navy-pier-kick";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
@@ -134,6 +135,7 @@ export default {
       const isOperationsOutputPublishedWrite = isOperationsOutputPublishedRoute && request.method === "POST";
       const isOperationsOutputPublishKickWrite = isOperationsOutputPublishKickRoute && request.method === "POST";
       const isOperationsCompressWrite = isOperationsCompressRoute && request.method === "POST";
+      const isOpsAzNavyPierKickWrite = isOpsAzNavyPierKickRoute && request.method === "POST";
       const isOperationsResetRenderUrlsWrite = isOperationsResetRenderUrlsRoute && request.method === "POST";
       const isOperationsRetryAssetSelectionWrite = isOperationsRetryAssetSelectionRoute && request.method === "POST";
       const isOperationsMakeAdminBridgeWrite = isOperationsMakeAdminBridgeRoute && request.method === "POST";
@@ -192,6 +194,7 @@ export default {
         isOperationsOutputPublishedWrite ||
         isOperationsOutputPublishKickWrite ||
         isOperationsCompressWrite ||
+        isOpsAzNavyPierKickWrite ||
         isOperationsResetRenderUrlsWrite ||
         isOperationsRetryAssetSelectionWrite ||
         isOperationsMakeAdminBridgeWrite ||
@@ -229,7 +232,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.256-az-navy-title",
+          version: "0.10.258-az-navy-unstick",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -574,6 +577,13 @@ export default {
         requirePermission(authorization, "tenant_admin");
         assertWriteRequest(request, env);
         return pulseA1SForDriveFile(request, env, authorization, ctx);
+      }
+
+      if (isOpsAzNavyPierKickRoute) {
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        const result = await opsForceAzNavyPierTitle(env);
+        return respond(request, env, result);
       }
 
       if (isOperationsResetRenderUrlsRoute) {
@@ -7529,7 +7539,18 @@ async function opsForceAzNavyPierTitle(env) {
     production_job_error: job?.error || null,
     content: contentSnapshot,
   };
-  console.log("ops az navy pier diagnostic", diagnostic);
+  console.log(`ops az navy pier diagnostic ${JSON.stringify(diagnostic)}`);
+
+  let compress = null;
+  if (diagnostic.needs_compress) {
+    try {
+      compress = await item4PulseStudioCompressJob(env, requestId);
+      console.log(`ops az navy pier compress ${JSON.stringify(compress)}`);
+    } catch (error) {
+      compress = { error: error instanceof Error ? error.message : String(error) };
+      console.warn(`ops az navy pier compress failed ${JSON.stringify(compress)}`);
+    }
+  }
 
   let advance = null;
   try {
@@ -7539,8 +7560,8 @@ async function opsForceAzNavyPierTitle(env) {
     advance = { error: error instanceof Error ? error.message : String(error) };
     console.warn("ops az navy pier advance failed", requestId, error);
   }
-  console.log("ops az navy pier advance", { requestId, advance });
-  return { ok: true, diagnostic, advance };
+  console.log(`ops az navy pier advance ${JSON.stringify({ requestId, advance })}`);
+  return { ok: true, diagnostic, compress, advance };
 }
 
 async function resumeAzFinishedVideoRequests(env, ctx = null) {
