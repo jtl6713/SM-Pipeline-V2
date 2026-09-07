@@ -1336,6 +1336,8 @@ html[data-studio-theme="nyc"]{
 .support-docs-body{padding:22px 24px}
 .support-article[hidden]{display:none!important}
 .support-article h2{margin:0 0 10px;font-size:1.35rem}
+.support-article h3{margin:20px 0 8px;font-size:1.02rem}
+.support-article h3:first-of-type{margin-top:14px}
 .support-article p,.support-article li{line-height:1.55;font-size:.92rem}
 .support-article ul,.support-article ol{padding-left:1.2rem}
 .support-steps{display:grid;gap:16px;padding-left:1.2rem}

@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.269-help-tabs";
+  const BUILD_ID = "item4-0.6.270-ops-help";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -366,6 +366,12 @@
   let studioPage = "home";
 
   function supportDocForPage(page) {
+    if (page === "operations") {
+      const parsed = typeof parseOperationsLocation === "function" ? parseOperationsLocation() : { view: "control", tab: "desk" };
+      if (parsed.view === "agent") return parsed.tab === "activity" ? "logs" : "desk";
+      if (parsed.tab === "desk") return "desk";
+      return "operations";
+    }
     const map = {
       home: "home",
       dashboard: "dashboard",
@@ -374,7 +380,6 @@
       outputs: "pipeline",
       music: "music",
       library: "library",
-      operations: "operations",
     };
     return map[page] || "walkthrough";
   }
@@ -2146,7 +2151,7 @@
 
   function showSupportDoc(id) {
     const doc = String(id || "walkthrough").trim() || "walkthrough";
-    document.querySelectorAll("[data-support-doc]").forEach((button) => {
+    document.querySelectorAll(".support-toc [data-support-doc]").forEach((button) => {
       const on = button.dataset.supportDoc === doc;
       button.classList.toggle("active", on);
       button.setAttribute("aria-selected", on ? "true" : "false");
@@ -2162,7 +2167,7 @@
   });
   document.querySelector(".support-toc")?.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
-    const tabs = [...document.querySelectorAll("[data-support-doc]")];
+    const tabs = [...document.querySelectorAll(".support-toc [data-support-doc]")];
     const index = tabs.indexOf(document.activeElement);
     if (index < 0) return;
     let next = index;
