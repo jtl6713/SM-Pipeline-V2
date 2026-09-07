@@ -7963,14 +7963,29 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
       finals,
       approveLimit: 1,
     });
-    if (Number(approveFirst?.approved_count || 0) > 0 || approveFirst?.skipped === "already_queued") {
+    if (
+      Number(approveFirst?.approved_count || 0) > 0
+      || approveFirst?.skipped === "already_queued"
+      || approveFirst?.skipped === "mains_queued"
+    ) {
       return ensureOutputs
         ? { ...approveFirst, ensure_outputs: ensureOutputs, phase }
         : { ...approveFirst, phase };
     }
     const stories = await azRestampFinishedStories(env, requestId, { limit: 1 });
     if (Number(stories?.restamped || 0) > 0 || Number(stories?.remaining || 0) > 0) {
-      return { waiting: "story_render", cover, finals, stories, ensure_outputs: ensureOutputs, phase };
+      // Preserve approve diagnostics (e.g. story_render wait) when restamping.
+      return {
+        ok: Boolean(approveFirst?.ok),
+        skipped: approveFirst?.skipped,
+        waiting: "story_render",
+        cover,
+        finals,
+        stories,
+        not_ready: approveFirst?.not_ready,
+        ensure_outputs: ensureOutputs,
+        phase,
+      };
     }
     return ensureOutputs
       ? { ...approveFirst, ensure_outputs: ensureOutputs, phase }
