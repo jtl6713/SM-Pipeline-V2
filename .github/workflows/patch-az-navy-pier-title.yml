@@ -136,6 +136,7 @@ jobs:
               )
               print("idea", idea_id, (idea.get("fields") or {}).get("Candidate_Title"))
 
+          output_ids = []
           if content_id:
               content_fields = {
                   "Content_Title": TITLE,
@@ -154,47 +155,58 @@ jobs:
                   "Thumbnail_Status": cf.get("Thumbnail_Status"),
                   "Thumbnail_URL": cf.get("Thumbnail_URL"),
               }, indent=2))
+              for key in ("Platform Outputs", "Platform_Outputs"):
+                  links = cf.get(key) or fields.get(key) or []
+                  if isinstance(links, list):
+                      output_ids.extend(str(x) for x in links if x)
 
-              # Refresh platform-output effective titles and clear stale covers so the new 3D title can stamp.
-              formula = f"FIND('{content_id}', ARRAYJOIN({{Content_Item}}))"
-              # Prefer linked Production Request when present
-              formula = (
-                  f"OR("
-                  f"FIND('{PR_ID}', ARRAYJOIN({{Production_Request_Output}}&'')),"
-                  f"FIND('{content_id}', ARRAYJOIN({{Content_Item}}&''))"
-                  f")"
-              )
-              _, listed = req(
-                  "GET",
-                  OUTPUT_TABLE,
-                  params=[
-                      ("filterByFormula", formula),
-                      ("pageSize", "50"),
-                      ("fields[]", "Output_ID"),
-                      ("fields[]", "Output_Title"),
-                      ("fields[]", "Studio_Effective_Requested_Title"),
-                      ("fields[]", "Thumbnail_URL"),
-                      ("fields[]", "Output_Status"),
-                      ("fields[]", "Platform"),
-                  ],
-              )
-              outputs = listed.get("records") or []
-              print("outputs_found", len(outputs))
-              for row in outputs:
-                  oid = row["id"]
-                  ofields = {
+          if not output_ids:
+              formula = f"FIND('{content_id or PR_ID}', ARRAYJOIN({{Content_Item}} & ''))"
+              if content_id:
+                  _, listed = req(
+                      "GET",
+                      OUTPUT_TABLE,
+                      params=[
+                          ("filterByFormula", formula),
+                          ("pageSize", "50"),
+                          ("fields[]", "Output_ID"),
+                          ("fields[]", "Platform"),
+                          ("fields[]", "Output_Status"),
+                      ],
+                  )
+                  output_ids = [row["id"] for row in (listed.get("records") or [])]
+
+          print("outputs_found", len(output_ids))
+          for oid in output_ids:
+              # Core writable fields first; effective-* may be formula-backed on some bases.
+              attempts = [
+                  {
                       "Output_Title": TITLE,
+                      "Thumbnail_URL": None,
                       "Studio_Effective_Title_Mode": "Force exact",
                       "Studio_Effective_Requested_Title": TITLE,
+                  },
+                  {
+                      "Output_Title": TITLE,
                       "Thumbnail_URL": None,
-                  }
-                  _, updated = req(
-                      "PATCH",
-                      f"{OUTPUT_TABLE}/{oid}",
-                      {"fields": ofields, "typecast": True},
-                  )
-                  uf = updated.get("fields") or {}
-                  print("output", oid, uf.get("Platform"), uf.get("Output_Title"), uf.get("Output_Status"))
+                  },
+              ]
+              updated = None
+              last_err = None
+              for ofields in attempts:
+                  try:
+                      _, updated = req(
+                          "PATCH",
+                          f"{OUTPUT_TABLE}/{oid}",
+                          {"fields": ofields, "typecast": True},
+                      )
+                      break
+                  except SystemExit as err:
+                      last_err = err
+              if updated is None:
+                  raise last_err
+              uf = updated.get("fields") or {}
+              print("output", oid, uf.get("Platform"), uf.get("Output_Title"), uf.get("Output_Status"))
 
           print("PASS title patched to:", TITLE)
           PY
