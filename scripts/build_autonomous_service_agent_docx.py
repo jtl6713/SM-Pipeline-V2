@@ -190,7 +190,7 @@ def build() -> Document:
         ["Where", "What you see", "How to open it"],
         [
             ["Studio Operations → Autonomous Service Agent", "Live stuck inventory (fingerprints) and recent desk_incident tickets.", "studio.chicagoshining.com → Operations → Autonomous Service Agent. Refresh on that page."],
-            ["Task Organizer", "The full ticket: fingerprint, class, record id, diagnosis. Posted as type=desk_incident, agent_id=3, task_id=1.", "https://tasks.chicagoshining.com — look for desk_incident events on task 1."],
+            ["Task Organizer", "The full ticket: fingerprint, class, record id, diagnosis. Posted as type=desk_incident, agent_id=3, task_id=1.", "https://tasks.chicagoshining.com/docs — look for desk_incident events on task 1."],
             ["Email", "Produce that exhausted five Worker resumes is parked as escalated and mailed to chicagoshining@gmail.com.", "Gmail for that address. Repeating fingerprints in 24 hours also email and freeze."],
             ["GitHub", "Code heals as pull requests named cursor/desk-* plus CI on the PR.", "github.com/jtl6713/SM-Pipeline-V2/pulls. Merge yourself while mode is patch."],
         ],
