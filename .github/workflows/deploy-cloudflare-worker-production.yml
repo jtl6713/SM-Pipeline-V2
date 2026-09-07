@@ -33,8 +33,11 @@ jobs:
         run: |
           set -euo pipefail
           test -s apps/studio-api/worker.js
-          cp apps/studio-api/worker.js /tmp/studio-worker.mjs
-          node --check /tmp/studio-worker.mjs
+          test -s apps/studio-api/desk-inventory.mjs
+          mkdir -p /tmp/studio-check
+          cp apps/studio-api/worker.js /tmp/studio-check/worker.mjs
+          cp apps/studio-api/desk-inventory.mjs /tmp/studio-check/desk-inventory.mjs
+          node --check /tmp/studio-check/worker.mjs
           mkdir -p /tmp/wrangler-production
           cd /tmp/wrangler-production
           npm init -y >/dev/null 2>&1
@@ -79,6 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           cp apps/studio-api/worker.js /tmp/wrangler-production/worker.js
+          cp apps/studio-api/desk-inventory.mjs /tmp/wrangler-production/desk-inventory.mjs
           python - <<'PY'
           import json, os
           from pathlib import Path

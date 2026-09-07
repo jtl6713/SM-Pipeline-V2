@@ -87,3 +87,22 @@ Do not mark this TODO complete until every production Worker/Pages component and
 
 - an identified GitHub source/config authority; or
 - an explicit documented reason why it is runtime-only and should not be source-controlled.
+
+## TODO — Autonomous service desk (Phase 4 automerge remains gated)
+
+**Status:** Phase 0–3 implemented 2026-09-07. Phase 4 auto-merge stays off until proven.
+
+### Landed
+
+- Inventory: `GET /api/ops/desk/inventory`, Operations strip, kill switch `STUDIO_DESK_MODE` (`PATCH /api/ops/desk/mode`)
+- Classifiers: `apps/studio-api/desk-inventory.mjs`
+- Runbook: `docs/handoffs/autonomous-service-desk.md`
+- Skill: `.cursor/skills/autonomous-service-desk/SKILL.md`
+- Local companion: `deploy/local-services/Invoke-DeskCompanion.ps1`
+- Observe automation: Cursor scheduled agent (ticket-only). Prompt is in the skill.
+
+### Still gated
+
+Do not set `STUDIO_DESK_MODE=automerge` until allowlisted auto-merge has been proven on real incidents: CI green, `AUTO_MERGE_ALLOWLIST` only, daily caps, no recurring fingerprint. Default remains `observe`.
+
+Worker cron self-heal is unchanged. The desk does not auto-publish.

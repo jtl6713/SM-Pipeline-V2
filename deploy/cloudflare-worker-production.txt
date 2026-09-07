@@ -369,3 +369,5 @@ AZ ready-destinations schedule Worker deploy: 2026-09-07 - Auto-approve ready ma
 AZ approve-one Worker deploy: 2026-09-07 - Auto-approve one ready AZ destination per invoke using existing schedule times; skip occupancy/insights scans. Worker 0.10.264-az-approve-one.
 
 AZ mains-queued Worker deploy: 2026-09-07 - When AZ mains are already Approved/Scheduled and only Stories remotion, treat as success (no Approve gate). Worker 0.10.265-az-mains-queued.
+
+Autonomous service desk inventory Worker deploy: 2026-09-07 - Read-only GET /api/ops/desk/inventory, Desk_Mode kill switch, health probes. Does not add a second heal cron. Worker 0.10.266-desk-inventory.

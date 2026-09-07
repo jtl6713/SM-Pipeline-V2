@@ -73,10 +73,11 @@ Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo
 - `PLAN Local Service Deployment.bat`
 - `DEPLOY Local Service.bat` (menu; pick **6 Pipeline Runner**)
 - `DEPLOY Pipeline Runner.bat` (pipeline-runner only)
+- `DESK Companion.bat` (service-desk public `/health` probe; optional restart/deploy)
 - `ROLLBACK Local Service.bat`
 - `INSTALL Operator Shortcuts.bat` (refresh bats + pipeline-root `.lnk` files)
 
-`SYNC-Git-Main.bat`, `INSTALL-Operator-Shortcuts.bat`, and `DEPLOY-pipeline-runner.bat` also live next to `Deploy-SMService.ps1` in this folder after `git pull` on SM-Pipeline-V2.
+`SYNC-Git-Main.bat`, `INSTALL-Operator-Shortcuts.bat`, `DESK-Companion.bat`, and `DEPLOY-pipeline-runner.bat` also live next to `Deploy-SMService.ps1` in this folder after `git pull` on SM-Pipeline-V2.
 
 After pulling this tooling, run once:
 

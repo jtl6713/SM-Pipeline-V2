@@ -390,7 +390,8 @@ Asset Library file size Pages deploy: 2026-09-07 - Asset Library cards show huma
 
 AZ finished-video auto-schedule Pages deploy: 2026-09-07 - Clarify AZ auto-schedules after cover/caption (no Approve publish gate); treat Drive thumbs as not-ready covers. UI 0.6.260-az-auto-schedule.
 
-
 AZ finished-video story clip Pages deploy: 2026-09-07 - Stories stay 5s teasers; Approve All shows Auto-scheduling for AZ. UI 0.6.261-az-story-clip.
 
 AZ ready-destinations schedule Pages deploy: 2026-09-07 - Stronger AZ Auto-scheduling button detection. UI 0.6.262-az-ready-schedule.
+
+Autonomous service desk Operations strip Pages deploy: 2026-09-07 - Stuck-count strip and Desk_Mode selector on Operations. UI 0.6.263-desk-inventory.

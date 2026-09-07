@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.262-az-ready-schedule">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.263-desk-inventory">
 </head>
 <body>
  <header class="topbar">
@@ -1102,10 +1102,25 @@
 
  <section id="page-operations" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, autonomous produce, library intake, publish queues, oversized compression, and render retries.</p></div>
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Per-profile daily ideas, autonomous produce, library intake, publish queues, oversized compression, render retries, and the service-desk stuck inventory.</p></div>
  <button class="secondary-button" data-refresh="operations">Refresh</button>
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
+ <section class="panel" id="operationsDeskPanel">
+ <div class="panel-heading"><div><h2>Service desk</h2><p>Stuck produce, render, crop, autonomous, and public /health counts. Worker cron still self-heals transients. Mode is the desk kill switch.</p></div>
+ <label class="form-field" style="max-width:14rem"><span>Desk mode</span>
+ <select id="operationsDeskMode" aria-label="Autonomous service desk mode">
+ <option value="off">off</option>
+ <option value="observe">observe</option>
+ <option value="infra">infra</option>
+ <option value="patch">patch</option>
+ <option value="automerge">automerge</option>
+ </select>
+ </label>
+ </div>
+ <p class="subtle" id="operationsDeskMeta">Loading desk inventory…</p>
+ <div id="operationsDeskCounts" class="ops-desk-counts"></div>
+ </section>
  <section class="panel">
  <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, Studio generates a daily batch of ideas around 1:00 a.m. Chicago for that profile only.</p></div>
  <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run today now</button>
@@ -1596,8 +1611,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.240-analytics-seq"></script>
- <script src="/assets/ez-plan.js?v=0.6.262-az-ready-schedule"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.262-az-ready-schedule"></script>
+ <script src="/assets/config.js?v=0.6.263-desk-inventory"></script>
+ <script src="/assets/ez-plan.js?v=0.6.263-desk-inventory"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.263-desk-inventory"></script>
 </body>
 </html>

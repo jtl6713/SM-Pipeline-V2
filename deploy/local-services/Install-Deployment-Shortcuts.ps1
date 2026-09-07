@@ -186,6 +186,19 @@ pause
 exit /b %RC%
 '@
 
+$deskBat = @'
+@echo off
+setlocal
+set "COMPANION=D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2\deploy\local-services\Invoke-DeskCompanion.ps1"
+echo Autonomous service desk local companion. Probe public /health; restart/deploy only when mode is infra+.
+echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%COMPANION%" %*
+set "RC=%ERRORLEVEL%"
+echo.
+pause
+exit /b %RC%
+'@
+
 Write-Step 'Install operator launchers into Start-Stop-Verify folder(s)'
 $launcherFiles = @{
     'DEPLOY Local Service.bat' = $deployBat
@@ -193,6 +206,7 @@ $launcherFiles = @{
     'ROLLBACK Local Service.bat' = $rollbackBat
     'DEPLOY Pipeline Runner.bat' = $runnerBat
     'SYNC Local Git Checkout.bat' = $syncBat
+    'DESK Companion.bat' = $deskBat
     'INSTALL Operator Shortcuts.bat' = $installBat
 }
 foreach ($root in $toolRoots) {
@@ -261,6 +275,7 @@ $rootShortcuts = @(
     @{ Name = 'STOP ChicagoShining Services.lnk'; Target = $stopBat; PreserveIfExists = $true; Description = 'Stop all local ChicagoShining services' },
     @{ Name = 'VERIFY ChicagoShining Services.lnk'; Target = $verifyTarget; PreserveIfExists = $true; Description = 'Verify local + public service health' },
     @{ Name = 'SYNC Local Git Checkout.lnk'; Target = (Join-Path $ToolsRoot 'SYNC Local Git Checkout.bat'); PreserveIfExists = $false; Description = 'Fast-forward SM-Pipeline-V2 to origin/main' },
+    @{ Name = 'DESK Companion.lnk'; Target = (Join-Path $ToolsRoot 'DESK Companion.bat'); PreserveIfExists = $false; Description = 'Service desk public health probe and gated local restart/deploy' },
     @{ Name = 'PLAN Local Service Deployment.lnk'; Target = (Join-Path $ToolsRoot 'PLAN Local Service Deployment.bat'); PreserveIfExists = $false; Description = 'Read-only deployment plan from GitHub main' },
     @{ Name = 'DEPLOY Local Service.lnk'; Target = (Join-Path $ToolsRoot 'DEPLOY Local Service.bat'); PreserveIfExists = $false; Description = 'Deploy one approved service from GitHub main' },
     @{ Name = 'DEPLOY Pipeline Runner.lnk'; Target = (Join-Path $ToolsRoot 'DEPLOY Pipeline Runner.bat'); PreserveIfExists = $false; Description = 'Deploy pipeline-runner only' },
