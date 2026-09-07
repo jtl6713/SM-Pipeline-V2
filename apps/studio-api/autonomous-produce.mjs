@@ -1,5 +1,7 @@
 /** Pure helpers for the twice-daily Chicago autonomous produce path. */
 
+import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
+
 export const AUTONOMOUS_WINDOWS = Object.freeze([8, 16]);
 export const AUTONOMOUS_NEWS_FEEDS = Object.freeze([
   "https://blockclubchicago.org/feed/",
@@ -61,7 +63,13 @@ export function autonomousRunIsBusy(last, nowMs = Date.now(), maxAgeMs = 15 * 60
 
 export function autonomousSlotAlreadyClaimed(last, slot) {
   if (!slot || String(last?.slot || "") !== slot) return false;
-  return ["picking", "resuming", "waiting_variants", "awaiting_i4", "producing", "promoted"].includes(String(last?.status || "").trim());
+  const status = String(last?.status || "").trim();
+  if (["picking", "resuming", "waiting_variants", "awaiting_i4", "producing", "promoted"].includes(status)) {
+    return true;
+  }
+  // A successful pick already created an idea this slot. Do not harvest again if
+  // produce later saved status=skipped (variant timeout, I4 wait, enqueue error).
+  return Boolean(String(last?.idea_id || "").trim()) && status !== "reset";
 }
 
 export function parseAutonomousLastRun(raw) {
@@ -253,6 +261,50 @@ const AUTONOMOUS_TOPIC_STOP = new Set([
   "with", "from", "into", "over", "after", "before", "today", "weekend", "quick", "save",
 ]);
 
+export const AUTONOMOUS_IDEA_CREATED_FIELD = "Create_Date";
+
+export const AUTONOMOUS_OCCUPIED_STATUSES = Object.freeze([
+  "Generated",
+  "Approved",
+  "Sent for Review",
+  "Promoted",
+]);
+
+export const AUTONOMOUS_LANDMARKS = Object.freeze([
+  "lincoln park zoo",
+  "brookfield zoo",
+  "shedd aquarium",
+  "adler planetarium",
+  "field museum",
+  "art institute",
+  "chicago theatre",
+  "wrigley field",
+  "united center",
+  "soldier field",
+  "cloud gate",
+  "buckingham fountain",
+  "chicago river",
+  ...IDEA_LIBRARY_NAMED_PLACES,
+].sort((a, b) => b.length - a.length));
+
+export function autonomousNormalizedPlace(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function autonomousPlaceSubjects(...parts) {
+  const hay = autonomousNormalizedPlace(parts.filter(Boolean).join(" "));
+  if (!hay) return [];
+  const places = [];
+  for (const place of AUTONOMOUS_LANDMARKS) {
+    if (hay.includes(place)) places.push(place);
+  }
+  return [...new Set(places)];
+}
+
 export function autonomousTopicTokens(text) {
   return new Set(
     String(text || "")
@@ -263,33 +315,63 @@ export function autonomousTopicTokens(text) {
   );
 }
 
-export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
-  const pickMedia = new Set(pick?.media_asset_ids || []);
-  const pickTokens = autonomousTopicTokens([
+export function autonomousOccupiedHaystack(row) {
+  return [
+    row?.title,
+    row?.location,
+    row?.topic,
+    row?.subtopic,
+    row?.name,
+  ].filter(Boolean).join(" ");
+}
+
+export function autonomousPickHaystack(pick) {
+  return [
     pick?.candidate_title,
     pick?.primary_location,
     pick?.neighborhood_or_area,
     pick?.idea_summary,
-  ].filter(Boolean).join(" "));
+    pick?.location,
+    pick?.topic,
+    pick?.subtopic,
+    pick?.name,
+  ].filter(Boolean).join(" ");
+}
+
+function autonomousConflictResult(row) {
+  return {
+    conflict: true,
+    reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
+    match: String(row.title || row.location || "").trim() || "occupied idea",
+  };
+}
+
+export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
+  const pickMedia = new Set(pick?.media_asset_ids || []);
+  const pickHay = autonomousPickHaystack(pick);
+  const pickTokens = autonomousTopicTokens(pickHay);
+  const pickPlaces = new Set(autonomousPlaceSubjects(pickHay));
+  const pickLocation = autonomousNormalizedPlace(pick?.primary_location || pick?.location);
   for (const row of occupied) {
     const otherMedia = new Set(row?.media_asset_ids || []);
     const sharedMedia = [...pickMedia].filter((id) => otherMedia.has(id));
     const mediaRatio = pickMedia.size ? sharedMedia.length / pickMedia.size : 0;
     if (sharedMedia.length >= 3 || (sharedMedia.length >= 2 && mediaRatio >= 0.5)) {
-      return {
-        conflict: true,
-        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
-        match: String(row.title || "").trim() || "occupied idea",
-      };
+      return autonomousConflictResult(row);
     }
-    const otherTokens = autonomousTopicTokens([row?.title, row?.location].filter(Boolean).join(" "));
+    const otherHay = autonomousOccupiedHaystack(row);
+    const otherPlaces = autonomousPlaceSubjects(otherHay);
+    if (otherPlaces.some((place) => pickPlaces.has(place))) {
+      return autonomousConflictResult(row);
+    }
+    const otherLocation = autonomousNormalizedPlace(row?.location);
+    if (pickLocation && otherLocation && pickLocation === otherLocation && pickLocation !== "chicago") {
+      return autonomousConflictResult(row);
+    }
+    const otherTokens = autonomousTopicTokens(otherHay);
     const sharedTokens = [...pickTokens].filter((token) => otherTokens.has(token));
     if (sharedTokens.length >= 2) {
-      return {
-        conflict: true,
-        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
-        match: String(row.title || "").trim() || "occupied idea",
-      };
+      return autonomousConflictResult(row);
     }
   }
   return { conflict: false };
@@ -297,10 +379,133 @@ export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
 
 export function autonomousUnusedLibraryAssets(assets, occupied = []) {
   const used = new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []));
+  const occupiedPlaces = new Set((occupied || []).flatMap((row) => autonomousPlaceSubjects(autonomousOccupiedHaystack(row))));
+  const occupiedLocations = new Set(
+    (occupied || [])
+      .map((row) => autonomousNormalizedPlace(row?.location))
+      .filter((value) => value && value !== "chicago")
+  );
   return (assets || []).filter((row) => {
     const id = String(row?.id || row?.media_asset_id || "").trim();
-    return /^rec[A-Za-z0-9]+$/.test(id) && !used.has(id);
+    if (!/^rec[A-Za-z0-9]+$/.test(id) || used.has(id)) return false;
+    const hay = autonomousOccupiedHaystack(row);
+    if (autonomousPlaceSubjects(hay).some((place) => occupiedPlaces.has(place))) return false;
+    const location = autonomousNormalizedPlace(row?.location);
+    if (location && occupiedLocations.has(location)) return false;
+    return true;
   });
+}
+
+export function autonomousIdeaStatusIsOccupied(status) {
+  return AUTONOMOUS_OCCUPIED_STATUSES.includes(String(status || "").trim());
+}
+
+export function mapAutonomousOccupiedIdea(record, nowMs = Date.now()) {
+  const fields = record?.fields && typeof record.fields === "object" ? record.fields : (record || {});
+  const status = String(fields.Candidate_Status || "").trim();
+  if (status === "On Hold" || status === "Rejected") return null;
+  if (!autonomousIdeaStatusIsOccupied(status)) return null;
+  if (!autonomousRecordIsRecent(record, nowMs)) return null;
+  const title = String(fields.Candidate_Title || "").trim();
+  if (!title) return null;
+  return {
+    source: status === "Promoted" ? "recent" : "in_flight",
+    title,
+    location: String(fields.Primary_Location || fields.Neighborhood_or_Area || "").trim(),
+    media_asset_ids: parseAutonomousNotedMediaIds(fields.Production_Config_Notes),
+  };
+}
+
+export function collectAutonomousOccupiedFromIdeas(records, nowMs = Date.now()) {
+  return (records || []).map((row) => mapAutonomousOccupiedIdea(row, nowMs)).filter(Boolean);
+}
+
+export function mapAutonomousOccupiedRequest(record) {
+  const fields = record?.fields && typeof record.fields === "object" ? record.fields : (record || {});
+  const status = String(fields.Request_Status || "").trim();
+  if (status === "Cancelled") return null;
+  const location = String(fields.Primary_Location || "").trim();
+  const notes = String(fields.Production_Notes || fields.Production_Config_Notes || "");
+  const title = String(fields.Candidate_Title || fields.Production_Request_ID || "").trim();
+  if (!location && !title) return null;
+  return {
+    source: isAutonomousOrigin(notes) && ["Draft", "Ready", "Submitted"].includes(status) ? "in_flight" : "recent",
+    title: title || location,
+    location,
+    media_asset_ids: parseAutonomousNotedMediaIds(notes),
+  };
+}
+
+export function mergeAutonomousOccupied(groups = []) {
+  const occupied = [];
+  const seen = new Set();
+  for (const row of groups.flat().filter(Boolean)) {
+    const key = `${autonomousNormalizedPlace(row.title)}|${autonomousNormalizedPlace(row.location)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    occupied.push(row);
+  }
+  return occupied;
+}
+
+function autonomousPrimaryPlace(title, location, notes) {
+  return autonomousPlaceSubjects(title, location, notes)[0] || "";
+}
+
+/** Group recent packages that share a named place when at least one extra is origin=autonomous. */
+export function collectAutonomousTopicCollisions(packages = []) {
+  const groups = new Map();
+  for (const row of packages || []) {
+    const title = String(row?.title || "").trim();
+    const location = String(row?.location || "").trim();
+    const notes = String(row?.notes || "").trim();
+    const place = autonomousPrimaryPlace(title, location, notes);
+    if (!place) continue;
+    const id = String(row?.id || row?.record_id || "").trim();
+    const created = Date.parse(row?.createdTime || row?.created_at || "") || 0;
+    const originAutonomous = row?.origin === "autonomous" || isAutonomousOrigin(notes);
+    if (!groups.has(place)) groups.set(place, []);
+    groups.get(place).push({
+      id,
+      title,
+      location,
+      notes,
+      origin_autonomous: originAutonomous,
+      created,
+      status: String(row?.status || "").trim(),
+    });
+  }
+  const collisions = [];
+  for (const [place, rows] of groups) {
+    const unique = [];
+    const seen = new Set();
+    for (const row of rows) {
+      const key = row.id || `${row.title}|${row.location}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(row);
+    }
+    if (unique.length < 2) continue;
+    unique.sort((left, right) => {
+      if (left.origin_autonomous !== right.origin_autonomous) return left.origin_autonomous ? 1 : -1;
+      return left.created - right.created;
+    });
+    const extras = unique.slice(1).filter((row) => row.origin_autonomous);
+    if (!extras.length) continue;
+    collisions.push({
+      place,
+      keep: unique[0],
+      extras,
+      packages: unique,
+    });
+  }
+  return collisions;
+}
+
+export function autonomousRecordIsRecent(record, nowMs = Date.now(), maxAgeMs = 14 * 24 * 60 * 60 * 1000) {
+  const ts = Date.parse(record?.createdTime || record?.fields?.Create_Date || record?.Create_Date || "");
+  if (!Number.isFinite(ts)) return true;
+  return nowMs - ts <= maxAgeMs;
 }
 
 export function autonomousPreferredSubject(value) {
@@ -322,7 +527,7 @@ Use only stills of: ${pin}. Title, location, and media_asset_ids must be that la
 
 Return ONLY one raw JSON object. No markdown.
 
-A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.${pinBlock}
+A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same landmark, neighborhood, zoo, pier, park, or stills as an in-flight or recently published idea. Another angle of an occupied place is still a repeat — skip instead.${pinBlock}
 
 ACTIVE PROFILE
 Name: ${profileName}

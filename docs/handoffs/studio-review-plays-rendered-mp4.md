@@ -39,4 +39,6 @@ On any Remotion Reel / Short / TikTok / Story that already has a Drive MP4:
 
 Fixture: [Lincoln Park Zoo](https://airtable.com/appe33zkZn35yirTL/tblwzN9AXWvmKVKPs/recN5gK7L7ToiF7Uw) outputs 370–375.
 
+Same-day follow-up: three extra autonomous zoo harvests on this fixture were occupancy bugs, not Review playback. See `docs/handoffs/autonomous-same-topic-harvest.md`. Do not recreate those extras.
+
 Do not Approve those rows unless Joseph says so.

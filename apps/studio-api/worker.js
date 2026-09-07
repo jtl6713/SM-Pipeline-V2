@@ -5,12 +5,14 @@ import {
   PUBLIC_HEALTH_TARGETS,
   buildDeskInventoryPayload,
   classifyAutonomousRequest,
+  classifyAutonomousTopicCollision,
   classifyCropRow,
   classifyHealthTarget,
   classifyIntakeResidue,
   classifyPreparingGap,
   classifyProduceJob,
   classifyRenderRow,
+  classifyYoutubePrivateSourceFail,
   parseDeskCaps,
   parseDeskMode,
 } from "./desk-inventory.mjs";
@@ -20,6 +22,42 @@ import {
   sanitizeLibraryAssetName,
 } from "./asset-library.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
+import {
+  AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+  AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
+  AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
+  AUTONOMOUS_IDEA_CREATED_FIELD,
+  AUTONOMOUS_MAX_MASTER_ASSETS,
+  AUTONOMOUS_NEWS_FEEDS,
+  AUTONOMOUS_STANDARD_PLATFORMS,
+  AUTONOMOUS_YOUTUBE_QUERIES,
+  autonomousDefaultVoiceoverSeconds,
+  autonomousDefaultVoiceoverTailSeconds,
+  autonomousIdeaConflictsOccupied,
+  autonomousInWindow,
+  autonomousIncomingMediaIds,
+  autonomousMasterMediaIds,
+  autonomousPlanExtras,
+  autonomousPlanOverrides,
+  autonomousPreferredSubject,
+  autonomousRequestNeedsContinue,
+  autonomousRunIsBusy,
+  autonomousSlot,
+  autonomousSlotAlreadyClaimed,
+  autonomousUnusedLibraryAssets,
+  buildAutonomousPickerPrompt,
+  collectAutonomousOccupiedFromIdeas,
+  collectAutonomousTopicCollisions,
+  isAutonomousOrigin,
+  mapAutonomousOccupiedRequest,
+  mapYoutubeSearchItems,
+  mergeAutonomousOccupied,
+  parseAutonomousLastRun,
+  parseAutonomousPick,
+  parseRssItemTitles,
+  summarizeObservations,
+  youtubePublishedAfterIso,
+} from "./autonomous-produce.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -262,7 +300,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.276-youtube-public-source",
+          version: "0.10.277-autonomous-topic-dedupe",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1816,9 +1854,25 @@ function studioYoutubePublicSourceUrl(record) {
     .find((href) => item4UrlIsPublicPublishCdn(href)) || "";
 }
 
+function mapYoutubePrivateSourceDeskRow(record) {
+  return {
+    id: record?.id,
+    platform: f(record, "Platform"),
+    output_status: f(record, "Output_Status"),
+    publish_status: f(record, "Publish_Status"),
+    youtube_stage: f(record, "YouTube_Stage"),
+    youtube_video_id: f(record, "YouTube_Video_ID"),
+    final_file_url: f(record, "Final_File_URL"),
+    publish_asset_url: f(record, "Publish_Asset_URL"),
+    studio_preview_url: f(record, "Studio_Preview_URL"),
+    youtube_error: f(record, "YouTube_Error_Message"),
+    publish_error: f(record, "Publish_Error_Message"),
+    publish_error_stage: f(record, "Publish_Error_Stage"),
+  };
+}
+
 function studioYoutubeFailedPrivateSource(record) {
-  const err = `${f(record, "YouTube_Error_Message") || ""} ${f(record, "Publish_Error_Message") || ""}`;
-  return /source download failed 401/i.test(err) || /YTS1_UPLOAD/i.test(String(f(record, "Publish_Error_Stage") || ""));
+  return Boolean(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
 }
 
 function item4FinishedVideoPreviewKey(requestId, assetId) {
@@ -23703,7 +23757,7 @@ async function studioEnsureYoutubePublish(env, record) {
   if (/^complete$/i.test(stage) && videoId) {
     return { ok: true, skipped: "already-complete", target: "YT0", backend: "python", video_id: videoId };
   }
-  if (!videoId && /^terminal error$/i.test(stage) && studioYoutubeFailedPrivateSource(record)) {
+  if (!videoId && studioYoutubeFailedPrivateSource(record)) {
     const healed = await studioHealFailedYoutubeSourceDownloads(env, { limit: 1, recordId: record.id });
     return healed[0] || { ok: false, skipped: "heal-miss", target: "AP0" };
   }
@@ -24458,9 +24512,10 @@ async function studioResetYoutubeUploadForRetry(env, record) {
 async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
   const limit = Number(options.limit || 3);
   const recordId = String(options.recordId || "").trim();
+  const stuckFormula = 'AND({YouTube_Video_ID}="",{Output_Status}="Approved for Publishing",OR({YouTube_Stage}="Terminal Error",AND({YouTube_Stage}="YT1",{Publish_Status}="Failed")))';
   const formula = recordId
-    ? `AND(RECORD_ID()="${recordId}",{YouTube_Stage}="Terminal Error",{YouTube_Video_ID}="")`
-    : 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Video_ID}="",{YouTube_Stage}="Terminal Error",{Output_Status}="Approved for Publishing")';
+    ? `AND(RECORD_ID()="${recordId}",${stuckFormula})`
+    : `AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,${stuckFormula})`;
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
@@ -28528,6 +28583,47 @@ async function gatherStudioDeskInventory(env) {
   }
 
   try {
+    const ideaQuery = {
+      limit: 50,
+      sortField: AUTONOMOUS_IDEA_CREATED_FIELD,
+      sortDirection: "desc",
+      filterFormula: "{Test_Run_ID}=BLANK()",
+    };
+    let ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, ideaQuery).catch(() => null);
+    if (!ideas) {
+      ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+        ...ideaQuery,
+        sortField: undefined,
+      }).catch(() => []);
+    }
+    const packages = (ideas || []).map((record) => ({
+      id: record.id,
+      title: f(record, "Candidate_Title"),
+      location: f(record, "Primary_Location") || f(record, "Neighborhood_or_Area"),
+      notes: f(record, "Production_Config_Notes") || f(record, "Idea_Summary"),
+      status: f(record, "Candidate_Status"),
+      createdTime: record.createdTime,
+    }));
+    for (const collision of collectAutonomousTopicCollisions(packages)) {
+      push(classifyAutonomousTopicCollision(collision));
+    }
+  } catch (error) {
+    console.warn("desk autonomous topic collision scan failed", error);
+  }
+
+  try {
+    const youtubeFailed = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Output_Status}="Approved for Publishing",OR({YouTube_Stage}="Terminal Error",AND({YouTube_Stage}="YT1",{Publish_Status}="Failed")))',
+    }).catch(() => []);
+    for (const record of youtubeFailed || []) {
+      push(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
+    }
+  } catch (error) {
+    console.warn("desk youtube private-source scan failed", error);
+  }
+
+  try {
     const { response, payload } = await item4PulsePipelineStage(env, "a2", { extra: { dry_run: true } }, "A2");
     const routes = response.ok ? (payload?.details?.run?.routes || []) : [];
     for (const file of routes) push(classifyIntakeResidue(file));
@@ -28893,261 +28989,6 @@ async function patchStudioOperationsProfile(request, env, url, authorization) {
   return respond(request, env, { ok: true, profile: mapOperationsProfile(updated) });
 }
 
-const AUTONOMOUS_NEWS_FEEDS = Object.freeze(["https://blockclubchicago.org/feed/"]);
-const AUTONOMOUS_YOUTUBE_QUERIES = Object.freeze(["Chicago", "Chicago news today", "things to do in Chicago"]);
-const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze(["Instagram", "Facebook", "TikTok", "YouTube"]);
-const AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID = "recT49crfrhMVfZAQ";
-const AUTONOMOUS_DEFAULT_VIDEO_SECONDS = 30;
-const AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION = 0.5;
-const AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
-const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
-const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
-  Instagram: "Reel",
-  Facebook: "Slideshow Reel",
-  TikTok: "Video Draft",
-  YouTube: "Slideshow Video",
-});
-const AUTONOMOUS_CAROUSEL_OVERRIDES = Object.freeze({
-  Instagram: "Carousel",
-  Facebook: "Multi-Image Post",
-  TikTok: "Video Draft",
-  YouTube: "Slideshow Video",
-});
-const AUTONOMOUS_PLAN_EXTRAS = Object.freeze([
-  { platform: "Instagram", output_type: "Story" },
-  { platform: "Facebook", output_type: "Story" },
-]);
-
-function autonomousSlot(chicago) {
-  const date = String(chicago?.date || "").trim();
-  const hour = Number(chicago?.hour);
-  if (!date || !Number.isFinite(hour)) return null;
-  if (hour === 8) return `${date}:am`;
-  if (hour === 16) return `${date}:pm`;
-  return null;
-}
-
-function autonomousInWindow(chicago, cron = "") {
-  const hour = Number(chicago?.hour);
-  if (hour === 8 || hour === 16) return true;
-  return cron === "0 13 * * *" || cron === "0 21 * * *";
-}
-
-function autonomousRunIsBusy(last, nowMs = Date.now(), maxAgeMs = 15 * 60 * 1000) {
-  const status = String(last?.status || "").trim();
-  if (!["picking", "resuming"].includes(status)) return false;
-  const at = Date.parse(last?.at || "");
-  if (!Number.isFinite(at)) return true;
-  return nowMs - at < maxAgeMs;
-}
-
-function autonomousSlotAlreadyClaimed(last, slot) {
-  if (!slot || String(last?.slot || "") !== slot) return false;
-  return ["picking", "resuming", "waiting_variants", "producing", "promoted"].includes(String(last?.status || "").trim());
-}
-
-function parseAutonomousLastRun(raw) {
-  const text = String(raw || "").trim();
-  if (!text) return {};
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" ? parsed : { notes: text };
-  } catch {
-    return { notes: text };
-  }
-}
-
-function observationIsRecent(publishedAt, nowMs = Date.now(), maxAgeMs = 48 * 60 * 60 * 1000) {
-  const ts = Date.parse(publishedAt);
-  if (!Number.isFinite(ts)) return false;
-  return nowMs - ts <= maxAgeMs;
-}
-
-function summarizeObservations(posts, { nowMs = Date.now(), limit = 12 } = {}) {
-  return (posts || [])
-    .filter((row) => observationIsRecent(row.published_at, nowMs))
-    .sort((a, b) => (Number(b.engagement_score || 0) - Number(a.engagement_score || 0))
-      || (Date.parse(b.published_at) - Date.parse(a.published_at)))
-    .slice(0, limit)
-    .map((row) => ({
-      source: row.source || "similar_account",
-      platform: row.platform || "",
-      handle: row.handle || "",
-      caption: String(row.caption || "").trim().slice(0, 180),
-      published_at: row.published_at,
-      engagement_score: Number(row.engagement_score || 0) || 0,
-    }));
-}
-
-function parseRssItemTitles(xml, { limit = 8 } = {}) {
-  const items = String(xml || "").match(/<item[\s\S]*?<\/item>/gi) || [];
-  const titles = [];
-  for (const item of items) {
-    const match = item.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
-    const title = String(match?.[1] || "").replace(/<[^>]+>/g, "").trim();
-    if (!title) continue;
-    titles.push(title.slice(0, 160));
-    if (titles.length >= limit) break;
-  }
-  return titles;
-}
-
-function youtubePublishedAfterIso(nowMs = Date.now(), maxAgeMs = 48 * 60 * 60 * 1000) {
-  return new Date(nowMs - maxAgeMs).toISOString();
-}
-
-function mapYoutubeSearchItems(body, { limit = 8 } = {}) {
-  const rows = [];
-  for (const item of body?.items || []) {
-    const title = String(item?.snippet?.title || "").trim();
-    if (!title) continue;
-    rows.push({
-      source: "youtube",
-      title: title.slice(0, 160),
-      channel: String(item?.snippet?.channelTitle || "").trim(),
-      published_at: item?.snippet?.publishedAt || null,
-    });
-    if (rows.length >= limit) break;
-  }
-  return rows;
-}
-
-function extractJsonObject(text) {
-  const raw = String(text || "").trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-  const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Picker response was not a JSON object");
-  }
-  return parsed;
-}
-
-function parseAutonomousPick(parsed) {
-  if (parsed?.skip) {
-    return {
-      skip: true,
-      reason: String(parsed.reason || parsed.skip_reason || "picker_skip").trim() || "picker_skip",
-    };
-  }
-  const title = String(parsed?.candidate_title || parsed?.title || "").trim();
-  const summary = String(parsed?.idea_summary || parsed?.summary || "").trim();
-  const mediaIds = [...new Set((Array.isArray(parsed?.media_asset_ids) ? parsed.media_asset_ids : [])
-    .map((id) => String(id || "").trim())
-    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-  const format = String(parsed?.suggested_format || parsed?.content_type || "Vertical Short Video").trim()
-    || "Vertical Short Video";
-  if (!title || !summary || mediaIds.length < 1) {
-    return { skip: true, reason: "picker_incomplete" };
-  }
-  return {
-    skip: false,
-    candidate_title: title.slice(0, 80),
-    idea_summary: summary.slice(0, 240),
-    hook: String(parsed?.hook || "").trim().slice(0, 80),
-    primary_location: String(parsed?.primary_location || "").trim().slice(0, 80),
-    neighborhood_or_area: String(parsed?.neighborhood_or_area || "").trim().slice(0, 80),
-    suggested_visuals: String(parsed?.suggested_visuals || "").trim().slice(0, 160),
-    required_assets: String(parsed?.required_assets || "").trim().slice(0, 160),
-    why_this_should_work: String(parsed?.why_this_should_work || "").trim().slice(0, 160),
-    cited_trend: String(parsed?.cited_trend || "").trim().slice(0, 200),
-    content_type: format === "Carousel" || format === "Photo Set" || format === "Feed Post"
-      ? format
-      : "Vertical Short Video",
-    media_asset_ids: mediaIds.slice(0, 12),
-  };
-}
-
-function autonomousPlanOverrides(contentType) {
-  if (contentType === "Carousel" || contentType === "Photo Set" || contentType === "Feed Post") {
-    return { ...AUTONOMOUS_CAROUSEL_OVERRIDES };
-  }
-  return { ...AUTONOMOUS_REEL_OVERRIDES };
-}
-
-function autonomousPlanExtras() {
-  return AUTONOMOUS_PLAN_EXTRAS.map((row) => ({ ...row }));
-}
-
-function autonomousDefaultVoiceoverSeconds(videoSeconds = AUTONOMOUS_DEFAULT_VIDEO_SECONDS) {
-  const duration = Number(videoSeconds);
-  const base = Number.isFinite(duration) && duration > 0 ? duration : AUTONOMOUS_DEFAULT_VIDEO_SECONDS;
-  return Math.max(1, Math.round(base * AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION));
-}
-
-function autonomousDefaultVoiceoverTailSeconds(raw) {
-  if (raw === undefined || raw === null || String(raw).trim() === "") {
-    return AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS;
-  }
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0 || value > 10) {
-    return AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS;
-  }
-  return Math.round(value * 2) / 2;
-}
-
-function isAutonomousOrigin(text) {
-  return String(text || "").includes("origin=autonomous");
-}
-
-function autonomousRequestNeedsContinue(requestStatus, notes) {
-  if (!isAutonomousOrigin(notes)) return false;
-  return ["Draft", "Ready", "Submitted"].includes(String(requestStatus || "").trim());
-}
-
-function parseAutonomousNotedMediaIds(notes) {
-  const match = String(notes || "").match(/media_asset_ids=([^\n]+)/i);
-  if (!match) return [];
-  return [...new Set(match[1].split(",").map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-}
-
-const AUTONOMOUS_TOPIC_STOP = new Set([
-  "chicago", "chicagoshining", "street", "walk", "color", "right", "now", "this", "that",
-  "with", "from", "into", "over", "after", "before", "today", "weekend", "quick", "save",
-]);
-
-function autonomousTopicTokens(text) {
-  return new Set(
-    String(text || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]+/g, " ")
-      .split(/\s+/)
-      .filter((word) => word.length >= 4 && !AUTONOMOUS_TOPIC_STOP.has(word))
-  );
-}
-
-function autonomousIdeaConflictsOccupied(pick, occupied = []) {
-  const pickMedia = new Set(pick?.media_asset_ids || []);
-  const pickTokens = autonomousTopicTokens([
-    pick?.candidate_title,
-    pick?.primary_location,
-    pick?.neighborhood_or_area,
-    pick?.idea_summary,
-  ].filter(Boolean).join(" "));
-  for (const row of occupied) {
-    const otherMedia = new Set(row?.media_asset_ids || []);
-    const sharedMedia = [...pickMedia].filter((id) => otherMedia.has(id));
-    const mediaRatio = pickMedia.size ? sharedMedia.length / pickMedia.size : 0;
-    if (sharedMedia.length >= 3 || (sharedMedia.length >= 2 && mediaRatio >= 0.5)) {
-      return {
-        conflict: true,
-        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
-        match: String(row.title || "").trim() || "occupied idea",
-      };
-    }
-    const otherTokens = autonomousTopicTokens([row?.title, row?.location].filter(Boolean).join(" "));
-    const sharedTokens = [...pickTokens].filter((token) => otherTokens.has(token));
-    if (sharedTokens.length >= 2) {
-      return {
-        conflict: true,
-        reason: row.source === "in_flight" ? "similar_to_in_flight" : "similar_to_recent",
-        match: String(row.title || "").trim() || "occupied idea",
-      };
-    }
-  }
-  return { conflict: false };
-}
-
 function firstLinkedRecordId(value) {
   if (Array.isArray(value) && value.length) {
     const first = value[0];
@@ -29157,88 +28998,6 @@ function firstLinkedRecordId(value) {
   return typeof value === "string" ? value : "";
 }
 
-function autonomousMasterMediaIds(assets) {
-  const rows = Array.isArray(assets) ? assets : [];
-  const originals = rows.filter((row) => !(/__\d+x\d+__/i.test(String(row?.name || "")) || /fill-crop-v\d+/i.test(String(row?.name || ""))));
-  const use = originals.length ? originals : rows;
-  return [...new Set(use
-    .map((row) => String(row?.media_asset_record_id || "").trim())
-    .filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
-}
-
-function autonomousIncomingMediaIds(existingAssets, mediaAssetIds, max = AUTONOMOUS_MAX_MASTER_ASSETS) {
-  const already = new Set(autonomousMasterMediaIds(existingAssets));
-  const incoming = [];
-  for (const raw of mediaAssetIds || []) {
-    const id = String(raw || "").trim();
-    if (!/^rec[A-Za-z0-9]+$/.test(id) || already.has(id) || incoming.includes(id)) continue;
-    if (already.size + incoming.length >= max) break;
-    incoming.push(id);
-  }
-  return incoming;
-}
-
-function autonomousUnusedLibraryAssets(assets, occupied = []) {
-  const used = new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []));
-  return (assets || []).filter((row) => {
-    const id = String(row?.id || row?.media_asset_id || "").trim();
-    return /^rec[A-Za-z0-9]+$/.test(id) && !used.has(id);
-  });
-}
-
-function autonomousPreferredSubject(value) {
-  return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
-}
-
-function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas, preferredSubject }) {
-  const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
-  const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
-  const voice = profile?.brand_voice || profile?.Brand_Voice || "";
-  const pin = autonomousPreferredSubject(preferredSubject);
-  const pinBlock = pin
-    ? `
-
-OPERATOR PIN (this run only)
-Use only stills of: ${pin}. Title, location, and media_asset_ids must be that landmark. If none of the listed stills match, return {"skip":true,"reason":"no_matching_subject_stills"}.`
-    : "";
-  return `You are ChicagoShining's autonomous producer. Start from the library stills. Review those photos and pick ONE unused set that can become a short.
-
-Return ONLY one raw JSON object. No markdown.
-
-A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same subject, neighborhood, or stills as an in-flight or recently published idea.${pinBlock}
-
-ACTIVE PROFILE
-Name: ${profileName}
-Voice: ${voice}
-Avoid topics: ${avoid}
-
-LIBRARY STILLS (review these; use only these media_asset_ids)
-${JSON.stringify(assets, null, 2)}
-
-OPTIONAL TREND HARVEST (cite only if it actually fits the stills you picked)
-${JSON.stringify(trends, null, 2)}
-
-IN FLIGHT OR RECENT IDEAS (do not repeat these subjects, places, or stills)
-${JSON.stringify(occupiedIdeas || recentTitles || [], null, 2)}
-
-If every listed still conflicts with an in-flight or recent idea, return:
-{"skip":true,"reason":"no_unused_library_stills"}
-
-Otherwise return:
-{
-  "candidate_title": "max 8 words",
-  "idea_summary": "one sentence, max 18 words",
-  "hook": "max 12 words",
-  "primary_location": "max 5 words",
-  "neighborhood_or_area": "max 4 words",
-  "suggested_visuals": "max 14 words",
-  "required_assets": "max 12 words",
-  "why_this_should_work": "max 12 words",
-  "cited_trend": "matching harvest item, or library",
-  "suggested_format": "Vertical Short Video or Carousel",
-  "media_asset_ids": ["rec..."]
-}`;
-}
 
 function studioInternalJsonRequest(pathname, body) {
   const url = new URL(`https://studio.chicagoshining.com${pathname}`);
@@ -29341,37 +29100,32 @@ async function harvestAutonomousRecentTitles(env) {
     .slice(0, 8);
 }
 
-function autonomousRecordIsRecent(record, nowMs = Date.now(), maxAgeMs = 14 * 24 * 60 * 60 * 1000) {
-  const ts = Date.parse(record?.createdTime || "");
-  if (!Number.isFinite(ts)) return true;
-  return nowMs - ts <= maxAgeMs;
-}
-
 async function harvestAutonomousOccupiedTopics(env) {
-  const ideas = (await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+  const ideaQuery = {
+    limit: 50,
+    sortField: AUTONOMOUS_IDEA_CREATED_FIELD,
+    sortDirection: "desc",
+    filterFormula: "{Test_Run_ID}=BLANK()",
+  };
+  let ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, ideaQuery).catch(() => null);
+  if (!ideas) {
+    ideas = await listRecords(env, env.AIRTABLE_IDEA_TABLE_ID, {
+      ...ideaQuery,
+      sortField: undefined,
+    }).catch(() => []);
+  }
+  const requests = (await listRecords(env, PRODUCTION_REQUEST_TABLE, {
     limit: 25,
     sortField: "Created_At",
     sortDirection: "desc",
+    filterFormula: "AND({Test_Run_ID}=BLANK(),{Request_Status}!='Cancelled')",
   }).catch(() => [])) || [];
-  const occupied = [];
-  for (const row of ideas) {
-    const status = String(f(row, "Candidate_Status") || "").trim();
-    if (status === "On Hold") continue;
-    if (!["Generated", "Promoted"].includes(status)) continue;
-    if (!autonomousRecordIsRecent(row)) continue;
-    occupied.push({
-      source: status === "Generated" ? "in_flight" : "recent",
-      title: String(f(row, "Candidate_Title") || "").trim(),
-      location: String(f(row, "Primary_Location") || f(row, "Neighborhood_or_Area") || "").trim(),
-      media_asset_ids: parseAutonomousNotedMediaIds(f(row, "Production_Config_Notes")),
-    });
-  }
   const published = await harvestAutonomousRecentTitles(env);
-  for (const title of published) {
-    if (occupied.some((row) => row.title === title)) continue;
-    occupied.push({ source: "recent", title, location: "", media_asset_ids: [] });
-  }
-  return occupied.filter((row) => row.title);
+  return mergeAutonomousOccupied([
+    collectAutonomousOccupiedFromIdeas(ideas || []),
+    (requests || []).map(mapAutonomousOccupiedRequest),
+    published.map((title) => ({ source: "recent", title, location: "", media_asset_ids: [] })),
+  ]);
 }
 
 async function studioAutonomousOpenAiPick(env, prompt) {
