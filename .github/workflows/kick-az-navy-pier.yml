@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Wait for Worker version az-navy-fanout2 then kick via service binding
+      - name: Wait for Worker version az-auto-schedule then kick via service binding
         shell: bash
         run: |
           set -euo pipefail
@@ -81,11 +81,11 @@ jobs:
           READY=0
           for i in $(seq 1 40); do
             CODE=$(curl -sS --max-time 45 -o /tmp/health.json -w '%{http_code}' "$URL?mode=health" || true)
-            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-navy-fanout2"))' /tmp/health.json >/dev/null 2>&1; then
+            if [[ "$CODE" == "200" ]] && jq -e '.ok==true and (.version|tostring|contains("az-auto-schedule"))' /tmp/health.json >/dev/null 2>&1; then
               READY=1
               break
             fi
-            echo "waiting for Worker az-navy-fanout2 (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
+            echo "waiting for Worker az-auto-schedule (try $i code=$CODE version=$(jq -r '.version // empty' /tmp/health.json 2>/dev/null || true))"
             sleep 6
           done
           test "$READY" = "1"
@@ -105,32 +105,42 @@ jobs:
           d=data.get('diagnostic') or {}
           advance=data.get('advance') or {}
           ensure=(advance.get('ensure_outputs') if isinstance(advance, dict) else None) or {}
+          cover=(advance.get('cover') if isinstance(advance, dict) else None) or {}
           pro=d.get('pro_rows') or {}
+          approved=int(advance.get('approved_count') or 0) if isinstance(advance, dict) else 0
+          waiting=str(advance.get('waiting') or '') if isinstance(advance, dict) else ''
+          skipped=str(advance.get('skipped') or '') if isinstance(advance, dict) else ''
           print('request_status=', d.get('request_status'))
           print('platform_output_count=', d.get('platform_output_count'))
           print('pro_with_po=', pro.get('with_platform_output'))
           print('pro_enabled=', pro.get('enabled'))
           print('advance=', advance)
           print('ensure_remaining=', ensure.get('remaining'))
+          print('cover=', cover)
+          print('approved_count=', approved)
           Path('/tmp/az-kick-summary.env').write_text(
             f"PO={d.get('platform_output_count') or 0}\n"
             f"LINKED={pro.get('with_platform_output') or 0}\n"
             f"ENABLED={pro.get('enabled') or 0}\n"
             f"REMAINING={ensure.get('remaining') if ensure.get('remaining') is not None else -1}\n"
-            f"WAITING={advance.get('waiting') if isinstance(advance, dict) else ''}\n"
+            f"WAITING={waiting}\n"
+            f"APPROVED={approved}\n"
+            f"SKIPPED={skipped}\n"
+            f"ADVANCE_OK={1 if isinstance(advance, dict) and advance.get('ok') else 0}\n"
           )
           PY
             # shellcheck source=/tmp/az-kick-summary.env
             . /tmp/az-kick-summary.env
-            if [[ "${LINKED:-0}" -ge "${ENABLED:-6}" && "${ENABLED:-0}" -gt 0 ]]; then
+            if [[ "${APPROVED:-0}" -gt 0 || "${SKIPPED:-}" == "already_queued" || "${ADVANCE_OK:-0}" == "1" ]]; then
               FINAL_OK=1
               break
             fi
-            if [[ "${PO:-0}" -ge 6 ]]; then
-              FINAL_OK=1
-              break
+            if [[ "${WAITING:-}" == "cover" || "${WAITING:-}" == "outputs" ]]; then
+              echo "still waiting on ${WAITING}; continuing"
+              sleep 4
+              continue
             fi
-            if [[ "${WAITING:-}" != "outputs" && "${REMAINING:-1}" -le 0 && "${LINKED:-0}" -gt 0 ]]; then
+            if [[ "${LINKED:-0}" -ge "${ENABLED:-6}" && "${ENABLED:-0}" -gt 0 && "${WAITING:-}" != "cover" ]]; then
               FINAL_OK=1
               break
             fi

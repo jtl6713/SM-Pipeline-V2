@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.259-library-size";
+  const BUILD_ID = "item4-0.6.260-az-auto-schedule";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2487,7 +2487,13 @@
     if (!rows.length) return "cover/caption";
     const story = (row) => /story/i.test(String(row?.studio_output_type || row?.output_type || row?.format || ""));
     const mains = rows.filter((row) => !story(row));
-    const hasCover = mains.length && mains.every((row) => String(row.thumbnail_url || "").trim());
+    const hasCover = mains.length && mains.every((row) => {
+      const url = String(row.thumbnail_url || "").trim();
+      if (!url) return false;
+      if (/drive\.google\.com|\/uc\?id=|googleusercontent\.com/i.test(url)) return false;
+      if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(url)) return false;
+      return true;
+    });
     const hasCaption = rows.every((row) => String(row.output_caption || "").trim());
     const queued = rows.length && rows.every((row) => {
       const review = String(row.review_status || "").trim();
@@ -4484,7 +4490,7 @@
     }).join("");
     ezWizardShowForm(
       `${rows ? `<div class="ez-wizard-schedules">${rows}</div>` : ""}
-       <p class="subtle">Same-platform posts stay at least 90 minutes apart. Publishing still waits for Ready for Review → Approve publish.</p>
+       <p class="subtle">Same-platform posts stay at least 90 minutes apart. Finished-video (AZ) auto-schedules after cover + caption — no Approve publish step. Other Studio requests still wait for Ready for Review → Approve publish.</p>
        <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
       () => {
         const schedules = {};

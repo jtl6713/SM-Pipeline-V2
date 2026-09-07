@@ -388,3 +388,5 @@ AZ 1.5 GB finished-video Pages deploy: 2026-09-07 - Home finished-video drop acc
 
 Asset Library file size Pages deploy: 2026-09-07 - Asset Library cards show human file size from File_Size_Bytes, with File_Size_MB as fallback. UI 0.6.259-library-size.
 
+AZ finished-video auto-schedule Pages deploy: 2026-09-07 - Clarify AZ auto-schedules after cover/caption (no Approve publish gate); treat Drive thumbs as not-ready covers. UI 0.6.260-az-auto-schedule.
+
