@@ -1,0 +1,596 @@
+{
+  "version": 1,
+  "rotation": [
+    "svc-pipeline",
+    "svc-youtube",
+    "svc-watermark",
+    "svc-voiceover",
+    "svc-timing",
+    "svc-frames",
+    "svc-compressor",
+    "svc-remotion",
+    "mx1-single-native",
+    "mx2-single-reel",
+    "mx3-multi-slideshow",
+    "mx4-stories-plus-feed",
+    "mx5-youtube-standard",
+    "cu-still-body",
+    "cu-cover-first",
+    "ez-finished-video",
+    "ez-finished-stills",
+    "ez-photos-and-clips",
+    "ez-mixed-ai",
+    "auto-reel",
+    "auto-carousel",
+    "idea-photo-wait",
+    "ez-thumb-mode-no",
+    "ez-caption-none"
+  ],
+  "services": {
+    "frame-extractor": {
+      "id": "frame-extractor",
+      "local": "http://127.0.0.1:3334",
+      "public": "https://frames.chicagoshining.com",
+      "health": { "ok": true, "ffmpeg": true, "ffprobe": true }
+    },
+    "remotion": {
+      "id": "remotion",
+      "local": "http://127.0.0.1:3333",
+      "public": "https://render.chicagoshining.com",
+      "health": { "ok": true, "voiceoverSupport": true }
+    },
+    "watermark": {
+      "id": "watermark",
+      "local": "http://127.0.0.1:3011",
+      "public": "https://watermark.chicagoshining.com",
+      "health": { "ok": true }
+    },
+    "voiceover": {
+      "id": "voiceover",
+      "local": "http://127.0.0.1:3012",
+      "public": "https://voiceover.chicagoshining.com",
+      "health": { "ok": true }
+    },
+    "youtube-uploader": {
+      "id": "youtube-uploader",
+      "local": "http://127.0.0.1:3340",
+      "public": "https://youtube-upload.chicagoshining.com",
+      "health": { "ok": true, "oauthConfigured": true }
+    },
+    "pipeline-runner": {
+      "id": "pipeline-runner",
+      "local": "http://127.0.0.1:3350",
+      "public": "https://pipeline.chicagoshining.com",
+      "health": { "ok": true }
+    },
+    "video-compressor": {
+      "id": "video-compressor",
+      "local": "http://127.0.0.1:3335",
+      "public": "https://compress.chicagoshining.com",
+      "health": { "ok": true, "ffmpeg": true, "ffprobe": true }
+    },
+    "timing-engine": {
+      "id": "timing-engine",
+      "local": "http://127.0.0.1:3336",
+      "public": "https://timing.chicagoshining.com",
+      "health": { "ok": true }
+    }
+  },
+  "photos": {
+    "cloud-gate": {
+      "filename": "millennium-cloud-gate.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Plaza_by_the_Cloud_Gate_on_a_rainy_night_(52036718497).jpg?width=1280"
+    },
+    "water-tower": {
+      "filename": "chicago-water-tower.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Historic_Chicago_Water_Tower_and_Water_Tower_Place_on_a_rainy_night_(52039872491).jpg?width=1280"
+    },
+    "skyline": {
+      "filename": "chicago-skyline.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago,_Illinois_-_city_at_night_in_the_rain-.jpg?width=1280"
+    },
+    "navy-pier": {
+      "filename": "navy-pier.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Navy_Pier_Chicago.JPG?width=1280"
+    },
+    "buckingham": {
+      "filename": "chicago-buckingham.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Buckingham_Fountain_Grant_Park_Chicago.jpg?width=1280"
+    },
+    "riverwalk": {
+      "filename": "chicago-river.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Chicago_Riverwalk.jpg?width=1280"
+    },
+    "el": {
+      "filename": "chicago-el.jpg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/CTA_Loop_Elevated_-_Madison_&_Wabash_Station.jpg?width=1280"
+    }
+  },
+  "live": {
+    "svc-pipeline": {
+      "kind": "service-smoke",
+      "service": "pipeline-runner",
+      "title": "Pipeline Runner health and stage registry"
+    },
+    "svc-youtube": {
+      "kind": "service-smoke",
+      "service": "youtube-uploader",
+      "title": "YouTube uploader health and OAuth status"
+    },
+    "svc-watermark": {
+      "kind": "service-smoke",
+      "service": "watermark",
+      "title": "Watermark overlay on a public still"
+    },
+    "svc-voiceover": {
+      "kind": "service-smoke",
+      "service": "voiceover",
+      "title": "Voiceover normalizer LUFS pass"
+    },
+    "svc-timing": {
+      "kind": "service-smoke",
+      "service": "timing-engine",
+      "title": "Timing engine beat timeline"
+    },
+    "svc-frames": {
+      "kind": "service-smoke",
+      "service": "frame-extractor",
+      "title": "Frame extractor unique frames"
+    },
+    "svc-compressor": {
+      "kind": "service-smoke",
+      "service": "video-compressor",
+      "title": "Large-file compression under 95 MB",
+      "drive_file_id": "1j-QltV1ETljTtuYkapQ_AZJU9_lPG5YW",
+      "target_mb": 95
+    },
+    "svc-remotion": {
+      "kind": "service-smoke",
+      "service": "remotion",
+      "title": "Remotion TEST-REMOTION-V4 short render"
+    },
+    "mx1-single-native": {
+      "kind": "studio-scenario",
+      "title": "Millennium Park — single still native test",
+      "summary": "One Chicago still. Silent native singles. AI thumbnail required for the grid.",
+      "origin": "ez-wizard",
+      "ez_input": "single-photo",
+      "package": "slides",
+      "content_type": "Feed Post",
+      "photo_count": 1,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook"],
+      "overrides": { "Instagram": "Single Image", "Facebook": "Single Image" },
+      "extras": [],
+      "expected_route": "uploaded:native_still",
+      "photos": ["cloud-gate"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "skip"
+      }
+    },
+    "mx2-single-reel": {
+      "kind": "studio-scenario",
+      "title": "Chicago Riverwalk — single reel with voice and music",
+      "summary": "One Chicago still rendered as video with voiceover and music.",
+      "origin": "ez-wizard",
+      "ez_input": "single-photo",
+      "package": "video",
+      "content_type": "Feed Post",
+      "photo_count": 1,
+      "voiceover_mode": "Yes",
+      "background_music_mode": "Yes",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+      "overrides": {
+        "Instagram": "Reel",
+        "Facebook": "Reel",
+        "TikTok": "Video Draft",
+        "YouTube": "Short"
+      },
+      "extras": [],
+      "expected_route": "uploaded:photo_sequence",
+      "photos": ["water-tower"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "private",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "mx3-multi-slideshow": {
+      "kind": "studio-scenario",
+      "title": "Downtown Chicago — multi still slideshow with voice",
+      "summary": "Three Chicago stills with voiceover and music.",
+      "origin": "ez-wizard",
+      "ez_input": "multiple-photos",
+      "package": "video",
+      "content_type": "Photo Set",
+      "photo_count": 3,
+      "voiceover_mode": "Yes",
+      "background_music_mode": "Yes",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+      "overrides": {
+        "Instagram": "Reel",
+        "Facebook": "Slideshow Reel",
+        "TikTok": "Video Draft",
+        "YouTube": "Slideshow Video"
+      },
+      "extras": [],
+      "expected_route": "uploaded:photo_sequence",
+      "photos": ["skyline", "water-tower", "cloud-gate"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "private",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "mx4-stories-plus-feed": {
+      "kind": "studio-scenario",
+      "title": "Lakefront — stories plus native feed stills",
+      "summary": "Silent native feed singles plus Instagram Story and Facebook Story extras.",
+      "origin": "ez-wizard",
+      "ez_input": "single-photo",
+      "package": "slides",
+      "content_type": "Feed Post",
+      "photo_count": 1,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok"],
+      "overrides": {
+        "Instagram": "Single Image",
+        "Facebook": "Single Image",
+        "TikTok": "Single Photo"
+      },
+      "extras": ["Instagram::Story", "Facebook::Story"],
+      "expected_route": "uploaded:mixed_outputs",
+      "photos": ["skyline"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "mx5-youtube-standard": {
+      "kind": "studio-scenario",
+      "title": "Chicago skyline — YouTube standard 16x9 with voice",
+      "summary": "YouTube Standard Video 16:9 plus an Instagram Reel.",
+      "origin": "ez-wizard",
+      "ez_input": "single-photo",
+      "package": "custom",
+      "content_type": "Feed Post",
+      "photo_count": 1,
+      "voiceover_mode": "Yes",
+      "background_music_mode": "Yes",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["YouTube", "Instagram"],
+      "overrides": { "YouTube": "Standard Video", "Instagram": "Reel" },
+      "extras": [],
+      "expected_route": "uploaded:photo_sequence",
+      "photos": ["cloud-gate"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "skip",
+        "youtube": "private",
+        "tiktok": "skip"
+      }
+    },
+    "cu-still-body": {
+      "kind": "studio-scenario",
+      "title": "Navy Pier — still-as-body native test",
+      "summary": "Graph must post the 4:5 photo still, not the 3D thumb.",
+      "origin": "ez-wizard",
+      "ez_input": "single-photo",
+      "package": "slides",
+      "content_type": "Feed Post",
+      "photo_count": 1,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook"],
+      "overrides": { "Instagram": "Single Image", "Facebook": "Single Image" },
+      "extras": [],
+      "expected_route": "uploaded:native_still",
+      "cover_is_body": false,
+      "photos": ["navy-pier"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "skip"
+      }
+    },
+    "cu-cover-first": {
+      "kind": "studio-scenario",
+      "title": "Three Chicago stills — cover-first carousel",
+      "summary": "Slide 1 is the AI 3D cover. Remaining slides are lettered 4:5 photos.",
+      "origin": "ez-wizard",
+      "ez_input": "multiple-photos",
+      "package": "slides",
+      "content_type": "Photo Set",
+      "photo_count": 3,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook"],
+      "overrides": { "Instagram": "Carousel", "Facebook": "Multi-Image Post" },
+      "extras": [],
+      "expected_route": "uploaded:native_still",
+      "cover_first_slide": true,
+      "photos": ["buckingham", "riverwalk", "el"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "skip"
+      }
+    },
+    "ez-finished-video": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Finished-video passthrough",
+      "summary": "Publish-as-is MP4. Thumbnail yes, VO/music no. Immediate private YouTube.",
+      "origin": "az-finished-video",
+      "ez_input": "finished-video",
+      "package": "video",
+      "content_type": "Vertical Short Video",
+      "photo_count": 0,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+      "overrides": {
+        "Instagram": "Reel",
+        "Facebook": "Reel",
+        "TikTok": "Video Draft",
+        "YouTube": "Short"
+      },
+      "extras": ["Instagram::Story", "Facebook::Story"],
+      "expected_route": "finished-video:passthrough",
+      "photos": [],
+      "needs_finished_video": true,
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "private",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "ez-finished-stills": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Finished-stills passthrough",
+      "summary": "Publish-as-is stills. No Remotion.",
+      "origin": "ez-wizard",
+      "ez_input": "finished-stills",
+      "package": "slides",
+      "content_type": "Photo Set",
+      "photo_count": 3,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok"],
+      "overrides": {
+        "Instagram": "Carousel",
+        "Facebook": "Multi-Image Post",
+        "TikTok": "Multi-Photo"
+      },
+      "extras": [],
+      "expected_route": "finished-stills:passthrough",
+      "photos": ["buckingham", "riverwalk", "el"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "ez-photos-and-clips": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Photos and clips Remotion pack",
+      "summary": "Video package from photos-and-clips. Facebook Reel plus Stories.",
+      "origin": "ez-wizard",
+      "ez_input": "photos-and-clips",
+      "package": "video",
+      "content_type": "Vertical Short Video",
+      "photo_count": 2,
+      "clip_count": 1,
+      "voiceover_mode": "Yes",
+      "background_music_mode": "Yes",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+      "overrides": {
+        "Instagram": "Reel",
+        "Facebook": "Reel",
+        "TikTok": "Video Draft",
+        "YouTube": "Short"
+      },
+      "extras": ["Instagram::Story", "Facebook::Story"],
+      "expected_route": "uploaded:photo_sequence",
+      "photos": ["cloud-gate", "water-tower"],
+      "needs_clip": true,
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "private",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "ez-mixed-ai": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Mixed manual and AI stills",
+      "summary": "ez-input=mixed with one upload and one AI still.",
+      "origin": "ez-wizard",
+      "ez_input": "mixed",
+      "package": "slides",
+      "content_type": "Photo Set",
+      "photo_count": 2,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook"],
+      "overrides": { "Instagram": "Carousel", "Facebook": "Multi-Image Post" },
+      "extras": [],
+      "expected_route": "mixed:native_still",
+      "photos": ["navy-pier"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "skip"
+      }
+    },
+    "auto-reel": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Autonomous reel pack",
+      "summary": "origin=autonomous Vertical Short Video defaults. Human gate is Ready for Review; test then private/unreleased publish.",
+      "origin": "autonomous",
+      "content_type": "Vertical Short Video",
+      "photo_count": 3,
+      "voiceover_mode": "Yes",
+      "background_music_mode": "Yes",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+      "overrides": {
+        "Instagram": "Reel",
+        "Facebook": "Slideshow Reel",
+        "TikTok": "Video Draft",
+        "YouTube": "Slideshow Video"
+      },
+      "extras": ["Instagram::Story", "Facebook::Story"],
+      "expected_route": "uploaded:photo_sequence",
+      "photos": ["skyline", "water-tower", "cloud-gate"],
+      "skip_production_approve": true,
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "private",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "auto-carousel": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Autonomous carousel pack",
+      "summary": "origin=autonomous Carousel/Photo Set defaults.",
+      "origin": "autonomous",
+      "content_type": "Carousel",
+      "photo_count": 3,
+      "voiceover_mode": "Yes",
+      "background_music_mode": "Yes",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook", "TikTok", "YouTube"],
+      "overrides": {
+        "Instagram": "Carousel",
+        "Facebook": "Multi-Image Post",
+        "TikTok": "Video Draft",
+        "YouTube": "Slideshow Video"
+      },
+      "extras": ["Instagram::Story", "Facebook::Story"],
+      "expected_route": "uploaded:mixed_outputs",
+      "photos": ["buckingham", "riverwalk", "el"],
+      "skip_production_approve": true,
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "private",
+        "tiktok": "inbox-draft"
+      }
+    },
+    "idea-photo-wait": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Idea promote photo-wait",
+      "summary": "Carousel Target range + Manual Upload waits for library matches.",
+      "origin": "manual",
+      "content_type": "Carousel",
+      "photo_count": 0,
+      "carousel_slide_count_mode": "Target range",
+      "carousel_image_mode": "Wait for matching photos",
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook"],
+      "overrides": { "Instagram": "Carousel", "Facebook": "Multi-Image Post" },
+      "extras": [],
+      "expected_route": "uploaded:native_still",
+      "photo_wait": true,
+      "photos": [],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "skip"
+      }
+    },
+    "ez-thumb-mode-no": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Thumbnail_Mode No still needs grid cover",
+      "summary": "Mode No skips lettering on the video, not the native 3D cover.",
+      "origin": "ez-wizard",
+      "ez_input": "single-photo",
+      "package": "video",
+      "content_type": "Feed Post",
+      "photo_count": 1,
+      "voiceover_mode": "No",
+      "background_music_mode": "Yes",
+      "thumbnail_mode": "No",
+      "caption_mode": "ai",
+      "platforms": ["Instagram", "Facebook"],
+      "overrides": { "Instagram": "Reel", "Facebook": "Reel" },
+      "extras": [],
+      "expected_route": "uploaded:photo_sequence",
+      "cover_required": true,
+      "photos": ["navy-pier"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "skip"
+      }
+    },
+    "ez-caption-none": {
+      "kind": "studio-scenario",
+      "title": "[REGRESSION] Caption mode none",
+      "summary": "ez-caption=none leaves title and caption blank.",
+      "origin": "ez-wizard",
+      "ez_input": "single-photo",
+      "package": "slides",
+      "content_type": "Feed Post",
+      "photo_count": 1,
+      "voiceover_mode": "No",
+      "background_music_mode": "No",
+      "thumbnail_mode": "Yes",
+      "caption_mode": "none",
+      "platforms": ["Instagram", "Facebook"],
+      "overrides": { "Instagram": "Single Image", "Facebook": "Single Image" },
+      "extras": [],
+      "expected_route": "uploaded:native_still",
+      "photos": ["el"],
+      "publish": {
+        "instagram": "container-only",
+        "facebook": "unpublished-only",
+        "youtube": "skip",
+        "tiktok": "skip"
+      }
+    }
+  }
+}
