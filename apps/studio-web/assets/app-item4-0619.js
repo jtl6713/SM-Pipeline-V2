@@ -14412,9 +14412,10 @@
     const deskEvents = Array.isArray(payload?.desk_events)
       ? payload.desk_events
       : events.filter((row) => !isOperationsTestActivityEvent(row));
-    const testEvents = Array.isArray(payload?.test_events)
+    const testEvents = (Array.isArray(payload?.test_events)
       ? payload.test_events
-      : events.filter(isOperationsTestActivityEvent);
+      : events.filter(isOperationsTestActivityEvent)
+    ).filter((row) => opsActivityPayload(row).probe !== true);
     if (meta) {
       if (payload?.source === "unavailable") {
         meta.textContent = `Task Organizer tickets are unavailable${payload.error ? ` (${payload.error})` : ""}. Live inventory above is still current. Use the full log link above.`;

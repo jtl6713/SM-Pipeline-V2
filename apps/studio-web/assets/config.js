@@ -76,7 +76,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsViewAgent: "Open the Autonomous Service Agent page: Word guide, desk mode, stuck inventory, and Task Organizer activity log.",
     operationsAgentGuideLink: "Download the operator Word guide for auto-review, auto-correction, and how to read activity logs.",
     operationsAgentOrganizerLink: "Open the Task Organizer activity log (service desk and automated tests). Not the API schema.",
-    operationsAgentActivityMeta: "Recent service-desk tickets and automated test results from Task Organizer. Worker transient heals are not listed here.",
+    operationsAgentActivityMeta: "Recent service-desk tickets and automated test results from Task Organizer. Click a test card for each job’s pass/fail. Worker transient heals are not listed here.",
     operationsIntakeMeta: "Shows the latest library-intake summary returned by the Operations API.",
     operationsIntakeProgress: "Live progress for the current library-intake run, including intake, video backfill, classification, and reconciliation stages."
   };
