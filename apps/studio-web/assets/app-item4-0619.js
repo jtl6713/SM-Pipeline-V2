@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.271-activity-logs";
+  const BUILD_ID = "item4-0.6.272-play-rendered-mp4";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -10053,7 +10053,31 @@
   }
 
   function phase6PreviewLooksLikeImage(url) {
-    return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(String(url || ""));
+    return /\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(String(url || ""));
+  }
+
+  function phase6LooksLikeDriveFile(url) {
+    return /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?)/i.test(String(url || ""));
+  }
+
+  function phase6OutputHasVideoFinal(output = {}) {
+    if (String(output.final_file_id || "").trim()) return true;
+    return [output.final_file_url, output.output_url, output.publish_asset_url, output.studio_preview_url]
+      .map((value) => String(value || "").trim())
+      .some((href) => href && (!phase6PreviewLooksLikeImage(href) && (/\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(href) || /\/current\.mp4/i.test(href) || phase6LooksLikeDriveFile(href))));
+  }
+
+  function phase6ReviewWatchUrl(output = {}) {
+    const stored = String(output.studio_preview_url || "").trim();
+    if (stored && !phase6PreviewLooksLikeImage(stored)) return stored;
+    const finalUrl = String(output.final_file_url || "").trim();
+    if (finalUrl && !phase6PreviewLooksLikeImage(finalUrl)) return finalUrl;
+    const outputUrl = String(output.output_url || "").trim();
+    if (outputUrl && !phase6PreviewLooksLikeImage(outputUrl)) return outputUrl;
+    if (output.id && phase6OutputHasVideoFinal(output)) {
+      return `/api/outputs/${encodeURIComponent(output.id)}/preview`;
+    }
+    return stored;
   }
 
   function phase6UrlLooksPublicPublish(url) {
@@ -10133,6 +10157,7 @@
   function phase6IsNativeStillPreview(output = activeCreativeOutput) {
     if (!output) return false;
     if (/story/i.test(String(output.studio_output_type || output.platform_output_type || output.format || ""))) return false;
+    if (phase6OutputHasVideoFinal(output)) return false;
     if (String(output.preview_kind || "") === "still") return true;
     if (creativeIsNativePhotoPackage(output)) return true;
     return false;
@@ -10380,6 +10405,7 @@
   function creativeMixInProgress(handoff = creativeHandoffStatus, output = activeCreativeOutput) {
     if (creativeSimpleVideoKind(output) === "still") return false;
     if (handoff?.completed || handoff?.overall_status === "complete" || handoff?.overall_status === "idle") return false;
+    if (phase6OutputHasVideoFinal(output) && !(handoff?.active && handoff?.overall_status === "active")) return false;
     const render = String(output?.render_status || "").trim();
     const status = String(output?.output_status || "").trim();
     if (["Ready for Render", "Rendering"].includes(render)) return true;
@@ -10977,7 +11003,7 @@
 
   function renderCreativeOutputMeta(output) {
     const target = $("creativeOutputMeta");
-    const watchUrl = output.studio_preview_url || output.final_file_url || output.output_url || "";
+    const watchUrl = phase6ReviewWatchUrl(output);
     const thumbUrl = phase6ThumbnailDownloadUrl(output);
     const coverPreview = phase6CoverStillUrl(output);
     const rows = [
@@ -11490,7 +11516,7 @@
     }
 
     const stillUrl = phase6NativeStillUrl(output);
-    if (!creativeIsFinishedVideo(output) && !storyOutput && (phase6IsNativeStillPreview(output) || (stillUrl && phase6PreviewLooksLikeImage(output?.studio_preview_url || stillUrl) && !output?.final_file_url && !output?.final_file_id))) {
+    if (!creativeIsFinishedVideo(output) && !storyOutput && !phase6OutputHasVideoFinal(output) && (phase6IsNativeStillPreview(output) || (stillUrl && phase6PreviewLooksLikeImage(output?.studio_preview_url || stillUrl) && !output?.final_file_url && !output?.final_file_id))) {
       if (stillUrl && still) {
         still.alt = storyOutput ? "Story still preview" : "Native photo preview";
         still.src = stillUrl;
@@ -11537,19 +11563,20 @@
 
     empty.hidden = true;
     const fallbackToDrive = () => {
-      if (!creativeIsFinishedVideo(output) && showCoverStill()) return;
       const embed = phase6DriveEmbedUrl(fileId);
-      if (!embed) {
-        empty.textContent = "Rendered file exists, but no playable preview source is available.";
-        empty.hidden = false;
+      if (embed) {
+        video.pause();
+        video.removeAttribute("src");
         video.hidden = true;
+        drive.src = embed;
+        drive.hidden = false;
+        if (still) still.hidden = true;
         return;
       }
-      video.pause();
-      video.removeAttribute("src");
+      if (!creativeIsFinishedVideo(output) && showCoverStill()) return;
+      empty.textContent = "Rendered file exists, but no playable preview source is available.";
+      empty.hidden = false;
       video.hidden = true;
-      drive.src = embed;
-      drive.hidden = false;
     };
 
     const playableSrc = (() => {
@@ -11558,6 +11585,9 @@
         const sep = directPreview.includes("?") ? "&" : "?";
         return stamp ? `${directPreview}${sep}v=${encodeURIComponent(String(stamp))}` : directPreview;
       }
+      // Drive-only mains: the Worker preview proxy often dies on 100MB+ files.
+      // Play the Drive MP4 in Studio instead of flashing the cover still.
+      if (fileId) return "";
       return output.id ? `/api/outputs/${encodeURIComponent(output.id)}/preview` : "";
     })();
     if (playableSrc) {
@@ -11576,6 +11606,10 @@
       return;
     }
 
+    if (fileId) {
+      fallbackToDrive();
+      return;
+    }
     if (!creativeIsFinishedVideo(output) && showCoverStill()) return;
     fallbackToDrive();
   }

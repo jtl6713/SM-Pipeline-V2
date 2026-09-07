@@ -412,4 +412,6 @@ Operations Help Pages deploy: 2026-09-07 - Expand Operations guides: Control tab
 
 Activity log Pages deploy: 2026-09-07 - Activity log shows service-desk tickets and automated tests. Task Organizer link opens /logs, not Swagger /docs. UI 0.6.271-activity-logs.
 
+Review plays rendered MP4 Pages deploy: 2026-09-07 - Open Review plays the Drive/R2 MP4 instead of the cover PNG. Stale Rendering no longer covers a finished file. UI 0.6.272-play-rendered-mp4.
+
 

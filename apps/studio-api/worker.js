@@ -262,7 +262,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.274-activity-logs",
+          version: "0.10.275-play-rendered-mp4",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1792,7 +1792,7 @@ function studioOutputHasReviewableDeliverable(record) {
     if (!slides && !preview && !firstClip && !studioNativeClipsArePublicCdn(record)) return false;
     return true;
   }
-  if (!String(f(record, "Final_File_URL") || "").trim()) return false;
+  if (!String(f(record, "Final_File_URL") || "").trim() && !String(f(record, "Final_File_ID") || "").trim()) return false;
   if (!studioOutputHasReviewCover(record)) return false;
   return true;
 }
@@ -1805,6 +1805,7 @@ function studioClipPublicCdnUrl(clipOrUrl) {
 function item4UrlIsPublicPublishCdn(url) {
   const href = String(url || "").trim();
   if (!href.startsWith("https://media.chicagoshining.com/")) return false;
+  if (studioUrlLooksLikeImage(href)) return false;
   const path = href.slice("https://media.chicagoshining.com/".length);
   return path.startsWith("studio/previews/") || path.startsWith("publish/");
 }
@@ -1864,11 +1865,38 @@ function studioNativeSlidePublicFields(clip, platform) {
 }
 
 function studioUrlLooksLikeImage(url) {
-  return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(String(url || ""));
+  return /\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(String(url || ""));
 }
 
 function studioUrlLooksLikeVideo(url) {
-  return /\.(mp4|mov|webm|m4v)(\?|$)/i.test(String(url || ""));
+  return /\.(mp4|mov|webm|m4v)(\?|#|$)/i.test(String(url || ""))
+    || /\/current\.mp4/i.test(String(url || ""));
+}
+
+function studioUrlLooksLikeDriveFile(url) {
+  return /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?)/i.test(String(url || ""));
+}
+
+function outputHasVideoFinal(record) {
+  if (String(f(record, "Final_File_ID") || "").trim()) return true;
+  return [
+    f(record, "Final_File_URL"),
+    f(record, "Output_URL"),
+    f(record, "Publish_Asset_URL"),
+    f(record, "Studio_Preview_URL"),
+  ].some((value) => {
+    const href = String(value || "").trim();
+    return href && (studioUrlLooksLikeVideo(href) || studioUrlLooksLikeDriveFile(href));
+  });
+}
+
+function studioMappedPreviewUrl(record) {
+  const stored = String(f(record, "Studio_Preview_URL") || "").trim();
+  if (stored && studioUrlLooksLikeVideo(stored)) return stored;
+  if (outputHasVideoFinal(record)) {
+    return stored && !studioUrlLooksLikeImage(stored) ? stored : null;
+  }
+  return stored || studioNativeStillPreviewUrl(record) || null;
 }
 
 function studioPublicJpegCoverUrl(record) {
@@ -1892,16 +1920,17 @@ function studioNativeStillPreviewUrl(record) {
 function studioPreviewKind(record) {
   const stored = String(f(record, "Studio_Preview_URL") || "").trim();
   const finalUrl = String(f(record, "Final_File_URL") || "").trim();
-  if (stored && studioUrlLooksLikeVideo(stored)) return "video";
-  if (finalUrl && studioUrlLooksLikeVideo(finalUrl)) return "video";
   const still = studioNativeStillPreviewUrl(record);
   const nativePhoto = studioOutputIsNativePhoto(record) || studioOutputIsNativePhotoRoute(
     f(record, "Platform"),
     f(record, "Studio_Output_Type"),
     f(record, "Platform_Output_Type")
   );
+  if (!nativePhoto && outputHasVideoFinal(record)) return "video";
+  if (stored && studioUrlLooksLikeVideo(stored)) return "video";
+  if (finalUrl && studioUrlLooksLikeVideo(finalUrl)) return "video";
   if (nativePhoto && (still || (stored && studioUrlLooksLikeImage(stored)))) return "still";
-  if (stored && studioUrlLooksLikeImage(stored)) return "still";
+  if (stored && studioUrlLooksLikeImage(stored) && !outputHasVideoFinal(record)) return "still";
   if (stored || finalUrl) return "video";
   return still ? "still" : "none";
 }
@@ -2604,6 +2633,7 @@ function mapOutput(record, job = null) {
     auto_publish_enabled: Boolean(f(record, "Auto_Publish_Enabled")),
     do_not_publish: Boolean(f(record, "Do_Not_Publish")),
     final_file_url: f(record, "Final_File_URL"),
+    final_file_id: f(record, "Final_File_ID"),
     publish_asset_url: f(record, "Publish_Asset_URL"),
     output_title: f(record, "Output_Title"),
     output_caption: f(record, "Output_Caption"),
@@ -2611,7 +2641,7 @@ function mapOutput(record, job = null) {
     output_hashtags: f(record, "Output_Hashtags"),
     thumbnail_url: f(record, "Thumbnail_URL"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
-    studio_preview_url: f(record, "Studio_Preview_URL") || studioNativeStillPreviewUrl(record) || null,
+    studio_preview_url: studioMappedPreviewUrl(record),
     native_still_url: studioNativeStillPreviewUrl(record) || null,
     preview_kind: studioPreviewKind(record),
     output_url: f(record, "Output_URL"),
@@ -19383,7 +19413,7 @@ function mapPhase6CreativeOutput(record) {
     voiceover_tail_seconds: f(record, "Voiceover_Tail_Seconds"),
     review_notes: f(record, "Review_Notes"),
     review_decision_at: f(record, "Review_Decision_At"),
-    studio_preview_url: f(record, "Studio_Preview_URL") || studioNativeStillPreviewUrl(record) || null,
+    studio_preview_url: studioMappedPreviewUrl(record),
     native_still_url: studioNativeStillPreviewUrl(record) || null,
     preview_kind: studioPreviewKind(record),
     studio_preview_updated_at: f(record, "Studio_Preview_Updated_At"),
