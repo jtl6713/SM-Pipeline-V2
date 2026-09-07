@@ -380,6 +380,9 @@ Asset Library published files Pages deploy: 2026-09-06 - Asset Library cards sho
 
 Library layout, TikTok live URL, and AZ finished-video Pages deploy: 2026-09-06 - Asset Library list/grid and clip playback. Pipeline and Open review accept a pasted TikTok live URL. Home drop zone publishes a finished MP4 without Production Approve. UI 0.6.255-library-tiktok.
 
+AZ large video staging Pages deploy: 2026-09-06 - Home finished-video drop accepts up to 1 GB, uploads large files in parts with progress, and compresses automatically afterward. UI 0.6.256-az-large-video.
 
+AZ 1.2 GB finished-video Pages deploy: 2026-09-06 - Home finished-video drop accepts up to 1.2 GB. UI 0.6.257-az-1-2gb.
 
+AZ 1.5 GB finished-video Pages deploy: 2026-09-07 - Home finished-video drop accepts up to 1.5 GB. UI 0.6.258-az-1-5gb.
 

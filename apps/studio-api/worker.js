@@ -35,10 +35,18 @@ export default {
       const isProductionRequestOutputsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/outputs$/.test(url.pathname);
       const isItem4AssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets$/.test(url.pathname);
       const isItem4LibraryAssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/library$/.test(url.pathname);
+      const isItem4UploadSessionRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session$/.test(url.pathname);
+      const isItem4UploadSessionPartRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session\/[A-Za-z0-9_-]+\/parts\/\d+$/.test(url.pathname);
+      const isItem4UploadSessionCompleteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session\/[A-Za-z0-9_-]+\/complete$/.test(url.pathname);
+      const isItem4UploadSessionAbortRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session\/[A-Za-z0-9_-]+$/.test(url.pathname)
+        && !isItem4UploadSessionPartRoute
+        && !isItem4UploadSessionCompleteRoute;
       const isItem4AssetPosterRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+\/poster$/.test(url.pathname);
       const isItem4AssetRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+$/.test(url.pathname)
         && !isItem4LibraryAssetsRoute
-        && !isItem4AssetPosterRoute;
+        && !isItem4AssetPosterRoute
+        && !isItem4UploadSessionRoute
+        && !isItem4UploadSessionAbortRoute;
       const isItem4PlanRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/plan$/.test(url.pathname);
       const isItem4StatusRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/item4$/.test(url.pathname);
       const isItem4VariantsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/variants$/.test(url.pathname);
@@ -103,6 +111,10 @@ export default {
       const isProductionRequestOutputsSyncWrite = isProductionRequestOutputsRoute && request.method === "PUT";
       const isItem4AssetsUploadWrite = isItem4AssetsRoute && request.method === "POST";
       const isItem4LibraryAssetsWrite = isItem4LibraryAssetsRoute && request.method === "POST";
+      const isItem4UploadSessionWrite = isItem4UploadSessionRoute && request.method === "POST";
+      const isItem4UploadSessionPartWrite = isItem4UploadSessionPartRoute && request.method === "PUT";
+      const isItem4UploadSessionCompleteWrite = isItem4UploadSessionCompleteRoute && request.method === "POST";
+      const isItem4UploadSessionAbortWrite = isItem4UploadSessionAbortRoute && request.method === "DELETE";
       const isItem4AssetDeleteWrite = isItem4AssetRecordRoute && request.method === "DELETE";
       const isItem4AssetPosterWrite = isItem4AssetPosterRoute && request.method === "POST";
       const isItem4PlanWrite = isItem4PlanRoute && request.method === "POST";
@@ -147,6 +159,10 @@ export default {
         isProductionRequestOutputsSyncWrite ||
         isItem4AssetsUploadWrite ||
         isItem4LibraryAssetsWrite ||
+        isItem4UploadSessionWrite ||
+        isItem4UploadSessionPartWrite ||
+        isItem4UploadSessionCompleteWrite ||
+        isItem4UploadSessionAbortWrite ||
         isMusicLibraryUploadWrite ||
         isMusicFavoriteWrite ||
         isMusicDeleteWrite ||
@@ -213,12 +229,13 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.251-library-size",
+          version: "0.10.254-library-size",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_az_finished_video_v1: true,
           studio_az_auto_queue_v1: true,
+          studio_az_large_video_staging_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
           studio_insights_watchlist_v2: true,
@@ -712,6 +729,34 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
         return attachItem4LibraryAssets(request, env, url, authorization);
+      }
+
+      if (isItem4UploadSessionRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return createItem4LargeVideoUploadSession(request, env, url, authorization);
+      }
+
+      if (isItem4UploadSessionPartRoute) {
+        if (request.method !== "PUT") throw new HttpError(405, "Method not allowed");
+        assertOriginWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return uploadItem4LargeVideoPart(request, env, url, authorization);
+      }
+
+      if (isItem4UploadSessionCompleteRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx);
+      }
+
+      if (isItem4UploadSessionAbortRoute) {
+        if (request.method !== "DELETE") throw new HttpError(405, "Method not allowed");
+        assertOriginWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return abortItem4LargeVideoUploadSession(request, env, url, authorization);
       }
 
       if (isItem4AssetsRoute) {
@@ -1433,16 +1478,34 @@ function assertWriteRequest(request, env) {
   }
 }
 
-function assertUploadWriteRequest(request, env) {
+function assertOriginWriteRequest(request, env) {
   const origin = String(request.headers.get("Origin") || "").trim();
   const allowed = allowedOrigins(env);
   if (!origin || !allowed.has(origin)) {
     throw new HttpError(403, "Studio write request origin is not allowed");
   }
+}
+
+function assertUploadWriteRequest(request, env) {
+  assertOriginWriteRequest(request, env);
   const contentType = String(request.headers.get("Content-Type") || "").toLowerCase();
   if (!contentType.includes("multipart/form-data")) {
     throw new HttpError(415, "Master media uploads must use multipart/form-data");
   }
+}
+
+async function readJsonBody(request, { required = true } = {}) {
+  let payload = null;
+  try {
+    payload = await request.json();
+  } catch {
+    if (required) throw new HttpError(400, "Request body must be valid JSON");
+    return {};
+  }
+  if (required && (payload === null || typeof payload !== "object" || Array.isArray(payload))) {
+    throw new HttpError(400, "Request body must be a JSON object");
+  }
+  return payload || {};
 }
 
 function requirePermission(authorization, permission) {
@@ -3490,6 +3553,8 @@ const ITEM4_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ITEM4_MAX_TOTAL_BYTES = 150 * 1024 * 1024;
 const ITEM4_MAX_CLIP_FILES = 10;
 const ITEM4_MAX_CLIP_FILE_BYTES = 200 * 1024 * 1024;
+const ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES = Math.round(1.5 * 1024 * 1024 * 1024);
+const ITEM4_LARGE_UPLOAD_PART_BYTES = 16 * 1024 * 1024;
 const ITEM4_COMPRESS_THRESHOLD_BYTES = 100 * 1024 * 1024;
 const ITEM4_MAX_MIXED_TOTAL_BYTES = 1500 * 1024 * 1024;
 const ITEM4_CLIP_INPUTS = Object.freeze(["photos-and-clips", "video-clips"]);
@@ -4360,6 +4425,260 @@ async function getItem4MasterAssets(request, env, url, authorization) {
   });
 }
 
+function item4LargeUploadSessionIdFromPath(url) {
+  const match = String(url?.pathname || "").match(/\/assets\/upload-session\/([A-Za-z0-9_-]+)/);
+  return match ? match[1] : "";
+}
+
+function item4LargeUploadPartNumberFromPath(url) {
+  const match = String(url?.pathname || "").match(/\/parts\/(\d+)$/);
+  return match ? Number(match[1]) : 0;
+}
+
+function item4FindLargeUploadDraft(assets, assetId) {
+  const id = String(assetId || "").trim();
+  return (Array.isArray(assets) ? assets : []).find((row) => (
+    String(row?.id || "") === id
+    && String(row?.upload_status || "") === "multipart_pending"
+    && String(row?.multipart_upload_id || "").trim()
+    && String(row?.r2_key || "").trim()
+  )) || null;
+}
+
+async function createItem4LargeVideoUploadSession(request, env, url, authorization) {
+  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
+  if (typeof env.STUDIO_MEDIA.createMultipartUpload !== "function") {
+    throw new HttpError(503, "Large video staging is not available on this Worker yet");
+  }
+  const recordId = item4RequestIdFromPath(url);
+  let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+  const body = await readJsonBody(request);
+  const filename = item4SafeFileName(body?.filename || body?.name || "finished-video.mp4");
+  const sizeBytes = Number(body?.size_bytes || body?.size || 0);
+  const mimeType = String(body?.mime_type || body?.content_type || "video/mp4").trim() || "video/mp4";
+  const originKind = String(body?.origin_kind || "finished-video").trim().toLowerCase();
+  if (!sizeBytes || sizeBytes < 1) throw new HttpError(400, "size_bytes is required");
+  if (sizeBytes > ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES) {
+    throw new HttpError(413, "Finished videos must be 1.5 GB or smaller. Compress longer masters before uploading.");
+  }
+  if (!(mimeType.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(filename))) {
+    throw new HttpError(415, "Large upload sessions are only for finished videos");
+  }
+  const existing = item4AssetManifest(record);
+  if (existing.some(item4LooksLikeVideoAsset)) {
+    throw new HttpError(409, "This piece already has a video. Remove it first to replace it.");
+  }
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
+  const key = `studio/master-assets/${recordId}/${id}-${filename}`;
+  const multipart = await env.STUDIO_MEDIA.createMultipartUpload(key, {
+    httpMetadata: { contentType: mimeType },
+    customMetadata: {
+      productionRequestId: recordId,
+      originalName: filename,
+      assetId: id,
+      role: "large-finished-video",
+    },
+  });
+  const draft = {
+    id,
+    order: existing.length + 1,
+    name: filename,
+    mime_type: mimeType,
+    media_kind: "video",
+    size_bytes: sizeBytes,
+    r2_key: key,
+    url: "",
+    upload_status: "multipart_pending",
+    multipart_upload_id: String(multipart.uploadId || ""),
+    origin_kind: originKind || "finished-video",
+    uploaded_at: null,
+  };
+  if (!draft.multipart_upload_id) throw new HttpError(502, "Could not start staged upload");
+  const notes = String(f(record, "Production_Notes") || "").trim();
+  const stamped = studioRewriteFinishedOriginNotes(notes, "finished-video");
+  const fields = {
+    Studio_Master_Assets_JSON: JSON.stringify([...existing, draft]),
+    Studio_Master_Asset_Count: existing.length + 1,
+    Studio_Master_Asset_Status: "Uploading",
+    Studio_Item4_State: "Draft",
+  };
+  if (stamped !== notes) fields.Production_Notes = stamped;
+  record = await item4UpdateRequestState(env, recordId, fields);
+  const partSize = ITEM4_LARGE_UPLOAD_PART_BYTES;
+  return respond(request, env, {
+    ok: true,
+    asset_id: id,
+    r2_key: key,
+    upload_id: draft.multipart_upload_id,
+    part_size: partSize,
+    parts_expected: Math.max(1, Math.ceil(sizeBytes / partSize)),
+    max_bytes: ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES,
+    record: mapProductionRequest(record),
+    message: "Upload session ready. Send the file in parts — Studio will compress after it lands.",
+  }, 201);
+}
+
+async function uploadItem4LargeVideoPart(request, env, url, authorization) {
+  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
+  const recordId = item4RequestIdFromPath(url);
+  const assetId = item4LargeUploadSessionIdFromPath(url);
+  const partNumber = item4LargeUploadPartNumberFromPath(url);
+  if (!assetId || !Number.isFinite(partNumber) || partNumber < 1) {
+    throw new HttpError(400, "Invalid upload part route");
+  }
+  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+  const draft = item4FindLargeUploadDraft(item4AssetManifest(record), assetId);
+  if (!draft) throw new HttpError(404, "Upload session not found");
+  if (!request.body) throw new HttpError(400, "Missing part body");
+  const multipart = env.STUDIO_MEDIA.resumeMultipartUpload(draft.r2_key, draft.multipart_upload_id);
+  const uploaded = await multipart.uploadPart(partNumber, request.body);
+  return respond(request, env, {
+    ok: true,
+    asset_id: assetId,
+    part_number: partNumber,
+    etag: String(uploaded?.etag || ""),
+  });
+}
+
+async function completeItem4LargeVideoUploadSession(request, env, url, authorization, ctx) {
+  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
+  const recordId = item4RequestIdFromPath(url);
+  const assetId = item4LargeUploadSessionIdFromPath(url);
+  let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+  const body = await readJsonBody(request);
+  const parts = Array.isArray(body?.parts) ? body.parts : [];
+  if (!parts.length) throw new HttpError(400, "parts are required");
+  const assets = item4AssetManifest(record);
+  const draft = item4FindLargeUploadDraft(assets, assetId);
+  if (!draft) throw new HttpError(404, "Upload session not found");
+  const multipart = env.STUDIO_MEDIA.resumeMultipartUpload(draft.r2_key, draft.multipart_upload_id);
+  const normalizedParts = parts
+    .map((row) => ({
+      partNumber: Number(row?.partNumber || row?.part_number || 0),
+      etag: String(row?.etag || "").trim(),
+    }))
+    .filter((row) => row.partNumber > 0 && row.etag)
+    .sort((a, b) => a.partNumber - b.partNumber);
+  if (!normalizedParts.length) throw new HttpError(400, "No valid upload parts were provided");
+  await multipart.complete(normalizedParts);
+  const object = await env.STUDIO_MEDIA.head(draft.r2_key).catch(() => null);
+  const sizeBytes = Number(object?.size || draft.size_bytes || 0);
+  const durationSeconds = Number(body?.duration_seconds || body?.durationSeconds || 0);
+  const width = Number(body?.width || 0) || null;
+  const height = Number(body?.height || 0) || null;
+  const needsCompress = sizeBytes > ITEM4_COMPRESS_THRESHOLD_BYTES;
+  const finalized = {
+    id: draft.id,
+    order: draft.order || 1,
+    name: draft.name,
+    mime_type: draft.mime_type || "video/mp4",
+    media_kind: "video",
+    duration_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
+    in_seconds: 0,
+    out_seconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null,
+    size_bytes: sizeBytes,
+    width,
+    height,
+    source_ratio: width && height ? `${width}:${height}` : null,
+    focal_point: "center",
+    r2_key: draft.r2_key,
+    url: needsCompress ? "" : `${ITEM4_MEDIA_PUBLIC_BASE}/${draft.r2_key}`,
+    uploaded_at: new Date().toISOString(),
+    upload_status: "complete",
+  };
+  if (needsCompress) {
+    finalized.compression_needed = true;
+    finalized.compression_status = "pending";
+    finalized.original_size_bytes = sizeBytes;
+  } else {
+    const previewKey = item4FinishedVideoPreviewKey(recordId, draft.id);
+    const source = await env.STUDIO_MEDIA.get(draft.r2_key);
+    if (!source?.body) throw new HttpError(502, "Staged video missing after upload completed");
+    const staged = await studioPutPublicObjectViaUploadWorker(env, {
+      key: previewKey,
+      body: source.body,
+      contentType: finalized.mime_type,
+      contentLength: sizeBytes,
+      outputId: recordId,
+    });
+    if (!staged.url) throw new HttpError(502, "Finished video could not be copied to the public preview host");
+    finalized.preview_r2_key = previewKey;
+    finalized.preview_public_url = staged.url;
+    finalized.url = staged.url;
+    finalized.compression_status = "skipped";
+  }
+  const nextAssets = assets.map((row) => (String(row?.id || "") === String(draft.id) ? finalized : row));
+  record = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
+    Studio_Master_Asset_Count: nextAssets.length,
+    Studio_Master_Asset_Status: needsCompress ? "Uploading" : "Ready",
+    Studio_Output_Plan_Status: "Needs Plan",
+    Studio_Output_Plan_JSON: null,
+    Studio_Variant_Manifest_JSON: null,
+    Studio_Variant_Status: "None",
+    Studio_Variant_Updated_At: null,
+    Studio_Variant_Error: null,
+    Studio_Item4_State: needsCompress ? "Draft" : "Assets Ready",
+  });
+  if (needsCompress && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(item4PulseStudioCompressJob(env, recordId).catch((error) => {
+      console.warn("Item 4 studio-compress pulse deferred after large upload", error);
+    }));
+  }
+  if (studioIsAzFinishedVideo(record) && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(advanceAzFinishedVideo(env, recordId, authorization, ctx).catch((error) => {
+      console.warn("AZ finished-video advance deferred after large upload", recordId, error);
+    }));
+  }
+  return respond(request, env, {
+    ok: true,
+    uploaded: 1,
+    authority_status: needsCompress ? "Uploading" : "Ready",
+    authority_progress: { ready: needsCompress ? 0 : nextAssets.length, target: nextAssets.length },
+    assets: nextAssets,
+    execution_ids: [],
+    record: mapProductionRequest(record),
+    compression_pending: needsCompress,
+    message: needsCompress
+      ? "Video is staged. Studio is compressing it automatically — you can close this tab."
+      : "Finished video is stored. Studio will thumbnail, schedule, and queue the platforms.",
+  }, 201);
+}
+
+async function abortItem4LargeVideoUploadSession(request, env, url, authorization) {
+  if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
+  const recordId = item4RequestIdFromPath(url);
+  const assetId = item4LargeUploadSessionIdFromPath(url);
+  let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+  const assets = item4AssetManifest(record);
+  const draft = item4FindLargeUploadDraft(assets, assetId);
+  if (!draft) {
+    return respond(request, env, { ok: true, aborted: false, message: "Upload session already gone." });
+  }
+  try {
+    const multipart = env.STUDIO_MEDIA.resumeMultipartUpload(draft.r2_key, draft.multipart_upload_id);
+    await multipart.abort();
+  } catch (error) {
+    console.warn("Large video multipart abort failed", draft.r2_key, error);
+  }
+  try { await env.STUDIO_MEDIA.delete(draft.r2_key); } catch {}
+  const nextAssets = assets.filter((row) => String(row?.id || "") !== String(draft.id));
+  record = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Assets_JSON: JSON.stringify(nextAssets),
+    Studio_Master_Asset_Count: nextAssets.length,
+    Studio_Master_Asset_Status: nextAssets.length ? "Uploading" : "None",
+  });
+  return respond(request, env, {
+    ok: true,
+    aborted: true,
+    record: mapProductionRequest(record),
+  });
+}
+
 async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
   if (!env.STUDIO_MEDIA) throw new HttpError(503, "Studio media storage is not configured");
   const recordId = item4RequestIdFromPath(url);
@@ -4424,7 +4743,12 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
         : `${file.name || "An image"} exceeds the 25 MB per-image limit`);
     }
   }
-  if (finishedVideo && total > ITEM4_MAX_CLIP_FILE_BYTES) throw new HttpError(413, "The finished video exceeds the 200 MB upload limit");
+  if (finishedVideo && total > ITEM4_MAX_CLIP_FILE_BYTES) {
+    throw new HttpError(
+      413,
+      "This finished video exceeds the 200 MB direct-upload limit. Studio will stage larger files in parts automatically from the browser — refresh and try again, or compress first."
+    );
+  }
   if (!finishedVideo && mixedClips && total > ITEM4_MAX_MIXED_TOTAL_BYTES) throw new HttpError(413, "The selected photos and clips exceed the upload limit");
   if (!finishedVideo && !mixedClips && total > ITEM4_MAX_TOTAL_BYTES) throw new HttpError(413, "The selected images exceed the 150 MB upload limit");
 
