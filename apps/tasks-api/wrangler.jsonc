@@ -12,6 +12,14 @@
     {
       "pattern": "tasks.chicagoshining.com/health",
       "zone_name": "chicagoshining.com"
+    },
+    {
+      "pattern": "tasks.chicagoshining.com/logs",
+      "zone_name": "chicagoshining.com"
+    },
+    {
+      "pattern": "tasks.chicagoshining.com/logs/",
+      "zone_name": "chicagoshining.com"
     }
   ]
 }

@@ -267,6 +267,8 @@ jobs:
           wanted = [
               "tasks.chicagoshining.com/agent-activity/log-event",
               "tasks.chicagoshining.com/health",
+              "tasks.chicagoshining.com/logs",
+              "tasks.chicagoshining.com/logs/",
           ]
           existing = {
               item.get("pattern"): item

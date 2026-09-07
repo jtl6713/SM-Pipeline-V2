@@ -1193,11 +1193,15 @@ input, select, textarea, button {
 .ops-agent-copy code{font-size:.86em}
 .ops-agent-copy a,.ops-heading-copy a{color:var(--teal-dark);font-weight:750;text-underline-offset:2px}
 .ops-agent-copy a:hover,.ops-heading-copy a:hover{text-decoration-thickness:2px}
+.ops-log-heading{margin:0;padding:4px 20px 8px;font-size:.92rem}
 .ops-agent-log{list-style:none;margin:0;padding:0 20px 18px;display:grid;gap:10px}
 .ops-agent-log li{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fbfdfd}
+.ops-agent-log li[data-tone="fail"]{border-color:#ead0d0;background:#fff8f8}
+.ops-agent-log li[data-tone="ok"]{border-color:#b7d8d3;background:#f4fbf9}
 .ops-agent-log strong{display:block;font-size:.82rem;text-transform:capitalize}
 .ops-agent-log span{font-size:.8rem;color:var(--muted)}
 .ops-agent-log p{margin:6px 0 0;font-size:.86rem;line-height:1.45}
+.ops-agent-log a{color:var(--teal-dark);font-weight:650}
 .ops-agent-log em{display:block;margin-top:6px;font-size:.74rem;color:var(--muted);font-style:normal}
 .ops-intake-notice[data-tone="action"]{color:#5a4300;background:var(--amber-soft);border:1px solid #ead8a0}
 .ops-intake-notice[data-tone="ok"]{color:var(--teal-dark);background:var(--teal-soft);border:1px solid #b7d8d3}

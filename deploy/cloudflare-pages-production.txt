@@ -410,4 +410,6 @@ Help header Pages deploy: 2026-09-07 - Header Help left of Profile; tabbed guide
 
 Operations Help Pages deploy: 2026-09-07 - Expand Operations guides: Control tabs, autonomous service desk, testing, and testing logs. UI 0.6.270-ops-help.
 
+Activity log Pages deploy: 2026-09-07 - Activity log shows service-desk tickets and automated tests. Task Organizer link opens /logs, not Swagger /docs. UI 0.6.271-activity-logs.
+
 

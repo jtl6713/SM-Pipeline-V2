@@ -33,4 +33,4 @@ if (-not (Get-Command wt.exe -ErrorAction SilentlyContinue)) {
 
 Write-Host "Opening tab from: $Helper" -ForegroundColor Cyan
 & wt.exe new-tab --title $Title powershell.exe -NoProfile -NoExit -ExecutionPolicy Bypass -File $Helper
-Write-Host 'Tab launched. Docs open after http://localhost:3360/health is ready.' -ForegroundColor Green
+Write-Host 'Tab launched. Activity log opens after http://localhost:3360/health is ready.' -ForegroundColor Green

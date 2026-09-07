@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.270-ops-help";
+  const BUILD_ID = "item4-0.6.271-activity-logs";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14023,37 +14023,90 @@
     if (agentCounts) agentCounts.innerHTML = chipHtml;
   }
 
-  function renderOperationsAgentActivity(payload) {
-    const meta = $("operationsAgentActivityMeta");
-    const log = $("operationsAgentActivityLog");
-    const events = Array.isArray(payload?.events) ? payload.events : [];
-    if (meta) {
-      if (payload?.source === "unavailable") {
-        meta.textContent = `Task Organizer tickets are unavailable${payload.error ? ` (${payload.error})` : ""}. Live inventory above is still current. Use the Task Organizer link above for the durable log.`;
-      } else if (!events.length) {
-        meta.textContent = "No desk_incident tickets yet. Observe mode writes them here when a fingerprint is not transient.";
-      } else {
-        meta.textContent = `${events.length} recent ticket${events.length === 1 ? "" : "s"} from Task Organizer.`;
-      }
+  function isOperationsTestActivityEvent(row) {
+    const type = String(row?.type || "").trim();
+    return type === "test_result" || type === "github_actions" || type === "regression";
+  }
+
+  function safeHttpUrl(value) {
+    try {
+      const parsed = new URL(String(value || ""));
+      if (parsed.protocol === "https:" || parsed.protocol === "http:") return parsed.href;
+    } catch {
+      return "";
     }
-    if (!log) return;
+    return "";
+  }
+
+  function renderOperationsActivityItems(events, emptyCopy) {
     if (!events.length) {
-      log.innerHTML = '<li class="subtle">When the desk tickets an incident, the fingerprint, class, and diagnosis appear here.</li>';
-      return;
+      return `<li class="subtle">${emptyCopy}</li>`;
     }
-    log.innerHTML = events.slice(0, 40).map((row) => {
+    return events.slice(0, 40).map((row) => {
       const body = row.payload && typeof row.payload === "object" ? row.payload : {};
-      const fingerprint = body.fingerprint || body.record_id || row.id || "—";
-      const klass = body.class || row.type || "desk_incident";
-      const diagnosis = String(body.diagnosis || body.status || "").trim();
+      const test = isOperationsTestActivityEvent(row);
+      const fingerprint = test
+        ? (body.suite || body.workflow || body.message || row.type || "test")
+        : (body.fingerprint || body.record_id || row.id || "—");
+      const klass = test
+        ? (body.conclusion || body.job || row.type || "test")
+        : (body.class || row.type || "desk_incident");
+      const diagnosis = test
+        ? [body.job, body.detail, body.message].filter(Boolean).join(" · ")
+        : String(body.diagnosis || body.status || "").trim();
       const when = row.created_at || body.at || "";
-      return `<li>
+      const runUrl = safeHttpUrl(body.run_url);
+      const conclusion = String(body.conclusion || "").toLowerCase();
+      const tone = conclusion === "failure" || conclusion === "failed" || conclusion === "cancelled"
+        ? "fail"
+        : conclusion === "success" || conclusion === "passed"
+          ? "ok"
+          : "";
+      return `<li${tone ? ` data-tone="${tone}"` : ""}>
         <strong>${escapeHtml(String(klass).replace(/_/g, " "))}</strong>
         <span>${escapeHtml(String(fingerprint))}</span>
         ${diagnosis ? `<p>${escapeHtml(diagnosis.slice(0, 400))}</p>` : ""}
+        ${runUrl ? `<p><a href="${escapeHtml(runUrl)}" target="_blank" rel="noopener noreferrer">Open Actions run</a></p>` : ""}
         ${when ? `<em>${escapeHtml(String(when))}</em>` : ""}
       </li>`;
     }).join("");
+  }
+
+  function renderOperationsAgentActivity(payload) {
+    const meta = $("operationsAgentActivityMeta");
+    const log = $("operationsAgentActivityLog");
+    const tests = $("operationsAgentTestLog");
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    const deskEvents = Array.isArray(payload?.desk_events)
+      ? payload.desk_events
+      : events.filter((row) => !isOperationsTestActivityEvent(row));
+    const testEvents = Array.isArray(payload?.test_events)
+      ? payload.test_events
+      : events.filter(isOperationsTestActivityEvent);
+    if (meta) {
+      if (payload?.source === "unavailable") {
+        meta.textContent = `Task Organizer tickets are unavailable${payload.error ? ` (${payload.error})` : ""}. Live inventory above is still current. Use the full log link above.`;
+      } else if (!deskEvents.length && !testEvents.length) {
+        meta.textContent = "No service-desk tickets or test results yet.";
+      } else {
+        const bits = [];
+        if (deskEvents.length) bits.push(`${deskEvents.length} desk ticket${deskEvents.length === 1 ? "" : "s"}`);
+        if (testEvents.length) bits.push(`${testEvents.length} test result${testEvents.length === 1 ? "" : "s"}`);
+        meta.textContent = `${bits.join(" · ")} from Task Organizer.`;
+      }
+    }
+    if (log) {
+      log.innerHTML = renderOperationsActivityItems(
+        deskEvents,
+        "When the desk tickets an incident, the fingerprint, class, and diagnosis appear here."
+      );
+    }
+    if (tests) {
+      tests.innerHTML = renderOperationsActivityItems(
+        testEvents,
+        "Regression and GitHub Actions results appear here after a run finishes."
+      );
+    }
   }
 
   function renderOperationsProfiles(profiles, canEdit) {

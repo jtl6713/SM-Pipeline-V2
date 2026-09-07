@@ -75,8 +75,8 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsDeskMode: "Service-desk kill switch. off = inventory only. observe = ticket. infra = local restart/deploy. patch = PRs, you merge. automerge = Phase 4 allowlisted merge only.",
     operationsViewAgent: "Open the Autonomous Service Agent page: Word guide, desk mode, stuck inventory, and Task Organizer activity log.",
     operationsAgentGuideLink: "Download the operator Word guide for auto-review, auto-correction, and how to read activity logs.",
-    operationsAgentOrganizerLink: "Open Task Organizer for the durable desk_incident log.",
-    operationsAgentActivityMeta: "Recent desk_incident tickets from Task Organizer. Worker transient heals are not listed here.",
+    operationsAgentOrganizerLink: "Open the Task Organizer activity log (service desk and automated tests). Not the API schema.",
+    operationsAgentActivityMeta: "Recent service-desk tickets and automated test results from Task Organizer. Worker transient heals are not listed here.",
     operationsIntakeMeta: "Shows the latest library-intake summary returned by the Operations API.",
     operationsIntakeProgress: "Live progress for the current library-intake run, including intake, video backfill, classification, and reconciliation stages."
   };

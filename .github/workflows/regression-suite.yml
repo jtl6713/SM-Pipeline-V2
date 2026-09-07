@@ -68,6 +68,13 @@ jobs:
       - name: Hermetic packs
         run: python tests/regression/runner.py hermetic
 
+      - name: Log result to Task Organizer
+        if: always()
+        continue-on-error: true
+        env:
+          CONCLUSION: ${{ job.status }}
+        run: python scripts/log_task_activity.py --suite "Regression suite" --job hermetic --conclusion "$CONCLUSION"
+
   health:
     needs: [hermetic]
     if: ${{ always() && (needs.hermetic.result == 'success' || needs.hermetic.result == 'skipped') && (github.event_name == 'schedule' || github.event.inputs.target != 'functional_only') }}
@@ -80,6 +87,13 @@ jobs:
           python-version: "3.12"
       - name: Public local-service health sweep
         run: python tests/regression/runner.py --public health
+
+      - name: Log result to Task Organizer
+        if: always()
+        continue-on-error: true
+        env:
+          CONCLUSION: ${{ job.status }}
+        run: python scripts/log_task_activity.py --suite "Regression suite" --job health --conclusion "$CONCLUSION"
 
   live:
     needs: [health]
@@ -255,3 +269,10 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
           AFTER=$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)
           test "$BEFORE" = "$AFTER"
+
+      - name: Log result to Task Organizer
+        if: always()
+        continue-on-error: true
+        env:
+          CONCLUSION: ${{ job.status }}
+        run: python scripts/log_task_activity.py --suite "Regression suite" --job live --conclusion "$CONCLUSION" --detail "${{ steps.pick.outputs.id }}"

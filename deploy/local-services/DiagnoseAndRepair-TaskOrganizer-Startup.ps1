@@ -28,7 +28,7 @@ function Get-HelperText([string]$HelperPath) {
 do {
     try {
         `$health = Invoke-RestMethod -Uri 'http://localhost:$Port/health' -TimeoutSec 2
-        if (`$health.ok -eq `$true) { Start-Process 'http://localhost:$Port/docs'; exit 0 }
+        if (`$health.ok -eq `$true) { Start-Process 'http://localhost:$Port/logs'; exit 0 }
     } catch {}
     Start-Sleep -Seconds 1
 } while ((Get-Date) -lt `$deadline)
