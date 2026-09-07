@@ -63,6 +63,21 @@ pause
 exit /b %RC%
 '@
 
+$syncBat = @'
+@echo off
+setlocal
+set "SYNC=D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2\deploy\local-services\SYNC-Git-Main.bat"
+if not exist "%SYNC%" (
+  echo FAIL - sync script not found. Pull GitHub main in SM-Pipeline-V2 first:
+  echo   %SYNC%
+  echo.
+  pause
+  exit /b 1
+)
+call "%SYNC%"
+exit /b %ERRORLEVEL%
+'@
+
 [System.IO.File]::WriteAllText(
     (Join-Path $ToolsRoot 'DEPLOY Local Service.bat'),
     $deployBat,
@@ -83,6 +98,11 @@ exit /b %RC%
     $runnerBat,
     [System.Text.Encoding]::ASCII
 )
+[System.IO.File]::WriteAllText(
+    (Join-Path $ToolsRoot 'SYNC Local Git Checkout.bat'),
+    $syncBat,
+    [System.Text.Encoding]::ASCII
+)
 
 Write-Host ''
 Write-Host 'PASS - local service deployment launchers installed.' -ForegroundColor Green
@@ -93,4 +113,5 @@ Write-Host '  DEPLOY Local Service.bat'
 Write-Host '  DEPLOY Pipeline Runner.bat'
 Write-Host '  PLAN Local Service Deployment.bat'
 Write-Host '  ROLLBACK Local Service.bat'
+Write-Host '  SYNC Local Git Checkout.bat'
 Write-Host ''

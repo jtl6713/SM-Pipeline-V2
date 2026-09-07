@@ -122,7 +122,9 @@ Direct commits to `main` should be exceptions rather than the default for servic
 
 ## 7. Local Git basics
 
-Open PowerShell:
+Double-click **SYNC Local Git Checkout.bat** in `Production Start-Stop-Verify Services` (or run `deploy\local-services\SYNC-Git-Main.bat` from the Git checkout). That checks out `main`, fast-forwards from `origin/main`, prints `git status`, and shows the current commit. It does **not** deploy or restart live services.
+
+Or open PowerShell:
 
 ```powershell
 cd "D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2"
@@ -166,10 +168,13 @@ deploy\local-services\README.md
 
 Friendly launchers under `Production Start-Stop-Verify Services`:
 
+- `SYNC Local Git Checkout.bat`
 - `PLAN Local Service Deployment.bat`
 - `DEPLOY Local Service.bat`
 - `DEPLOY Pipeline Runner.bat`
 - `ROLLBACK Local Service.bat`
+
+Re-run `deploy\local-services\Install-Deployment-Shortcuts.ps1` after pulling if the SYNC launcher is missing from that folder.
 
 ## 9. PLAN — safe/read-only
 
