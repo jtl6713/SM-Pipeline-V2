@@ -6,6 +6,8 @@ media.chicagoshining.com host is chicagoshining-publish-assets, so those keys 40
 
 from __future__ import annotations
 
+import os
+import tempfile
 from typing import Any
 from urllib.parse import urlparse
 
@@ -46,6 +48,19 @@ def master_r2_key_from_record(record: dict[str, Any]) -> str:
     return ""
 
 
+def download_mp4_to_path(client, record: dict[str, Any], dest_path: str) -> str:
+    from integrations.google_drive import GoogleDriveClient
+
+    drive_id = field_str(record, "Final_File_ID")
+    if drive_id:
+        GoogleDriveClient().download_file_to_path(drive_id, dest_path)
+        return dest_path
+    content = download_mp4_bytes(client, record)
+    with open(dest_path, "wb") as out:
+        out.write(content)
+    return dest_path
+
+
 def download_mp4_bytes(client, record: dict[str, Any]) -> bytes:
     from item4.settings import PipelineSettings
     from item4.sources import download_via_media_bridge
@@ -68,9 +83,17 @@ def ensure_public_mp4_url(client, record: dict[str, Any], plan: dict[str, str]) 
     existing = field_str(record, "Publish_Asset_URL")
     if is_public_publish_url(existing):
         return existing
-    content = download_mp4_bytes(client, record)
-    R2UploadClient().put_object(plan["r2_object_key"], content, CONTENT_TYPE)
-    return plan["publish_asset_url"]
+    handle = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    handle.close()
+    try:
+        download_mp4_to_path(client, record, handle.name)
+        R2UploadClient().put_file(plan["r2_object_key"], handle.name, CONTENT_TYPE)
+        return plan["publish_asset_url"]
+    finally:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
 
 
 def finished_video_preview_key(request_id: str, asset_id: str) -> str:

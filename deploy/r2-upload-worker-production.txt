@@ -1,0 +1,1 @@
+R2 upload multipart Worker deploy: 2026-09-07 - POST mpu-create / PUT mpu-part / POST mpu-complete / POST mpu-abort so YouTube Shorts over 95MB (Output 375 is 121MB) can stage onto publish/ without a single Worker-body PUT. Existing PUT stays for smaller objects. Worker 1.2.0-multipart.
