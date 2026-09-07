@@ -9,6 +9,8 @@ import {
   publishedDurationSeconds,
   publishedFileReleaseGuard,
   publishedLibraryFilterFormula,
+  publishedLibraryObjectKey,
+  publicMediaObjectKey,
   publishedReleaseFields,
 } from "./asset-library.mjs";
 
@@ -118,6 +120,22 @@ test("release-file refuses unpublished, missing live URL, and master-id collisio
   }));
   assert.equal(gone.ok, true);
   assert.equal(gone.already_released, true);
+});
+
+test("published object key prefers the R2 MP4 and ignores cover JPEGs", () => {
+  assert.equal(publicMediaObjectKey("https://media.chicagoshining.com/studio/previews/out.mp4"), "studio/previews/out.mp4");
+  assert.equal(publicMediaObjectKey("https://media.chicagoshining.com/publish/cover.jpg"), "");
+  assert.equal(publishedLibraryObjectKey(output({
+    Thumbnail_URL: "https://media.chicagoshining.com/publish/cover.jpg",
+    Studio_Preview_URL: "https://media.chicagoshining.com/studio/previews/recOUT1/out.mp4",
+  })), "studio/previews/recOUT1/out.mp4");
+  assert.equal(publishedLibraryObjectKey(output({
+    Studio_Preview_URL: "https://media.chicagoshining.com/publish/cover.jpg",
+    Studio_Preview_R2_Key: "studio/previews/platform-output/recOUT1/out.mp4",
+  })), "studio/previews/platform-output/recOUT1/out.mp4");
+  assert.equal(publishedLibraryObjectKey(output({
+    Final_File_URL: "https://drive.google.com/file/d/driveFinal1/view",
+  })), "");
 });
 
 test("library file bytes prefer File_Size_Bytes and fall back to File_Size_MB", () => {

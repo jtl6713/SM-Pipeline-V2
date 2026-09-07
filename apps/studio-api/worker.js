@@ -229,7 +229,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.254-library-size",
+          version: "0.10.255-library-pub-size",
           studio_tiktok_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
@@ -15505,6 +15505,53 @@ function collectJsonDriveIds(raw, { finishedOnly = false } = {}) {
   return [...new Set(ids)];
 }
 
+function publicMediaObjectKey(urlOrKey) {
+  let path = String(urlOrKey || "").trim();
+  if (!path) return "";
+  const host = `${ITEM4_MEDIA_PUBLIC_BASE}/`;
+  if (path.startsWith(host)) path = path.slice(host.length);
+  path = path.split("?")[0].replace(/^\/+/, "");
+  if (!path || /\.(jpe?g|png|webp|gif)$/i.test(path)) return "";
+  if (path.startsWith("studio/previews/") || path.startsWith("publish/") || path.startsWith("studio/master-assets/")) return path;
+  return "";
+}
+
+function publishedLibraryObjectKey(record) {
+  const candidates = [
+    f(record, "Studio_Preview_R2_Key"),
+    f(record, "Studio_Preview_URL"),
+    f(record, "Publish_Asset_URL"),
+    f(record, "Final_File_URL"),
+  ];
+  for (const value of candidates) {
+    const key = publicMediaObjectKey(value);
+    if (key) return key;
+  }
+  return "";
+}
+
+async function attachPublishedLibraryFileSizes(env, records, mapped) {
+  if (!Array.isArray(mapped) || !mapped.length) return mapped;
+  await Promise.all(mapped.map(async (row, index) => {
+    if (Number(row?.file_size_bytes || 0) > 0) return;
+    const key = publishedLibraryObjectKey(records[index]);
+    if (!key) return;
+    if (env?.STUDIO_MEDIA) {
+      const object = await env.STUDIO_MEDIA.head(key).catch(() => null);
+      const size = Number(object?.size || 0);
+      if (size > 0) {
+        row.file_size_bytes = size;
+        return;
+      }
+    }
+    const href = `${ITEM4_MEDIA_PUBLIC_BASE}/${key}`;
+    const probe = await fetch(href, { method: "HEAD", redirect: "follow" }).catch(() => null);
+    const length = Number(probe?.headers?.get("Content-Length") || 0);
+    if (length > 0) row.file_size_bytes = length;
+  }));
+  return mapped;
+}
+
 function mapPublishedLibraryFile(record) {
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Platform_Output_Type") || f(record, "Studio_Output_Type") || "").trim();
@@ -15596,7 +15643,7 @@ async function listPublishedLibraryFiles(request, env, url) {
     sortDirection: "desc",
     filterFormula: publishedLibraryFilterFormula(query),
   });
-  const mapped = page.records.map(mapPublishedLibraryFile);
+  const mapped = await attachPublishedLibraryFileSizes(env, page.records, page.records.map(mapPublishedLibraryFile));
   return respond(request, env, {
     ok: true,
     idle: false,
