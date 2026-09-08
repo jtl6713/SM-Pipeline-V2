@@ -418,4 +418,7 @@ TikTok URL gate Pages deploy: 2026-09-07 - Open Review shows TikTok live URL onl
 
 Ops activity detail Pages deploy: 2026-09-07 - Activity log cards expand. Test cards list each job pass/fail. UI 0.6.274-ops-activity-detail.
 
+Quality Agent catalog Pages deploy: 2026-09-07 - Operations → Quality Agent Catalog tab next to Activity log. Named check sentences with pass/finding. UI 0.6.275-quality-catalog. Source commit cc1d0b0.
+
+
 

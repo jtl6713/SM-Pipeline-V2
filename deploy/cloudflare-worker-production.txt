@@ -394,3 +394,6 @@ Autonomous topic-dedupe Worker deploy: 2026-09-07 - Occupied harvest sorts Creat
 
 YouTube 375 public MP4 Worker deploy: 2026-09-07 - Heal YT1 Ready to Publish as well as Failed. Stream Drive finals onto publish/ in 16MB multipart parts (Worker isolate, not a 121MB Windows PUT). Clear stale YouTube_Upload_Job_ID then pulse YTP1. Keep thumbnails.set; do not send thumb_offset. Worker 0.10.278-youtube-375-public-mp4.
 
+Quality Agent catalog Worker deploy: 2026-09-07 - GET /api/ops/desk/inventory returns payload.checks. Origin-aware Promoted/AZ scanners. A2 processed leftovers. Worker 0.10.279-quality-agent. Source commit cc1d0b0.
+
+
