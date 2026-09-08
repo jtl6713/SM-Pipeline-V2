@@ -799,13 +799,14 @@ def test_video_playable_url_uses_drive_authority_not_poster():
     }) == "https://drive.google.com/file/d/video-drive-id/view"
 
 
-def test_finished_thumbnail_prompt_requires_colorful_3d():
+def test_finished_thumbnail_prompt_prefers_gold_lettering():
     prompt = build_finished_thumbnail_prompt(
         {"fields": {"Requested_Title": "Rainy Chicago"}},
         {"fields": {"Caption": "Lake Shore Drive at dusk"}},
     )
     assert "Rainy Chicago" in prompt
     assert "Lake Shore Drive" in prompt
-    assert "colorful 3D block lettering" in prompt
+    assert "gold" in prompt.lower()
+    assert "~80%" in prompt
     assert COLORFUL_3D_RULE in prompt
-    assert "Do not use" in prompt and "black-and-gold" in prompt
+    assert "Prefer stylish gold" in prompt or "premium gold" in prompt

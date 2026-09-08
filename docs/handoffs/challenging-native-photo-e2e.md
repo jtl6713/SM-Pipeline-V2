@@ -162,7 +162,7 @@ Path allowlist on the control workflow: `/api/outputs/rec[A-Za-z0-9]+/(preview|c
 **Case B IG**
 
 - Carousel `/p/`
-- Grid / first slide = colorful 3D lettering
+- Grid / first slide = designed title card (prefer gold / black-and-gold sophisticated lettering; colorful 3D only occasionally)
 - Swipe = the three photos (lettering on slides if lettering ran)
 - Caption under the post
 

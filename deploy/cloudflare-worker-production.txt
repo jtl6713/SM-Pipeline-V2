@@ -398,4 +398,4 @@ Quality Agent catalog Worker deploy: 2026-09-07 - GET /api/ops/desk/inventory re
 
 Ready-for-Review Drive cover Worker deploy: 2026-09-08 - Unlock Ready for Review when the 3D cover is still on Drive. Hourly desk companion keep-alive; hidden local service start so DEPLOY/START do not open extra consoles. Worker 0.10.280-rfr-locked-cover.
 
-
+Gold thumbnail style Worker deploy: 2026-09-08 - Prefer gold / black-and-gold sophisticated lettering for ≥ ~80% of grid covers; colorful 3D only occasionally. Worker 0.10.281-gold-thumb-style.

@@ -25,6 +25,9 @@ This folder is the durable operational documentation for the SM Pipeline V2 repo
 7. **`docs/LOCAL_SERVICE_ARTIFACT_CLEANUP_TODO.md`**  
    Implemented scratch TTL (canonical `services/_shared/scratch_ttl.py`).
 
+8. **`docs/thumbnail-style-guidance.md`**  
+   Grid-cover lettering mix: gold / black-and-gold sophisticated themes for ≥ ~80% of posts; colorful 3D only occasionally.
+
 ## Repository
 
 - GitHub repository: `jtl6713/SM-Pipeline-V2`
