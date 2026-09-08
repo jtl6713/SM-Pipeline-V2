@@ -1,4 +1,4 @@
-"""Colorful 3D block-letter cover sized to each Platform Output aspect ratio."""
+"""Block-letter grid cover sized to each Platform Output aspect ratio (gold-preferred mix)."""
 
 from __future__ import annotations
 
