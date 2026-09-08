@@ -131,70 +131,49 @@ $logDir = Join-Path $PipelineRoot 'Deployment Logs\Local Services'
 if (-not (Test-Path -LiteralPath $logDir)) {
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 }
-$helperDir = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services\_deployment_helpers'
-if (-not (Test-Path -LiteralPath $helperDir)) {
-    New-Item -ItemType Directory -Force -Path $helperDir | Out-Null
-}
-$launcher = Join-Path $helperDir ("hidden-launch-" + $Service + ".ps1")
-$log = (Join-Path $logDir ("hidden-" + $Service + ".log")).Replace("'", "''")
-$escapedRuntime = $runtime.Replace("'", "''")
-$escapedTitle = $cfg.Title.Replace("'", "''")
+$outLog = Join-Path $logDir ("hidden-" + $Service + ".out.log")
+$errLog = Join-Path $logDir ("hidden-" + $Service + ".err.log")
 
-$envLines = New-Object System.Collections.Generic.List[string]
-if ($cfg.ExtraEnv) {
-    foreach ($key in $cfg.ExtraEnv.Keys) {
-        $envLines.Add("`$env:$key = '$($cfg.ExtraEnv[$key])'")
-    }
-}
-$envBlock = [string]::Join("`r`n", $envLines)
-
+$filePath = $null
+$argumentList = @()
 if ($cfg.Kind -eq 'node') {
-    $startLine = "& node.exe '.\$($cfg.File)'"
+    $filePath = (Get-Command node.exe -ErrorAction Stop).Source
+    $argumentList = @($cfg.File)
 }
 elseif ($cfg.Kind -eq 'python') {
-    $dashB = if ($cfg.DashB) { '-B ' } else { '' }
-    $startLine = @"
-`$py = Join-Path (Get-Location) '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath `$py)) { `$py = 'python.exe' }
-& `$py ${dashB}'.\app.py'
-"@
+    $filePath = Join-Path $runtime '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $filePath)) { $filePath = (Get-Command python.exe -ErrorAction Stop).Source }
+    $argumentList = if ($cfg.DashB) { @('-B', 'app.py') } else { @('app.py') }
 }
 elseif ($cfg.Kind -eq 'uvicorn') {
-    $startLine = @"
-`$py = Join-Path (Get-Location) '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath `$py)) { `$py = 'python.exe' }
-& `$py -m uvicorn app.main:app --host 127.0.0.1 --port 3360
-"@
+    $filePath = Join-Path $runtime '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $filePath)) { $filePath = (Get-Command python.exe -ErrorAction Stop).Source }
+    $argumentList = @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '3360')
 }
 else {
     throw "Unsupported start kind $($cfg.Kind)"
 }
 
-$launcherText = @"
-`$ErrorActionPreference = 'Stop'
-`$Host.UI.RawUI.WindowTitle = '$escapedTitle'
-Set-Location -LiteralPath '$escapedRuntime'
-Start-Transcript -Path '$log' -Append | Out-Null
-try {
-    Write-Host 'Starting $($cfg.Name) hidden (no extra console window).'
-    $envBlock
-    $startLine
+$saved = @{}
+if ($cfg.ExtraEnv) {
+    foreach ($key in $cfg.ExtraEnv.Keys) {
+        $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+        [Environment]::SetEnvironmentVariable($key, [string]$cfg.ExtraEnv[$key], 'Process')
+    }
 }
-finally {
-    Stop-Transcript | Out-Null
-}
-"@
-
-[System.IO.File]::WriteAllText($launcher, $launcherText, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host ("Starting {0} hidden on port {1}" -f $cfg.Name, $cfg.Port)
-$p = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -ArgumentList @(
-    '-NoProfile',
-    '-ExecutionPolicy', 'Bypass',
-    '-File', $launcher
-)
+try {
+    $p = Start-Process -FilePath $filePath -WorkingDirectory $runtime -ArgumentList $argumentList -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
+} finally {
+    if ($cfg.ExtraEnv) {
+        foreach ($key in $saved.Keys) {
+            [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process')
+        }
+    }
+}
 if (-not $p) {
     throw "Hidden start failed for $Service"
 }
-Write-Host ("  pid={0} log={1}" -f $p.Id, $log)
+Write-Host ("  pid={0} log={1}" -f $p.Id, $outLog)
 exit 0
