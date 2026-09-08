@@ -25,6 +25,7 @@ from studio_produce.queue import (
     upsert_variant_queue,
 )
 from studio_produce.stamp import directive_yes, is_native_photo, stamp_outputs
+from studio_produce.thumbnail import is_designed_cover_url, needs_grid_cover
 
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
@@ -97,7 +98,9 @@ def thumbnail_required(request: dict[str, Any], outputs: list[dict[str, Any]] | 
 
 def pick_resume_step(request: dict[str, Any], outputs: list[dict[str, Any]] | None = None) -> str:
     rows = outputs or []
-    if rows and all(_output_ready(row) for row in rows):
+    if rows and all(_output_file_ready(row) for row in rows):
+        if any(_output_missing_review_cover(row) for row in rows):
+            return "stamp"
         return "done"
     if any(field_str(row, "Remotion_Job_ID") or field_str(row, "Render_Status").lower() == "rendering" for row in rows):
         return "render"
@@ -341,7 +344,7 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     want_voice = voiceover_required(request, parent)
     want_thumb = thumbnail_required(request, ctx.get("outputs"))
     has_voice = bool(field_str(parent, "Voiceover_URL"))
-    has_thumb = bool(field_str(parent, "Thumbnail_URL"))
+    has_thumb = is_designed_cover_url(field_str(parent, "Thumbnail_URL"))
     if (not want_voice or has_voice) and (not want_thumb or has_thumb):
         return "images"
     if want_voice and not has_voice and not field_str(parent, "Voiceover_Script"):
@@ -374,7 +377,7 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     refreshed = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
     ctx["parent"] = refreshed
     still_voice = want_voice and not field_str(refreshed, "Voiceover_URL")
-    still_thumb = want_thumb and not field_str(refreshed, "Thumbnail_URL")
+    still_thumb = want_thumb and not is_designed_cover_url(field_str(refreshed, "Thumbnail_URL"))
     if still_voice:
         if result.get("processed"):
             raise StepWait("Waiting for voiceover")
@@ -391,7 +394,7 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
             if result.get("reason") == "no_eligible_p2_route":
                 raise StepBlocked(f"Thumbnail required but not generated: {exc}") from exc
             raise StepWait("Waiting for thumbnail")
-        if not field_str(refreshed, "Thumbnail_URL"):
+        if not is_designed_cover_url(field_str(refreshed, "Thumbnail_URL")):
             raise StepWait("Waiting for thumbnail")
     return "images"
 
@@ -571,11 +574,21 @@ def step_stamp(client: AirtableClient, ctx: dict[str, Any]) -> str:
         from studio_produce.public_preview import ensure_finished_preview_masters
 
         ctx["request"] = ensure_finished_preview_masters(client, ctx["request"])
-    if is_finished(ctx) and ctx.get("parent"):
+    cover_only = all(_output_file_ready(row) for row in ctx["outputs"])
+    if ctx.get("parent") and (
+        is_finished(ctx)
+        or thumbnail_required(ctx["request"], ctx.get("outputs"))
+        or any(_output_missing_review_cover(row) for row in ctx["outputs"])
+    ):
         from studio_produce.thumbnail import ensure_platform_thumbnails
 
         ensure_platform_thumbnails(client, ctx["request"], ctx["parent"], ctx.get("outputs") or [])
         ctx["parent"] = client.get_record(CONTENT_ITEMS_TABLE, ctx["parent"]["id"])
+        ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
+    if cover_only:
+        if any(_output_missing_review_cover(row) for row in ctx["outputs"]):
+            raise StepWait("Waiting for thumbnail")
+        return "done"
     result = stamp_outputs(client, ctx["request"], ctx["outputs"], ctx["parent"])
     if result["missing"]:
         raise StepBlocked(f"{len(result['missing'])} output(s) are missing a complete source package")
@@ -584,7 +597,7 @@ def step_stamp(client: AirtableClient, ctx: dict[str, Any]) -> str:
     return "render"
 
 
-def _output_ready(output: dict[str, Any]) -> bool:
+def _output_file_ready(output: dict[str, Any]) -> bool:
     status = field_str(output, "Output_Status")
     if status in {"Ready for Review", "Approved for Publishing", "Published"}:
         if field_str(output, "Final_File_URL") or field_str(output, "Studio_Preview_URL"):
@@ -592,6 +605,16 @@ def _output_ready(output: dict[str, Any]) -> bool:
         if field_str(output, "Render_Status") == "Native Photo Route":
             return True
     return False
+
+
+def _output_missing_review_cover(output: dict[str, Any]) -> bool:
+    if not needs_grid_cover(output):
+        return False
+    return not is_designed_cover_url(field_str(output, "Thumbnail_URL"))
+
+
+def _output_ready(output: dict[str, Any]) -> bool:
+    return _output_file_ready(output)
 
 
 def render_progress_detail(outputs: list[dict[str, Any]] | None = None) -> str:
@@ -740,8 +763,15 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 continue
             raise
     ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
-    if all(_output_ready(row) for row in ctx["outputs"]):
-        return "done"
+    if all(_output_file_ready(row) for row in ctx["outputs"]):
+        if any(_output_missing_review_cover(row) for row in ctx["outputs"]) and ctx.get("parent"):
+            from studio_produce.thumbnail import ensure_platform_thumbnails
+
+            ensure_platform_thumbnails(client, ctx["request"], ctx["parent"], ctx.get("outputs") or [])
+            ctx["parent"] = client.get_record(CONTENT_ITEMS_TABLE, ctx["parent"]["id"])
+            ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
+        if not any(_output_missing_review_cover(row) for row in ctx["outputs"]):
+            return "done"
     if remaining or transient:
         raise StepWait(render_progress_detail(ctx["outputs"]))
     raise StepBlocked("Outputs are stamped but none are eligible for R3/R4/letter")

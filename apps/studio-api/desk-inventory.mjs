@@ -459,6 +459,68 @@ export function classifyPublishDispatch(row, nowMs = Date.now()) {
   };
 }
 
+export function deskDesignedCoverUrl(url) {
+  const href = String(url || "").trim();
+  if (!href) return "";
+  if (/ITEM4-VARIANT-fill-crop/i.test(href)) return "";
+  if (/drive\.google\.com|\/uc\?id=|googleusercontent\.com/i.test(href)) return "";
+  if (/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(href)) return "";
+  if (/\/studio\/previews\/clip-posters\//i.test(href)) return "";
+  if (!/^https:\/\/media\.chicagoshining\.com\/(publish|studio\/previews)\//i.test(href)) return "";
+  return href;
+}
+
+export function deskNeedsGridCover(row) {
+  const platform = String(row?.platform || "").trim();
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""} ${row?.output_type || ""}`.trim();
+  if (/story/i.test(type)) return false;
+  if (platform === "Instagram" && /single image|instagram feed post/i.test(type) && !/carousel|reel/i.test(type)) return false;
+  if (platform === "Facebook" && /single image|facebook post/i.test(type) && !/reel|multi-image|photo set/i.test(type)) return false;
+  return true;
+}
+
+export function deskReviewBlocker(row) {
+  const native = /native photo route/i.test(String(row?.render_status || ""));
+  if (native && Boolean(row?.needs_lettering)) return "lettering";
+  const hasFile = Boolean(String(row?.final_file_url || "").trim() || String(row?.studio_preview_url || "").trim());
+  if (!native && !hasFile) return "final_file";
+  if (deskNeedsGridCover(row) && !deskDesignedCoverUrl(row?.thumbnail_url)) return "cover";
+  return null;
+}
+
+export function classifyRfrLockedMissingDeliverable(row, nowMs = Date.now(), extras = {}) {
+  if (String(row?.test_run_id || "").trim()) return null;
+  if (outputPastReview(row)) return null;
+  const outputStatus = String(row?.output_status || "").trim();
+  const renderStatus = String(row?.render_status || "").trim();
+  const reviewStatus = String(row?.review_status || "").trim();
+  const labelsReady = /ready for review/i.test(outputStatus)
+    || /review sent/i.test(reviewStatus)
+    || /^rendered$/i.test(renderStatus)
+    || /native photo route/i.test(renderStatus);
+  if (!labelsReady) return null;
+  const blocker = deskReviewBlocker(row);
+  if (!blocker) return null;
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const outputId = String(row?.output_id || recordId || "").trim();
+  const stale = outputAgeMs(row, nowMs) >= STALE_RENDER_MINUTES * 60 * 1000;
+  const storyOpen = Boolean(extras?.story_open_review);
+  const group = extras?.group_progress ? ` Group progress ${extras.group_progress}.` : "";
+  const sibling = storyOpen
+    ? " Sibling Stories already Open review while cover-required destinations stay Preparing Assets."
+    : "";
+  return {
+    kind: "rfr_locked_missing_deliverable",
+    class: stale ? "code_bug" : "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("rfr_locked_missing_deliverable", outputId, blocker),
+    actor: stale ? "desk_agent" : "worker_heal",
+    blocker,
+    output_id: row?.output_id || null,
+    diagnosis: `Labels say ${outputStatus || renderStatus || reviewStatus} but Open review is locked (${blocker}). Ignore the Ready for Review badge; trust creative_available.${sibling}${group} Worker must stage a public 3D still to media.chicagoshining.com/publish or studio/previews, stamp cover-required siblings, and stamp a blank Output_Caption from the Content Item. Do not Approve. Do not send thumb_offset.`,
+  };
+}
+
 export function classifyNativeCover(row) {
   const recordId = String(row?.id || row?.record_id || "").trim();
   const outputStatus = String(row?.output_status || "").trim();
@@ -569,6 +631,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "autonomous_rfr_gate",
   "publish_never_dispatch",
   "native_cover_missing",
+  "rfr_locked_missing_deliverable",
   "health_down",
   "variant_preparing",
   "tester_nightly",

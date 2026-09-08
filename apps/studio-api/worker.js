@@ -17,6 +17,7 @@ import {
   classifyPromotedNotRfr,
   classifyPublishDispatch,
   classifyRenderRow,
+  classifyRfrLockedMissingDeliverable,
   classifyTesterCatalogAssert,
   classifyTesterNightly,
   classifyYoutubePrivateSourceFail,
@@ -1139,6 +1140,11 @@ export default {
         await advanceStudioProductionOutputs(env, { waitMs: 0 });
       } catch (error) {
         console.warn("studio continuation listener failed", error);
+      }
+      try {
+        await studioHealRfrMissingDeliverable(env, { limit: 8 });
+      } catch (error) {
+        console.warn("studio rfr missing-deliverable heal failed", error);
       }
       try {
         await startOrphanedStudioProductionJobs(env);
@@ -6173,6 +6179,7 @@ function studioAiThumbnailUrl(value) {
   if (!url || item4UrlIsStudioPhotoCrop(url)) return "";
   if (studioUrlLooksLikeVideoFile(url) || studioUrlLooksLikeDriveFetch(url)) return "";
   if (/\/studio\/previews\/clip-posters\//i.test(url)) return "";
+  if (!/^https:\/\/media\.chicagoshining\.com\/(publish|studio\/previews)\//i.test(url)) return "";
   return url;
 }
 
@@ -6190,7 +6197,8 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
   const needsCaption = Boolean(caption && !currentCaption);
   if (!po?.id) return false;
   const current = String(f(po, "Thumbnail_URL") || "").trim();
-  if (current === ai) {
+  const currentDesigned = studioAiThumbnailUrl(current);
+  if (ai && currentDesigned === ai) {
     const native = studioOutputIsNativePhotoRoute(
       f(po, "Platform"),
       f(po, "Studio_Output_Type"),
@@ -6207,9 +6215,10 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
   );
   const isStory = String(f(po, "Studio_Output_Type") || "").trim() === "Story";
   const coverMismatch = Boolean(ai && current !== ai);
-  if (ai && current && !item4UrlIsStudioPhotoCrop(current) && !native && coverMismatch && !needsCaption) return false;
+  if (ai && currentDesigned && currentDesigned !== ai && !native && coverMismatch && !needsCaption
+      && !/^ready for review$/i.test(String(f(po, "Output_Status") || ""))) return false;
   const fields = {};
-  if (coverMismatch && (native || !current || item4UrlIsStudioPhotoCrop(current) || /^ready for review$/i.test(String(f(po, "Output_Status") || "")))) {
+  if (coverMismatch && (native || !current || !currentDesigned || item4UrlIsStudioPhotoCrop(current) || /^ready for review$/i.test(String(f(po, "Output_Status") || "")))) {
     fields.Thumbnail_URL = ai;
   }
   if (needsCaption) fields.Output_Caption = caption;
@@ -6222,6 +6231,112 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
     body: JSON.stringify({ fields, typecast: true }),
   });
   return true;
+}
+
+async function studioEnsurePublicAiCover(env, parent, requestRecord = null) {
+  if (!parent?.id) return { url: "", skip: "missing_parent" };
+  const existing = studioAiThumbnailUrl(f(parent, "Thumbnail_URL"));
+  if (existing) return { url: existing, staged: false };
+  const source = String(f(parent, "Thumbnail_URL") || "").trim();
+  const driveId = String(f(parent, "Thumbnail_Google_Drive_File_ID") || "").trim();
+  if (!source && !driveId && !studioNeedsAiThumbnail(parent, requestRecord)) {
+    return { url: "", skip: "thumbnail_not_required" };
+  }
+  if (!source && !driveId) return { url: "", skip: "no_thumbnail_source" };
+  const staged = await azStagePublicCoverFromSource(env, parent, source, driveId);
+  if (!staged.url) return { url: "", skip: staged.skip || "stage_failed" };
+  await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parent.id, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Thumbnail_URL: staged.url,
+        Thumbnail_Status: "Generated",
+        Include_Thumbnail: "Yes",
+        Content_Status: "Thumbnail Ready",
+      },
+      typecast: true,
+    }),
+  });
+  return { url: staged.url, staged: true };
+}
+
+async function studioStampPackageReviewCovers(env, parent, outputs) {
+  let stamped = 0;
+  for (const row of outputs || []) {
+    const changed = await studioStampParentAiCoverOnOutput(env, row, parent).catch(() => false);
+    if (changed) stamped += 1;
+  }
+  return stamped;
+}
+
+async function studioHealRfrMissingDeliverable(env, options = {}) {
+  const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
+  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit,
+    sortField: "Output_ID",
+    sortDirection: "desc",
+    filterFormula: STUDIO_RFR_MISSING_COVER_FORMULA,
+  }).catch((error) => {
+    console.warn("rfr missing-deliverable heal scan failed", error);
+    return [];
+  });
+  const results = [];
+  const cache = { parents: new Map(), requests: new Map(), packages: new Map() };
+  for (const po of rows || []) {
+    const parentId = studioFirstLinkedId(f(po, "Content_Item"));
+    if (!parentId) continue;
+    try {
+      if (!cache.parents.has(parentId)) {
+        cache.parents.set(parentId, await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId));
+      }
+      let parent = cache.parents.get(parentId);
+      const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+        || studioFirstLinkedId(f(parent, "Production Requests"))
+        || studioFirstLinkedId(f(parent, "Production_Requests"));
+      let requestRecord = null;
+      if (requestId) {
+        if (!cache.requests.has(requestId)) {
+          cache.requests.set(requestId, await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null));
+        }
+        requestRecord = cache.requests.get(requestId);
+      }
+      const ensured = await studioEnsurePublicAiCover(env, parent, requestRecord);
+      if (ensured.url) {
+        parent = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+        cache.parents.set(parentId, parent);
+      }
+      if (!cache.packages.has(parentId)) {
+        cache.packages.set(parentId, await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+          limit: 12,
+          filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${parentId}", ARRAYJOIN({Content_Item})))`,
+        }).catch(() => [po]));
+      }
+      const siblings = cache.packages.get(parentId) || [po];
+      const stamped = await studioStampPackageReviewCovers(env, parent, siblings);
+      const stillMissing = studioNeedsAiThumbnail(parent, requestRecord)
+        || siblings.some((row) => studioOutputNeedsGridCoverForReview(row) && !studioAiThumbnailUrl(f(row, "Thumbnail_URL")));
+      if (stillMissing && requestId) {
+        await enqueueStudioProductionJob(env, requestId, { resume: true }).catch(() => null);
+        await pulseStudioP2Handoff(env, parentId, requestRecord).catch(() => null);
+      }
+      results.push({
+        id: po.id,
+        output_id: f(po, "Output_ID"),
+        cover: ensured.url || null,
+        staged: Boolean(ensured.staged),
+        stamped,
+        skip: ensured.skip || null,
+        resumed: Boolean(stillMissing && requestId),
+      });
+    } catch (error) {
+      results.push({
+        id: po.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (results.length) console.log("Studio rfr missing-deliverable heal", JSON.stringify({ count: results.length, results }));
+  return results;
 }
 
 function item4StudioThumbnailPrompt(requestRecord, parent) {
@@ -8340,7 +8455,7 @@ async function resumeAzFinishedVideoRequests(env, ctx = null) {
   return { resumed: results.length, results };
 }
 
-async function enqueueStudioProductionJob(env, requestId) {
+async function enqueueStudioProductionJob(env, requestId, options = {}) {
   if (!requestId) return null;
   const record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
   const existing = parseStudioProductionJob(record);
@@ -8366,7 +8481,7 @@ async function enqueueStudioProductionJob(env, requestId) {
       }),
     });
   }
-  if (step === "blocked" || step === "escalated") {
+  if (Boolean(options.resume) || step === "blocked" || step === "escalated") {
     return item4PulseStudioProduceJob(env, requestId, { resume: true });
   }
   return item4PulseStudioProduceJob(env, requestId);
@@ -21993,6 +22108,15 @@ async function studioContinuationMediaGate(env, po, cache) {
     requestRecord = cache.requests.get(requestId);
   }
   if (studioNeedsAiThumbnail(parent, requestRecord)) {
+    const ensured = await studioEnsurePublicAiCover(env, parent, requestRecord);
+    if (ensured.url) {
+      const refreshed = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId);
+      cache.parents.set(parentId, refreshed);
+      const stamped = await studioStampParentAiCoverOnOutput(env, po, refreshed).catch(() => false);
+      if (stamped || studioAiThumbnailUrl(f(po, "Thumbnail_URL")) === ensured.url) {
+        return { action: "stamped_cover", reason: "staged_public_cover", contentItemId: parentId };
+      }
+    }
     return { action: "wait_thumbnail", reason: "missing_ai_cover", contentItemId: parentId, requestRecordId: requestId || null };
   }
   const outputStatus = String(f(po, "Output_Status") || "");
@@ -22033,8 +22157,8 @@ async function pulseStudioP2ForWaitingParents(env, parentIds, pulses) {
       await pulseStudioP2Handoff(env, parentId, requestRecord);
       pulses.push({ key: "P2", pulsed: true, content_item: parentId, rearmed: rearm });
       if (requestId) {
-        try {
-          const produced = await enqueueStudioProductionJob(env, requestId);
+          try {
+          const produced = await enqueueStudioProductionJob(env, requestId, { resume: true });
           pulses.push({ key: "STUDIO_PRODUCE", request: requestId, produced: produced || true });
         } catch (error) {
           pulses.push({ key: "STUDIO_PRODUCE", request: requestId, error: error instanceof Error ? error.message : String(error) });
@@ -28694,10 +28818,12 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map()) {
   const note = String(f(record, "Studio_Publish_Dispatch_Note") || "");
   return {
     id: record.id,
+    output_id: f(record, "Output_ID"),
     output_status: f(record, "Output_Status"),
     render_status: f(record, "Render_Status"),
     remotion_job_id: f(record, "Remotion_Job_ID"),
     final_file_url: f(record, "Final_File_URL"),
+    studio_preview_url: f(record, "Studio_Preview_URL"),
     thumbnail_url: f(record, "Thumbnail_URL"),
     output_caption: f(record, "Output_Caption"),
     review_status: f(record, "Review_Status"),
@@ -28706,9 +28832,12 @@ function mapDeskInventoryOutput(record, contentToRequest = new Map()) {
     platform: f(record, "Platform"),
     studio_output_type: f(record, "Studio_Output_Type"),
     platform_output_type: f(record, "Platform_Output_Type"),
+    thumbnail_mode: f(record, "Studio_Effective_Thumbnail_Mode"),
+    test_run_id: f(record, "Test_Run_ID"),
     last_modified: f(record, "Last_Modified") || f(record, "Updated_At") || "1970-01-01T00:00:00Z",
     request_id: studioOutputProductionRequestId(record, contentToRequest)
       || studioFirstLinkedId(f(record, "Production Requests")),
+    content_item_id: studioFirstLinkedId(f(record, "Content_Item")),
     cover_attached: note.includes("facebook-cover=attached"),
   };
 }
@@ -28907,6 +29036,38 @@ async function gatherStudioDeskInventory(env) {
   scanned("native_cover_missing");
   for (const record of publishedCovers || []) {
     push(classifyNativeCover(mapOut(record)));
+  }
+
+  try {
+    const rfrLockedRows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 25,
+      sortField: "Output_ID",
+      sortDirection: "desc",
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Published_At}=BLANK(),OR({Output_Status}="Ready for Review",{Review_Status}="Review Sent",{Render_Status}="Rendered",{Render_Status}="Native Photo Route"))',
+    }).catch(() => []);
+    scanned("rfr_locked_missing_deliverable");
+    const mapped = (rfrLockedRows || []).map(mapOut);
+    const byContent = new Map();
+    for (const row of mapped) {
+      const cid = String(row.content_item_id || "");
+      if (!cid) continue;
+      if (!byContent.has(cid)) byContent.set(cid, []);
+      byContent.get(cid).push(row);
+    }
+    for (const row of mapped) {
+      const sibs = byContent.get(String(row.content_item_id || "")) || [];
+      const storyOpen = sibs.some((sibling) => (
+        /story/i.test(String(sibling.studio_output_type || ""))
+        && !classifyRfrLockedMissingDeliverable(sibling, nowMs)
+      ));
+      const lockedCount = sibs.filter((sibling) => classifyRfrLockedMissingDeliverable(sibling, nowMs)).length;
+      push(classifyRfrLockedMissingDeliverable(row, nowMs, {
+        story_open_review: storyOpen,
+        group_progress: sibs.length ? `${sibs.length - lockedCount}/${sibs.length}` : null,
+      }));
+    }
+  } catch (error) {
+    console.warn("desk rfr locked missing deliverable scan failed", error);
   }
 
   try {

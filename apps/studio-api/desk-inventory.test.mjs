@@ -18,6 +18,7 @@ import {
   classifyAutonomousRfrGate,
   classifyPublishDispatch,
   classifyNativeCover,
+  classifyRfrLockedMissingDeliverable,
   classifyTesterNightly,
   classifyTesterCatalogAssert,
   originFromNotes,
@@ -250,6 +251,65 @@ test("promoted advancement is origin-aware and does not treat Ready for Review a
     studio_output_type: "Reel",
     thumbnail_url: "https://media.chicagoshining.com/publish/cover.jpg",
   }), null);
+  const bigJohnReel = {
+    id: "recQnS3hxKuA00cbW",
+    output_id: 391,
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    review_status: "Review Sent",
+    platform: "Instagram",
+    studio_output_type: "Reel",
+    thumbnail_url: "",
+    final_file_url: "https://drive.google.com/file/d/1Rvb7fO0HKcs3RtIRn9xZJChYzj2VWC6X/view",
+    studio_preview_url: "https://media.chicagoshining.com/studio/previews/recQnS3hxKuA00cbW/current.mp4",
+    last_modified: "2026-09-07T03:00:00Z",
+  };
+  const locked = classifyRfrLockedMissingDeliverable(bigJohnReel, now);
+  assert.equal(locked.kind, "rfr_locked_missing_deliverable");
+  assert.equal(locked.blocker, "cover");
+  assert.equal(locked.class, "code_bug");
+  assert.equal(locked.fingerprint, fingerprint("rfr_locked_missing_deliverable", "391", "cover"));
+  assert.equal(classifyRfrLockedMissingDeliverable({
+    ...bigJohnReel,
+    last_modified: "2026-09-07T03:59:00Z",
+  }, now).class, "transient");
+  assert.equal(classifyRfrLockedMissingDeliverable({
+    id: "recxUhl52Y88ZYx5Z",
+    output_id: 392,
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    review_status: "Review Sent",
+    platform: "Instagram",
+    studio_output_type: "Story",
+    thumbnail_url: "",
+    final_file_url: "https://drive.google.com/file/d/story/view",
+    studio_preview_url: "https://media.chicagoshining.com/studio/previews/recxUhl52Y88ZYx5Z/current.mp4",
+  }, now), null);
+  assert.equal(classifyRfrLockedMissingDeliverable({
+    ...bigJohnReel,
+    thumbnail_url: "https://media.chicagoshining.com/studio/previews/thumbnails/recL3Jcd7dimxybTF/cover-9x16.png",
+  }, now), null);
+  assert.equal(classifyRfrLockedMissingDeliverable({
+    id: "recDriveCover",
+    output_id: 393,
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    platform: "Facebook",
+    studio_output_type: "Reel",
+    thumbnail_url: "https://drive.google.com/uc?id=1kQ8eVS9Oo5okoa08g8iZJSfYVk39Cx6A&export=download",
+    studio_preview_url: "https://media.chicagoshining.com/studio/previews/x.mp4",
+  }, now).blocker, "cover");
+  assert.equal(classifyRfrLockedMissingDeliverable({
+    id: "recLetter",
+    output_id: 200,
+    output_status: "Ready for Review",
+    render_status: "Native Photo Route",
+    platform: "Instagram",
+    studio_output_type: "Carousel",
+    needs_lettering: true,
+    thumbnail_url: "https://media.chicagoshining.com/studio/previews/thumbnails/recX/cover-9x16.png",
+  }, now).blocker, "lettering");
+  assert.ok(CLASSIFIER_KINDS.includes("rfr_locked_missing_deliverable"));
   assert.equal(classifyTesterNightly([], now).kind, "tester_nightly");
   assert.equal(classifyTesterNightly([{
     type: "github_actions",

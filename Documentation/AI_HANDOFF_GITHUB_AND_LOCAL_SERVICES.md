@@ -65,6 +65,7 @@ Friendly launchers:
 - `DEPLOY Local Service.bat`
 - `DEPLOY Pipeline Runner.bat`
 - `DESK Companion.bat` (public `/health` probe; restart/deploy only when `STUDIO_DESK_MODE` is `infra` or higher)
+- Hourly keep-alive: `deploy/local-services/Register-DeskCompanionHourly.ps1` (VERIFY; hidden START of a down service; PLAN+DEPLOY when live stamp is behind `origin/main`)
 - `ROLLBACK Local Service.bat`
 - `INSTALL Operator Shortcuts.bat` (also creates pipeline-root shortcuts beside START / STOP / VERIFY)
 

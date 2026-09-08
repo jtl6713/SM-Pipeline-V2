@@ -128,6 +128,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "ticket_only",
   }),
   check({
+    id: "rfr_locked_missing_deliverable",
+    title: "Check for Rendered / Review Sent / Ready for Review outputs that still cannot Open review because the reviewable deliverable is incomplete",
+    lane: "service",
+    kind: "rfr_locked_missing_deliverable",
+    actor: "worker_heal",
+    heal: "resume_produce",
+  }),
+  check({
     id: "produce_stale",
     title: "Check for stale studio-produce jobs that Worker heal should still resume",
     lane: "service",

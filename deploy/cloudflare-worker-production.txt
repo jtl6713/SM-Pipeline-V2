@@ -396,4 +396,6 @@ YouTube 375 public MP4 Worker deploy: 2026-09-07 - Heal YT1 Ready to Publish as 
 
 Quality Agent catalog Worker deploy: 2026-09-07 - GET /api/ops/desk/inventory returns payload.checks. Origin-aware Promoted/AZ scanners. A2 processed leftovers. Worker 0.10.279-quality-agent. Source commit cc1d0b0.
 
+Ready-for-Review Drive cover Worker deploy: 2026-09-08 - Unlock Ready for Review when the 3D cover is still on Drive. Hourly desk companion keep-alive; hidden local service start so DEPLOY/START do not open extra consoles. Worker 0.10.280-rfr-locked-cover.
+
 

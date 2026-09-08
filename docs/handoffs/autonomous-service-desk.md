@@ -48,6 +48,7 @@ Class → actor:
 - `code_bug` → desk agent PR
 - `produce_clip_mismatch` (`clip_count_mismatch`) → code_bug immediately. Remotion `expected N, received M`. Stories often succeed (they skip T1) while Reels/TikTok/YouTube stay Ready for Render. Fix `expectedClipCount` to `len(clips)` then resume studio-produce. Do not wait for heal budget. Proven: Lincoln Park Zoo `reccEj6eVXPPKalJd` outputs 370–375.
 - `variant_heic_sprite` (`stacked_fill_crop`) → code_bug. 9:16 fill-crop looks like two photos stacked (horizontal seam). Raw iPhone HEIC tile grid went to Cloudflare Images / `ffmpeg -map 0:v:0`. Decode with ffmpeg default tile grid, recrop, restamp, re-render. Worker heal cannot replace Drive pixels. Proven: Lincoln Park Zoo IG Reel 370.
+- `rfr_locked_missing_deliverable` (`cover` / `final_file` / `lettering`) → Worker stages a public 3D still and stamps siblings. `code_bug` if `wait_thumbnail` repeats past 15 minutes. Labels can say Ready for Review; Open review is the gate. Proven: Big John’s Skeleton 391/393/395/396.
 - repeating fingerprint in 24h or `unknown` → freeze, email Joseph, stop
 
 Human sessions that find a stuck bug must POST the same `desk_incident` in that turn. Do not wait for the 15-minute tick.
@@ -60,7 +61,7 @@ Human sessions that find a stuck bug must POST the same `desk_incident` in that 
 | `origin=az-finished-video` | Auto-schedule / auto-approve when cover + caption + `Final_File_URL` exist | Operator may still change times. TikTok stays draft. |
 | Manual / other | Ready for Review | Approve publish |
 
-Do not treat Ready for Review autonomous as a finding. Do not harvest a new autonomous idea while Draft/Ready/Submitted `origin=autonomous` work is in flight.
+Do not treat Ready for Review autonomous as a finding **when Open review is actually available**. Labels plus a missing public cover (`creative_available=false`) is `rfr_locked_missing_deliverable`. Do not harvest a new autonomous idea while Draft/Ready/Submitted `origin=autonomous` work is in flight.
 
 ## Debug loop
 
@@ -82,7 +83,15 @@ Do not treat Ready for Review autonomous as a finding. Do not harvest a new auto
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Invoke-DeskCompanion.ps1"
 ```
 
-`-RestartDown` requires mode `infra` or higher. `-DeployDown` additionally PLAN/DEPLOY the matching service from `main` when public `/health` is still down after VERIFY. Dirty checkout → stop. Never `reset --hard`.
+`-RestartDown` requires mode `infra` or higher. `-DeployDown` additionally PLAN/DEPLOY the matching service from `main` when public `/health` is still down after VERIFY. Dirty checkout blocks DEPLOY and git reset, not START/VERIFY. Never `reset --hard`.
+
+Hourly keep-alive on this Windows machine (Task Scheduler task `ChicagoShining Desk Companion Hourly`, user `Joe`, interactive logon):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Register-DeskCompanionHourly.ps1"
+```
+
+Each tick: public `/health`; if a required probe is down, start **that** service hidden (`Start-ChicagoShiningHidden.ps1`, no extra consoles). If a live `.smv2-deployment.json` SHA is strictly behind `origin/main`, PLAN+DEPLOY **one** service from `main` (`-Yes`) so a merged enhancement restarts that listener. DEPLOY also starts hidden. Dirty checkout still allows START and that DEPLOY (isolated worktree). Never `reset --hard`. Cap: 1 service per tick, 2 per service per day. Logs: `Deployment Logs\Local Services\desk-companion-hourly-YYYYMMDD.log`. Unregister with `-Unregister`. The PC must stay on and logged in (locked is OK). Cursor Automations cannot restart these Windows listeners.
 
 Caps file: `D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\Local Services\desk-caps.json`.
 
@@ -108,7 +117,7 @@ Leave mode at `observe` or `patch` until those rules have been proven on real in
 
 ## Recurrence watches
 
-Same-place autonomous harvest and YouTube Drive-source Failed rows: `docs/handoffs/autonomous-same-topic-harvest.md`. Inventory kinds `autonomous_topic_collision` (`data_repair`) and `youtube_private_source_fail` (`transient` → Worker AP0 + YT reset). Keep manual packages; do not recreate 2026-09-07 zoo extras; never `thumb_offset` when a native cover is required.
+Same-place autonomous harvest, YouTube Drive-source Failed rows, and Ready-for-Review outputs that still cannot Open review: `docs/handoffs/autonomous-same-topic-harvest.md`. Inventory kinds `autonomous_topic_collision` (`data_repair`), `youtube_private_source_fail` (`transient` → Worker AP0 + YT reset), and `rfr_locked_missing_deliverable` (`transient` → Worker stages the public 3D still; `code_bug` if `wait_thumbnail` repeats past 15 minutes). Keep manual packages; do not recreate 2026-09-07 zoo extras; never `thumb_offset` when a native cover is required. Proven RFR-locked fixture: Big John’s Skeleton 391/393/395/396.
 
 ## Out of scope
 

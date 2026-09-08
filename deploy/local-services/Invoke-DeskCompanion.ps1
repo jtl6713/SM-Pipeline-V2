@@ -20,8 +20,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$VerifyBat = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services\verify-chicagoshining-local-services.bat'
-$StartBat = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services\start-chicagoshining-local-services.bat'
+$VerifyPs1 = Join-Path $PipelineRoot 'Source Control\Production-Start-Stop-Verify-Services\verify-chicagoshining-local-services.ps1'
+$HiddenStart = Join-Path $RepoRoot 'deploy\local-services\Start-ChicagoShiningHidden.ps1'
 $DeployScript = Join-Path $RepoRoot 'deploy\local-services\Deploy-SMService.ps1'
 $CapsPath = Join-Path $PipelineRoot 'Deployment Logs\Local Services\desk-caps.json'
 
@@ -30,7 +30,7 @@ $HealthTargets = @(
     @{ Id = 'remotion-renderer'; Url = 'https://render.chicagoshining.com/health'; Service = 'remotion-renderer' }
     @{ Id = 'frame-extractor'; Url = 'https://frames.chicagoshining.com/health'; Service = 'frame-extractor' }
     @{ Id = 'video-compressor'; Url = 'https://compress.chicagoshining.com/health'; Service = $null }
-    @{ Id = 'timing-engine'; Url = 'https://timing.chicagoshining.com/health'; Service = 'timing-engine' }
+    @{ Id = 'timing-engine'; Url = 'https://timing.chicagoshining.com/health'; Service = 'timing-engine'; WarnOnly = $true }
     @{ Id = 'watermark'; Url = 'https://watermark.chicagoshining.com/health'; Service = 'watermark' }
     @{ Id = 'voiceover-normalizer'; Url = 'https://voiceover.chicagoshining.com/health'; Service = 'voiceover-normalizer' }
     @{ Id = 'youtube-uploader'; Url = 'https://youtube-upload.chicagoshining.com/health'; Service = 'youtube-uploader' }
@@ -62,7 +62,7 @@ function Get-GitState {
     try {
         $branch = (git rev-parse --abbrev-ref HEAD).Trim()
         $dirty = [bool](git status --porcelain)
-        git fetch origin main 2>$null | Out-Null
+        cmd.exe /c "git fetch origin main >nul 2>&1" | Out-Null
         $local = (git rev-parse HEAD).Trim()
         $remote = (git rev-parse origin/main).Trim()
         return @{
@@ -84,6 +84,7 @@ function Get-DeskCaps {
         auto_prs = 0
         auto_merges = 0
         restarts = @{}
+        noop_commits = @{}
         max_auto_prs_per_day = 3
         max_auto_merges_per_day = 1
         max_restarts_per_service_per_day = 2
@@ -91,6 +92,9 @@ function Get-DeskCaps {
     if (Test-Path -LiteralPath $CapsPath) {
         try {
             $parsed = Get-Content -LiteralPath $CapsPath -Raw | ConvertFrom-Json
+            if ($parsed.noop_commits) {
+                $parsed.noop_commits.PSObject.Properties | ForEach-Object { $caps.noop_commits[$_.Name] = [string]$_.Value }
+            }
             if ($parsed.date -eq $today) {
                 $caps.auto_prs = [int]$parsed.auto_prs
                 $caps.auto_merges = [int]$parsed.auto_merges
@@ -119,7 +123,45 @@ function Test-AllowlistedPath([string]$Path) {
         -or $rel -match '^services/pipeline-runner/item4/'
 }
 
-if ($DeskMode -eq '') { $DeskMode = 'observe' }
+$RuntimePaths = @{
+    'frame-extractor' = 'Services\Frame_Extractor'
+    'remotion-renderer' = 'Services\Remotion_Renderer'
+    'watermark' = 'Services\Watermark'
+    'voiceover-normalizer' = 'Services\voiceover-normalizer\service'
+    'youtube-uploader' = 'Services\youtube-uploader\service'
+    'pipeline-runner' = 'Services\pipeline-runner\service'
+    'timing-engine' = 'Services\timing-engine\service'
+}
+
+function Get-LiveDeployedCommit([string]$ServiceName) {
+    $rel = $RuntimePaths[$ServiceName]
+    if (-not $rel) { return $null }
+    $manifest = Join-Path $PipelineRoot ($rel + '\.smv2-deployment.json')
+    if (-not (Test-Path -LiteralPath $manifest)) { return $null }
+    try {
+        $parsed = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+        return [string]$parsed.deployed_commit
+    } catch {
+        return $null
+    }
+}
+
+function Test-LiveBehindOriginMain([string]$LiveCommit, [string]$OriginMain) {
+    if (-not $LiveCommit -or -not $OriginMain) { return $false }
+    if ($LiveCommit -eq $OriginMain) { return $false }
+    Push-Location $RepoRoot
+    try {
+        cmd.exe /c "git merge-base --is-ancestor $LiveCommit $OriginMain >nul 2>&1" | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        Pop-Location
+    }
+}
+
+if ($DeskMode -eq '') {
+    if ($env:STUDIO_DESK_MODE) { $DeskMode = $env:STUDIO_DESK_MODE }
+    else { $DeskMode = 'observe' }
+}
 $rank = Get-DeskRank $DeskMode
 $git = Get-GitState
 $caps = Get-DeskCaps
@@ -133,13 +175,14 @@ foreach ($target in $HealthTargets) {
         ok = [bool]$probe.Ok
         status = $probe.Status
         error = $probe.Error
+        warnOnly = [bool]$target.WarnOnly
     }
 }
 
-$down = @($probes | Where-Object { -not $_.ok })
+$down = @($probes | Where-Object { -not $_.ok -and -not $_.warnOnly })
 Write-Host "Desk companion mode=$DeskMode dirty=$($git.Dirty) behind=$($git.Behind) down=$($down.Count)"
 $probes | ForEach-Object {
-    $state = if ($_.ok) { 'ok' } else { 'DOWN' }
+    $state = if ($_.ok) { 'ok' } elseif ($_.warnOnly) { 'WARN' } else { 'DOWN' }
     Write-Host ("  {0,-22} {1}" -f $_.id, $state)
 }
 
@@ -181,48 +224,90 @@ if ($rank -lt 2) {
     exit 0
 }
 
-if ($git.Dirty) {
-    Write-Host 'STOP: dirty Git checkout. Will not SYNC, restart-deploy, or reset --hard.'
-    exit 3
-}
-
+$didStart = $false
 if ($down.Count -eq 0) {
     Write-Host 'All public health probes passed.'
+} elseif ($RestartDown -and (Test-Path -LiteralPath $HiddenStart) -and (Test-Path -LiteralPath $VerifyPs1)) {
+    if ($git.Dirty) {
+        Write-Host 'Git checkout is dirty. Hidden START/VERIFY still allowed.'
+    }
+    Write-Host 'Public health failed. Starting down services hidden (no extra console windows).'
+    foreach ($row in $down) {
+        $svc = $row.service
+        if (-not $svc) { $svc = $row.id }
+        Write-Host "Hidden start $svc"
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HiddenStart -Service $svc -StopFirst
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "WARN hidden start failed for $svc (exit $LASTEXITCODE)"
+        }
+    }
+    Start-Sleep -Seconds 20
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $VerifyPs1
+    $didStart = $true
+}
+
+if (-not $DeployDown) {
+    if ($git.Dirty) { Write-Host 'Git checkout is dirty. Companion will not SYNC or DEPLOY.' }
     exit 0
 }
 
-if ($RestartDown -and (Test-Path -LiteralPath $StartBat) -and (Test-Path -LiteralPath $VerifyBat)) {
-    Write-Host 'Public health failed. Running START then VERIFY (existing bats).'
-    & cmd.exe /c "`"$StartBat`""
-    & cmd.exe /c "`"$VerifyBat`""
+if ($didStart) {
+    Write-Host 'Skipped origin/main DEPLOY this tick because START already relaunched live Services.'
+    exit 0
 }
 
-if ($DeployDown) {
-    $deployed = 0
-    foreach ($row in $down) {
-        if (-not $row.service) {
-            Write-Host "SKIP deploy for $($row.id): not in Deploy-SMService selector (use dedicated compressor install)."
-            continue
-        }
-        $used = 0
-        if ($caps.restarts.ContainsKey($row.service)) { $used = [int]$caps.restarts[$row.service] }
-        if ($used -ge $caps.max_restarts_per_service_per_day) {
-            Write-Host "SKIP $($row.service): daily restart cap."
-            continue
-        }
-        if ($deployed -ge 1) {
-            Write-Host 'One service per companion run. Remaining downs left for the next tick.'
-            break
-        }
-        Write-Host "PLAN+DEPLOY $($row.service) from origin/main"
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DeployScript -Service $row.service -PlanOnly
-        if ($LASTEXITCODE -ne 0) { throw "PLAN failed for $($row.service)" }
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DeployScript -Service $row.service
-        if ($LASTEXITCODE -ne 0) { throw "DEPLOY failed for $($row.service)" }
-        $caps.restarts[$row.service] = $used + 1
-        $deployed++
-    }
-    Save-DeskCaps $caps
+if ($git.Dirty) {
+    Write-Host 'Git checkout is dirty. DEPLOY still uses an origin/main worktree. Will not reset --hard.'
 }
+
+$behind = New-Object System.Collections.Generic.List[string]
+foreach ($svc in @('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','pipeline-runner','timing-engine')) {
+    $live = Get-LiveDeployedCommit $svc
+    if (Test-LiveBehindOriginMain $live $git.OriginMain) {
+        Write-Host ("  {0} live={1} origin/main={2} (behind)" -f $svc, $live.Substring(0, [Math]::Min(12, $live.Length)), $git.OriginMain.Substring(0, 12))
+        $behind.Add($svc)
+    }
+}
+
+if ($behind.Count -eq 0) {
+    Write-Host 'No live service stamp is behind origin/main. No enhancement DEPLOY.'
+    exit 0
+}
+
+$deployed = 0
+foreach ($svc in $behind) {
+    $used = 0
+    if ($caps.restarts.ContainsKey($svc)) { $used = [int]$caps.restarts[$svc] }
+    if ($used -ge $caps.max_restarts_per_service_per_day) {
+        Write-Host "SKIP ${svc}: daily restart cap."
+        continue
+    }
+    if ($caps.noop_commits.ContainsKey($svc) -and $caps.noop_commits[$svc] -eq $git.OriginMain) {
+        Write-Host "SKIP ${svc}: already planned against this origin/main with no file changes."
+        continue
+    }
+    Write-Host "PLAN $svc from origin/main (live stamp behind merged main)"
+    $planLines = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DeployScript -Service $svc -PlanOnly 2>&1
+    $planCode = $LASTEXITCODE
+    $planOut = $planLines | Out-String
+    Write-Host $planOut
+    if ($planCode -ne 0) { throw "PLAN failed for $svc" }
+    if ($planOut -match 'Files:\s+0 added,\s+0 changed,\s+0 removed') {
+        Write-Host "SKIP ${svc}: origin/main has no file changes vs live. Not restarting."
+        $caps.noop_commits[$svc] = $git.OriginMain
+        Save-DeskCaps $caps
+        continue
+    }
+    if ($deployed -ge 1) {
+        Write-Host 'One service per companion run. Remaining file-changing deploys left for the next tick.'
+        break
+    }
+    Write-Host "DEPLOY $svc from origin/main"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $DeployScript -Service $svc -Yes
+    if ($LASTEXITCODE -ne 0) { throw "DEPLOY failed for $svc" }
+    $caps.restarts[$svc] = $used + 1
+    $deployed++
+}
+Save-DeskCaps $caps
 
 exit 0
