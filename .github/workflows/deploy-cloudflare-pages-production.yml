@@ -60,9 +60,14 @@ jobs:
           cp -a apps/studio-web/assets/. /tmp/pages-deploy/assets/
           mkdir -p /tmp/pages-deploy/docs
           test -s docs/handoffs/Autonomous-Service-Agent.docx
+          test -s docs/handoffs/Quality-Agent.docx
           cp docs/handoffs/Autonomous-Service-Agent.docx /tmp/pages-deploy/docs/Autonomous-Service-Agent.docx
+          cp docs/handoffs/Quality-Agent.docx /tmp/pages-deploy/docs/Quality-Agent.docx
           if [ -f apps/studio-web/docs/Autonomous-Service-Agent.docx ]; then
             cp apps/studio-web/docs/Autonomous-Service-Agent.docx /tmp/pages-deploy/docs/Autonomous-Service-Agent.docx
+          fi
+          if [ -f apps/studio-web/docs/Quality-Agent.docx ]; then
+            cp apps/studio-web/docs/Quality-Agent.docx /tmp/pages-deploy/docs/Quality-Agent.docx
           fi
 
       - name: Read existing Pages production branch

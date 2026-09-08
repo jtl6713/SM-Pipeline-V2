@@ -8,8 +8,14 @@ from studio_produce.job import derive_route, finished_origin_kind, is_finished_r
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
 from studio_produce.media import asset_is_video, playable_url
 from studio_produce.queue import rebuild_variant_manifest
-from studio_produce.stamp import assign_clip_frames, finished_source_package, is_native_photo, source_package, stamp_fields
-from studio_produce.steps import pick_resume_step, render_progress_detail, thumbnail_required, voiceover_required
+from studio_produce.stamp import assign_clip_frames, finished_source_package, is_native_photo, photo_sequence_url, source_package, stamp_fields
+from studio_produce.steps import (
+    _is_delay_render_failure,
+    pick_resume_step,
+    render_progress_detail,
+    thumbnail_required,
+    voiceover_required,
+)
 from studio_produce.thumbnail_prompt import COLORFUL_3D_RULE, build_finished_thumbnail_prompt
 
 
@@ -26,6 +32,16 @@ def test_new_job_and_labels():
     assert job["detail"] == STEP_LABELS["themes"]
     assert job["percent"] == STEP_PERCENT["themes"]
     assert job["job_id"].startswith("spj-")
+
+
+def test_delay_render_failure_requeues_exit_code_1():
+    assert _is_delay_render_failure(
+        {"fields": {"Remotion_Error_Message": "Remotion render failed with exit code 1"}}
+    )
+    assert _is_delay_render_failure(
+        {"fields": {"Final_File_Error_Message": "delayRender() call was not cleared"}}
+    )
+    assert not _is_delay_render_failure({"fields": {"Remotion_Error_Message": "asset 404"}})
 
 
 def test_render_progress_detail_counts_ready_outputs():
@@ -687,6 +703,46 @@ def test_stamp_preserves_ready_timing_and_clip_list():
     assert "Timing_Status" not in fields
     assert "Render_Clip_List_JSON" not in fields
     assert "Render_Total_Frames" not in fields
+
+
+def test_photo_sequence_url_ignores_stale_fill_crop_master_preview():
+    master = {
+        "preview_url": "https://media.chicagoshining.com/studio/previews/item4/recPR/ITEM4-VARIANT-fill-crop-v2-old.jpg",
+    }
+    variant = {
+        "preview_url": "https://media.chicagoshining.com/studio/previews/item4/recPR/ITEM4-VARIANT-fill-crop-v2-new.jpg",
+    }
+    assert photo_sequence_url(master, variant) == variant["preview_url"]
+    jpeg_master = {"preview_url": "https://media.chicagoshining.com/studio/previews/item4/recPR/master-one.jpg"}
+    assert photo_sequence_url(jpeg_master, variant) == jpeg_master["preview_url"]
+
+
+def test_stamp_recrop_rewrites_clip_list_and_reopens_timing():
+    package = {
+        "native": False,
+        "story": False,
+        "clip_count": 1,
+        "total_frames": 900,
+        "clips": [{"url": "https://media.chicagoshining.com/studio/previews/item4/a/ITEM4-VARIANT-fill-crop-v2-new.jpg", "media_asset_record_id": "recPHOTO00000001"}],
+        "effective": {"music_url": "https://media.example/track.mp3", "background_music_mode": "Yes"},
+        "render_clip_list_json": '[{"url":"https://media.chicagoshining.com/studio/previews/item4/a/ITEM4-VARIANT-fill-crop-v2-new.jpg","media_kind":"photo"}]',
+        "selected_assets_json": "{}",
+        "output_filename": "studio-test.mp4",
+    }
+    fields = stamp_fields(
+        package,
+        None,
+        existing={
+            "fields": {
+                "Timing_Status": "Ready",
+                "Timing_Timeline_JSON": '{"schema_version":"timing.timeline.1"}',
+                "Render_Clip_List_JSON": '[{"url":"https://media.chicagoshining.com/studio/previews/item4/a/ITEM4-VARIANT-fill-crop-v2-old.jpg","media_kind":"photo"}]',
+            }
+        },
+    )
+    assert fields["Timing_Status"] == "Pending"
+    assert fields["Timing_Timeline_JSON"] is None
+    assert "fill-crop-v2-new.jpg" in fields["Render_Clip_List_JSON"]
 
 
 def test_stamp_heals_pending_when_timeline_already_exists():

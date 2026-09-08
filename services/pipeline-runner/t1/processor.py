@@ -209,6 +209,7 @@ def process_one(
             "Music_Duration_Seconds": duration,
             "Render_Clip_List_JSON": json_text(timed),
             "Render_Total_Frames": total_frames,
+            "Selected_Clip_Count": len(timed),
         }
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)
         if content_item_id:

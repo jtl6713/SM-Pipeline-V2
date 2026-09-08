@@ -5,6 +5,7 @@ import {
   parseDeskMode,
   deskModeAllows,
   classifyProduceJob,
+  errorClassFromText,
   classifyRenderRow,
   classifyCropRow,
   classifyAutonomousRequest,
@@ -12,6 +13,15 @@ import {
   classifyYoutubePrivateSourceFail,
   classifyHealthTarget,
   classifyIntakeResidue,
+  classifyPromotedNotRfr,
+  classifyAzNotAutoFinished,
+  classifyAutonomousRfrGate,
+  classifyPublishDispatch,
+  classifyNativeCover,
+  classifyTesterNightly,
+  classifyTesterCatalogAssert,
+  originFromNotes,
+  CLASSIFIER_KINDS,
   fingerprint,
   pathIsAutoMergeAllowlisted,
   deskMayAutomerge,
@@ -59,6 +69,19 @@ test("produce jobs escalate after heal budget then stay transient while retries 
   assert.equal(escalated.kind, "produce_escalated");
   assert.equal(escalated.class, "code_bug");
   assert.equal(escalated.fingerprint, fingerprint("produce_escalated", "recJob1", "heal_exhausted"));
+  const mismatch = classifyProduceJob({
+    request_id: "reccEj6eVXPPKalJd",
+    step: "blocked",
+    job_id: "spj-1",
+    updated_at: "2026-09-07T15:21:07Z",
+    error: "Remotion /render failed (500): Render clip count mismatch before asset download: expected 20, received 28.",
+    heal: {},
+  }, now);
+  assert.equal(mismatch.kind, "produce_clip_mismatch");
+  assert.equal(mismatch.class, "code_bug");
+  assert.equal(mismatch.actor, "desk_agent");
+  assert.equal(mismatch.fingerprint, fingerprint("produce_clip_mismatch", "reccEj6eVXPPKalJd", "clip_count_mismatch"));
+  assert.equal(errorClassFromText("clip count mismatch before asset download"), "clip_count_mismatch");
 });
 
 test("render, orphan, crop, autonomous, and health classifiers", () => {
@@ -116,10 +139,125 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     size: 16148070,
   }).kind, "intake_parked");
   assert.equal(classifyIntakeResidue({
+    id: "driveProcessed",
+    name: "Lincoln Park Zoo 20.MOV",
+    size: 16148070,
+    existing_media_asset_id: "recMedia1",
+    duplicate_reason: "drive_id",
+    parents: ["ingestion", "photos"],
+  }).kind, "intake_processed_residue");
+  assert.equal(classifyIntakeResidue({
     id: "driveHuge",
     name: "Huge.MOV",
     size: 150000000,
+  }).kind, "intake_oversize");
+  assert.equal(classifyIntakeResidue({
+    id: "driveHugeProcessed",
+    name: "Huge.MOV",
+    size: 150000000,
+    existing_media_asset_id: "recOld",
+  }).kind, "intake_processed_residue");
+});
+
+test("promoted advancement is origin-aware and does not treat Ready for Review as a finding", () => {
+  const now = Date.parse("2026-09-07T04:00:00Z");
+  assert.equal(originFromNotes("origin=autonomous cited_trend=Navy Pier"), "autonomous");
+  assert.equal(classifyPromotedNotRfr({
+    status: "Promoted",
+    notes: "origin=autonomous",
+    requestId: "recA3",
+    outputs: [{ id: "out1", output_status: "Ready for Review" }],
+    nowMs: now,
   }), null);
+  assert.equal(classifyPromotedNotRfr({
+    status: "Promoted",
+    notes: "origin=autonomous",
+    requestId: "recA4",
+    outputs: [{
+      id: "out2",
+      output_status: "In Production",
+      last_modified: "2026-09-07T03:00:00Z",
+    }],
+    nowMs: now,
+  }).kind, "promoted_not_rfr");
+  assert.equal(classifyPromotedNotRfr({
+    status: "Promoted",
+    notes: "origin=az-finished-video",
+    requestId: "recAz1",
+    outputs: [{ id: "out3", output_status: "In Production", last_modified: "2026-09-07T03:00:00Z" }],
+    nowMs: now,
+  }), null);
+  assert.equal(classifyAzNotAutoFinished({
+    status: "Promoted",
+    notes: "origin=az-finished-video",
+    requestId: "recAz2",
+    outputs: [{
+      id: "azOut",
+      output_status: "Ready for Review",
+      review_status: "",
+      final_file_url: "https://media.example/final.mp4",
+      thumbnail_url: "https://media.chicagoshining.com/publish/cover.jpg",
+      output_caption: "Navy Pier at dusk",
+      studio_output_type: "Reel",
+    }],
+  }).kind, "az_not_auto_finished");
+  assert.equal(classifyAzNotAutoFinished({
+    status: "Promoted",
+    notes: "origin=az-finished-video",
+    requestId: "recAz3",
+    outputs: [{
+      output_status: "Approved for Publishing",
+      review_status: "Approved",
+      final_file_url: "https://media.example/final.mp4",
+      thumbnail_url: "https://media.chicagoshining.com/publish/cover.jpg",
+      output_caption: "caption",
+      studio_output_type: "Reel",
+    }],
+  }), null);
+  assert.equal(classifyAutonomousRfrGate({
+    notes: "origin=autonomous",
+    requestId: "recA5",
+    outputs: [{ id: "rfr1", output_status: "Ready for Review" }],
+  }), null);
+  assert.equal(classifyAutonomousRfrGate({
+    notes: "origin=autonomous",
+    requestId: "recA6",
+    outputs: [{ id: "pub1", output_status: "Published", review_status: "", published_at: "2026-09-07T03:00:00Z" }],
+  }).kind, "autonomous_rfr_gate");
+  assert.equal(classifyPublishDispatch({
+    id: "recP1",
+    output_status: "Approved for Publishing",
+    platform: "Instagram",
+    last_modified: "2026-09-07T03:00:00Z",
+  }, now).kind, "publish_never_dispatch");
+  assert.equal(classifyPublishDispatch({
+    id: "recP2",
+    output_status: "Approved for Publishing",
+    platform: "TikTok",
+    last_modified: "2026-09-07T03:00:00Z",
+  }, now), null);
+  assert.equal(classifyNativeCover({
+    id: "recCvr",
+    output_status: "Published",
+    platform: "Instagram",
+    studio_output_type: "Reel",
+    thumbnail_url: "https://drive.google.com/uc?id=abc",
+  }).kind, "native_cover_missing");
+  assert.equal(classifyNativeCover({
+    id: "recCvrOk",
+    output_status: "Published",
+    platform: "Instagram",
+    studio_output_type: "Reel",
+    thumbnail_url: "https://media.chicagoshining.com/publish/cover.jpg",
+  }), null);
+  assert.equal(classifyTesterNightly([], now).kind, "tester_nightly");
+  assert.equal(classifyTesterNightly([{
+    type: "github_actions",
+    created_at: "2026-09-07T03:30:00Z",
+    payload: { suite: "Regression suite", conclusion: "success" },
+  }], now), null);
+  assert.equal(classifyTesterCatalogAssert(), null);
+  assert.ok(CLASSIFIER_KINDS.includes("promoted_not_rfr"));
   const zooCollision = classifyAutonomousTopicCollision({
     place: "lincoln park zoo",
     keep: { id: "recEMuJACqAnqsRPu", title: "Lincoln Park Zoo - Worth the trip?" },
@@ -220,5 +358,7 @@ test("inventory payload summarizes escalate counts without inventing work", () =
   assert.equal(payload.summary.total, 2);
   assert.equal(payload.summary.counts.produce_escalated, 1);
   assert.equal(payload.summary.needs_desk, true);
+  assert.ok(Array.isArray(payload.checks));
+  assert.equal(payload.checks.some((row) => row.kind === "produce_escalated" && row.status === "finding"), true);
   assert.equal(summarizeIncidents([]).total, 0);
 });

@@ -205,6 +205,27 @@ class GoogleDriveClient:
         response.raise_for_status()
         return response.json()
 
+    def remove_parent(self, file_id: str, parent_id: str) -> dict[str, Any]:
+        token = self.access_token()
+        parent = str(parent_id or "").strip()
+        drive_id = str(file_id or "").strip()
+        if not drive_id:
+            raise ValueError("file_id is required")
+        if not parent:
+            raise ValueError("parent_id is required")
+        response = requests.patch(
+            f"https://www.googleapis.com/drive/v3/files/{drive_id}",
+            params={
+                "removeParents": parent,
+                "supportsAllDrives": "true",
+                "fields": "id,name,parents",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()
+
     def delete_file(self, file_id: str) -> None:
         token = self.access_token()
         response = requests.delete(

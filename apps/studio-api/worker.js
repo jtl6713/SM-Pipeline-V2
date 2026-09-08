@@ -5,13 +5,20 @@ import {
   PUBLIC_HEALTH_TARGETS,
   buildDeskInventoryPayload,
   classifyAutonomousRequest,
+  classifyAutonomousRfrGate,
   classifyAutonomousTopicCollision,
+  classifyAzNotAutoFinished,
   classifyCropRow,
   classifyHealthTarget,
   classifyIntakeResidue,
+  classifyNativeCover,
   classifyPreparingGap,
   classifyProduceJob,
+  classifyPromotedNotRfr,
+  classifyPublishDispatch,
   classifyRenderRow,
+  classifyTesterCatalogAssert,
+  classifyTesterNightly,
   classifyYoutubePrivateSourceFail,
   parseDeskCaps,
   parseDeskMode,
@@ -306,7 +313,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.278-youtube-375-public-mp4",
+          version: "0.10.279-quality-agent",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -324,6 +331,7 @@ export default {
           studio_library_heic_preview_v1: true,
           studio_a3_heic_jpeg_v1: true,
           studio_intake_parked_heal_v1: true,
+          studio_quality_agent_v1: true,
           studio_oversized_list_refresh_v1: true,
           studio_library_published_files_v1: true,
           studio_native_grid_cover_v1: true,
@@ -28682,10 +28690,39 @@ async function probeDeskHealthTarget(target) {
   }
 }
 
+function mapDeskInventoryOutput(record, contentToRequest = new Map()) {
+  const note = String(f(record, "Studio_Publish_Dispatch_Note") || "");
+  return {
+    id: record.id,
+    output_status: f(record, "Output_Status"),
+    render_status: f(record, "Render_Status"),
+    remotion_job_id: f(record, "Remotion_Job_ID"),
+    final_file_url: f(record, "Final_File_URL"),
+    thumbnail_url: f(record, "Thumbnail_URL"),
+    output_caption: f(record, "Output_Caption"),
+    review_status: f(record, "Review_Status"),
+    publish_status: f(record, "Publish_Status"),
+    published_at: f(record, "Published_At"),
+    platform: f(record, "Platform"),
+    studio_output_type: f(record, "Studio_Output_Type"),
+    platform_output_type: f(record, "Platform_Output_Type"),
+    last_modified: f(record, "Last_Modified") || f(record, "Updated_At") || "1970-01-01T00:00:00Z",
+    request_id: studioOutputProductionRequestId(record, contentToRequest)
+      || studioFirstLinkedId(f(record, "Production Requests")),
+    cover_attached: note.includes("facebook-cover=attached"),
+  };
+}
+
+function deskOutputsForRequest(outputs, requestId) {
+  const id = String(requestId || "").trim();
+  if (!id) return [];
+  return (outputs || []).filter((row) => String(row.request_id || "").trim() === id);
+}
+
 async function gatherStudioDeskInventory(env) {
   const chicago = chicagoNowParts();
   const nowMs = Date.now();
-  const [modeRow, capsRow, produceRows, readyNoJob, longRendering, orphans, preparing, cropProcessing, cropError, autonomousRows, azRows] = await Promise.all([
+  const [modeRow, capsRow, produceRows, readyNoJob, longRendering, orphans, preparing, cropProcessing, cropError, autonomousRows, azRows, promotedRows, autonomousPromoted, notRfrOutputs, azReadyOutputs, approvedDispatch, publishedCovers] = await Promise.all([
     studioSettingsByName(env, DESK_SETTING_NAME).catch(() => null),
     studioSettingsByName(env, DESK_CAPS_SETTING_NAME).catch(() => null),
     listRecords(env, PRODUCTION_REQUEST_TABLE, {
@@ -28726,22 +28763,52 @@ async function gatherStudioDeskInventory(env) {
       limit: 8,
       filterFormula: 'AND({Test_Run_ID}=BLANK(),FIND("origin=az-finished-video",{Production_Notes}&""),{Request_Status}!="Cancelled")',
     }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Request_Status}="Promoted")',
+    }).catch(() => []),
+    listRecords(env, PRODUCTION_REQUEST_TABLE, {
+      limit: 8,
+      filterFormula: "AND({Test_Run_ID}=BLANK(),FIND('origin=autonomous',{Production_Notes}&'')>0,{Request_Status}='Promoted')",
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: `AND(${STUDIO_CONTINUATION_CANDIDATE_FORMULA},{Output_Status}!="Ready for Review",${studioLastModifiedStaleFormula(15)})`,
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Output_Status}="Ready for Review",{Final_File_URL}!="",{Output_Caption}!="",{Thumbnail_URL}!="",OR({Review_Status}="",{Review_Status}="Review Sent"))',
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: `AND({Test_Run_ID}=BLANK(),{Output_Status}="Approved for Publishing",{Published_At}=BLANK(),{Platform}!="TikTok",${studioLastModifiedStaleFormula(15)})`,
+    }).catch(() => []),
+    listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 8,
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),OR({Output_Status}="Published",{Publish_Status}="Published"),OR({Studio_Output_Type}="Reel",{Studio_Output_Type}="Short",{Platform_Output_Type}="Instagram Reel",{Platform_Output_Type}="Facebook Reel",{Platform_Output_Type}="YouTube Short"))',
+    }).catch(() => []),
   ]);
 
   const mode = parseDeskMode(f(modeRow, "Setting_Value"));
   const caps = parseDeskCaps(f(capsRow, "Setting_Value"), chicago.date);
   const incidents = [];
   const seen = new Set();
+  const scannedKinds = new Set();
   const push = (row) => {
     if (!row?.fingerprint || seen.has(row.fingerprint)) return;
     seen.add(row.fingerprint);
     incidents.push(row);
   };
+  const scanned = (...kinds) => {
+    for (const kind of kinds) scannedKinds.add(kind);
+  };
 
+  scanned("produce_stale", "produce_escalated", "produce_clip_mismatch");
   for (const record of produceRows || []) {
     const job = parseStudioProductionJob(record) || {};
     push(classifyProduceJob({ ...job, request_id: record.id }, nowMs));
   }
+  scanned("render_ready_no_job", "render_long", "produce_orphan");
   for (const record of readyNoJob || []) {
     push(classifyRenderRow({
       id: record.id,
@@ -28768,9 +28835,11 @@ async function gatherStudioDeskInventory(env) {
       published_at: f(record, "Published_At"),
     }, nowMs));
   }
+  scanned("variant_preparing");
   for (const record of preparing || []) {
     push(classifyPreparingGap({ id: record.id, studio_variant_status: f(record, "Studio_Variant_Status") }));
   }
+  scanned("crop_stale", "crop_parked");
   for (const record of [...(cropProcessing || []), ...(cropError || [])]) {
     push(classifyCropRow({
       id: record.id,
@@ -28780,6 +28849,7 @@ async function gatherStudioDeskInventory(env) {
       updated_at: f(record, "Updated_At"),
     }, nowMs));
   }
+  scanned("autonomous_stalled", "autonomous_produce_gap", "az_stalled");
   for (const record of [...(autonomousRows || []), ...(azRows || [])]) {
     const job = parseStudioProductionJob(record) || {};
     push(classifyAutonomousRequest({
@@ -28788,6 +28858,55 @@ async function gatherStudioDeskInventory(env) {
       job: { ...job, request_id: record.id },
       nowMs,
     }));
+  }
+
+  const contentToRequest = new Map();
+  for (const record of [...(promotedRows || []), ...(autonomousPromoted || []), ...(azRows || []), ...(autonomousRows || [])]) {
+    const contentId = studioFirstLinkedId(f(record, "Promoted_Content_Item"));
+    if (contentId && !contentToRequest.has(contentId)) contentToRequest.set(contentId, record.id);
+  }
+  const mapOut = (record) => mapDeskInventoryOutput(record, contentToRequest);
+  const notRfr = (notRfrOutputs || []).map(mapOut);
+  const azReady = (azReadyOutputs || []).map(mapOut);
+  scanned("promoted_not_rfr");
+  for (const record of promotedRows || []) {
+    const notes = studioRequestNotesText(record);
+    push(classifyPromotedNotRfr({
+      status: f(record, "Request_Status"),
+      notes,
+      outputs: deskOutputsForRequest(notRfr, record.id),
+      requestId: record.id,
+      nowMs,
+    }));
+  }
+  scanned("az_not_auto_finished");
+  for (const record of azRows || []) {
+    push(classifyAzNotAutoFinished({
+      status: f(record, "Request_Status"),
+      notes: studioRequestNotesText(record),
+      outputs: deskOutputsForRequest(azReady, record.id),
+      requestId: record.id,
+    }));
+  }
+  scanned("autonomous_rfr_gate");
+  const leakedOutputs = [
+    ...((approvedDispatch || []).map(mapOut)),
+    ...((publishedCovers || []).map(mapOut)),
+  ];
+  for (const record of autonomousPromoted || []) {
+    push(classifyAutonomousRfrGate({
+      notes: studioRequestNotesText(record),
+      outputs: deskOutputsForRequest(leakedOutputs, record.id),
+      requestId: record.id,
+    }));
+  }
+  scanned("publish_never_dispatch");
+  for (const record of approvedDispatch || []) {
+    push(classifyPublishDispatch(mapOut(record), nowMs));
+  }
+  scanned("native_cover_missing");
+  for (const record of publishedCovers || []) {
+    push(classifyNativeCover(mapOut(record)));
   }
 
   try {
@@ -28812,6 +28931,7 @@ async function gatherStudioDeskInventory(env) {
       status: f(record, "Candidate_Status"),
       createdTime: record.createdTime,
     }));
+    scanned("autonomous_topic_collision");
     for (const collision of collectAutonomousTopicCollisions(packages)) {
       push(classifyAutonomousTopicCollision(collision));
     }
@@ -28824,6 +28944,7 @@ async function gatherStudioDeskInventory(env) {
       limit: 8,
       filterFormula: `AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,${YOUTUBE_PRIVATE_SOURCE_HEAL_INNER})`,
     }).catch(() => []);
+    scanned("youtube_private_source_fail");
     for (const record of youtubeFailed || []) {
       push(classifyYoutubePrivateSourceFail(mapYoutubePrivateSourceDeskRow(record)));
     }
@@ -28834,16 +28955,30 @@ async function gatherStudioDeskInventory(env) {
   try {
     const { response, payload } = await item4PulsePipelineStage(env, "a2", { extra: { dry_run: true } }, "A2");
     const routes = response.ok ? (payload?.details?.run?.routes || []) : [];
+    scanned("intake_processed_residue", "intake_parked", "intake_oversize");
     for (const file of routes) push(classifyIntakeResidue(file));
   } catch (error) {
     console.warn("desk intake residue scan failed", error);
   }
 
+  scanned("health_down");
   const health = [];
   for (const target of PUBLIC_HEALTH_TARGETS) {
     const probe = await probeDeskHealthTarget(target);
     health.push(probe);
     push(classifyHealthTarget(target, probe));
+  }
+
+  scanned("tester_catalog_assert");
+  push(classifyTesterCatalogAssert());
+  try {
+    const endpoint = String(env.TASKS_ACTIVITY_URL || "https://tasks.chicagoshining.com/agent-activity/log-event").replace(/\/$/, "");
+    const tester = await fetchTaskActivityEvents(endpoint, "github_actions", 20);
+    const results = await fetchTaskActivityEvents(endpoint, "test_result", 20);
+    scanned("tester_nightly");
+    push(classifyTesterNightly([...(tester.events || []), ...(results.events || [])], nowMs));
+  } catch (error) {
+    console.warn("desk tester nightly scan failed", error);
   }
 
   return buildDeskInventoryPayload({
@@ -28853,6 +28988,7 @@ async function gatherStudioDeskInventory(env) {
     incidents,
     health,
     caps,
+    scannedKinds,
   });
 }
 
@@ -28939,7 +29075,7 @@ async function patchStudioDeskMode(request, env) {
     throw new HttpError(400, "Desk_Mode must be off, observe, infra, patch, or automerge");
   }
   const mode = requested;
-  await studioUpsertSetting(env, DESK_SETTING_NAME, mode, "Autonomous service desk kill switch / phase");
+  await studioUpsertSetting(env, DESK_SETTING_NAME, mode, "Quality Agent kill switch / phase");
   const inventory = await gatherStudioDeskInventory(env);
   return respond(request, env, { ok: true, ...inventory });
 }

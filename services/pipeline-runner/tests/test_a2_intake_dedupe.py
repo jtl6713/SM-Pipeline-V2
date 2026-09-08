@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from a2.processor import existing_intake_record, process_request, _intake_fields
+from asset.constants import GDRIVE_INGESTION_FOLDER, GDRIVE_PHOTOS_FOLDER
 
 
 def test_existing_intake_record_matches_drive_id_first():
@@ -14,13 +15,26 @@ def test_existing_intake_record_matches_drive_id_first():
 def test_process_request_skips_and_trashes_existing_files(monkeypatch):
     drive = MagicMock()
     drive.list_files.return_value = [
-        {"id": "dup1", "name": "River Fog 1.jpg", "mimeType": "image/jpeg", "size": "100", "fileExtension": "jpg"},
+        {
+            "id": "dup1",
+            "name": "River Fog 1.jpg",
+            "mimeType": "image/jpeg",
+            "size": "100",
+            "fileExtension": "jpg",
+            "parents": [GDRIVE_INGESTION_FOLDER],
+        },
         {"id": "new1", "name": "Navy Pier 2.jpg", "mimeType": "image/jpeg", "size": "200", "fileExtension": "jpg"},
     ]
     drive.share_anyone_reader.return_value = {"webContentLink": "https://drive.example/new"}
     drive.move_file.return_value = {"id": "new1", "webContentLink": "https://drive.example/moved"}
+    drive.get_file.return_value = {"id": "lib1", "parents": [GDRIVE_PHOTOS_FOLDER]}
     airtable = MagicMock()
-    airtable.list_records.side_effect = [[{"id": "recDUP"}], [], []]
+    airtable.list_records.side_effect = [
+        [],
+        [{"id": "recDUP", "fields": {"Google Drive File ID": "lib1"}}],
+        [],
+        [],
+    ]
     airtable.create_records.return_value = [{"id": "recNEW"}]
     gmail = MagicMock()
 
@@ -41,7 +55,131 @@ def test_process_request_skips_and_trashes_existing_files(monkeypatch):
     assert result["skipped_existing_count"] == 1
     assert result["skipped_existing_ids"] == ["dup1"]
     drive.trash_file.assert_called_once_with("dup1")
+    drive.remove_parent.assert_not_called()
     assert airtable.create_records.call_count == 1
+
+
+def test_process_request_removes_ingestion_parent_for_same_drive_id(monkeypatch):
+    drive = MagicMock()
+    drive.list_files.return_value = [
+        {
+            "id": "same1",
+            "name": "River Fog 1.jpg",
+            "mimeType": "image/jpeg",
+            "size": "100",
+            "fileExtension": "jpg",
+            "parents": [GDRIVE_INGESTION_FOLDER, GDRIVE_PHOTOS_FOLDER],
+        },
+    ]
+    drive.get_file.return_value = {"id": "same1", "parents": [GDRIVE_INGESTION_FOLDER, GDRIVE_PHOTOS_FOLDER]}
+    airtable = MagicMock()
+    airtable.list_records.return_value = [{"id": "recDUP", "fields": {"Google Drive File ID": "same1"}}]
+    gmail = MagicMock()
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
+    monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
+
+    result = process_request(dry_run=False, trigger_a2b=False)
+    assert result["skipped_existing_count"] == 1
+    drive.remove_parent.assert_called_once_with("same1", GDRIVE_INGESTION_FOLDER)
+    drive.trash_file.assert_not_called()
+    airtable.create_records.assert_not_called()
+
+
+def test_process_request_retries_move_when_processed_file_never_left_ingestion(monkeypatch):
+    drive = MagicMock()
+    drive.list_files.return_value = [
+        {
+            "id": "only1",
+            "name": "River Fog 1.jpg",
+            "mimeType": "image/jpeg",
+            "size": "100",
+            "fileExtension": "jpg",
+            "parents": [GDRIVE_INGESTION_FOLDER],
+        },
+    ]
+    drive.get_file.return_value = {"id": "only1", "parents": [GDRIVE_INGESTION_FOLDER]}
+    drive.move_file.return_value = {"id": "only1", "parents": [GDRIVE_PHOTOS_FOLDER]}
+    airtable = MagicMock()
+    airtable.list_records.return_value = [{"id": "recDUP", "fields": {"Google Drive File ID": "only1"}}]
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: MagicMock())
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
+    monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
+
+    result = process_request(dry_run=False, trigger_a2b=False)
+    assert result["skipped_existing_count"] == 1
+    drive.move_file.assert_called_once()
+    drive.trash_file.assert_not_called()
+
+
+def test_process_request_logs_residue_heal_failure(monkeypatch):
+    drive = MagicMock()
+    drive.list_files.return_value = [
+        {
+            "id": "dup1",
+            "name": "River Fog 1.jpg",
+            "mimeType": "image/jpeg",
+            "size": "100",
+            "fileExtension": "jpg",
+            "parents": [GDRIVE_INGESTION_FOLDER],
+        },
+    ]
+    drive.get_file.return_value = {"id": "lib1", "parents": [GDRIVE_PHOTOS_FOLDER]}
+    drive.trash_file.side_effect = RuntimeError("Drive trash 403")
+    airtable = MagicMock()
+    airtable.list_records.side_effect = [
+        [],
+        [{"id": "recDUP", "fields": {"Google Drive File ID": "lib1"}}],
+    ]
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: MagicMock())
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
+    monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
+
+    result = process_request(dry_run=False, trigger_a2b=False)
+    assert result["skipped_existing_count"] == 1
+    assert result["skipped_error_count"] == 1
+    assert result["skipped_error_ids"] == ["dup1"]
+
+
+def test_process_request_dry_run_annotates_duplicates(monkeypatch):
+    drive = MagicMock()
+    drive.list_files.return_value = [
+        {
+            "id": "dup1",
+            "name": "River Fog 1.jpg",
+            "mimeType": "image/jpeg",
+            "size": "100",
+            "fileExtension": "jpg",
+            "parents": [GDRIVE_INGESTION_FOLDER, GDRIVE_PHOTOS_FOLDER],
+        },
+    ]
+    drive.get_file.return_value = {"id": "dup1", "parents": [GDRIVE_INGESTION_FOLDER, GDRIVE_PHOTOS_FOLDER]}
+    airtable = MagicMock()
+    airtable.list_records.return_value = [{"id": "recDUP", "fields": {"Google Drive File ID": "dup1"}}]
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+
+    result = process_request(dry_run=True)
+    assert result["dry_run"] is True
+    route = result["routes"][0]
+    assert route["existing_media_asset_id"] == "recDUP"
+    assert route["duplicate_reason"] == "drive_id"
+    assert GDRIVE_INGESTION_FOLDER in route["parents"]
+    drive.trash_file.assert_not_called()
+    drive.remove_parent.assert_not_called()
 
 
 def test_process_request_continues_after_one_file_fails(monkeypatch):

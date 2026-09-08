@@ -271,13 +271,38 @@ def _public_cdn_url(value: Any) -> str:
     return url if url.startswith("https://media.chicagoshining.com/") else ""
 
 
+def _is_derived_fill_crop_url(url: str) -> bool:
+    lower = str(url or "").lower()
+    return "fill-crop" in lower or "item4-variant" in lower
+
+
+def _clip_still_urls(raw: Any) -> set[str]:
+    parsed = raw
+    if isinstance(raw, str):
+        parsed = parse_json(raw, []) or []
+    urls: set[str] = set()
+    for clip in parsed if isinstance(parsed, list) else []:
+        if not isinstance(clip, dict):
+            continue
+        url = str(clip.get("url") or clip.get("src") or "").strip()
+        kind = str(clip.get("media_kind") or clip.get("mediaKind") or "").lower()
+        if not url:
+            continue
+        if kind == "photo" or _is_derived_fill_crop_url(url):
+            urls.add(url)
+    return urls
+
+
 def photo_sequence_url(master: dict[str, Any], variant: dict[str, Any] | None) -> str:
-    """Prefer the original still. 9:16 fill-crop variants cut square/4:5 flyers."""
-    return (
-        _public_cdn_url(master.get("preview_url"))
-        or str((variant or {}).get("preview_url") or "").strip()
-        or playable_url(master)
-    )
+    """Prefer the original still. Derived 9:16 fill-crops cut square/4:5 flyers.
+
+    Master preview_url is sometimes itself an ITEM4 fill-crop JPEG (HEIC originals
+    are not browser-safe). That URL must not win over a recropped variant.
+    """
+    original = _public_cdn_url(master.get("preview_url"))
+    if original and not _is_derived_fill_crop_url(original):
+        return original
+    return str((variant or {}).get("preview_url") or "").strip() or playable_url(master)
 
 
 def finished_source_package(
@@ -748,7 +773,14 @@ def stamp_fields(
     existing_record = existing if isinstance(existing, dict) and "fields" in existing else {"fields": existing or {}}
     existing_timing = field_str(existing_record, "Timing_Status")
     existing_timeline = field_str(existing_record, "Timing_Timeline_JSON")
-    if existing_timing in {"Ready", "Skipped"} or existing_timeline:
+    old_stills = _clip_still_urls(field(existing_record, "Render_Clip_List_JSON"))
+    new_stills = _clip_still_urls(package.get("render_clip_list_json"))
+    recropped = bool(new_stills) and bool(old_stills) and new_stills != old_stills
+    if recropped:
+        fields["Timing_Status"] = "Pending"
+        fields["Timing_Timeline_JSON"] = None
+        fields["Timing_Error_Message"] = None
+    elif existing_timing in {"Ready", "Skipped"} or existing_timeline:
         fields.pop("Render_Clip_List_JSON", None)
         fields.pop("Render_Total_Frames", None)
         if existing_timing in {"Ready", "Skipped"}:

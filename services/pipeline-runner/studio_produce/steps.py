@@ -621,6 +621,39 @@ def _is_transient_render_error(exc: BaseException) -> bool:
     return any(n in text for n in needles)
 
 
+def _is_delay_render_failure(output: dict[str, Any]) -> bool:
+    text = " ".join(
+        (
+            field_str(output, "Remotion_Error_Message"),
+            field_str(output, "Final_File_Error_Message"),
+        )
+    ).lower()
+    needles = (
+        "delayrender",
+        "delay-render",
+        "request closed",
+        "could not extract frame",
+        "exit code 1",
+    )
+    return any(needle in text for needle in needles)
+
+
+def _requeue_failed_render(client: AirtableClient, output_id: str) -> None:
+    client.update_record(
+        PLATFORM_OUTPUTS_TABLE,
+        output_id,
+        {
+            "Render_Status": "Ready for Render",
+            "Remotion_Job_ID": "",
+            "Remotion_Status_URL": "",
+            "Remotion_Error_Message": "",
+            "Final_File_Error_Message": "",
+            "Remotion_Props_JSON": "",
+        },
+        typecast=True,
+    )
+
+
 def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if is_finished(ctx):
         return "done"
@@ -635,6 +668,11 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     test_run_id = field_str(ctx["request"], "Test_Run_ID") or None
     remaining = []
     transient = False
+    started_r4 = False
+    busy_rendering = any(
+        field_str(row, "Render_Status").lower() == "rendering" and field_str(row, "Remotion_Job_ID")
+        for row in ctx["outputs"]
+    )
     for output in ctx["outputs"]:
         fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
         if _output_ready(fresh):
@@ -662,16 +700,30 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
             # Failed + Remotion_Job_ID usually means harvest timed out after Remotion
             # already finished — keep polling R5 instead of abandoning the package.
             if render_status.lower() in {"rendering", "failed"} and field_str(fresh, "Remotion_Job_ID"):
+                if render_status.lower() == "failed" and _is_delay_render_failure(fresh):
+                    _requeue_failed_render(client, fresh["id"])
+                    remaining.append(fresh["id"])
+                    continue
                 result = process_r5(output_record_id=fresh["id"], test_run_id=test_run_id)
-                if result.get("processed") and _output_ready(client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])):
+                harvested = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
+                if result.get("processed") and _output_ready(harvested):
+                    continue
+                if field_str(harvested, "Render_Status").lower() == "failed" and _is_delay_render_failure(harvested):
+                    _requeue_failed_render(client, harvested["id"])
+                    remaining.append(harvested["id"])
                     continue
                 remaining.append(fresh["id"])
                 continue
             if render_status == "Ready for Render":
+                if busy_rendering or started_r4:
+                    remaining.append(fresh["id"])
+                    continue
                 timing = field_str(fresh, "Timing_Status")
                 if timing not in {"Ready", "Skipped"}:
                     process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
                 process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
+                started_r4 = True
+                busy_rendering = True
                 remaining.append(fresh["id"])
                 continue
             if field_str(fresh, "Asset_Selection_Status") == "Selected" and not render_status:

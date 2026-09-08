@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Build the operator Word guide for the Autonomous Service Agent."""
+"""Build the operator Word guide for Quality Agent."""
+import sys
 from pathlib import Path
 
 from docx import Document
@@ -9,7 +10,9 @@ from docx.shared import Inches, Pt, RGBColor
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUTS = [
+    ROOT / "docs" / "handoffs" / "Quality-Agent.docx",
     ROOT / "docs" / "handoffs" / "Autonomous-Service-Agent.docx",
+    ROOT / "apps" / "studio-web" / "docs" / "Quality-Agent.docx",
     ROOT / "apps" / "studio-web" / "docs" / "Autonomous-Service-Agent.docx",
 ]
 TEAL = RGBColor(0x0F, 0x5C, 0x57)
@@ -70,31 +73,49 @@ def build() -> Document:
     section.left_margin = Inches(1.0)
     section.right_margin = Inches(1.0)
 
-    add_heading(doc, "Chicago Shining Autonomous Service Agent", 1)
+    add_heading(doc, "Chicago Shining Quality Agent", 1)
     add_para(
         doc,
-        "Operator guide for auto-review of stuck pipeline work, bounded auto-correction, "
-        "and how to read activity logs. This file lives in Git at docs/handoffs/Autonomous-Service-Agent.docx "
-        "and opens from Studio → Operations → Autonomous Service Agent.",
+        "Operator guide for the Quality Agent: one check catalog for the tester lane and the service lane, "
+        "auto-review of stuck pipeline work, bounded auto-correction, and how to read activity logs. "
+        "This file lives in Git at docs/handoffs/Quality-Agent.docx "
+        "(also Autonomous-Service-Agent.docx) and opens from Studio → Operations → Quality Agent.",
     )
     add_para(doc, "Last updated: 7 September 2026.", bold=True)
 
     add_heading(doc, "1. What this agent is", 2)
     add_para(
         doc,
-        "The Autonomous Service Agent watches Chicago Shining production for stuck jobs and down local services. "
-        "It is not a second publisher. It does not approve posts, change covers, or move media off Google Drive.",
+        "Quality Agent watches Chicago Shining production against a maintained checklist. "
+        "It is not a second publisher. It does not approve library-stills posts, change covers, or move media off Google Drive.",
     )
     add_bullets(
         doc,
         [
-            "Runtime healer (always on): Studio Worker cron every two minutes resumes stale produce, render, crop, and AZ work.",
-            "Desk agent (mode-gated): reads the stuck inventory, tickets a diagnosis pack, and only then may restart, open a PR, or later auto-merge an allowlisted heal.",
+            "Runtime healer (always on): Studio Worker cron every two minutes resumes stale produce, render, crop, and AZ work, and drains leftover Drive ingestion files (including already-processed residue).",
+            "Quality Agent (mode-gated, ~15 min): reads GET /api/ops/desk/inventory, walks payload.checks, tickets a diagnosis pack, and only then may restart, open a PR, or later auto-merge an allowlisted heal.",
+            "Tester lane: last nightly rotation from tests/regression/catalog.json plus PR hermetic packs. The 15-minute tick does not seed live mx1–mx5 rows.",
             "Local companion (this Windows PC): SYNC Git, VERIFY /health, and PLAN/DEPLOY one service when mode allows and a public health check is down.",
         ],
     )
 
-    add_heading(doc, "2. How auto-review works", 2)
+    add_heading(doc, "2. Check catalog", 2)
+    add_para(
+        doc,
+        "Quality Agent is driven by a maintained list of sentences (apps/studio-api/quality-checks.mjs). "
+        "Operations shows each sentence as pass, finding, or not yet run. Kind chips remain for fingerprints.",
+    )
+    add_bullets(
+        doc,
+        [
+            "Intake: processed leftovers, eligible unprocessed files, oversized videos waiting on compress.",
+            "Production advancement is origin-aware: autonomous library-stills stop at Ready for Review; AZ finished-video may auto-schedule when cover, caption, and Final_File_URL exist; manual work also stops at Ready for Review.",
+            "Jobs and infra: stale/escalated produce, render without a job, long render, produce orphan, variant Preparing, crop Processing/Error, public /health.",
+            "Tester lane: last nightly regression rotation plus cheap catalog assertions. Do not seed live platform-matrix rows every 15 minutes.",
+        ],
+    )
+
+    add_heading(doc, "3. How auto-review works", 2)
     add_para(
         doc,
         "Every few minutes the Worker tries the usual self-heal first. If a job is still stuck after that budget, "
@@ -103,11 +124,12 @@ def build() -> Document:
     add_bullets(
         doc,
         [
-            "transient — leave it to Worker heal. Do not open a ticket or a PR.",
+            "transient — ticket once, then leave it to Worker heal. Do not open a PR.",
             "infra_down — a public /health is down. The local companion can restart or deploy one service.",
             "data_repair — a bounded Airtable field fix (never schema, never publish).",
             "code_bug — the desk agent may open a cursor/desk-* pull request. You merge unless automerge is later proven.",
             "unknown or the same fingerprint twice in 24 hours — freeze, email chicagoshining@gmail.com, stop.",
+            "produce_clip_mismatch — stories Ready for Review while Reels, TikTok, and YouTube stay Ready for Render. Parent job error is Remotion clip count mismatch (expected N, received M). Stories skip T1; T1 expands the clip list past Selected_Clip_Count. Ticket immediately as code_bug. Worker heal cannot fix it until expectedClipCount equals the actual clip list length, then resume studio-produce. Do not Approve publish. Proven fixture: Lincoln Park Zoo reccEj6eVXPPKalJd / outputs 370–375.",
         ],
     )
     add_para(
@@ -115,7 +137,7 @@ def build() -> Document:
         "Default desk mode is observe if STUDIO_DESK_MODE is empty. Observe tickets only. It does not patch Git, deploy, restart Windows, write Airtable, pulse Make, or Approve publish.",
     )
 
-    add_heading(doc, "3. How auto-correction works", 2)
+    add_heading(doc, "4. How auto-correction works", 2)
     add_para(doc, "Correction is a ladder. Each step requires a higher Desk mode on Operations (or the Airtable Pipeline Settings row STUDIO_DESK_MODE).")
     add_table(
         doc,
@@ -138,7 +160,7 @@ def build() -> Document:
         ],
     )
 
-    add_heading(doc, "4. What it will never do", 2)
+    add_heading(doc, "5. What it will never do", 2)
     add_bullets(
         doc,
         [
@@ -150,13 +172,13 @@ def build() -> Document:
         ],
     )
 
-    add_heading(doc, "5. How you support it", 2)
+    add_heading(doc, "6. How you support it", 2)
     add_para(doc, "Do once", bold=True)
     add_bullets(
         doc,
         [
             "Save the Cursor Automation for the 15-minute observe tick if a draft is still open.",
-            "Confirm Desk mode on Operations → Autonomous Service Agent. Empty Airtable means observe. Leave automerge off.",
+            "Confirm Desk mode on Operations → Quality Agent. Empty Airtable means observe. Leave automerge off.",
             "Run INSTALL Operator Shortcuts if you want DESK Companion next to START / STOP / VERIFY.",
         ],
     )
@@ -164,7 +186,7 @@ def build() -> Document:
     add_bullets(
         doc,
         [
-            "Library-stills autonomous: Ready for Review → Approve publish.",
+            "Library-stills autonomous: Ready for Review → Approve publish. Quality Agent must not auto-publish origin=autonomous.",
             "AZ finished-video may auto-schedule. Change or cancel times in Pipeline before they fire.",
             "TikTok: set the cover in the TikTok app.",
             "In patch mode, merge cursor/desk-* PRs yourself after reading the fingerprint and diagnosis.",
@@ -183,14 +205,14 @@ def build() -> Document:
         ],
     )
 
-    add_heading(doc, "6. How to review activity logs", 2)
+    add_heading(doc, "7. How to review activity logs", 2)
     add_para(doc, "Three places hold the story. Start on the Studio page, then open Task Organizer if you need the ticket text.")
     add_table(
         doc,
         ["Where", "What you see", "How to open it"],
         [
-            ["Studio Operations → Autonomous Service Agent", "Live stuck inventory (fingerprints) and recent desk_incident tickets.", "studio.chicagoshining.com → Operations → Autonomous Service Agent. Refresh on that page."],
-            ["Task Organizer", "The full ticket: fingerprint, class, record id, diagnosis. Posted as type=desk_incident, agent_id=3, task_id=1. Automated test results use type=test_result.", "https://tasks.chicagoshining.com/logs — service desk and automated tests. /docs is API schema only."],
+            ["Studio Operations → Quality Agent", "Live check catalog (pass/finding) plus stuck inventory fingerprints and recent desk_incident tickets.", "studio.chicagoshining.com → Operations → Quality Agent. Refresh on that page."],
+            ["Task Organizer", "The full ticket: fingerprint, class, record id, diagnosis. Posted as type=desk_incident, agent_id=3, task_id=1. Automated test results use type=test_result.", "https://tasks.chicagoshining.com/logs — Quality Agent service lane and tester lane. /docs is API schema only."],
             ["Email", "Produce that exhausted five Worker resumes is parked as escalated and mailed to chicagoshining@gmail.com.", "Gmail for that address. Repeating fingerprints in 24 hours also email and freeze."],
             ["GitHub", "Code heals as pull requests named cursor/desk-* plus CI on the PR.", "github.com/jtl6713/SM-Pipeline-V2/pulls. Merge yourself while mode is patch."],
         ],
@@ -200,7 +222,7 @@ def build() -> Document:
         "Worker heal itself is not a Task Organizer ticket. Transient resumes stay in Cloudflare Worker logs and on the Production / Pipeline rows (job JSON step, resume_count, Render_Status).",
     )
 
-    add_heading(doc, "7. Companion and Windows services", 2)
+    add_heading(doc, "8. Companion and Windows services", 2)
     add_para(doc, "On this PC, from the SM-Pipeline-V2 checkout:")
     add_para(doc, "powershell -NoProfile -ExecutionPolicy Bypass -File .\\deploy\\local-services\\Invoke-DeskCompanion.ps1")
     add_bullets(
@@ -212,7 +234,7 @@ def build() -> Document:
         ],
     )
 
-    add_heading(doc, "8. Freeze", 2)
+    add_heading(doc, "9. Freeze", 2)
     add_para(
         doc,
         "Set Desk mode to off to stop tickets, restarts, PRs, and companion deploys. Inventory and Worker two-minute heal keep running. Turn observe back on when you want ticketing again.",
@@ -224,8 +246,11 @@ def main() -> None:
     document = build()
     for path in OUTPUTS:
         path.parent.mkdir(parents=True, exist_ok=True)
-        document.save(path)
-        print(path)
+        try:
+            document.save(path)
+            print(path)
+        except PermissionError:
+            print(f"skip locked {path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

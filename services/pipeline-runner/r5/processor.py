@@ -225,6 +225,27 @@ def process_one_output(
         )
     except Exception as exc:
         message = str(exc) or "Render completed, but final Google Drive upload did not complete."
+        existing_url = field_str(output, "Final_File_URL")
+        if existing_url and "404" in message.lower():
+            client.update_record(
+                PLATFORM_OUTPUTS_TABLE,
+                output["id"],
+                {
+                    "Render_Status": "Rendered",
+                    "Output_Status": "Ready for Review",
+                    "Final_File_Error_Message": "",
+                    "Remotion_Error_Message": "",
+                    **review_fields_after_successful_render(output),
+                },
+                typecast=True,
+            )
+            return {
+                "processed": True,
+                "route": "complete",
+                "drive_file_id": field_str(output, "Final_File_ID"),
+                "studio_preview_url": field_str(output, "Studio_Preview_URL"),
+                **preview,
+            }
         transient = any(
             needle in message.lower()
             for needle in (
@@ -235,6 +256,7 @@ def process_one_output(
                 "remote disconnected",
                 "connectionpool",
                 "temporarily unavailable",
+                "404",
                 "502",
                 "503",
                 "504",

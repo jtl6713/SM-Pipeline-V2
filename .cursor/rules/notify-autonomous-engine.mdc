@@ -1,0 +1,25 @@
+---
+description: Ticket the autonomous service desk whenever a stuck pipeline bug is found.
+alwaysApply: true
+---
+
+# Notify the autonomous engine on stuck bugs
+
+Whenever you diagnose a bug that parks Studio work (Blocked / Escalated produce, stale render, crop parked, inventory 503 storm, down `/health`), **ticket the desk in the same turn**. Do not wait for the 15-minute observe tick.
+
+## Always
+
+- `POST https://tasks.chicagoshining.com/agent-activity/log-event`
+- `task_id=1`, `agent_id=3`, `type=desk_incident`
+- Reuse `fingerprint` (`kind:record_id:error_class`). Same fingerprint twice in 24h → email Joseph, stop.
+- Include a diagnosis pack: request/output IDs, job JSON `step`/`error`, class, what Worker heal cannot fix.
+
+## Observe mode
+
+Ticket only. No git, deploy, restart, Airtable writes, Make pulses, or Studio Approve.
+
+## Watch for this class
+
+Pipeline rows **Blocked**, or stories Ready for Review while Reels/TikTok/YouTube stay Ready for Render, while parent `Studio_Production_Job_JSON.step=blocked` and the error contains **clip count mismatch** (`expected N, received M`). Kind `produce_clip_mismatch` / `code_bug`. Stories skip T1; T1 expands the clip list past `Selected_Clip_Count`. Real-time correction: `expectedClipCount` must equal `len(clips)` (`r4/render_request.py`), then resume studio-produce. After that, serialize R4 — concurrent 28-clip Remotion jobs `delayRender` and exit 1. Requeue Failed `exit code 1` to Ready for Render. Worker resume without those fixes cannot heal it.
+
+9:16 fill-crop that looks like **two photos stacked** (horizontal seam) is `variant_heic_sprite` / `code_bug`. Raw iPhone HEIC tile grid went to Cloudflare Images. Decode with ffmpeg default tile grid (`integrations/variant_service.py`), recrop, restamp, re-render. Worker heal cannot replace Drive pixels.
