@@ -91,7 +91,7 @@ Hourly keep-alive on this Windows machine (Task Scheduler task `ChicagoShining D
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Register-DeskCompanionHourly.ps1"
 ```
 
-Each tick: public `/health`; START only if a required probe is down; if a live `.smv2-deployment.json` SHA is strictly behind `origin/main`, PLAN+DEPLOY **one** service from `main` (`-Yes`) so a merged enhancement restarts that listener. Dirty checkout still allows START and that DEPLOY (isolated worktree). Never `reset --hard`. Cap: 1 service per tick, 2 per service per day. Logs: `Deployment Logs\Local Services\desk-companion-hourly-YYYYMMDD.log`. Unregister with `-Unregister`. The PC must stay on and logged in (locked is OK). Cursor Automations cannot restart these Windows listeners.
+Each tick: public `/health`; if a required probe is down, start **that** service hidden (`Start-ChicagoShiningHidden.ps1`, no extra consoles). If a live `.smv2-deployment.json` SHA is strictly behind `origin/main`, PLAN+DEPLOY **one** service from `main` (`-Yes`) so a merged enhancement restarts that listener. DEPLOY also starts hidden. Dirty checkout still allows START and that DEPLOY (isolated worktree). Never `reset --hard`. Cap: 1 service per tick, 2 per service per day. Logs: `Deployment Logs\Local Services\desk-companion-hourly-YYYYMMDD.log`. Unregister with `-Unregister`. The PC must stay on and logged in (locked is OK). Cursor Automations cannot restart these Windows listeners.
 
 Caps file: `D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\Local Services\desk-caps.json`.
 

@@ -74,6 +74,8 @@ Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo
 - `DEPLOY Local Service.bat` (menu; pick **6 Pipeline Runner**)
 - `DEPLOY Pipeline Runner.bat` (pipeline-runner only)
 - `DESK Companion.bat` (service-desk public `/health` probe; optional restart/deploy)
+- Hourly keep-alive: `Register-DeskCompanionHourly.ps1` (VERIFY every hour; hidden START of a down service only; PLAN+DEPLOY one service when live stamp is behind `origin/main`)
+- Hidden launch: `Start-ChicagoShiningHidden.ps1` (no extra Windows Terminal / PowerShell windows)
 - `ROLLBACK Local Service.bat`
 - `INSTALL Operator Shortcuts.bat` (refresh bats + pipeline-root `.lnk` files)
 

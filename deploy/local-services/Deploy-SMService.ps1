@@ -395,52 +395,14 @@ function Start-LocalService {
         [string]$RuntimeRoot
     )
 
-    if (-not (Get-Command wt.exe -ErrorAction SilentlyContinue)) {
-        throw 'Windows Terminal (wt.exe) was not found.'
+    $hidden = Join-Path $RepoRoot 'deploy\local-services\Start-ChicagoShiningHidden.ps1'
+    if (-not (Test-Path -LiteralPath $hidden)) {
+        throw "Missing hidden launcher: $hidden"
     }
-
-    New-Item -ItemType Directory -Force -Path $HelperBase | Out-Null
-    $launcher = Join-Path $HelperBase ("deploy-launch-" + $ServiceName + ".ps1")
-
-    $escapedRuntime = $RuntimeRoot.Replace("'","''")
-    $escapedTitle = ([string]$Config.WindowTitle).Replace("'","''")
-    $escapedStartFile = ([string]$Config.StartFile).Replace("'","''")
-
-    if ($Config.StartKind -eq 'node') {
-        $startLine = "& node.exe '.\$escapedStartFile'"
-    }
-    elseif ($Config.StartKind -eq 'batch') {
-        $startLine = "& '.\$escapedStartFile'"
-    }
-    else {
-        throw "Unsupported StartKind: $($Config.StartKind)"
-    }
-
-    $launcherText = @"
-`$ErrorActionPreference = 'Stop'
-`$Host.UI.RawUI.WindowTitle = '$escapedTitle'
-Set-Location -LiteralPath '$escapedRuntime'
-Write-Host 'Starting $($Config.DisplayName) from deployed source...' -ForegroundColor Cyan
-Write-Host 'Git-controlled deployment launcher' -ForegroundColor DarkGray
-$startLine
-Write-Host '$($Config.DisplayName) stopped.' -ForegroundColor Red
-"@
-
-    [System.IO.File]::WriteAllText($launcher,$launcherText,[System.Text.UTF8Encoding]::new($false))
-
-    Write-Host "Starting tab: $($Config.WindowTitle)" -ForegroundColor Yellow
-    $code = Invoke-Native -FilePath 'wt.exe' -NativeArgs @(
-        'new-tab',
-        '--title', [string]$Config.WindowTitle,
-        'powershell.exe',
-        '-NoProfile',
-        '-NoExit',
-        '-ExecutionPolicy','Bypass',
-        '-File',$launcher
-    ) -AllowFailure
-
-    if ($code -ne 0) {
-        throw "Windows Terminal failed to start $($Config.DisplayName), exit code $code."
+    Write-Host "Starting $($Config.DisplayName) hidden (no extra console window)." -ForegroundColor Yellow
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $hidden -Service $ServiceName
+    if ($LASTEXITCODE -ne 0) {
+        throw "Hidden start failed for $($Config.DisplayName), exit code $LASTEXITCODE."
     }
 }
 

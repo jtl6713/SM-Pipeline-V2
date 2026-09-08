@@ -67,7 +67,7 @@ Local companion only, on the Windows machine:
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Invoke-DeskCompanion.ps1" -RestartDown
 ```
 
-Hourly Windows keep-alive (this PC, logged-in session): `Register-DeskCompanionHourly.ps1` runs `Run-DeskCompanionHourly.ps1`. VERIFY every hour; START only if a public `/health` is down. If a live `.smv2-deployment.json` SHA is behind `origin/main`, PLAN+DEPLOY one service from `main` (merged enhancement + that service restart). Dirty checkout still allows START/VERIFY and that DEPLOY; it will not `git reset --hard`. Never `git reset --hard`. One service at a time.
+Hourly Windows keep-alive (this PC, logged-in session): `Register-DeskCompanionHourly.ps1` runs `Run-DeskCompanionHourly.ps1`. VERIFY every hour; if a public `/health` is down, start **that** service hidden (`Start-ChicagoShiningHidden.ps1`). If a live `.smv2-deployment.json` SHA is behind `origin/main`, PLAN+DEPLOY one service from `main` (merged enhancement + hidden restart). Dirty checkout still allows START/VERIFY and that DEPLOY; it will not `git reset --hard`. Never `git reset --hard`. One service at a time.
 
 ## Patch (`patch`)
 
