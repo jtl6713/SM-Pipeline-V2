@@ -86,6 +86,23 @@ export const QUALITY_CHECKS = Object.freeze([
     terminal_by_origin: ADVANCEMENT_TERMINALS,
   }),
   check({
+    id: "autonomous_topic_collision",
+    title: "Check for origin=autonomous harvests that leaked a second package on the same landmark",
+    lane: "service",
+    kind: "autonomous_topic_collision",
+    actor: "desk_agent",
+    heal: "ticket_only",
+    terminal_by_origin: ADVANCEMENT_TERMINALS,
+  }),
+  check({
+    id: "youtube_private_source_fail",
+    title: "Check for YouTube Shorts stuck because Graph cannot fetch a private Drive final",
+    lane: "service",
+    kind: "youtube_private_source_fail",
+    actor: "worker_heal",
+    heal: "resume_produce",
+  }),
+  check({
     id: "autonomous_rfr_gate",
     title: "Check that library-stills autonomous work stops at Ready for Review (must not auto-publish)",
     lane: "both",

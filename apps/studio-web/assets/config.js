@@ -77,7 +77,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsTabCatalog: "Named Quality Agent check list with pass, finding, or not yet run. Worker still heals transients. Library-stills never auto-publish.",
     operationsAgentGuideLink: "Download the operator Word guide for Quality Agent auto-review, auto-correction, and how to read activity logs.",
     operationsAgentOrganizerLink: "Open the Task Organizer activity log (Quality Agent service lane and tester lane). Not the API schema.",
-    operationsAgentActivityMeta: "Recent Quality Agent tickets and automated test results from Task Organizer. Worker transient heals are not listed here.",
+    operationsAgentActivityMeta: "Recent Quality Agent tickets and automated test results from Task Organizer. Click a test card for each job’s pass/fail. Worker transient heals are not listed here.",
     operationsIntakeMeta: "Shows the latest library-intake summary returned by the Operations API.",
     operationsIntakeProgress: "Live progress for the current library-intake run, including intake, video backfill, classification, and reconciliation stages."
   };

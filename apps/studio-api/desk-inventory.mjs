@@ -201,6 +201,67 @@ export function classifyCropRow(row, nowMs = Date.now()) {
   return null;
 }
 
+function deskUrlIsPublicPublishCdn(url) {
+  return /^https:\/\/media\.chicagoshining\.com\/(publish|studio\/previews)\//i.test(String(url || "").trim());
+}
+
+function deskUrlLooksLikeDrive(url) {
+  return /drive\.google\.com|docs\.google\.com/i.test(String(url || ""));
+}
+
+export function classifyAutonomousTopicCollision(collision) {
+  const place = String(collision?.place || "").trim();
+  if (!place) return null;
+  const extras = Array.isArray(collision?.extras) ? collision.extras.filter(Boolean) : [];
+  if (!extras.length) return null;
+  const keep = collision?.keep || null;
+  const extraId = String(extras[0]?.id || "").trim();
+  const slug = place.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "place";
+  return {
+    kind: "autonomous_topic_collision",
+    class: "data_repair",
+    record_id: extraId || null,
+    fingerprint: fingerprint("autonomous_topic_collision", slug, "same_place"),
+    actor: "desk_agent",
+    place,
+    keep_record_id: String(keep?.id || "").trim() || null,
+    keep_title: String(keep?.title || "").trim() || null,
+    extra_record_ids: extras.map((row) => String(row?.id || "").trim()).filter(Boolean),
+    extra_titles: extras.map((row) => String(row?.title || "").trim()).filter(Boolean),
+    diagnosis: `Same-place autonomous harvest leaked on "${place}". Keep ${keep?.title || "the non-autonomous or oldest package"}; do not enqueue or recreate extras. Unpublished origin=autonomous extras may be Cancelled. Do not delete library stills or published posts.`,
+  };
+}
+
+export function classifyYoutubePrivateSourceFail(row) {
+  if (!row || typeof row !== "object") return null;
+  const platform = String(row.platform || "").trim();
+  if (!/^youtube$/i.test(platform)) return null;
+  if (String(row.youtube_video_id || "").trim()) return null;
+  const outputStatus = String(row.output_status || "").trim();
+  if (outputStatus && outputStatus !== "Approved for Publishing") return null;
+  const stage = String(row.youtube_stage || "").trim();
+  const publishStatus = String(row.publish_status || "").trim();
+  const err = `${row.youtube_error || ""} ${row.publish_error || ""} ${row.publish_error_stage || ""} ${row.publish_asset_error || ""}`;
+  const publicSrc = deskUrlIsPublicPublishCdn(row.publish_asset_url) || deskUrlIsPublicPublishCdn(row.studio_preview_url);
+  const driveFinal = deskUrlLooksLikeDrive(row.final_file_url);
+  const explicit401 = /source download failed 401/i.test(err) || /YTS1_UPLOAD/i.test(String(row.publish_error_stage || ""));
+  const ap0Abort = /ap0 worker\/r2 upload failed|connection aborted|10053/i.test(err);
+  const publishStuck = !publishStatus || /^(failed|ready to publish)$/i.test(publishStatus);
+  const stuckYt1 = /^YT1$/i.test(stage) && driveFinal && !publicSrc && publishStuck;
+  const terminal = /^terminal error$/i.test(stage) && (explicit401 || (driveFinal && !publicSrc));
+  if (!explicit401 && !stuckYt1 && !terminal && !ap0Abort) return null;
+  if (!stuckYt1 && !terminal && ap0Abort && !driveFinal) return null;
+  const recordId = String(row.id || row.record_id || "").trim();
+  return {
+    kind: "youtube_private_source_fail",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("youtube_private_source_fail", recordId, stuckYt1 ? "yt1_drive" : (ap0Abort ? "ap0_abort" : "source_401")),
+    actor: "worker_heal",
+    diagnosis: "YouTube Approved for Publishing has no video id and no public MP4; Graph/YouTube cannot fetch Drive. Stream the Drive final to publish/ (not a one-shot Windows PUT), clear a stale YouTube_Upload_Job_ID, then pulse YTP1. Keep the native 3D cover; do not send thumb_offset.",
+  };
+}
+
 export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now() } = {}) {
   const text = String(notes || "");
   const requestStatus = String(status || "").trim();
@@ -512,6 +573,8 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "variant_preparing",
   "tester_nightly",
   "tester_catalog_assert",
+  "autonomous_topic_collision",
+  "youtube_private_source_fail",
 ]);
 
 export function classifyHealthTarget(target, probe) {

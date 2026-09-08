@@ -1,5 +1,5 @@
 const SERVICE = "chicagoshining-r2-upload";
-const VERSION = "1.1.0-lifecycle";
+const VERSION = "1.2.0-multipart";
 const LEGACY_SECRET_SHA256 = "206163e803094104e8de49871a138636b2978653a9935feea94f85e2454d666e";
 const ALLOWED_PREFIXES = ["publish/", "studio/previews/"];
 const CLEANUP_PREFIXES = ["publish/platform-output-157/", "publish/item12-lifecycle-proof/"];
@@ -21,7 +21,8 @@ export default {
           service: SERVICE,
           version: VERSION,
           bucket_configured: Boolean(resolveBucket(env)),
-          accepted_methods: ["GET", "PUT", "DELETE"],
+          accepted_methods: ["GET", "PUT", "POST", "DELETE"],
+          multipart_actions: ["mpu-create", "mpu-part", "mpu-complete", "mpu-abort"],
           cleanup_prefixes: CLEANUP_PREFIXES,
           ttl_policy: PUBLISH_TTL_POLICY,
         });
@@ -51,6 +52,20 @@ export default {
         const body = await readJson(request);
         const keys = Array.isArray(body.keys) ? body.keys.map((value) => String(value || "")) : [];
         return json(await deleteObjects(bucket, request, keys, url.searchParams));
+      }
+
+      const action = String(url.searchParams.get("action") || "").trim();
+      if (request.method === "POST" && action === "mpu-create") {
+        return json(await mpuCreate(bucket, request, url));
+      }
+      if (request.method === "PUT" && action === "mpu-part") {
+        return json(await mpuPart(bucket, request, url));
+      }
+      if (request.method === "POST" && action === "mpu-complete") {
+        return json(await mpuComplete(bucket, request, url));
+      }
+      if (request.method === "POST" && action === "mpu-abort") {
+        return json(await mpuAbort(bucket, url));
       }
 
       if (request.method === "PUT") {
@@ -190,6 +205,104 @@ async function deleteObjects(bucket, request, rawKeys, searchParams) {
   };
 }
 
+function objectHttpMetadata(key, contentType) {
+  return {
+    contentType,
+    cacheControl: key.startsWith("publish/") ? "public, max-age=31536000, immutable" : "public, max-age=300",
+  };
+}
+
+function objectCustomMetadata(request, key) {
+  const outputId = String(request.headers.get("x-output-id") || outputIdFromKey(key) || "");
+  const finalFileId = String(request.headers.get("x-final-file-id") || finalFileIdFromKey(key) || "");
+  const retainClass = String(request.headers.get("x-retain-class") || (key.startsWith("studio/previews/") ? "preview" : "publish"));
+  return { outputId, finalFileId, retainClass };
+}
+
+async function mpuCreate(bucket, request, url) {
+  const key = normalizeKey(url.searchParams.get("key") || "");
+  if (!key) return { ok: false, error: "Missing key" };
+  if (!prefixAllowed(key, ALLOWED_PREFIXES)) return { ok: false, error: "Key prefix not allowed" };
+  if (typeof bucket.createMultipartUpload !== "function") {
+    return { ok: false, error: "Multipart upload is not available on this bucket binding" };
+  }
+  const contentType = request.headers.get("content-type") || inferContentType(key);
+  const customMetadata = {
+    uploadedBy: SERVICE,
+    uploadedAt: new Date().toISOString(),
+    ...objectCustomMetadata(request, key),
+  };
+  const upload = await bucket.createMultipartUpload(key, {
+    httpMetadata: objectHttpMetadata(key, contentType),
+    customMetadata,
+  });
+  return {
+    ok: true,
+    key,
+    uploadId: upload.uploadId,
+    content_type: contentType,
+    custom_metadata: objectCustomMetadata(request, key),
+  };
+}
+
+async function mpuPart(bucket, request, url) {
+  const key = normalizeKey(url.searchParams.get("key") || "");
+  const uploadId = String(url.searchParams.get("uploadId") || "").trim();
+  const partNumber = Number(url.searchParams.get("partNumber") || "0");
+  if (!key) return { ok: false, error: "Missing key" };
+  if (!prefixAllowed(key, ALLOWED_PREFIXES)) return { ok: false, error: "Key prefix not allowed" };
+  if (!uploadId) return { ok: false, error: "Missing uploadId" };
+  if (!Number.isInteger(partNumber) || partNumber < 1) return { ok: false, error: "Invalid partNumber" };
+  const contentLength = Number(request.headers.get("content-length") || "0");
+  if (contentLength > MAX_UPLOAD_BYTES) return { ok: false, error: "Upload too large" };
+  const upload = bucket.resumeMultipartUpload(key, uploadId);
+  const uploaded = await upload.uploadPart(partNumber, request.body);
+  return {
+    ok: true,
+    key,
+    uploadId,
+    partNumber,
+    etag: uploaded.etag,
+  };
+}
+
+async function mpuComplete(bucket, request, url) {
+  const key = normalizeKey(url.searchParams.get("key") || "");
+  const uploadId = String(url.searchParams.get("uploadId") || "").trim();
+  if (!key) return { ok: false, error: "Missing key" };
+  if (!prefixAllowed(key, ALLOWED_PREFIXES)) return { ok: false, error: "Key prefix not allowed" };
+  if (!uploadId) return { ok: false, error: "Missing uploadId" };
+  const body = await readJson(request);
+  const parts = Array.isArray(body.parts) ? body.parts : [];
+  const normalized = parts
+    .map((part) => ({
+      partNumber: Number(part?.partNumber || part?.part_number || 0),
+      etag: String(part?.etag || ""),
+    }))
+    .filter((part) => Number.isInteger(part.partNumber) && part.partNumber > 0 && part.etag);
+  if (!normalized.length) return { ok: false, error: "Missing parts" };
+  const upload = bucket.resumeMultipartUpload(key, uploadId);
+  await upload.complete(normalized);
+  return {
+    ok: true,
+    key,
+    uploadId,
+    public_url: `https://media.chicagoshining.com/${key}`,
+    parts: normalized.length,
+  };
+}
+
+async function mpuAbort(bucket, url) {
+  const key = normalizeKey(url.searchParams.get("key") || "");
+  const uploadId = String(url.searchParams.get("uploadId") || "").trim();
+  if (!key) return { ok: false, error: "Missing key" };
+  if (!prefixAllowed(key, ALLOWED_PREFIXES)) return { ok: false, error: "Key prefix not allowed" };
+  if (!uploadId) return { ok: false, error: "Missing uploadId" };
+  const upload = bucket.resumeMultipartUpload(key, uploadId);
+  await upload.abort();
+  return { ok: true, key, uploadId, aborted: true };
+}
+
 async function putObject(bucket, request, url) {
   const key = normalizeKey(url.searchParams.get("key") || "");
   if (!key) return { ok: false, error: "Missing key" };
@@ -247,7 +360,7 @@ function corsResponse(body, status = 200, headers = {}) {
     status,
     headers: {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS",
       "Access-Control-Allow-Headers":
         "content-type, x-pipeline-secret, x-lifecycle-confirm, x-output-id, x-final-file-id, x-retain-class",
       ...headers,

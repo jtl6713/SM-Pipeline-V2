@@ -12,6 +12,7 @@ import {
   autonomousDefaultVoiceoverTailSeconds,
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
+  AUTONOMOUS_IDEA_CREATED_FIELD,
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
@@ -27,8 +28,13 @@ import {
   summarizeObservations,
   autonomousIdeaConflictsOccupied,
   autonomousUnusedLibraryAssets,
+  autonomousPlaceSubjects,
   buildAutonomousPickerPrompt,
   autonomousPreferredSubject,
+  collectAutonomousOccupiedFromIdeas,
+  collectAutonomousTopicCollisions,
+  mapAutonomousOccupiedRequest,
+  mergeAutonomousOccupied,
 } from "./autonomous-produce.mjs";
 
 test("Chicago 8am and 4pm are autonomous windows", () => {
@@ -47,6 +53,17 @@ test("slot keys are once per morning and afternoon", () => {
   assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "waiting_variants" }, "2026-08-30:am"), true);
   assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "awaiting_i4" }, "2026-08-30:am"), true);
   assert.equal(autonomousSlotAlreadyClaimed({ slot: "2026-08-30:am", status: "reset" }, "2026-08-30:am"), false);
+  assert.equal(autonomousSlotAlreadyClaimed({
+    slot: "2026-09-07:pm",
+    status: "skipped",
+    idea_id: "recdGHU0uHq3ktPje",
+    skip_reason: "variants_still_preparing",
+  }, "2026-09-07:pm"), true);
+  assert.equal(autonomousSlotAlreadyClaimed({
+    slot: "2026-09-07:pm",
+    status: "skipped",
+    skip_reason: "no_unused_library_stills",
+  }, "2026-09-07:pm"), false);
 });
 
 test("RSS parser reads CDATA titles", () => {
@@ -94,6 +111,7 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.match(pinned, /Chicago Theatre/);
   assert.match(libraryFirst, /Start from the library stills/);
   assert.match(libraryFirst, /no_unused_library_stills/);
+  assert.match(libraryFirst, /Another angle of an occupied place/);
   assert.equal(libraryFirst.includes("no_asset_backed_trend"), false);
   assert.deepEqual(autonomousUnusedLibraryAssets([
     { id: "recAsset1234567890" },
@@ -166,6 +184,110 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     media_asset_ids: ["recPierAsset000001"],
   }, occupied);
   assert.equal(different.conflict, false);
+  const zooOccupied = [{
+    source: "recent",
+    title: "Lincoln Park Zoo: Quick Stroll",
+    location: "Lincoln Park Zoo",
+    media_asset_ids: ["recZooStill0000001"],
+  }];
+  const anotherZooAngle = autonomousIdeaConflictsOccupied({
+    candidate_title: "Free Zoo Escape",
+    idea_summary: "A quick urban nature break near the lake.",
+    primary_location: "Lincoln Park Zoo",
+    neighborhood_or_area: "Lincoln Park",
+    media_asset_ids: ["recZooStill0000002"],
+  }, zooOccupied);
+  assert.equal(anotherZooAngle.conflict, true);
+  assert.equal(anotherZooAngle.reason, "similar_to_recent");
+  assert.deepEqual(autonomousPlaceSubjects("Free Zoo Escape Lincoln Park Zoo"), [
+    "lincoln park zoo",
+    "lincoln park",
+  ]);
+  assert.deepEqual(autonomousUnusedLibraryAssets([
+    { id: "recZooStill0000002", name: "Zoo rhino.jpeg", location: "Lincoln Park Zoo" },
+    { id: "recPierAsset000001", name: "Navy Pier.jpeg", location: "Navy Pier" },
+  ], zooOccupied).map((row) => row.id), ["recPierAsset000001"]);
+  assert.equal(AUTONOMOUS_IDEA_CREATED_FIELD, "Create_Date");
+  const occupiedFromAirtable = collectAutonomousOccupiedFromIdeas([
+    {
+      createdTime: "2026-09-07T21:05:56.000Z",
+      fields: {
+        Candidate_Title: "Free Zoo Escape",
+        Candidate_Status: "Approved",
+        Primary_Location: "Lincoln Park Zoo",
+        Neighborhood_or_Area: "Lincoln Park",
+      },
+    },
+    {
+      createdTime: "2026-09-07T11:36:41.000Z",
+      fields: {
+        Candidate_Title: "Lincoln Park Zoo - Worth the trip?",
+        Candidate_Status: "Promoted",
+        Primary_Location: "Lincoln Park Zoo",
+      },
+    },
+    {
+      createdTime: "2026-09-07T21:00:00.000Z",
+      fields: {
+        Candidate_Title: "Rejected zoo extra",
+        Candidate_Status: "Rejected",
+        Primary_Location: "Lincoln Park Zoo",
+      },
+    },
+  ], Date.parse("2026-09-07T22:00:00.000Z"));
+  assert.deepEqual(occupiedFromAirtable.map((row) => row.title), [
+    "Free Zoo Escape",
+    "Lincoln Park Zoo - Worth the trip?",
+  ]);
+  const merged = mergeAutonomousOccupied([
+    occupiedFromAirtable,
+    [mapAutonomousOccupiedRequest({
+      fields: {
+        Request_Status: "Promoted",
+        Primary_Location: "Lincoln Park Zoo",
+        Production_Notes: "origin=autonomous cited_trend=library",
+        Production_Request_ID: "PR-20260907213117-QP78NY",
+      },
+    })],
+  ]);
+  assert.equal(merged.some((row) => row.location === "Lincoln Park Zoo"), true);
+  const collisions = collectAutonomousTopicCollisions([
+    {
+      id: "recEMuJACqAnqsRPu",
+      title: "Lincoln Park Zoo - Worth the trip?",
+      location: "Lincoln Park Zoo",
+      notes: "manual library stills",
+      createdTime: "2026-09-07T11:36:41.000Z",
+    },
+    {
+      id: "recdGHU0uHq3ktPje",
+      title: "Free Zoo Escape",
+      location: "Lincoln Park Zoo",
+      notes: "origin=autonomous cited_trend=library",
+      createdTime: "2026-09-07T21:05:56.000Z",
+    },
+    {
+      id: "recPy3fzh3rdnsVta",
+      title: "Lincoln Park Zoo Stroll: Birds to Rhinos",
+      location: "Lincoln Park Zoo",
+      notes: "origin=autonomous",
+      createdTime: "2026-09-07T21:31:00.000Z",
+    },
+    {
+      id: "recNavyPierOnly",
+      title: "Navy Pier sunset sail",
+      location: "Navy Pier",
+      notes: "origin=autonomous",
+      createdTime: "2026-09-07T21:40:00.000Z",
+    },
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].place, "lincoln park zoo");
+  assert.equal(collisions[0].keep.id, "recEMuJACqAnqsRPu");
+  assert.deepEqual(collisions[0].extras.map((row) => row.id), [
+    "recdGHU0uHq3ktPje",
+    "recPy3fzh3rdnsVta",
+  ]);
 });
 
 test("JSON fences unwrap and last-run notes stay readable", () => {

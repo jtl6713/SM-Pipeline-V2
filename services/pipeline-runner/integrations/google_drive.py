@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -47,16 +48,39 @@ class GoogleDriveClient:
         return token
 
     def download_file(self, file_id: str, timeout: int = 300) -> tuple[bytes, str]:
+        dest = ""
+        try:
+            import tempfile
+
+            handle = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+            handle.close()
+            dest = handle.name
+            _path, mime = self.download_file_to_path(file_id, dest, timeout=timeout)
+            with open(dest, "rb") as fh:
+                return fh.read(), mime
+        finally:
+            if dest:
+                try:
+                    os.unlink(dest)
+                except OSError:
+                    pass
+
+    def download_file_to_path(self, file_id: str, dest_path: str, timeout: int = 600) -> tuple[str, str]:
         token = self.access_token()
-        response = requests.get(
+        with requests.get(
             f"https://www.googleapis.com/drive/v3/files/{file_id}",
             params={"alt": "media", "supportsAllDrives": "true"},
             headers={"Authorization": f"Bearer {token}"},
-            timeout=max(5, int(timeout or 300)),
-        )
-        response.raise_for_status()
-        mime = response.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
-        return response.content, mime
+            timeout=max(5, int(timeout or 600)),
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            mime = response.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
+            with open(dest_path, "wb") as out:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        out.write(chunk)
+        return dest_path, mime
 
     def upload_file(
         self,

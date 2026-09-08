@@ -1,0 +1,53 @@
+name: Log CI parts
+
+on:
+  workflow_run:
+    workflows:
+      - Regression functional
+      - Regression suite
+      - Validate Cloudflare Sources
+      - Configure tasks.chicagoshining.com
+      - Deploy Studio Pages Production
+      - Deploy Studio API Worker Production
+      - Cloudflare Connection Check
+      - Test Local Video Compressor
+      - Pulse Studio Library Intake
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Actions run id to copy jobs from
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+
+jobs:
+  log:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.name != 'Log CI parts' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Log each job conclusion to Task Organizer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_RUN_ID: ${{ github.event.inputs.run_id || github.event.workflow_run.id }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          CI_WORKFLOW: ${{ github.event.workflow_run.name || github.workflow }}
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url || '' }}
+        run: |
+          set -euo pipefail
+          parts=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}/jobs" --jq '[.jobs[] | {name, conclusion, status}]')
+          python scripts/log_task_activity.py \
+            --type github_actions \
+            --suite "$CI_WORKFLOW" \
+            --conclusion "$CI_CONCLUSION" \
+            --parts-json "$parts"

@@ -87,3 +87,25 @@ Call `deskMayAutomerge` mentally with the changed paths. Refuse unless every pat
 - Edit live `Services\` except emergency, then reconcile to Git immediately
 - Pulse Make as a substitute for Worker cron
 - Harvest a new autonomous idea while Draft/Ready/Submitted `origin=autonomous` work is in flight
+- Recreate deleted same-place autonomous extras (Lincoln Park Zoo 2026-09-07: Free Zoo Escape / Birds to Rhinos / Quick Stroll). Keep Worth the trip.
+
+## Recurrence watches (2026-09-07)
+
+Read `docs/handoffs/autonomous-same-topic-harvest.md` on every tick. Inventory now emits these kinds:
+
+### `autonomous_topic_collision` (`data_repair`)
+
+Two or more recent ideas share a named place (longest landmark in the title/location) and at least one extra is `origin=autonomous`. Occupancy used to miss this because Idea Candidates were sorted by the wrong created-time field (`Created_At` vs `Create_Date`), Approved ideas were invisible, `zoo` was dropped as a short token, and a skipped produce released the AM/PM slot.
+
+Auto-correct:
+
+1. Leave Worker harvest to skip the next pick (place/location conflict + slot claim). Do not harvest a replacement.
+2. Ticket fingerprint `autonomous_topic_collision:<place>:same_place`.
+3. **Keep** the manual / non-autonomous package (Worth the trip pattern) and library stills.
+4. In `observe`, stop after the ticket. If mode allows Airtable data repair, Cancel unpublished extra `origin=autonomous` PRs only. Never delete published posts or Drive masters other packages still use.
+
+### `youtube_private_source_fail` (`transient` → Worker heal)
+
+YouTube Approved for Publishing, no `YouTube_Video_ID`, `YouTube_Stage` is YT1 (Failed **or Ready to Publish**) or Terminal Error, Drive `Final_File_URL`, no public `Publish_Asset_URL`. Output 375 (Worth the trip Short `recRxp28DYcT9SEMW`) stuck this way: heal matched only Failed, Windows AP0 aborted a 121MB one-shot PUT (`10053`), then YTP1 saw a stale upload job id.
+
+Auto-correct: leave to Worker `studioHealFailedYoutubeSourceDownloads` (Drive Range GET → R2 multipart `publish/` → reset YT1 → YTP1). After processing, `thumbnails.set` the 3D cover. Do **not** send `thumb_offset`. If the row is still missing a public MP4 after a later tick, that is a `code_bug`.
