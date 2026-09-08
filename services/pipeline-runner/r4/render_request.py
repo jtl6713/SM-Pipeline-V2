@@ -89,6 +89,18 @@ def _clip_list_json(output: dict[str, Any]) -> Any:
     return parsed if parsed is not None else raw
 
 
+def expected_clip_count(output: dict[str, Any], clips: Any = None) -> int:
+    """Remotion rejects when expectedClipCount != len(clips).
+
+    T1 / expand_without_beats can grow Render_Clip_List_JSON past Selected_Clip_Count
+    (source masters). Stories skip T1, so they never hit this. Use the actual clip list.
+    """
+    listed = clips if clips is not None else _clip_list_json(output)
+    if isinstance(listed, list) and listed:
+        return len(listed)
+    return int(_num(field(output, "Selected_Clip_Count"), 0))
+
+
 def voiceover_url(output: dict[str, Any], content_item: dict[str, Any] | None = None) -> str:
     return field_str(output, "Voiceover_URL") or field_str(content_item or {}, "Voiceover_URL")
 
@@ -158,6 +170,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
     duck_multiplier = (ducked / music_volume) if music_volume > 0 and ducking_enabled else 0
     cover = _cover_url(output)
     total_frames = int(_num(field(output, "Render_Total_Frames"), 0))
+    clips = _clip_list_json(output)
     return {
         "filename": field_str(output, "Output_Filename"),
         "compositionId": field_str(output, "Composition_ID"),
@@ -167,7 +180,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
         "thumbnailUrl": cover,
         "initialFramePolicy": "first_visual_frame",
         "blackFrameGuard": _black_frame_guard(output),
-        "expectedClipCount": int(_num(field(output, "Selected_Clip_Count"), 0)),
+        "expectedClipCount": expected_clip_count(output, clips),
         "fps": 30,
         "width": width,
         "height": height,
@@ -175,7 +188,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
         "durationSeconds": total_frames / 30,
         "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
         "durationIsExplicit": duration_is_explicit(output),
-        "clips": _clip_list_json(output),
+        "clips": clips,
         "music": _with_music_start({
             "enabled": music_enabled,
             "url": music_url,
@@ -205,6 +218,7 @@ def build_voiceover_request(
     spoken_disabled = "overlay" in clip_json.lower()
     cover = _cover_url(output)
     total_frames = int(_num(field(output, "Render_Total_Frames"), 0))
+    clips = _clip_list_json(output)
     return {
         "filename": field_str(output, "Output_Filename"),
         "compositionId": field_str(output, "Composition_ID"),
@@ -217,7 +231,7 @@ def build_voiceover_request(
         "voiceoverText": field_str(content_item or {}, "Voiceover_Script"),
         "spokenCaptionsEnabled": not spoken_disabled,
         "spokenCaptionWordsPerPage": 4,
-        "expectedClipCount": int(_num(field(output, "Selected_Clip_Count"), 0)),
+        "expectedClipCount": expected_clip_count(output, clips),
         "fps": 30,
         "width": width,
         "height": height,
@@ -225,7 +239,7 @@ def build_voiceover_request(
         "durationSeconds": round(total_frames / 30),
         "voiceoverTailSeconds": _num(field(output, "Voiceover_Tail_Seconds"), 2),
         "durationIsExplicit": duration_is_explicit(output),
-        "clips": _clip_list_json(output),
+        "clips": clips,
         "music": _with_music_start({"url": music_url, "volume": music_volume}, output, content_item),
         "voiceover": {
             "url": voiceover_url(output, content_item),
@@ -241,6 +255,7 @@ def build_no_voiceover_request(output: dict[str, Any], *, default_music: float) 
     music_volume = _music_volume(output, default_music) if music_url else 0.0
     cover = _cover_url(output)
     total_frames = int(_num(field(output, "Render_Total_Frames"), 0))
+    clips = _clip_list_json(output)
     return {
         "filename": field_str(output, "Output_Filename"),
         "compositionId": field_str(output, "Composition_ID"),
@@ -250,13 +265,13 @@ def build_no_voiceover_request(output: dict[str, Any], *, default_music: float) 
         "thumbnailUrl": cover,
         "initialFramePolicy": "first_visual_frame",
         "blackFrameGuard": _black_frame_guard(output),
-        "expectedClipCount": int(_num(field(output, "Selected_Clip_Count"), 0)),
+        "expectedClipCount": expected_clip_count(output, clips),
         "fps": 30,
         "width": width,
         "height": height,
         "durationInFrames": total_frames,
         "durationSeconds": round(total_frames / 30),
-        "clips": _clip_list_json(output),
+        "clips": clips,
         "music": _with_music_start({"url": music_url, "volume": music_volume}, output),
     }
 

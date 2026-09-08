@@ -1,7 +1,7 @@
 from r4.constants import R4_CLEAR_FIELDS
 from r4.formulas import r4_exact_output_formula, r4_production_formula
 from r4.processor import _eligible_exact_output
-from r4.render_request import choose_render_request, voiceover_is_required
+from r4.render_request import choose_render_request, expected_clip_count, voiceover_is_required
 
 
 def test_r4_production_formula_requires_render_package():
@@ -104,6 +104,21 @@ def test_r4_music_start_seconds_pass_through():
     route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
     assert route == "no_voiceover"
     assert payload["music"]["startFromSeconds"] == 12.5
+
+
+def test_r4_expected_clip_count_follows_expanded_clip_list():
+    clips = [{"url": f"https://cdn/{i}.jpg"} for i in range(28)]
+    output = _photo_output(
+        Selected_Clip_Count=20,
+        Render_Clip_List_JSON=__import__("json").dumps(clips),
+    )
+    assert expected_clip_count(output) == 28
+    route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
+    assert route == "no_voiceover"
+    assert payload["expectedClipCount"] == 28
+    assert len(payload["clips"]) == 28
+    empty = _photo_output(Selected_Clip_Count=2, Render_Clip_List_JSON="[]")
+    assert expected_clip_count(empty) == 2
 
 
 def test_r4_p020_merges_parent_voiceover():

@@ -1,4 +1,15 @@
+import io
+
+from PIL import Image
+
 from item4.processor import group_pending_variant_rows, process_variant_group
+
+
+def _jpeg_bytes() -> bytes:
+    image = Image.new("RGB", (32, 32), (12, 40, 80))
+    out = io.BytesIO()
+    image.save(out, format="JPEG", quality=90)
+    return out.getvalue()
 
 
 def _variant_row(record_id: str, source_id: str, ratio: str) -> dict:
@@ -46,15 +57,15 @@ def test_process_variant_group_downloads_once(monkeypatch):
 
         def download_file(self, _file_id):
             self.downloads += 1
-            return b"master-bytes", "image/jpeg"
+            return _jpeg_bytes(), "image/jpeg"
 
         def upload_file(self, _folder, _name, _body, _mime):
             self.uploads += 1
             return {"id": f"up{self.uploads}", "webViewLink": "https://drive.google.com/file/d/up/view"}
 
     class FakeVariant:
-        def render(self, source, ratio, _gravity):
-            assert source == b"master-bytes"
+        def render(self, source, ratio, _gravity, **_kwargs):
+            assert source[:3] == b"\xff\xd8\xff"
             return f"crop-{ratio}".encode()
 
     class FakeAirtable:

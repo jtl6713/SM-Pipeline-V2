@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.271-activity-logs";
+  const BUILD_ID = "item4-0.6.273-catalog-tab";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13909,14 +13909,14 @@
   }
 
   const OPS_CONTROL_TABS = ["desk", "ideas", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
-  const OPS_AGENT_TABS = ["guide", "inventory", "activity"];
+  const OPS_AGENT_TABS = ["guide", "catalog", "activity"];
   let operationsControlTab = "desk";
   let operationsAgentTab = "guide";
 
   function parseOperationsLocation() {
     const raw = location.hash.replace(/^#/, "").trim().toLowerCase();
     if (raw === "agent" || raw === "agent-guide") return { view: "agent", tab: "guide" };
-    if (raw === "agent-inventory") return { view: "agent", tab: "inventory" };
+    if (raw === "agent-catalog" || raw === "agent-inventory" || raw === "agent-checks") return { view: "agent", tab: "catalog" };
     if (raw === "agent-activity") return { view: "agent", tab: "activity" };
     if (OPS_CONTROL_TABS.includes(raw)) return { view: "control", tab: raw };
     return { view: "control", tab: operationsControlTab || "desk" };
@@ -13924,7 +13924,7 @@
 
   function operationsHashFor(view, tab) {
     if (view === "agent") {
-      if (tab === "inventory") return "#agent-inventory";
+      if (tab === "catalog") return "#agent-catalog";
       if (tab === "activity") return "#agent-activity";
       return "#agent";
     }
@@ -13998,6 +13998,7 @@
       const agentCounts = $("operationsAgentDeskCounts");
       if (agentMeta) agentMeta.textContent = "Desk inventory is unavailable.";
       if (agentCounts) agentCounts.innerHTML = "";
+      renderOperationsQualityChecks(null);
       return;
     }
     const summary = desk.summary || {};
@@ -14021,6 +14022,53 @@
     if (counts) counts.innerHTML = chipHtml;
     const agentCounts = $("operationsAgentDeskCounts");
     if (agentCounts) agentCounts.innerHTML = chipHtml;
+    renderOperationsQualityChecks(desk);
+  }
+
+  function formatQualityCheckTime(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const parsed = Date.parse(raw);
+    if (!Number.isFinite(parsed)) return raw;
+    try {
+      return new Date(parsed).toLocaleString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", month: "short", day: "numeric" });
+    } catch {
+      return raw;
+    }
+  }
+
+  function qualityCheckLaneLabel(lane) {
+    if (lane === "tester") return "Tester lane";
+    if (lane === "both") return "Both lanes";
+    return "Service lane";
+  }
+
+  function renderOperationsQualityChecks(desk) {
+    const targets = [$("operationsDeskChecks"), $("operationsAgentDeskChecks")].filter(Boolean);
+    if (!targets.length) return;
+    const checks = Array.isArray(desk?.checks) ? desk.checks : [];
+    const lanes = ["service", "both", "tester"];
+    const html = checks.length
+      ? lanes.map((lane) => {
+        const rows = checks.filter((row) => String(row.lane || "service") === lane);
+        if (!rows.length) return "";
+        const items = rows.map((row) => {
+          const status = String(row.status || "not_run");
+          const tone = status === "finding" ? "fail" : status === "pass" ? "ok" : "";
+          const when = formatQualityCheckTime(row.checked_at);
+          const count = Array.isArray(row.incidents) ? row.incidents.length : 0;
+          const detail = status === "finding"
+            ? `${count} finding${count === 1 ? "" : "s"}`
+            : status === "pass" ? "pass" : "not run";
+          return `<li${tone ? ` data-tone="${tone}"` : ""} data-status="${escapeHtml(status)}">
+          <strong>${escapeHtml(row.title || row.kind || "Check")}</strong>
+          <span>${escapeHtml(detail)}${when ? ` · ${escapeHtml(when)}` : ""}</span>
+        </li>`;
+        }).join("");
+        return `<section><h3 class="ops-log-heading">${escapeHtml(qualityCheckLaneLabel(lane))}</h3><ol class="ops-quality-checks">${items}</ol></section>`;
+      }).join("")
+      : `<p class="subtle">Catalog has not loaded yet.</p>`;
+    for (const target of targets) target.innerHTML = html;
   }
 
   function isOperationsTestActivityEvent(row) {
@@ -14087,11 +14135,11 @@
       if (payload?.source === "unavailable") {
         meta.textContent = `Task Organizer tickets are unavailable${payload.error ? ` (${payload.error})` : ""}. Live inventory above is still current. Use the full log link above.`;
       } else if (!deskEvents.length && !testEvents.length) {
-        meta.textContent = "No service-desk tickets or test results yet.";
+        meta.textContent = "No Quality Agent tickets or test results yet.";
       } else {
         const bits = [];
-        if (deskEvents.length) bits.push(`${deskEvents.length} desk ticket${deskEvents.length === 1 ? "" : "s"}`);
-        if (testEvents.length) bits.push(`${testEvents.length} test result${testEvents.length === 1 ? "" : "s"}`);
+        if (deskEvents.length) bits.push(`${deskEvents.length} service ticket${deskEvents.length === 1 ? "" : "s"}`);
+        if (testEvents.length) bits.push(`${testEvents.length} tester result${testEvents.length === 1 ? "" : "s"}`);
         meta.textContent = `${bits.join(" · ")} from Task Organizer.`;
       }
     }

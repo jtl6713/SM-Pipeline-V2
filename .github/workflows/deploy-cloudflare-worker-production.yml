@@ -34,6 +34,7 @@ jobs:
           set -euo pipefail
           test -s apps/studio-api/worker.js
           test -s apps/studio-api/desk-inventory.mjs
+          test -s apps/studio-api/quality-checks.mjs
           test -s apps/studio-api/asset-library.mjs
           test -s apps/studio-api/operations-oversized.mjs
           mkdir -p /tmp/studio-check

@@ -9,7 +9,7 @@ from airtable.client import AirtableClient
 from airtable.constants import MEDIA_TRANSFER_QUEUE_TABLE
 from integrations.google_drive import GoogleDriveClient
 from integrations.r2_upload import R2UploadClient
-from integrations.variant_service import VariantServiceClient
+from integrations.variant_service import VariantServiceClient, rasterize_still_bytes
 from item4.clip_poster import clip_poster_bytes, is_video_preview_row, stamp_request_clip_poster
 from item4.constants import BROWSER_MASTER_EXTENSIONS, STALE_PROCESSING_MS, VARIANT_RECIPE_VERSION
 from item4.formulas import airtable_quote, smv1_exact_request_formula
@@ -380,7 +380,21 @@ def _process_variant_pending(
 
     _claim_row(client, record_id, fields)
     source_bytes, _ = drive.download_file(source_drive_id)
-    rendered = variant.render(source_bytes, ratio, _gravity_token(fields))
+    source_ext = str(fields.get("Source_Extension") or "")
+    source_bytes = rasterize_still_bytes(
+        source_bytes,
+        drive=drive,
+        drive_id=source_drive_id,
+        ext=source_ext,
+    )
+    rendered = variant.render(
+        source_bytes,
+        ratio,
+        _gravity_token(fields),
+        drive=drive,
+        drive_id=source_drive_id,
+        ext=source_ext,
+    )
     return _complete_variant_upload(client, drive, row, rendered)
 
 
@@ -435,12 +449,26 @@ def process_variant_group(
         return results
 
     source_bytes, _ = drive.download_file(source_drive_id)
+    source_ext = str((pending_rows[0].get("fields") or {}).get("Source_Extension") or "")
+    source_bytes = rasterize_still_bytes(
+        source_bytes,
+        drive=drive,
+        drive_id=source_drive_id,
+        ext=source_ext,
+    )
     first_error: Exception | None = None
     for row in pending_rows:
         fields = row.get("fields") or {}
         ratio = str(fields.get("Aspect_Ratio") or "").strip()
         try:
-            rendered = variant.render(source_bytes, ratio, _gravity_token(fields))
+            rendered = variant.render(
+                source_bytes,
+                ratio,
+                _gravity_token(fields),
+                drive=drive,
+                drive_id=source_drive_id,
+                ext=str(fields.get("Source_Extension") or source_ext),
+            )
             results.append(
                 _complete_variant_upload(client, drive, row, rendered, airtable_lock=airtable_lock)
             )
@@ -534,7 +562,14 @@ def _process_preview_pending(
             content_type = "image/jpeg"
             suffix = f"-{drive_id}.jpg"
         elif ext in {"heic", "heif"}:
-            preview_bytes = variant.render(source_bytes, "4:5", "center")
+            preview_bytes = variant.render(
+                source_bytes,
+                "4:5",
+                "center",
+                drive=drive,
+                drive_id=drive_id,
+                ext=ext,
+            )
             content_type = "image/jpeg"
             suffix = ".jpg"
         elif ext in BROWSER_MASTER_EXTENSIONS:

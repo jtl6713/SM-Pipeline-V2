@@ -13,8 +13,8 @@ This folder is the durable operational documentation for the SM Pipeline V2 repo
 3. **`DEFERRED_TODO.md`**  
    Deferred housekeeping items that are intentionally not being implemented yet, plus the service-desk Phase 4 automerge gate.
 
-4. **`docs/handoffs/autonomous-service-desk.md`**  
-   Autonomous service desk runbook (inventory, modes, companion, ship playbook). Operator Word guide: **`docs/handoffs/Autonomous-Service-Agent.docx`** (also Studio → Operations → Autonomous Service Agent).
+  4. **`docs/handoffs/autonomous-service-desk.md`**  
+   Quality Agent runbook (catalog, inventory, modes, companion, ship playbook). Operator Word guide: **`docs/handoffs/Quality-Agent.docx`** (also `Autonomous-Service-Agent.docx`; Studio → Operations → Quality Agent).
 
 5. **`deploy/cloud-vm/README.md`**  
    Linux/ARM Docker home for the eight Windows media services (Oracle Always Free path). Windows START/STOP/VERIFY stays production until that cutover.

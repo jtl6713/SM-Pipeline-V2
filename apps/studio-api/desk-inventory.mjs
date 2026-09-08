@@ -1,4 +1,6 @@
-/** Pure classifiers for the autonomous service-desk inventory. No Airtable I/O. */
+/** Pure classifiers for the Quality Agent inventory. No Airtable I/O. */
+
+import { attachQualityChecks, assertQualityCatalog, QUALITY_CHECKS } from "./quality-checks.mjs";
 
 export const DESK_SCHEMA = "studio.desk-inventory.1";
 export const DESK_SETTING_NAME = "STUDIO_DESK_MODE";
@@ -17,8 +19,9 @@ export const DEFAULT_DESK_CAPS = Object.freeze({
 });
 
 export const AUTO_MERGE_ALLOWLIST = Object.freeze([
-  /^apps\/studio-api\/(worker\.js|desk-inventory\.mjs)$/,
+  /^apps\/studio-api\/(worker\.js|desk-inventory\.mjs|quality-checks\.mjs)$/,
   /^apps\/studio-api\/desk-inventory\.test\.mjs$/,
+  /^apps\/studio-api\/quality-checks\.test\.mjs$/,
   /^services\/pipeline-runner\/studio_produce\//,
   /^services\/pipeline-runner\/item4\//,
   /^services\/pipeline-runner\/tests\/test_produce_self_heal\.py$/,
@@ -67,6 +70,7 @@ export function errorClassFromText(text) {
   const value = String(text || "").trim().toLowerCase();
   if (!value) return "unknown";
   if (/(timed?\s*out|timeout|connectionpool|connection reset|502|503|504)/i.test(value)) return "transient_http";
+  if (/clip count mismatch/i.test(value)) return "clip_count_mismatch";
   if (/no_eligible_p2_route/i.test(value)) return "no_eligible_p2_route";
   if (/heal budget|retries exhausted|escalated/i.test(value)) return "heal_exhausted";
   const compact = value.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
@@ -89,6 +93,20 @@ export function classifyProduceJob(job, nowMs = Date.now(), staleAfterMs = STALE
   const errorClass = errorClassFromText(error || step);
   const updated = Date.parse(String(job.updated_at || ""));
   const stale = !Number.isFinite(updated) || (nowMs - updated) >= staleAfterMs;
+
+  // Remotion expectedClipCount vs clips.length. Worker heal retries cannot fix this.
+  if (errorClass === "clip_count_mismatch" && (step === "blocked" || step === "escalated")) {
+    return {
+      kind: "produce_clip_mismatch",
+      class: "code_bug",
+      record_id: recordId || null,
+      fingerprint: fingerprint("produce_clip_mismatch", recordId, errorClass),
+      step,
+      resume_count: resumeCount,
+      error: error || null,
+      actor: "desk_agent",
+    };
+  }
 
   if (step === "escalated" || (step === "blocked" && resumeCount >= maxResumes)) {
     return {
@@ -226,12 +244,63 @@ export function classifyAutonomousRequest({ status, notes, job, nowMs = Date.now
 }
 
 export const INTAKE_MAX_FILE_BYTES = 100000000;
+export const TESTER_NIGHTLY_MAX_AGE_MS = 36 * 60 * 60 * 1000;
+
+export function originFromNotes(notes) {
+  const text = String(notes || "");
+  if (/origin=az-finished-video/i.test(text)) return "az-finished-video";
+  if (text.includes("origin=autonomous")) return "autonomous";
+  return "other";
+}
+
+function outputAgeMs(row, nowMs) {
+  const modified = Date.parse(String(row?.last_modified || row?.updated_at || ""));
+  return Number.isFinite(modified) ? nowMs - modified : Infinity;
+}
+
+function isStoryOutput(row) {
+  return /story/i.test(String(row?.output_type || row?.studio_output_type || row?.platform_output_type || ""));
+}
+
+function outputPastReview(row) {
+  const status = String(row?.output_status || "").trim();
+  const review = String(row?.review_status || "").trim();
+  const publish = String(row?.publish_status || "").trim();
+  if (review === "Approved" || status === "Approved for Publishing") return true;
+  if (["Published", "Publishing", "Scheduled"].includes(status) || ["Published", "Publishing", "Scheduled"].includes(publish)) return true;
+  return Boolean(row?.published_at);
+}
 
 export function classifyIntakeResidue(file) {
   const id = String(file?.id || "").trim();
   if (!id) return null;
   const size = Number(file?.size);
-  if (Number.isFinite(size) && size > INTAKE_MAX_FILE_BYTES) return null;
+  const oversized = Number.isFinite(size) && size > INTAKE_MAX_FILE_BYTES;
+  const existingId = String(file?.existing_media_asset_id || "").trim();
+  const reason = String(file?.duplicate_reason || "").trim();
+  if (existingId) {
+    return {
+      kind: "intake_processed_residue",
+      class: "transient",
+      record_id: id,
+      fingerprint: fingerprint("intake_processed_residue", id, reason || "already_processed"),
+      name: String(file?.name || "").trim() || null,
+      existing_media_asset_id: existingId,
+      duplicate_reason: reason || null,
+      parents: Array.isArray(file?.parents) ? file.parents : [],
+      actor: "worker_heal",
+    };
+  }
+  if (oversized) {
+    return {
+      kind: "intake_oversize",
+      class: "transient",
+      record_id: id,
+      fingerprint: fingerprint("intake_oversize", id, "waiting_compress"),
+      name: String(file?.name || "").trim() || null,
+      actor: "worker_heal",
+    };
+  }
   return {
     kind: "intake_parked",
     class: "transient",
@@ -241,6 +310,209 @@ export function classifyIntakeResidue(file) {
     actor: "worker_heal",
   };
 }
+
+export function classifyPromotedNotRfr({ status, notes, outputs = [], requestId, nowMs = Date.now() } = {}) {
+  if (String(status || "").trim() !== "Promoted") return null;
+  const origin = originFromNotes(notes);
+  if (origin === "az-finished-video") return null;
+  const rows = Array.isArray(outputs) ? outputs : [];
+  const stuck = rows.filter((row) => {
+    const outputStatus = String(row?.output_status || "").trim();
+    if (outputStatus === "Ready for Review" || outputPastReview(row)) return false;
+    if (outputStatus === "In Production") return outputAgeMs(row, nowMs) >= STALE_RENDER_MINUTES * 60 * 1000;
+    const missingDeliverable = !String(row?.final_file_url || "").trim() && !String(row?.thumbnail_url || "").trim();
+    return missingDeliverable && outputAgeMs(row, nowMs) >= STALE_RENDER_MINUTES * 60 * 1000;
+  });
+  if (!stuck.length) return null;
+  const recordId = String(requestId || stuck[0]?.request_id || stuck[0]?.id || "").trim();
+  return {
+    kind: "promoted_not_rfr",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("promoted_not_rfr", recordId, origin || "in_production"),
+    origin,
+    actor: "worker_heal",
+  };
+}
+
+export function classifyAzNotAutoFinished({ status, notes, outputs = [], requestId } = {}) {
+  if (originFromNotes(notes) !== "az-finished-video") return null;
+  if (String(status || "").trim() !== "Promoted") return null;
+  const rows = Array.isArray(outputs) ? outputs : [];
+  const mains = rows.filter((row) => !isStoryOutput(row));
+  const ready = (mains.length ? mains : rows).filter((row) => {
+    const finalUrl = String(row?.final_file_url || "").trim();
+    const caption = String(row?.output_caption || "").trim();
+    const thumb = String(row?.thumbnail_url || "").trim();
+    return Boolean(finalUrl && caption && (isStoryOutput(row) || thumb));
+  });
+  if (!ready.length) return null;
+  if (ready.every(outputPastReview)) return null;
+  const recordId = String(requestId || "").trim();
+  return {
+    kind: "az_not_auto_finished",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("az_not_auto_finished", recordId, "ready_not_queued"),
+    actor: "worker_heal",
+  };
+}
+
+export function classifyAutonomousRfrGate({ notes, outputs = [], requestId } = {}) {
+  if (originFromNotes(notes) !== "autonomous") return null;
+  const leaked = (Array.isArray(outputs) ? outputs : []).filter((row) => {
+    const status = String(row?.output_status || "").trim();
+    const publish = String(row?.publish_status || "").trim();
+    const review = String(row?.review_status || "").trim();
+    if (status === "Ready for Review") return false;
+    const published = status === "Published" || ["Published", "Publishing"].includes(publish) || Boolean(row?.published_at);
+    if (published && review !== "Approved") return true;
+    if (status === "Approved for Publishing" && review !== "Approved") return true;
+    return false;
+  });
+  if (!leaked.length) return null;
+  const recordId = String(requestId || leaked[0]?.id || "").trim();
+  return {
+    kind: "autonomous_rfr_gate",
+    class: "code_bug",
+    record_id: recordId || null,
+    fingerprint: fingerprint("autonomous_rfr_gate", recordId, "auto_published"),
+    actor: "desk_agent",
+  };
+}
+
+export function classifyPublishDispatch(row, nowMs = Date.now()) {
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const outputStatus = String(row?.output_status || "").trim();
+  const platform = String(row?.platform || "").trim();
+  if (outputStatus !== "Approved for Publishing") return null;
+  if (row?.published_at || ["Published", "Publishing"].includes(String(row?.publish_status || "").trim())) return null;
+  if (platform === "TikTok") return null;
+  if (outputAgeMs(row, nowMs) < STALE_RENDER_MINUTES * 60 * 1000) return null;
+  return {
+    kind: "publish_never_dispatch",
+    class: "transient",
+    record_id: recordId || null,
+    fingerprint: fingerprint("publish_never_dispatch", recordId, "approved_not_dispatched"),
+    actor: "worker_heal",
+  };
+}
+
+export function classifyNativeCover(row) {
+  const recordId = String(row?.id || row?.record_id || "").trim();
+  const outputStatus = String(row?.output_status || "").trim();
+  const publish = String(row?.publish_status || "").trim();
+  const published = outputStatus === "Published" || publish === "Published" || Boolean(row?.published_at);
+  if (!published) return null;
+  const platform = String(row?.platform || "").trim();
+  if (platform === "TikTok") return null;
+  const type = `${row?.studio_output_type || ""} ${row?.platform_output_type || ""} ${row?.output_type || ""}`;
+  if (!/reel|short/i.test(type) || /story|carousel|single image|multi-image|multi-photo/i.test(type)) return null;
+  const thumb = String(row?.thumbnail_url || "").trim();
+  const publicCover = Boolean(thumb)
+    && !/drive\.google\.com|\/uc\?id=|googleusercontent\.com/i.test(thumb)
+    && !/ITEM4-VARIANT-fill-crop/i.test(thumb);
+  if (platform === "Facebook") {
+    if (row?.cover_attached) return null;
+    return {
+      kind: "native_cover_missing",
+      class: "code_bug",
+      record_id: recordId || null,
+      fingerprint: fingerprint("native_cover_missing", recordId, publicCover ? "cover_not_attached" : "missing_public_cover"),
+      actor: "desk_agent",
+    };
+  }
+  if (publicCover) return null;
+  return {
+    kind: "native_cover_missing",
+    class: "code_bug",
+    record_id: recordId || null,
+    fingerprint: fingerprint("native_cover_missing", recordId, "missing_public_cover"),
+    actor: "desk_agent",
+  };
+}
+
+export function classifyTesterNightly(events, nowMs = Date.now(), maxAgeMs = TESTER_NIGHTLY_MAX_AGE_MS) {
+  const rows = Array.isArray(events) ? events : [];
+  const nightly = rows.find((row) => {
+    const body = row?.payload && typeof row.payload === "object" ? row.payload : row || {};
+    const label = `${body.suite || ""} ${body.workflow || ""} ${row?.type || ""}`;
+    return /regression suite/i.test(label);
+  });
+  if (!nightly) {
+    return {
+      kind: "tester_nightly",
+      class: "infra_down",
+      record_id: "nightly",
+      fingerprint: fingerprint("tester_nightly", "nightly", "missing"),
+      actor: "regression",
+    };
+  }
+  const body = nightly.payload && typeof nightly.payload === "object" ? nightly.payload : {};
+  const conclusion = String(body.conclusion || nightly.conclusion || "").toLowerCase();
+  const created = Date.parse(String(nightly.created_at || body.at || ""));
+  if (conclusion === "failure" || conclusion === "failed" || conclusion === "cancelled") {
+    return {
+      kind: "tester_nightly",
+      class: "code_bug",
+      record_id: "nightly",
+      fingerprint: fingerprint("tester_nightly", "nightly", "failed"),
+      actor: "regression",
+    };
+  }
+  if (!Number.isFinite(created) || (nowMs - created) >= maxAgeMs) {
+    return {
+      kind: "tester_nightly",
+      class: "infra_down",
+      record_id: "nightly",
+      fingerprint: fingerprint("tester_nightly", "nightly", "stale"),
+      actor: "regression",
+    };
+  }
+  return null;
+}
+
+export function classifyTesterCatalogAssert() {
+  try {
+    assertQualityCatalog(QUALITY_CHECKS);
+    return null;
+  } catch (error) {
+    return {
+      kind: "tester_catalog_assert",
+      class: "code_bug",
+      record_id: "catalog",
+      fingerprint: fingerprint("tester_catalog_assert", "catalog", "invalid"),
+      error: error instanceof Error ? error.message : String(error),
+      actor: "regression",
+    };
+  }
+}
+
+export const CLASSIFIER_KINDS = Object.freeze([
+  "produce_clip_mismatch",
+  "produce_escalated",
+  "produce_stale",
+  "render_ready_no_job",
+  "render_long",
+  "produce_orphan",
+  "crop_parked",
+  "crop_stale",
+  "autonomous_stalled",
+  "autonomous_produce_gap",
+  "az_stalled",
+  "intake_processed_residue",
+  "intake_parked",
+  "intake_oversize",
+  "promoted_not_rfr",
+  "az_not_auto_finished",
+  "autonomous_rfr_gate",
+  "publish_never_dispatch",
+  "native_cover_missing",
+  "health_down",
+  "variant_preparing",
+  "tester_nightly",
+  "tester_catalog_assert",
+]);
 
 export function classifyHealthTarget(target, probe) {
   if (target?.public === false || probe?.skipped) return null;
@@ -347,18 +619,22 @@ export function buildDeskInventoryPayload({
   health,
   caps,
   generatedAt,
+  scannedKinds,
 } = {}) {
-  const summary = summarizeIncidents(incidents);
+  const generated = generatedAt || new Date().toISOString();
+  const rows = Array.isArray(incidents) ? incidents.filter(Boolean) : [];
+  const summary = summarizeIncidents(rows);
   return {
     ok: true,
     schema: DESK_SCHEMA,
     desk_mode: parseDeskMode(mode),
     chicago_date: chicagoDate || null,
     chicago_hour: Number.isFinite(Number(chicagoHour)) ? Number(chicagoHour) : null,
-    generated_at: generatedAt || new Date().toISOString(),
+    generated_at: generated,
     caps: caps || parseDeskCaps({}, chicagoDate),
     summary,
     health: Array.isArray(health) ? health : [],
-    incidents: Array.isArray(incidents) ? incidents.filter(Boolean) : [],
+    incidents: rows,
+    checks: attachQualityChecks(rows, { generatedAt: generated, scannedKinds }),
   };
 }

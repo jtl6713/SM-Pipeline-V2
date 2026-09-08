@@ -8,7 +8,7 @@ import threading
 from typing import Any
 
 from a2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
-from a2.dedupe import intake_duplicate_formulas
+from a2.dedupe import intake_duplicate_formulas, existing_drive_id, parent_ids, processed_residue_action
 from a2.email_builder import intake_email_html, intake_subject
 from airtable.client import AirtableClient
 from airtable.constants import MEDIA_ASSETS_TABLE
@@ -50,8 +50,19 @@ def existing_intake_record(
     name: str,
     size: int | None,
 ) -> dict[str, Any] | None:
+    match = existing_intake_match(client, file_id=file_id, name=name, size=size)
+    return match[0] if match else None
+
+
+def existing_intake_match(
+    client: AirtableClient,
+    *,
+    file_id: str,
+    name: str,
+    size: int | None,
+) -> tuple[dict[str, Any], str] | None:
     fields = ["Asset Name", "Google Drive File ID", "File_Size_Bytes"]
-    for formula in intake_duplicate_formulas(file_id, name, size):
+    for formula, reason in intake_duplicate_formulas(file_id, name, size):
         rows = client.list_records(
             MEDIA_ASSETS_TABLE,
             formula=formula,
@@ -59,7 +70,7 @@ def existing_intake_record(
             fields=fields,
         )
         if rows:
-            return rows[0]
+            return rows[0], reason
     return None
 
 
@@ -109,6 +120,73 @@ def _intake_fields(file: dict[str, Any], *, share_url: str, batch_id: str) -> di
     if duration:
         fields["Duration_Seconds"] = duration
     return fields
+
+
+def _drive_parents(item: dict[str, Any]) -> list[str]:
+    return parent_ids(item.get("parents"))
+
+
+def _existing_file_parents(drive: GoogleDriveClient, record: dict[str, Any] | None) -> list[str]:
+    drive_id = existing_drive_id(record)
+    if not drive_id:
+        return []
+    try:
+        meta = drive.get_file(drive_id, fields="id,parents")
+        return parent_ids(meta.get("parents"))
+    except Exception:
+        logger.exception("A2 could not read Drive parents for existing asset %s", drive_id)
+        raise
+
+
+def _annotate_ingestion_route(
+    item: dict[str, Any],
+    *,
+    match: tuple[dict[str, Any], str] | None = None,
+    existing_parents: list[str] | None = None,
+) -> dict[str, Any]:
+    record, reason = match if match else (None, None)
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "mime": item.get("mimeType"),
+        "route": classify_intake_file(str(item.get("name") or ""), str(item.get("mimeType") or "")),
+        "size": parse_bytes(item.get("size")),
+        "parents": _drive_parents(item),
+        "existing_media_asset_id": str((record or {}).get("id") or "") or None,
+        "existing_drive_id": existing_drive_id(record) or None,
+        "existing_parents": list(existing_parents or []),
+        "duplicate_reason": reason,
+    }
+
+
+def _clear_processed_residue(
+    drive: GoogleDriveClient,
+    item: dict[str, Any],
+    *,
+    existing: dict[str, Any],
+    reason: str,
+) -> str:
+    leftover_id = str(item.get("id") or "").strip()
+    action = processed_residue_action(
+        leftover_id=leftover_id,
+        leftover_parents=_drive_parents(item),
+        existing_drive_id=existing_drive_id(existing),
+        existing_parents=_existing_file_parents(drive, existing),
+        duplicate_reason=reason,
+    )
+    if action == "remove_ingestion_parent":
+        drive.remove_parent(leftover_id, GDRIVE_INGESTION_FOLDER)
+        return action
+    if action == "trash_leftover":
+        drive.trash_file(leftover_id)
+        return action
+    if action == "retry_move":
+        route = classify_intake_file(str(item.get("name") or ""), str(item.get("mimeType") or ""))
+        dest = GDRIVE_FOLDERS[route]
+        drive.move_file(leftover_id, dest, remove_parent_id=GDRIVE_INGESTION_FOLDER)
+        return action
+    logger.warning("A2 processed leftover %s has no safe heal action", leftover_id)
+    return action
 
 
 def _list_ingestion_files(drive: GoogleDriveClient) -> list[dict[str, Any]]:
@@ -179,14 +257,20 @@ def _intake_pass(
             mime = str(item.get("mimeType") or "")
             size = parse_bytes(item.get("size"))
             try:
-                existing = existing_intake_record(client, file_id=file_id, name=name, size=size)
-                if existing:
+                existing_match = existing_intake_match(client, file_id=file_id, name=name, size=size)
+                if existing_match:
+                    existing, reason = existing_match
                     skipped_existing.append(file_id)
                     if file_id:
                         try:
-                            drive.trash_file(file_id)
+                            _clear_processed_residue(drive, item, existing=existing, reason=reason)
                         except Exception:
-                            pass
+                            logger.exception(
+                                "A2 failed to clear processed leftover %s (%s)",
+                                name,
+                                file_id,
+                            )
+                            skipped_errors.append(file_id)
                     continue
                 shared = drive.share_anyone_reader(file_id)
                 share_url = str(shared.get("webContentLink") or shared.get("webViewLink") or "")
@@ -345,16 +429,24 @@ def process_request(
         files = _list_ingestion_files(drive)
         preview["file_ids"] = [str(item.get("id") or "") for item in files]
         preview["files_found"] = bool(files)
-        preview["routes"] = [
-            {
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "mime": item.get("mimeType"),
-                "route": classify_intake_file(str(item.get("name") or ""), str(item.get("mimeType") or "")),
-                "size": parse_bytes(item.get("size")),
-            }
-            for item in files
-        ]
+        client = AirtableClient() if files else None
+        routes = []
+        for item in files:
+            file_id = str(item.get("id") or "")
+            name = str(item.get("name") or "")
+            size = parse_bytes(item.get("size"))
+            match = None
+            existing_parents: list[str] = []
+            if client:
+                try:
+                    match = existing_intake_match(client, file_id=file_id, name=name, size=size)
+                    if match:
+                        existing_parents = _existing_file_parents(drive, match[0])
+                except Exception:
+                    logger.exception("A2 dry-run could not annotate duplicate for %s (%s)", name, file_id)
+                    raise
+            routes.append(_annotate_ingestion_route(item, match=match, existing_parents=existing_parents))
+        preview["routes"] = routes
         return {"processed": False, "dry_run": True, **preview}
 
     if drain:

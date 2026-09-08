@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.271-activity-logs">
+ <link rel="stylesheet" href="/assets/styles-phase7-0617.css?v=0.6.273-catalog-tab">
 </head>
 <body>
  <header class="topbar">
@@ -1105,13 +1105,13 @@
 
  <section id="page-operations" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Open one Control tool at a time from the text links. Autonomous Service Agent has its own page for the guide, desk inventory, and activity log.</p></div>
+ <div><span class="eyebrow">Control</span><h1>Operations</h1><p>Open one Control tool at a time from the text links. Quality Agent has its own page for the check catalog, desk inventory, and activity log.</p></div>
  <button class="secondary-button" data-refresh="operations">Refresh</button>
  </div>
  <div class="form-message" id="operationsMessage" aria-live="polite"></div>
  <nav class="ops-subnav" aria-label="Operations pages">
  <button type="button" class="ops-subnav-link active" data-ops-view="control" id="operationsViewControl">Control</button>
- <button type="button" class="ops-subnav-link" data-ops-view="agent" id="operationsViewAgent">Autonomous Service Agent</button>
+ <button type="button" class="ops-subnav-link" data-ops-view="agent" id="operationsViewAgent">Quality Agent</button>
  </nav>
  <div id="operationsControlView">
  <section class="panel ops-tabbed-panel">
@@ -1127,9 +1127,9 @@
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabRepair" data-ops-tab="repair" aria-controls="operationsRepairPanel" aria-selected="false" tabindex="-1">Render repair</button>
  </nav>
  <div class="ops-tab-panel" id="operationsDeskPanel" data-ops-tab-panel="desk" role="tabpanel" aria-labelledby="operationsTabDesk">
- <div class="panel-heading"><div><h2>Service desk</h2><p>Stuck produce, render, crop, autonomous, and public /health counts. Worker cron still self-heals transients. Mode is the desk kill switch.</p></div>
+ <div class="panel-heading"><div><h2>Service desk</h2><p>Quality Agent — service lane. Stuck produce, render, crop, autonomous, and public /health. Worker cron still self-heals transients. Mode is the desk kill switch.</p></div>
  <label class="form-field" style="max-width:14rem"><span>Desk mode</span>
- <select id="operationsDeskMode" aria-label="Autonomous service desk mode">
+ <select id="operationsDeskMode" aria-label="Quality Agent desk mode">
  <option value="off">off</option>
  <option value="observe">observe</option>
  <option value="infra">infra</option>
@@ -1140,6 +1140,8 @@
  </div>
  <p class="subtle" id="operationsDeskMeta">Loading desk inventory…</p>
  <div id="operationsDeskCounts" class="ops-desk-counts"></div>
+ <h3 class="ops-log-heading">Catalog</h3>
+ <div id="operationsDeskChecks" class="ops-quality-catalog"></div>
  </div>
  <div class="ops-tab-panel" id="operationsIdeasPanel" data-ops-tab-panel="ideas" role="tabpanel" aria-labelledby="operationsTabIdeas" hidden>
  <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, Studio generates a daily batch of ideas around 1:00 a.m. Chicago for that profile only.</p></div>
@@ -1250,33 +1252,33 @@
  </div>
  <div id="operationsAgentView" hidden>
  <section class="panel ops-tabbed-panel">
- <nav class="ops-card-tabs" role="tablist" aria-label="Autonomous Service Agent">
+ <nav class="ops-card-tabs" role="tablist" aria-label="Quality Agent">
  <button type="button" class="ops-card-tab active" role="tab" id="operationsTabGuide" data-ops-tab="guide" aria-controls="operationsAgentGuidePanel" aria-selected="true">Guide</button>
- <button type="button" class="ops-card-tab" role="tab" id="operationsTabInventory" data-ops-tab="inventory" aria-controls="operationsAgentInventoryPanel" aria-selected="false" tabindex="-1">Desk inventory</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabCatalog" data-ops-tab="catalog" aria-controls="operationsAgentCatalogPanel" aria-selected="false" tabindex="-1">Catalog</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabActivity" data-ops-tab="activity" aria-controls="operationsAgentActivityPanel" aria-selected="false" tabindex="-1">Activity log</button>
  </nav>
  <div class="ops-tab-panel" id="operationsAgentGuidePanel" data-ops-tab-panel="guide" role="tabpanel" aria-labelledby="operationsTabGuide">
  <div class="panel-heading">
  <div>
- <h2>Autonomous Service Agent</h2>
- <p>How auto-review and bounded auto-correction work, what you still approve, and where to read the activity log.</p>
+ <h2>Quality Agent</h2>
+ <p>One catalog drives the tester lane (regression + cheap assertions) and the service lane (stuck / illogical state). Worker cron still heals transients. You still Approve publish for library-stills.</p>
  </div>
  </div>
  <div class="ops-agent-copy">
- <p>The Worker heals transient stuck produce, render, crop, and AZ jobs every two minutes. The desk agent only tickets after that, then may restart a down service or open a <code>cursor/desk-*</code> PR depending on Desk mode. It never auto-publishes.</p>
+ <p>The Worker heals transient stuck produce, render, crop, intake leftovers, and AZ jobs every two minutes. Quality Agent tickets findings from the same check list, then may restart a down service or open a <code>cursor/desk-*</code> PR depending on Desk mode. It never auto-publishes library-stills (<code>origin=autonomous</code>). AZ (<code>origin=az-finished-video</code>) may auto-schedule as today.</p>
  <ul>
  <li><strong>observe</strong> (default) — ticket diagnosis packs only.</li>
  <li><strong>infra</strong> — also SYNC / VERIFY / one-service DEPLOY when public <code>/health</code> is down.</li>
  <li><strong>patch</strong> — also open PRs. You merge.</li>
  <li><strong>automerge</strong> — leave off. Allowlisted heals only, after proof.</li>
  </ul>
- <p>You still Approve publish for library-stills autonomous work, set TikTok covers in the TikTok app, and can change AZ times in Pipeline before they fire. Full instructions are in the <a id="operationsAgentGuideLink" href="/docs/Autonomous-Service-Agent.docx" download="Autonomous-Service-Agent.docx">Word guide</a>.</p>
+ <p>You still Approve publish for library-stills autonomous work, set TikTok covers in the TikTok app, and can change AZ times in Pipeline before they fire. Full instructions are in the <a id="operationsAgentGuideLink" href="/docs/Quality-Agent.docx" download="Quality-Agent.docx">Word guide</a> (also saved as Autonomous-Service-Agent.docx).</p>
  </div>
  </div>
- <div class="ops-tab-panel" id="operationsAgentInventoryPanel" data-ops-tab-panel="inventory" role="tabpanel" aria-labelledby="operationsTabInventory" hidden>
- <div class="panel-heading"><div><h2>Desk mode and live inventory</h2><p>Same kill switch as Control. Fingerprints reuse one incident so the same parked job is not five tickets.</p></div>
+ <div class="ops-tab-panel" id="operationsAgentCatalogPanel" data-ops-tab-panel="catalog" role="tabpanel" aria-labelledby="operationsTabCatalog" hidden>
+ <div class="panel-heading"><div><h2>Catalog</h2><p>Every Quality Agent sentence, with the last pass or finding. Desk mode is the kill switch. Fingerprints reuse one incident so the same parked job is not five tickets.</p></div>
  <label class="form-field" style="max-width:14rem"><span>Desk mode</span>
- <select id="operationsAgentDeskMode" aria-label="Autonomous service desk mode on agent page">
+ <select id="operationsAgentDeskMode" aria-label="Quality Agent desk mode on catalog tab">
  <option value="off">off</option>
  <option value="observe">observe</option>
  <option value="infra">infra</option>
@@ -1285,16 +1287,17 @@
  </select>
  </label>
  </div>
- <p class="subtle" id="operationsAgentDeskMeta">Loading desk inventory…</p>
+ <p class="subtle" id="operationsAgentDeskMeta">Loading catalog…</p>
  <div id="operationsAgentDeskCounts" class="ops-desk-counts"></div>
+ <div id="operationsAgentDeskChecks" class="ops-quality-catalog"></div>
  </div>
  <div class="ops-tab-panel" id="operationsAgentActivityPanel" data-ops-tab-panel="activity" role="tabpanel" aria-labelledby="operationsTabActivity" hidden>
  <div class="panel-heading"><div><h2>Activity log</h2><p class="ops-heading-copy">Service-desk tickets and automated test results. Open the <a id="operationsAgentOrganizerLink" href="https://tasks.chicagoshining.com/logs" target="_blank" rel="noopener noreferrer">full log</a> on Task Organizer. Worker transient heals are not listed here.</p></div>
  </div>
  <p class="subtle" id="operationsAgentActivityMeta">Loading activity…</p>
- <h3 class="ops-log-heading">Service desk</h3>
+ <h3 class="ops-log-heading">Service lane</h3>
  <ol id="operationsAgentActivityLog" class="ops-agent-log"></ol>
- <h3 class="ops-log-heading">Automated tests</h3>
+ <h3 class="ops-log-heading">Tester lane</h3>
  <ol id="operationsAgentTestLog" class="ops-agent-log"></ol>
  </div>
  </section>
@@ -1317,7 +1320,7 @@
  <button type="button" class="support-toc-link" role="tab" id="helpTabMusic" data-support-doc="music" aria-controls="helpArticleMusic" aria-selected="false" tabindex="-1">Music</button>
  <button type="button" class="support-toc-link" role="tab" id="helpTabLibrary" data-support-doc="library" aria-controls="helpArticleLibrary" aria-selected="false" tabindex="-1">Assets</button>
  <button type="button" class="support-toc-link" role="tab" id="helpTabOperations" data-support-doc="operations" aria-controls="helpArticleOperations" aria-selected="false" tabindex="-1">Operations</button>
- <button type="button" class="support-toc-link" role="tab" id="helpTabDesk" data-support-doc="desk" aria-controls="helpArticleDesk" aria-selected="false" tabindex="-1">Service desk</button>
+ <button type="button" class="support-toc-link" role="tab" id="helpTabDesk" data-support-doc="desk" aria-controls="helpArticleDesk" aria-selected="false" tabindex="-1">Quality Agent</button>
  <button type="button" class="support-toc-link" role="tab" id="helpTabTesting" data-support-doc="testing" aria-controls="helpArticleTesting" aria-selected="false" tabindex="-1">Testing</button>
  <button type="button" class="support-toc-link" role="tab" id="helpTabLogs" data-support-doc="logs" aria-controls="helpArticleLogs" aria-selected="false" tabindex="-1">Logs</button>
  </nav>
@@ -1508,12 +1511,12 @@
  <h2>Operations</h2>
  <figure class="support-shot">
  <img src="/assets/support/operations.jpg?v=0.6.102" alt="Operations control page" width="1440" height="920">
- <figcaption>Admin-only control room. Control and Autonomous Service Agent are separate pages. Control tools are text tabs so only one section is open at a time.</figcaption>
+ <figcaption>Admin-only control room. Control and Quality Agent are separate pages. Control tools are text tabs so only one section is open at a time.</figcaption>
  </figure>
- <p>Operations is the control room. The sidebar item is limited to tenant admin, publishing, and production-configure roles. Use <strong>Control</strong> for daily jobs and queues. Use <strong>Autonomous Service Agent</strong> for the desk guide, stuck inventory, and activity log. Refresh reloads the current page from the API.</p>
+ <p>Operations is the control room. The sidebar item is limited to tenant admin, publishing, and production-configure roles. Use <strong>Control</strong> for daily jobs and queues. Use <strong>Quality Agent</strong> for the check catalog, stuck inventory, and activity log. Refresh reloads the current page from the API.</p>
  <h3>Control tabs</h3>
  <ul>
- <li><strong>Service desk</strong> — stuck produce, render, crop, autonomous, and public health counts. Desk mode is the kill switch. Worker cron still heals transients every two minutes. Full desk behavior is on the Service desk Help tab.</li>
+ <li><strong>Service desk</strong> — Quality Agent service lane: stuck produce, render, crop, autonomous, and public health, plus the named check list. Desk mode is the kill switch. Worker cron still heals transients every two minutes. Full behavior is on the Quality Agent Help tab.</li>
  <li><strong>Daily ideas</strong> — per-profile overnight batch around 1:00 a.m. Chicago. Toggle a profile on, or use Run today now for enabled profiles only.</li>
  <li><strong>Autonomous produce</strong> — harvests a Chicago trend the library can shoot, produces the standard template, and <em>stops at Ready for Review</em>. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or Run autonomous now. Optional landmark pin applies to the next run. Studio will not pick a new autonomous idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
  <li><strong>Library intake</strong> — Drive ingestion folder scan every 10 minutes. Process intake folder starts the same drain now. Oversized clips compress one at a time, then the next file starts immediately. Cap music leading silence rewrites catalog audio so the intro is no longer than 0.5 seconds.</li>
@@ -1524,19 +1527,22 @@
  <li><strong>Render repair</strong> — Reset stale render URLs after Remotion moved. Retry failed asset selection only retries that failed stage. These do not run on a clock.</li>
  </ul>
  <p>Control buttons pulse on-demand work when something is waiting. They do not turn interval scanners back on.</p>
- <p>See also the <button type="button" class="text-button" data-support-doc="desk">Service desk</button>, <button type="button" class="text-button" data-support-doc="testing">Testing</button>, and <button type="button" class="text-button" data-support-doc="logs">Logs</button> Help tabs.</p>
+ <p>See also the <button type="button" class="text-button" data-support-doc="desk">Quality Agent</button>, <button type="button" class="text-button" data-support-doc="testing">Testing</button>, and <button type="button" class="text-button" data-support-doc="logs">Logs</button> Help tabs.</p>
  <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
  </article>
  <article class="support-article" id="helpArticleDesk" data-support-article="desk" role="tabpanel" aria-labelledby="helpTabDesk" hidden>
- <h2>Autonomous service desk</h2>
- <p>The desk watches stuck Studio work after the Worker has already tried to heal it. Open it from Operations → Control → Service desk, or Operations → Autonomous Service Agent.</p>
- <h3>Two layers</h3>
+ <h2>Quality Agent</h2>
+ <p>Quality Agent is the umbrella for the tester lane (nightly/PR regression + cheap catalog assertions) and the service lane (stuck / illogical Studio state). Both report against the same named check catalog. Open it from Operations → Control → Service desk, or Operations → Quality Agent.</p>
+ <h3>Check catalog</h3>
+ <p>Each row is a precise sentence (intake leftovers, origin-aware Promoted → Ready for Review vs published, produce/render/crop, public /health, last nightly rotation). Inventory returns every row as pass, finding, or not yet run. Kind chips still exist for fingerprints; the catalog is what operators should read.</p>
+ <h3>Two lanes, one list</h3>
  <ul>
- <li><strong>Worker heal</strong> — every two minutes. Resumes stale produce, render, crop, and finished-video jobs, and drains leftover Drive ingestion files. This is the first responder. Transient items never become desk tickets.</li>
- <li><strong>Desk agent</strong> — reads the live inventory, classifies what is still stuck, and writes a <code>desk_incident</code> ticket. Depending on Desk mode it may restart a down local service or open a <code>cursor/desk-*</code> pull request. It never Approves publish and never sets a video-frame cover when a 3D grid cover is required.</li>
+ <li><strong>Worker heal</strong> — every two minutes. Resumes stale produce, render, crop, and finished-video jobs, and drains leftover Drive ingestion files (including already-processed residue). Transient items are ticketed then left to this layer.</li>
+ <li><strong>Service lane</strong> — reads inventory, tickets a <code>desk_incident</code> for catalog findings, and may restart a down local service or open a <code>cursor/desk-*</code> pull request. It never Approves publish for library-stills and never sets a video-frame cover when a 3D grid cover is required.</li>
+ <li><strong>Tester lane</strong> — last nightly rotation from <code>tests/regression/catalog.json</code> plus PR hermetic packs. The 15-minute tick does not seed live mx1–mx5 rows. A missing or failing nightly job is itself a catalog finding.</li>
  </ul>
  <h3>Desk mode</h3>
- <p>The same selector appears on Control and on the Agent inventory tab. Missing value is observe.</p>
+ <p>The same selector appears on Control and on the Quality Agent Catalog tab. Missing value is observe. Airtable setting name stays <code>STUDIO_DESK_MODE</code>.</p>
  <ul>
  <li><strong>off</strong> — inventory only. No tickets, no restarts, no PRs.</li>
  <li><strong>observe</strong> (default) — ticket a diagnosis pack only.</li>
@@ -1544,20 +1550,24 @@
  <li><strong>patch</strong> — also open PRs. You merge. After merge, ship Worker/Pages via the production trigger files, or PLAN/DEPLOY one local service.</li>
  <li><strong>automerge</strong> — leave off until proven. Allowlisted heal paths only, CI green, caps remain, and the same fingerprint is not repeating.</li>
  </ul>
- <h3>Inventory and fingerprints</h3>
- <p>Counts cover stuck produce, render, crop, autonomous, intake parked, and public health. A fingerprint is kind + record + error class. The same parked job reuses one incident instead of five tickets. A fingerprint that repeats within 24 hours emails Joseph and stops; it does not open another PR.</p>
+ <h3>Origin terminals</h3>
+ <ul>
+ <li><code>origin=autonomous</code> library-stills — skip Production Approve through to Promoted, then stop at Ready for Review. Human gate = Approve publish. Nothing auto-publishes.</li>
+ <li><code>origin=az-finished-video</code> — cover + caption + final may auto-schedule / auto-approve. Operator may still change times. TikTok stays a draft.</li>
+ <li>Manual / other — Ready for Review. Human gate = Approve publish.</li>
+ </ul>
  <h3>Agent page</h3>
  <ul>
- <li><strong>Guide</strong> — short operator copy plus the downloadable Word guide for auto-review, bounded auto-correction, and what you still approve.</li>
- <li><strong>Desk inventory</strong> — live stuck counts and the same Desk mode switch.</li>
- <li><strong>Activity log</strong> — recent desk tickets. See the Logs Help tab.</li>
+ <li><strong>Guide</strong> — short operator copy plus the downloadable Word guide.</li>
+ <li><strong>Catalog</strong> — live catalog sentences with pass/finding and last check time, plus Desk mode. Same list as Control → Service desk.</li>
+ <li><strong>Activity log</strong> — service incidents and automated tests under Quality Agent. See the Logs Help tab.</li>
  </ul>
- <p>You still Approve publish for library-stills autonomous work. Finished-video (AZ) may auto-schedule; you can still change or cancel times in Pipeline before they fire. TikTok covers are set in the TikTok app.</p>
+ <p>See also the <button type="button" class="text-button" data-support-doc="testing">Testing</button> Help tab for how to pulse a safe Studio run.</p>
  <button type="button" class="primary-button" data-open-page="operations">Go to Operations</button>
  </article>
  <article class="support-article" id="helpArticleTesting" data-support-article="testing" role="tabpanel" aria-labelledby="helpTabTesting" hidden>
  <h2>Testing</h2>
- <p>Studio testing means proving a path to Ready for Review without posting live, unless you explicitly Approve. Operations is where you pulse a run; Pipeline is where you inspect the result.</p>
+ <p>Testing is the Quality Agent tester lane. The shared check catalog lives on the <button type="button" class="text-button" data-support-doc="desk">Quality Agent</button> Help tab. Studio testing means proving a path to Ready for Review without posting live, unless you explicitly Approve. Operations is where you pulse a run; Pipeline is where you inspect the result. Do not seed live mx1–mx5 platform-matrix rows on the 15-minute tick.</p>
  <h3>Safe Studio tests</h3>
  <ul>
  <li><strong>Autonomous produce</strong> — Operations → Autonomous produce → Run autonomous now. It must stop at Ready for Review. Nothing publishes. Do not harvest a second idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
@@ -1587,10 +1597,10 @@
  <h2>Activity logs</h2>
  <p>Logs for Operations live in Studio first. Worker heals that succeed quietly do not show up as desk tickets.</p>
  <h3>Studio activity log</h3>
- <p>Operations → Autonomous Service Agent → Activity log. This is the operator view. It has two lists:</p>
+ <p>Operations → Quality Agent → Activity log. This is the operator view. It has two lists:</p>
  <ul>
- <li><strong>Service desk</strong> — recent <code>desk_incident</code> tickets (agent 3, task 1). Each row is a fingerprint, class, record, and diagnosis after Worker heal did not clear the job.</li>
- <li><strong>Automated tests</strong> — Regression functional, the nightly regression suite, and Task Organizer connectivity checks. Each row shows pass/fail, the job name, and a link to the GitHub Actions run.</li>
+ <li><strong>Service lane</strong> — recent <code>desk_incident</code> tickets (agent 3, task 1). Each row is a fingerprint, class, record, and diagnosis after Worker heal did not clear the job.</li>
+ <li><strong>Tester lane</strong> — Regression functional, the nightly regression suite, and Task Organizer connectivity checks. Each row shows pass/fail, the job name, and a link to the GitHub Actions run.</li>
  </ul>
  <h3>Task Organizer</h3>
  <p>The durable store behind those lists is the <a href="https://tasks.chicagoshining.com/logs" target="_blank" rel="noopener noreferrer">Task Organizer activity log</a>. That page is the event history, not the API schema. <a href="https://tasks.chicagoshining.com/docs" target="_blank" rel="noopener noreferrer">/docs</a> is only OpenAPI. Worker transient heals are not copied here.</p>
@@ -1775,8 +1785,8 @@
  </div>
  </aside>
 
- <script src="/assets/config.js?v=0.6.271-activity-logs"></script>
+ <script src="/assets/config.js?v=0.6.273-catalog-tab"></script>
  <script src="/assets/ez-plan.js?v=0.6.271-activity-logs"></script>
- <script src="/assets/app-item4-0619.js?v=0.6.271-activity-logs"></script>
+ <script src="/assets/app-item4-0619.js?v=0.6.273-catalog-tab"></script>
 </body>
 </html>
