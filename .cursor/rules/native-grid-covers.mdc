@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Native grid covers
 
-The generated 3D block-letter thumbnail is the **grid cover** wherever a platform API allows a cover that is separate from the video or album body.
+The generated block-letter thumbnail is the **grid cover** wherever a platform API allows a cover that is separate from the video or album body. Prefer **gold / black-and-gold sophisticated lettering for ≥ ~80% of posts**; use colorful glossy 3D lettering for ≤ ~20%. See `docs/thumbnail-style-guidance.md`.
 
 ## Always
 

@@ -6355,14 +6355,11 @@ function item4StudioThumbnailPrompt(requestRecord, parent) {
     || ""
   ).trim();
   const concept = String(f(parent, "Thumbnail_Concept") || "").trim();
-  const finished = studioIsFinishedPassthrough(requestRecord);
   return [
     `Create a ChicagoShining social thumbnail / promo still for: ${title}.`,
     caption ? `Post context: ${caption.slice(0, 500)}` : "",
     concept ? `Thumbnail concept: ${concept}` : "",
-    finished
-      ? "The thumbnail MUST include bold, colorful 3D block lettering: glossy, dimensional, high-impact letters in bright ChicagoShining colors. Do not use flat type, thin script, or black-and-gold arched lettering for this cover."
-      : "The thumbnail MUST include bold, colorful 3D block lettering (glossy, dimensional, high-impact) or black-and-gold slightly arched block lettering.",
+    "Lettering mix: for at least ~80% of covers use premium gold or black-and-gold block lettering — metallic gold, slightly arched or refined, sophisticated and cinematic. Use colorful glossy 3D block lettering for at most ~20% of covers, and only when the subject clearly calls for high-energy playful treatment. Do not default to bright multicolor candy 3D letters. Prefer stylish gold sophistication.",
     "Text must be large and readable on a phone, near the center or slightly below center, inside safe margins, and not in the top or bottom 10%.",
     "Polished, high-contrast, and dramatic. Do not invent logos, watermarks, platform UI, or distorted letters.",
   ].filter(Boolean).join("\n");
@@ -13108,8 +13105,8 @@ function studioFinishedSeedOverlay(requestRecord, clips, nativeReady) {
   const firstUrl = String(clips[0]?.url || "").trim() || null;
   const az = studioIsAzFinishedVideo(requestRecord);
   const note = az
-    ? `origin=az-finished-video; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the colorful 3D block-letter thumbnail. AI may write the post caption only; do not burn text onto the finished file. az-auto-queue=1.`
-    : `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the colorful 3D block-letter thumbnail. AI may write the post caption only; do not burn text onto the finished file.`;
+    ? `origin=az-finished-video; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (prefer gold / black-and-gold sophisticated lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file. az-auto-queue=1.`
+    : `origin=ez-wizard; ez-input=${kind}. Finished passthrough. Skip P1/voiceover/R2-R5. Generate the grid thumbnail (prefer gold / black-and-gold sophisticated lettering ~80%; colorful 3D only occasionally). AI may write the post caption only; do not burn text onto the finished file.`;
   if (kind === "finished-video") {
     return {
       Output_Status: firstUrl ? "Ready for Review" : "In Production",

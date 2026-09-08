@@ -27,9 +27,9 @@ IMPORTANT BRANDING RULE:
 Do not invent, draw, simulate, approximate, or generate any ChicagoShining logo or watermark in the image. Official branding/watermarking is handled downstream by production assets.
 
 CHICAGOSHINING THUMBNAIL TEXT STYLE:
-When the thumbnail includes text, use bold, high-impact block lettering. Preferred styles are:
-1) colorful 3D block lettering with bright, glossy, dimensional letters, or
-2) black-and-gold slightly arched block lettering with a premium ChicagoShining look.
+When the thumbnail includes text, use bold, high-impact block lettering with this mix:
+1) DEFAULT (≥ ~80% of posts): premium gold or black-and-gold lettering — metallic gold, slightly arched or refined block letters, sophisticated and cinematic (elegant city light, dusk skyline, reflective water, architectural drama). Prefer this stylish gold look over colorful 3D.
+2) OCCASIONAL (≤ ~20% of posts): colorful glossy 3D block lettering only when the subject clearly calls for high-energy playful treatment. Do not default to bright multicolor candy 3D letters.
 
 Text should be large, readable on mobile, visually dramatic, and placed near the center or slightly lower than center. Keep text inside safe margins and avoid the top and bottom 10% of the image.
 
