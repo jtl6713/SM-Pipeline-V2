@@ -67,7 +67,7 @@ Local companion only, on the Windows machine:
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Invoke-DeskCompanion.ps1" -RestartDown
 ```
 
-Dirty checkout → stop. Never `git reset --hard`. One service at a time. Public `/health` down after VERIFY may `-DeployDown` from `main` only.
+Hourly Windows keep-alive (this PC, logged-in session): `Register-DeskCompanionHourly.ps1` runs `Run-DeskCompanionHourly.ps1`. VERIFY every hour; START only if a public `/health` is down. If a live `.smv2-deployment.json` SHA is behind `origin/main`, PLAN+DEPLOY one service from `main` (merged enhancement + that service restart). Dirty checkout still allows START/VERIFY and that DEPLOY; it will not `git reset --hard`. Never `git reset --hard`. One service at a time.
 
 ## Patch (`patch`)
 
@@ -80,7 +80,7 @@ Call `deskMayAutomerge` mentally with the changed paths. Refuse unless every pat
 ## Never
 
 - Auto-publish or Approve publish for `origin=autonomous` library-stills
-- Treat Ready for Review autonomous work as a finding
+- Treat Ready for Review autonomous work as a finding when Open review is actually available (locked RFR without a public cover is `rfr_locked_missing_deliverable`)
 - Send `thumb_offset` when a native cover is required
 - Persist library media on R2
 - Force-push, `--no-verify`, commit `.env` / tokens
@@ -103,6 +103,14 @@ Auto-correct:
 2. Ticket fingerprint `autonomous_topic_collision:<place>:same_place`.
 3. **Keep** the manual / non-autonomous package (Worth the trip pattern) and library stills.
 4. In `observe`, stop after the ticket. If mode allows Airtable data repair, Cancel unpublished extra `origin=autonomous` PRs only. Never delete published posts or Drive masters other packages still use.
+
+### `rfr_locked_missing_deliverable` (`transient` → Worker heal; `code_bug` past the stale window)
+
+Rendered / Review Sent / Ready for Review labels with `creative_available=false`. Ignore the badge. Open review is the gate. Cover-required Reels/Shorts/TikTok Video need a public 3D still on `media.chicagoshining.com/publish/` or `studio/previews/` — not Drive, not a fill-crop. Stories / IG single image / FB single image are not cover findings. Sibling Stories may already Open review while the group says N/M rendered.
+
+Proven fixture: Big John’s Skeleton Content Item 129 / outputs 391, 393, 395, 396 (Stories 392/394 were already reviewable). Parent thumb was Drive `uc?id=`; Worker `wait_thumbnail` pulsed P2 and went idle because P2 saw a non-empty Drive URL.
+
+Auto-correct: Worker `studioHealRfrMissingDeliverable` stages the existing Drive still to the public CDN, stamps cover-required siblings, stamps blank captions from the Content Item, then resumes studio-produce if a 3D still still does not exist. Do not Approve. Do not send `thumb_offset`. Fingerprint `rfr_locked_missing_deliverable:<output_id>:cover`.
 
 ### `youtube_private_source_fail` (`transient` → Worker heal)
 

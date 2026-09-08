@@ -18,10 +18,11 @@ from studio_produce.thumbnail_prompt import build_finished_thumbnail_prompt
 logger = logging.getLogger("pipeline-runner.studio-produce")
 
 VIDEO_COVER_SUFFIXES = (".mp4", ".mov", ".m4v", ".webm")
+PUBLIC_MEDIA_PREFIX = "https://media.chicagoshining.com/"
 
 
 def is_designed_cover_url(url: Any) -> bool:
-    """True only for a generated 3D still. Drive fetches and video files are not covers."""
+    """True only for a generated 3D still on the public CDN. Drive fetches and video files are not covers."""
     href = str(url or "").strip()
     if not href:
         return False
@@ -34,6 +35,23 @@ def is_designed_cover_url(url: Any) -> bool:
     if path.endswith(VIDEO_COVER_SUFFIXES):
         return False
     if "/studio/previews/clip-posters/" in lower:
+        return False
+    if not lower.startswith(PUBLIC_MEDIA_PREFIX):
+        return False
+    rest = lower[len(PUBLIC_MEDIA_PREFIX):]
+    return rest.startswith("publish/") or rest.startswith("studio/previews/")
+
+
+def needs_grid_cover(output: dict[str, Any]) -> bool:
+    """True when Open review needs a public 3D still in addition to the body file."""
+    platform = field_str(output, "Platform")
+    output_type = field_str(output, "Studio_Output_Type") or field_str(output, "Platform_Output_Type")
+    kind = output_type.lower()
+    if "story" in kind:
+        return False
+    if platform == "Instagram" and ("single image" in kind or "instagram feed post" in kind) and "carousel" not in kind and "reel" not in kind:
+        return False
+    if platform == "Facebook" and ("single image" in kind or "facebook post" in kind) and "reel" not in kind and "multi-image" not in kind and "photo set" not in kind:
         return False
     return True
 
@@ -71,6 +89,39 @@ def _generate_cover_bytes(
     return png, prompt
 
 
+def _stage_existing_drive_cover(client, parent: dict[str, Any]) -> str:
+    from ap0.public_cover import drive_file_id_from_url
+
+    drive_id = field_str(parent, "Thumbnail_Google_Drive_File_ID") or drive_file_id_from_url(
+        field_str(parent, "Thumbnail_URL")
+    )
+    if not drive_id:
+        return ""
+    try:
+        drive = GoogleDriveClient()
+        png, _ctype = drive.download_file(drive_id)
+    except Exception as error:
+        logger.warning("existing Drive cover download skipped: %s", error)
+        return ""
+    if not png:
+        return ""
+    public = _public_thumb_url(client, parent["id"], png)
+    if not public:
+        return ""
+    client.update_record(
+        CONTENT_ITEMS_TABLE,
+        parent["id"],
+        {
+            "Thumbnail_URL": public,
+            "Thumbnail_Status": "Generated",
+            "Include_Thumbnail": "Yes",
+            "Content_Status": "Thumbnail Ready",
+        },
+        typecast=True,
+    )
+    return public
+
+
 def ensure_finished_thumbnail(
     client,
     request: dict[str, Any],
@@ -87,6 +138,10 @@ def ensure_finished_thumbnail(
     if is_designed_cover_url(existing) and not force:
         _stamp_outputs(client, outputs or [], existing)
         return {"url": existing, "generated": False, "aspect_ratio": ratio}
+    staged = "" if force else _stage_existing_drive_cover(client, parent)
+    if staged:
+        _stamp_outputs(client, outputs or [], staged)
+        return {"url": staged, "generated": False, "staged": True, "aspect_ratio": ratio}
 
     png, prompt = _generate_cover_bytes(client, request, parent, aspect_ratio=ratio)
     drive = GoogleDriveClient()
@@ -131,6 +186,12 @@ def ensure_platform_thumbnails(
     """Generate one cover per distinct Platform Output aspect ratio and stamp each row."""
     if not parent:
         raise RuntimeError("A promoted Content Item is required before platform thumbnails can be generated")
+    if not force and not is_designed_cover_url(field_str(parent, "Thumbnail_URL")):
+        staged = _stage_existing_drive_cover(client, parent)
+        if staged:
+            fields = parent.get("fields")
+            if isinstance(fields, dict):
+                fields["Thumbnail_URL"] = staged
     rows = list(outputs or [])
     by_ratio: dict[str, list[dict[str, Any]]] = {}
     for output in rows:

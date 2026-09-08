@@ -240,9 +240,23 @@ def test_pick_resume_step_jumps_to_stamp_when_selected():
     assert pick_resume_step(request, outputs) == "stamp"
     ready = [{"fields": {
         "Output_Status": "Ready for Review",
+        "Studio_Output_Type": "Reel",
         "Final_File_URL": "https://media.chicagoshining.com/studio/previews/x.mp4",
+        "Thumbnail_URL": "https://media.chicagoshining.com/studio/previews/thumbnails/recX/cover-9x16.png",
     }}]
     assert pick_resume_step(request, ready) == "done"
+    missing_cover = [{"fields": {
+        "Output_Status": "Ready for Review",
+        "Studio_Output_Type": "Reel",
+        "Final_File_URL": "https://media.chicagoshining.com/studio/previews/x.mp4",
+    }}]
+    assert pick_resume_step(request, missing_cover) == "stamp"
+    story_ready = [{"fields": {
+        "Output_Status": "Ready for Review",
+        "Studio_Output_Type": "Story",
+        "Final_File_URL": "https://media.chicagoshining.com/studio/previews/x.mp4",
+    }}]
+    assert pick_resume_step(request, story_ready) == "done"
 
 
 def test_native_photo_detection():
@@ -369,6 +383,11 @@ def test_drive_video_is_not_a_designed_cover():
     assert is_designed_cover_url(
         "https://media.chicagoshining.com/studio/previews/thumbnails/recX/cover-9x16.png"
     ) is True
+    assert is_designed_cover_url("https://example.com/thumb.png") is False
+    from studio_produce.thumbnail import needs_grid_cover
+    assert needs_grid_cover({"fields": {"Platform": "Instagram", "Studio_Output_Type": "Reel"}}) is True
+    assert needs_grid_cover({"fields": {"Platform": "Instagram", "Studio_Output_Type": "Story"}}) is False
+    assert needs_grid_cover({"fields": {"Platform": "TikTok", "Studio_Output_Type": "Video Draft"}}) is True
 
 
 def test_stamp_fields_ignores_drive_video_thumbnail():
