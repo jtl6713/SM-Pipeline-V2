@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.285-library-profile-name";
+  const BUILD_ID = "item4-0.6.286-mobile-master-reorder";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -5815,7 +5815,7 @@
     return `<div class="item4-heic-placeholder item4-image-placeholder${isVideo ? " item4-clip-placeholder" : ""}">${isVideo ? `<span class="item4-clip-play" aria-hidden="true"></span>` : ""}<strong>${escapeHtml(format)}</strong><span>${escapeHtml(isVideo ? clipLabel : label)}</span></div>`;
   }
 
-  function item4AssetThumb(asset) {
+  function item4AssetThumb(asset, { index = 0, total = 1 } = {}) {
     const dims = asset.width && asset.height ? `${asset.width}×${asset.height}` : "Original";
     const isHeic = item4IsHeicAsset(asset);
     const isVideo = item4AssetLooksLikeVideo(asset);
@@ -5825,7 +5825,7 @@
     const visual = isVideo
       ? (item4ClipPlayerHtml({ previewUrl, streamUrl, name: asset.name || "Clip", durationSeconds: asset.duration_seconds, asset, preload: Boolean(streamUrl) }) || item4AssetPlaceholder(asset, "Clip saved"))
       : previewUrl
-        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
+        ? `<img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(asset.name || "Master photo")}" loading="lazy" draggable="false" data-item4-preview-image data-preview-src="${escapeHtml(previewUrl)}" data-preview-failure-key="${escapeHtml(String(asset.id || asset.media_asset_record_id || previewUrl))}">`
         : item4AssetPlaceholder(asset, isHeic ? "Original preserved" : "Preview unavailable");
     const ext = item4AssetExtension(asset?.name).toUpperCase();
     const seconds = item4KnownClipDuration(asset);
@@ -5834,12 +5834,68 @@
     const showCaption = ezManualCaptionsEnabled() && (ezPhotoSetActive() || ezIntakeKind === "single-photo");
     const captionField = showCaption ? item4CaptionField(asset.id) : "";
     const canRemove = asset.id && !String(asset.id).startsWith("local:");
+    const canReorder = canRemove && total > 1;
+    const orderControls = canReorder
+      ? `<div class="item4-asset-order" role="group" aria-label="Reorder ${isVideo ? "clip" : "photo"} ${Number(asset.order || index + 1)}">
+          <button type="button" class="item4-asset-order-btn" data-item4-reorder="${escapeHtml(asset.id)}" data-dir="up" ${index <= 0 ? "disabled" : ""} aria-label="Move earlier">↑</button>
+          <button type="button" class="item4-asset-order-btn" data-item4-reorder="${escapeHtml(asset.id)}" data-dir="down" ${index >= total - 1 ? "disabled" : ""} aria-label="Move later">↓</button>
+        </div>`
+      : "";
     return `<article class="item4-asset-card${showCaption ? " with-caption" : ""}" data-item4-asset="${escapeHtml(asset.id)}">
-      <div class="item4-thumb">${visual}</div>
+      <div class="item4-thumb">${visual}${orderControls}</div>
       <div class="item4-asset-meta"><strong>${escapeHtml(asset.name || (isVideo ? "Clip" : "Photo"))}</strong><span>${escapeHtml(isVideo ? `Clip ${asset.order || ""}` : `Photo ${asset.order || ""}`)} · ${escapeHtml(dims)}${durationNote}${formatNote}</span></div>
       ${captionField}
       ${canRemove ? `<button type="button" class="item4-remove-asset" data-remove-item4-asset="${escapeHtml(asset.id)}" title="${ezIsFinishedVideo() ? "Remove this video" : "Remove this photo"}">×</button>` : ""}
     </article>`;
+  }
+
+  let item4ReorderBusy = false;
+
+  async function reorderItem4Asset(assetId, direction) {
+    if (!activeProductionRequest?.id || item4ReorderBusy) return;
+    const assets = (Array.isArray(item4Workspace?.assets) ? item4Workspace.assets : [])
+      .slice()
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const index = assets.findIndex((asset) => String(asset.id || "") === String(assetId || ""));
+    if (index < 0) return;
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= assets.length) return;
+    const next = assets.slice();
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    const ordered = next.map((asset, orderIndex) => ({ ...asset, order: orderIndex + 1 }));
+    const previous = item4Workspace;
+    item4ReorderBusy = true;
+    item4Workspace = { ...(item4Workspace || {}), assets: ordered, assets_status: "Ready" };
+    item4AssetStripSignature = "";
+    renderItem4Assets(item4Workspace);
+    renderEzPhotoStrip();
+    try {
+      const result = await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ asset_ids: ordered.map((asset) => asset.id) }),
+        timeoutMs: 30000,
+      });
+      if (result?.record) {
+        activeProductionRequest = result.record;
+        populateProductionRequestForm(result.record);
+      }
+      if (Array.isArray(result?.assets)) {
+        item4Workspace = { ...(item4Workspace || {}), assets: result.assets, assets_status: "Ready" };
+        item4AssetStripSignature = "";
+        renderItem4Assets(item4Workspace);
+        renderEzPhotoStrip();
+      }
+      setRequestMessage(`Photo order updated (${target + 1} of ${ordered.length}). Rebuild frames if you already prepared variants.`, "success");
+    } catch (error) {
+      item4Workspace = previous;
+      item4AssetStripSignature = "";
+      renderItem4Assets(item4Workspace || { assets: [] });
+      renderEzPhotoStrip();
+      setRequestMessage(error.message || "Could not reorder photos.", "error-text");
+    } finally {
+      item4ReorderBusy = false;
+    }
   }
 
   function renderItem4Assets(status) {
@@ -5864,22 +5920,25 @@
       return;
     }
     hydrateEzCaptionDrafts(status);
-    const signature = assets.map((asset) => `${asset.id}|${asset.name}|${asset.poster_url || ""}|${asset.preview_url || ""}|${asset.google_drive_file_id || ""}`).join(";");
+    const sortedAssets = assets.slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const signature = sortedAssets.map((asset) => `${asset.id}|${asset.order}|${asset.name}|${asset.poster_url || ""}|${asset.preview_url || ""}|${asset.google_drive_file_id || ""}`).join(";");
     if (!assets.length && (item4Uploading || ezStagedFiles.length || String(status?.assets_status || "") === "Uploading")) {
       item4AssetStripSignature = "";
       host.innerHTML = `<div class="empty compact-empty">${ezIsFinishedVideo() ? "Video is loading into the system." : "Photos are loading into the system."} You can keep working or leave this screen.</div>`;
     } else if (signature && signature === item4AssetStripSignature && host.querySelector("[data-item4-asset]")) {
       syncFinishedMediaHeadings();
       syncProductionStudioState();
-      item4EnsureClipPosters(assets);
+      item4EnsureClipPosters(sortedAssets);
       return;
     } else {
       item4AssetStripSignature = signature;
-      host.innerHTML = assets.length ? assets.map(item4AssetThumb).join("") : '<div class="empty compact-empty"></div>';
+      host.innerHTML = sortedAssets.length
+        ? `${sortedAssets.length > 1 ? `<p class="item4-reorder-hint">Use ↑ ↓ on each photo to set carousel order.</p>` : ""}${sortedAssets.map((asset, index) => item4AssetThumb(asset, { index, total: sortedAssets.length })).join("")}`
+        : '<div class="empty compact-empty"></div>';
     }
     host.querySelectorAll("[data-item4-preview-image]").forEach((img) => {
       const card = img.closest("[data-item4-asset]");
-      const asset = assets.find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
+      const asset = sortedAssets.find((row) => String(row?.id || "") === String(card?.dataset?.item4Asset || ""));
       item4BindPreviewImage(img, {
         candidates: item4AssetPreviewCandidates(asset || {}),
         failureKey: String(asset?.id || asset?.media_asset_record_id || img.dataset.previewFailureKey || "").trim(),
@@ -5887,12 +5946,19 @@
       });
     });
     host.querySelectorAll("[data-remove-item4-asset]").forEach(button => button.addEventListener("click", () => removeItem4Asset(button.dataset.removeItem4Asset)));
+    host.querySelectorAll("[data-item4-reorder]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        reorderItem4Asset(button.dataset.item4Reorder, button.dataset.dir);
+      });
+    });
     item4BindClipPlayers(host);
     bindEzCaptionInputs(host);
     productionDecorateTooltips(host);
     syncFinishedMediaHeadings();
     syncProductionStudioState();
-    item4EnsureClipPosters(assets);
+    item4EnsureClipPosters(sortedAssets);
   }
 
   function item4PlanCard(item) {
