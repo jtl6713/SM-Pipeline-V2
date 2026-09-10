@@ -26,10 +26,16 @@ import {
 } from "./desk-inventory.mjs";
 import {
   allocateLibraryBatchNames,
+  combineAirtableFormulas,
+  firstLinkedRecordId,
+  LIBRARY_CROSS_SCOPE_SETTING,
   libraryBatchNameFilterFormula,
+  libraryCrossScopeEnabled,
   libraryDriveFilename,
   mediaAssetIsHeic,
+  mediaAssetProfileScopeFormula,
   normalizeLibraryBatchBase,
+  resolveLibraryCrossScopeFlag,
   sanitizeLibraryAssetName,
 } from "./asset-library.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
@@ -151,6 +157,7 @@ export default {
       const isOpsDeskInventoryRoute = url.pathname === "/api/ops/desk/inventory";
       const isOpsDeskActivityRoute = url.pathname === "/api/ops/desk/activity";
       const isOpsDeskModeRoute = url.pathname === "/api/ops/desk/mode";
+      const isOpsLibraryCrossScopeRoute = url.pathname === "/api/ops/library/cross-scope";
       const isOperationsResetRenderUrlsRoute = url.pathname === "/api/operations/reset-render-urls";
       const isOperationsRetryAssetSelectionRoute = url.pathname === "/api/operations/retry-asset-selection";
       const isOperationsMakeAdminBridgeRoute = url.pathname === "/api/operations/make-admin-bridge";
@@ -639,6 +646,13 @@ export default {
         return patchStudioDeskMode(request, env);
       }
 
+      if (isOpsLibraryCrossScopeRoute) {
+        if (request.method !== "PATCH") throw new HttpError(405, "Method not allowed");
+        requirePermission(authorization, "tenant_admin");
+        assertWriteRequest(request, env);
+        return patchLibraryCrossScope(request, env);
+      }
+
       if (isOperationsRoute) {
         requireAnyPermission(authorization, ["tenant_admin", "publishing_control", "production_configure"]);
         return getStudioOperations(request, env, authorization);
@@ -1111,7 +1125,7 @@ export default {
           assertUploadWriteRequest(request, env);
           return uploadAssetLibraryItems(request, env, authorization);
         }
-        return listAssetLibrary(request, env, url);
+        return listAssetLibrary(request, env, url, authorization);
       }
 
       return respond(request, env, { ok: false, error: "Not found" }, 404);
@@ -5609,11 +5623,12 @@ async function getMediaLibraryStills(request, env, url, authorization) {
   const query = String(url.searchParams.get("q") || "").trim();
   const includeVideo = ["1", "true", "video", "all", "clips"].includes(String(url.searchParams.get("include") || "").trim().toLowerCase());
   const queryTokens = ideaLibraryTokens(query);
+  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url);
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: IDEA_LIBRARY_SCAN_LIMIT,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(queryTokens.slice(0, 10), { includeVideo }),
+    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(queryTokens.slice(0, 10), { includeVideo }), scopeFormula),
   });
   const items = [];
   for (const record of records) {
@@ -5652,11 +5667,12 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, query);
   const today = chicagoNowParts().date;
   const scanLimit = scanKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(scanKeys),
+    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(scanKeys), scopeFormula),
   });
   const ranked = [];
   for (const record of records) {
@@ -15918,11 +15934,16 @@ async function rankStillsForIdeaPhotoWait(env, idea) {
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
   const today = chicagoNowParts().date;
   const scanLimit = scanKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const crossScope = await readLibraryCrossScopeSetting(env);
+  const scopeFormula = mediaAssetProfileScopeFormula(firstLinkedRecordId(f(idea, "Content_Profile")), {
+    crossScope,
+    includeUnscoped: true,
+  });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
     limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(scanKeys),
+    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(scanKeys), scopeFormula),
   });
   const ranked = [];
   for (const record of records) {
@@ -16783,6 +16804,33 @@ async function listPublishedLibraryFiles(request, env, url) {
   });
 }
 
+async function readLibraryCrossScopeSetting(env) {
+  const row = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
+  return libraryCrossScopeEnabled(f(row, "Setting_Value"));
+}
+
+async function resolveLibraryCrossScope(env, url) {
+  const settingEnabled = await readLibraryCrossScopeSetting(env);
+  return resolveLibraryCrossScopeFlag(url, settingEnabled ? "1" : "0");
+}
+
+async function resolveLibraryScopeProfileId(env, authorization, url, { idea = null, profileId = null } = {}) {
+  if (profileId && /^rec[A-Za-z0-9]+$/.test(String(profileId))) return String(profileId);
+  if (idea) {
+    const fromIdea = firstLinkedRecordId(f(idea, "Content_Profile"));
+    if (fromIdea) return fromIdea;
+  }
+  if (!authorization) return "";
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  return profile?.id || "";
+}
+
+async function libraryProfileScopeFormula(env, authorization, url, options = {}) {
+  const crossScope = await resolveLibraryCrossScope(env, url);
+  const profileId = await resolveLibraryScopeProfileId(env, authorization, url, options);
+  return mediaAssetProfileScopeFormula(profileId, { crossScope, includeUnscoped: true });
+}
+
 function assetLibraryFilterFormula(query, kind) {
   const parts = [ASSET_LIBRARY_LIST_FORMULA];
   const normalizedKind = String(kind || "").trim().toLowerCase();
@@ -16829,7 +16877,7 @@ function mapLibraryAsset(record) {
   };
 }
 
-async function listAssetLibrary(request, env, url) {
+async function listAssetLibrary(request, env, url, authorization) {
   const kind = String(url.searchParams.get("kind") || "").trim().toLowerCase();
   if (kind === "published") return listPublishedLibraryFiles(request, env, url);
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -16837,12 +16885,14 @@ async function listAssetLibrary(request, env, url) {
   const requestedLimit = Number(url.searchParams.get("limit"));
   const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
   const offset = String(url.searchParams.get("offset") || "").trim() || null;
+  const crossScope = await resolveLibraryCrossScope(env, url);
+  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url);
   const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit,
     offset,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: assetLibraryFilterFormula(query, kind),
+    filterFormula: combineAirtableFormulas(assetLibraryFilterFormula(query, kind), scopeFormula),
   });
   const mapped = page.records
     .filter((record) => !/__\d+x\d+__/i.test(String(f(record, "Asset Name") || "")))
@@ -16856,6 +16906,7 @@ async function listAssetLibrary(request, env, url) {
     has_more: Boolean(page.offset),
     offset: page.offset || null,
     limit,
+    cross_scope: crossScope,
     records: mapped,
   });
 }
@@ -16889,8 +16940,8 @@ async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) 
   return payload;
 }
 
-async function listLibraryBatchExistingNames(env, baseName) {
-  const filterFormula = libraryBatchNameFilterFormula(baseName);
+async function listLibraryBatchExistingNames(env, baseName, scopeFormula = null) {
+  const filterFormula = combineAirtableFormulas(libraryBatchNameFilterFormula(baseName), scopeFormula);
   if (!filterFormula) return [];
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: 500,
@@ -16901,13 +16952,18 @@ async function listLibraryBatchExistingNames(env, baseName) {
 }
 
 async function uploadAssetLibraryItems(request, env, authorization) {
-  void authorization;
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   if (!String(env.PIPELINE_RUNNER_URL || "").trim()) {
     throw new HttpError(503, "Pipeline runner is required to store assets in Google Drive");
   }
+  const url = new URL(request.url);
+  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   let form;
   try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded files"); }
+  const formProfileId = String(form.get("content_profile_id") || form.get("profile") || "").trim();
+  const uploadProfile = formProfileId && formProfileId !== profile.id
+    ? await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, { content_profile_id: formProfileId }))
+    : profile;
   const files = form.getAll("files").filter((value) => value && typeof value.arrayBuffer === "function");
   if (!files.length) throw new HttpError(400, "Choose at least one photo or video clip");
   if (files.length > ASSET_LIBRARY_MAX_FILES) {
@@ -16923,7 +16979,8 @@ async function uploadAssetLibraryItems(request, env, authorization) {
     const normalized = normalizeLibraryBatchBase(rawBatchName);
     if (!normalized.ok) throw new HttpError(400, normalized.error);
     batchBase = normalized.name;
-    const existingNames = await listLibraryBatchExistingNames(env, batchBase);
+    const scopeFormula = mediaAssetProfileScopeFormula(uploadProfile.id, { crossScope: false, includeUnscoped: false });
+    const existingNames = await listLibraryBatchExistingNames(env, batchBase, scopeFormula);
     batchNames = allocateLibraryBatchNames(batchBase, files.length, existingNames);
     if (batchNames.length !== files.length) {
       throw new HttpError(500, "Could not allocate sequential asset names");
@@ -16990,6 +17047,7 @@ async function uploadAssetLibraryItems(request, env, authorization) {
             Location: location || null,
             Asset_Description: description || "Studio Asset Manager upload stored in Google Drive.",
             Studio_Transfer_ID: `LIB-${id}`,
+            Content_Profile: uploadProfile?.id ? [uploadProfile.id] : null,
           },
         }],
         typecast: true,
@@ -29279,6 +29337,28 @@ async function patchStudioDeskMode(request, env) {
   return respond(request, env, { ok: true, ...inventory });
 }
 
+async function patchLibraryCrossScope(request, env) {
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  if (!Object.prototype.hasOwnProperty.call(payload, "enabled") && !Object.prototype.hasOwnProperty.call(payload, "include_cross_scope")) {
+    throw new HttpError(400, "enabled is required");
+  }
+  const enabled = libraryCrossScopeEnabled(
+    Object.prototype.hasOwnProperty.call(payload, "enabled") ? payload.enabled : payload.include_cross_scope
+  );
+  await studioUpsertSetting(
+    env,
+    LIBRARY_CROSS_SCOPE_SETTING,
+    enabled ? "1" : "0",
+    "Admin: include Media Assets from other Content Profiles in Asset Manager and matching"
+  );
+  return respond(request, env, {
+    ok: true,
+    library_include_cross_scope: enabled,
+    setting: LIBRARY_CROSS_SCOPE_SETTING,
+  });
+}
+
 function parseA1JobValue(value) {
   const parts = String(value || "").split("|");
   const phase = String(parts[0] || "").trim().toLowerCase();
@@ -29475,6 +29555,7 @@ async function getStudioOperations(request, env, authorization) {
   const chicago = chicagoNowParts();
   const lastDaily = await studioSettingsByName(env, STUDIO_I1_LAST_DAILY_SETTING);
   const lastAutonomous = await studioSettingsByName(env, STUDIO_AUTONOMOUS_LAST_SETTING);
+  const libraryCrossScopeRow = await studioSettingsByName(env, LIBRARY_CROSS_SCOPE_SETTING).catch(() => null);
   const [profiles, readyToSchedule, readyToPublish, published, oversized, needingClassification, compressionJobs] = await Promise.all([
     listRecords(env, STUDIO_IDEA_PROFILE_TABLE_ID, { limit: 50 }),
     listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit: 50, view: STUDIO_PUB1_VIEW_ID, filterFormula: "{Test_Run_ID}=BLANK()" }),
@@ -29506,6 +29587,7 @@ async function getStudioOperations(request, env, authorization) {
     a1s_oversize_bytes: STUDIO_A1S_OVERSIZE_BYTES,
     library_intake: libraryIntake,
     similar_accounts: similarAccounts,
+    library_include_cross_scope: libraryCrossScopeEnabled(f(libraryCrossScopeRow, "Setting_Value")),
   });
 }
 
@@ -29531,16 +29613,6 @@ async function patchStudioOperationsProfile(request, env, url, authorization) {
   });
   return respond(request, env, { ok: true, profile: mapOperationsProfile(updated) });
 }
-
-function firstLinkedRecordId(value) {
-  if (Array.isArray(value) && value.length) {
-    const first = value[0];
-    if (typeof first === "string") return first;
-    if (first && typeof first === "object") return String(first.id || "").trim();
-  }
-  return typeof value === "string" ? value : "";
-}
-
 
 function studioInternalJsonRequest(pathname, body) {
   const url = new URL(`https://studio.chicagoshining.com${pathname}`);
@@ -29605,13 +29677,15 @@ async function harvestAutonomousYoutube(env) {
   }
 }
 
-async function harvestAutonomousLibraryCatalog(env, subject = "") {
+async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = "") {
   const pin = autonomousPreferredSubject(subject);
+  const crossScope = await readLibraryCrossScopeSetting(env);
+  const scopeFormula = mediaAssetProfileScopeFormula(profileId, { crossScope, includeUnscoped: true });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
     limit: 80,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []),
+    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
   }).catch(() => []);
   const rows = [];
   for (const record of records || []) {
@@ -30114,7 +30188,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     harvestAutonomousOccupiedTopics(env),
   ]);
   const recentTitles = occupiedIdeas.map((row) => row.title);
-  const catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject);
+  const catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, profile?.id || profiles[0]?.id || "");
   const unusedAssets = autonomousUnusedLibraryAssets(catalog, occupiedIdeas);
   const trends = { similar, news, youtube };
   if (!unusedAssets.length) {

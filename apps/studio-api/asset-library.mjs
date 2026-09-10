@@ -322,3 +322,52 @@ export function mediaAssetIsHeic({ mimeType, fileExtension, name } = {}) {
   const filename = String(name || "").toLowerCase();
   return mime.includes("heic") || mime.includes("heif") || ext === "heic" || ext === "heif" || /\.(heic|heif)$/.test(filename);
 }
+
+/** Pipeline Settings row that lets Admin browse/match across Content Profiles. */
+export const LIBRARY_CROSS_SCOPE_SETTING = "LIBRARY_INCLUDE_CROSS_SCOPE";
+
+export function libraryCrossScopeEnabled(raw) {
+  const value = String(raw ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "on" || value === "yes";
+}
+
+export function resolveLibraryCrossScopeFlag(url, settingRaw) {
+  if (url?.searchParams?.has("cross_scope")) {
+    return libraryCrossScopeEnabled(url.searchParams.get("cross_scope"));
+  }
+  return libraryCrossScopeEnabled(settingRaw);
+}
+
+export function firstLinkedRecordId(value) {
+  if (Array.isArray(value) && value.length) {
+    const first = value[0];
+    if (typeof first === "string" && /^rec[A-Za-z0-9]+$/.test(first)) return first;
+    if (first && typeof first === "object") {
+      const id = String(first.id || "").trim();
+      if (/^rec[A-Za-z0-9]+$/.test(id)) return id;
+    }
+  }
+  if (typeof value === "string" && /^rec[A-Za-z0-9]+$/.test(value.trim())) return value.trim();
+  return "";
+}
+
+/**
+ * Scope Media Assets to a Content Profile.
+ * Blank Content_Profile rows stay visible (legacy shared) until backfilled.
+ */
+export function mediaAssetProfileScopeFormula(profileId, { crossScope = false, includeUnscoped = true } = {}) {
+  if (crossScope) return null;
+  const id = String(profileId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) return null;
+  const escaped = escapeLibraryAirtableFormulaValue(id);
+  const match = `FIND("${escaped}", ARRAYJOIN({Content_Profile})&"")`;
+  if (includeUnscoped) return `OR({Content_Profile}=BLANK(),${match})`;
+  return match;
+}
+
+export function combineAirtableFormulas(...parts) {
+  const clauses = parts.map((part) => String(part || "").trim()).filter(Boolean);
+  if (!clauses.length) return null;
+  if (clauses.length === 1) return clauses[0];
+  return `AND(${clauses.join(",")})`;
+}

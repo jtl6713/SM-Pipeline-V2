@@ -20,6 +20,12 @@ import {
   publicMediaObjectKey,
   publishedReleaseFields,
   sanitizeLibraryAssetName,
+  LIBRARY_CROSS_SCOPE_SETTING,
+  libraryCrossScopeEnabled,
+  resolveLibraryCrossScopeFlag,
+  firstLinkedRecordId,
+  mediaAssetProfileScopeFormula,
+  combineAirtableFormulas,
 } from "./asset-library.mjs";
 
 function output(fields) {
@@ -210,6 +216,26 @@ test("library batch sequence continues after existing Airtable names", () => {
   assert.deepEqual(allocateLibraryBatchNames("Space Museum", 2, []), ["Space Museum 1", "Space Museum 2"]);
   assert.match(libraryBatchNameFilterFormula("Space Museum"), /space museum/);
   assert.match(libraryBatchNameFilterFormula("Space Museum"), /REGEX_MATCH/);
+});
+
+test("library profile scope formula isolates Content_Profile unless cross-scope is on", () => {
+  assert.equal(LIBRARY_CROSS_SCOPE_SETTING, "LIBRARY_INCLUDE_CROSS_SCOPE");
+  assert.equal(libraryCrossScopeEnabled("on"), true);
+  assert.equal(libraryCrossScopeEnabled("0"), false);
+  assert.equal(resolveLibraryCrossScopeFlag({ searchParams: new URLSearchParams("cross_scope=1") }, "0"), true);
+  assert.equal(resolveLibraryCrossScopeFlag({ searchParams: new URLSearchParams("") }, "on"), true);
+  assert.equal(firstLinkedRecordId(["recProfileChicago1"]), "recProfileChicago1");
+  assert.equal(firstLinkedRecordId([{ id: "recProfileLa2" }]), "recProfileLa2");
+  assert.equal(mediaAssetProfileScopeFormula("recProfileChicago1", { crossScope: true }), null);
+  assert.match(
+    mediaAssetProfileScopeFormula("recProfileChicago1"),
+    /Content_Profile.*recProfileChicago1/
+  );
+  assert.match(mediaAssetProfileScopeFormula("recProfileChicago1"), /BLANK/);
+  assert.equal(
+    combineAirtableFormulas("AND({Active})", mediaAssetProfileScopeFormula("recProfileChicago1")),
+    `AND(AND({Active}),${mediaAssetProfileScopeFormula("recProfileChicago1")})`
+  );
 });
 
 test("library HEIC originals are flagged so previews use Drive JPEG thumbs", () => {

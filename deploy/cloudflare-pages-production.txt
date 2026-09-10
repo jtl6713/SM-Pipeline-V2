@@ -428,3 +428,5 @@ Library batch asset name Pages deploy: 2026-09-10 - Asset Manager Add assets sho
 Library name-field false alarm Pages deploy: 2026-09-10 - Do not show Photo Library closed when the operator only types Asset name. Clear the stale picker flag; warn only after an iPhone picker return with no files. UI 0.6.277-library-name-quiet.
 
 Library multi-photo picker Pages deploy: 2026-09-10 - iPhone Choose photos keeps multiple=true and image-only accept so Photo Library can select many stills. Choose clip stays one-at-a-time. UI 0.6.278-library-multi-photo.
+
+Library profile scope Pages deploy: 2026-09-10 - Asset Manager lists Media Assets for the selected Content Profile. Operations Admin can include cross-profile library images. UI 0.6.279-library-profile-scope.
