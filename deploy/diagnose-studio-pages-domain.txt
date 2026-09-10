@@ -4,3 +4,5 @@ Trigger: 2026-09-10 UI 0.6.282 hard cache bust.
 Also covers Streeterville idea 303 empty masters / fill-crop scan flood.
 
 Approve All live purge: 2026-09-10 - Purge studio.chicagoshining.com after 0.6.288 so Approve All is not stuck on Auto-scheduling from cached UI 0.6.286.
+
+Approve All path bust diagnose: 2026-09-10 - After 0.6.289 path rename, confirm custom domain serves app-item4-0621.js (not 0620).

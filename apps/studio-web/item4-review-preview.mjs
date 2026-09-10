@@ -1,4 +1,4 @@
-// Keep these helpers aligned with apps/studio-web/assets/app-item4-0620.js
+// Keep these helpers aligned with apps/studio-web/assets/app-item4-0621.js
 // and apps/studio-api/worker.js (studioMappedPreviewUrl, studioPreviewKind)
 // plus renderCreativeTiktokComplete / tiktokNeedsUrlEntry.
 

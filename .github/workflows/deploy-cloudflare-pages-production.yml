@@ -160,15 +160,35 @@ jobs:
           NODE
           LATEST_URL=$(cat /tmp/pages-latest-url.txt)
           # Always purge the custom domain first so studio.chicagoshining.com cannot keep an old index.html.
+          # Prefer files purge (works with narrower tokens) then hosts purge. Path renames are the hard bust.
           ZONE_ID=$(curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" | jq -r '.result[0].id // empty')
+          PURGE_OK=0
           if [[ -n "$ZONE_ID" ]]; then
             curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" -H "$AUTH" -o /tmp/worker-routes.json || true
             jq -c '[.result[]? | {pattern,script}]' /tmp/worker-routes.json 2>/dev/null || true
             curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
               -H "$AUTH" -H "Content-Type: application/json" \
+              --data "{\"files\":[\"https://studio.chicagoshining.com/\",\"https://studio.chicagoshining.com/index.html\",\"https://studio.chicagoshining.com$EXPECTED_JS_PATH\",\"https://studio.chicagoshining.com$EXPECTED_JS_URL\"]}" \
+              -o /tmp/purge-files.json || true
+            jq -c '{mode:"files",success:(.success // false),errors:(.errors // [])}' /tmp/purge-files.json 2>/dev/null || true
+            if jq -e '.success == true' /tmp/purge-files.json >/dev/null 2>&1; then PURGE_OK=1; fi
+            curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
+              -H "$AUTH" -H "Content-Type: application/json" \
               --data '{"hosts":["studio.chicagoshining.com"]}' \
-              -o /tmp/purge.json || true
-            jq -c '{success:(.success // false),errors:(.errors // [])}' /tmp/purge.json 2>/dev/null || true
+              -o /tmp/purge-hosts.json || true
+            jq -c '{mode:"hosts",success:(.success // false),errors:(.errors // [])}' /tmp/purge-hosts.json 2>/dev/null || true
+            if jq -e '.success == true' /tmp/purge-hosts.json >/dev/null 2>&1; then PURGE_OK=1; fi
+            if [[ "$PURGE_OK" -ne 1 ]]; then
+              echo "::warning::Cloudflare cache purge for studio.chicagoshining.com failed (token likely missing Cache Purge). Relying on asset path rename + hard refresh. Grant Zone.Cache Purge on CLOUDFLARE_API_TOKEN."
+              fsappend="$GITHUB_STEP_SUMMARY"
+              {
+                echo "### Studio custom-domain purge: WARN"
+                echo "- Zone purge auth failed; pages.dev verify still required."
+                echo "- Operators on studio.chicagoshining.com must hard-refresh after asset path renames."
+              } >> "$fsappend"
+            fi
+          else
+            echo "::warning::Could not resolve chicagoshining.com zone id for cache purge."
           fi
           curl -fsSL "$LATEST_URL/" -o /tmp/live-index.html
           grep -Fq "$EXPECTED_JS_PATH" /tmp/live-index.html
