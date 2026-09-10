@@ -240,6 +240,76 @@ export function sanitizeLibraryAssetName(raw) {
   return { ok: true, name };
 }
 
+/** Strip a trailing " 12" so "Space Museum 15" is treated as base "Space Museum". */
+export function normalizeLibraryBatchBase(raw) {
+  const sanitized = sanitizeLibraryAssetName(raw);
+  if (!sanitized.ok) return sanitized;
+  const stripped = sanitized.name.replace(/\s+\d+$/, "").trim();
+  if (!stripped) return { ok: false, error: "Name is required" };
+  if (stripped.length > LIBRARY_ASSET_NAME_MAX) {
+    return { ok: true, name: stripped.slice(0, LIBRARY_ASSET_NAME_MAX).trim() };
+  }
+  return { ok: true, name: stripped };
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function escapeLibraryAirtableFormulaValue(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/**
+ * Parse the sequence number for a catalog name under a batch base.
+ * Exact "Space Museum" counts as 1. "Space Museum 16" → 16. Unrelated names → null.
+ */
+export function parseLibraryBatchSequence(assetName, baseName) {
+  const name = String(assetName || "").replace(/\s+/g, " ").trim();
+  const base = String(baseName || "").replace(/\s+/g, " ").trim();
+  if (!name || !base) return null;
+  if (name.toLowerCase() === base.toLowerCase()) return 1;
+  const match = name.match(new RegExp(`^${escapeRegExp(base)}\\s+(\\d+)$`, "i"));
+  if (!match) return null;
+  const number = Number(match[1]);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+export function maxLibraryBatchSequence(existingNames, baseName) {
+  let max = 0;
+  for (const name of existingNames || []) {
+    const sequence = parseLibraryBatchSequence(name, baseName);
+    if (sequence != null && sequence > max) max = sequence;
+  }
+  return max;
+}
+
+/** Allocate the next count names after any existing catalog sequence for baseName. */
+export function allocateLibraryBatchNames(baseName, count, existingNames = []) {
+  const base = String(baseName || "").replace(/\s+/g, " ").trim();
+  const total = Math.max(0, Number(count) || 0);
+  if (!base || total < 1) return [];
+  let next = maxLibraryBatchSequence(existingNames, base) + 1;
+  const names = [];
+  for (let i = 0; i < total; i += 1) {
+    const stem = `${base} ${next}`;
+    names.push(stem.length > LIBRARY_ASSET_NAME_MAX
+      ? `${base.slice(0, Math.max(1, LIBRARY_ASSET_NAME_MAX - String(next).length - 1)).trim()} ${next}`
+      : stem);
+    next += 1;
+  }
+  return names;
+}
+
+/** Airtable formula: exact base or "base N" Asset Name matches (case-insensitive). */
+export function libraryBatchNameFilterFormula(baseName) {
+  const base = String(baseName || "").replace(/\s+/g, " ").trim();
+  if (!base) return null;
+  const escaped = escapeLibraryAirtableFormulaValue(base.toLowerCase());
+  const regexEscaped = escapeRegExp(base.toLowerCase()).replace(/"/g, '\\"');
+  return `OR(LOWER({Asset Name}&"")="${escaped}",REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped} [0-9]+$"))`;
+}
+
 export function libraryDriveFilename(stem, extension) {
   const safe = String(stem || "asset").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, LIBRARY_ASSET_NAME_MAX) || "asset";
   const ext = String(extension || "").replace(/^\./, "").toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 8);

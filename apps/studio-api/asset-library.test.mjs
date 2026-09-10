@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  allocateLibraryBatchNames,
   collectJsonDriveIds,
   coerceLibraryDurationSeconds,
+  libraryBatchNameFilterFormula,
   libraryDriveFilename,
   libraryRecordFileBytes,
+  maxLibraryBatchSequence,
   mediaAssetIsHeic,
   mapPublishedLibraryFile,
+  normalizeLibraryBatchBase,
+  parseLibraryBatchSequence,
   publishedDurationSeconds,
   publishedFileReleaseGuard,
   publishedLibraryFilterFormula,
@@ -179,6 +184,32 @@ test("library rename sanitizes stem and Drive filename", () => {
   assert.equal(sanitizeLibraryAssetName("a/b").ok, false);
   assert.equal(libraryDriveFilename("Oak Street Beach", "jpg"), "Oak-Street-Beach.jpg");
   assert.equal(libraryDriveFilename("Oak Street Beach", ".PNG"), "Oak-Street-Beach.png");
+});
+
+test("library batch base strips a trailing number the operator typed", () => {
+  assert.deepEqual(normalizeLibraryBatchBase("  Space Museum 15 "), { ok: true, name: "Space Museum" });
+  assert.deepEqual(normalizeLibraryBatchBase("Space Museum"), { ok: true, name: "Space Museum" });
+  assert.equal(normalizeLibraryBatchBase("").ok, false);
+});
+
+test("library batch sequence continues after existing Airtable names", () => {
+  assert.equal(parseLibraryBatchSequence("Space Museum", "Space Museum"), 1);
+  assert.equal(parseLibraryBatchSequence("Space Museum 15", "Space Museum"), 15);
+  assert.equal(parseLibraryBatchSequence("space museum 2", "Space Museum"), 2);
+  assert.equal(parseLibraryBatchSequence("Space Museum Cafe 3", "Space Museum"), null);
+  assert.equal(maxLibraryBatchSequence([
+    "Space Museum 1",
+    "Space Museum 15",
+    "Other Beach 9",
+    "Space Museum",
+  ], "Space Museum"), 15);
+  assert.deepEqual(
+    allocateLibraryBatchNames("Space Museum", 3, ["Space Museum 1", "Space Museum 15"]),
+    ["Space Museum 16", "Space Museum 17", "Space Museum 18"]
+  );
+  assert.deepEqual(allocateLibraryBatchNames("Space Museum", 2, []), ["Space Museum 1", "Space Museum 2"]);
+  assert.match(libraryBatchNameFilterFormula("Space Museum"), /space museum/);
+  assert.match(libraryBatchNameFilterFormula("Space Museum"), /REGEX_MATCH/);
 });
 
 test("library HEIC originals are flagged so previews use Drive JPEG thumbs", () => {

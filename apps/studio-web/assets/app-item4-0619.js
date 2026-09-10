@@ -13434,22 +13434,33 @@
     const zone = $("libraryUploadZone");
     const inputs = libraryFileInputs();
     const location = String($("libraryLocation")?.value || "").trim();
+    const batchName = String($("libraryBatchName")?.value || "").trim();
+    const chunkSize = batchName ? 8 : 1;
     if (zone) zone.dataset.busy = "true";
     inputs.forEach((input) => { input.disabled = true; });
     const errors = [];
+    const namedUploads = [];
     let uploaded = 0;
+    let completedFiles = 0;
     try {
-      for (let index = 0; index < files.length; index += 1) {
-        const file = files[index];
-        setLibraryUploadMessage(files.length === 1
-          ? `Adding ${file.name}…`
-          : `Adding ${index + 1} of ${files.length}: ${file.name}…`, "");
+      for (let start = 0; start < files.length; start += chunkSize) {
+        const chunk = files.slice(start, start + chunkSize);
+        const progressLabel = batchName
+          ? (files.length === 1
+            ? `Adding as next “${batchName}” number…`
+            : `Adding ${completedFiles + 1}–${completedFiles + chunk.length} of ${files.length} as next “${batchName}” numbers…`)
+          : (files.length === 1
+            ? `Adding ${chunk[0].name}…`
+            : `Adding ${completedFiles + 1} of ${files.length}: ${chunk[0].name}…`);
+        setLibraryUploadMessage(progressLabel, "");
         const form = new FormData();
-        form.append("files", file, file.name);
+        for (const file of chunk) form.append("files", file, file.name);
         if (location) form.append("location", location);
-        if (item4FileLooksLikeVideo(file)) {
+        if (batchName) form.append("batch_name", batchName);
+        const video = chunk.find((file) => item4FileLooksLikeVideo(file));
+        if (chunk.length === 1 && video) {
           try {
-            const meta = await imageMetadataForFiles([file]);
+            const meta = await imageMetadataForFiles([video]);
             const seconds = Number(meta[0]?.duration_seconds || 0);
             if (Number.isFinite(seconds) && seconds > 0) {
               form.append("duration_seconds", String(Math.round(seconds)));
@@ -13457,23 +13468,40 @@
           } catch {}
         }
         try {
-          await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
-          uploaded += 1;
+          const result = await api("/api/library", { method: "POST", body: form, timeoutMs: 180000, retries: 0 });
+          const count = Number(result?.uploaded || chunk.length) || chunk.length;
+          uploaded += count;
+          completedFiles += chunk.length;
+          const assigned = Array.isArray(result?.batch_names) ? result.batch_names.filter(Boolean) : [];
+          if (assigned.length) namedUploads.push(...assigned);
+          else if (Array.isArray(result?.records)) {
+            for (const record of result.records) {
+              if (record?.name) namedUploads.push(record.name);
+            }
+          }
         } catch (error) {
-          errors.push(`${file.name}: ${error.message || "upload failed"}`);
+          completedFiles += chunk.length;
+          const label = chunk.length === 1 ? chunk[0].name : `${chunk.length} files`;
+          errors.push(`${label}: ${error.message || "upload failed"}`);
         }
       }
       inputs.forEach((input) => { input.value = ""; });
       if (uploaded) await startLibraryBrowse();
+      const namedSummary = namedUploads.length === 1
+        ? `Added as ${namedUploads[0]}.`
+        : (namedUploads.length > 1
+          ? `Added ${namedUploads.length} assets as ${namedUploads[0]}–${namedUploads[namedUploads.length - 1]}.`
+          : "");
       if (item4OversizedClipNotice) {
         const extra = errors.length
           ? `${uploaded ? `${uploaded} added. ` : ""}${errors.join(" ")}`
           : (uploaded ? `${uploaded === 1 ? "The other asset was added" : `The other ${uploaded} assets were added`} to the library.` : "");
         setLibraryUploadMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
       } else if (uploaded && !errors.length) {
-        setLibraryUploadMessage(uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`, "success");
+        setLibraryUploadMessage(namedSummary
+          || (uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`), "success");
       } else if (uploaded) {
-        setLibraryUploadMessage(`${uploaded} added. ${errors.join(" ")}`, "error-text");
+        setLibraryUploadMessage(`${namedSummary || `${uploaded} added.`} ${errors.join(" ")}`.trim(), "error-text");
       } else {
         setLibraryUploadMessage(errors.join(" ") || "Could not add those assets.", "error-text");
       }
