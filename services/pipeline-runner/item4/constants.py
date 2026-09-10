@@ -25,6 +25,14 @@ SMV1_BASE_ELIGIBILITY_FORMULA = (
     ')'
 )
 
+# Unfinished crops only. Exclude Ready+Preview Pending and Master Original so
+# neither preview uploads nor master copies can fill the Airtable select window
+# and starve Platform Variant Pending rows (the Frames "17/21" stall).
+SMV1_PENDING_CROP_FORMULA = (
+    'AND({Asset_Kind}="Platform Variant",'
+    'OR({Transfer_Status}="Pending",{Transfer_Status}="Drive Uploaded"))'
+)
+
 SMV1_PRODUCTION_FORMULA = f'AND({{Test_Run_ID}}=BLANK(),{SMV1_BASE_ELIGIBILITY_FORMULA})'
 
 OUTSTANDING_TRANSFER_STATUSES = {"Pending", "Drive Uploaded", "Processing"}

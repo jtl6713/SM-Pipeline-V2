@@ -10,8 +10,9 @@ def run(request: StageRequest) -> StageResult:
     SMV1 — drain Studio Media Transfer Queue rows on the Python runner.
 
     Pending platform variants for the same photo share one Drive download.
-    Up to four photos crop in parallel. Follow-up rows (previews, masters)
-    still run one at a time.
+    Up to eight photos crop in parallel; ratios within a photo also parallelize.
+    Crop rows are drained before preview uploads so Ready+Preview cannot starve
+    Frames progress.
     """
     production_request_record_id = request.production_request_record_id
     test_run_id = (request.test_run_id or "").strip() or None
@@ -27,12 +28,15 @@ def run(request: StageRequest) -> StageResult:
     max_runs = 1
     if isinstance(request.extra.get("max_runs"), int):
         max_runs = max(1, min(int(request.extra["max_runs"]), 20))
+    photo_workers = 8
+    if isinstance(request.extra.get("photo_workers"), int):
+        photo_workers = max(1, min(int(request.extra["photo_workers"]), 10))
 
     try:
         result = process_drain(
             production_request_record_id=production_request_record_id,
             test_run_id=test_run_id,
-            photo_workers=4,
+            photo_workers=photo_workers,
             max_followup=max_runs,
         )
     except Exception as exc:

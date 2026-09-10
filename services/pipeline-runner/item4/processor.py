@@ -12,7 +12,7 @@ from integrations.r2_upload import R2UploadClient
 from integrations.variant_service import VariantServiceClient, rasterize_still_bytes
 from item4.clip_poster import clip_poster_bytes, is_video_preview_row, stamp_request_clip_poster
 from item4.constants import BROWSER_MASTER_EXTENSIONS, STALE_PROCESSING_MS, VARIANT_RECIPE_VERSION
-from item4.formulas import airtable_quote, smv1_exact_request_formula
+from item4.formulas import airtable_quote, smv1_exact_request_formula, smv1_pending_crop_formula
 from item4.media_assets import ensure_media_asset
 from item4.settings import PipelineSettings, field, pipeline_settings
 from item4.sources import resolve_master_source
@@ -199,18 +199,37 @@ def select_eligible_rows(
     production_request_record_id: str | None = None,
     test_run_id: str | None = None,
     max_records: int = 40,
+    crops_only: bool = False,
 ) -> list[dict]:
+    """Select SMV1 work. Prefer unfinished crops so Ready+Preview rows cannot starve them."""
+    limit = max(1, min(int(max_records or 1), 40))
     if production_request_record_id:
+        crop_formula = smv1_pending_crop_formula(production_request_record_id, test_run_id or "")
+        crop_rows = client.list_records(
+            MEDIA_TRANSFER_QUEUE_TABLE,
+            formula=crop_formula,
+            max_records=limit,
+        )
+        if crop_rows or crops_only:
+            return crop_rows
         formula = smv1_exact_request_formula(production_request_record_id, test_run_id or "")
     else:
-        from item4.constants import SMV1_PRODUCTION_FORMULA
+        from item4.constants import SMV1_PENDING_CROP_FORMULA, SMV1_PRODUCTION_FORMULA
 
+        crop_rows = client.list_records(
+            MEDIA_TRANSFER_QUEUE_TABLE,
+            formula=f'AND({{Test_Run_ID}}=BLANK(),{SMV1_PENDING_CROP_FORMULA})',
+            max_records=limit,
+        )
+        if crop_rows or crops_only:
+            return crop_rows
         formula = SMV1_PRODUCTION_FORMULA
     return client.list_records(
         MEDIA_TRANSFER_QUEUE_TABLE,
         formula=formula,
-        max_records=max(1, min(int(max_records or 1), 40)),
+        max_records=limit,
     )
+
 
 
 def select_next_row(
@@ -456,24 +475,32 @@ def process_variant_group(
         drive_id=source_drive_id,
         ext=source_ext,
     )
-    first_error: Exception | None = None
-    for row in pending_rows:
+    def _crop_one(row: dict) -> dict[str, Any]:
         fields = row.get("fields") or {}
         ratio = str(fields.get("Aspect_Ratio") or "").strip()
+        # Per-ratio Drive/variant clients: concurrent uploads must not share one Session.
+        # Keep injected fakes (unit tests) on the caller's objects.
+        local_drive = (
+            GoogleDriveClient() if isinstance(drive, GoogleDriveClient) else drive
+        )
+        local_variant = (
+            VariantServiceClient(getattr(variant, "_settings", None))
+            if isinstance(variant, VariantServiceClient)
+            else variant
+        )
         try:
-            rendered = variant.render(
+            rendered = local_variant.render(
                 source_bytes,
                 ratio,
                 _gravity_token(fields),
-                drive=drive,
+                drive=local_drive,
                 drive_id=source_drive_id,
                 ext=str(fields.get("Source_Extension") or source_ext),
             )
-            results.append(
-                _complete_variant_upload(client, drive, row, rendered, airtable_lock=airtable_lock)
+            return _complete_variant_upload(
+                client, local_drive, row, rendered, airtable_lock=airtable_lock
             )
         except Exception as exc:
-            first_error = first_error or exc
             try:
                 if airtable_lock:
                     with airtable_lock:
@@ -494,9 +521,23 @@ def process_variant_group(
                     )
             except Exception:
                 pass
+            raise
+
+    first_error: Exception | None = None
+    ratio_workers = max(1, min(4, len(pending_rows)))
+    with ThreadPoolExecutor(max_workers=ratio_workers) as pool:
+        # Submit in parallel, then collect in pending_rows order so callers
+        # (and hermetic assertions) see a stable ratio sequence.
+        futures = [pool.submit(_crop_one, row) for row in pending_rows]
+        for future in futures:
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                first_error = first_error or exc
     if first_error and not results:
         raise first_error
     return results
+
 
 
 def _process_variant_drive_uploaded(
@@ -705,10 +746,15 @@ def process_drain(
     *,
     production_request_record_id: str | None = None,
     test_run_id: str | None = None,
-    photo_workers: int = 4,
+    photo_workers: int = 8,
     max_followup: int = 8,
 ) -> dict[str, Any]:
-    """Process pending variant photos in parallel (one Drive download per photo)."""
+    """Process pending variant photos in parallel (one Drive download per photo).
+
+    Unfinished Platform Variant crops are selected before Ready+Preview rows so
+    preview uploads cannot fill the Airtable window and stall the last crops.
+    Leftover preview/master rows run in parallel and no longer abort the drain.
+    """
     client = AirtableClient()
     if production_request_record_id and test_run_id:
         _assert_test_mode_boundary(client, production_request_record_id, test_run_id)
@@ -735,23 +781,55 @@ def process_drain(
             airtable_lock=airtable_lock,
         )
 
-    for _wave in range(3):
+    def _safe_leftover(row: dict) -> dict[str, Any] | None:
+        try:
+            return process_queue_row(client, row)
+        except Exception as exc:
+            preview = (
+                str(field(row, "Transfer_Status") or "") == "Ready"
+                and str(field(row, "Preview_Status") or "") == "Pending"
+            )
+            try:
+                _fail_row(
+                    client,
+                    row["id"],
+                    str(exc),
+                    preview=preview,
+                    retryable=not preview and is_retryable_master_error(exc),
+                )
+            except Exception:
+                pass
+            return {
+                "processed": False,
+                "route": "leftover_error",
+                "queue_record_id": row.get("id"),
+                "error": str(exc),
+            }
+
+    # Prefer crop waves first; one final wave accepts previews/masters.
+    for wave in range(5):
+        crops_only = wave < 4
         rows = select_eligible_rows(
             client,
             production_request_record_id=production_request_record_id,
             test_run_id=test_run_id,
             max_records=40,
+            crops_only=crops_only,
         )
         if not rows:
+            if crops_only:
+                continue
             if results:
                 break
             return {"processed": False, "reason": "no_eligible_queue_row", "processed_count": 0}
 
         groups, leftover = group_pending_variant_rows(rows)
         if not groups and not leftover:
+            if crops_only:
+                continue
             break
 
-        workers = max(1, min(int(photo_workers or 1), 5, max(1, len(groups))))
+        workers = max(1, min(int(photo_workers or 1), 10, max(1, len(groups) or 1)))
         if groups:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = [pool.submit(_run_group, group_rows) for group_rows in groups.values()]
@@ -764,25 +842,18 @@ def process_drain(
                 if first_error and not results:
                     raise first_error
 
-        for row in leftover:
-            try:
-                results.append(process_queue_row(client, row))
-            except Exception as exc:
-                preview = (
-                    str(field(row, "Transfer_Status") or "") == "Ready"
-                    and str(field(row, "Preview_Status") or "") == "Pending"
-                )
-                try:
-                    _fail_row(
-                        client,
-                        row["id"],
-                        str(exc),
-                        preview=preview,
-                        retryable=not preview and is_retryable_master_error(exc),
-                    )
-                except Exception:
-                    pass
-                raise
+        # Defer leftover (previews) while unfinished crop groups still exist.
+        if crops_only and groups:
+            leftover = []
+
+        if leftover:
+            leftover_workers = max(1, min(6, len(leftover)))
+            with ThreadPoolExecutor(max_workers=leftover_workers) as pool:
+                futures = [pool.submit(_safe_leftover, row) for row in leftover]
+                for future in as_completed(futures):
+                    row_result = future.result()
+                    if row_result:
+                        results.append(row_result)
 
     followup = 0
     while followup < max(0, int(max_followup or 0)):
