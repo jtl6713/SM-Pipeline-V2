@@ -452,3 +452,5 @@ Mobile master reorder Pages deploy: 2026-09-10 - Tap ↑ ↓ on Production maste
 Approve All + forced voiceover Pages deploy: 2026-09-10 - Restore Approve All when AZ finished-video rows are also Ready; auto Force exact when script/title/caption text is pasted with AI decides. UI 0.6.287-approve-all-voiceover.
 
 Approve All live Pages deploy: 2026-09-10 - UI 0.6.288-approve-all-live. Pages verify uses cache-busted JS URL and purges studio.chicagoshining.com before verify.
+
+Approve All path bust Pages deploy: 2026-09-10 - Rename assets to *-0621 and UI 0.6.289-approve-all-path-bust so studio.chicagoshining.com cannot keep Auto-scheduling from cached app-item4-0620.js.
