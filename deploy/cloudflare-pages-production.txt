@@ -450,3 +450,5 @@ Library profile name scope Pages deploy: 2026-09-10 - Keep attached masters visi
 Mobile master reorder Pages deploy: 2026-09-10 - Tap ↑ ↓ on Production master photos to set carousel order on phone. UI 0.6.286-mobile-master-reorder.
 
 Approve All + forced voiceover Pages deploy: 2026-09-10 - Restore Approve All when AZ finished-video rows are also Ready; auto Force exact when script/title/caption text is pasted with AI decides. UI 0.6.287-approve-all-voiceover.
+
+Approve All live Pages deploy: 2026-09-10 - UI 0.6.288-approve-all-live. Pages verify uses cache-busted JS URL and purges studio.chicagoshining.com before verify.
