@@ -126,7 +126,7 @@ def drain_smv1(request_id: str, test_run_id: str | None, max_runs: int = 8) -> i
     result = process_smv1_drain(
         production_request_record_id=request_id,
         test_run_id=test_run_id or None,
-        photo_workers=4,
+        photo_workers=8,
         max_followup=max(1, min(max_runs, 20)),
     )
     return int(result.get("processed_count") or 0)
