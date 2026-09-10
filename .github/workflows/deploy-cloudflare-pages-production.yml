@@ -136,14 +136,24 @@ jobs:
           const data = JSON.parse(fs.readFileSync('/tmp/pages-production.json', 'utf8'));
           const rows = Array.isArray(data) ? data : (data.result || []);
           if (!rows.length) throw new Error('No production Pages deployment was returned after deploy');
-          const latest = rows[0];
-          const url = latest.url || latest.aliases?.[0] || '(available in Cloudflare dashboard)';
+          const latest = rows[0] || {};
+          const candidates = [
+            latest.url,
+            Array.isArray(latest.aliases) ? latest.aliases[0] : null,
+            latest.deployment_url,
+            'https://chicagoshining-studio.pages.dev',
+          ].map((value) => String(value || '').trim().replace(/\/$/, ''));
+          const url = candidates.find((value) => /^https:\/\//i.test(value));
+          if (!url) {
+            throw new Error(`Could not resolve a HTTPS Pages URL from deployment list: ${JSON.stringify(latest).slice(0, 500)}`);
+          }
           const project = JSON.parse(fs.readFileSync('/tmp/pages-project.json', 'utf8')).result || {};
           const domains = project.domains || [];
-          fs.writeFileSync('/tmp/pages-latest-url.txt', String(url).replace(/\/$/, ''));
+          fs.writeFileSync('/tmp/pages-latest-url.txt', url);
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
             `### Studio Pages production deployment: PASS\n- Production branch: ${process.env.PROD_BRANCH}\n- Latest deployment: ${url}\n- Domains: ${domains.join(', ') || '(none listed)'}\n- Expected UI: ${expected.expectedLabel}\n`);
           console.log('pages_domains=' + JSON.stringify(domains));
+          console.log('pages_verify_url=' + url);
           NODE
           LATEST_URL=$(cat /tmp/pages-latest-url.txt)
           curl -fsSL "$LATEST_URL/" -o /tmp/live-index.html
