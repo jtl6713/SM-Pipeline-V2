@@ -7785,21 +7785,135 @@
     }
   }
 
-  async function removeItem4Asset(assetId) {
+  const item4PendingRemoves = new Set();
+  let item4RemoveDrain = Promise.resolve();
+
+  function item4ApplyAssetsLocally(assets, { planNeedsRebuild = true } = {}) {
+    const next = (Array.isArray(assets) ? assets : []).map((row, index) => ({
+      ...row,
+      order: index + 1,
+    }));
+    const authority = next.length
+      ? (String(item4Workspace?.assets_status || "").trim() === "Uploading" ? "Uploading" : "Ready")
+      : "None";
+    item4Workspace = {
+      ...(item4Workspace || {}),
+      assets: next,
+      assets_status: authority,
+      ...(planNeedsRebuild ? {
+        plan: null,
+        plan_status: "Needs Plan",
+        variants: null,
+        variant_status: "None",
+        variant_error: null,
+      } : {}),
+    };
+    item4AssetStripSignature = "";
+    return item4Workspace;
+  }
+
+  function item4RemoveAssetCardsFromDom(assetId) {
+    const id = String(assetId || "").trim();
+    if (!id) return;
+    document.querySelectorAll(`[data-item4-asset="${CSS.escape(id)}"]`).forEach((node) => node.remove());
+    document.querySelectorAll(`[data-remove-item4-asset="${CSS.escape(id)}"]`).forEach((button) => {
+      button.closest("[data-item4-asset], .ez-photo-card, .item4-asset-card")?.remove();
+    });
+  }
+
+  function item4RefreshAssetCountsAfterLocalRemove() {
+    const status = item4Workspace || { assets: [] };
+    const assets = Array.isArray(status.assets) ? status.assets : [];
+    const badge = $("item4AssetStatus");
+    if (badge) {
+      const counts = item4ClipCountsFromStatus({ assets });
+      const phrase = item4MediaCountPhrase(counts);
+      const authority = String(status.assets_status || "None");
+      badge.textContent = !assets.length
+        ? "No media yet"
+        : authority === "Ready"
+          ? `${phrase} ready`
+          : authority === "Error"
+            ? `${phrase} need attention`
+            : `${phrase} processing`;
+    }
+    assets.forEach((asset, index) => {
+      const card = document.querySelector(`[data-item4-asset="${CSS.escape(String(asset.id || ""))}"]`);
+      const meta = card?.querySelector(".item4-asset-meta span");
+      if (!meta) return;
+      const video = item4AssetLooksLikeVideo(asset);
+      const label = video ? `Clip ${index + 1}` : `Photo ${index + 1}`;
+      meta.textContent = String(meta.textContent || "").replace(/^(Photo|Clip)\s+\d+/, label);
+    });
+    updateItem4MasterProgress(status);
+    syncProductionStudioState();
+    const host = $("ezPhotoStrip");
+    if (host && !assets.length && !(Array.isArray(ezStagedFiles) && ezStagedFiles.length)) {
+      host.hidden = true;
+      host.innerHTML = "";
+    }
+    const planHost = $("item4OutputPlan");
+    const planBadge = $("item4PlanStatus");
+    const gate = $("item4ProductionGate");
+    if (planBadge) planBadge.textContent = item4StateLabel(status.plan_status, "Needs plan");
+    if (planHost && status.plan_status === "Needs Plan") {
+      planHost.innerHTML = '<div class="empty compact-empty"></div>';
+    }
+    if (gate) gate.hidden = true;
+  }
+
+  function removeItem4Asset(assetId) {
     if (!activeProductionRequest?.id || !assetId) return;
     if (String(assetId).startsWith("local:") || String(assetId).startsWith("staged:")) return;
-    if (!window.confirm("Remove this photo from the set? You can add it again afterward.")) return;
-    try {
-      await api(`/api/production-requests/${encodeURIComponent(activeProductionRequest.id)}/assets/${encodeURIComponent(assetId)}`, {method:"DELETE", body:JSON.stringify({})});
-      await loadItem4Workspace(activeProductionRequest);
-      ezStagedFiles = [];
-      const total = ezPersistedAssetCount();
-      const incomplete = ezIncompleteSetMessage(total);
-      setRequestMessage(incomplete || "Photo removed. Add another, or rebuild the platform plan when the set is ready.", "success");
-      setEzMessage(incomplete || "Photo removed.", incomplete ? "success" : "");
-      renderEzPhotoStrip();
-      if (ezIsOriginRecord() && ezMasterSetReadyForPlan()) await maybeAutoEzPlan(true);
-    } catch (error) { setRequestMessage(error.message, "error-text"); }
+    const id = String(assetId);
+    if (item4PendingRemoves.has(id)) return;
+
+    const previousAssets = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.slice() : [];
+    const removed = previousAssets.find((row) => String(row?.id || "") === id);
+    if (!removed) return;
+
+    item4PendingRemoves.add(id);
+    const nextAssets = previousAssets
+      .filter((row) => String(row?.id || "") !== id)
+      .map((row, index) => ({ ...row, order: index + 1 }));
+    item4ApplyAssetsLocally(nextAssets);
+    item4RemoveAssetCardsFromDom(id);
+    item4RefreshAssetCountsAfterLocalRemove();
+    ezStagedFiles = [];
+    const total = nextAssets.length;
+    const incomplete = ezIncompleteSetMessage(total);
+    setRequestMessage(incomplete || "Photo removed.", "success");
+    setEzMessage(incomplete || "Photo removed.", incomplete ? "success" : "");
+
+    const requestId = activeProductionRequest.id;
+    item4RemoveDrain = item4RemoveDrain.then(async () => {
+      try {
+        const result = await api(
+          `/api/production-requests/${encodeURIComponent(requestId)}/assets/${encodeURIComponent(id)}`,
+          { method: "DELETE", body: JSON.stringify({}), timeoutMs: 45000, retries: 0 }
+        );
+        if (result.production_request && activeProductionRequest?.id === requestId) {
+          activeProductionRequest = result.production_request;
+        }
+        if (item4PendingRemoves.size <= 1 && Array.isArray(result.assets) && activeProductionRequest?.id === requestId) {
+          item4ApplyAssetsLocally(result.assets, { planNeedsRebuild: true });
+          item4RefreshAssetCountsAfterLocalRemove();
+        }
+      } catch (error) {
+        if (activeProductionRequest?.id !== requestId) return;
+        const current = Array.isArray(item4Workspace?.assets) ? item4Workspace.assets.slice() : [];
+        if (!current.some((row) => String(row?.id || "") === id)) {
+          current.push(removed);
+          current.sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+          item4ApplyAssetsLocally(current);
+          renderItem4Assets(item4Workspace);
+          renderEzPhotoStrip();
+        }
+        setRequestMessage(error.message || "Could not remove that photo.", "error-text");
+      } finally {
+        item4PendingRemoves.delete(id);
+      }
+    });
   }
 
   async function buildItem4Plan() {
