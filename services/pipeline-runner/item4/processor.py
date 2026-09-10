@@ -525,19 +525,15 @@ def process_variant_group(
 
     first_error: Exception | None = None
     ratio_workers = max(1, min(4, len(pending_rows)))
-    if ratio_workers == 1:
-        try:
-            results.append(_crop_one(pending_rows[0]))
-        except Exception as exc:
-            first_error = exc
-    else:
-        with ThreadPoolExecutor(max_workers=ratio_workers) as pool:
-            futures = {pool.submit(_crop_one, row): row for row in pending_rows}
-            for future in as_completed(futures):
-                try:
-                    results.append(future.result())
-                except Exception as exc:
-                    first_error = first_error or exc
+    with ThreadPoolExecutor(max_workers=ratio_workers) as pool:
+        # Submit in parallel, then collect in pending_rows order so callers
+        # (and hermetic assertions) see a stable ratio sequence.
+        futures = [pool.submit(_crop_one, row) for row in pending_rows]
+        for future in futures:
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                first_error = first_error or exc
     if first_error and not results:
         raise first_error
     return results
