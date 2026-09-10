@@ -73,6 +73,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     operationsIdeaMeta: "Shows the current Daily Ideas timing/profile summary returned by the Operations API.",
     operationsDeskMeta: "Quality Agent check catalog and stuck-job counts from /api/ops/desk/inventory. Worker cron still heals transients. Escalated produce needs investigation.",
     operationsDeskMode: "Quality Agent kill switch. off = inventory only. observe = ticket. infra = local restart/deploy. patch = PRs, you merge. automerge = Phase 4 allowlisted merge only.",
+    operationsLibraryCrossScope: "When off, Asset Manager and photo matching stay inside the selected Content Profile. Turn on only when you intentionally want Chicago and LA (or other) library images mixed.",
     operationsViewAgent: "Open the Quality Agent page: Word guide, catalog, and Task Organizer activity log.",
     operationsTabCatalog: "Named Quality Agent check list with pass, finding, or not yet run. Worker still heals transients. Library-stills never auto-publish.",
     operationsAgentGuideLink: "Download the operator Word guide for Quality Agent auto-review, auto-correction, and how to read activity logs.",

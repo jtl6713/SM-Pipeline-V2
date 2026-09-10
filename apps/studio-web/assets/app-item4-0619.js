@@ -265,7 +265,19 @@
     if (!selectedProfileId) return path;
     const qIndex = String(path || "").indexOf("?");
     const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
-    if (!["/api/ideas", "/api/content", "/api/outputs", "/api/dashboard", "/api/production-requests", "/api/insights/best-times", "/api/insights/similar-times", "/api/insights/captions", "/api/insights/discover"].includes(pathname)) return path;
+    if (![
+      "/api/ideas",
+      "/api/content",
+      "/api/outputs",
+      "/api/dashboard",
+      "/api/production-requests",
+      "/api/insights/best-times",
+      "/api/insights/similar-times",
+      "/api/insights/captions",
+      "/api/insights/discover",
+      "/api/library",
+      "/api/media-assets/library-stills",
+    ].includes(pathname)) return path;
     const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1));
     params.set("profile", selectedProfileId);
     return `${pathname}?${params.toString()}`;
@@ -549,6 +561,7 @@
   });
   $("operationsDeskMode")?.addEventListener("change", (event) => patchOperationsDeskMode(event.target.value));
   $("operationsAgentDeskMode")?.addEventListener("change", (event) => patchOperationsDeskMode(event.target.value));
+  $("operationsLibraryCrossScope")?.addEventListener("change", (event) => patchLibraryCrossScope(event.target.checked));
   document.querySelectorAll("[data-ops-view]").forEach((button) => {
     button.addEventListener("click", () => showOperationsView(button.dataset.opsView));
   });
@@ -13455,6 +13468,7 @@
         for (const file of chunk) form.append("files", file, file.name);
         if (location) form.append("location", location);
         if (batchName) form.append("batch_name", batchName);
+        if (selectedProfileId) form.append("content_profile_id", selectedProfileId);
         const video = chunk.find((file) => item4FileLooksLikeVideo(file));
         if (chunk.length === 1 && video) {
           try {
@@ -14085,6 +14099,38 @@
     } catch (error) {
       setOperationsMessage(error.message || "Could not update desk mode.", "error-text");
     }
+  }
+
+  async function patchLibraryCrossScope(enabled) {
+    try {
+      setOperationsMessage(enabled ? "Including cross-profile library images…" : "Scoping library images to the selected profile…");
+      const result = await api("/api/ops/library/cross-scope", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: Boolean(enabled) }),
+      });
+      const toggle = $("operationsLibraryCrossScope");
+      if (toggle) toggle.checked = Boolean(result.library_include_cross_scope);
+      setOperationsMessage(
+        result.library_include_cross_scope
+          ? "Asset Manager and matching can use images from every Content Profile."
+          : "Asset Manager and matching stay scoped to the selected Content Profile."
+      );
+      if (activeNavPage() === "library") loadLibrary().catch(() => {});
+    } catch (error) {
+      const toggle = $("operationsLibraryCrossScope");
+      if (toggle) toggle.checked = !enabled;
+      setOperationsMessage(error.message || "Could not update cross-profile library setting.", "error-text");
+    }
+  }
+
+  function renderLibraryCrossScopeToggle(enabled, canEdit) {
+    const toggle = $("operationsLibraryCrossScope");
+    const wrap = $("operationsLibraryCrossScopeField");
+    if (toggle) {
+      toggle.checked = Boolean(enabled);
+      toggle.disabled = !canEdit;
+    }
+    if (wrap) wrap.hidden = false;
   }
 
   function renderOperationsDesk(desk, canEdit) {
@@ -14733,6 +14779,7 @@
       ]);
       operationsTimezone = data.timezone || null;
       renderOperationsDesk(desk, Boolean(data.can_edit_profiles));
+      renderLibraryCrossScopeToggle(Boolean(data.library_include_cross_scope), Boolean(data.can_edit_profiles));
       renderOperationsAgentActivity(activity);
       if (meta) {
         const tz = data.timezone || studioTimezone();
@@ -14781,6 +14828,8 @@
       if (runAuto) runAuto.hidden = !data.can_edit_profiles;
       const deskMode = $("operationsDeskMode");
       if (deskMode) deskMode.hidden = !data.can_edit_profiles;
+      const crossScopeField = $("operationsLibraryCrossScopeField");
+      if (crossScopeField) crossScopeField.hidden = !data.can_edit_profiles;
       const intake = $("operationsRunIntake");
       if (intake) intake.hidden = !data.can_edit_profiles;
       const capSilence = $("operationsCapAudioSilence");

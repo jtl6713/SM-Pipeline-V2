@@ -401,3 +401,5 @@ Ready-for-Review Drive cover Worker deploy: 2026-09-08 - Unlock Ready for Review
 Gold thumbnail style Worker deploy: 2026-09-08 - Prefer gold / black-and-gold sophisticated lettering for ≥ ~80% of grid covers; colorful 3D only occasionally. Worker 0.10.281-gold-thumb-style.
 
 Library batch asset name Worker deploy: 2026-09-10 - POST /api/library accepts batch_name, looks up existing Asset Name sequences in Airtable, and writes numbered Drive/catalog names. Worker 0.10.282-library-batch-name. Source commit f9d388c.
+
+Library profile scope Worker deploy: 2026-09-10 - Stamp Content_Profile on Asset Manager uploads; scope /api/library, library-stills, idea suggestions, photo-wait, and autonomous harvest unless LIBRARY_INCLUDE_CROSS_SCOPE is on. Worker 0.10.283-library-profile-scope.
