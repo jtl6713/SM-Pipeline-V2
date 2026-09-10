@@ -422,3 +422,5 @@ Quality Agent catalog Pages deploy: 2026-09-07 - Operations → Quality Agent Ca
 
 
 
+
+Library batch asset name Pages deploy: 2026-09-10 - Asset Manager Add assets shows optional Asset name. Numbers uploads Space Museum 1, 2… and continues after matching Airtable names. UI 0.6.276-library-batch-name. Source commit f9d388c.
