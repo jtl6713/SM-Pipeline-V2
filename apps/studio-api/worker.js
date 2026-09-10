@@ -32,6 +32,7 @@ import {
   libraryBatchNameFilterFormula,
   libraryCrossScopeEnabled,
   libraryDriveFilename,
+  ideaLibraryExcludeDerivedStillFormula,
   mediaAssetIsHeic,
   mediaAssetProfileScopeFormula,
   normalizeLibraryBatchBase,
@@ -324,7 +325,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.281-gold-thumb-style",
+          version: "0.10.285-library-search-browse",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5264,7 +5265,13 @@ async function deleteItem4MasterAsset(request, env, url, authorization) {
     Studio_Variant_Error: null,
     Studio_Item4_State: remaining.length ? "Assets Ready" : "Draft",
   });
-  return respond(request, env, { ok: true, deleted: true, assets: remaining, record: mapProductionRequest(updated) });
+  return respond(request, env, {
+    ok: true,
+    deleted: true,
+    assets: remaining,
+    record: mapProductionRequest(updated),
+    production_request: mapProductionRequest(updated),
+  });
 }
 
 async function uploadItem4ClipPoster(request, env, url, authorization) {
@@ -5462,7 +5469,12 @@ function ideaLibraryFilterFormula(placeKeys, { includeVideo = false } = {}) {
   const media = includeVideo
     ? "OR({Media_Class}='Image',{Media_Class}='Graphic',{Media_Class}='Video')"
     : "OR({Media_Class}='Image',{Media_Class}='Graphic')";
-  const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}))`;
+  // Exclude Item 4 fill-crop / aspect variants from the Airtable scan. Those rows
+  // share place names (e.g. Streeterville__9x16__fill-crop), sort newest-first,
+  // and used to exhaust IDEA_LIBRARY_PLACE_FILTER_LIMIT so every candidate was
+  // rejected in JS and photo-wait reported high_count=0.
+  const notDerived = ideaLibraryExcludeDerivedStillFormula();
+  const base = `AND(${media},{Classification_Status}='Classified',{Active},NOT({Do_Not_Use}),${notDerived})`;
   const keys = (placeKeys || []).filter(Boolean).slice(0, 10);
   if (!keys.length) return base;
   const hay = "LOWER(CONCATENATE({Search_Keywords},' ',{AI_Tags},' ',{Location},' ',{Asset Name},' ',{Topic},' ',{Subtopic}))";
@@ -5622,13 +5634,21 @@ async function getMediaLibraryStills(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
   const includeVideo = ["1", "true", "video", "all", "clips"].includes(String(url.searchParams.get("include") || "").trim().toLowerCase());
+  const ideaId = String(url.searchParams.get("idea_id") || "").trim();
   const queryTokens = ideaLibraryTokens(query);
-  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url);
+  let idea = null;
+  if (/^rec[A-Za-z0-9]+$/.test(ideaId)) {
+    try { idea = await loadAuthorizedIdea(env, ideaId, authorization); } catch {}
+  }
+  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
+  // Operator browse/search uses the Asset Manager name FIND (already excludes fill-crop),
+  // not the idea photo-wait subject-token OR which flooded scans with luxury/glamorous hits.
+  const browseFormula = assetLibraryFilterFormula(query, includeVideo ? "" : "photo");
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: IDEA_LIBRARY_SCAN_LIMIT,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(queryTokens.slice(0, 10), { includeVideo }), scopeFormula),
+    filterFormula: combineAirtableFormulas(browseFormula, scopeFormula),
   });
   const items = [];
   for (const record of records) {
@@ -5666,13 +5686,18 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, query);
   const today = chicagoNowParts().date;
-  const scanLimit = scanKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  // When the operator typed a search, filter Airtable on those tokens only.
+  // Otherwise prefer named place keys so title nouns like "luxury" do not flood the scan.
+  const filterKeys = queryTokens.length
+    ? ideaLibraryStrongTokens(queryTokens)
+    : (placeKeys.length ? placeKeys : scanKeys);
+  const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(scanKeys), scopeFormula),
+    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(filterKeys), scopeFormula),
   });
   const ranked = [];
   for (const record of records) {
@@ -5708,7 +5733,7 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
       medium: "one subject/topic overlap only — show, do not auto-attach",
       low: "weak/search hit — operator choice only",
       scan_limit: scanLimit,
-      place_filter_active: scanKeys.length > 0,
+      place_filter_active: filterKeys.length > 0,
     },
     suggested: capped.filter((row) => row.preselected),
     matches: capped.filter((row) => !row.preselected),
@@ -10595,7 +10620,24 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
 
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
-    return respond(request, env, { ok: true, created: false, record: mapProductionRequest(existing) });
+    let record = existing;
+    const masterCount = Number(f(existing, "Studio_Master_Asset_Count") || item4AssetManifest(existing).length || 0);
+    const waitStatus = String(f(idea, "Studio_Photo_Wait_Status") || "").trim();
+    // Empty draft + photo-wait idea: rematch/reattach so Production shows stills again
+    // after fast-remove or a bad scanner pass wiped Studio_Master_Assets_JSON.
+    if (masterCount === 0 && (waitStatus === "Waiting" || waitStatus === "Ready")) {
+      try {
+        const rematch = await evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, {
+          authorization,
+          force: true,
+          productionRequest: existing,
+        });
+        if (rematch?.production_request) record = rematch.production_request;
+      } catch (error) {
+        console.warn("photo-wait rehydrate on open failed", ideaRecordId, error);
+      }
+    }
+    return respond(request, env, { ok: true, created: false, record: mapProductionRequest(record) });
   }
 
   const created = await createDraftForIdea(env, idea, authorization);
@@ -15933,7 +15975,8 @@ async function rankStillsForIdeaPhotoWait(env, idea) {
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, "");
   const today = chicagoNowParts().date;
-  const scanLimit = scanKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
+  const filterKeys = placeKeys.length ? placeKeys : scanKeys;
+  const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const crossScope = await readLibraryCrossScopeSetting(env);
   const scopeFormula = mediaAssetProfileScopeFormula(firstLinkedRecordId(f(idea, "Content_Profile")), {
     crossScope,
@@ -15943,7 +15986,7 @@ async function rankStillsForIdeaPhotoWait(env, idea) {
     limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(scanKeys), scopeFormula),
+    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(filterKeys), scopeFormula),
   });
   const ranked = [];
   for (const record of records) {
@@ -16119,8 +16162,13 @@ async function evaluateAndMaybeAttachWaitingIdeaPhotos(env, idea, { authorizatio
 
   const keepHighIds = sortHighConfidenceMatches(matches).map((row) => row.id);
   if (requestRecord) {
-    const stripped = await applyLibraryAssetsToProductionRequest(env, requestRecord, keepHighIds, { replaceWaitAssets: true });
-    requestRecord = stripped.record;
+    const existingCount = item4AssetManifest(requestRecord).length;
+    // Never wipe existing masters when the scanner temporarily finds zero highs
+    // (e.g. fill-crop flood). Only rewrite when we have highs or the strip is empty.
+    if (keepHighIds.length || existingCount === 0) {
+      const stripped = await applyLibraryAssetsToProductionRequest(env, requestRecord, keepHighIds, { replaceWaitAssets: true });
+      requestRecord = stripped.record;
+    }
   }
   const ideaWaiting = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, idea.id, {
     method: "PATCH",

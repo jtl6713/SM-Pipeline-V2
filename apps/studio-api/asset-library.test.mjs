@@ -26,6 +26,7 @@ import {
   firstLinkedRecordId,
   mediaAssetProfileScopeFormula,
   combineAirtableFormulas,
+  ideaLibraryExcludeDerivedStillFormula,
 } from "./asset-library.mjs";
 
 function output(fields) {
@@ -236,6 +237,14 @@ test("library profile scope formula isolates Content_Profile unless cross-scope 
     combineAirtableFormulas("AND({Active})", mediaAssetProfileScopeFormula("recProfileChicago1")),
     `AND(AND({Active}),${mediaAssetProfileScopeFormula("recProfileChicago1")})`
   );
+});
+
+test("photo-wait / library scans exclude fill-crop and aspect-ratio derived stills", () => {
+  const clause = ideaLibraryExcludeDerivedStillFormula();
+  assert.match(clause, /fill-crop/);
+  assert.match(clause, /REGEX_MATCH/);
+  assert.ok(clause.includes("__[0-9]+x[0-9]+__"));
+  assert.doesNotMatch(clause, /Streeterville/);
 });
 
 test("library HEIC originals are flagged so previews use Drive JPEG thumbs", () => {

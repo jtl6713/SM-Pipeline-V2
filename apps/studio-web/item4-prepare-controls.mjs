@@ -1,4 +1,4 @@
-// Keep these helpers aligned with apps/studio-web/assets/app-item4-0619.js
+// Keep these helpers aligned with apps/studio-web/assets/app-item4-0620.js
 // (item4PrepareButtonView, productionPillState, item4IsRetryablePrepareFailure).
 
 export function item4ProductionPillState(text) {

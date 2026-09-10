@@ -110,11 +110,56 @@ jobs:
             --json > /tmp/pages-production.json
           node - <<'NODE'
           const fs = require('fs');
-          const data = JSON.parse(fs.readFileSync('/tmp/pages-production.json','utf8'));
+          const html = fs.readFileSync('apps/studio-web/index.html', 'utf8');
+          const jsMatch = html.match(/src=["']\/assets\/(app-item4-[^"'?]+\.js)/);
+          const labelMatch = html.match(/UI build (\d+\.\d+\.\d+)/);
+          if (!jsMatch || !labelMatch) throw new Error('index.html is missing app-item4 script or UI build label');
+          const expectedJs = `/assets/${jsMatch[1]}`;
+          const expectedLabel = labelMatch[1];
+          const buildIdMatch = fs.readFileSync(`apps/studio-web${expectedJs}`, 'utf8').match(/BUILD_ID\s*=\s*"([^"]+)"/);
+          if (!buildIdMatch) throw new Error(`BUILD_ID missing in ${expectedJs}`);
+          fs.writeFileSync('/tmp/pages-expected.json', JSON.stringify({
+            expectedJs,
+            expectedLabel,
+            expectedBuildId: buildIdMatch[1],
+          }));
+          NODE
+          EXPECTED_JS=$(jq -r .expectedJs /tmp/pages-expected.json)
+          EXPECTED_LABEL=$(jq -r .expectedLabel /tmp/pages-expected.json)
+          EXPECTED_BUILD_ID=$(jq -r .expectedBuildId /tmp/pages-expected.json)
+          API_ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "$API_ROOT/pages/projects/chicagoshining-studio" -H "$AUTH" -o /tmp/pages-project.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const expected = JSON.parse(fs.readFileSync('/tmp/pages-expected.json', 'utf8'));
+          const data = JSON.parse(fs.readFileSync('/tmp/pages-production.json', 'utf8'));
           const rows = Array.isArray(data) ? data : (data.result || []);
           if (!rows.length) throw new Error('No production Pages deployment was returned after deploy');
           const latest = rows[0];
           const url = latest.url || latest.aliases?.[0] || '(available in Cloudflare dashboard)';
+          const project = JSON.parse(fs.readFileSync('/tmp/pages-project.json', 'utf8')).result || {};
+          const domains = project.domains || [];
+          fs.writeFileSync('/tmp/pages-latest-url.txt', String(url).replace(/\/$/, ''));
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-            `### Studio Pages production deployment: PASS\n- Production branch: ${process.env.PROD_BRANCH}\n- Latest deployment: ${url}\n`);
+            `### Studio Pages production deployment: PASS\n- Production branch: ${process.env.PROD_BRANCH}\n- Latest deployment: ${url}\n- Domains: ${domains.join(', ') || '(none listed)'}\n- Expected UI: ${expected.expectedLabel}\n`);
+          console.log('pages_domains=' + JSON.stringify(domains));
           NODE
+          LATEST_URL=$(cat /tmp/pages-latest-url.txt)
+          curl -fsSL "$LATEST_URL/" -o /tmp/live-index.html
+          grep -Fq "$EXPECTED_JS" /tmp/live-index.html
+          grep -Fq "UI build $EXPECTED_LABEL" /tmp/live-index.html
+          curl -fsSL "$LATEST_URL$EXPECTED_JS" -o /tmp/live-app.js
+          grep -Fq "$EXPECTED_BUILD_ID" /tmp/live-app.js
+          curl -fsSL "https://chicagoshining-studio.pages.dev$EXPECTED_JS" -o /tmp/alias-app.js
+          grep -Fq "$EXPECTED_BUILD_ID" /tmp/alias-app.js
+          ZONE_ID=$(curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" | jq -r '.result[0].id // empty')
+          if [[ -n "$ZONE_ID" ]]; then
+            curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" -H "$AUTH" -o /tmp/worker-routes.json || true
+            jq -c '[.result[]? | {pattern,script}]' /tmp/worker-routes.json 2>/dev/null || true
+            curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
+              -H "$AUTH" -H "Content-Type: application/json" \
+              --data '{"hosts":["studio.chicagoshining.com"]}' \
+              -o /tmp/purge.json || true
+            jq -c '{success:(.success // false),errors:(.errors // [])}' /tmp/purge.json 2>/dev/null || true
+          fi

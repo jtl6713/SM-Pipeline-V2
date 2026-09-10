@@ -1,4 +1,4 @@
-// Keep these helpers aligned with apps/studio-web/assets/app-item4-0619.js
+// Keep these helpers aligned with apps/studio-web/assets/app-item4-0620.js
 // (renderOperationsActivityItems / Operations activity log cards).
 
 const DETAIL_KEYS = [
