@@ -434,3 +434,5 @@ Library profile scope Pages deploy: 2026-09-10 - Asset Manager lists Media Asset
 Library video preview Pages deploy: 2026-09-10 - Asset Manager clips open a native modal video player on tap (iPhone-friendly controls). UI 0.6.280-library-video-preview.
 
 Fast master remove Pages deploy: 2026-09-10 - Removing Production master photos updates the strip instantly and deletes in the background (no full workspace reload or confirm). UI 0.6.281-fast-remove-masters.
+
+UI build label Pages deploy: 2026-09-10 - Footer BUILD_ID bumped to 0.6.281 so hard refresh shows the shipped video-preview + fast-remove UI. UI 0.6.281-fast-remove-masters.
