@@ -329,7 +329,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.288-output-fanout",
+          version: "0.10.289-outputs-newest",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -16405,10 +16405,15 @@ const OUTPUT_LIST_FIELDS = [
 
 async function listOutputs(request, env, url, authorization, ctx = null) {
   const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
+  // Newest first. An unsorted maxRecords=100 page returns older rows and can
+  // hide a package's latest Platform Outputs (Streeterville 424/425) so Pipeline
+  // only shows the earlier four destinations.
   const records = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit: clampLimit(url, 100, 100),
     filterFormula: contentProfileFilterFormula(profile),
     fields: OUTPUT_LIST_FIELDS,
+    sortField: "Output_ID",
+    sortDirection: "desc",
   });
   const healed = [];
   for (const record of records) {
