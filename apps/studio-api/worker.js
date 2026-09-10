@@ -25,8 +25,11 @@ import {
   parseDeskMode,
 } from "./desk-inventory.mjs";
 import {
+  allocateLibraryBatchNames,
+  libraryBatchNameFilterFormula,
   libraryDriveFilename,
   mediaAssetIsHeic,
+  normalizeLibraryBatchBase,
   sanitizeLibraryAssetName,
 } from "./asset-library.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
@@ -16886,6 +16889,17 @@ async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) 
   return payload;
 }
 
+async function listLibraryBatchExistingNames(env, baseName) {
+  const filterFormula = libraryBatchNameFilterFormula(baseName);
+  if (!filterFormula) return [];
+  const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: 500,
+    filterFormula,
+    fields: ["Asset Name"],
+  }).catch(() => []);
+  return records.map((record) => String(f(record, "Asset Name") || "").trim()).filter(Boolean);
+}
+
 async function uploadAssetLibraryItems(request, env, authorization) {
   void authorization;
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
@@ -16902,6 +16916,19 @@ async function uploadAssetLibraryItems(request, env, authorization) {
   const location = String(form.get("location") || "").trim();
   const description = String(form.get("description") || "").trim();
   const formDuration = coerceLibraryDurationSeconds(form.get("duration_seconds"));
+  const rawBatchName = String(form.get("batch_name") || form.get("display_name") || "").trim();
+  let batchBase = null;
+  let batchNames = null;
+  if (rawBatchName) {
+    const normalized = normalizeLibraryBatchBase(rawBatchName);
+    if (!normalized.ok) throw new HttpError(400, normalized.error);
+    batchBase = normalized.name;
+    const existingNames = await listLibraryBatchExistingNames(env, batchBase);
+    batchNames = allocateLibraryBatchNames(batchBase, files.length, existingNames);
+    if (batchNames.length !== files.length) {
+      throw new HttpError(500, "Could not allocate sequential asset names");
+    }
+  }
   for (const file of files) {
     const isVideo = item4IsSupportedVideoFile(file);
     const isImage = item4IsSupportedImageFile(file);
@@ -16916,13 +16943,20 @@ async function uploadAssetLibraryItems(request, env, authorization) {
     }
   }
   const uploaded = [];
-  for (const file of files) {
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
     const id = crypto.randomUUID().replace(/-/g, "").slice(0, 18);
-    const safeName = item4SafeFileName(file.name || "asset");
+    const extension = item4FileExtension(file.name);
+    const assetName = batchNames
+      ? batchNames[index]
+      : (String(file.name || "").replace(/\.[^.]+$/, "") || "Studio library asset");
+    const driveFilename = batchNames
+      ? libraryDriveFilename(assetName, extension)
+      : item4SafeFileName(file.name || "asset");
     const isVideo = item4IsSupportedVideoFile(file);
     const bytes = await file.arrayBuffer();
     const drive = await promoteStudioAssetToDrive(env, {
-      filename: safeName,
+      filename: driveFilename,
       bytes,
       contentType: item4NormalizedMimeType(file),
     });
@@ -16934,12 +16968,12 @@ async function uploadAssetLibraryItems(request, env, authorization) {
       body: JSON.stringify({
         records: [{
           fields: {
-            "Asset Name": String(file.name || safeName).replace(/\.[^.]+$/, "") || "Studio library asset",
+            "Asset Name": assetName,
             Media_Class: isVideo ? "Video" : "Image",
             "Google Drive URL": drive.google_drive_url,
             "Google Drive File ID": drive.google_drive_file_id,
             MIME_Type: drive.mime_type || item4NormalizedMimeType(file),
-            File_Extension: item4FileExtension(file.name),
+            File_Extension: extension,
             File_Size_Bytes: Number(drive.file_size_bytes || file.size || 0) || null,
             Duration_Seconds: durationSeconds,
             Intake_Status: "Created",
@@ -16965,13 +16999,20 @@ async function uploadAssetLibraryItems(request, env, authorization) {
     if (!record?.id) throw new HttpError(502, "The file was stored, but the catalog record was not created");
     uploaded.push(mapLibraryAsset(record));
   }
+  const namedMessage = batchBase && uploaded.length
+    ? (uploaded.length === 1
+      ? `Added as ${uploaded[0]?.name || batchNames[0]}.`
+      : `Added ${uploaded.length} assets as ${batchNames[0]}–${batchNames[batchNames.length - 1]}.`)
+    : null;
   return respond(request, env, {
     ok: true,
     uploaded: uploaded.length,
     records: uploaded,
-    message: uploaded.length === 1
+    batch_base: batchBase,
+    batch_names: batchNames,
+    message: namedMessage || (uploaded.length === 1
       ? "Asset added to the library."
-      : `${uploaded.length} assets added to the library.`,
+      : `${uploaded.length} assets added to the library.`),
   }, 201);
 }
 
