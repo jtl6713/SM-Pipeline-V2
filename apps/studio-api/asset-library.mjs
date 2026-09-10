@@ -371,3 +371,8 @@ export function combineAirtableFormulas(...parts) {
   if (clauses.length === 1) return clauses[0];
   return `AND(${clauses.join(",")})`;
 }
+
+/** Drop Item 4 fill-crop / aspect variants from library + photo-wait Airtable scans. */
+export function ideaLibraryExcludeDerivedStillFormula() {
+  return `AND(NOT(FIND("fill-crop",LOWER({Asset Name}&""))),NOT(REGEX_MATCH({Asset Name}&"","__[0-9]+x[0-9]+__")))`;
+}

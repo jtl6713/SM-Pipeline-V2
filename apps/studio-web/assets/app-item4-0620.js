@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.282-hard-cache-bust";
+  const BUILD_ID = "item4-0.6.283-streeterville-rematch";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -8765,8 +8765,12 @@
         } else {
           setRequestMessage("Add photos one at a time, or drop several together.", "success");
         }
+      } else if (result.created) {
+        setRequestMessage("Production Request draft created. Choose Single or Multiple photos, then upload.", "success");
+      } else if (assetCount) {
+        setRequestMessage(`Opened the draft with ${assetCount} matched photo${assetCount === 1 ? "" : "s"}.`, "success");
       } else {
-        setRequestMessage(result.created ? "Production Request draft created. Choose Single or Multiple photos, then upload." : "Existing Production Request draft opened.", "success");
+        setRequestMessage("Existing Production Request draft opened. Add photos from the library or upload.", "success");
       }
     } catch (e) {
       setManageMessage(e.message, "error-text");
