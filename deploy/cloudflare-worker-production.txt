@@ -407,3 +407,5 @@ Library profile scope Worker deploy: 2026-09-10 - Stamp Content_Profile on Asset
 Photo-wait raw stills Worker deploy: 2026-09-10 - Exclude fill-crop/__NxN__ variants from library/photo-wait Airtable scans; prefer place keys; rehydrate empty drafts on open; do not wipe masters on empty rematch. Worker 0.10.284-photo-wait-raw-stills.
 
 Library search browse Worker deploy: 2026-09-10 - library-stills uses Asset Manager FIND (not idea subject tokens); suggestions pass q as place filter. Worker 0.10.285-library-search-browse.
+
+Library profile name scope Worker deploy: 2026-09-10 - Match Content_Profile by Profile_Name as well as record id (ARRAYJOIN returns names). Restores Streeterville/Chicago stamped stills in library-stills + suggestions + photo-wait. Worker 0.10.286-library-profile-name-scope.

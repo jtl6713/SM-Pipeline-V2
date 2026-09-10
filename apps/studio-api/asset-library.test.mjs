@@ -237,6 +237,12 @@ test("library profile scope formula isolates Content_Profile unless cross-scope 
     combineAirtableFormulas("AND({Active})", mediaAssetProfileScopeFormula("recProfileChicago1")),
     `AND(AND({Active}),${mediaAssetProfileScopeFormula("recProfileChicago1")})`
   );
+  const named = mediaAssetProfileScopeFormula("recT2rbKX3MF7cVFU", {
+    profileName: "ChicagoShining - Chicago",
+  });
+  assert.match(named, /recT2rbKX3MF7cVFU/);
+  assert.match(named, /ChicagoShining - Chicago/);
+  assert.match(named, /^OR\(/);
 });
 
 test("photo-wait / library scans exclude fill-crop and aspect-ratio derived stills", () => {

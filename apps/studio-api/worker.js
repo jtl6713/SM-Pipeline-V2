@@ -325,7 +325,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.285-library-search-browse",
+          version: "0.10.286-library-profile-name-scope",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -15978,10 +15978,11 @@ async function rankStillsForIdeaPhotoWait(env, idea) {
   const filterKeys = placeKeys.length ? placeKeys : scanKeys;
   const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const crossScope = await readLibraryCrossScopeSetting(env);
-  const scopeFormula = mediaAssetProfileScopeFormula(firstLinkedRecordId(f(idea, "Content_Profile")), {
-    crossScope,
-    includeUnscoped: true,
-  });
+  const scopeFormula = await mediaAssetProfileScopeForId(
+    env,
+    firstLinkedRecordId(f(idea, "Content_Profile")),
+    { crossScope, includeUnscoped: true },
+  );
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
     limit: scanLimit,
     sortField: "Intake_Date",
@@ -16862,6 +16863,23 @@ async function resolveLibraryCrossScope(env, url) {
   return resolveLibraryCrossScopeFlag(url, settingEnabled ? "1" : "0");
 }
 
+async function mediaAssetProfileScopeForId(env, profileId, {
+  crossScope = false,
+  includeUnscoped = true,
+} = {}) {
+  const id = String(profileId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) {
+    return mediaAssetProfileScopeFormula("", { crossScope, includeUnscoped });
+  }
+  const profiles = await listContentProfileRecords(env).catch(() => []);
+  const profile = profiles.find((row) => row.id === id) || null;
+  return mediaAssetProfileScopeFormula(id, {
+    crossScope,
+    includeUnscoped,
+    profileName: f(profile, "Profile_Name") || "",
+  });
+}
+
 async function resolveLibraryScopeProfileId(env, authorization, url, { idea = null, profileId = null } = {}) {
   if (profileId && /^rec[A-Za-z0-9]+$/.test(String(profileId))) return String(profileId);
   if (idea) {
@@ -16873,10 +16891,27 @@ async function resolveLibraryScopeProfileId(env, authorization, url, { idea = nu
   return profile?.id || "";
 }
 
+async function resolveLibraryScopeProfile(env, authorization, url, options = {}) {
+  const profileId = await resolveLibraryScopeProfileId(env, authorization, url, options);
+  if (!profileId) return null;
+  if (authorization) {
+    try {
+      const working = await resolveWorkingContentProfile(env, authorization, profileId);
+      if (working?.id === profileId) return working;
+    } catch {}
+  }
+  const profiles = await listContentProfileRecords(env).catch(() => []);
+  return profiles.find((row) => row.id === profileId) || { id: profileId, fields: {} };
+}
+
 async function libraryProfileScopeFormula(env, authorization, url, options = {}) {
   const crossScope = await resolveLibraryCrossScope(env, url);
-  const profileId = await resolveLibraryScopeProfileId(env, authorization, url, options);
-  return mediaAssetProfileScopeFormula(profileId, { crossScope, includeUnscoped: true });
+  const profile = await resolveLibraryScopeProfile(env, authorization, url, options);
+  return mediaAssetProfileScopeFormula(profile?.id || "", {
+    crossScope,
+    includeUnscoped: true,
+    profileName: f(profile, "Profile_Name") || "",
+  });
 }
 
 function assetLibraryFilterFormula(query, kind) {
@@ -17027,7 +17062,11 @@ async function uploadAssetLibraryItems(request, env, authorization) {
     const normalized = normalizeLibraryBatchBase(rawBatchName);
     if (!normalized.ok) throw new HttpError(400, normalized.error);
     batchBase = normalized.name;
-    const scopeFormula = mediaAssetProfileScopeFormula(uploadProfile.id, { crossScope: false, includeUnscoped: false });
+    const scopeFormula = mediaAssetProfileScopeFormula(uploadProfile.id, {
+      crossScope: false,
+      includeUnscoped: false,
+      profileName: f(uploadProfile, "Profile_Name") || "",
+    });
     const existingNames = await listLibraryBatchExistingNames(env, batchBase, scopeFormula);
     batchNames = allocateLibraryBatchNames(batchBase, files.length, existingNames);
     if (batchNames.length !== files.length) {
@@ -29728,7 +29767,7 @@ async function harvestAutonomousYoutube(env) {
 async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = "") {
   const pin = autonomousPreferredSubject(subject);
   const crossScope = await readLibraryCrossScopeSetting(env);
-  const scopeFormula = mediaAssetProfileScopeFormula(profileId, { crossScope, includeUnscoped: true });
+  const scopeFormula = await mediaAssetProfileScopeForId(env, profileId, { crossScope, includeUnscoped: true });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
     limit: 80,
     sortField: "Intake_Date",

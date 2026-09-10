@@ -444,3 +444,5 @@ Streeterville rematch Pages deploy: 2026-09-10 - UI 0.6.283-streeterville-rematc
 Library search picker Pages deploy: 2026-09-10 - Production/Idea library picker merges suggested+matches+browse and passes search q / idea_id. UI 0.6.284-library-search.
 
 Pages verify URL fallback: 2026-09-10 - Prefer https Pages URLs (fallback to chicagoshining-studio.pages.dev) so verify does not fail on wrangler list shape changes. UI still 0.6.284-library-search.
+
+Library profile name scope Pages deploy: 2026-09-10 - Keep attached masters visible in From library picker; surface empty/error states. UI 0.6.285-library-profile-name.
