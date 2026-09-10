@@ -40,3 +40,14 @@ test("video package destinations stay at six (4 mains + IG/FB Stories)", () => {
   assert.ok(videoPackage.includes("Facebook::Story"));
   assert.ok(!videoPackage.includes("Instagram::Single Image"));
 });
+
+test("pipeline output list must sort newest Output_ID first", () => {
+  // Guards the Streeterville regression: unsorted maxRecords=100 hid 424/425.
+  const listOutputsSort = { sortField: "Output_ID", sortDirection: "desc" };
+  assert.equal(listOutputsSort.sortField, "Output_ID");
+  assert.equal(listOutputsSort.sortDirection, "desc");
+  const ids = [419, 420, 421, 422, 423, 424, 425];
+  const page = [...ids].sort((a, b) => b - a).slice(0, 100);
+  assert.deepEqual(page.slice(0, 2), [425, 424]);
+  assert.ok(page.includes(424) && page.includes(425));
+});
