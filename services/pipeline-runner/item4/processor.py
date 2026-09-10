@@ -479,8 +479,15 @@ def process_variant_group(
         fields = row.get("fields") or {}
         ratio = str(fields.get("Aspect_Ratio") or "").strip()
         # Per-ratio Drive/variant clients: concurrent uploads must not share one Session.
-        local_drive = GoogleDriveClient()
-        local_variant = VariantServiceClient(getattr(variant, "_settings", None))
+        # Keep injected fakes (unit tests) on the caller's objects.
+        local_drive = (
+            GoogleDriveClient() if isinstance(drive, GoogleDriveClient) else drive
+        )
+        local_variant = (
+            VariantServiceClient(getattr(variant, "_settings", None))
+            if isinstance(variant, VariantServiceClient)
+            else variant
+        )
         try:
             rendered = local_variant.render(
                 source_bytes,
