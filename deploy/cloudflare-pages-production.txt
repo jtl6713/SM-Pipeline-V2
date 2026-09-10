@@ -432,3 +432,5 @@ Library multi-photo picker Pages deploy: 2026-09-10 - iPhone Choose photos keeps
 Library profile scope Pages deploy: 2026-09-10 - Asset Manager lists Media Assets for the selected Content Profile. Operations Admin can include cross-profile library images. UI 0.6.279-library-profile-scope.
 
 Library video preview Pages deploy: 2026-09-10 - Asset Manager clips open a native modal video player on tap (iPhone-friendly controls). UI 0.6.280-library-video-preview.
+
+Fast master remove Pages deploy: 2026-09-10 - Removing Production master photos updates the strip instantly and deletes in the background (no full workspace reload or confirm). UI 0.6.281-fast-remove-masters.
