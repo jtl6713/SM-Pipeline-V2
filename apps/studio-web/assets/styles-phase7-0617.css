@@ -2696,6 +2696,13 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 #libraryUploadZone{
   position:relative;
 }
+.library-choose-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  position:relative;
+  z-index:2;
+}
 @media(max-width:760px){
   .heading-actions .native-file-label,
   .heading-actions label.primary-button{
