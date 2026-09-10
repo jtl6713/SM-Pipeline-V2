@@ -354,13 +354,28 @@ export function firstLinkedRecordId(value) {
 /**
  * Scope Media Assets to a Content Profile.
  * Blank Content_Profile rows stay visible (legacy shared) until backfilled.
+ *
+ * Airtable formulas expose linked records as primary-field names via ARRAYJOIN,
+ * not record IDs. Match both id (legacy) and Profile_Name so stamped Chicago
+ * stills are not filtered out of library / photo-wait scans.
  */
-export function mediaAssetProfileScopeFormula(profileId, { crossScope = false, includeUnscoped = true } = {}) {
+export function mediaAssetProfileScopeFormula(profileId, {
+  crossScope = false,
+  includeUnscoped = true,
+  profileName = "",
+} = {}) {
   if (crossScope) return null;
   const id = String(profileId || "").trim();
-  if (!/^rec[A-Za-z0-9]+$/.test(id)) return null;
-  const escaped = escapeLibraryAirtableFormulaValue(id);
-  const match = `FIND("${escaped}", ARRAYJOIN({Content_Profile})&"")`;
+  const name = String(profileName || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(id) && !name) return null;
+  const parts = [];
+  if (/^rec[A-Za-z0-9]+$/.test(id)) {
+    parts.push(`FIND("${escapeLibraryAirtableFormulaValue(id)}", ARRAYJOIN({Content_Profile})&"")`);
+  }
+  if (name) {
+    parts.push(`FIND("${escapeLibraryAirtableFormulaValue(name)}", ARRAYJOIN({Content_Profile})&"")`);
+  }
+  const match = parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
   if (includeUnscoped) return `OR({Content_Profile}=BLANK(),${match})`;
   return match;
 }

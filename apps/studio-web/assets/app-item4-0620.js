@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.284-library-search";
+  const BUILD_ID = "item4-0.6.285-library-profile-name";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9042,6 +9042,31 @@
     return new Set((item4Workspace?.assets || []).map((asset) => String(asset.media_asset_record_id || "").trim()).filter(Boolean));
   }
 
+  function item4AttachedLibraryItems() {
+    return (item4Workspace?.assets || [])
+      .map((asset) => {
+        const id = String(asset?.media_asset_record_id || "").trim();
+        if (!id) return null;
+        const kind = String(asset?.media_kind || asset?.kind || "").toLowerCase();
+        const video = kind === "video" || String(asset?.mime_type || "").toLowerCase().startsWith("video/");
+        return {
+          id,
+          name: asset?.name || id,
+          media_kind: video ? "video" : "photo",
+          mime_type: asset?.mime_type || null,
+          duration_seconds: Number(asset?.duration_seconds || 0) || null,
+          google_drive_file_id: asset?.google_drive_file_id || null,
+          preview_path: asset?.preview_url || `/api/media-assets/${id}/preview`,
+          location: asset?.location || null,
+          score: 0,
+          confidence: "attached",
+          match_reasons: ["already_attached"],
+          preselected: true,
+        };
+      })
+      .filter(Boolean);
+  }
+
   function item4LibraryDiff() {
     const attached = item4AttachedMediaIds();
     const toAdd = [...item4LibrarySelected].filter((id) => !attached.has(id));
@@ -9082,16 +9107,28 @@
     if (hint) hint.textContent = "Loading suggested stills and the Drive library.";
     const ideaId = activeProductionRequest?.idea_record_id || activeIdea?.id || null;
     const q = String(query || "").trim();
+    const attachedItems = item4AttachedLibraryItems();
+    let suggestionError = null;
+    let browseError = null;
     const [ideaPack, browse] = await Promise.all([
       ideaId
-        ? fetchIdeaLibrarySuggested(ideaId, q).catch(() => ({ suggested: [], matches: [] }))
+        ? fetchIdeaLibrarySuggested(ideaId, q).catch((error) => {
+          suggestionError = error;
+          return { suggested: [], matches: [] };
+        })
         : Promise.resolve({ suggested: [], matches: [] }),
-      fetchLibraryBrowse(q, ideaId).catch(() => []),
+      fetchLibraryBrowse(q, ideaId).catch((error) => {
+        browseError = error;
+        return [];
+      }),
     ]);
     const suggested = ideaPack.suggested || [];
     const matches = ideaPack.matches || [];
-    item4LibrarySuggestedIds = new Set(suggested.map((item) => item.id).filter(Boolean));
-    item4LibraryItems = mergeLibraryPickerItems(suggested, matches, browse);
+    item4LibrarySuggestedIds = new Set([
+      ...attachedItems.map((item) => item.id),
+      ...suggested.map((item) => item.id).filter(Boolean),
+    ]);
+    item4LibraryItems = mergeLibraryPickerItems(suggested, matches, [...attachedItems, ...browse]);
     item4LibrarySelected = seedLibrarySelection(
       item4LibrarySelected,
       suggested,
@@ -9101,6 +9138,20 @@
     );
     item4LibrarySeeded = true;
     renderItem4LibraryPicker();
+    if (!item4LibraryItems.length) {
+      const detail = suggestionError?.message || browseError?.message || (q
+        ? `No classified Drive stills matched “${q}”.`
+        : "No classified Drive stills were returned for this profile.");
+      if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">${escapeHtml(detail)}</p>`;
+      if (suggestionError || browseError) {
+        setRequestMessage(detail, "error-text");
+      }
+    } else if (suggestionError || browseError) {
+      setRequestMessage(
+        `Library search partially failed: ${suggestionError?.message || browseError?.message}`,
+        "error-text"
+      );
+    }
   }
 
   async function openItem4LibraryPicker() {
