@@ -13509,10 +13509,26 @@
     }
   }
 
-  function libraryFileInputs() {
+  function libraryPhotoAccept() {
+    return "image/*,.heic,.heif,image/heic,image/heif,image/jpeg,image/png,image/webp,image/gif";
+  }
+
+  function libraryClipAccept() {
+    return "video/*,.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime";
+  }
+
+  function libraryPhotoInputs() {
     return ["libraryFileInput", "libraryZoneInput", "libraryChooseInput"]
       .map((id) => $(id))
       .filter(Boolean);
+  }
+
+  function libraryClipInputs() {
+    return ["libraryClipInput"].map((id) => $(id)).filter(Boolean);
+  }
+
+  function libraryFileInputs() {
+    return libraryPhotoInputs().concat(libraryClipInputs());
   }
 
   function bindLibraryUpload() {
@@ -13522,10 +13538,17 @@
     if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
     const phone = libraryPickerIsPhone();
-    inputs.forEach((input) => { input.multiple = !phone; });
+    libraryPhotoInputs().forEach((input) => {
+      input.multiple = true;
+      input.accept = libraryPhotoAccept();
+    });
+    libraryClipInputs().forEach((input) => {
+      input.multiple = !phone;
+      input.accept = libraryClipAccept();
+    });
     const hint = $("libraryUploadHint");
     if (hint && phone) {
-      hint.textContent = "On iPhone add one clip at a time and keep this tab open. JPG, PNG, WEBP, HEIC, MP4, MOV · 25 MB photos · 100 MB clips";
+      hint.textContent = "Select multiple photos in Photo Library. Clips one at a time. JPG, PNG, WEBP, HEIC, MP4, MOV · 25 MB photos · 100 MB clips";
     }
     ["libraryBatchName", "libraryLocation"].forEach((id) => {
       $(id)?.addEventListener("input", () => {
