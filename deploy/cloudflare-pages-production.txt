@@ -446,3 +446,5 @@ Library search picker Pages deploy: 2026-09-10 - Production/Idea library picker 
 Pages verify URL fallback: 2026-09-10 - Prefer https Pages URLs (fallback to chicagoshining-studio.pages.dev) so verify does not fail on wrangler list shape changes. UI still 0.6.284-library-search.
 
 Library profile name scope Pages deploy: 2026-09-10 - Keep attached masters visible in From library picker; surface empty/error states. UI 0.6.285-library-profile-name.
+
+Mobile master reorder Pages deploy: 2026-09-10 - Tap ↑ ↓ on Production master photos to set carousel order on phone. UI 0.6.286-mobile-master-reorder.

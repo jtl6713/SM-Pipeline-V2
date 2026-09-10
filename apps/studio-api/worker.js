@@ -120,6 +120,7 @@ export default {
       const isProductionRequestOutputsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/outputs$/.test(url.pathname);
       const isItem4AssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets$/.test(url.pathname);
       const isItem4LibraryAssetsRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/library$/.test(url.pathname);
+      const isItem4AssetsReorderRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/reorder$/.test(url.pathname);
       const isItem4UploadSessionRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session$/.test(url.pathname);
       const isItem4UploadSessionPartRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session\/[A-Za-z0-9_-]+\/parts\/\d+$/.test(url.pathname);
       const isItem4UploadSessionCompleteRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/upload-session\/[A-Za-z0-9_-]+\/complete$/.test(url.pathname);
@@ -129,6 +130,7 @@ export default {
       const isItem4AssetPosterRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+\/poster$/.test(url.pathname);
       const isItem4AssetRecordRoute = /^\/api\/production-requests\/rec[A-Za-z0-9]+\/assets\/[A-Za-z0-9_-]+$/.test(url.pathname)
         && !isItem4LibraryAssetsRoute
+        && !isItem4AssetsReorderRoute
         && !isItem4AssetPosterRoute
         && !isItem4UploadSessionRoute
         && !isItem4UploadSessionAbortRoute;
@@ -202,6 +204,7 @@ export default {
       const isProductionRequestOutputsSyncWrite = isProductionRequestOutputsRoute && request.method === "PUT";
       const isItem4AssetsUploadWrite = isItem4AssetsRoute && request.method === "POST";
       const isItem4LibraryAssetsWrite = isItem4LibraryAssetsRoute && request.method === "POST";
+      const isItem4AssetsReorderWrite = isItem4AssetsReorderRoute && request.method === "POST";
       const isItem4UploadSessionWrite = isItem4UploadSessionRoute && request.method === "POST";
       const isItem4UploadSessionPartWrite = isItem4UploadSessionPartRoute && request.method === "PUT";
       const isItem4UploadSessionCompleteWrite = isItem4UploadSessionCompleteRoute && request.method === "POST";
@@ -252,6 +255,7 @@ export default {
         isProductionRequestOutputsSyncWrite ||
         isItem4AssetsUploadWrite ||
         isItem4LibraryAssetsWrite ||
+        isItem4AssetsReorderWrite ||
         isItem4UploadSessionWrite ||
         isItem4UploadSessionPartWrite ||
         isItem4UploadSessionCompleteWrite ||
@@ -325,7 +329,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.286-library-profile-name-scope",
+          version: "0.10.287-mobile-master-reorder",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -867,6 +871,13 @@ export default {
         assertWriteRequest(request, env);
         requirePermission(authorization, "production_configure");
         return attachItem4LibraryAssets(request, env, url, authorization);
+      }
+
+      if (isItem4AssetsReorderRoute) {
+        if (request.method !== "POST") throw new HttpError(405, "Method not allowed");
+        assertWriteRequest(request, env);
+        requirePermission(authorization, "production_configure");
+        return reorderItem4MasterAssets(request, env, url, authorization);
       }
 
       if (isItem4UploadSessionRoute) {
@@ -5234,6 +5245,55 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
     }
     throw error;
   }
+}
+
+async function reorderItem4MasterAssets(request, env, url, authorization) {
+  let payload = {};
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const recordId = item4RequestIdFromPath(url);
+  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  assertEditableProductionRequest(record);
+  const assets = item4AssetManifest(record).slice().sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  const requested = Array.isArray(payload?.asset_ids)
+    ? payload.asset_ids.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  if (!requested.length) throw new HttpError(400, "asset_ids is required");
+  if (requested.length !== assets.length) {
+    throw new HttpError(400, `asset_ids must include every master photo exactly once (expected ${assets.length})`);
+  }
+  const byId = new Map(assets.map((asset) => [String(asset.id || "").trim(), asset]));
+  if (requested.some((id) => !byId.has(id))) throw new HttpError(400, "asset_ids includes an unknown master photo");
+  if (new Set(requested).size !== requested.length) throw new HttpError(400, "asset_ids must not contain duplicates");
+  const reordered = requested.map((id, index) => ({ ...byId.get(id), order: index + 1 }));
+  const unchanged = reordered.every((asset, index) => String(assets[index]?.id || "") === String(asset.id || ""));
+  if (unchanged) {
+    return respond(request, env, {
+      ok: true,
+      reordered: false,
+      assets: reordered,
+      record: mapProductionRequest(record),
+      production_request: mapProductionRequest(record),
+    });
+  }
+  const updated = await item4UpdateRequestState(env, recordId, {
+    Studio_Master_Assets_JSON: JSON.stringify(reordered),
+    Studio_Master_Asset_Count: reordered.length,
+    Studio_Master_Asset_Status: reordered.length ? "Ready" : "None",
+    Studio_Output_Plan_Status: "Needs Plan",
+    Studio_Output_Plan_JSON: null,
+    Studio_Variant_Manifest_JSON: null,
+    Studio_Variant_Status: "None",
+    Studio_Variant_Updated_At: null,
+    Studio_Variant_Error: null,
+    Studio_Item4_State: reordered.length ? "Assets Ready" : "Draft",
+  });
+  return respond(request, env, {
+    ok: true,
+    reordered: true,
+    assets: reordered,
+    record: mapProductionRequest(updated),
+    production_request: mapProductionRequest(updated),
+  });
 }
 
 async function deleteItem4MasterAsset(request, env, url, authorization) {
