@@ -13420,9 +13420,7 @@
       return /image\//i.test(type) || /video\//i.test(type) || /\.(jpe?g|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/i.test(name);
     });
     if (!files.length) {
-      setLibraryUploadMessage(libraryPickerIsPhone()
-        ? "Photo Library closed before Studio received a clip. Add one clip at a time and keep this tab open."
-        : "Choose one or more photos or video clips.", "error-text");
+      // Empty change/drop is a cancel or a spurious iOS event — not an error.
       return;
     }
     const oversizedSplit = item4DropOversizedClips(files, { resetNotice: true, autoCompress: false });
@@ -13529,10 +13527,24 @@
     if (hint && phone) {
       hint.textContent = "On iPhone add one clip at a time and keep this tab open. JPG, PNG, WEBP, HEIC, MP4, MOV · 25 MB photos · 100 MB clips";
     }
-    if (libraryPickerWasAbandoned()) {
-      libraryDisarmPicker();
-      setLibraryUploadMessage("Photo Library closed before Studio received the clips. On iPhone add one clip at a time and keep this tab open.", "error-text");
-    }
+    ["libraryBatchName", "libraryLocation"].forEach((id) => {
+      $(id)?.addEventListener("input", () => {
+        libraryDisarmPicker();
+        const node = $("libraryUploadMessage");
+        if (node && /Photo Library closed/i.test(node.textContent || "")) {
+          setLibraryUploadMessage("");
+        }
+      });
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      if (!libraryPickerIsPhone() || !libraryPickerWasAbandoned()) return;
+      window.setTimeout(() => {
+        if (!libraryPickerWasAbandoned()) return;
+        libraryDisarmPicker();
+        setLibraryUploadMessage("Photo Library closed before Studio received the clips. On iPhone add one clip at a time and keep this tab open.", "error-text");
+      }, 400);
+    });
     zone?.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
