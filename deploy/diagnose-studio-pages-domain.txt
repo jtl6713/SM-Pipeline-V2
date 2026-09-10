@@ -2,3 +2,5 @@ Diagnose Studio Pages custom domain vs pages.dev UI build drift and purge studio
 Trigger: 2026-09-10 UI 0.6.282 hard cache bust.
 
 Also covers Streeterville idea 303 empty masters / fill-crop scan flood.
+
+Approve All live purge: 2026-09-10 - Purge studio.chicagoshining.com after 0.6.288 so Approve All is not stuck on Auto-scheduling from cached UI 0.6.286.
