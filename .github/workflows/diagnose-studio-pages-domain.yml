@@ -1,0 +1,60 @@
+name: Diagnose Studio Pages Custom Domain
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/diagnose-studio-pages-domain.txt'
+      - '.github/workflows/diagnose-studio-pages-domain.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-studio-pages-domain
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Inspect Pages domains, Worker routes, and live BUILD_ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS "$API/pages/projects/chicagoshining-studio" -H "$AUTH" -o /tmp/project.json
+          curl -fsS "$API/pages/projects/chicagoshining-studio/deployments?env=production&per_page=5" -H "$AUTH" -o /tmp/deployments.json
+          echo 'PAGES_PROJECT'
+          jq -c '{name:.result.name, production_branch:.result.production_branch, subdomain:.result.subdomain, domains:.result.domains, canonical_deployment:(.result.canonical_deployment.id // null), latest_deployment:(.result.latest_deployment.id // null)}' /tmp/project.json
+          echo 'PAGES_PRODUCTION_DEPLOYMENTS'
+          jq -c '[.result[]? | {id, url, created_on, aliases, is_skipped, deployment_trigger:(.deployment_trigger.metadata.commit_hash // null)}]' /tmp/deployments.json
+          ZONE_ID=$(curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" | jq -r '.result[0].id')
+          echo "ZONE_ID=$ZONE_ID"
+          curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/workers/routes" -H "$AUTH" -o /tmp/routes.json
+          echo 'WORKER_ROUTES'
+          jq -c '[.result[]? | {id, pattern, script}]' /tmp/routes.json
+          curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=studio.chicagoshining.com" -H "$AUTH" -o /tmp/dns.json || true
+          echo 'DNS_STUDIO'
+          jq -c '[.result[]? | {type, name, content, proxied}]' /tmp/dns.json 2>/dev/null || echo 'dns_unavailable'
+          for url in \
+            'https://chicagoshining-studio.pages.dev/' \
+            'https://chicagoshining-studio.pages.dev/assets/app-item4-0620.js' \
+            'https://chicagoshining-studio.pages.dev/assets/app-item4-0619.js'
+          do
+            code=$(curl -sS -o /tmp/body.bin -w '%{http_code}' "$url" || true)
+            build=$(grep -Eo 'item4-0\.6\.[0-9a-z.-]+|UI build 0\.6\.[0-9]+' /tmp/body.bin 2>/dev/null | head -3 | tr '\n' ' ' || true)
+            echo "FETCH $code $url :: $build"
+          done
+          curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" \
+            -H "$AUTH" -H "Content-Type: application/json" \
+            --data '{"hosts":["studio.chicagoshining.com"]}' -o /tmp/purge.json
+          echo 'PURGE'
+          jq -c '{success:(.success // false), errors:(.errors // []), result:(.result // null)}' /tmp/purge.json

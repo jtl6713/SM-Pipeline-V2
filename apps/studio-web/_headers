@@ -4,8 +4,11 @@
 /index.html
   Cache-Control: no-store
 
+# Do not use immutable year-long caching for Studio assets. Filenames are
+# reused across deploys; immutable + same path left operators on stale UI
+# (e.g. footer stuck at 0.6.275) even in a fresh browser.
 /assets/*
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: public, max-age=60, must-revalidate
 
 /docs/*
   Cache-Control: public, max-age=3600

@@ -1,0 +1,2 @@
+Diagnose Studio Pages custom domain vs pages.dev UI build drift and purge studio.chicagoshining.com edge cache.
+Trigger: 2026-09-10 UI 0.6.282 hard cache bust.

@@ -436,3 +436,5 @@ Library video preview Pages deploy: 2026-09-10 - Asset Manager clips open a nati
 Fast master remove Pages deploy: 2026-09-10 - Removing Production master photos updates the strip instantly and deletes in the background (no full workspace reload or confirm). UI 0.6.281-fast-remove-masters.
 
 UI build label Pages deploy: 2026-09-10 - Footer BUILD_ID bumped to 0.6.281 so hard refresh shows the shipped video-preview + fast-remove UI. UI 0.6.281-fast-remove-masters.
+
+Hard cache-bust Pages deploy: 2026-09-10 - Rename app/config/css asset paths and drop immutable year-long /assets cache so studio.chicagoshining.com cannot keep serving UI 0.6.275. UI 0.6.282-hard-cache-bust.

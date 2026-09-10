@@ -1,4 +1,4 @@
-// Keep these helpers aligned with apps/studio-web/assets/app-item4-0619.js
+// Keep these helpers aligned with apps/studio-web/assets/app-item4-0620.js
 // (Asset Manager card date, duration, file size, and published-file labels).
 
 export function formatLibraryClipDuration(seconds) {
