@@ -325,7 +325,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.284-photo-wait-raw-stills",
+          version: "0.10.285-library-search-browse",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5634,13 +5634,21 @@ async function getMediaLibraryStills(request, env, url, authorization) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
   const includeVideo = ["1", "true", "video", "all", "clips"].includes(String(url.searchParams.get("include") || "").trim().toLowerCase());
+  const ideaId = String(url.searchParams.get("idea_id") || "").trim();
   const queryTokens = ideaLibraryTokens(query);
-  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url);
+  let idea = null;
+  if (/^rec[A-Za-z0-9]+$/.test(ideaId)) {
+    try { idea = await loadAuthorizedIdea(env, ideaId, authorization); } catch {}
+  }
+  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
+  // Operator browse/search uses the Asset Manager name FIND (already excludes fill-crop),
+  // not the idea photo-wait subject-token OR which flooded scans with luxury/glamorous hits.
+  const browseFormula = assetLibraryFilterFormula(query, includeVideo ? "" : "photo");
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: IDEA_LIBRARY_SCAN_LIMIT,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(queryTokens.slice(0, 10), { includeVideo }), scopeFormula),
+    filterFormula: combineAirtableFormulas(browseFormula, scopeFormula),
   });
   const items = [];
   for (const record of records) {
@@ -5678,7 +5686,11 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const strongIdeaTokens = ideaLibraryStrongTokens(ideaTokens);
   const { placeKeys, subjectKeys, scanKeys } = ideaLibraryMatchKeys(idea, query);
   const today = chicagoNowParts().date;
-  const filterKeys = (queryTokens.length ? scanKeys : (placeKeys.length ? placeKeys : scanKeys));
+  // When the operator typed a search, filter Airtable on those tokens only.
+  // Otherwise prefer named place keys so title nouns like "luxury" do not flood the scan.
+  const filterKeys = queryTokens.length
+    ? ideaLibraryStrongTokens(queryTokens)
+    : (placeKeys.length ? placeKeys : scanKeys);
   const scanLimit = filterKeys.length ? IDEA_LIBRARY_PLACE_FILTER_LIMIT : IDEA_LIBRARY_SCAN_LIMIT;
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {

@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.283-streeterville-rematch";
+  const BUILD_ID = "item4-0.6.284-library-search";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -8822,24 +8822,34 @@
     return Math.min(20, Math.max(1, cap));
   }
 
-  async function fetchLibraryBrowse(query = "") {
+  async function fetchLibraryBrowse(query = "", ideaId = null) {
     const q = String(query || "").trim();
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     params.set("include", "video");
+    if (ideaId) params.set("idea_id", ideaId);
     const result = await api(`/api/media-assets/library-stills?${params.toString()}`, { timeoutMs: 20000 });
     return Array.isArray(result?.records) ? result.records : [];
   }
 
-  async function fetchIdeaLibrarySuggested(ideaId) {
-    if (!ideaId) return [];
-    const result = await api(`/api/ideas/${encodeURIComponent(ideaId)}/library-suggestions`, { timeoutMs: 20000 });
-    return Array.isArray(result?.suggested) ? result.suggested : [];
+  async function fetchIdeaLibrarySuggested(ideaId, query = "") {
+    if (!ideaId) return { suggested: [], matches: [] };
+    const params = new URLSearchParams();
+    if (String(query || "").trim()) params.set("q", String(query).trim());
+    const qs = params.toString();
+    const result = await api(`/api/ideas/${encodeURIComponent(ideaId)}/library-suggestions${qs ? `?${qs}` : ""}`, { timeoutMs: 20000 });
+    return {
+      suggested: Array.isArray(result?.suggested) ? result.suggested : [],
+      matches: Array.isArray(result?.matches) ? result.matches : [],
+    };
   }
 
-  function mergeLibraryPickerItems(suggested, browse) {
+  function mergeLibraryPickerItems(suggested, matches, browse) {
     const byId = new Map();
     for (const item of suggested || []) byId.set(item.id, { ...item, suggested: true });
+    for (const item of matches || []) {
+      if (!byId.has(item.id)) byId.set(item.id, { ...item, suggested: false });
+    }
     for (const item of browse || []) {
       if (!byId.has(item.id)) byId.set(item.id, { ...item, suggested: false });
     }
@@ -8930,12 +8940,15 @@
     const hint = $("ideaLibraryPickerHint");
     if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library stills…</p>`;
     if (hint) hint.textContent = "Loading suggested stills and the Drive library.";
-    const [suggested, browse] = await Promise.all([
-      fetchIdeaLibrarySuggested(activeIdea.id),
-      fetchLibraryBrowse(query),
+    const q = String(query || "").trim();
+    const [ideaPack, browse] = await Promise.all([
+      fetchIdeaLibrarySuggested(activeIdea.id, q).catch(() => ({ suggested: [], matches: [] })),
+      fetchLibraryBrowse(q, activeIdea.id).catch(() => []),
     ]);
-    ideaLibrarySuggestedIds = new Set(suggested.map((item) => item.id));
-    ideaLibraryPickerItems = mergeLibraryPickerItems(suggested, browse);
+    const suggested = ideaPack.suggested || [];
+    const matches = ideaPack.matches || [];
+    ideaLibrarySuggestedIds = new Set(suggested.map((item) => item.id).filter(Boolean));
+    ideaLibraryPickerItems = mergeLibraryPickerItems(suggested, matches, browse);
     ideaLibrarySelected = seedLibrarySelection(
       ideaLibrarySelected,
       suggested,
@@ -9068,12 +9081,17 @@
     if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading suggested stills and the Drive library…</p>`;
     if (hint) hint.textContent = "Loading suggested stills and the Drive library.";
     const ideaId = activeProductionRequest?.idea_record_id || activeIdea?.id || null;
-    const [suggested, browse] = await Promise.all([
-      fetchIdeaLibrarySuggested(ideaId),
-      fetchLibraryBrowse(query),
+    const q = String(query || "").trim();
+    const [ideaPack, browse] = await Promise.all([
+      ideaId
+        ? fetchIdeaLibrarySuggested(ideaId, q).catch(() => ({ suggested: [], matches: [] }))
+        : Promise.resolve({ suggested: [], matches: [] }),
+      fetchLibraryBrowse(q, ideaId).catch(() => []),
     ]);
-    item4LibrarySuggestedIds = new Set(suggested.map((item) => item.id));
-    item4LibraryItems = mergeLibraryPickerItems(suggested, browse);
+    const suggested = ideaPack.suggested || [];
+    const matches = ideaPack.matches || [];
+    item4LibrarySuggestedIds = new Set(suggested.map((item) => item.id).filter(Boolean));
+    item4LibraryItems = mergeLibraryPickerItems(suggested, matches, browse);
     item4LibrarySelected = seedLibrarySelection(
       item4LibrarySelected,
       suggested,
