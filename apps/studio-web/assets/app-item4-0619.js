@@ -5725,6 +5725,18 @@
       play?.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        const libraryMedia = wrap.closest(".library-card-media[data-library-preview='video']");
+        if (libraryMedia) {
+          const stream = String(libraryMedia.dataset.libraryStream || video?.dataset?.item4Stream || "").trim();
+          if (!stream) return;
+          openLibraryPreview({
+            kind: "video",
+            src: stream,
+            name: String(libraryMedia.dataset.libraryName || ""),
+            poster: String(libraryMedia.dataset.libraryImage || ""),
+          });
+          return;
+        }
         if (!video || !ensureSrc()) return;
         item4PauseOtherClipPlayers(wrap);
         wrap.classList.remove("is-failed");
@@ -13025,6 +13037,7 @@
     if (video) {
       try { video.pause(); } catch {}
       video.removeAttribute("src");
+      video.removeAttribute("poster");
       try { video.load(); } catch {}
     }
     if (image) image.removeAttribute("src");
@@ -13032,7 +13045,7 @@
     if (backdrop) backdrop.hidden = true;
   }
 
-  function openLibraryPreview({ kind, src, name }) {
+  function openLibraryPreview({ kind, src, name, poster = "" }) {
     const backdrop = $("libraryPreviewBackdrop");
     const video = $("libraryPreviewVideo");
     const image = $("libraryPreviewImage");
@@ -13044,7 +13057,14 @@
     dialog.classList.toggle("is-video", kind === "video");
     dialog.classList.toggle("is-image", kind !== "video");
     if (kind === "video" && video && src) {
+      if (poster) video.setAttribute("poster", poster);
+      else video.removeAttribute("poster");
+      video.setAttribute("playsinline", "");
+      video.setAttribute("webkit-playsinline", "");
+      video.controls = true;
       video.src = src;
+      // iPhone Safari needs an explicit user-gesture play; ignore autoplay refusal
+      // so native controls still remain for a second tap.
       video.play().catch(() => {});
     } else if (image && src) {
       image.src = src;
@@ -13054,13 +13074,19 @@
 
   function bindLibraryPreview(target) {
     target.querySelectorAll("[data-library-preview]").forEach((node) => {
-      node.addEventListener("click", () => {
+      node.addEventListener("click", (event) => {
+        if (event.target.closest("a, button, input, textarea, select, label")) return;
         const kind = String(node.dataset.libraryPreview || "image");
         const src = kind === "video"
           ? String(node.dataset.libraryStream || "")
           : String(node.dataset.libraryImage || "");
         if (!src) return;
-        openLibraryPreview({ kind, src, name: String(node.dataset.libraryName || "") });
+        openLibraryPreview({
+          kind,
+          src,
+          name: String(node.dataset.libraryName || ""),
+          poster: String(node.dataset.libraryImage || ""),
+        });
       });
     });
   }
@@ -13245,6 +13271,7 @@
         asset: r,
         preload: false,
       });
+      playAttrs = ` data-library-preview="video" data-library-stream="${escapeHtml(stream)}" data-library-image="${escapeHtml(poster)}" data-library-name="${escapeHtml(r.name || "Published file")}"`;
     } else if (poster) {
       media = `<img src="${escapeHtml(poster)}" alt="" loading="lazy">`;
       playAttrs = ` data-library-preview="image" data-library-image="${escapeHtml(poster)}" data-library-name="${escapeHtml(r.name || "Published file")}"`;
@@ -13283,12 +13310,14 @@
     });
     const added = r.intake_date ? `Added ${formatStudioDate(r.intake_date)}` : "";
     const needsDuration = video && !duration ? "1" : "0";
+    const stream = video ? libraryStreamUrl(r) : "";
+    const localPoster = video ? (item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id)) : "";
+    const poster = localPoster || preview;
     let media = "";
     if (video) {
-      const local = item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id);
       media = item4ClipPlayerHtml({
-        previewUrl: local || preview,
-        streamUrl: libraryStreamUrl(r),
+        previewUrl: poster,
+        streamUrl: stream,
         name: r.name || "Clip",
         durationSeconds: r.duration_seconds,
         asset: r,
@@ -13299,9 +13328,11 @@
     } else {
       media = libraryMissingPreviewHtml("IMAGE");
     }
-    const playAttrs = video
-      ? ""
-      : (preview ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"` : "");
+    const playAttrs = video && stream
+      ? ` data-library-preview="video" data-library-stream="${escapeHtml(stream)}" data-library-image="${escapeHtml(poster)}" data-library-name="${escapeHtml(r.name || "Clip")}"`
+      : (!video && preview
+        ? ` data-library-preview="image" data-library-image="${escapeHtml(preview)}" data-library-name="${escapeHtml(r.name || "Photo")}"`
+        : "");
     const meta = [
       `<span class="library-kind-text">${video ? "Clip" : "Photo"}</span>`,
       added ? `<span>${escapeHtml(added)}</span>` : "",
