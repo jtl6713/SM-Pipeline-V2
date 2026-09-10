@@ -415,3 +415,5 @@ Mobile master reorder Worker deploy: 2026-09-10 - POST /assets/reorder persists 
 Output fanout complete Worker deploy: 2026-09-10 - Resolve Platform Outputs via parent Production Request Outputs links so video packages get all six destinations (not a global 100-row scan). AZ ensure batch 2→6. Worker 0.10.288-output-fanout.
 
 Output fanout version stamp Worker deploy: 2026-09-10 - Health version string 0.10.288-output-fanout (fanout code already on main).
+
+Outputs list newest-first Worker deploy: 2026-09-10 - Sort /api/outputs by Output_ID desc so Pipeline maxRecords=100 includes latest Platform Outputs (Streeterville 424/425). Worker 0.10.289-outputs-newest.
