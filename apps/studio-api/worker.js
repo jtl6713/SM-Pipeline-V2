@@ -3567,12 +3567,53 @@ function mapProductionRequestOutput(record, master = null) {
 }
 
 async function outputRowsForProductionRequest(env, productionRequestId) {
-  const rows = await listRecords(env, PRODUCTION_REQUEST_OUTPUT_TABLE, { limit: 100 });
+  const requestId = String(productionRequestId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(requestId)) return [];
+
+  // Never scan a global page of PRO rows — tables grow past 100 and older
+  // outputs for a request fall out of the window, so fanout skips them and
+  // sync creates duplicates. Resolve via the parent request's linked IDs.
+  let linkedIds = [];
+  try {
+    const parent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    linkedIds = arrayOrEmpty(f(parent, "Production Request Outputs"))
+      .map((id) => String(id || "").trim())
+      .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+  } catch (error) {
+    console.warn("outputRowsForProductionRequest parent lookup failed", requestId, error);
+  }
+
+  const rows = [];
+  if (linkedIds.length) {
+    for (let i = 0; i < linkedIds.length; i += 40) {
+      const slice = linkedIds.slice(i, i + 40);
+      const formula = `OR(${slice.map((id) => `RECORD_ID()='${id}'`).join(",")})`;
+      const page = await listRecords(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
+        limit: slice.length,
+        filterFormula: formula,
+      });
+      rows.push(...page);
+    }
+  } else {
+    // Fallback: page the whole table and filter by parent link (rare empty link).
+    let offset = null;
+    let pages = 0;
+    do {
+      const page = await listRecordsPage(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
+        limit: 100,
+        offset,
+      });
+      for (const row of page.records || []) {
+        const links = Array.isArray(f(row, "Production_Request")) ? f(row, "Production_Request") : [];
+        if (links.includes(requestId)) rows.push(row);
+      }
+      offset = page.offset || null;
+      pages += 1;
+    } while (offset && pages < 50);
+  }
+
   return rows
-    .filter(row => {
-      const links = Array.isArray(f(row, "Production_Request")) ? f(row, "Production_Request") : [];
-      return links.includes(productionRequestId) && Boolean(f(row, "Active"));
-    })
+    .filter((row) => Boolean(f(row, "Active")))
     .sort((a, b) => Number(f(a, "Output_Order") || 0) - Number(f(b, "Output_Order") || 0));
 }
 
@@ -8219,7 +8260,9 @@ async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
   if (!requestRecord?.id) return { skipped: "missing_request" };
   const contentId = studioFirstLinkedId(f(requestRecord, "Promoted_Content_Item"));
   if (!contentId) return { waiting: "content", production_request_id: requestRecord.id };
-  const batchLimit = Math.max(1, Math.min(3, Number(options.limit) || 2));
+  // Video packages need up to 6 destinations (4 mains + IG/FB Stories). A
+  // limit of 2 left mains stranded when the PRO lookup window was incomplete.
+  const batchLimit = Math.max(1, Math.min(10, Number(options.limit) || 6));
 
   let proRows = await outputRowsForProductionRequest(env, requestRecord.id);
   let enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
@@ -8356,7 +8399,7 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
     const linked = enabled.filter((row) => arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))));
     if (!enabled.length || linked.length < enabled.length) {
       try {
-        ensureOutputs = await azEnsurePlatformOutputs(env, record, { limit: 2 });
+        ensureOutputs = await azEnsurePlatformOutputs(env, record, { limit: 6 });
         record = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
       } catch (error) {
         ensureOutputs = { error: error instanceof Error ? error.message : String(error) };
