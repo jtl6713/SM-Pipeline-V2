@@ -329,7 +329,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.289-outputs-newest",
+          version: "0.10.290-approve-all-voiceover",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -10501,9 +10501,9 @@ async function cleanProductionRequestPayload(payload, env) {
     "Carousel image mode"
   );
 
-  const titleMode = normalizeChoice(payload?.title_mode, PR_TEXT_MODES, "AI decides", "Title mode");
-  const captionMode = normalizeChoice(payload?.caption_mode, PR_TEXT_MODES, "AI decides", "Caption mode");
-  const scriptMode = normalizeChoice(payload?.script_mode, PR_TEXT_MODES, "AI decides", "Script mode");
+  let titleMode = normalizeChoice(payload?.title_mode, PR_TEXT_MODES, "AI decides", "Title mode");
+  let captionMode = normalizeChoice(payload?.caption_mode, PR_TEXT_MODES, "AI decides", "Caption mode");
+  let scriptMode = normalizeChoice(payload?.script_mode, PR_TEXT_MODES, "AI decides", "Script mode");
 
   let requestedTitle = String(payload?.requested_title || "").trim();
   let requestedCaption = String(payload?.requested_caption || "").trim();
@@ -10516,6 +10516,12 @@ async function cleanProductionRequestPayload(payload, env) {
   if (requestedScript.length > 25000) throw new HttpError(400, "Requested script must be 25000 characters or fewer");
   if (productionNotes.length > 10000) throw new HttpError(400, "Production notes must be 10000 characters or fewer");
   if (primaryLocation.length > 200) throw new HttpError(400, "Primary location must be 200 characters or fewer");
+
+  // Pasted copy with mode left on "AI decides" is an operator footgun: P1 only
+  // honors forced text when mode is Force exact. Upgrade automatically.
+  if (requestedTitle && titleMode === "AI decides") titleMode = "Force exact";
+  if (requestedCaption && captionMode === "AI decides") captionMode = "Force exact";
+  if (requestedScript && scriptMode === "AI decides") scriptMode = "Force exact";
 
   if (titleMode === "Force exact" && !requestedTitle) throw new HttpError(400, "Enter a title when Title mode is Force exact");
   if (captionMode === "Force exact" && !requestedCaption) throw new HttpError(400, "Enter a caption when Caption mode is Force exact");
@@ -25781,7 +25787,14 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
     sortDirection: "desc",
     filterFormula: studioApproveAllCandidateFormula(profile),
   });
-  const eligible = records.filter((record) => studioOutputReadyForPublishApproval(record));
+  const requestedIds = Array.isArray(payload?.record_ids)
+    ? payload.record_ids.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  const requestedIdSet = requestedIds.length ? new Set(requestedIds) : null;
+  const eligible = records.filter((record) => {
+    if (requestedIdSet && !requestedIdSet.has(record.id)) return false;
+    return studioOutputReadyForPublishApproval(record);
+  });
   const approved = [];
   const failed = [];
   const schedules = payload?.schedules && typeof payload.schedules === "object" ? payload.schedules : {};

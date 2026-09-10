@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.286-mobile-master-reorder";
+  const BUILD_ID = "item4-0.6.287-approve-all-voiceover";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3255,6 +3255,29 @@
     return mode !== "AI decides" || Boolean(text);
   }
 
+
+  function coerceForceExactTextModes(payload) {
+    const next = { ...(payload || {}) };
+    if (String(next.requested_title || "").trim() && (next.title_mode || "AI decides") === "AI decides") {
+      next.title_mode = "Force exact";
+    }
+    if (String(next.requested_caption || "").trim() && (next.caption_mode || "AI decides") === "AI decides") {
+      next.caption_mode = "Force exact";
+    }
+    if (String(next.requested_script || "").trim() && (next.script_mode || "AI decides") === "AI decides") {
+      next.script_mode = "Force exact";
+    }
+    return next;
+  }
+
+  function syncForceExactModeFromText({ modeId, textId } = {}) {
+    const modeEl = modeId ? $(modeId) : null;
+    const textEl = textId ? $(textId) : null;
+    if (!modeEl || !textEl) return;
+    const text = String(textEl.value || "").trim();
+    if (text && modeEl.value === "AI decides") modeEl.value = "Force exact";
+  }
+
   function ezFieldDirty(...ids) {
     return ids.some((id) => ezDirty.has(id));
   }
@@ -3743,7 +3766,7 @@
       }
       payload.production_notes = mergeEzProductionNotes();
     }
-    return payload;
+    return coerceForceExactTextModes(payload);
   }
 
   async function saveEzCaptionsToRequest() {
@@ -4144,7 +4167,7 @@
     if (captionFields.caption_mode === "Force exact" && !String(captionFields.requested_caption || "").trim()) {
       captionFields = { ...captionFields, caption_mode: "AI decides", requested_caption: "" };
     }
-    return {
+    return coerceForceExactTextModes({
       content_type: az
         ? "Vertical Short Video"
         : (planned?.master_content_type || helpers?.ezMasterContentType?.(count) || "Photo Set"),
@@ -4193,7 +4216,7 @@
       selected_music_asset_id: $("ezAudioTrack")?.value || "",
       production_notes: mergeEzProductionNotes(),
       ...selectedRequestVoice(),
-    };
+    });
   }
 
   function renderEzWizardChips(chips) {
@@ -9504,7 +9527,7 @@
       });
       payload.production_notes = $("prProductionNotes").value.trim();
     }
-    return payload;
+    return coerceForceExactTextModes(payload);
   }
 
   async function saveActiveProductionRequest({ quiet = false } = {}) {
@@ -10391,13 +10414,26 @@
     return typeof ezIsFinishedVideo === "function" && ezIsFinishedVideo();
   }
 
-  function pipelineIsAzAutoQueueGroup(records = pipelineOutputs) {
-    const notesBlob = [
-      activeProductionRequest?.production_notes,
-      item4Workspace?.production_notes,
-      ...(records || []).flatMap((record) => [record?.output_notes, record?.production_notes]),
+  function pipelineRecordIsAzAutoQueue(record) {
+    const notes = [
+      record?.output_notes,
+      record?.production_notes,
     ].map((value) => String(value || "")).join("\n");
-    return /origin=az-finished-video/i.test(notesBlob) || /az-auto-queue=1/i.test(notesBlob);
+    return /origin=az-finished-video/i.test(notes)
+      || (/az-auto-queue=1/i.test(notes) && /ez-input=finished-video/i.test(notes));
+  }
+
+  function pipelineIsAzAutoQueueGroup(records = pipelineOutputs) {
+    // Only suppress Approve All when every Ready row is AZ finished-video.
+    // Scanning the whole Pipeline page (or leftover workspace notes) wrongly
+    // renamed the button to "Auto-scheduling…" for Streeterville photo packages.
+    const ready = pipelineApprovableOutputs(records);
+    if (!ready.length) return false;
+    return ready.every((record) => pipelineRecordIsAzAutoQueue(record));
+  }
+
+  function pipelineManualApprovableOutputs(records = pipelineOutputs) {
+    return pipelineApprovableOutputs(records).filter((record) => !pipelineRecordIsAzAutoQueue(record));
   }
 
   function creativeFinishedVideoSeconds(output = activeCreativeOutput) {
@@ -12594,27 +12630,27 @@
   function updatePipelineApproveAllButton() {
     const button = $("pipelineApproveAll");
     if (!button) return;
-    if (pipelineIsAzAutoQueueGroup()) {
-      const ready = pipelineApprovableOutputs();
+    const readyManual = pipelineManualApprovableOutputs();
+    const readyAz = pipelineApprovableOutputs().filter((record) => pipelineRecordIsAzAutoQueue(record));
+    if (!readyManual.length && readyAz.length) {
       button.disabled = true;
       button.dataset.azAuto = "true";
-      button.textContent = ready.length
-        ? `Auto-scheduling (${ready.length})…`
-        : "Auto-scheduling…";
+      button.textContent = `Auto-scheduling (${readyAz.length})…`;
       button.title = "AZ finished-video queues itself after the public cover and caption are ready. You can still open a row to edit times.";
       return;
     }
     button.dataset.azAuto = "";
-    button.title = "";
-    const ready = pipelineApprovableOutputs();
-    const count = ready.length;
+    button.title = readyAz.length
+      ? `${readyAz.length} AZ finished-video output(s) auto-schedule separately. Approve All covers the other Ready rows.`
+      : "";
+    const count = readyManual.length;
     button.disabled = !count || button.dataset.busy === "true";
     button.textContent = count ? `Approve All (${count})` : "Approve All";
   }
 
   async function approveAllPipelineOutputs() {
     const button = $("pipelineApproveAll");
-    const ready = pipelineApprovableOutputs();
+    const ready = pipelineManualApprovableOutputs();
     if (!ready.length) return;
     if (pipelineUseDefaultSchedules()) {
       setPipelineLiveHint("Applying default schedules…");
@@ -12642,7 +12678,11 @@
       setPipelineLiveHint("Approving all ready outputs…");
       const result = await api("/api/outputs/approve-all", {
         method: "POST",
-        body: JSON.stringify({ notes: "Studio Pipeline Approve All", schedules }),
+        body: JSON.stringify({
+          notes: "Studio Pipeline Approve All",
+          schedules,
+          record_ids: ready.map((record) => record.id),
+        }),
         timeoutMs: 120000,
       });
       pipelineScheduleDrafts.clear();
@@ -15270,6 +15310,26 @@
   $("creativeRequestChanges")?.addEventListener("click", () => {
     reviewActiveCreative(creativeWatchOnly() ? "apply_audio_mix" : "changes_requested");
   });
+  
+  ["ezRequestedTitle", "prRequestedTitle"].forEach((id) => {
+    $(id)?.addEventListener("input", () => syncForceExactModeFromText({
+      modeId: id.startsWith("ez") ? "ezTitleMode" : "prTitleMode",
+      textId: id,
+    }));
+  });
+  ["ezRequestedCaption", "prRequestedCaption"].forEach((id) => {
+    $(id)?.addEventListener("input", () => syncForceExactModeFromText({
+      modeId: id.startsWith("ez") ? "ezCaptionMode" : "prCaptionMode",
+      textId: id,
+    }));
+  });
+  ["ezRequestedScript", "prRequestedScript"].forEach((id) => {
+    $(id)?.addEventListener("input", () => syncForceExactModeFromText({
+      modeId: id.startsWith("ez") ? "ezScriptMode" : "prScriptMode",
+      textId: id,
+    }));
+  });
+
   $("pipelineApproveAll")?.addEventListener("click", () => {
     approveAllPipelineOutputs().catch((e) => setPipelineLiveHint(e.message || "Approve All failed"));
   });

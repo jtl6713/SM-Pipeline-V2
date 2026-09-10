@@ -448,3 +448,5 @@ Pages verify URL fallback: 2026-09-10 - Prefer https Pages URLs (fallback to chi
 Library profile name scope Pages deploy: 2026-09-10 - Keep attached masters visible in From library picker; surface empty/error states. UI 0.6.285-library-profile-name.
 
 Mobile master reorder Pages deploy: 2026-09-10 - Tap ↑ ↓ on Production master photos to set carousel order on phone. UI 0.6.286-mobile-master-reorder.
+
+Approve All + forced voiceover Pages deploy: 2026-09-10 - Restore Approve All when AZ finished-video rows are also Ready; auto Force exact when script/title/caption text is pasted with AI decides. UI 0.6.287-approve-all-voiceover.

@@ -417,3 +417,5 @@ Output fanout complete Worker deploy: 2026-09-10 - Resolve Platform Outputs via 
 Output fanout version stamp Worker deploy: 2026-09-10 - Health version string 0.10.288-output-fanout (fanout code already on main).
 
 Outputs list newest-first Worker deploy: 2026-09-10 - Sort /api/outputs by Output_ID desc so Pipeline maxRecords=100 includes latest Platform Outputs (Streeterville 424/425). Worker 0.10.289-outputs-newest.
+
+Approve All record_ids + forced voiceover Worker deploy: 2026-09-10 - Auto Force exact when requested script/title/caption text is present with AI decides; Approve All accepts record_ids so AZ auto-queue rows are not approved with photo packages. Worker 0.10.290-approve-all-voiceover.
