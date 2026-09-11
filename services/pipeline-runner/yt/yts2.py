@@ -16,7 +16,14 @@ from yt.client import (
     processing_failure_reason,
     processing_status,
 )
-from yt.common import preview, response_json, retry_at, valid_record_id
+from yt.common import (
+    is_quota_exceeded,
+    manual_publish_required_fields,
+    preview,
+    response_json,
+    retry_at,
+    valid_record_id,
+)
 from yt.constants import (
     MAKE_YTS2_ID,
     MAKE_YTS2_NAME,
@@ -31,6 +38,7 @@ from yt.constants import (
     STAGE_YT4,
     THUMB_PENDING,
     THUMB_UPLOADED,
+    UPLOAD_UPLOADED,
 )
 from yt.eligibility import yts2_eligibility_reason
 
@@ -275,7 +283,7 @@ def process_request(
                 "YouTube_Processing_Failure_Reason": failure,
             },
         )
-        return {"processed": True, "terminal": True, **result}
+        return {"processed": True, "manual_publish_required": True, **result}
 
     if contains_invalid_grant(body):
         client.update_record(
@@ -289,7 +297,24 @@ def process_request(
                 body=body,
             ),
         )
-        return {"processed": True, "terminal": True, **result}
+        return {"processed": True, "manual_publish_required": True, **result}
+
+    if is_quota_exceeded(status_code, body) or status_code == 403:
+        # Keep the uploaded video id; park until Pacific midnight instead of
+        # burning more quota with short retries.
+        fields = manual_publish_required_fields(
+            error_stage="YTS2_QUOTA",
+            publish_message="YouTube API quota exhausted while polling processing. Manual publish required until the next automatic retry after Pacific midnight.",
+            youtube_message=f"YTS2 poll blocked by quota/HTTP {status_code}: {body}",
+            body=body,
+            youtube_stage=STAGE_YT2,
+            clear_upload_job=False,
+            upload_status=UPLOAD_UPLOADED,
+            package_status=None,
+            extra={"YouTube_Last_Checked_At": now},
+        )
+        client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, fields, typecast=True)
+        return {"processed": True, "manual_publish_required": True, **result}
 
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
@@ -319,19 +344,17 @@ def _auth_failure(
     body: Any,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    fields = {
-        "YouTube_Stage": STAGE_TERMINAL,
-        "Publish_Status": PUBLISH_STATUS_FAILED,
-        "Publish_Locked_At": None,
-        "Publish_Locked_By": "",
-        "Publish_Error_Stage": stage,
-        "Publish_Error_Message": publish_message,
-        "Publish_Next_Retry_At": None,
-        "YouTube_Error_Message": youtube_message,
-        "YouTube_Response_JSON": response_json(body),
-        "Publish_Retry_Eligible": False,
-        "YouTube_Last_Checked_At": now,
-    }
+    fields = manual_publish_required_fields(
+        error_stage=stage,
+        publish_message=publish_message,
+        youtube_message=youtube_message,
+        body=body,
+        youtube_stage=STAGE_YT2,
+        clear_upload_job=False,
+        upload_status=UPLOAD_UPLOADED,
+        package_status=None,
+        extra={"YouTube_Last_Checked_At": now},
+    )
     if extra:
         fields.update(extra)
     return fields
