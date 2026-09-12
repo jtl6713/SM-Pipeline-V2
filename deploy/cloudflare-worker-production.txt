@@ -421,3 +421,7 @@ Outputs list newest-first Worker deploy: 2026-09-10 - Sort /api/outputs by Outpu
 Approve All record_ids + forced voiceover Worker deploy: 2026-09-10 - Auto Force exact when requested script/title/caption text is present with AI decides; Approve All accepts record_ids so AZ auto-queue rows are not approved with photo packages. Worker 0.10.290-approve-all-voiceover.
 
 YouTube Manual Publish Required Worker deploy: 2026-09-12 - Park failed YouTube publishes as Manual Publish Required until Pacific midnight; Studio badge shows Manual Action Required instead of Failed. Worker 0.10.291-yt-manual-publish.
+
+YouTube discovery quota throttle Worker deploy: 2026-09-12 - Cron Chicago creator discovery (search.list ~100 units) at most once/day; stamp after every attempt including errors; cache autonomous YouTube harvest 12h; published insights sweep limit 8→4. Worker 0.10.292-yt-discovery-throttle.
+
+Asset Manager Drive upload error clarity Worker deploy: 2026-09-12 - Surface pipeline-runner unreachable errors for library uploads instead of a blank 500. Worker 0.10.293-library-upload-drive-errors.

@@ -10,7 +10,14 @@ from carousel.timeutil import iso_utc
 from item4.settings import PipelineSettings
 from render.fields import field_str
 from yt.client import YouTubeUploaderClient, load_uploader_settings
-from yt.common import manual_publish_required_fields, preview, response_json, retry_at, valid_record_id
+from yt.common import (
+    is_quota_exceeded,
+    manual_publish_required_fields,
+    preview,
+    response_json,
+    retry_at,
+    valid_record_id,
+)
 from yt.constants import (
     MAKE_YTS1_ID,
     MAKE_YTS1_NAME,
@@ -115,6 +122,21 @@ def process_request(
             body=body,
             youtube_stage=STAGE_YT1,
             clear_upload_job=True,
+            package_status=PACKAGE_READY,
+            extra={"YouTube_Last_Checked_At": now},
+        )
+        client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, fields, typecast=True)
+        return {"processed": True, "manual_publish_required": True, **result}
+
+    if is_quota_exceeded(status_code, body) or status_code == 403:
+        # Uploader may wrap Google 403 as HTTP 500 + "videos.list failed 403".
+        fields = manual_publish_required_fields(
+            error_stage="YTS1_QUOTA",
+            publish_message="YouTube API quota exhausted while polling the upload job. Manual publish required until the next automatic retry after Pacific midnight.",
+            youtube_message=f"YTS1 poll blocked by quota/HTTP {status_code}: {body}",
+            body=body,
+            youtube_stage=STAGE_YT1,
+            clear_upload_job=False,
             package_status=PACKAGE_READY,
             extra={"YouTube_Last_Checked_At": now},
         )

@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.289-approve-all-path-bust";
+  const BUILD_ID = "item4-0.6.291-library-upload-one";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13770,7 +13770,10 @@
     const inputs = libraryFileInputs();
     const location = String($("libraryLocation")?.value || "").trim();
     const batchName = String($("libraryBatchName")?.value || "").trim();
-    const chunkSize = batchName ? 8 : 1;
+    // Always one file per request. A named batch of 6+ photos in one Worker call
+    // times out while each file is pushed to Drive through the pipeline runner.
+    // Sequential calls still allocate Navy Pier 1, 2, … from existing names.
+    const chunkSize = 1;
     if (zone) zone.dataset.busy = "true";
     inputs.forEach((input) => { input.disabled = true; });
     const errors = [];
@@ -13783,7 +13786,7 @@
         const progressLabel = batchName
           ? (files.length === 1
             ? `Adding as next “${batchName}” number…`
-            : `Adding ${completedFiles + 1}–${completedFiles + chunk.length} of ${files.length} as next “${batchName}” numbers…`)
+            : `Adding ${completedFiles + 1} of ${files.length} as next “${batchName}” number…`)
           : (files.length === 1
             ? `Adding ${chunk[0].name}…`
             : `Adding ${completedFiles + 1} of ${files.length}: ${chunk[0].name}…`);
@@ -13817,8 +13820,12 @@
           }
         } catch (error) {
           completedFiles += chunk.length;
-          const label = chunk.length === 1 ? chunk[0].name : `${chunk.length} files`;
-          errors.push(`${label}: ${error.message || "upload failed"}`);
+          const raw = String(error?.message || "upload failed");
+          const hint = /Request failed \(50[023]\)|failed to fetch|networkerror|aborted|timeout/i.test(raw)
+            ? " Drive/pipeline may be slow or unreachable — try again one photo at a time."
+            : "";
+          const label = chunk[0]?.name || "file";
+          errors.push(`${label}: ${raw}${hint}`);
         }
       }
       inputs.forEach((input) => { input.value = ""; });

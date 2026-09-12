@@ -8,7 +8,7 @@ const { URL } = require("url");
 
 const { spawnSync } = require("child_process");
 
-const SERVICE_VERSION = "2026-09-06-shorts-vertical-required";
+const SERVICE_VERSION = "2026-09-12-propagate-videos-list-status";
 const MIN_REFRESH_TOKEN_LENGTH = 40;
 const ENV_PATH = path.join(process.cwd(), ".env");
 
@@ -337,14 +337,29 @@ async function processUpload(jobId, payload) {
   }
 }
 
+class UpstreamHttpError extends Error {
+  constructor(status, message, body) {
+    super(message);
+    this.name = "UpstreamHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function videoStatus(videoId) {
   const token = await accessToken();
   const url = new URL("https://www.googleapis.com/youtube/v3/videos");
   url.searchParams.set("part", "status,processingDetails,snippet");
   url.searchParams.set("id", videoId);
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  const data = await response.json();
-  if (!response.ok) throw new Error(`videos.list failed ${response.status}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new UpstreamHttpError(
+      response.status,
+      `videos.list failed ${response.status}`,
+      data
+    );
+  }
   return data;
 }
 
@@ -635,7 +650,12 @@ async function handler(req, res) {
     return json(res, 404, { error: "Not found" });
   } catch (error) {
     console.error(error);
-    return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    const status = Number(error?.status) >= 400 && Number(error?.status) < 600
+      ? Number(error.status)
+      : 500;
+    const payload = { error: error instanceof Error ? error.message : String(error) };
+    if (error?.body !== undefined) payload.upstream = error.body;
+    return json(res, status, payload);
   }
 }
 

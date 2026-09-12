@@ -20,7 +20,10 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 _QUOTA_RE = re.compile(
     r"quotaExceeded|dailyLimitExceeded|uploadLimitExceeded|rateLimitExceeded|"
     r"userRateLimitExceeded|youtube\.quota|quota.?exceeded|exceeded your.{0,80}?quota|"
-    r"queries per day",
+    r"queries per day|"
+    # YouTube uploader wraps Google 403 as HTTP 500 + "videos.list failed 403".
+    r"videos\.(?:list|insert|update|delete)\s+failed\s+403|"
+    r"\bfailed 403\b",
     re.IGNORECASE,
 )
 
@@ -65,6 +68,7 @@ def error_text(*parts: Any) -> str:
 
 
 def is_quota_exceeded(*parts: Any) -> bool:
+    """True for Google quota reasons and uploader-wrapped videos.* 403 responses."""
     return bool(_QUOTA_RE.search(error_text(*parts)))
 
 

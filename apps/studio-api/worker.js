@@ -329,7 +329,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.290-approve-all-voiceover",
+          version: "0.10.293-library-upload-drive-errors",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1279,7 +1279,7 @@ export default {
         console.warn("production cadence cron failed", error);
       }
       try {
-        await studioSweepPublishedInsights(env, { limit: 8 });
+        await studioSweepPublishedInsights(env, { limit: 4 });
       } catch (error) {
         console.warn("insights sweep cron failed", error);
       }
@@ -1299,8 +1299,8 @@ export default {
         console.warn("insights learned-model recompute failed", error);
       }
       try {
-        // Light discovery on cron so the watchlist grows beyond the seeded handles.
-        await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5 });
+        // search.list is ~100 quota units. At most once per day from cron; Ops can still force discover.
+        await studioDiscoverYoutubeChicagoCreators(env, { theme: "chicago", limit: 5, scheduled: true });
       } catch (error) {
         console.warn("insights youtube discovery cron failed", error);
       }
@@ -13467,6 +13467,11 @@ const STUDIO_SIMILAR_TIMES_SETTING = "SIMILAR_ACCOUNT_TIMES_CACHE";
 const STUDIO_SIMILAR_TIMES_TTL_MS = 24 * 60 * 60 * 1000;
 const STUDIO_SIMILAR_TIMES_MIN_SAMPLE = 8;
 const STUDIO_SIMILAR_ACCOUNT_STATUS_SETTING = "SIMILAR_ACCOUNT_STATUS_CACHE";
+// search.list costs ~100 quota units. Cron discovery must not run every 2 minutes.
+const STUDIO_YOUTUBE_CREATOR_DISCOVERY_LAST_SETTING = "YOUTUBE_CREATOR_DISCOVERY_LAST_RUN";
+const STUDIO_YOUTUBE_DISCOVERY_CRON_TTL_MS = 24 * 60 * 60 * 1000;
+const STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_SETTING = "YOUTUBE_AUTONOMOUS_HARVEST_CACHE";
+const STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_TTL_MS = 12 * 60 * 60 * 1000;
 const STUDIO_INSIGHTS_OBSERVATIONS_TABLE = "tblcDNIZs125iVi2B";
 const STUDIO_INSIGHTS_LEARNED_TABLE = "tblb6LfRv7CemHHN6";
 const STUDIO_INSIGHTS_SEASONS = Object.freeze(["winter", "spring", "summer", "fall"]);
@@ -15039,9 +15044,36 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
   ],
 });
 
+async function studioStampYoutubeCreatorDiscoveryRun(env, ranAt = new Date().toISOString()) {
+  await studioUpsertSetting(
+    env,
+    STUDIO_YOUTUBE_CREATOR_DISCOVERY_LAST_SETTING,
+    ranAt,
+    "Last YouTube search.list creator discovery attempt (cron throttled to once per day)."
+  ).catch((error) => console.warn("youtube discovery last-run stamp failed", error));
+  return ranAt;
+}
+
 async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
   const theme = studioNormalizeSimilarProfile(options.theme || "chicago");
   const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
+  const scheduled = options.scheduled === true;
+  const force = options.force === true;
+  if (scheduled && !force) {
+    const lastRow = await studioSettingsByName(env, STUDIO_YOUTUBE_CREATOR_DISCOVERY_LAST_SETTING).catch(() => null);
+    const lastRaw = String(lastRow?.fields?.Setting_Value || lastRow?.fields?.Value || "").trim();
+    const lastMs = Date.parse(lastRaw);
+    if (Number.isFinite(lastMs) && Date.now() - lastMs < STUDIO_YOUTUBE_DISCOVERY_CRON_TTL_MS) {
+      return {
+        ok: true,
+        status: "throttled",
+        added: [],
+        discovered: [],
+        skipped: true,
+        message: `YouTube discovery skipped (cron throttle). Last run ${new Date(lastMs).toISOString()}; next after ${STUDIO_YOUTUBE_DISCOVERY_CRON_TTL_MS / 3600000}h to protect Data API quota.`,
+      };
+    }
+  }
   const settings = await studioActivePipelineSettings(env, ["YOUTUBE_API_KEY"]).catch(() => ({}));
   const youtubeKey = settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY;
   if (!youtubeKey) {
@@ -15052,12 +15084,15 @@ async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
   const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=${encodeURIComponent(String(limit))}&q=${encodeURIComponent(query)}&key=${encodeURIComponent(youtubeKey)}`;
   const response = await fetch(searchUrl);
   const body = await response.json().catch(() => ({}));
+  // Stamp after every search.list attempt so cron does not retry every 2 minutes on quota/error.
+  const ranAt = await studioStampYoutubeCreatorDiscoveryRun(env);
   if (!response.ok || body?.error) {
     return {
       ok: false,
       status: "error",
       added: [],
       discovered: [],
+      ran_at: ranAt,
       message: studioTruncateInsightError(body?.error || { message: `YouTube discovery HTTP ${response.status}` }),
     };
   }
@@ -15114,6 +15149,7 @@ async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
     query,
     discovered,
     added,
+    ran_at: ranAt,
     message: added.length
       ? `Discovered and added ${added.length} YouTube Chicago creator(s) from “${query}”.`
       : discovered.length
@@ -15131,6 +15167,7 @@ async function postInsightsDiscover(request, env, url, authorization) {
   const result = await studioDiscoverYoutubeChicagoCreators(env, {
     theme,
     limit: payload.limit,
+    force: payload.force !== false,
   });
   return respond(request, env, { ok: result.ok !== false, ...result, profile: theme });
 }
@@ -17135,20 +17172,28 @@ async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) 
   form.set("filename", filename);
   form.set("mime_type", contentType || "");
   form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
-  const response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
-    method: "POST",
-    headers: {
-      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
-    },
-    body: form,
-  });
+  let response;
+  try {
+    response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
+      method: "POST",
+      headers: {
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: form,
+    });
+  } catch (error) {
+    throw new HttpError(
+      503,
+      `Pipeline runner unreachable for Google Drive upload (${error instanceof Error ? error.message : "network error"}). Confirm Pipeline Runner is running on Windows.`
+    );
+  }
   const payload = await response.json().catch(() => ({}));
   const fileId = String(payload?.google_drive_file_id || "").trim();
   const driveUrl = String(payload?.google_drive_url || "").trim();
   if (!response.ok || !fileId || !driveUrl) {
     throw new HttpError(
       response.status >= 400 ? response.status : 502,
-      payload?.error || payload?.message || "Google Drive asset upload failed"
+      payload?.error || payload?.message || `Google Drive asset upload failed (${response.status})`
     );
   }
   return payload;
@@ -29944,7 +29989,23 @@ async function harvestAutonomousNewsHeadlines() {
   return [...new Set(titles)].slice(0, 8).map((title) => ({ source: "news", title }));
 }
 
-async function harvestAutonomousYoutube(env) {
+async function harvestAutonomousYoutube(env, options = {}) {
+  const force = options.force === true;
+  if (!force) {
+    const cacheRow = await studioSettingsByName(env, STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_SETTING).catch(() => null);
+    const raw = String(cacheRow?.fields?.Setting_Value || cacheRow?.fields?.Value || "").trim();
+    if (raw) {
+      try {
+        const cached = JSON.parse(raw);
+        const atMs = Date.parse(String(cached?.at || ""));
+        if (Number.isFinite(atMs) && Date.now() - atMs < STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_TTL_MS && Array.isArray(cached?.items)) {
+          return cached.items;
+        }
+      } catch {
+        /* fall through to live search */
+      }
+    }
+  }
   const settings = await studioActivePipelineSettings(env, ["YOUTUBE_API_KEY"]).catch(() => ({}));
   const youtubeKey = settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY;
   if (!youtubeKey) return [];
@@ -29954,8 +30015,24 @@ async function harvestAutonomousYoutube(env) {
   try {
     const response = await fetch(searchUrl);
     const body = await response.json().catch(() => ({}));
-    if (!response.ok || body?.error) return [];
-    return mapYoutubeSearchItems(body);
+    if (!response.ok || body?.error) {
+      // Cache empty attempt briefly via stamp so a quota burn does not retry every autonomous pick.
+      await studioUpsertSetting(
+        env,
+        STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_SETTING,
+        JSON.stringify({ at: new Date().toISOString(), query, items: [], error: true }),
+        "Cached YouTube autonomous harvest (search.list ~100 units; 12h TTL)."
+      ).catch(() => {});
+      return [];
+    }
+    const items = mapYoutubeSearchItems(body);
+    await studioUpsertSetting(
+      env,
+      STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_SETTING,
+      JSON.stringify({ at: new Date().toISOString(), query, items }),
+      "Cached YouTube autonomous harvest (search.list ~100 units; 12h TTL)."
+    ).catch((error) => console.warn("youtube autonomous harvest cache failed", error));
+    return items;
   } catch (error) {
     console.warn("autonomous youtube harvest failed", error);
     return [];

@@ -454,3 +454,7 @@ Approve All + forced voiceover Pages deploy: 2026-09-10 - Restore Approve All wh
 Approve All live Pages deploy: 2026-09-10 - UI 0.6.288-approve-all-live. Pages verify uses cache-busted JS URL and purges studio.chicagoshining.com before verify.
 
 Approve All path bust Pages deploy: 2026-09-10 - Rename assets to *-0621 and UI 0.6.289-approve-all-path-bust so studio.chicagoshining.com cannot keep Auto-scheduling from cached app-item4-0620.js.
+
+Asset Manager search-in-results Pages deploy: 2026-09-12 - Move catalogue Search/Show/Layout into the Browse assets results panel so Add assets ends after Location. UI 0.6.290-library-search-results.
+
+Asset Manager one-at-a-time library upload Pages deploy: 2026-09-12 - Upload named batches one photo at a time so Drive/pipeline handoffs do not Worker-timeout as a 6-file 500. UI 0.6.291-library-upload-one.
