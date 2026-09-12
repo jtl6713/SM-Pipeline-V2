@@ -2432,6 +2432,12 @@ function normalizedOutputState(record) {
     return "Manual Action Required";
   }
 
+  // Terminal success must win over stale error text left by earlier FBS2/AP0/YT
+  // attempts. Output 372 was Published with a live Facebook Reel URL while
+  // FB_Slideshow_Error_Message still said "FBS2 ... R2 upload runtime failure"
+  // — the Failed branch below used to win and paint a red badge forever.
+  if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
+
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
     const output = text("Output_Status").toLowerCase();
     const render = text("Render_Status").toLowerCase();
@@ -2448,12 +2454,6 @@ function normalizedOutputState(record) {
     if (!outputDead && !publishDead && stillRendering) return "Trying Again";
     return "Failed";
   }
-
-  // Terminal success must win over stale/manual helper flags left behind by
-  // earlier workflow stages. This is especially important for Facebook, where
-  // a record can be fully published while a legacy manual-completion flag is
-  // still populated.
-  if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
 
   if (
     has("Publish_Status", "manual publish required")
@@ -23516,6 +23516,9 @@ async function studioAttachFacebookNativeCover(env, record) {
             }).slice(0, 90000),
             Publish_Error_Stage: "",
             Publish_Error_Message: "",
+            // Stale FBS2 staging errors must not keep painting Failed after a live Reel exists.
+            FB_Slideshow_Error_Message: "",
+            Publish_Asset_Error_Message: "",
             ...(published ? {} : {
               Publish_Status: "Published",
               Published_At: new Date().toISOString(),
