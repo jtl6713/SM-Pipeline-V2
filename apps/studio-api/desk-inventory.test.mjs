@@ -92,6 +92,25 @@ test("render, orphan, crop, autonomous, and health classifiers", () => {
     render_status: "Ready for Render",
     remotion_job_id: "",
   }, now).kind, "render_ready_no_job");
+  // Output 432 / CI 137: narration required, Voiceover_URL blank, R4 loops on waiting_for_voiceover.
+  const waitingVo = classifyRenderRow({
+    id: "recR1b",
+    render_status: "Ready for Render",
+    remotion_job_id: "",
+    voiceover_required: true,
+    voiceover_url: "",
+    output_id: 432,
+  }, now);
+  assert.equal(waitingVo.kind, "render_ready_waiting_voiceover");
+  assert.equal(waitingVo.actor, "worker_heal");
+  assert.equal(waitingVo.fingerprint, "render_ready_waiting_voiceover:recR1b:no_voiceover_url");
+  assert.equal(classifyRenderRow({
+    id: "recR1c",
+    render_status: "Ready for Render",
+    remotion_job_id: "",
+    voiceover_required: true,
+    voiceover_url: "https://drive.google.com/uc?id=vo",
+  }, now).kind, "render_ready_no_job");
   assert.equal(classifyRenderRow({
     id: "recR2",
     render_status: "Rendering",
