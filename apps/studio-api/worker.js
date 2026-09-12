@@ -52,6 +52,11 @@ import {
   youtubePublishAssetKey,
 } from "./youtube-public-mp4.mjs";
 import {
+  YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
+  manualPublishRequiredFields,
+  youtubeManualActionRequired,
+} from "./youtube-manual-publish.mjs";
+import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
@@ -337,7 +342,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.298-library-upload-profile",
+          version: "0.10.299-yt-manual-not-failed",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2420,11 +2425,8 @@ function normalizedOutputState(record) {
 
   // YouTube Manual Publish Required must win over leftover YouTube_Error_Message,
   // otherwise Studio keeps painting a red Failed badge after we park the row.
-  if (
-    has("Publish_Status", "manual publish required")
-    || fields.Manual_Fallback_Required
-    || has("Manual_Completion_Status", "required")
-  ) {
+  // Also catch undeployed YTS2_POLL + quota/403 rows that never set Manual Publish Required.
+  if (youtubeManualActionRequired(fields)) {
     return "Manual Action Required";
   }
 
@@ -25410,6 +25412,46 @@ async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
 }
 
 
+async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
+  const limit = Number(options.limit || 5);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
+    });
+  } catch (error) {
+    console.warn("youtube stale quota-poll park scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const videoId = String(f(row, "YouTube_Video_ID") || "").trim();
+      const stage = String(f(row, "Publish_Error_Stage") || "").trim() || "YTS2_QUOTA";
+      const errorStage = /ytp1/i.test(stage) ? "YTP1" : /yts1/i.test(stage) ? "YTS1_QUOTA" : "YTS2_QUOTA";
+      const fields = manualPublishRequiredFields({
+        errorStage,
+        publishMessage: "YouTube API quota exhausted. Manual publish required until the next automatic retry after Pacific midnight.",
+        youtubeMessage: String(f(row, "YouTube_Error_Message") || f(row, "Publish_Error_Message") || "").trim(),
+        youtubeStage: videoId ? "YT2" : "YT1",
+        uploadStatus: videoId ? "Uploaded" : "Failed",
+      });
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      results.push({ id: row.id, stage: "manual_publish_park", error_stage: errorStage });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("youtube stale quota-poll park failed", row.id, error);
+      results.push({ id: row.id, stage: "manual_publish_park", error: message });
+    }
+  }
+  return results;
+}
+
+
 async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
   const limit = Number(options.limit || 3);
   const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}="Manual Publish Required",{Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))';
@@ -25472,6 +25514,11 @@ async function studioReconcileYoutubePublishes(env, options = {}) {
     results.push(...await studioHealFailedYoutubeSourceDownloads(env, { limit }));
   } catch (error) {
     console.warn("youtube source-download heal failed", error);
+  }
+  try {
+    results.push(...await studioParkStaleYoutubeQuotaPolls(env, { limit }));
+  } catch (error) {
+    console.warn("youtube stale quota-poll park failed", error);
   }
   try {
     results.push(...await studioRearmDueYoutubeManualPublishes(env, { limit }));
