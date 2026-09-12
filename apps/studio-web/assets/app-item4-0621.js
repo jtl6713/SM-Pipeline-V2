@@ -298,11 +298,64 @@
     return document.querySelector(".nav-item.active")?.dataset.page || "home";
   }
 
+
+  const STUDIO_THEME_BACKGROUND = {
+    chicago: "#e8eef6",
+    la: "#f6e8e8",
+    nyc: "#f5f2fa",
+  };
+
+  function normalizeStudioBackgroundColor(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const match = /^#?([0-9a-fA-F]{6})$/.exec(raw);
+    return match ? `#${match[1].toLowerCase()}` : "";
+  }
+
+  function themeDefaultBackground(theme) {
+    return STUDIO_THEME_BACKGROUND[theme] || STUDIO_THEME_BACKGROUND.chicago;
+  }
+
+  function effectiveProfileBackground(profile) {
+    const custom = normalizeStudioBackgroundColor(profile?.background_color);
+    if (custom) return custom;
+    return themeDefaultBackground(profile?.theme || "chicago");
+  }
+
+  function applyStudioBackgroundColor(profile) {
+    const root = document.documentElement;
+    const custom = normalizeStudioBackgroundColor(profile?.background_color);
+    if (custom) {
+      root.style.setProperty("--bg", custom);
+      root.dataset.studioBgCustom = "1";
+    } else {
+      root.style.removeProperty("--bg");
+      delete root.dataset.studioBgCustom;
+    }
+  }
+
+  function syncOperationsProfileContext(profile = studioProfiles.find((item) => item.id === selectedProfileId) || null) {
+    const banner = $("operationsProfileContext");
+    if (banner) {
+      if (profile) {
+        banner.hidden = false;
+        banner.innerHTML = `<strong>Working profile</strong> <span>${escapeHtml(profile.name || profile.city_label || profile.id)}</span> <span class="subtle">Admin tools below use this profile's library, analytics theme, and background.</span>`;
+      } else {
+        banner.hidden = true;
+        banner.textContent = "";
+      }
+    }
+    document.querySelectorAll(".ops-profile-card[data-profile-id]").forEach((card) => {
+      card.classList.toggle("is-working-profile", Boolean(profile && card.dataset.profileId === profile.id));
+    });
+  }
+
   function applyStudioProfile(profile, { reload = false } = {}) {
     if (!profile) return;
     selectedProfileId = profile.id;
     try { localStorage.setItem(PROFILE_STORAGE_KEY, profile.id); } catch {}
     document.documentElement.dataset.studioTheme = profile.theme || "chicago";
+    applyStudioBackgroundColor(profile);
     const city = profile.city_label || "Chicago";
     const cityNode = $("ezPathBrandCity");
     if (cityNode) cityNode.textContent = city;
@@ -315,6 +368,7 @@
       const select = $(id);
       if (select && select.value !== profile.id) select.value = profile.id;
     });
+    syncOperationsProfileContext(profile);
     if (reload) {
       const page = activeNavPage();
       if (page) loadPage(page);
@@ -15244,24 +15298,39 @@
     if (!target) return;
     if (!profiles.length) {
       target.innerHTML = '<div class="empty">No Content Profiles were returned.</div>';
+      syncOperationsProfileContext();
       return;
     }
-    target.innerHTML = profiles.map((profile) => `
-      <article class="ops-profile-card" data-profile-id="${escapeHtml(profile.id)}">
+    const ordered = [...profiles].sort((a, b) => {
+      if (a.id === selectedProfileId) return -1;
+      if (b.id === selectedProfileId) return 1;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+    target.innerHTML = ordered.map((profile) => {
+      const working = profile.id === selectedProfileId;
+      const color = effectiveProfileBackground(profile);
+      const custom = Boolean(normalizeStudioBackgroundColor(profile.background_color));
+      return `
+      <article class="ops-profile-card${working ? " is-working-profile" : ""}" data-profile-id="${escapeHtml(profile.id)}">
         <div>
           <strong>${value(profile.name)}</strong>
-          <div class="subtle">${profile.active ? "Active profile" : "Inactive profile"}</div>
+          <div class="subtle">${working ? "Working profile · " : ""}${profile.active ? "Active profile" : "Inactive profile"}</div>
         </div>
+        <label class="ops-profile-color"><span>Background</span>
+          <input type="color" data-ops-bg-color value="${escapeHtml(color)}" ${canEdit ? "" : "disabled"} aria-label="Background color for ${escapeHtml(profile.name || "profile")}">
+        </label>
+        <button type="button" class="text-button" data-ops-bg-reset ${canEdit ? "" : "disabled"} ${custom ? "" : "hidden"}>Reset</button>
         <label><input type="checkbox" data-ops-idea-toggle ${profile.idea_generation_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Daily ideas</label>
         <label><input type="checkbox" data-ops-autonomous-toggle ${profile.autonomous_produce_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Autonomous produce</label>
         <label>Limit <input type="number" min="1" max="10" step="1" value="${escapeHtml(String(profile.daily_idea_limit || 5))}" data-ops-idea-limit ${canEdit ? "" : "disabled"}></label>
-      </article>
-    `).join("");
+      </article>`;
+    }).join("");
     target.querySelectorAll(".ops-profile-card").forEach((card) => {
-      const save = async () => {
+      const profileId = card.dataset.profileId;
+      const saveCadence = async () => {
         if (!canEdit) return;
         try {
-          await api(`/api/operations/profiles/${encodeURIComponent(card.dataset.profileId)}`, {
+          await api(`/api/operations/profiles/${encodeURIComponent(profileId)}`, {
             method: "PATCH",
             body: JSON.stringify({
               idea_generation_enabled: Boolean(card.querySelector("[data-ops-idea-toggle]")?.checked),
@@ -15274,10 +15343,54 @@
           setOperationsMessage(error.message || "Could not save profile cadence.", "error-text");
         }
       };
-      card.querySelector("[data-ops-idea-toggle]")?.addEventListener("change", save);
-      card.querySelector("[data-ops-autonomous-toggle]")?.addEventListener("change", save);
-      card.querySelector("[data-ops-idea-limit]")?.addEventListener("change", save);
+      const saveBackground = async (backgroundColor) => {
+        if (!canEdit) return;
+        try {
+          const result = await api(`/api/operations/profiles/${encodeURIComponent(profileId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ background_color: backgroundColor }),
+          });
+          const updated = result.profile || {};
+          const idx = studioProfiles.findIndex((item) => item.id === profileId);
+          if (idx >= 0) {
+            studioProfiles[idx] = {
+              ...studioProfiles[idx],
+              background_color: updated.background_color || "",
+              theme: updated.theme || studioProfiles[idx].theme,
+              city_label: updated.city_label || studioProfiles[idx].city_label,
+            };
+          }
+          const opsIdx = (profiles || []).findIndex((item) => item.id === profileId);
+          if (opsIdx >= 0) {
+            profiles[opsIdx] = { ...profiles[opsIdx], ...updated };
+          }
+          if (profileId === selectedProfileId) {
+            const current = studioProfiles.find((item) => item.id === profileId);
+            if (current) applyStudioProfile(current);
+          }
+          const reset = card.querySelector("[data-ops-bg-reset]");
+          if (reset) reset.hidden = !normalizeStudioBackgroundColor(updated.background_color);
+          setOperationsMessage(backgroundColor ? "Profile background color saved." : "Profile background reset to theme default.");
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not save background color.", "error-text");
+        }
+      };
+      card.querySelector("[data-ops-idea-toggle]")?.addEventListener("change", saveCadence);
+      card.querySelector("[data-ops-autonomous-toggle]")?.addEventListener("change", saveCadence);
+      card.querySelector("[data-ops-idea-limit]")?.addEventListener("change", saveCadence);
+      card.querySelector("[data-ops-bg-color]")?.addEventListener("change", (event) => {
+        saveBackground(event.target.value);
+      });
+      card.querySelector("[data-ops-bg-reset]")?.addEventListener("click", () => {
+        const input = card.querySelector("[data-ops-bg-color]");
+        const theme = studioProfiles.find((item) => item.id === profileId)?.theme
+          || profiles.find((item) => item.id === profileId)?.theme
+          || "chicago";
+        if (input) input.value = themeDefaultBackground(theme);
+        saveBackground("");
+      });
     });
+    syncOperationsProfileContext();
   }
 
   function renderOperationsQueue(target, records, kind) {
@@ -15439,6 +15552,19 @@
           ? `Last autonomous run: ${parts.join(" · ")}.`
           : "Autonomous produce has not run yet. Enable a profile toggle, then wait for 8:00 a.m. / 4:00 p.m. Chicago or run now.";
       }
+      (data.profiles || []).forEach((opsProfile) => {
+        const idx = studioProfiles.findIndex((item) => item.id === opsProfile.id);
+        if (idx >= 0) {
+          studioProfiles[idx] = {
+            ...studioProfiles[idx],
+            background_color: opsProfile.background_color || studioProfiles[idx].background_color || "",
+            theme: opsProfile.theme || studioProfiles[idx].theme,
+            city_label: opsProfile.city_label || studioProfiles[idx].city_label,
+          };
+        }
+      });
+      const working = studioProfiles.find((item) => item.id === selectedProfileId);
+      if (working) applyStudioBackgroundColor(working);
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
       const watchlist = data.similar_accounts || [];
       renderOperationsWatchlist(watchlist, Boolean(data.can_edit_profiles));

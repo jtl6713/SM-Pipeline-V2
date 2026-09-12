@@ -3107,6 +3107,20 @@ function studioCityLabel(theme, record) {
   return "Chicago";
 }
 
+
+function normalizeStudioBackgroundColor(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = /^#?([0-9a-fA-F]{6})$/.exec(raw);
+  if (!match) return null;
+  return `#${match[1].toLowerCase()}`;
+}
+
+function studioBackgroundColorForRecord(record) {
+  const normalized = normalizeStudioBackgroundColor(f(record, "Studio_Background_Color"));
+  return normalized || "";
+}
+
 function mapStudioContentProfile(record) {
   const theme = studioThemeForProfile(record);
   return {
@@ -3119,6 +3133,7 @@ function mapStudioContentProfile(record) {
     active: Boolean(f(record, "Active")),
     theme,
     city_label: studioCityLabel(theme, record),
+    background_color: studioBackgroundColorForRecord(record),
   };
 }
 
@@ -29303,10 +29318,14 @@ function mapOperationsOutput(record) {
 
 function mapOperationsProfile(record) {
   const limit = Number(f(record, "Daily_Idea_Limit"));
+  const theme = studioThemeForProfile(record);
   return {
     id: record.id,
     name: String(f(record, "Profile_Name") || ""),
     active: Boolean(f(record, "Active")),
+    theme,
+    city_label: studioCityLabel(theme, record),
+    background_color: studioBackgroundColorForRecord(record),
     idea_generation_enabled: Boolean(f(record, "Idea_Generation_Enabled")),
     autonomous_produce_enabled: Boolean(f(record, "Autonomous_Produce_Enabled")),
     daily_idea_limit: Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : 5,
@@ -30063,11 +30082,21 @@ async function patchStudioOperationsProfile(request, env, url, authorization) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new HttpError(400, "Daily idea limit must be a whole number from 1 to 10");
     fields.Daily_Idea_Limit = limit;
   }
+  if (payload.background_color !== undefined) {
+    if (payload.background_color === null || String(payload.background_color).trim() === "") {
+      fields.Studio_Background_Color = null;
+    } else {
+      const color = normalizeStudioBackgroundColor(payload.background_color);
+      if (color === null) throw new HttpError(400, "Background color must be a 6-digit hex value like #e8eef6");
+      fields.Studio_Background_Color = color;
+    }
+  }
   if (!Object.keys(fields).length) throw new HttpError(400, "No profile settings to update");
   const updated = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, record.id, {
     method: "PATCH",
     body: JSON.stringify({ fields, typecast: true }),
   });
+  env.__contentProfilesPromise = null;
   return respond(request, env, { ok: true, profile: mapOperationsProfile(updated) });
 }
 

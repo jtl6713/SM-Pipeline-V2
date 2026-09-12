@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.299-la-bg">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.300-profile-bg-admin">
 </head>
 <body>
  <header class="topbar">
@@ -1166,10 +1166,11 @@
  <div id="operationsDeskChecks" class="ops-quality-catalog"></div>
  </div>
  <div class="ops-tab-panel" id="operationsIdeasPanel" data-ops-tab-panel="ideas" role="tabpanel" aria-labelledby="operationsTabIdeas" hidden>
- <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, Studio generates a daily batch of ideas around 1:00 a.m. Chicago for that profile only.</p></div>
+ <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, Studio generates a daily batch of ideas around 1:00 a.m. Chicago for that profile only. Background color is per profile — Admin follows the header Profile control.</p></div>
  <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run today now</button>
  </div>
  <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
+ <div class="ops-profile-context" id="operationsProfileContext" hidden></div>
  <div id="operationsProfiles" class="ops-profile-list"></div>
  </div>
  <div class="ops-tab-panel" id="operationsProducePanel" data-ops-tab-panel="produce" role="tabpanel" aria-labelledby="operationsTabProduce" hidden>
@@ -1544,7 +1545,7 @@
  <h3>Control tabs</h3>
  <ul>
  <li><strong>Service desk</strong> — Quality Agent service lane: stuck produce, render, crop, autonomous, and public health, plus the named check list. Desk mode is the kill switch. Worker cron still heals transients every two minutes. Full behavior is on the Quality Agent Help tab.</li>
- <li><strong>Daily ideas</strong> — per-profile overnight batch around 1:00 a.m. Chicago. Toggle a profile on, or use Run today now for enabled profiles only.</li>
+ <li><strong>Daily ideas</strong> — per-profile overnight batch around 1:00 a.m. Chicago. Toggle a profile on, or use Run today now for enabled profiles only. Each profile also has its own Studio background color. Changing the header Profile switches Admin to that profile's context.</li>
  <li><strong>Autonomous produce</strong> — harvests a Chicago trend the library can shoot, produces the standard template, and <em>stops at Ready for Review</em>. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or Run autonomous now. Optional landmark pin applies to the next run. Studio will not pick a new autonomous idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
  <li><strong>Library intake</strong> — Drive ingestion folder scan every 10 minutes. Process intake folder starts the same drain now. Oversized clips compress one at a time, then the next file starts immediately. Cap music leading silence rewrites catalog audio so the intro is no longer than 0.5 seconds.</li>
  <li><strong>Analytics</strong> — posting-time heatmap from similar public accounts (Chicago weekday/hour). Gold marks your upcoming scheduled posts. YouTube timing is live; Instagram timing is paused pending Meta permission; TikTok and Facebook stay reference-only. Run sequentially fetches one handle at a time. Suggested times never auto-apply.</li>
@@ -1812,8 +1813,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.295-library-picker-previews"></script>
+ <script src="/assets/config-0621.js?v=0.6.300-profile-bg-admin"></script>
  <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.297-library-upload-profile"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.300-profile-bg-admin"></script>
 </body>
 </html>

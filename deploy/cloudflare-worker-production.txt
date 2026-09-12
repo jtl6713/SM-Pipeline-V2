@@ -433,3 +433,4 @@ Asset Manager batch numbering ignores file extension Worker deploy: 2026-09-12 -
 Drive ingest waits for profile Worker deploy: 2026-09-12 - A2 no longer auto-pulses A3. POST /api/library/:id/profile assigns Content_Profile then classifies. Worker 0.10.296-ingest-profile.
 
 Library profile stamp + LA hub red Worker deploy: 2026-09-12 - Asset Manager list excludes blank-profile leftovers; uploads refuse a Chicago fallback. Worker 0.10.298-library-upload-profile.
+Profile background Worker deploy: 2026-09-12 — Content Profiles Studio_Background_Color on /api/profiles and /api/operations/profiles PATCH. Worker profile-bg-admin.
