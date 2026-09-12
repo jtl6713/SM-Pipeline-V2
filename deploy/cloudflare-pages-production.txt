@@ -474,3 +474,5 @@ Profile background + Admin context Pages deploy: 2026-09-12 — Per-profile Stud
 Profiles voice + music pool Pages deploy: 2026-09-12 — Operations Profiles tab with default narration voice and autonomous music multi-select. UI 0.6.301-profiles-voice-music.
 
 Production Request voice persist Pages deploy: 2026-09-12 — Continue refetches full PR before hydrate; catalog reload and quiet-save no longer overwrite Admin Hank with Kate. UI 0.6.302-pr-voice-persist.
+
+Asset Manager classify-all Pages deploy: 2026-09-12 — profile dropdown saves on change and refreshes the card in place; Classify all button in the Browse toolbar. UI 0.6.303-library-classify-all.
