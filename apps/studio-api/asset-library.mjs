@@ -314,13 +314,24 @@ export function escapeLibraryAirtableFormulaValue(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+/** Drop a trailing .jpg/.mp4/etc so Drive-style names still match the batch stem. */
+export function stripLibraryAssetExtension(raw) {
+  return String(raw || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.[A-Za-z0-9]{1,8}$/, "")
+    .trim();
+}
+
 /**
  * Parse the sequence number for a catalog name under a batch base.
- * Exact "Space Museum" counts as 1. "Space Museum 16" → 16. Unrelated names → null.
+ * Exact "Space Museum" (or "Space Museum.jpg") counts as 1.
+ * "Space Museum 16" / "Space Museum 16.mp4" → 16. Unrelated names → null.
+ * Extension does not matter — numbering continues from the highest stem.
  */
 export function parseLibraryBatchSequence(assetName, baseName) {
-  const name = String(assetName || "").replace(/\s+/g, " ").trim();
-  const base = String(baseName || "").replace(/\s+/g, " ").trim();
+  const name = stripLibraryAssetExtension(assetName);
+  const base = stripLibraryAssetExtension(baseName);
   if (!name || !base) return null;
   if (name.toLowerCase() === base.toLowerCase()) return 1;
   const match = name.match(new RegExp(`^${escapeRegExp(base)}\\s+(\\d+)$`, "i"));
@@ -340,7 +351,7 @@ export function maxLibraryBatchSequence(existingNames, baseName) {
 
 /** Allocate the next count names after any existing catalog sequence for baseName. */
 export function allocateLibraryBatchNames(baseName, count, existingNames = []) {
-  const base = String(baseName || "").replace(/\s+/g, " ").trim();
+  const base = stripLibraryAssetExtension(baseName);
   const total = Math.max(0, Number(count) || 0);
   if (!base || total < 1) return [];
   let next = maxLibraryBatchSequence(existingNames, base) + 1;
@@ -355,13 +366,16 @@ export function allocateLibraryBatchNames(baseName, count, existingNames = []) {
   return names;
 }
 
-/** Airtable formula: exact base or "base N" Asset Name matches (case-insensitive). */
+/**
+ * Airtable formula: exact base or "base N" Asset Name matches (case-insensitive).
+ * Optional trailing file extension is allowed so older Drive-style names still count.
+ */
 export function libraryBatchNameFilterFormula(baseName) {
-  const base = String(baseName || "").replace(/\s+/g, " ").trim();
+  const base = stripLibraryAssetExtension(baseName);
   if (!base) return null;
-  const escaped = escapeLibraryAirtableFormulaValue(base.toLowerCase());
   const regexEscaped = escapeRegExp(base.toLowerCase()).replace(/"/g, '\\"');
-  return `OR(LOWER({Asset Name}&"")="${escaped}",REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped} [0-9]+$"))`;
+  const ext = "([.][a-z0-9]{1,8})?";
+  return `OR(REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped}${ext}$"),REGEX_MATCH(LOWER({Asset Name}&""),"^${regexEscaped} [0-9]+${ext}$"))`;
 }
 
 export function libraryDriveFilename(stem, extension) {
