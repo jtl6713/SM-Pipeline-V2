@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.300-profile-bg-admin">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.301-profiles-voice-music">
 </head>
 <body>
  <header class="topbar">
@@ -1139,7 +1139,7 @@
  <section class="panel ops-tabbed-panel">
  <nav class="ops-card-tabs" role="tablist" aria-label="Control tools">
  <button type="button" class="ops-card-tab active" role="tab" id="operationsTabDesk" data-ops-tab="desk" aria-controls="operationsDeskPanel" aria-selected="true">Service desk</button>
- <button type="button" class="ops-card-tab" role="tab" id="operationsTabIdeas" data-ops-tab="ideas" aria-controls="operationsIdeasPanel" aria-selected="false" tabindex="-1">Daily ideas</button>
+ <button type="button" class="ops-card-tab" role="tab" id="operationsTabProfiles" data-ops-tab="profiles" aria-controls="operationsProfilesPanel" aria-selected="false" tabindex="-1">Profiles</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabProduce" data-ops-tab="produce" aria-controls="operationsProducePanel" aria-selected="false" tabindex="-1">Autonomous produce</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabIntake" data-ops-tab="intake" aria-controls="operationsIntakePanel" aria-selected="false" tabindex="-1">Library intake</button>
  <button type="button" class="ops-card-tab" role="tab" id="operationsTabAnalytics" data-ops-tab="analytics" aria-controls="operationsAnalyticsPanel" aria-selected="false" tabindex="-1">Analytics</button>
@@ -1165,9 +1165,9 @@
  <h3 class="ops-log-heading">Catalog</h3>
  <div id="operationsDeskChecks" class="ops-quality-catalog"></div>
  </div>
- <div class="ops-tab-panel" id="operationsIdeasPanel" data-ops-tab-panel="ideas" role="tabpanel" aria-labelledby="operationsTabIdeas" hidden>
- <div class="panel-heading"><div><h2>Daily ideas</h2><p>When a profile toggle is on, Studio generates a daily batch of ideas around 1:00 a.m. Chicago for that profile only. Background color is per profile — Admin follows the header Profile control.</p></div>
- <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run today now</button>
+ <div class="ops-tab-panel" id="operationsProfilesPanel" data-ops-tab-panel="profiles" role="tabpanel" aria-labelledby="operationsTabProfiles" hidden>
+ <div class="panel-heading"><div><h2>Profiles</h2><p>Per-profile Studio settings: hub background, daily idea cadence, default narration voice, and the music pool autonomous produce may choose from. Admin follows the header Profile control. Use Run ideas now for enabled daily-idea profiles.</p></div>
+ <button type="button" class="secondary-button" id="operationsRunDailyIdeas">Run ideas now</button>
  </div>
  <p class="subtle" id="operationsIdeaMeta">Loading profiles…</p>
  <div class="ops-profile-context" id="operationsProfileContext" hidden></div>
@@ -1415,7 +1415,7 @@
  </li>
  <li>
  <strong>Confirm in Operations if you need a clock or a manual mark.</strong>
- <span>Ready to schedule lists approved rows that still need a post time. Ready to publish lists due packages. Use <em>mark published</em> only when you posted by hand. Daily ideas, Drive intake, and render repair live on the same page (admin roles).</span>
+ <span>Ready to schedule lists approved rows that still need a post time. Ready to publish lists due packages. Use <em>mark published</em> only when you posted by hand. Profiles, Drive intake, and render repair live on the same page (admin roles).</span>
  <figure class="support-shot">
  <img src="/assets/support/operations.jpg?v=0.6.102" alt="Operations page with daily ideas, intake, and publish queues" width="1440" height="920">
  <figcaption>Operations — schedule a post time, mark a hand-posted URL, or pulse intake and render repair.</figcaption>
@@ -1545,7 +1545,7 @@
  <h3>Control tabs</h3>
  <ul>
  <li><strong>Service desk</strong> — Quality Agent service lane: stuck produce, render, crop, autonomous, and public health, plus the named check list. Desk mode is the kill switch. Worker cron still heals transients every two minutes. Full behavior is on the Quality Agent Help tab.</li>
- <li><strong>Daily ideas</strong> — per-profile overnight batch around 1:00 a.m. Chicago. Toggle a profile on, or use Run today now for enabled profiles only. Each profile also has its own Studio background color. Changing the header Profile switches Admin to that profile's context.</li>
+ <li><strong>Profiles</strong> — per-profile Studio settings: overnight idea batch around 1:00 a.m. Chicago, hub background, default narration voice, and autonomous music pool. Toggle daily ideas on, or use Run ideas now for enabled profiles. Changing the header Profile switches Admin to that profile's context.</li>
  <li><strong>Autonomous produce</strong> — harvests a Chicago trend the library can shoot, produces the standard template, and <em>stops at Ready for Review</em>. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or Run autonomous now. Optional landmark pin applies to the next run. Studio will not pick a new autonomous idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
  <li><strong>Library intake</strong> — Drive ingestion folder scan every 10 minutes. Process intake folder starts the same drain now. Oversized clips compress one at a time, then the next file starts immediately. Cap music leading silence rewrites catalog audio so the intro is no longer than 0.5 seconds.</li>
  <li><strong>Analytics</strong> — posting-time heatmap from similar public accounts (Chicago weekday/hour). Gold marks your upcoming scheduled posts. YouTube timing is live; Instagram timing is paused pending Meta permission; TikTok and Facebook stay reference-only. Run sequentially fetches one handle at a time. Suggested times never auto-apply.</li>
@@ -1599,7 +1599,7 @@
  <h3>Safe Studio tests</h3>
  <ul>
  <li><strong>Autonomous produce</strong> — Operations → Autonomous produce → Run autonomous now. It must stop at Ready for Review. Nothing publishes. Do not harvest a second idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
- <li><strong>Daily ideas</strong> — Run today now only for profiles whose Daily Ideas toggle is on. Candidates land on Ideas; they are not production and not publish.</li>
+ <li><strong>Profiles</strong> — Run ideas now only for profiles whose Daily ideas toggle is on. Candidates land on Ideas; they are not production and not publish. Narration voice and music pool guide autonomous produce when AI picks audio.</li>
  <li><strong>Finished video (AZ)</strong> — Home drop of one MP4. Studio makes the 3D cover, captions, and a 7-day schedule. You can still change or cancel times in Pipeline before they fire. TikTok stays a draft.</li>
  <li><strong>Library intake / compress</strong> — Process intake or Compress all only when files are waiting. Watch the intake stages and the oversized banner instead of assuming it finished.</li>
  <li><strong>Analytics</strong> — Run sequentially or Refresh similar times. This stores public-post observations. It never writes a publish time onto an output.</li>
@@ -1813,8 +1813,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.300-profile-bg-admin"></script>
+ <script src="/assets/config-0621.js?v=0.6.301-profiles-voice-music"></script>
  <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.300-profile-bg-admin"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.301-profiles-voice-music"></script>
 </body>
 </html>

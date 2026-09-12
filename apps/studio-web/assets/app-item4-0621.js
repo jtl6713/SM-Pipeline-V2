@@ -201,7 +201,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.297-library-upload-profile";
+  const BUILD_ID = "item4-0.6.301-profiles-voice-music";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14719,16 +14719,19 @@
     });
   }
 
-  const OPS_CONTROL_TABS = ["desk", "ideas", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
+  const OPS_CONTROL_TABS = ["desk", "profiles", "produce", "intake", "analytics", "schedule", "publish", "oversized", "repair"];
   const OPS_AGENT_TABS = ["guide", "catalog", "activity"];
   let operationsControlTab = "desk";
   let operationsAgentTab = "guide";
+  let operationsVoiceOptions = [];
+  let operationsMusicOptions = [];
 
   function parseOperationsLocation() {
     const raw = location.hash.replace(/^#/, "").trim().toLowerCase();
     if (raw === "agent" || raw === "agent-guide") return { view: "agent", tab: "guide" };
     if (raw === "agent-catalog" || raw === "agent-inventory" || raw === "agent-checks") return { view: "agent", tab: "catalog" };
     if (raw === "agent-activity") return { view: "agent", tab: "activity" };
+    if (raw === "ideas") return { view: "control", tab: "profiles" };
     if (OPS_CONTROL_TABS.includes(raw)) return { view: "control", tab: raw };
     return { view: "control", tab: operationsControlTab || "desk" };
   }
@@ -15293,6 +15296,22 @@
     bindOperationsActivityLogs();
   }
 
+  function mergeOperationsProfileUpdate(profiles, profileId, updated) {
+    const opsIdx = (profiles || []).findIndex((item) => item.id === profileId);
+    if (opsIdx >= 0) profiles[opsIdx] = { ...profiles[opsIdx], ...updated };
+    const idx = studioProfiles.findIndex((item) => item.id === profileId);
+    if (idx >= 0) {
+      studioProfiles[idx] = {
+        ...studioProfiles[idx],
+        background_color: updated.background_color !== undefined
+          ? (updated.background_color || "")
+          : studioProfiles[idx].background_color,
+        theme: updated.theme || studioProfiles[idx].theme,
+        city_label: updated.city_label || studioProfiles[idx].city_label,
+      };
+    }
+  }
+
   function renderOperationsProfiles(profiles, canEdit) {
     const target = $("operationsProfiles");
     if (!target) return;
@@ -15306,23 +15325,70 @@
       if (b.id === selectedProfileId) return 1;
       return String(a.name || "").localeCompare(String(b.name || ""));
     });
+    const musicById = new Map(
+      operationsMusicOptions
+        .map((track) => [String(track.id || "").trim(), track])
+        .filter(([id]) => !!id)
+    );
     target.innerHTML = ordered.map((profile) => {
       const working = profile.id === selectedProfileId;
       const color = effectiveProfileBackground(profile);
       const custom = Boolean(normalizeStudioBackgroundColor(profile.background_color));
+      const selectedVoiceId = String(profile.default_narration_voice_id || "").trim();
+      const selectedMusicIds = Array.isArray(profile.autonomous_music_asset_ids)
+        ? profile.autonomous_music_asset_ids.map((id) => String(id || "").trim()).filter(Boolean)
+        : [];
+      const selectedMusicSet = new Set(selectedMusicIds);
+      const voiceOptions = [
+        `<option value="">Default (Kate)</option>`,
+        ...operationsVoiceOptions.map((voice) => {
+          const voiceId = String(voice.id || "").trim();
+          if (!voiceId) return "";
+          const selected = voiceId === selectedVoiceId ? "selected" : "";
+          return `<option value="${escapeHtml(voiceId)}" data-name="${escapeHtml(voice.name || voiceId)}" ${selected}>${escapeHtml(phase6VoiceLabel(voice))}</option>`;
+        }),
+        selectedVoiceId && !operationsVoiceOptions.some((voice) => String(voice.id || "").trim() === selectedVoiceId)
+          ? `<option value="${escapeHtml(selectedVoiceId)}" data-name="${escapeHtml(profile.default_narration_voice_name || selectedVoiceId)}" selected>${escapeHtml(profile.default_narration_voice_name || selectedVoiceId)} · current</option>`
+          : "",
+      ].join("");
+      const musicTracks = [
+        ...operationsMusicOptions,
+        ...selectedMusicIds
+          .filter((id) => !musicById.has(id))
+          .map((id) => ({ id, display_name: id, name: id })),
+      ];
+      const musicChecklist = musicTracks.length
+        ? musicTracks.map((track) => {
+            const trackId = String(track.id || "").trim();
+            if (!trackId) return "";
+            const checked = selectedMusicSet.has(trackId) ? "checked" : "";
+            return `<label class="ops-music-option"><input type="checkbox" data-ops-music-option value="${escapeHtml(trackId)}" ${checked} ${canEdit ? "" : "disabled"}> <span>${escapeHtml(musicOptionLabel(track))}</span></label>`;
+          }).join("")
+        : `<div class="subtle">No music library tracks available.</div>`;
       return `
       <article class="ops-profile-card${working ? " is-working-profile" : ""}" data-profile-id="${escapeHtml(profile.id)}">
-        <div>
-          <strong>${value(profile.name)}</strong>
-          <div class="subtle">${working ? "Working profile · " : ""}${profile.active ? "Active profile" : "Inactive profile"}</div>
+        <div class="ops-profile-card-top">
+          <div>
+            <strong>${value(profile.name)}</strong>
+            <div class="subtle">${working ? "Working profile · " : ""}${profile.active ? "Active profile" : "Inactive profile"}</div>
+          </div>
+          <label class="ops-profile-color"><span>Background</span>
+            <input type="color" data-ops-bg-color value="${escapeHtml(color)}" ${canEdit ? "" : "disabled"} aria-label="Background color for ${escapeHtml(profile.name || "profile")}">
+          </label>
+          <button type="button" class="text-button" data-ops-bg-reset ${canEdit ? "" : "disabled"} ${custom ? "" : "hidden"}>Reset</button>
+          <label><input type="checkbox" data-ops-idea-toggle ${profile.idea_generation_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Daily ideas</label>
+          <label><input type="checkbox" data-ops-autonomous-toggle ${profile.autonomous_produce_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Autonomous produce</label>
+          <label>Limit <input type="number" min="1" max="10" step="1" value="${escapeHtml(String(profile.daily_idea_limit || 5))}" data-ops-idea-limit ${canEdit ? "" : "disabled"}></label>
         </div>
-        <label class="ops-profile-color"><span>Background</span>
-          <input type="color" data-ops-bg-color value="${escapeHtml(color)}" ${canEdit ? "" : "disabled"} aria-label="Background color for ${escapeHtml(profile.name || "profile")}">
+        <label class="ops-profile-voice-field">
+          <span>Default narration voice</span>
+          <select data-ops-voice ${canEdit ? "" : "disabled"}>${voiceOptions}</select>
         </label>
-        <button type="button" class="text-button" data-ops-bg-reset ${canEdit ? "" : "disabled"} ${custom ? "" : "hidden"}>Reset</button>
-        <label><input type="checkbox" data-ops-idea-toggle ${profile.idea_generation_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Daily ideas</label>
-        <label><input type="checkbox" data-ops-autonomous-toggle ${profile.autonomous_produce_enabled ? "checked" : ""} ${canEdit ? "" : "disabled"}> Autonomous produce</label>
-        <label>Limit <input type="number" min="1" max="10" step="1" value="${escapeHtml(String(profile.daily_idea_limit || 5))}" data-ops-idea-limit ${canEdit ? "" : "disabled"}></label>
+        <div class="ops-profile-music-field">
+          <span>Autonomous music pool</span>
+          <div class="ops-music-checklist" data-ops-music-pool>${musicChecklist}</div>
+          <span class="subtle ops-field-hint">When AI picks background music, it only chooses from this subset. Leave empty to use the system default track.</span>
+        </div>
       </article>`;
     }).join("");
     target.querySelectorAll(".ops-profile-card").forEach((card) => {
@@ -15330,7 +15396,7 @@
       const saveCadence = async () => {
         if (!canEdit) return;
         try {
-          await api(`/api/operations/profiles/${encodeURIComponent(profileId)}`, {
+          const result = await api(`/api/operations/profiles/${encodeURIComponent(profileId)}`, {
             method: "PATCH",
             body: JSON.stringify({
               idea_generation_enabled: Boolean(card.querySelector("[data-ops-idea-toggle]")?.checked),
@@ -15338,6 +15404,7 @@
               daily_idea_limit: Number(card.querySelector("[data-ops-idea-limit]")?.value || 5),
             }),
           });
+          mergeOperationsProfileUpdate(profiles, profileId, result.profile || {});
           setOperationsMessage("Profile cadence saved.");
         } catch (error) {
           setOperationsMessage(error.message || "Could not save profile cadence.", "error-text");
@@ -15351,19 +15418,7 @@
             body: JSON.stringify({ background_color: backgroundColor }),
           });
           const updated = result.profile || {};
-          const idx = studioProfiles.findIndex((item) => item.id === profileId);
-          if (idx >= 0) {
-            studioProfiles[idx] = {
-              ...studioProfiles[idx],
-              background_color: updated.background_color || "",
-              theme: updated.theme || studioProfiles[idx].theme,
-              city_label: updated.city_label || studioProfiles[idx].city_label,
-            };
-          }
-          const opsIdx = (profiles || []).findIndex((item) => item.id === profileId);
-          if (opsIdx >= 0) {
-            profiles[opsIdx] = { ...profiles[opsIdx], ...updated };
-          }
+          mergeOperationsProfileUpdate(profiles, profileId, updated);
           if (profileId === selectedProfileId) {
             const current = studioProfiles.find((item) => item.id === profileId);
             if (current) applyStudioProfile(current);
@@ -15373,6 +15428,43 @@
           setOperationsMessage(backgroundColor ? "Profile background color saved." : "Profile background reset to theme default.");
         } catch (error) {
           setOperationsMessage(error.message || "Could not save background color.", "error-text");
+        }
+      };
+      const saveVoice = async () => {
+        if (!canEdit) return;
+        const select = card.querySelector("[data-ops-voice]");
+        const voiceId = String(select?.value || "").trim();
+        const voiceName = String(select?.selectedOptions?.[0]?.dataset?.name || select?.selectedOptions?.[0]?.textContent || "").trim();
+        try {
+          const result = await api(`/api/operations/profiles/${encodeURIComponent(profileId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              default_narration_voice_id: voiceId,
+              default_narration_voice_name: voiceId ? voiceName : "",
+            }),
+          });
+          mergeOperationsProfileUpdate(profiles, profileId, result.profile || {});
+          setOperationsMessage(voiceId ? "Default narration voice saved." : "Narration voice reset to Kate default.");
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not save narration voice.", "error-text");
+        }
+      };
+      const saveMusicPool = async () => {
+        if (!canEdit) return;
+        const selected = Array.from(card.querySelectorAll("[data-ops-music-option]:checked"))
+          .map((input) => String(input.value || "").trim())
+          .filter(Boolean);
+        try {
+          const result = await api(`/api/operations/profiles/${encodeURIComponent(profileId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ autonomous_music_asset_ids: selected }),
+          });
+          mergeOperationsProfileUpdate(profiles, profileId, result.profile || {});
+          setOperationsMessage(selected.length
+            ? `Autonomous music pool saved (${selected.length}).`
+            : "Autonomous music pool cleared; system default track will be used.");
+        } catch (error) {
+          setOperationsMessage(error.message || "Could not save music pool.", "error-text");
         }
       };
       card.querySelector("[data-ops-idea-toggle]")?.addEventListener("change", saveCadence);
@@ -15388,6 +15480,10 @@
           || "chicago";
         if (input) input.value = themeDefaultBackground(theme);
         saveBackground("");
+      });
+      card.querySelector("[data-ops-voice]")?.addEventListener("change", saveVoice);
+      card.querySelectorAll("[data-ops-music-option]").forEach((input) => {
+        input.addEventListener("change", saveMusicPool);
       });
     });
     syncOperationsProfileContext();
@@ -15524,11 +15620,17 @@
     initOperationsInsightsSeason();
     if (meta) meta.textContent = "Loading operations…";
     try {
-      const [data, desk, activity] = await Promise.all([
+      const [data, desk, activity, voicesResult, musicResult] = await Promise.all([
         api("/api/operations"),
         api("/api/ops/desk/inventory").catch(() => null),
         api("/api/ops/desk/activity").catch(() => null),
+        api("/api/voices", { timeoutMs: 45000 }).catch(() => ({ voices: [] })),
+        api("/api/music?limit=100").catch(() => ({ records: [] })),
       ]);
+      operationsVoiceOptions = phase6NormalizeVoices(voicesResult?.voices || voicesResult?.records || voicesResult?.items || []);
+      operationsMusicOptions = sortClientMusic(
+        (Array.isArray(musicResult?.records) ? musicResult.records : []).filter((record) => !record.do_not_use)
+      );
       operationsTimezone = data.timezone || null;
       renderOperationsDesk(desk, Boolean(data.can_edit_profiles));
       renderLibraryCrossScopeToggle(Boolean(data.library_include_cross_scope), Boolean(data.can_edit_profiles));

@@ -13,6 +13,8 @@ import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
+  pickAutonomousMusicAssetId,
+  resolveAutonomousNarrationVoice,
   autonomousRunIsBusy,
   autonomousSlot,
   autonomousSlotAlreadyClaimed,
@@ -36,6 +38,39 @@ import {
   mapAutonomousOccupiedRequest,
   mergeAutonomousOccupied,
 } from "./autonomous-produce.mjs";
+
+test("music pool picks only from profile subset and falls back", () => {
+  assert.equal(pickAutonomousMusicAssetId([], AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID), AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID);
+  assert.equal(pickAutonomousMusicAssetId(["not-a-rec"], AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID), AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID);
+  const pool = ["recAAAAAAAAAAAAAA", "recBBBBBBBBBBBBBB"];
+  assert.equal(pickAutonomousMusicAssetId(pool, AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID, () => 0), "recAAAAAAAAAAAAAA");
+  assert.equal(pickAutonomousMusicAssetId(pool, AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID, () => 0.99), "recBBBBBBBBBBBBBB");
+  assert.equal(
+    pickAutonomousMusicAssetId(["recAAAAAAAAAAAAAA", "recAAAAAAAAAAAAAA", "bad"], AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID, () => 0.4),
+    "recAAAAAAAAAAAAAA",
+  );
+});
+
+test("narration voice uses profile default then Kate fallback", () => {
+  assert.deepEqual(
+    resolveAutonomousNarrationVoice(
+      { default_narration_voice_id: "voice-1", default_narration_voice_name: "Nova" },
+      { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" },
+    ),
+    { voice_id: "voice-1", voice_name: "Nova" },
+  );
+  assert.deepEqual(
+    resolveAutonomousNarrationVoice(
+      { Default_Narration_Voice_ID: "voice-2" },
+      { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" },
+    ),
+    { voice_id: "voice-2", voice_name: "voice-2" },
+  );
+  assert.deepEqual(
+    resolveAutonomousNarrationVoice({}, { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" }),
+    { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" },
+  );
+});
 
 test("Chicago 8am and 4pm are autonomous windows", () => {
   assert.equal(autonomousInWindow({ hour: 8 }), true);

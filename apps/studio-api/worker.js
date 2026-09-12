@@ -87,6 +87,8 @@ import {
   mapYoutubeSearchItems,
   mergeAutonomousOccupied,
   parseAutonomousLastRun,
+  pickAutonomousMusicAssetId,
+  resolveAutonomousNarrationVoice,
   parseAutonomousPick,
   parseRssItemTitles,
   summarizeObservations,
@@ -342,7 +344,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.299-yt-manual-not-failed",
+          version: "0.10.300-profiles-voice-music",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -29363,6 +29365,13 @@ function mapOperationsOutput(record) {
   };
 }
 
+function linkedRecordIds(value) {
+  return arrayOrEmpty(value)
+    .map((item) => (typeof item === "string" ? item : item?.id))
+    .map((id) => String(id || "").trim())
+    .filter((id) => /^rec[a-zA-Z0-9]{14}$/.test(id));
+}
+
 function mapOperationsProfile(record) {
   const limit = Number(f(record, "Daily_Idea_Limit"));
   const theme = studioThemeForProfile(record);
@@ -29376,6 +29385,9 @@ function mapOperationsProfile(record) {
     idea_generation_enabled: Boolean(f(record, "Idea_Generation_Enabled")),
     autonomous_produce_enabled: Boolean(f(record, "Autonomous_Produce_Enabled")),
     daily_idea_limit: Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : 5,
+    default_narration_voice_id: String(f(record, "Default_Narration_Voice_ID") || "").trim(),
+    default_narration_voice_name: String(f(record, "Default_Narration_Voice_Name") || "").trim(),
+    autonomous_music_asset_ids: linkedRecordIds(f(record, "Autonomous_Music_Pool")),
   };
 }
 
@@ -30138,6 +30150,29 @@ async function patchStudioOperationsProfile(request, env, url, authorization) {
       fields.Studio_Background_Color = color;
     }
   }
+  if (payload.default_narration_voice_id !== undefined || payload.default_narration_voice_name !== undefined) {
+    const voiceId = payload.default_narration_voice_id === undefined
+      ? String(f(record, "Default_Narration_Voice_ID") || "").trim()
+      : String(payload.default_narration_voice_id || "").trim().slice(0, 120);
+    const voiceName = payload.default_narration_voice_name === undefined
+      ? String(f(record, "Default_Narration_Voice_Name") || "").trim()
+      : String(payload.default_narration_voice_name || "").trim().slice(0, 120);
+    fields.Default_Narration_Voice_ID = voiceId || null;
+    fields.Default_Narration_Voice_Name = voiceId ? (voiceName || voiceId) : null;
+  }
+  if (payload.autonomous_music_asset_ids !== undefined) {
+    if (payload.autonomous_music_asset_ids === null) {
+      fields.Autonomous_Music_Pool = [];
+    } else if (!Array.isArray(payload.autonomous_music_asset_ids)) {
+      throw new HttpError(400, "autonomous_music_asset_ids must be an array of Media Asset record ids");
+    } else {
+      const ids = linkedRecordIds(payload.autonomous_music_asset_ids);
+      if (ids.length !== payload.autonomous_music_asset_ids.filter((value) => String(value || "").trim()).length) {
+        throw new HttpError(400, "autonomous_music_asset_ids must contain only Airtable record ids");
+      }
+      fields.Autonomous_Music_Pool = ids;
+    }
+  }
   if (!Object.keys(fields).length) throw new HttpError(400, "No profile settings to update");
   const updated = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, record.id, {
     method: "PATCH",
@@ -30840,6 +30875,15 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
   const idea = await createAutonomousIdea(env, profile, pick);
   const defaults = productionRequestDefaultsFromIdea(idea);
+  const profileSettings = mapOperationsProfile(profile);
+  const narration = resolveAutonomousNarrationVoice(profileSettings, {
+    voice_id: PHASE6_DEFAULT_VOICE_ID,
+    voice_name: "Kate",
+  });
+  const musicAssetId = pickAutonomousMusicAssetId(
+    profileSettings.autonomous_music_asset_ids,
+    AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
+  );
   const input = await cleanProductionRequestPayload({
     ...defaults,
     content_type: pick.content_type,
@@ -30851,9 +30895,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     voiceover_duration_seconds: autonomousDefaultVoiceoverSeconds(AUTONOMOUS_DEFAULT_VIDEO_SECONDS),
     voiceover_tail_seconds: AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
     music_start_seconds: 0,
-    selected_music_asset_id: AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
-    voice_id: PHASE6_DEFAULT_VOICE_ID,
-    voice_name: "Kate",
+    selected_music_asset_id: musicAssetId,
+    voice_id: narration.voice_id || PHASE6_DEFAULT_VOICE_ID,
+    voice_name: narration.voice_name || "Kate",
     carousel_image_mode: "Manual Upload",
     production_notes: `origin=autonomous cited_trend=${pick.cited_trend || ""}`.slice(0, 3000),
     primary_location: pick.primary_location || defaults.primary_location,

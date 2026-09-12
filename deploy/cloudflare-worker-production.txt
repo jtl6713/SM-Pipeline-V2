@@ -433,9 +433,9 @@ Asset Manager batch numbering ignores file extension Worker deploy: 2026-09-12 -
 Drive ingest waits for profile Worker deploy: 2026-09-12 - A2 no longer auto-pulses A3. POST /api/library/:id/profile assigns Content_Profile then classifies. Worker 0.10.296-ingest-profile.
 
 Library profile stamp + LA hub red Worker deploy: 2026-09-12 - Asset Manager list excludes blank-profile leftovers; uploads refuse a Chicago fallback. Worker 0.10.298-library-upload-profile.
-<<<<<<< HEAD
+
 Profile background Worker deploy: 2026-09-12 — Content Profiles Studio_Background_Color on /api/profiles and /api/operations/profiles PATCH. Worker profile-bg-admin.
-=======
 
 YouTube Manual Action not Failed Worker deploy: 2026-09-12 - Treat YTS2_POLL + quota/wrapped 403 as Manual Action Required even when Windows runner left Publish_Status=Publishing; cron parks those rows. Worker 0.10.299-yt-manual-not-failed.
->>>>>>> fe5d41b (Park stale YouTube quota polls as Manual Action Required, not Failed.)
+
+Profiles voice + music pool Worker deploy: 2026-09-12 — Content Profiles default narration voice and Autonomous_Music_Pool; autonomous produce picks only from the pool when set. Worker 0.10.300-profiles-voice-music.

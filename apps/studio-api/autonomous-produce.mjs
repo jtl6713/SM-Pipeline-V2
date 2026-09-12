@@ -38,6 +38,31 @@ export const AUTONOMOUS_DEFAULT_VIDEO_SECONDS = 30;
 export const AUTONOMOUS_DEFAULT_VOICEOVER_FRACTION = 0.5;
 export const AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS = 2;
 
+function normalizeAirtableRecordId(value) {
+  const id = String(value || "").trim();
+  return /^rec[a-zA-Z0-9]{14}$/.test(id) ? id : "";
+}
+
+/** Prefer a random track from the profile music pool; otherwise the global autonomous default. */
+export function pickAutonomousMusicAssetId(poolIds, fallbackId = AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID, random = Math.random) {
+  const pool = [...new Set((Array.isArray(poolIds) ? poolIds : [])
+    .map(normalizeAirtableRecordId)
+    .filter(Boolean))];
+  if (!pool.length) return normalizeAirtableRecordId(fallbackId) || AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID;
+  const index = Math.floor(Number(random()) * pool.length) % pool.length;
+  return pool[Math.max(0, index)];
+}
+
+/** Profile default narration voice, with Kate/global fallback. */
+export function resolveAutonomousNarrationVoice(profile, defaults = {}) {
+  const fallbackId = String(defaults.voice_id || "").trim();
+  const fallbackName = String(defaults.voice_name || "").trim() || "Kate";
+  const voiceId = String(profile?.default_narration_voice_id || profile?.Default_Narration_Voice_ID || "").trim();
+  const voiceName = String(profile?.default_narration_voice_name || profile?.Default_Narration_Voice_Name || "").trim();
+  if (voiceId) return { voice_id: voiceId, voice_name: voiceName || voiceId };
+  return { voice_id: fallbackId, voice_name: fallbackName };
+}
+
 export function autonomousSlot(chicago) {
   const date = String(chicago?.date || "").trim();
   const hour = Number(chicago?.hour);
