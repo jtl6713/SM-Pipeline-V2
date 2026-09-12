@@ -17,6 +17,9 @@ def test_is_quota_exceeded_detects_google_reasons():
     assert is_quota_exceeded(403, {"error": {"errors": [{"reason": "quotaExceeded"}]}})
     assert is_quota_exceeded("The request cannot be completed because you have exceeded your <a href=\"/youtube/v3/getting-started#quota\">quota</a>.")
     assert is_quota_exceeded("The request cannot be completed because you have exceeded your quota.")
+    # Uploader often returns HTTP 500 with the Google status embedded in the message.
+    assert is_quota_exceeded(500, {"error": "videos.list failed 403"})
+    assert is_quota_exceeded("YTS2 poll failed. HTTP 500: {'error': 'videos.list failed 403'}")
     assert not is_quota_exceeded(500, {"error": "backendError"})
 
 
