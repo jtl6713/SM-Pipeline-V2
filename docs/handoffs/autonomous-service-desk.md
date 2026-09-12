@@ -83,15 +83,19 @@ Do not treat Ready for Review autonomous as a finding **when Open review is actu
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Invoke-DeskCompanion.ps1"
 ```
 
-`-RestartDown` requires mode `infra` or higher. `-DeployDown` additionally PLAN/DEPLOY the matching service from `main` when public `/health` is still down after VERIFY. Dirty checkout blocks DEPLOY and git reset, not START/VERIFY. Never `reset --hard`.
+`-RestartDown` requires mode `infra` or higher. `-DeployDown` additionally PLAN/DEPLOY one matching service from `main` when the checkout is clean and a live stamp is behind `origin/main`. Dirty checkout: log and skip deploy. Never `reset --hard`.
 
-Hourly keep-alive on this Windows machine (Task Scheduler task `ChicagoShining Desk Companion Hourly`, user `Joe`, interactive logon):
+Hourly keep-alive on this Windows machine (Task Scheduler task `ChicagoShining Desk Companion Hourly`, interactive logon):
+
+```bat
+deploy\local-services\HOURLY-Local-Services.bat
+```
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\deploy\local-services\Register-DeskCompanionHourly.ps1"
 ```
 
-Each tick: public `/health`; if a required probe is down, start **that** service hidden (`Start-ChicagoShiningHidden.ps1`, no extra consoles). If a live `.smv2-deployment.json` SHA is strictly behind `origin/main`, PLAN+DEPLOY **one** service from `main` (`-Yes`) so a merged enhancement restarts that listener. DEPLOY also starts hidden. Dirty checkout still allows START and that DEPLOY (isolated worktree). Never `reset --hard`. Cap: 1 service per tick, 2 per service per day. Logs: `Deployment Logs\Local Services\desk-companion-hourly-YYYYMMDD.log`. Unregister with `-Unregister`. The PC must stay on and logged in (locked is OK). Cursor Automations cannot restart these Windows listeners.
+The hourly bat has **no** `pause` (Task Scheduler would hang). It does **not** STOP ALL + START ALL. Each tick: public `/health`; if a required probe is down, call the stock `start-chicagoshining-local-services.bat` then `verify-chicagoshining-local-services.bat`, then `Invoke-DeskCompanion.ps1 -RestartDown`. If `origin/main` moved and the checkout is clean, fast-forward pull (do not schedule `SYNC-Git-Main.bat`; it pauses) then PLAN+DEPLOY **one** changed service (`-DeployDown`) when mode is `infra+`. Dirty checkout: log and skip deploy. Never `reset --hard`. Cap: 1 service per tick, 2 per service per day. Logs: `Deployment Logs\Local Services\hourly-companion-YYYYMMDD.log`. Unregister with `-Unregister`. The PC must stay on and logged in (locked is OK). Cursor Automations cannot restart these Windows listeners.
 
 Caps file: `D:\Content Creation\ChicagoShining Pipeline\Deployment Logs\Local Services\desk-caps.json`.
 
