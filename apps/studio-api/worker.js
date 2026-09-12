@@ -199,6 +199,7 @@ export default {
       const isAssetLibraryRenameWrite = isAssetLibraryRecordRoute && request.method === "PATCH";
       const isAssetLibraryProfileRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/profile$/.test(url.pathname);
       const isAssetLibraryProfileWrite = isAssetLibraryProfileRoute && request.method === "POST";
+      const isAssetLibraryClassifyAllWrite = url.pathname === "/api/library/classify-all" && request.method === "POST";
       const isAssetLibraryDurationRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/duration$/.test(url.pathname);
       const isAssetLibraryDurationWrite = isAssetLibraryDurationRoute && request.method === "POST";
       const isPublishedLibraryReleaseRoute = /^\/api\/library\/published\/rec[A-Za-z0-9]+\/release-file$/.test(url.pathname);
@@ -281,6 +282,7 @@ export default {
         isAssetLibraryDeleteWrite ||
         isAssetLibraryRenameWrite ||
         isAssetLibraryProfileWrite ||
+        isAssetLibraryClassifyAllWrite ||
         isAssetLibraryDurationWrite ||
         isPublishedLibraryReleaseWrite ||
         isItem4AssetDeleteWrite ||
@@ -344,7 +346,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.301-pr-voice-persist",
+          version: "0.10.302-library-classify-all",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1135,6 +1137,11 @@ export default {
       if (isAssetLibraryProfileWrite) {
         assertWriteRequest(request, env);
         return assignLibraryAssetProfile(request, env, url, authorization, ctx);
+      }
+
+      if (isAssetLibraryClassifyAllWrite) {
+        assertWriteRequest(request, env);
+        return classifyAllLibraryAssets(request, env, url, authorization, ctx);
       }
 
       if (isPublishedLibraryReleaseWrite) {
@@ -17674,6 +17681,8 @@ async function assignLibraryAssetProfile(request, env, url, authorization, ctx) 
   try { payload = await request.json(); } catch { payload = {}; }
   const profileId = String(payload?.content_profile_id || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(profileId)) throw new HttpError(400, "Choose a Content Profile");
+  // classify=false saves the profile only (dropdown change). "Classify all" runs A3 later.
+  const shouldClassify = payload?.classify !== false;
   const profile = await resolveWorkingContentProfile(env, authorization, profileId);
   const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
   assertLibrarySourceAsset(record);
@@ -17687,24 +17696,80 @@ async function assignLibraryAssetProfile(request, env, url, authorization, ctx) 
       typecast: true,
     }),
   });
-  const classify = (async () => {
-    try {
-      await pulseLibraryAssetClassification(env, recordId);
-    } catch (error) {
-      console.warn("library profile classify failed", error?.message || String(error));
-    }
-  })();
-  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(classify);
-  else await classify.catch(() => {});
+  if (shouldClassify) {
+    const classify = (async () => {
+      try {
+        await pulseLibraryAssetClassification(env, recordId);
+      } catch (error) {
+        console.warn("library profile classify failed", error?.message || String(error));
+      }
+    })();
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(classify);
+    else await classify.catch(() => {});
+  }
   const profilesById = await libraryAssetProfilesById(env);
   const profileName = String(f(profile, "Profile_Name") || "").trim();
   return respond(request, env, {
     ok: true,
-    classifying: true,
+    classifying: shouldClassify,
     id: recordId,
     content_profile_id: profile.id,
     record: mapLibraryAsset(updated || record, profilesById),
-    message: `Assigned ${profileName || "profile"}. Classifying in the background — refresh to see updated tags.`,
+    message: shouldClassify
+      ? `Assigned ${profileName || "profile"}. Classifying in the background — refresh to see updated tags.`
+      : `Saved ${profileName || "profile"}. Use Classify all when you are done assigning profiles.`,
+  });
+}
+
+const LIBRARY_CLASSIFY_ALL_LIMIT = 200;
+const LIBRARY_CLASSIFY_PENDING_FORMULA = `AND(${ASSET_LIBRARY_LIST_FORMULA},{Content_Profile}!=BLANK(),OR({Classification_Status}='Needs Classification',{Classification_Status}='Classification Error'))`;
+
+// Studio "Classify all": every photo/clip that already has a Content Profile and is still
+// Needs Classification / Classification Error goes to A3 in one background run.
+async function classifyAllLibraryAssets(request, env, url, authorization, ctx) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const rows = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+    limit: LIBRARY_CLASSIFY_ALL_LIMIT,
+    sortField: "Intake_Date",
+    sortDirection: "asc",
+    filterFormula: LIBRARY_CLASSIFY_PENDING_FORMULA,
+    fields: ["Asset Name", "Classification_Status", "Content_Profile"],
+  });
+  const recordIds = (rows || []).map((row) => row.id).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+  if (!recordIds.length) {
+    return respond(request, env, {
+      ok: true,
+      classifying: false,
+      count: 0,
+      message: "Nothing is waiting for classification. Assign a profile to an asset first.",
+    });
+  }
+  const { response, payload } = await item4PulsePipelineStage(env, "a3", {
+    extra: {
+      record_ids: recordIds,
+      trigger_a4: false,
+      wait_for_next: false,
+      drain: false,
+      background: true,
+    },
+  }, "A3");
+  if (!response.ok || payload?.status === "error") {
+    throw new HttpError(
+      response.ok ? 502 : response.status,
+      payload?.message || payload?.error || `A3 classify-all failed (${response.status})`,
+    );
+  }
+  const alreadyRunning = Boolean(payload?.details?.already_running);
+  const truncated = recordIds.length >= LIBRARY_CLASSIFY_ALL_LIMIT;
+  return respond(request, env, {
+    ok: true,
+    classifying: !alreadyRunning,
+    already_running: alreadyRunning,
+    count: recordIds.length,
+    truncated,
+    message: alreadyRunning
+      ? `A3 is already classifying in the background. ${recordIds.length} assets are still waiting — refresh in a few minutes.`
+      : `Classifying ${recordIds.length} assets in the background${truncated ? " (first batch)" : ""}. Refresh to see updated tags.`,
   });
 }
 
