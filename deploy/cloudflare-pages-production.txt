@@ -463,3 +463,5 @@ Asset Manager sort + date-added filter Pages deploy: 2026-09-12 - Sort and Added
 Quality Agent Pages deploy: 2026-09-12 - Operations Help and Word guide for the shared check catalog, plus hourly HOURLY-Local-Services.bat. UI 0.6.292-quality-agent.
 
 Pipeline column filters Pages deploy: 2026-09-12 - Platform pipeline filters by output, platform, type/ratio, studio state, render, review, publish, progress, and creative. UI 0.6.294-pipeline-col-filters.
+
+Asset Manager library picker preview fallback Pages deploy: 2026-09-12 - Fall back to Drive JPEG thumbs when API previews fail or load 0×0 (HEIC-behind-.jpeg). UI 0.6.295-library-picker-previews.

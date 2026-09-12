@@ -201,7 +201,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.294-pipeline-col-filters";
+  const BUILD_ID = "item4-0.6.295-library-picker-previews";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -5511,21 +5511,22 @@
     if (candidateIndex >= chain.length) candidateIndex = 0;
     img.dataset.previewFailureKey = key;
     img.dataset.previewCandidate = String(candidateIndex);
+    const applySrc = (url) => {
+      if (/drive\.google\.com/i.test(url)) img.referrerPolicy = "no-referrer";
+      img.src = url;
+    };
     if (String(img.getAttribute("src") || "") !== chain[candidateIndex]) {
-      img.src = chain[candidateIndex];
+      applySrc(chain[candidateIndex]);
     }
 
-    img.addEventListener("load", () => {
-      item4PreviewFailures.delete(key);
-    }, { once: true });
-
-    img.addEventListener("error", () => {
+    const previewImageLooksReady = (node) => Boolean(node && Number(node.naturalWidth) > 0);
+    const failPreview = () => {
       if (!img.isConnected) return;
       const nextIndex = candidateIndex + 1;
       if (nextIndex < chain.length) {
         candidateIndex = nextIndex;
         img.dataset.previewCandidate = String(candidateIndex);
-        img.src = item4CacheBustedPreviewUrl(chain[candidateIndex], candidateIndex);
+        applySrc(item4CacheBustedPreviewUrl(chain[candidateIndex], candidateIndex));
         return;
       }
 
@@ -5538,7 +5539,7 @@
         img.dataset.previewCandidate = "0";
         window.setTimeout(() => {
           if (!img.isConnected) return;
-          img.src = item4CacheBustedPreviewUrl(chain[0], decision.attempt);
+          applySrc(item4CacheBustedPreviewUrl(chain[0], decision.attempt));
         }, decision.wait_ms);
         return;
       }
@@ -5546,7 +5547,25 @@
       item4PreviewFailures.set(key, recorded);
       const host = img.closest(".item4-thumb, .item4-variant-image-wrap");
       if (host && typeof placeholder === "function") host.innerHTML = placeholder();
-    }, { once: false });
+      else {
+        img.classList.add("preview-failed");
+        img.alt = img.alt || "Preview unavailable";
+      }
+    };
+
+    img.addEventListener("load", () => {
+      if (!previewImageLooksReady(img)) {
+        failPreview();
+        return;
+      }
+      item4PreviewFailures.delete(key);
+    });
+
+    img.addEventListener("error", failPreview);
+    if (img.complete) {
+      if (previewImageLooksReady(img)) item4PreviewFailures.delete(key);
+      else failPreview();
+    }
   }
 
   function item4AssetPreviewUrl(asset) {
@@ -8910,12 +8929,37 @@
     if (continueButton) continueButton.disabled = true;
   }
 
-  function ideaLibraryPreviewUrl(item) {
-    const path = String(item?.preview_path || "").trim();
+  function libraryPickerApiPreviewUrl(item) {
+    const path = String(item?.preview_path || item?.preview_url || "").trim();
     if (path.startsWith("http")) return path;
     if (path) return `${apiBase}${path}`;
     const id = String(item?.id || "").trim();
     return id ? `${apiBase}/api/media-assets/${encodeURIComponent(id)}/preview` : "";
+  }
+
+  function libraryPickerPreviewCandidates(item) {
+    const apiPreview = libraryPickerApiPreviewUrl(item);
+    const thumb = item4DriveThumbnailUrl(item?.google_drive_file_id);
+    return [...new Set([apiPreview, thumb].filter(Boolean))];
+  }
+
+  function ideaLibraryPreviewUrl(item) {
+    return libraryPickerPreviewCandidates(item)[0] || "";
+  }
+
+  function bindLibraryPickerPreviews(root, items) {
+    if (!root) return;
+    const byId = new Map((items || []).map((item) => [String(item?.id || ""), item]));
+    root.querySelectorAll(".idea-library-card img, .library-card[data-library-record-type='media_asset'] .library-card-media > img").forEach((img) => {
+      if (img.closest(".item4-clip-poster-wrap")) return;
+      const card = img.closest(".idea-library-card, .library-card");
+      const id = card?.getAttribute("data-library-id") || card?.getAttribute("data-item4-library-id") || "";
+      const item = byId.get(id) || { id, preview_path: img.getAttribute("src"), google_drive_file_id: img.dataset.driveId };
+      item4BindPreviewImage(img, {
+        candidates: libraryPickerPreviewCandidates(item),
+        failureKey: `library-picker:${id || img.getAttribute("src") || "unknown"}`,
+      });
+    });
   }
 
   function libraryPickerMaxCount() {
@@ -8992,7 +9036,7 @@
           asset: item,
           preload: false,
         }) || (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`))
-        : (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`);
+        : (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy"${item.google_drive_file_id ? ` data-drive-id="${escapeHtml(item.google_drive_file_id)}"` : ""}>` : `<img alt="">`);
       return `<div class="idea-library-card" role="button" tabindex="0" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
         <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
         ${media}
@@ -9035,6 +9079,7 @@
     }
     syncIdeaLibraryContinue();
     item4BindClipPlayers(grid);
+    bindLibraryPickerPreviews(grid, ideaLibraryPickerItems);
   }
 
   async function loadIdeaLibrarySuggestions(query = "") {
@@ -9201,6 +9246,7 @@
     }
     syncItem4LibraryAdd();
     item4BindClipPlayers(grid);
+    bindLibraryPickerPreviews(grid, item4LibraryItems);
   }
 
   async function loadItem4LibraryStills(query = "") {
@@ -13788,7 +13834,7 @@
         preload: false,
       }) || libraryMissingPreviewHtml("CLIP", "Clip saved");
     } else if (preview) {
-      media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy">`;
+      media = `<img src="${escapeHtml(preview)}" alt="" loading="lazy"${r.google_drive_file_id ? ` data-drive-id="${escapeHtml(r.google_drive_file_id)}"` : ""}>`;
     } else {
       media = libraryMissingPreviewHtml("IMAGE");
     }
@@ -13895,6 +13941,7 @@
       bindLibraryReleaseButtons(target);
       bindLibraryPreview(target);
       item4BindClipPlayers(target);
+      bindLibraryPickerPreviews(target, records);
       updateLibraryPager();
       if (!published) fillLibraryClipPosters(target);
     } catch (e) {
