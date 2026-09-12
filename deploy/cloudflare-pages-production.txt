@@ -458,3 +458,5 @@ Approve All path bust Pages deploy: 2026-09-10 - Rename assets to *-0621 and UI 
 Asset Manager search-in-results Pages deploy: 2026-09-12 - Move catalogue Search/Show/Layout into the Browse assets results panel so Add assets ends after Location. UI 0.6.290-library-search-results.
 
 Asset Manager one-at-a-time library upload Pages deploy: 2026-09-12 - Upload named batches one photo at a time so Drive/pipeline handoffs do not Worker-timeout as a 6-file 500. UI 0.6.291-library-upload-one.
+
+Quality Agent Pages deploy: 2026-09-12 - Operations Help and Word guide for the shared check catalog, plus hourly HOURLY-Local-Services.bat. UI 0.6.292-quality-agent.
