@@ -81,7 +81,7 @@ def build() -> Document:
         "This file lives in Git at docs/handoffs/Quality-Agent.docx "
         "(also Autonomous-Service-Agent.docx) and opens from Studio → Operations → Quality Agent.",
     )
-    add_para(doc, "Last updated: 7 September 2026.", bold=True)
+    add_para(doc, "Last updated: 12 September 2026.", bold=True)
 
     add_heading(doc, "1. What this agent is", 2)
     add_para(
@@ -95,7 +95,7 @@ def build() -> Document:
             "Runtime healer (always on): Studio Worker cron every two minutes resumes stale produce, render, crop, and AZ work, and drains leftover Drive ingestion files (including already-processed residue).",
             "Quality Agent (mode-gated, ~15 min): reads GET /api/ops/desk/inventory, walks payload.checks, tickets a diagnosis pack, and only then may restart, open a PR, or later auto-merge an allowlisted heal.",
             "Tester lane: last nightly rotation from tests/regression/catalog.json plus PR hermetic packs. The 15-minute tick does not seed live mx1–mx5 rows.",
-            "Local companion (this Windows PC): SYNC Git, VERIFY /health, and PLAN/DEPLOY one service when mode allows and a public health check is down.",
+            "Local companion (this Windows PC): hourly HOURLY-Local-Services.bat (no pause) wraps stock START/VERIFY when /health is down, then PLAN/DEPLOY one service when mode is infra+ and the checkout is clean.",
         ],
     )
 
@@ -110,6 +110,7 @@ def build() -> Document:
         [
             "Intake: processed leftovers, eligible unprocessed files, oversized videos waiting on compress.",
             "Production advancement is origin-aware: autonomous library-stills stop at Ready for Review; AZ finished-video may auto-schedule when cover, caption, and Final_File_URL exist; manual work also stops at Ready for Review.",
+            "Rendered / Review Sent rows that still cannot Open review — almost always a missing public 3D grid cover. Worker stages and stamps the cover; do not Approve publish.",
             "Jobs and infra: stale/escalated produce, render without a job, long render, produce orphan, variant Preparing, crop Processing/Error, public /health.",
             "Tester lane: last nightly regression rotation plus cheap catalog assertions. Do not seed live platform-matrix rows every 15 minutes.",
         ],
@@ -224,12 +225,16 @@ def build() -> Document:
 
     add_heading(doc, "8. Companion and Windows services", 2)
     add_para(doc, "On this PC, from the SM-Pipeline-V2 checkout:")
+    add_para(doc, "deploy\\local-services\\HOURLY-Local-Services.bat")
     add_para(doc, "powershell -NoProfile -ExecutionPolicy Bypass -File .\\deploy\\local-services\\Invoke-DeskCompanion.ps1")
     add_bullets(
         doc,
         [
+            "The hourly bat has no pause. Register it with Register-DeskCompanionHourly.ps1. Do not schedule DESK-Companion.bat or SYNC-Git-Main.bat (they pause).",
+            "If public /health is down: stock start-chicagoshining-local-services.bat, then VERIFY, then -RestartDown. Do not STOP ALL + START ALL every hour.",
             "-RestartDown requires mode infra or higher.",
-            "-DeployDown PLAN/DEPLOYs one matching service from main if public /health is still down after VERIFY.",
+            "-DeployDown PLAN/DEPLOYs one matching service from main only when the checkout is clean. Dirty checkout: log and skip deploy. Never git reset --hard.",
+            "Log: D:\\Content Creation\\ChicagoShining Pipeline\\Deployment Logs\\Local Services\\hourly-companion-YYYYMMDD.log",
             "Caps file: D:\\Content Creation\\ChicagoShining Pipeline\\Deployment Logs\\Local Services\\desk-caps.json",
         ],
     )

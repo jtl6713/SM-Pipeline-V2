@@ -18,6 +18,7 @@ test("Operations copy uses Quality Agent as the operator-facing umbrella", () =>
   assert.match(html, /id="operationsDeskChecks"/);
   assert.match(html, /id="operationsAgentDeskChecks"/);
   assert.match(html, /Quality Agent — service lane/);
+  assert.match(html, /HOURLY-Local-Services\.bat/);
   assert.match(html, /id="operationsTabDesk"[^>]*>Service desk</);
   assert.match(html, /href="\/docs\/Quality-Agent\.docx"/);
   assert.match(config, /Open the Quality Agent page/);
