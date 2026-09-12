@@ -406,6 +406,24 @@ export function resolveLibraryCrossScopeFlag(url, settingRaw) {
   return libraryCrossScopeEnabled(settingRaw);
 }
 
+/**
+ * Asset Manager uploads must use the operator-chosen profile.
+ * Prefer the form field (header select) over the query string. Never fall back
+ * to a default market — that stamps Chicago while the header shows LA.
+ */
+export function resolveLibraryUploadProfileId({ formProfileId = "", urlProfileId = "" } = {}) {
+  const formId = String(formProfileId || "").trim();
+  const urlId = String(urlProfileId || "").trim();
+  const raw = formId || urlId;
+  if (!raw) {
+    return { ok: false, error: "Choose a Content Profile before uploading assets" };
+  }
+  if (!/^rec[A-Za-z0-9]+$/.test(raw)) {
+    return { ok: false, error: "Invalid Content Profile id" };
+  }
+  return { ok: true, profileId: raw };
+}
+
 export function firstLinkedRecordId(value) {
   if (Array.isArray(value) && value.length) {
     const first = value[0];
@@ -421,7 +439,10 @@ export function firstLinkedRecordId(value) {
 
 /**
  * Scope Media Assets to a Content Profile.
- * Blank Content_Profile rows stay visible (legacy shared) until backfilled.
+ *
+ * Asset Manager browse should pass includeUnscoped: false so LA does not list
+ * blank-profile Chicago stills. Photo-wait / idea matching may still include
+ * blank rows until those Drive-ingest leftovers are assigned.
  *
  * Airtable formulas expose linked records as primary-field names via ARRAYJOIN,
  * not record IDs. Match both id (legacy) and Profile_Name so stamped Chicago

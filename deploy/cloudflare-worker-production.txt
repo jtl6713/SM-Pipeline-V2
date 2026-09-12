@@ -431,3 +431,5 @@ Asset Manager sort + date-added filter Worker deploy: 2026-09-12 - Browse suppor
 Asset Manager batch numbering ignores file extension Worker deploy: 2026-09-12 - Continue auto-numbering from the highest existing Asset Name stem across .jpg/.heic/.mp4/etc. Worker 0.10.295-library-batch-number-any-ext.
 
 Drive ingest waits for profile Worker deploy: 2026-09-12 - A2 no longer auto-pulses A3. POST /api/library/:id/profile assigns Content_Profile then classifies. Worker 0.10.296-ingest-profile.
+
+Library profile stamp + LA hub red Worker deploy: 2026-09-12 - Asset Manager list excludes blank-profile leftovers; uploads refuse a Chicago fallback. Worker 0.10.298-library-upload-profile.

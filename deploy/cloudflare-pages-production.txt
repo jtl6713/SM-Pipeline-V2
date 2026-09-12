@@ -467,3 +467,5 @@ Pipeline column filters Pages deploy: 2026-09-12 - Platform pipeline filters by 
 Asset Manager library picker preview fallback Pages deploy: 2026-09-12 - Fall back to Drive JPEG thumbs when API previews fail or load 0×0 (HEIC-behind-.jpeg). UI 0.6.295-library-picker-previews.
 
 Drive ingest waits for profile Pages deploy: 2026-09-12 - Asset Manager Needs profile filter and per-card Classify to profile. UI 0.6.296-ingest-profile.
+
+Library profile stamp + LA hub red Pages deploy: 2026-09-12 - Asset Manager browse stays on the selected profile; Studio uploads require the header profile; LA hub canvas is light red. UI 0.6.299-la-bg.
