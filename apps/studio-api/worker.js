@@ -2384,7 +2384,8 @@ function normalizedOutputState(record) {
   const outputDeadEarly = outputStatusLc.includes("failed")
     || outputStatusLc.includes("terminal error")
     || outputStatusLc.includes("skipped");
-  const publishDeadEarly = publishStatusLc.includes("failed") || publishStatusLc.includes("error");
+  const publishDeadEarly = (publishStatusLc.includes("failed") || publishStatusLc.includes("error"))
+    && !publishStatusLc.includes("manual publish required");
   const readyForReviewIntent = has("Output_Status", "ready for review")
     || has("Review_Status", "pending")
     || has("Review_Status", "review sent");
@@ -2402,6 +2403,16 @@ function normalizedOutputState(record) {
     && (!inProductionEarly || remotionFinishedEarly || studioOutputIsNativePhoto(record))
   ) {
     return "Ready for Review";
+  }
+
+  // YouTube Manual Publish Required must win over leftover YouTube_Error_Message,
+  // otherwise Studio keeps painting a red Failed badge after we park the row.
+  if (
+    has("Publish_Status", "manual publish required")
+    || fields.Manual_Fallback_Required
+    || has("Manual_Completion_Status", "required")
+  ) {
+    return "Manual Action Required";
   }
 
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
