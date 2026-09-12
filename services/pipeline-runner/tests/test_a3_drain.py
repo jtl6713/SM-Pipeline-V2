@@ -1,12 +1,13 @@
 from unittest.mock import MagicMock
 
 from a3.processor import normalize_record_ids, process_request
+from a3.prompt import metadata_block
 
 
 def test_a3_drain_classifies_until_view_empty(monkeypatch):
     batches = [
-        [{"id": "rec1", "fields": {"MIME_Type": "image/jpeg"}}],
-        [{"id": "rec2", "fields": {"MIME_Type": "image/jpeg"}}],
+        [{"id": "rec1", "fields": {"MIME_Type": "image/jpeg", "Content_Profile": ["recPROFILE"]}}],
+        [{"id": "rec2", "fields": {"MIME_Type": "image/jpeg", "Content_Profile": ["recPROFILE"]}}],
         [],
     ]
     client = MagicMock()
@@ -26,7 +27,10 @@ def test_a3_drain_classifies_until_view_empty(monkeypatch):
 
 def test_a3_record_ids_skip_the_classify_view(monkeypatch):
     client = MagicMock()
-    client.get_record.side_effect = lambda _table, rid: {"id": rid, "fields": {"MIME_Type": "image/jpeg"}}
+    client.get_record.side_effect = lambda _table, rid: {
+        "id": rid,
+        "fields": {"MIME_Type": "image/jpeg", "Content_Profile": ["recPROFILE"]},
+    }
     monkeypatch.setattr("a3.processor.AirtableClient", lambda: client)
     monkeypatch.setattr(
         "a3.processor._classify_one",
@@ -59,7 +63,56 @@ def test_a3_missing_record_ids_are_not_processed(monkeypatch):
     assert result["classified"][0]["status"] == "missing"
 
 
+def test_a3_drain_skips_rows_without_profile(monkeypatch):
+    client = MagicMock()
+    client.list_records.return_value = [{"id": "recBare", "fields": {"MIME_Type": "image/jpeg"}}]
+    monkeypatch.setattr("a3.processor.AirtableClient", lambda: client)
+
+    def fail_classify(_client, _row):
+        raise AssertionError("unprofiled rows must not classify")
+
+    monkeypatch.setattr("a3.processor._classify_one", fail_classify)
+
+    result = process_request(drain=True, trigger_a4=False)
+
+    assert result["processed"] is True
+    assert result["classified_count"] == 0
+    assert result["classified"] == []
+
+
+def test_a3_targeted_skips_without_profile(monkeypatch):
+    client = MagicMock()
+    client.get_record.side_effect = lambda _table, rid: {"id": rid, "fields": {"MIME_Type": "image/jpeg"}}
+    monkeypatch.setattr("a3.processor.AirtableClient", lambda: client)
+
+    result = process_request(record_ids=["recBare"], trigger_a4=False)
+
+    assert result["processed"] is False
+    assert result["reason"] == "content_profile_required"
+    assert result["classified"][0]["status"] == "skipped_no_profile"
+
+
 def test_normalize_record_ids_accepts_string_and_list():
     assert normalize_record_ids("recOnly") == ["recOnly"]
     assert normalize_record_ids(["recA", "nope", "recA"]) == ["recA"]
     assert normalize_record_ids(None) == []
+
+
+def test_metadata_block_includes_assigned_profile():
+    text = metadata_block(
+        {
+            "id": "recAsset",
+            "fields": {"Asset Name": "Pier"},
+            "_content_profile": {
+                "id": "recP",
+                "fields": {
+                    "Profile_Name": "Los Angeles",
+                    "Market_Name": "Los Angeles",
+                    "Asset_Filter_Tag": "la",
+                },
+            },
+        }
+    )
+    assert "Assigned Content Profile" in text
+    assert "Los Angeles" in text
+    assert "la" in text

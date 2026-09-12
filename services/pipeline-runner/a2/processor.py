@@ -220,7 +220,7 @@ def _daisy_a2b(*, wait_for_next: bool, test_run_id: str | None) -> dict[str, Any
         daisy_payload("a2b"),
         python_call=lambda: process_a2b(
             dry_run=False,
-            trigger_a3=True,
+            trigger_a3=False,
             wait_for_next=wait_for_next,
             drain=True,
             test_run_id=test_run_id,
