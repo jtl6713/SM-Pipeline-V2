@@ -398,8 +398,16 @@ def drain_until_idle(
                 total["compression_started"] = True
             except Exception:
                 logger.exception("A2 drain could not start oversized compression")
-        if not result.get("intaken_count"):
-            break
+        if result.get("intaken_count"):
+            continue
+        if result.get("skipped_error_count"):
+            logger.warning(
+                "A2 drain retrying after leftover/intake errors (pass errors=%s existing=%s)",
+                result.get("skipped_error_count"),
+                result.get("skipped_existing_count"),
+            )
+            continue
+        break
     if trigger_a2b:
         total["a2b"] = _daisy_a2b(wait_for_next=True, test_run_id=test_run_id)
     return {

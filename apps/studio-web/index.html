@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.291-pipeline-col-filters">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.294-pipeline-col-filters">
 </head>
 <body>
  <header class="topbar">
@@ -1063,8 +1063,8 @@
  </section>
  <section class="panel" id="libraryResultsPanel">
  <div class="library-results-toolbar">
- <div class="panel-heading"><div><h2>Browse assets</h2><p>Search the catalogue, change what shows, then browse the results below.</p></div></div>
- <div class="library-toolbar">
+ <div class="panel-heading"><div><h2>Browse assets</h2><p>Search, sort, and filter by date added — works with or without a search — then browse the results below.</p></div></div>
+  <div class="library-toolbar">
  <label class="form-field"><span>Search</span><input id="librarySearch" type="search" placeholder="Name or location"></label>
  <label class="form-field"><span>Show</span>
  <select id="libraryKindFilter">
@@ -1072,6 +1072,14 @@
  <option value="photo">Photos only</option>
  <option value="video">Clips only</option>
  <option value="published">Published files</option>
+ </select>
+ </label>
+ <label class="form-field"><span>Sort</span>
+ <select id="librarySort">
+ <option value="newest" selected>Newest added</option>
+ <option value="oldest">Oldest added</option>
+ <option value="name_asc">Name A–Z</option>
+ <option value="name_desc">Name Z–A</option>
  </select>
  </label>
  <label class="form-field"><span>Layout</span>
@@ -1089,6 +1097,12 @@
  <option value="50">50</option>
  </select>
  </label>
+ </div>
+ <div class="library-toolbar library-toolbar-dates">
+ <label class="form-field"><span id="libraryAddedFromLabel">Added from</span><input id="libraryAddedFrom" type="date"></label>
+ <label class="form-field"><span id="libraryAddedToLabel">Added to</span><input id="libraryAddedTo" type="date"></label>
+ <div class="library-date-actions">
+ <button type="button" class="secondary-button" id="libraryClearDates">Clear dates</button>
  </div>
  </div>
  <div id="libraryList" class="library-grid"></div>
@@ -1557,7 +1571,7 @@
  <ul>
  <li><strong>off</strong> — inventory only. No tickets, no restarts, no PRs.</li>
  <li><strong>observe</strong> (default) — ticket a diagnosis pack only.</li>
- <li><strong>infra</strong> — also SYNC / VERIFY / one-service deploy when public health is down. Local companion on this Windows machine only. Dirty git checkout stops the companion; it never hard-resets.</li>
+ <li><strong>infra</strong> — also SYNC / VERIFY / one-service deploy when public health is down. Local companion on this Windows machine only. Away-from-home hourly keep-alive is <code>HOURLY-Local-Services.bat</code> (no pause). It calls stock START then VERIFY only when <code>/health</code> is down — never STOP ALL. Dirty checkout: log and skip deploy. Never hard-reset.</li>
  <li><strong>patch</strong> — also open PRs. You merge. After merge, ship Worker/Pages via the production trigger files, or PLAN/DEPLOY one local service.</li>
  <li><strong>automerge</strong> — leave off until proven. Allowlisted heal paths only, CI green, caps remain, and the same fingerprint is not repeating.</li>
  </ul>
@@ -1650,7 +1664,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.291</span> </div>
+ <span id="uiBuildLabel">UI build 0.6.294</span> </div>
  </footer>
 
  <div class="drawer-backdrop" id="ideaDrawerBackdrop" hidden></div>
@@ -1796,8 +1810,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.291-pipeline-col-filters"></script>
+ <script src="/assets/config-0621.js?v=0.6.294-pipeline-col-filters"></script>
  <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.291-pipeline-col-filters"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.294-pipeline-col-filters"></script>
 </body>
 </html>

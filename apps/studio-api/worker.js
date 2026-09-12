@@ -29,6 +29,7 @@ import {
   combineAirtableFormulas,
   firstLinkedRecordId,
   LIBRARY_CROSS_SCOPE_SETTING,
+  libraryAddedDateFilterFormula,
   libraryBatchNameFilterFormula,
   libraryCrossScopeEnabled,
   libraryDriveFilename,
@@ -36,7 +37,9 @@ import {
   mediaAssetIsHeic,
   mediaAssetProfileScopeFormula,
   normalizeLibraryBatchBase,
+  parseLibraryDateParam,
   resolveLibraryCrossScopeFlag,
+  resolveLibraryListSort,
   sanitizeLibraryAssetName,
 } from "./asset-library.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
@@ -329,7 +332,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.292-yt-discovery-throttle",
+          version: "0.10.294-library-sort-date-filter",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17000,12 +17003,18 @@ async function listPublishedLibraryFiles(request, env, url) {
   const requestedLimit = Number(url.searchParams.get("limit"));
   const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
   const offset = String(url.searchParams.get("offset") || "").trim() || null;
+  const addedFrom = parseLibraryDateParam(url.searchParams.get("added_from"));
+  const addedTo = parseLibraryDateParam(url.searchParams.get("added_to"));
+  const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: true });
   const page = await listRecordsPage(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
     limit,
     offset,
-    sortField: "Published_At",
-    sortDirection: "desc",
-    filterFormula: publishedLibraryFilterFormula(query),
+    sortField: sort.sortField,
+    sortDirection: sort.sortDirection,
+    filterFormula: combineAirtableFormulas(
+      publishedLibraryFilterFormula(query),
+      libraryAddedDateFilterFormula(addedFrom, addedTo, "Published_At"),
+    ),
   });
   const mapped = await attachPublishedLibraryFileSizes(env, page.records, page.records.map(mapPublishedLibraryFile));
   return respond(request, env, {
@@ -17013,6 +17022,9 @@ async function listPublishedLibraryFiles(request, env, url) {
     idle: false,
     query: query || null,
     kind: "published",
+    sort: sort.sort,
+    added_from: addedFrom,
+    added_to: addedTo,
     count: mapped.length,
     has_more: Boolean(page.offset),
     offset: page.offset || null,
@@ -17136,14 +17148,21 @@ async function listAssetLibrary(request, env, url, authorization) {
   const requestedLimit = Number(url.searchParams.get("limit"));
   const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
   const offset = String(url.searchParams.get("offset") || "").trim() || null;
+  const addedFrom = parseLibraryDateParam(url.searchParams.get("added_from"));
+  const addedTo = parseLibraryDateParam(url.searchParams.get("added_to"));
+  const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: false });
   const crossScope = await resolveLibraryCrossScope(env, url);
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url);
   const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit,
     offset,
-    sortField: "Intake_Date",
-    sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(assetLibraryFilterFormula(query, kind), scopeFormula),
+    sortField: sort.sortField,
+    sortDirection: sort.sortDirection,
+    filterFormula: combineAirtableFormulas(
+      assetLibraryFilterFormula(query, kind),
+      libraryAddedDateFilterFormula(addedFrom, addedTo, "Intake_Date"),
+      scopeFormula,
+    ),
   });
   const mapped = page.records
     .filter((record) => !/__\d+x\d+__/i.test(String(f(record, "Asset Name") || "")))
@@ -17153,6 +17172,9 @@ async function listAssetLibrary(request, env, url, authorization) {
     idle: false,
     query: query || null,
     kind: kind || null,
+    sort: sort.sort,
+    added_from: addedFrom,
+    added_to: addedTo,
     count: mapped.length,
     has_more: Boolean(page.offset),
     offset: page.offset || null,
@@ -17172,20 +17194,28 @@ async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) 
   form.set("filename", filename);
   form.set("mime_type", contentType || "");
   form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
-  const response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
-    method: "POST",
-    headers: {
-      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
-    },
-    body: form,
-  });
+  let response;
+  try {
+    response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
+      method: "POST",
+      headers: {
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: form,
+    });
+  } catch (error) {
+    throw new HttpError(
+      503,
+      `Pipeline runner unreachable for Google Drive upload (${error instanceof Error ? error.message : "network error"}). Confirm Pipeline Runner is running on Windows.`
+    );
+  }
   const payload = await response.json().catch(() => ({}));
   const fileId = String(payload?.google_drive_file_id || "").trim();
   const driveUrl = String(payload?.google_drive_url || "").trim();
   if (!response.ok || !fileId || !driveUrl) {
     throw new HttpError(
       response.status >= 400 ? response.status : 502,
-      payload?.error || payload?.message || "Google Drive asset upload failed"
+      payload?.error || payload?.message || `Google Drive asset upload failed (${response.status})`
     );
   }
   return payload;

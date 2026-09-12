@@ -201,7 +201,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.291-pipeline-col-filters";
+  const BUILD_ID = "item4-0.6.294-pipeline-col-filters";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13702,6 +13702,14 @@
         : "Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
     }
     if (search) search.placeholder = published ? "Title, platform, or filename" : "Name or location";
+    const sortNewest = $("librarySort")?.querySelector('option[value="newest"]');
+    const sortOldest = $("librarySort")?.querySelector('option[value="oldest"]');
+    if (sortNewest) sortNewest.textContent = published ? "Newest published" : "Newest added";
+    if (sortOldest) sortOldest.textContent = published ? "Oldest published" : "Oldest added";
+    const fromLabel = $("libraryAddedFromLabel");
+    const toLabel = $("libraryAddedToLabel");
+    if (fromLabel) fromLabel.textContent = published ? "Published from" : "Added from";
+    if (toLabel) toLabel.textContent = published ? "Published to" : "Added to";
   }
 
   function renderPublishedLibraryCard(r) {
@@ -13854,6 +13862,13 @@
     const params = new URLSearchParams({ limit: String(libraryPageSize()) });
     if (query) params.set("q", query);
     if (kind) params.set("kind", kind);
+    const sort = String($("librarySort")?.value || "newest").trim() || "newest";
+    if (sort && sort !== "newest") params.set("sort", sort);
+    else params.set("sort", sort);
+    const addedFrom = String($("libraryAddedFrom")?.value || "").trim();
+    const addedTo = String($("libraryAddedTo")?.value || "").trim();
+    if (addedFrom) params.set("added_from", addedFrom);
+    if (addedTo) params.set("added_to", addedTo);
     const offset = libraryPage.offsets[libraryPage.index];
     if (offset) params.set("offset", offset);
     try {
@@ -13863,10 +13878,11 @@
       libraryPage.hasMore = Boolean(data.has_more);
       libraryPage.count = records.length;
       if (!records.length) {
-        target.innerHTML = query
+        const dated = Boolean(addedFrom || addedTo);
+        target.innerHTML = (query || dated)
           ? (published
-            ? '<div class="empty">No published files matched that search.</div>'
-            : '<div class="empty">No library photos or clips matched that search.</div>')
+            ? '<div class="empty">No published files matched that search or date filter.</div>'
+            : '<div class="empty">No library photos or clips matched that search or date filter.</div>')
           : (published
             ? '<div class="empty">No published Platform Outputs on this page.</div>'
             : '<div class="empty">No library photos or clips on this page.</div>');
@@ -13933,7 +13949,10 @@
     const inputs = libraryFileInputs();
     const location = String($("libraryLocation")?.value || "").trim();
     const batchName = String($("libraryBatchName")?.value || "").trim();
-    const chunkSize = batchName ? 8 : 1;
+    // Always one file per request. A named batch of 6+ photos in one Worker call
+    // times out while each file is pushed to Drive through the pipeline runner.
+    // Sequential calls still allocate Navy Pier 1, 2, … from existing names.
+    const chunkSize = 1;
     if (zone) zone.dataset.busy = "true";
     inputs.forEach((input) => { input.disabled = true; });
     const errors = [];
@@ -13946,7 +13965,7 @@
         const progressLabel = batchName
           ? (files.length === 1
             ? `Adding as next “${batchName}” number…`
-            : `Adding ${completedFiles + 1}–${completedFiles + chunk.length} of ${files.length} as next “${batchName}” numbers…`)
+            : `Adding ${completedFiles + 1} of ${files.length} as next “${batchName}” number…`)
           : (files.length === 1
             ? `Adding ${chunk[0].name}…`
             : `Adding ${completedFiles + 1} of ${files.length}: ${chunk[0].name}…`);
@@ -13980,8 +13999,12 @@
           }
         } catch (error) {
           completedFiles += chunk.length;
-          const label = chunk.length === 1 ? chunk[0].name : `${chunk.length} files`;
-          errors.push(`${label}: ${error.message || "upload failed"}`);
+          const raw = String(error?.message || "upload failed");
+          const hint = /Request failed \(50[023]\)|failed to fetch|networkerror|aborted|timeout/i.test(raw)
+            ? " Drive/pipeline may be slow or unreachable — try again one photo at a time."
+            : "";
+          const label = chunk[0]?.name || "file";
+          errors.push(`${label}: ${raw}${hint}`);
         }
       }
       inputs.forEach((input) => { input.value = ""; });
@@ -14102,6 +14125,21 @@
       resetLibraryPage();
       syncLibraryPublishedMode();
       loadLibrary();
+    });
+    $("librarySort")?.addEventListener("change", () => {
+      resetLibraryPage();
+      loadLibrary();
+    });
+    const reloadLibraryFromDates = () => {
+      resetLibraryPage();
+      loadLibrary();
+    };
+    $("libraryAddedFrom")?.addEventListener("change", reloadLibraryFromDates);
+    $("libraryAddedTo")?.addEventListener("change", reloadLibraryFromDates);
+    $("libraryClearDates")?.addEventListener("click", () => {
+      if ($("libraryAddedFrom")) $("libraryAddedFrom").value = "";
+      if ($("libraryAddedTo")) $("libraryAddedTo").value = "";
+      reloadLibraryFromDates();
     });
     $("libraryPageSize")?.addEventListener("change", () => {
       resetLibraryPage();

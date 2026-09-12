@@ -16,6 +16,9 @@ import {
   publishedDurationSeconds,
   publishedFileReleaseGuard,
   publishedLibraryFilterFormula,
+  parseLibraryDateParam,
+  resolveLibraryListSort,
+  libraryAddedDateFilterFormula,
   publishedLibraryObjectKey,
   publicMediaObjectKey,
   publishedReleaseFields,
@@ -258,4 +261,53 @@ test("library HEIC originals are flagged so previews use Drive JPEG thumbs", () 
   assert.equal(mediaAssetIsHeic({ mimeType: "image/heic", fileExtension: "HEIC" }), true);
   assert.equal(mediaAssetIsHeic({ mimeType: "image/heif", name: "walk.heif" }), true);
   assert.equal(mediaAssetIsHeic({ mimeType: "image/jpeg", name: "Lincoln Park Zoo 4.jpg" }), false);
+});
+
+
+test("library date param accepts only real YYYY-MM-DD days", () => {
+  assert.equal(parseLibraryDateParam("2026-09-12"), "2026-09-12");
+  assert.equal(parseLibraryDateParam("2026-13-01"), null);
+  assert.equal(parseLibraryDateParam("09/12/2026"), null);
+  assert.equal(parseLibraryDateParam(""), null);
+});
+
+test("library list sort works for media and published catalogues", () => {
+  assert.deepEqual(resolveLibraryListSort(""), {
+    sort: "newest",
+    sortField: "Intake_Date",
+    sortDirection: "desc",
+  });
+  assert.deepEqual(resolveLibraryListSort("oldest"), {
+    sort: "oldest",
+    sortField: "Intake_Date",
+    sortDirection: "asc",
+  });
+  assert.deepEqual(resolveLibraryListSort("name-asc"), {
+    sort: "name_asc",
+    sortField: "Asset Name",
+    sortDirection: "asc",
+  });
+  assert.deepEqual(resolveLibraryListSort("name_desc", { published: true }), {
+    sort: "name_desc",
+    sortField: "Output_Title",
+    sortDirection: "desc",
+  });
+  assert.deepEqual(resolveLibraryListSort("newest", { published: true }), {
+    sort: "newest",
+    sortField: "Published_At",
+    sortDirection: "desc",
+  });
+});
+
+test("library added-date filter is inclusive and combines with search independently", () => {
+  assert.equal(libraryAddedDateFilterFormula("", ""), null);
+  const fromOnly = libraryAddedDateFilterFormula("2026-09-01", "");
+  assert.match(fromOnly, /Intake_Date/);
+  assert.match(fromOnly, /2026-09-01/);
+  assert.match(fromOnly, /IS_AFTER/);
+  const both = libraryAddedDateFilterFormula("2026-09-01", "2026-09-12", "Published_At");
+  assert.match(both, /Published_At/);
+  assert.match(both, /2026-09-01/);
+  assert.match(both, /2026-09-12/);
+  assert.match(both, /IS_BEFORE/);
 });
