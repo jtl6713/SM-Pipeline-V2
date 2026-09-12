@@ -174,6 +174,17 @@
   const pipelineScheduleDrafts = new Map();
   const pipelineTiktokUrlDrafts = new Map();
   let pipelineViewFilter = "all";
+  let pipelineColumnFilters = {
+    output: "",
+    platform: "",
+    type: "",
+    state: "",
+    render: "",
+    review: "",
+    publish: "",
+    progress: "",
+    creative: "",
+  };
   let pipelineOpenSingleOnLoad = false;
   let dashboardCache = { metrics: {}, ideas: [], content: [], outputs: [] };
   let dashboardView = "recent";
@@ -190,7 +201,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.290-library-search-results";
+  const BUILD_ID = "item4-0.6.291-pipeline-col-filters";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -419,7 +430,10 @@
     if (next === "support") $("studioHelpLink")?.setAttribute("aria-current", "page");
     else $("studioHelpLink")?.removeAttribute("aria-current");
     if (next === "outputs") pipelineViewFilter = "all";
-    if (next !== "outputs") stopPipelinePoll();
+    if (next !== "outputs") {
+      clearPipelineColumnFilters();
+      stopPipelinePoll();
+    }
     if (next !== "content") stopProductionPoll();
     if (next === "support") {
       const requested = String(options.supportDoc || "").trim();
@@ -12765,20 +12779,120 @@
     return true;
   }
 
+  function clearPipelineColumnFilters() {
+    pipelineColumnFilters = {
+      output: "",
+      platform: "",
+      type: "",
+      state: "",
+      render: "",
+      review: "",
+      publish: "",
+      progress: "",
+      creative: "",
+    };
+  }
+
+  function pipelineColumnFiltersActive() {
+    return Object.values(pipelineColumnFilters).some((value) => String(value || "").trim());
+  }
+
+  function pipelineColumnDisplayBucket(value) {
+    const text = String(value ?? "").trim();
+    return text || "—";
+  }
+
+  function pipelineCreativeFilterValue(record) {
+    if (record?.creative_available) return "Open review";
+    const step = String(record?.studio_production_job?.step || "");
+    if (step === "escalated") return "Escalated";
+    if (step === "blocked" || record?.studio_job_error) return "Blocked";
+    return "Not ready yet";
+  }
+
+  function pipelineProgressFilterValue(record, records = pipelineOutputs) {
+    const peers = (records || []).filter((row) => pipelineContentGroupKey(row) === pipelineContentGroupKey(record));
+    const dest = pipelineDestinationProgress(peers);
+    if (dest && pipelineOutputRenderInFlight(record)) return `${dest.done}/${dest.total}`;
+    const pct = pipelineDisplayPercent(record);
+    if (pct === null || pct === undefined || pct === "") return "—";
+    return `${pct}%`;
+  }
+
+  function pipelineColumnFilterValue(record, key, records = pipelineOutputs) {
+    if (key === "output") return pipelineColumnDisplayBucket(record?.output_id);
+    if (key === "platform") return pipelineColumnDisplayBucket(record?.platform);
+    if (key === "type") {
+      return pipelineColumnDisplayBucket(`${record?.platform_output_type || record?.format || ""} ${record?.aspect_ratio || ""}`);
+    }
+    if (key === "state") return pipelineColumnDisplayBucket(pipelineStudioStateLabel(record) || record?.studio_state);
+    if (key === "render") return pipelineColumnDisplayBucket(pipelineRenderLabel(record));
+    if (key === "review") return pipelineColumnDisplayBucket(record?.review_status);
+    if (key === "publish") return pipelineColumnDisplayBucket(record?.platform_publish_status || record?.publish_status);
+    if (key === "progress") return pipelineColumnDisplayBucket(pipelineProgressFilterValue(record, records));
+    if (key === "creative") return pipelineColumnDisplayBucket(pipelineCreativeFilterValue(record));
+    return "—";
+  }
+
+  function pipelineRecordMatchesColumnFilters(record, filters = pipelineColumnFilters, records = pipelineOutputs) {
+    for (const [key, selected] of Object.entries(filters || {})) {
+      if (!String(selected || "").trim()) continue;
+      if (pipelineColumnFilterValue(record, key, records) !== selected) return false;
+    }
+    return true;
+  }
+
+  function pipelineColumnOptionValues(key, records = pipelineOutputs) {
+    const others = { ...pipelineColumnFilters, [key]: "" };
+    const pool = (records || []).filter((record) => (
+      pipelineRecordMatchesFilter(record) && pipelineRecordMatchesColumnFilters(record, others, records)
+    ));
+    const values = pool.map((record) => pipelineColumnFilterValue(record, key, records));
+    const current = String(pipelineColumnFilters[key] || "").trim();
+    if (current) values.push(current);
+    return [...new Set(values.map(pipelineColumnDisplayBucket))].sort((a, b) => (
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    ));
+  }
+
   function filteredPipelineRecords(records) {
-    return (records || []).filter((record) => pipelineRecordMatchesFilter(record));
+    return (records || []).filter((record) => (
+      pipelineRecordMatchesFilter(record) && pipelineRecordMatchesColumnFilters(record, pipelineColumnFilters, records)
+    ));
+  }
+
+  function pipelineColumnFilterSummary() {
+    const labels = {
+      output: "Output",
+      platform: "Platform",
+      type: "Type / ratio",
+      state: "Studio state",
+      render: "Render",
+      review: "Review",
+      publish: "Publish",
+      progress: "Progress",
+      creative: "Creative",
+    };
+    return Object.entries(pipelineColumnFilters)
+      .filter(([, value]) => String(value || "").trim())
+      .map(([key, value]) => `${labels[key] || key} ${value}`);
   }
 
   function updatePipelineFilterBar(visibleCount = 0) {
     const bar = $("pipelineFilterBar");
     const label = $("pipelineFilterLabel");
     if (!bar) return;
-    if (!pipelineViewFilter || pipelineViewFilter === "all") {
+    const columnBits = pipelineColumnFilterSummary();
+    const viewActive = pipelineViewFilter && pipelineViewFilter !== "all";
+    if (!viewActive && !columnBits.length) {
       bar.hidden = true;
       return;
     }
     bar.hidden = false;
-    if (label) label.textContent = `Showing ${pipelineFilterLabel()} · ${visibleCount}`;
+    const parts = [];
+    if (viewActive) parts.push(pipelineFilterLabel());
+    parts.push(...columnBits);
+    if (label) label.textContent = `Showing ${parts.join(" · ")} · ${visibleCount}`;
   }
 
   function maybeOpenFilteredPipelineOutput() {
@@ -12877,7 +12991,22 @@
   function pipelineSortHeader(key, label) {
     const active = pipelineSort.key === key;
     const arrow = !active ? "↕" : pipelineSort.dir === "asc" ? "↑" : "↓";
-    return `<th><button type="button" class="pipeline-sort${active ? " is-active" : ""}" data-pipeline-sort="${escapeHtml(key)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span aria-hidden="true">${arrow}</span></button></th>`;
+    return `<button type="button" class="pipeline-sort${active ? " is-active" : ""}" data-pipeline-sort="${escapeHtml(key)}" aria-pressed="${active ? "true" : "false"}">${escapeHtml(label)} <span aria-hidden="true">${arrow}</span></button>`;
+  }
+
+  function pipelineColumnFilterControl(key, label) {
+    const selected = String(pipelineColumnFilters[key] || "");
+    const options = pipelineColumnOptionValues(key)
+      .map((value) => `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(value)}</option>`)
+      .join("");
+    return `<label class="pipeline-col-filter-label"><span class="pipeline-col-filter-sr">Filter ${escapeHtml(label)}</span><select class="pipeline-col-filter" data-pipeline-col-filter="${escapeHtml(key)}" aria-label="Filter by ${escapeHtml(label)}" title="Filter by ${escapeHtml(label)}"><option value="">All</option>${options}</select></label>`;
+  }
+
+  function pipelineColumnHeader(key, label, { sortable = true, filterable = false } = {}) {
+    const filtered = filterable && String(pipelineColumnFilters[key] || "").trim();
+    const title = sortable ? pipelineSortHeader(key, label) : `<span class="pipeline-col-label">${escapeHtml(label)}</span>`;
+    const filter = filterable ? pipelineColumnFilterControl(key, label) : "";
+    return `<th class="pipeline-col-head${filtered ? " is-filtered" : ""}"><div class="pipeline-col-head-stack">${title}${filter}</div></th>`;
   }
 
   function renderOutputsTable(target, records) {
@@ -12887,8 +13016,9 @@
     const source = isPipeline ? filteredPipelineRecords(records) : records;
     if (isPipeline) updatePipelineFilterBar(source.length);
     if (!source.length) {
-      target.innerHTML = isPipeline && pipelineViewFilter && pipelineViewFilter !== "all"
-        ? `<div class="empty">No ${escapeHtml(pipelineFilterLabel().toLowerCase())} right now.</div>`
+      const filteredEmpty = isPipeline && ((pipelineViewFilter && pipelineViewFilter !== "all") || pipelineColumnFiltersActive());
+      target.innerHTML = filteredEmpty
+        ? `<div class="empty">No outputs match the current filters.</div>`
         : '<div class="empty">No Platform Output records were returned.</div>';
       return;
     }
@@ -12925,9 +13055,9 @@
         }).join("")
       : `<tbody>${sortedSource.map((row) => pipelineRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
     const head = isPipeline
-      ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("type", "Type / ratio")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}<th>Creative</th></tr>`
+      ? `<tr>${pipelineColumnHeader("output", "Output", { filterable: true })}${pipelineColumnHeader("platform", "Platform", { filterable: true })}${pipelineColumnHeader("type", "Type / ratio", { filterable: true })}${pipelineColumnHeader("state", "Studio state", { filterable: true })}${pipelineColumnHeader("render", "Render", { filterable: true })}${pipelineColumnHeader("review", "Review", { filterable: true })}${pipelineColumnHeader("publish", "Publish", { filterable: true })}${pipelineColumnHeader("progress", "Progress", { filterable: true })}${pipelineColumnHeader("creative", "Creative", { sortable: false, filterable: true })}</tr>`
       : isDashboard
-      ? `<tr>${pipelineSortHeader("output", "Output")}${pipelineSortHeader("platform", "Platform")}${pipelineSortHeader("state", "Studio state")}${pipelineSortHeader("render", "Render")}${pipelineSortHeader("review", "Review")}${pipelineSortHeader("publish", "Publish")}${pipelineSortHeader("progress", "Progress")}</tr>`
+      ? `<tr><th>${pipelineSortHeader("output", "Output")}</th><th>${pipelineSortHeader("platform", "Platform")}</th><th>${pipelineSortHeader("state", "Studio state")}</th><th>${pipelineSortHeader("render", "Render")}</th><th>${pipelineSortHeader("review", "Review")}</th><th>${pipelineSortHeader("publish", "Publish")}</th><th>${pipelineSortHeader("progress", "Progress")}</th></tr>`
       : `<tr><th>Output</th><th>Platform</th><th>Studio state</th><th>Render</th><th>Review</th><th>Publish</th><th>Progress</th></tr>`;
     rememberPipelineScheduleDrafts();
     const tableClass = isDashboard ? "data-table dashboard-output-table" : "data-table";
@@ -12945,6 +13075,18 @@
           }
           if (isPipeline) renderOutputsTable(target, pipelineOutputs);
           else renderDashboardPanel();
+        });
+      });
+    }
+    if (isPipeline) {
+      target.querySelectorAll("[data-pipeline-col-filter]").forEach((select) => {
+        select.addEventListener("click", (event) => event.stopPropagation());
+        select.addEventListener("mousedown", (event) => event.stopPropagation());
+        select.addEventListener("change", () => {
+          const key = select.dataset.pipelineColFilter;
+          if (!key) return;
+          pipelineColumnFilters[key] = select.value || "";
+          renderOutputsTable(target, pipelineOutputs);
         });
       });
     }
@@ -15341,6 +15483,7 @@
   });
   $("pipelineFilterClear")?.addEventListener("click", () => {
     pipelineViewFilter = "all";
+    clearPipelineColumnFilters();
     pipelineOpenSingleOnLoad = false;
     const target = $("outputsList");
     if (target) renderOutputsTable(target, pipelineOutputs);
