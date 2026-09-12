@@ -12,7 +12,8 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
 
   const explicitTooltips = {
     apiStatus: "Studio API connection status. If this reports an error, data refreshes and admin actions may not work until the API is reachable again.",
-    studioProfileSelect: "Choose the content profile/city used for new work, branding, defaults, and library filtering. Changing profiles does not modify existing records.",
+    studioProfileSelect: "Choose the content profile/city used for new work, branding, defaults, library filtering, and Admin context. Operations switches to this profile when you change it.",
+    operationsProfileContext: "Shows which Content Profile Admin is currently scoped to. Change it with the header Profile control.",
     studioHelpLink: "Open Studio help. Tabs cover the walkthrough plus a guide for the page you came from.",
     refreshDashboard: "Reload dashboard counts and recent output states from the Studio API without changing any records.",
     generateIdeasButton: "Open AI idea generation. You can choose how many ideas to create and the generation quality before anything is added.",

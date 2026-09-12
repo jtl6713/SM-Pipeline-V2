@@ -469,3 +469,4 @@ Asset Manager library picker preview fallback Pages deploy: 2026-09-12 - Fall ba
 Drive ingest waits for profile Pages deploy: 2026-09-12 - Asset Manager Needs profile filter and per-card Classify to profile. UI 0.6.296-ingest-profile.
 
 Library profile stamp + LA hub red Pages deploy: 2026-09-12 - Asset Manager browse stays on the selected profile; Studio uploads require the header profile; LA hub canvas is light red. UI 0.6.299-la-bg.
+Profile background + Admin context Pages deploy: 2026-09-12 — Per-profile Studio background color picker on Operations Daily ideas; header Profile switch scopes Admin to that profile. UI 0.6.300-profile-bg-admin.
