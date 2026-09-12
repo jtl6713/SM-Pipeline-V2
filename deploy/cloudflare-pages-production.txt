@@ -461,3 +461,5 @@ Asset Manager one-at-a-time library upload Pages deploy: 2026-09-12 - Upload nam
 
 Asset Manager sort + date-added filter Pages deploy: 2026-09-12 - Sort and Added from/to controls in Browse assets; works with search and with an empty search. UI 0.6.293-library-sort-date.
 Quality Agent Pages deploy: 2026-09-12 - Operations Help and Word guide for the shared check catalog, plus hourly HOURLY-Local-Services.bat. UI 0.6.292-quality-agent.
+
+Pipeline column filters Pages deploy: 2026-09-12 - Platform pipeline filters by output, platform, type/ratio, studio state, render, review, publish, progress, and creative. UI 0.6.294-pipeline-col-filters.
