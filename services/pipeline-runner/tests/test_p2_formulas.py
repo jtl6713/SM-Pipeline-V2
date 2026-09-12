@@ -1,4 +1,4 @@
-from p2.elevenlabs_client import voice_id_for_name
+from p2.elevenlabs_client import resolve_content_voice_id, voice_id_for_name
 from p2.processor import _trigger_p3, can_commit_generated_media, item_wants_ai_thumbnail
 from p2.formulas import (
     p2_exact_content_formula,
@@ -83,6 +83,23 @@ def test_p2_commits_cover_when_status_is_generated_without_url():
 def test_voice_id_mapping():
     assert voice_id_for_name("George") == "JBFqnCBsd6RMkjVDRZzb"
     assert voice_id_for_name("other") == "xVQH621DS3eyBYrseRt5"
+
+
+def test_resolve_content_voice_id_prefers_voice_id():
+    item = {
+        "fields": {
+            "Voice_ID": "6F5Zhi321D3Oq7v1oNT4",
+            "Voice_Name": "Hank - Deep and Engaging Narrator",
+            "Voice": "Kate",
+        }
+    }
+    assert resolve_content_voice_id(item) == "6F5Zhi321D3Oq7v1oNT4"
+
+
+def test_resolve_content_voice_id_falls_back_to_legacy_name():
+    assert resolve_content_voice_id({"fields": {"Voice": "George"}}) == "JBFqnCBsd6RMkjVDRZzb"
+    assert resolve_content_voice_id({"fields": {"Voice_Name": "Hank"}}) == "xVQH621DS3eyBYrseRt5"
+    assert resolve_content_voice_id({"fields": {}}) == "xVQH621DS3eyBYrseRt5"
 
 
 def test_thumbnail_prompt_suffix():

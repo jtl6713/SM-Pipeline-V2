@@ -18,7 +18,7 @@ from p2.constants import (
     THUMBNAIL_DRIVE_FOLDER_ID,
     VOICEOVER_DRIVE_FOLDER_ID,
 )
-from p2.elevenlabs_client import synthesize_voiceover
+from p2.elevenlabs_client import resolve_content_voice_id, synthesize_voiceover_by_id
 from p2.formulas import (
     p2_exact_content_formula,
     recheck_silent_thumbnail,
@@ -218,7 +218,10 @@ def process_request(
             **_preview(item, route=route),
         }
 
-    raw_mp3 = synthesize_voiceover(field_str(item, "Voiceover_Script"), voice_name=field_str(item, "Voice"))
+    raw_mp3 = synthesize_voiceover_by_id(
+        field_str(item, "Voiceover_Script"),
+        voice_id=resolve_content_voice_id(item),
+    )
     norm_payload, normalized_mp3 = normalize_voiceover(
         raw_mp3,
         filename=f"{content_id}_voice.mp3",
