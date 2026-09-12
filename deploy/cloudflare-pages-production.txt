@@ -470,3 +470,5 @@ Drive ingest waits for profile Pages deploy: 2026-09-12 - Asset Manager Needs pr
 
 Library profile stamp + LA hub red Pages deploy: 2026-09-12 - Asset Manager browse stays on the selected profile; Studio uploads require the header profile; LA hub canvas is light red. UI 0.6.299-la-bg.
 Profile background + Admin context Pages deploy: 2026-09-12 — Per-profile Studio background color picker on Operations Daily ideas; header Profile switch scopes Admin to that profile. UI 0.6.300-profile-bg-admin.
+
+Profiles voice + music pool Pages deploy: 2026-09-12 — Operations Profiles tab with default narration voice and autonomous music multi-select. UI 0.6.301-profiles-voice-music.
