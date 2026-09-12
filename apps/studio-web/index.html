@@ -1057,9 +1057,13 @@
  <label class="form-field music-upload-name"><span>Asset name <em>optional — numbers each file (Space Museum 1, 2…) and continues after names already in the catalog</em></span><input id="libraryBatchName" type="text" maxlength="120" placeholder="Space Museum" autocomplete="off" enterkeyhint="done"></label>
  <label class="form-field music-upload-name"><span>Location <em>optional</em></span><input id="libraryLocation" maxlength="120" placeholder="Oak Street Beach"></label>
  </div>
+ <div class="form-message" id="libraryUploadMessage" aria-live="polite"></div>
  </div>
  </div>
- <div class="music-upload-body">
+ </section>
+ <section class="panel" id="libraryResultsPanel">
+ <div class="library-results-toolbar">
+ <div class="panel-heading"><div><h2>Browse assets</h2><p>Search the catalogue, change what shows, then browse the results below.</p></div></div>
  <div class="library-toolbar">
  <label class="form-field"><span>Search</span><input id="librarySearch" type="search" placeholder="Name or location"></label>
  <label class="form-field"><span>Show</span>
@@ -1086,10 +1090,7 @@
  </select>
  </label>
  </div>
- <div class="form-message" id="libraryUploadMessage" aria-live="polite"></div>
  </div>
- </section>
- <section class="panel">
  <div id="libraryList" class="library-grid"></div>
  <div id="libraryPager" class="library-pager" hidden>
  <button type="button" class="secondary-button" id="libraryPrevPage">Previous</button>
