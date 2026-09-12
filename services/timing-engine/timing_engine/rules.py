@@ -7,7 +7,7 @@ DEFAULT_RULES: dict[str, Any] = {
     "recycle": False,
     "vo_clip_share": 0.35,
     "rules": [
-        {"until": "voiceover_end", "every_n_beats": 8, "spread": True},
+        {"until": "voiceover_end", "every_n_beats": 2, "spread": True},
         {"remaining": True, "every_n_beats": 1},
     ],
 }

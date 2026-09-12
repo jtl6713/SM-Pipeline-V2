@@ -127,6 +127,7 @@ def test_music_and_window_helpers():
     assert music_is_enabled(output) is True
     assert analysis_window(output) == (4.0, 20.0)
     assert resolve_rules(output)["rules"][0]["until"] == "voiceover_end"
+    assert resolve_rules(output)["rules"][0]["every_n_beats"] == 2
     assert resolve_rules(output)["strategy"] == "vo_phased"
     output["fields"]["Timing_Rules_JSON"] = '{"rules":[{"remaining":true,"every_n_beats":2}]}'
     assert resolve_rules(output)["strategy"] == "vo_phased"

@@ -6,7 +6,7 @@ DEFAULT_RULES = {
     "recycle": False,
     "vo_clip_share": 0.35,
     "rules": [
-        {"until": "voiceover_end", "every_n_beats": 8, "spread": True},
+        {"until": "voiceover_end", "every_n_beats": 2, "spread": True},
         {"remaining": True, "every_n_beats": 1},
     ],
 }
@@ -17,7 +17,7 @@ VIDEO_RULES = {
     "vo_clip_share": 0.35,
     "post_voiceover_transition_frames": 2,
     "rules": [
-        {"until": "voiceover_end", "every_n_beats": 8, "spread": True},
+        {"until": "voiceover_end", "every_n_beats": 2, "spread": True},
         {"remaining": True, "every_n_beats": 1},
     ],
 }
