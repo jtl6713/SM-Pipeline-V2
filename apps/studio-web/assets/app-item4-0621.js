@@ -201,7 +201,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.296-ingest-profile";
+  const BUILD_ID = "item4-0.6.297-library-upload-profile";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14058,6 +14058,11 @@
     const inputs = libraryFileInputs();
     const location = String($("libraryLocation")?.value || "").trim();
     const batchName = String($("libraryBatchName")?.value || "").trim();
+    const profileId = String($("studioProfileSelect")?.value || selectedProfileId || "").trim();
+    if (!profileId) {
+      setLibraryUploadMessage("Choose a Content Profile in the header before uploading.", "error-text");
+      return;
+    }
     // Always one file per request. A named batch of 6+ photos in one Worker call
     // times out while each file is pushed to Drive through the pipeline runner.
     // Sequential calls still allocate Navy Pier 1, 2, … from existing names.
@@ -14083,7 +14088,7 @@
         for (const file of chunk) form.append("files", file, file.name);
         if (location) form.append("location", location);
         if (batchName) form.append("batch_name", batchName);
-        if (selectedProfileId) form.append("content_profile_id", selectedProfileId);
+        form.append("content_profile_id", profileId);
         const video = chunk.find((file) => item4FileLooksLikeVideo(file));
         if (chunk.length === 1 && video) {
           try {

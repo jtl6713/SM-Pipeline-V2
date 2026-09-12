@@ -28,6 +28,7 @@ import {
   libraryCrossScopeEnabled,
   resolveLibraryCrossScopeFlag,
   firstLinkedRecordId,
+  resolveLibraryUploadProfileId,
   mediaAssetProfileScopeFormula,
   combineAirtableFormulas,
   ideaLibraryExcludeDerivedStillFormula,
@@ -252,6 +253,23 @@ test("library batch numbering continues from highest number no matter the file e
   assert.match(libraryBatchNameFilterFormula("Navy Pier"), /\[\.\]/);
 });
 
+test("library upload profile prefers the form field and refuses a silent default", () => {
+  assert.deepEqual(
+    resolveLibraryUploadProfileId({
+      formProfileId: "recProfileLa2",
+      urlProfileId: "recProfileChicago1",
+    }),
+    { ok: true, profileId: "recProfileLa2" }
+  );
+  assert.deepEqual(
+    resolveLibraryUploadProfileId({ urlProfileId: "recProfileLa2" }),
+    { ok: true, profileId: "recProfileLa2" }
+  );
+  assert.equal(resolveLibraryUploadProfileId({}).ok, false);
+  assert.match(resolveLibraryUploadProfileId({}).error, /Content Profile/);
+  assert.equal(resolveLibraryUploadProfileId({ formProfileId: "chicago" }).ok, false);
+});
+
 test("library profile scope formula isolates Content_Profile unless cross-scope is on", () => {
   assert.equal(LIBRARY_CROSS_SCOPE_SETTING, "LIBRARY_INCLUDE_CROSS_SCOPE");
   assert.equal(libraryCrossScopeEnabled("on"), true);
@@ -266,6 +284,10 @@ test("library profile scope formula isolates Content_Profile unless cross-scope 
     /Content_Profile.*recProfileChicago1/
   );
   assert.match(mediaAssetProfileScopeFormula("recProfileChicago1"), /BLANK/);
+  assert.doesNotMatch(
+    mediaAssetProfileScopeFormula("recProfileChicago1", { includeUnscoped: false }),
+    /BLANK/
+  );
   assert.equal(
     combineAirtableFormulas("AND({Active})", mediaAssetProfileScopeFormula("recProfileChicago1")),
     `AND(AND({Active}),${mediaAssetProfileScopeFormula("recProfileChicago1")})`

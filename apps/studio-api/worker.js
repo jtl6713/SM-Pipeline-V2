@@ -40,6 +40,7 @@ import {
   parseLibraryDateParam,
   resolveLibraryCrossScopeFlag,
   resolveLibraryListSort,
+  resolveLibraryUploadProfileId,
   sanitizeLibraryAssetName,
   stripLibraryAssetExtension,
 } from "./asset-library.mjs";
@@ -336,7 +337,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.295-library-batch-number-any-ext",
+          version: "0.10.298-library-upload-profile",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5770,7 +5771,7 @@ async function getMediaLibraryStills(request, env, url, authorization) {
   if (/^rec[A-Za-z0-9]+$/.test(ideaId)) {
     try { idea = await loadAuthorizedIdea(env, ideaId, authorization); } catch {}
   }
-  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea });
+  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url, { idea, includeUnscoped: false });
   // Operator browse/search uses the Asset Manager name FIND (already excludes fill-crop),
   // not the idea photo-wait subject-token OR which flooded scans with luxury/glamorous hits.
   const browseFormula = assetLibraryFilterFormula(query, includeVideo ? "" : "photo");
@@ -17098,7 +17099,7 @@ async function libraryProfileScopeFormula(env, authorization, url, options = {})
   const profile = await resolveLibraryScopeProfile(env, authorization, url, options);
   return mediaAssetProfileScopeFormula(profile?.id || "", {
     crossScope,
-    includeUnscoped: true,
+    includeUnscoped: options.includeUnscoped !== false,
     profileName: f(profile, "Profile_Name") || "",
   });
 }
@@ -17173,7 +17174,9 @@ async function listAssetLibrary(request, env, url, authorization) {
   const addedTo = parseLibraryDateParam(url.searchParams.get("added_to"));
   const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: false });
   const crossScope = await resolveLibraryCrossScope(env, url);
-  const scopeFormula = await libraryProfileScopeFormula(env, authorization, url);
+  const scopeFormula = needsProfile
+    ? null
+    : await libraryProfileScopeFormula(env, authorization, url, { includeUnscoped: false });
   const [page, profiles] = await Promise.all([
     listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
       limit,
@@ -17267,13 +17270,15 @@ async function uploadAssetLibraryItems(request, env, authorization) {
     throw new HttpError(503, "Pipeline runner is required to store assets in Google Drive");
   }
   const url = new URL(request.url);
-  const profile = await resolveWorkingContentProfile(env, authorization, requestedProfileId(url));
   let form;
   try { form = await request.formData(); } catch { throw new HttpError(400, "Could not read uploaded files"); }
-  const formProfileId = String(form.get("content_profile_id") || form.get("profile") || "").trim();
-  const uploadProfile = formProfileId && formProfileId !== profile.id
-    ? await resolveWorkingContentProfile(env, authorization, requestedProfileId(url, { content_profile_id: formProfileId }))
-    : profile;
+  const requestedUploadProfile = resolveLibraryUploadProfileId({
+    formProfileId: form.get("content_profile_id") || form.get("profile"),
+    urlProfileId: url.searchParams.get("profile"),
+  });
+  if (!requestedUploadProfile.ok) throw new HttpError(400, requestedUploadProfile.error);
+  const uploadProfile = await resolveWorkingContentProfile(env, authorization, requestedUploadProfile.profileId);
+  if (!uploadProfile?.id) throw new HttpError(409, "Choose a Content Profile before uploading assets");
   const files = form.getAll("files").filter((value) => value && typeof value.arrayBuffer === "function");
   if (!files.length) throw new HttpError(400, "Choose at least one photo or video clip");
   if (files.length > ASSET_LIBRARY_MAX_FILES) {
@@ -17361,14 +17366,27 @@ async function uploadAssetLibraryItems(request, env, authorization) {
             Location: location || null,
             Asset_Description: description || "Studio Asset Manager upload stored in Google Drive.",
             Studio_Transfer_ID: `LIB-${id}`,
-            Content_Profile: uploadProfile?.id ? [uploadProfile.id] : null,
+            Content_Profile: [uploadProfile.id],
           },
         }],
         typecast: true,
       }),
     });
-    const record = Array.isArray(created?.records) ? created.records[0] : null;
+    let record = Array.isArray(created?.records) ? created.records[0] : null;
     if (!record?.id) throw new HttpError(502, "The file was stored, but the catalog record was not created");
+    if (firstLinkedRecordId(f(record, "Content_Profile")) !== uploadProfile.id) {
+      const repaired = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, record.id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: { Content_Profile: [uploadProfile.id] },
+          typecast: true,
+        }),
+      });
+      record = repaired || record;
+    }
+    if (firstLinkedRecordId(f(record, "Content_Profile")) !== uploadProfile.id) {
+      throw new HttpError(502, "The file was stored, but the Content Profile was not stamped");
+    }
     uploaded.push(mapLibraryAsset(record));
   }
   const namedMessage = batchBase && uploaded.length
@@ -17380,6 +17398,8 @@ async function uploadAssetLibraryItems(request, env, authorization) {
     ok: true,
     uploaded: uploaded.length,
     records: uploaded,
+    content_profile_id: uploadProfile.id,
+    content_profile_name: f(uploadProfile, "Profile_Name") || null,
     batch_base: batchBase,
     batch_names: batchNames,
     message: namedMessage || (uploaded.length === 1
