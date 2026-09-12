@@ -329,7 +329,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.292-yt-discovery-throttle",
+          version: "0.10.293-library-upload-drive-errors",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17172,20 +17172,28 @@ async function promoteStudioAssetToDrive(env, { filename, bytes, contentType }) 
   form.set("filename", filename);
   form.set("mime_type", contentType || "");
   form.set("file", new Blob([bytes], { type: contentType || "application/octet-stream" }), filename);
-  const response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
-    method: "POST",
-    headers: {
-      ...(secret ? { "X-Pipeline-Secret": secret } : {}),
-    },
-    body: form,
-  });
+  let response;
+  try {
+    response = await fetch(`${runnerUrl}/jobs/studio-asset-library`, {
+      method: "POST",
+      headers: {
+        ...(secret ? { "X-Pipeline-Secret": secret } : {}),
+      },
+      body: form,
+    });
+  } catch (error) {
+    throw new HttpError(
+      503,
+      `Pipeline runner unreachable for Google Drive upload (${error instanceof Error ? error.message : "network error"}). Confirm Pipeline Runner is running on Windows.`
+    );
+  }
   const payload = await response.json().catch(() => ({}));
   const fileId = String(payload?.google_drive_file_id || "").trim();
   const driveUrl = String(payload?.google_drive_url || "").trim();
   if (!response.ok || !fileId || !driveUrl) {
     throw new HttpError(
       response.status >= 400 ? response.status : 502,
-      payload?.error || payload?.message || "Google Drive asset upload failed"
+      payload?.error || payload?.message || `Google Drive asset upload failed (${response.status})`
     );
   }
   return payload;
