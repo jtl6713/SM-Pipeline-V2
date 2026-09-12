@@ -425,3 +425,5 @@ YouTube Manual Publish Required Worker deploy: 2026-09-12 - Park failed YouTube 
 YouTube discovery quota throttle Worker deploy: 2026-09-12 - Cron Chicago creator discovery (search.list ~100 units) at most once/day; stamp after every attempt including errors; cache autonomous YouTube harvest 12h; published insights sweep limit 8→4. Worker 0.10.292-yt-discovery-throttle.
 
 Asset Manager Drive upload error clarity Worker deploy: 2026-09-12 - Surface pipeline-runner unreachable errors for library uploads instead of a blank 500. Worker 0.10.293-library-upload-drive-errors.
+
+Asset Manager sort + date-added filter Worker deploy: 2026-09-12 - Browse supports sort (newest/oldest/name) and added_from/added_to with or without search; published list uses Published_At. Worker 0.10.294-library-sort-date-filter.

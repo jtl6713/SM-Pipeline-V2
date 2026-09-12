@@ -190,7 +190,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.292-quality-agent";
+  const BUILD_ID = "item4-0.6.293-library-sort-date";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13539,6 +13539,14 @@
         : "Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
     }
     if (search) search.placeholder = published ? "Title, platform, or filename" : "Name or location";
+    const sortNewest = $("librarySort")?.querySelector('option[value="newest"]');
+    const sortOldest = $("librarySort")?.querySelector('option[value="oldest"]');
+    if (sortNewest) sortNewest.textContent = published ? "Newest published" : "Newest added";
+    if (sortOldest) sortOldest.textContent = published ? "Oldest published" : "Oldest added";
+    const fromLabel = $("libraryAddedFromLabel");
+    const toLabel = $("libraryAddedToLabel");
+    if (fromLabel) fromLabel.textContent = published ? "Published from" : "Added from";
+    if (toLabel) toLabel.textContent = published ? "Published to" : "Added to";
   }
 
   function renderPublishedLibraryCard(r) {
@@ -13691,6 +13699,13 @@
     const params = new URLSearchParams({ limit: String(libraryPageSize()) });
     if (query) params.set("q", query);
     if (kind) params.set("kind", kind);
+    const sort = String($("librarySort")?.value || "newest").trim() || "newest";
+    if (sort && sort !== "newest") params.set("sort", sort);
+    else params.set("sort", sort);
+    const addedFrom = String($("libraryAddedFrom")?.value || "").trim();
+    const addedTo = String($("libraryAddedTo")?.value || "").trim();
+    if (addedFrom) params.set("added_from", addedFrom);
+    if (addedTo) params.set("added_to", addedTo);
     const offset = libraryPage.offsets[libraryPage.index];
     if (offset) params.set("offset", offset);
     try {
@@ -13700,10 +13715,11 @@
       libraryPage.hasMore = Boolean(data.has_more);
       libraryPage.count = records.length;
       if (!records.length) {
-        target.innerHTML = query
+        const dated = Boolean(addedFrom || addedTo);
+        target.innerHTML = (query || dated)
           ? (published
-            ? '<div class="empty">No published files matched that search.</div>'
-            : '<div class="empty">No library photos or clips matched that search.</div>')
+            ? '<div class="empty">No published files matched that search or date filter.</div>'
+            : '<div class="empty">No library photos or clips matched that search or date filter.</div>')
           : (published
             ? '<div class="empty">No published Platform Outputs on this page.</div>'
             : '<div class="empty">No library photos or clips on this page.</div>');
@@ -13946,6 +13962,21 @@
       resetLibraryPage();
       syncLibraryPublishedMode();
       loadLibrary();
+    });
+    $("librarySort")?.addEventListener("change", () => {
+      resetLibraryPage();
+      loadLibrary();
+    });
+    const reloadLibraryFromDates = () => {
+      resetLibraryPage();
+      loadLibrary();
+    };
+    $("libraryAddedFrom")?.addEventListener("change", reloadLibraryFromDates);
+    $("libraryAddedTo")?.addEventListener("change", reloadLibraryFromDates);
+    $("libraryClearDates")?.addEventListener("click", () => {
+      if ($("libraryAddedFrom")) $("libraryAddedFrom").value = "";
+      if ($("libraryAddedTo")) $("libraryAddedTo").value = "";
+      reloadLibraryFromDates();
     });
     $("libraryPageSize")?.addEventListener("change", () => {
       resetLibraryPage();
