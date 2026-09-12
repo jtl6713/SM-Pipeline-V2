@@ -2384,7 +2384,8 @@ function normalizedOutputState(record) {
   const outputDeadEarly = outputStatusLc.includes("failed")
     || outputStatusLc.includes("terminal error")
     || outputStatusLc.includes("skipped");
-  const publishDeadEarly = publishStatusLc.includes("failed") || publishStatusLc.includes("error");
+  const publishDeadEarly = (publishStatusLc.includes("failed") || publishStatusLc.includes("error"))
+    && !publishStatusLc.includes("manual publish required");
   const readyForReviewIntent = has("Output_Status", "ready for review")
     || has("Review_Status", "pending")
     || has("Review_Status", "review sent");
@@ -2402,6 +2403,16 @@ function normalizedOutputState(record) {
     && (!inProductionEarly || remotionFinishedEarly || studioOutputIsNativePhoto(record))
   ) {
     return "Ready for Review";
+  }
+
+  // YouTube Manual Publish Required must win over leftover YouTube_Error_Message,
+  // otherwise Studio keeps painting a red Failed badge after we park the row.
+  if (
+    has("Publish_Status", "manual publish required")
+    || fields.Manual_Fallback_Required
+    || has("Manual_Completion_Status", "required")
+  ) {
+    return "Manual Action Required";
   }
 
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
@@ -2427,7 +2438,13 @@ function normalizedOutputState(record) {
   // still populated.
   if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
 
-  if (has("TikTok_Draft_Status", "manual action") || has("Manual_Completion_Status", "required") || has("Music_Status", "manual action")) return "Manual Action Required";
+  if (
+    has("Publish_Status", "manual publish required")
+    || has("TikTok_Draft_Status", "manual action")
+    || has("Manual_Completion_Status", "required")
+    || has("Music_Status", "manual action")
+    || fields.Manual_Fallback_Required
+  ) return "Manual Action Required";
   if (has("FB_Slideshow_Status", "reel processing") || has("IG_Story_Status", "publishing")) return "Platform Processing";
   // A leftover retry flag must not hide a YouTube video that is already on the platform.
   if (!youtubeVideoReady && (fields.Publish_Retry_Eligible || fields.Asset_Selection_Retry_Eligible || has("FB_Slideshow_Status", "retry") || has("TikTok_Draft_Status", "retry"))) return "Retry Pending";
@@ -25205,6 +25222,61 @@ async function studioHealFailedYoutubeSourceDownloads(env, options = {}) {
   return results;
 }
 
+
+async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
+  const limit = Number(options.limit || 3);
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}="Manual Publish Required",{Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))';
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
+  } catch (error) {
+    console.warn("youtube manual-publish rearm scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const videoId = String(f(row, "YouTube_Video_ID") || "").trim();
+      const fields = {
+        Publish_Status: videoId ? "Publishing" : "Ready to Publish",
+        Publish_Error_Stage: "",
+        Publish_Error_Message: "",
+        YouTube_Error_Message: "",
+        YouTube_Response_JSON: "",
+        Publish_Next_Retry_At: null,
+        Publish_Retry_Eligible: true,
+        Manual_Fallback_Required: false,
+        Manual_Completion_Status: "Not Required",
+        YouTube_Upload_Status: videoId ? "Uploaded" : "Not Started",
+        YouTube_Stage: videoId ? "YT2" : "YT1",
+        YouTube_Upload_Job_ID: videoId ? String(f(row, "YouTube_Upload_Job_ID") || "") : "",
+        YouTube_Package_Status: "Ready",
+      };
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
+      const stage = videoId ? "yts2" : "ytp1";
+      const target = videoId ? "YTS2" : "YTP1";
+      const pulsed = await studioPulseYtRecord(env, stage, target, refreshed);
+      results.push({
+        id: row.id,
+        stage: "manual_publish_rearm",
+        next: stage,
+        ok: pulsed?.ok !== false,
+        skipped: pulsed?.skipped || false,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("youtube manual-publish rearm failed", row.id, error);
+      results.push({ id: row.id, stage: "manual_publish_rearm", error: message });
+    }
+  }
+  return results;
+}
+
+
 async function studioReconcileYoutubePublishes(env, options = {}) {
   if (pipelineStageBackend(env, "YT0").mode !== "python") return [];
   const limit = Number(options.limit || 3);
@@ -25214,31 +25286,36 @@ async function studioReconcileYoutubePublishes(env, options = {}) {
   } catch (error) {
     console.warn("youtube source-download heal failed", error);
   }
+  try {
+    results.push(...await studioRearmDueYoutubeManualPublishes(env, { limit }));
+  } catch (error) {
+    console.warn("youtube manual-publish rearm failed", error);
+  }
   const scans = [
     {
       stage: "yt0",
       target: "YT0",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Platform_Post_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW()),{YouTube_Scheduled_Publish_At}!=""),OR({YouTube_Stage}="",{YouTube_Stage}="YT0",AND({Publish_Retry_Eligible}=1,FIND("YT0",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Auto_Publish_Enabled}=1,{Do_Not_Publish}=0,{YouTube_Video_ID}="",{Platform_Post_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW()),{YouTube_Scheduled_Publish_At}!=""),OR({YouTube_Stage}="",{YouTube_Stage}="YT0",AND({Publish_Retry_Eligible}=1,FIND("YT0",UPPER({Publish_Error_Stage}&""))>0)),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
     },
     {
       stage: "ytp1",
       target: "YTP1",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Stage}="YT1",{YouTube_Upload_Job_ID}="",{YouTube_Video_ID}="")',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{YouTube_Stage}="YT1",{YouTube_Upload_Job_ID}="",{YouTube_Video_ID}="",OR({Publish_Status}!="Manual Publish Required",AND({Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
     },
     {
       stage: "yts1",
       target: "YTS1",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="")',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Upload_Job_ID}!="",{YouTube_Video_ID}="",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
     },
     {
       stage: "yts2",
       target: "YTS2",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Video_ID}!="")',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT2",{YouTube_Video_ID}!="",OR({Publish_Status}!="Manual Publish Required",AND({Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))),OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
     },
     {
       stage: "yts3",
       target: "YTS3",
-      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT4",{YouTube_Video_ID}!="",{YouTube_Processing_Status}="Succeeded")',
+      formula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{YouTube_Stage}="YT4",{YouTube_Video_ID}!="",{YouTube_Processing_Status}="Succeeded",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))',
     },
   ];
   for (const scan of scans) {

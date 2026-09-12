@@ -11,7 +11,7 @@ from carousel.timeutil import iso_utc
 from item4.settings import PipelineSettings
 from render.fields import field, field_str
 from yt.client import YouTubeUploaderClient, load_uploader_settings
-from yt.common import preview, response_json, retry_at, valid_record_id
+from yt.common import manual_publish_required_fields, preview, response_json, retry_at, valid_record_id
 from yt.constants import (
     MAKE_YTP1_ID,
     MAKE_YTP1_NAME,
@@ -19,10 +19,8 @@ from yt.constants import (
     PACKAGE_UPLOADING,
     POLL_RETRY_MINUTES,
     PUBLISH_STATUS_PUBLISHING,
-    RETRY_MINUTES,
     STAGE_YT1,
     STAGE_YT2,
-    UPLOAD_FAILED,
     UPLOAD_UPLOADING,
 )
 from yt.eligibility import upload_source_url, ytp1_eligibility_reason
@@ -116,21 +114,20 @@ def process_request(
         result["youtube_stage"] = STAGE_YT2
         return {"processed": True, **result}
 
+    # One automatic attempt only. Park for manual publish / Pacific-midnight retry
+    # instead of thrashing every few minutes (especially on quotaExceeded).
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         record_id,
-        {
-            "YouTube_Stage": STAGE_YT1,
-            "Publish_Locked_At": None,
-            "Publish_Locked_By": "",
-            "Publish_Error_Stage": "YTP1",
-            "Publish_Error_Message": "YouTube upload initialization failed.",
-            "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-            "YouTube_Error_Message": f"YTP1 upload initialization failed. HTTP {status_code}: {body}",
-            "YouTube_Response_JSON": response_json(body),
-            "YouTube_Upload_Status": UPLOAD_FAILED,
-            "Publish_Retry_Eligible": True,
-            "YouTube_Package_Status": PACKAGE_READY,
-        },
+        manual_publish_required_fields(
+            error_stage="YTP1",
+            publish_message="YouTube upload failed. Manual publish required until the next automatic retry after Pacific midnight.",
+            youtube_message=f"YTP1 upload initialization failed. HTTP {status_code}: {body}",
+            body=body,
+            youtube_stage=STAGE_YT1,
+            clear_upload_job=True,
+            package_status=PACKAGE_READY,
+        ),
+        typecast=True,
     )
-    return {"processed": True, "retry": True, **result}
+    return {"processed": True, "manual_publish_required": True, **result}

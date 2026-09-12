@@ -10,16 +10,15 @@ from carousel.timeutil import iso_utc
 from item4.settings import PipelineSettings
 from render.fields import field_str
 from yt.client import YouTubeUploaderClient, load_uploader_settings
-from yt.common import preview, response_json, retry_at, valid_record_id
+from yt.common import manual_publish_required_fields, preview, response_json, retry_at, valid_record_id
 from yt.constants import (
     MAKE_YTS1_ID,
     MAKE_YTS1_NAME,
+    PACKAGE_READY,
     POLL_RETRY_MINUTES,
     PROCESSING_NOT_STARTED,
-    PUBLISH_STATUS_FAILED,
     RETRY_MINUTES,
-    STAGE_TERMINAL,
-    UPLOAD_FAILED,
+    STAGE_YT1,
     UPLOAD_UPLOADED,
     UPLOAD_UPLOADING,
 )
@@ -107,25 +106,20 @@ def process_request(
         result["still_processing"] = True
         return {"processed": True, **result}
     if 200 <= status_code <= 299 and job_status == "failed":
-        client.update_record(
-            PLATFORM_OUTPUTS_TABLE,
-            record_id,
-            {
-                "YouTube_Stage": STAGE_TERMINAL,
-                "Publish_Status": PUBLISH_STATUS_FAILED,
-                "Publish_Locked_At": None,
-                "Publish_Locked_By": "",
-                "Publish_Error_Stage": "YTS1_UPLOAD",
-                "Publish_Error_Message": "YouTube upload job failed.",
-                "Publish_Next_Retry_At": None,
-                "YouTube_Error_Message": f"YTS1 upload job failed: {body.get('error') or body}",
-                "YouTube_Response_JSON": response_json(body),
-                "YouTube_Upload_Status": UPLOAD_FAILED,
-                "Publish_Retry_Eligible": False,
-                "YouTube_Last_Checked_At": now,
-            },
+        # Do not terminal-fail. Park for operator manual publish and auto-retry
+        # at the next Pacific midnight (YouTube quota reset).
+        fields = manual_publish_required_fields(
+            error_stage="YTS1_UPLOAD",
+            publish_message="YouTube upload job failed. Manual publish required until the next automatic retry after Pacific midnight.",
+            youtube_message=f"YTS1 upload job failed: {body.get('error') or body}",
+            body=body,
+            youtube_stage=STAGE_YT1,
+            clear_upload_job=True,
+            package_status=PACKAGE_READY,
+            extra={"YouTube_Last_Checked_At": now},
         )
-        return {"processed": True, "terminal": True, **result}
+        client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, fields, typecast=True)
+        return {"processed": True, "manual_publish_required": True, **result}
 
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,

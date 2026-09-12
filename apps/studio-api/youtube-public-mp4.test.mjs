@@ -23,5 +23,6 @@ test("YouTube 375 public key and 121MB file use 16MB multipart parts", () => {
   assert.equal(ranges.at(-1).end, size - 1);
   assert.equal(ranges.reduce((sum, part) => sum + part.length, 0), size);
   assert.match(YOUTUBE_PRIVATE_SOURCE_HEAL_INNER, /Ready to Publish/);
+  assert.match(YOUTUBE_PRIVATE_SOURCE_HEAL_INNER, /Manual Publish Required/);
   assert.match(YOUTUBE_PRIVATE_SOURCE_HEAL_INNER, /YT1/);
 });
