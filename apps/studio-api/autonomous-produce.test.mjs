@@ -67,6 +67,19 @@ test("narration voice uses profile default then Kate fallback", () => {
     { voice_id: "voice-2", voice_name: "voice-2" },
   );
   assert.deepEqual(
+    resolveAutonomousNarrationVoice(
+      {
+        default_narration_voice_id: "6F5Zhi321D3Oq7v1oNT4",
+        default_narration_voice_name: "Hank - Deep and Engaging Narrator",
+      },
+      { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" },
+    ),
+    {
+      voice_id: "6F5Zhi321D3Oq7v1oNT4",
+      voice_name: "Hank - Deep and Engaging Narrator",
+    },
+  );
+  assert.deepEqual(
     resolveAutonomousNarrationVoice({}, { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" }),
     { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" },
   );

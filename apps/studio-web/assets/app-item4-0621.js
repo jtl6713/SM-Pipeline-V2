@@ -115,7 +115,9 @@
   const item4ClipObjectUrls = new Map();
   const item4ClipDurationCache = new Map();
   const item4PosterJobs = new Set();
-  let ezSelectedVoiceId = "xVQH621DS3eyBYrseRt5";
+  // Do not seed Kate here — a hard default made catalog reloads / Continue-from-list
+  // quiet-save overwrite Admin profile voices (e.g. LA Hank) stored on the Production Request.
+  let ezSelectedVoiceId = "";
   const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_NAME = "Kate";
   let ezStarting = false;
@@ -201,7 +203,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.301-profiles-voice-music";
+  const BUILD_ID = "item4-0.6.302-pr-voice-persist";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -3157,9 +3159,22 @@
     if (!voiceoverOn) return { voice_id: "", voice_name: "" };
     const select = ($("prVoice")?.value ? $("prVoice") : null) || $("ezAudioVoice") || $("prVoice");
     const picked = phase6SelectedVoice(select);
+    const savedId = String(activeProductionRequest?.voice_id || "").trim();
+    const savedName = String(activeProductionRequest?.voice_name || "").trim();
+    // Quiet-save guard: if the DOM fell back to Kate while the open request still has a
+    // non-Kate Admin voice (Hank), keep the saved voice unless the operator picked Kate
+    // (ezSelectedVoiceId tracks deliberate selection).
+    if (
+      savedId
+      && savedId !== DEFAULT_VOICE_ID
+      && (!picked.id || picked.id === DEFAULT_VOICE_ID)
+      && ezSelectedVoiceId !== DEFAULT_VOICE_ID
+    ) {
+      return { voice_id: savedId, voice_name: savedName || savedId };
+    }
     return {
-      voice_id: picked.id || DEFAULT_VOICE_ID,
-      voice_name: picked.name || DEFAULT_VOICE_NAME,
+      voice_id: picked.id || savedId || DEFAULT_VOICE_ID,
+      voice_name: picked.name || savedName || DEFAULT_VOICE_NAME,
     };
   }
 
@@ -3505,12 +3520,22 @@
       if (prHint) prHint.textContent = "Loading ElevenLabs voices…";
       const result = await api("/api/voices", { timeoutMs: 45000 });
       const voices = phase6NormalizeVoices(result.voices || result.records || result.items || []);
-      const current = ezSelectedVoiceId || voiceSelect?.value || prVoice?.value || DEFAULT_VOICE_ID;
-      const options = phase6VoiceOptionList(voices, current || DEFAULT_VOICE_ID, DEFAULT_VOICE_NAME);
+      // Authority order: in-memory selection, then saved Production Request voice, then DOM, then Kate.
+      // Never let a late catalog response re-select Kate over Hank after populateProductionRequestForm.
+      const savedId = String(activeProductionRequest?.voice_id || "").trim();
+      const savedName = String(activeProductionRequest?.voice_name || "").trim();
+      const current = ezSelectedVoiceId || savedId || voiceSelect?.value || prVoice?.value || DEFAULT_VOICE_ID;
+      const currentName = (ezSelectedVoiceId && ezSelectedVoiceId === current
+        ? (phase6SelectedVoice(voiceSelect || prVoice).name || savedName)
+        : savedName) || DEFAULT_VOICE_NAME;
+      const options = phase6VoiceOptionList(voices, current || DEFAULT_VOICE_ID, currentName || DEFAULT_VOICE_NAME);
       if (voiceSelect) voiceSelect.innerHTML = options;
       if (prVoice) prVoice.innerHTML = options;
       const selected = phase6SelectedVoice(voiceSelect || prVoice);
-      applyVoiceToSelects(selected.id || current || DEFAULT_VOICE_ID, selected.name || DEFAULT_VOICE_NAME);
+      applyVoiceToSelects(
+        selected.id || current || DEFAULT_VOICE_ID,
+        selected.name || currentName || DEFAULT_VOICE_NAME
+      );
       const hintText = voices.length && result.live_connected
         ? `${voices.length} ElevenLabs voices`
         : voices.length
@@ -9951,23 +9976,32 @@
             return;
           }
 
-          // Open immediately from the Production Request record already loaded
-          // into the drafts table. Do not block opening on a second API call.
-          const ideaId = ideaIdFromRequest(record);
+          // Always refetch the full Production Request before hydrate. Draft-list
+          // summaries used to omit voice_id; opening from the card then showed Kate
+          // and quiet-save overwrote Admin Hank. Full GET is the voice authority.
+          let fullRecord = record;
+          try {
+            const fresh = await api(`/api/production-requests/${encodeURIComponent(record.id)}`);
+            if (fresh?.record?.id) fullRecord = fresh.record;
+          } catch (error) {
+            console.warn("production request voice refresh failed; using list card", error);
+          }
+
+          const ideaId = ideaIdFromRequest(fullRecord);
           activeIdea = ideaId ? ideasCache.find((idea) => idea.id === ideaId) || null : null;
-          populateProductionRequestForm(record);
-          await loadProductionRequestOutputs(record);
-          await loadItem4Workspace(record);
+          populateProductionRequestForm(fullRecord);
+          await loadProductionRequestOutputs(fullRecord);
+          await loadItem4Workspace(fullRecord);
 
           // Refresh music choices only after the workspace is visible.
           try {
             await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
-            const musicId = Array.isArray(record.selected_music_asset_links)
-              ? record.selected_music_asset_links[0]
+            const musicId = Array.isArray(fullRecord.selected_music_asset_links)
+              ? fullRecord.selected_music_asset_links[0]
               : "";
             if ($("prMusicAsset")) $("prMusicAsset").value = musicId || "";
-            if (record.voiceover_mode === "Yes") {
-              applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
+            if (fullRecord.voiceover_mode === "Yes") {
+              applyVoiceToSelects(fullRecord.voice_id || DEFAULT_VOICE_ID, fullRecord.voice_name || DEFAULT_VOICE_NAME);
             }
             syncRequestVoiceUi();
           } catch (e) {

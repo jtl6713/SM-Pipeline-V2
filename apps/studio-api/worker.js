@@ -344,7 +344,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.300-profiles-voice-music",
+          version: "0.10.301-pr-voice-persist",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -10754,9 +10754,46 @@ async function existingDraftForIdea(env, ideaRecordId, authorization) {
   }) || null;
 }
 
+async function resolveDraftNarrationVoice(env, idea, authorization, fallback = {}) {
+  const fallbackId = String(fallback.voice_id || PHASE6_DEFAULT_VOICE_ID).trim() || PHASE6_DEFAULT_VOICE_ID;
+  const fallbackName = String(fallback.voice_name || "Kate").trim() || "Kate";
+  const ideaProfileId = arrayOrEmpty(f(idea, "Content_Profile"))[0]
+    || arrayOrEmpty(f(idea, "Content Profiles"))[0]
+    || "";
+  try {
+    const profileRecord = ideaProfileId
+      ? await resolveWorkingContentProfile(env, authorization, ideaProfileId).catch(async () => {
+          // Idea may point at a Content Profile id even when brand membership differs; load directly.
+          return airtableFetch(env, "Content Profiles", ideaProfileId);
+        })
+      : await resolveWorkingContentProfile(env, authorization, null);
+    return resolveAutonomousNarrationVoice(mapOperationsProfile(profileRecord), {
+      voice_id: fallbackId,
+      voice_name: fallbackName,
+    });
+  } catch (error) {
+    console.warn("draft narration voice profile lookup failed", idea?.id, error);
+    return { voice_id: fallbackId, voice_name: fallbackName };
+  }
+}
+
 async function createDraftForIdea(env, idea, authorization, input = null) {
   const now = new Date().toISOString();
   const defaults = productionRequestDefaultsFromIdea(idea);
+  // Resolve Admin profile narration BEFORE cleanProductionRequestPayload — that cleaner
+  // otherwise fills a blank voice_id with Kate and would hide LA's Hank default.
+  const incomingVoiceId = String(input?.voice_id || defaults.voice_id || "").trim();
+  if (String((input || defaults).voiceover_mode || "Yes").trim() === "Yes" && !incomingVoiceId) {
+    const narration = await resolveDraftNarrationVoice(env, idea, authorization, {
+      voice_id: PHASE6_DEFAULT_VOICE_ID,
+      voice_name: "Kate",
+    });
+    defaults.voice_id = narration.voice_id || PHASE6_DEFAULT_VOICE_ID;
+    defaults.voice_name = narration.voice_name || "Kate";
+    if (input && typeof input === "object") {
+      input = { ...input, voice_id: defaults.voice_id, voice_name: defaults.voice_name };
+    }
+  }
   const cleaned = input || await cleanProductionRequestPayload(defaults, env);
   if (!String(cleaned.primary_location || "").trim() && defaults.primary_location) {
     cleaned.primary_location = defaults.primary_location;
@@ -10858,6 +10895,12 @@ function mapProductionRequestSummary(record, ideaTitle = null) {
     status: mapped.status,
     content_type: mapped.content_type,
     platforms: mapped.platforms,
+    // Voice fields must ride the draft list: Continue opens from this summary, and a
+    // missing voice_id made the UI fall back to Kate then quiet-save over Admin Hank.
+    voiceover_mode: mapped.voiceover_mode,
+    voice_id: mapped.voice_id,
+    voice_name: mapped.voice_name,
+    background_music_mode: mapped.background_music_mode,
     video_duration_seconds: mapped.video_duration_seconds,
     carousel_slide_count_mode: mapped.carousel_slide_count_mode,
     carousel_slide_count_exact: mapped.carousel_slide_count_exact,
