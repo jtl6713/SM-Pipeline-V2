@@ -99,7 +99,7 @@ def process_request(
 
     slides = list_final_slides(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
     settings = PipelineSettings(client)
-    graph = InstagramCarouselClient(**load_instagram_settings(settings))
+    graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
     for slide in slides:
         client.update_record(
             CAROUSEL_SLIDES_TABLE,

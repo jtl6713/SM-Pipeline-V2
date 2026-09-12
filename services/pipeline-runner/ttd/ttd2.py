@@ -106,7 +106,7 @@ def process_request(
     result["poll_attempt"] = attempts
 
     try:
-        worker = load_tiktok_settings(settings)
+        worker = load_tiktok_settings(settings, output, client=client)
         status_code, body = TikTokDraftClient(base_url=worker["url"], secret=worker["secret"]).draft_status(publish_id)
     except TikTokDraftError as exc:
         client.update_record(

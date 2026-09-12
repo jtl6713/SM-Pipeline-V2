@@ -6,6 +6,7 @@ import requests
 
 from config import load_settings
 from item4.settings import PipelineSettings
+from publish.destinations import destination_value, resolve_publish_theme
 from ttd.constants import DEFAULT_WORKER_BASE_URL
 
 
@@ -16,14 +17,24 @@ class TikTokDraftError(RuntimeError):
         self.body = body
 
 
-def load_tiktok_settings(settings: PipelineSettings) -> dict[str, str]:
+def load_tiktok_settings(
+    settings: PipelineSettings,
+    output: dict[str, Any] | None = None,
+    *,
+    client=None,
+) -> dict[str, str]:
     env = load_settings()
+    theme = resolve_publish_theme(output=output, client=client)
     url = (
-        settings.get("TIKTOK_WORKER_BASE_URL")
-        or str(env.get("tiktok_worker_base_url") or DEFAULT_WORKER_BASE_URL)
+        destination_value(settings, "TIKTOK_WORKER_BASE_URL", theme)
+        or (
+            ""
+            if theme != "chicago"
+            else str(env.get("tiktok_worker_base_url") or DEFAULT_WORKER_BASE_URL)
+        )
     ).strip().rstrip("/")
     secret = (
-        settings.get("TIKTOK_PIPELINE_SECRET")
+        destination_value(settings, "TIKTOK_PIPELINE_SECRET", theme)
         or str(env.get("tiktok_pipeline_secret") or "")
         or str(env.get("pipeline_runner_shared_secret") or "")
     ).strip()

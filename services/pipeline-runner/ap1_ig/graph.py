@@ -5,6 +5,7 @@ from typing import Any
 import requests
 
 from item4.settings import PipelineSettings
+from publish.destinations import destination_value, resolve_publish_theme
 
 
 class InstagramGraphError(RuntimeError):
@@ -23,10 +24,20 @@ def graph_numeric_id(payload: Any) -> str:
     return "".join(ch for ch in str(payload or "") if ch.isdigit())
 
 
-def load_instagram_graph_settings(settings: PipelineSettings) -> dict[str, str]:
-    ig_user_id = settings.get("INSTAGRAM_BUSINESS_ACCOUNT_ID")
-    token = settings.get("META_GRAPH_API_ACCESS_TOKEN") or settings.get("FACEBOOK_PAGE_ACCESS_TOKEN")
-    version = (settings.get("FACEBOOK_GRAPH_API_VERSION") or "v25.0").strip().strip("/")
+def load_instagram_graph_settings(
+    settings: PipelineSettings,
+    output: dict[str, Any] | None = None,
+    *,
+    client=None,
+) -> dict[str, str]:
+    theme = resolve_publish_theme(output=output, client=client)
+    ig_user_id = destination_value(settings, "INSTAGRAM_BUSINESS_ACCOUNT_ID", theme)
+    token = destination_value(settings, "META_GRAPH_API_ACCESS_TOKEN", theme) or destination_value(
+        settings, "FACEBOOK_PAGE_ACCESS_TOKEN", theme
+    )
+    version = (
+        destination_value(settings, "FACEBOOK_GRAPH_API_VERSION", theme) or "v25.0"
+    ).strip().strip("/")
     if not ig_user_id or not token:
         raise InstagramGraphError("missing-instagram-settings")
     return {"ig_user_id": ig_user_id, "token": token, "version": version}

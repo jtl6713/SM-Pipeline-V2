@@ -119,7 +119,7 @@ def process_request(
     )
 
     try:
-        settings = load_facebook_reel_settings(PipelineSettings(client))
+        settings = load_facebook_reel_settings(PipelineSettings(client), output, client=client)
         graph = FacebookReelClient(
             page_id=settings["page_id"],
             token=settings["token"],

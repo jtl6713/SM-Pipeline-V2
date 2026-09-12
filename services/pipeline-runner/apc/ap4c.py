@@ -102,7 +102,7 @@ def process_request(
 
     replace = bool(field_str(output, "Replace_Transaction_ID"))
     try:
-        graph = InstagramCarouselClient(**load_instagram_settings(PipelineSettings(client)))
+        graph = InstagramCarouselClient(**load_instagram_settings(PipelineSettings(client), output, client=client))
         status_code, payload = graph.publish(field_str(output, "IG_Carousel_Parent_Container_ID"))
     except Exception:
         client.update_record(

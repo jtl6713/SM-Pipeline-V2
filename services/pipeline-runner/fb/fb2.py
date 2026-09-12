@@ -110,7 +110,7 @@ def process_request(
     fingerprint = post_fingerprint(message, ids)
     page_settings = None
     try:
-        page_settings = load_facebook_page_settings(settings)
+        page_settings = load_facebook_page_settings(settings, output, client=client)
     except FacebookPhotoError:
         page_settings = None
     location = resolve_publish_location(
@@ -141,7 +141,7 @@ def process_request(
     single = _ci(field_str(output, "FB_Resolved_Publish_Mode")) == _ci(MODE_SINGLE)
 
     try:
-        creds = page_settings or load_facebook_page_settings(settings)
+        creds = page_settings or load_facebook_page_settings(settings, output, client=client)
         graph = FacebookPhotoClient(**creds)
         place_id = location.page_id if location else None
         if single:

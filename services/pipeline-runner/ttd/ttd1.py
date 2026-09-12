@@ -122,7 +122,7 @@ def process_request(
         return {"processed": True, "retry": True, "reason": "capacity", **result}
 
     try:
-        worker = load_tiktok_settings(settings)
+        worker = load_tiktok_settings(settings, output, client=client)
         api = TikTokDraftClient(base_url=worker["url"], secret=worker["secret"])
         location = resolve_publish_location(client, output, settings=settings)
         result["location"] = location.as_dict() if location else None

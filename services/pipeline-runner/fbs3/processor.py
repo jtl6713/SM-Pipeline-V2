@@ -109,7 +109,7 @@ def process_request(
     pipeline_settings = PipelineSettings(client)
     reel_settings = None
     try:
-        reel_settings = load_facebook_reel_settings(pipeline_settings)
+        reel_settings = load_facebook_reel_settings(pipeline_settings, output, client=client)
     except FacebookReelError:
         reel_settings = None
     location = resolve_publish_location(
@@ -147,7 +147,7 @@ def process_request(
     video_id = field_str(output, "FB_Slideshow_Meta_Video_ID")
     upload_url = field_str(output, "FB_Slideshow_Meta_Upload_URL")
     try:
-        settings = reel_settings or load_facebook_reel_settings(pipeline_settings)
+        settings = reel_settings or load_facebook_reel_settings(pipeline_settings, output, client=client)
         graph = FacebookReelClient(
             page_id=settings["page_id"],
             token=settings["token"],

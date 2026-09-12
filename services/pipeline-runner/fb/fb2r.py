@@ -82,7 +82,7 @@ def process_request(
     expected = facebook_message(output).strip()
     result["expected_message"] = expected
     try:
-        creds = load_facebook_page_settings(settings)
+        creds = load_facebook_page_settings(settings, output, client=client)
         graph = FacebookPhotoClient(**creds)
         status_code, payload = graph.recent_feed(since=feed_since(field_str(output, "Publish_Started_At")))
     except FacebookPhotoError as exc:

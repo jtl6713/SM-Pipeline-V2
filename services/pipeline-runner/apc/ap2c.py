@@ -79,7 +79,7 @@ def process_request(
     settings = PipelineSettings(client)
     delay = setting_int(settings, "IG_CONTAINER_POLL_DELAY_MINUTES", DEFAULT_POLL_DELAY_MINUTES)
     max_attempts = setting_int(settings, "IG_CONTAINER_MAX_POLL_ATTEMPTS", DEFAULT_MAX_POLL_ATTEMPTS)
-    graph = InstagramCarouselClient(**load_instagram_settings(settings))
+    graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
     slides = list_child_slides(client, field_str(output, "Output_ID") or field(output, "Output_ID"))
     for slide in slides:
         try:

@@ -82,7 +82,7 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
-    settings = load_uploader_settings(PipelineSettings(client))
+    settings = load_uploader_settings(PipelineSettings(client), output, client=client)
     status_code, body = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"]).start_upload(payload)
     job_id = str(body.get("id") or "").strip()
     result["http_status"] = status_code

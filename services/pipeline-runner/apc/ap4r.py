@@ -82,7 +82,7 @@ def process_request(
     max_attempts = setting_int(settings, "IG_PUBLISH_RECONCILE_MAX_ATTEMPTS", DEFAULT_RECONCILE_MAX_ATTEMPTS)
     expected = reconcile_caption(output)
     try:
-        graph = InstagramCarouselClient(**load_instagram_settings(settings))
+        graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
         status_code, payload = graph.list_recent_media()
     except Exception:
         client.update_record(

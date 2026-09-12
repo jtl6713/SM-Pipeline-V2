@@ -70,7 +70,7 @@ def process_request(
     now = iso_utc()
     cover_required = native_grid_cover_required(output)
     if cover_required:
-        settings = load_uploader_settings(PipelineSettings(client))
+        settings = load_uploader_settings(PipelineSettings(client), output, client=client)
         uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
         try:
             thumb_url = ensure_youtube_short_cover_url(client, output) or field_str(output, "Thumbnail_URL")

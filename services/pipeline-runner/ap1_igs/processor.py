@@ -74,7 +74,7 @@ def process_request(
     pipeline_settings = PipelineSettings(client)
     graph_settings = None
     try:
-        graph_settings = load_instagram_graph_settings(pipeline_settings)
+        graph_settings = load_instagram_graph_settings(pipeline_settings, output, client=client)
     except InstagramGraphError:
         graph_settings = None
     location = resolve_publish_location(
@@ -122,7 +122,7 @@ def process_request(
     output["fields"] = {**(output.get("fields") or {}), "Output_Notes": started_notes}
 
     try:
-        settings = graph_settings or load_instagram_graph_settings(pipeline_settings)
+        settings = graph_settings or load_instagram_graph_settings(pipeline_settings, output, client=client)
         graph = InstagramReelClient(
             ig_user_id=settings["ig_user_id"],
             token=settings["token"],

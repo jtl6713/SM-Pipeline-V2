@@ -85,7 +85,7 @@ def process_request(
         return {"processed": False, "dry_run": True, **preview}
 
     try:
-        settings = load_instagram_graph_settings(PipelineSettings(client))
+        settings = load_instagram_graph_settings(PipelineSettings(client), output, client=client)
         graph = InstagramReelClient(
             ig_user_id=settings["ig_user_id"],
             token=settings["token"],

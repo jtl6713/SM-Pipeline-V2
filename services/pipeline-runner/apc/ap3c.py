@@ -97,7 +97,7 @@ def process_request(
         return {"processed": True, "needs_child_poll": True, **result}
 
     try:
-        graph = InstagramCarouselClient(**load_instagram_settings(PipelineSettings(client)))
+        graph = InstagramCarouselClient(**load_instagram_settings(PipelineSettings(client), output, client=client))
         status_code, payload = graph.create_parent(children=ids, caption=publish_caption(output))
     except Exception:
         client.update_record(

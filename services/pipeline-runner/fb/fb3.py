@@ -76,7 +76,7 @@ def process_request(
 
     post_id = field_str(output, "Platform_Post_ID")
     try:
-        creds = load_facebook_page_settings(PipelineSettings(client))
+        creds = load_facebook_page_settings(PipelineSettings(client), output, client=client)
         graph = FacebookPhotoClient(**creds)
         status_code, data = graph.post_permalink(post_id)
     except FacebookPhotoError as exc:

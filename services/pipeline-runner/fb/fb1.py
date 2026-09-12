@@ -98,7 +98,7 @@ def process_request(
         return _commit_photo_progress(client, output, record_id, ready, result)
 
     try:
-        creds = load_facebook_page_settings(settings)
+        creds = load_facebook_page_settings(settings, output, client=client)
         graph = FacebookPhotoClient(**creds)
     except FacebookPhotoError as exc:
         return _fail_output(client, record_id, result, message=str(exc), payload=exc.payload)

@@ -94,7 +94,7 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
-    settings = load_uploader_settings(PipelineSettings(client))
+    settings = load_uploader_settings(PipelineSettings(client), output, client=client)
     uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
     status_code, body = uploader.video_status(video_id)
     status = processing_status(body).casefold()

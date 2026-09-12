@@ -77,7 +77,7 @@ def process_request(
     max_attempts = setting_int(settings, "IG_CONTAINER_MAX_POLL_ATTEMPTS", DEFAULT_MAX_POLL_ATTEMPTS)
     attempt = (parse_int(field(output, "IG_Carousel_Parent_Poll_Attempt_Count"), 0) or 0) + 1
     try:
-        graph = InstagramCarouselClient(**load_instagram_settings(settings))
+        graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
         status_code, payload = graph.container_status(field_str(output, "IG_Carousel_Parent_Container_ID"))
     except Exception:
         client.update_record(

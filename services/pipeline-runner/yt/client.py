@@ -6,6 +6,7 @@ import requests
 
 from config import load_settings
 from item4.settings import PipelineSettings
+from publish.destinations import destination_value, resolve_publish_theme
 from yt.constants import THUMBNAIL_MAX_BYTES, THUMBNAIL_QUALITY_FLOOR
 
 
@@ -16,14 +17,20 @@ class YouTubeUploaderError(RuntimeError):
         self.body = body
 
 
-def load_uploader_settings(settings: PipelineSettings) -> dict[str, str]:
+def load_uploader_settings(
+    settings: PipelineSettings,
+    output: dict[str, Any] | None = None,
+    *,
+    client=None,
+) -> dict[str, str]:
     env = load_settings()
+    theme = resolve_publish_theme(output=output, client=client)
     url = (
-        settings.get("YOUTUBE_UPLOAD_SERVICE_URL")
-        or str(env.get("YOUTUBE_UPLOADER_URL") or "")
+        destination_value(settings, "YOUTUBE_UPLOAD_SERVICE_URL", theme)
+        or ("" if theme != "chicago" else str(env.get("YOUTUBE_UPLOADER_URL") or ""))
     ).strip().rstrip("/")
     secret = (
-        settings.get("YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET")
+        destination_value(settings, "YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET", theme)
         or str(env.get("YOUTUBE_UPLOAD_SERVICE_SHARED_SECRET") or "")
     ).strip()
     if not url or not secret:

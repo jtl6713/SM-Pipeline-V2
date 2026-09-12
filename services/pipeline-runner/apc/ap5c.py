@@ -77,7 +77,7 @@ def process_request(
     settings = PipelineSettings(client)
     delay = setting_int(settings, "IG_CONTAINER_POLL_DELAY_MINUTES", DEFAULT_POLL_DELAY_MINUTES)
     try:
-        graph = InstagramCarouselClient(**load_instagram_settings(settings))
+        graph = InstagramCarouselClient(**load_instagram_settings(settings, output, client=client))
         status_code, payload = graph.media_meta(field_str(output, "IG_Carousel_Published_Media_ID"))
     except Exception:
         client.update_record(

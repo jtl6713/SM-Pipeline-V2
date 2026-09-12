@@ -8,6 +8,7 @@ import requests
 
 from fb.constants import DEFAULT_GRAPH_VERSION
 from item4.settings import PipelineSettings
+from publish.destinations import destination_value, resolve_publish_theme
 
 
 class FacebookPhotoError(RuntimeError):
@@ -27,10 +28,18 @@ class FacebookPhotoError(RuntimeError):
         self.ambiguous = ambiguous
 
 
-def load_facebook_page_settings(settings: PipelineSettings) -> dict[str, str]:
-    page_id = settings.get("FACEBOOK_PAGE_ID")
-    token = settings.get("FACEBOOK_PAGE_ACCESS_TOKEN")
-    version = (settings.get("FACEBOOK_GRAPH_API_VERSION") or DEFAULT_GRAPH_VERSION).strip().strip("/")
+def load_facebook_page_settings(
+    settings: PipelineSettings,
+    output: dict[str, Any] | None = None,
+    *,
+    client=None,
+) -> dict[str, str]:
+    theme = resolve_publish_theme(output=output, client=client)
+    page_id = destination_value(settings, "FACEBOOK_PAGE_ID", theme)
+    token = destination_value(settings, "FACEBOOK_PAGE_ACCESS_TOKEN", theme)
+    version = (
+        destination_value(settings, "FACEBOOK_GRAPH_API_VERSION", theme) or DEFAULT_GRAPH_VERSION
+    ).strip().strip("/")
     if not page_id or not token:
         raise FacebookPhotoError("missing-facebook-settings", stage="FB1")
     return {"page_id": page_id, "token": token, "version": version}

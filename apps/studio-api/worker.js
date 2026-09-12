@@ -3098,9 +3098,33 @@ function studioThemeForProfile(record) {
     f(record, "Brand_Name"),
     f(record, "State_Region"),
   ].map((value) => String(value || "").toLowerCase()).join(" ");
-  if (hay.includes("los angeles") || hay.includes("la -") || /\bla\b/.test(hay) || hay.includes("hollywood")) return "la";
+  if (hay.includes("los angeles") || hay.includes("la shining") || hay.includes("la -") || /\bla\b/.test(hay) || hay.includes("hollywood")) return "la";
   if (hay.includes("new york") || hay.includes("nyc") || hay.includes("manhattan")) return "nyc";
   return "chicago";
+}
+
+const STUDIO_CITY_DESTINATION_KEYS = new Set([
+  "FACEBOOK_PAGE_ID",
+  "FACEBOOK_PAGE_ACCESS_TOKEN",
+  "INSTAGRAM_BUSINESS_ACCOUNT_ID",
+  "META_GRAPH_API_ACCESS_TOKEN",
+  "YOUTUBE_CHANNEL_ID",
+  "YOUTUBE_UPLOAD_SERVICE_URL",
+  "TIKTOK_WORKER_BASE_URL",
+]);
+
+async function studioThemeForPublishRecord(env, record) {
+  if (!record) return "chicago";
+  const direct = studioThemeForProfile(record);
+  if (direct !== "chicago") return direct;
+  const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+  if (!contentId || !env.AIRTABLE_CONTENT_TABLE_ID) return direct;
+  try {
+    const item = await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, contentId);
+    return studioThemeForProfile(item);
+  } catch {
+    return direct;
+  }
 }
 
 function studioCityLabel(theme, record) {
@@ -23393,17 +23417,32 @@ function studioOutputReadyForPublishApproval(record) {
   return outputStatus === "Ready for Review" || reviewStatus === "Review Sent";
 }
 
-async function studioActivePipelineSettings(env, names) {
+async function studioActivePipelineSettings(env, names, contextRecord) {
   const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
   if (!wanted.length) return {};
-  const formula = `AND({Active}=1,OR(${wanted.map((name) => `{Setting_Name}='${name.replace(/'/g, "\\'")}'`).join(",")}))`;
-  const rows = await listRecords(env, "Pipeline Settings", { limit: 20, filterFormula: formula });
+  const theme = contextRecord ? await studioThemeForPublishRecord(env, contextRecord) : "chicago";
+  const prefix = theme === "la" ? "LA_" : theme === "nyc" ? "NYC_" : "";
+  const fetchNames = [...wanted];
+  if (prefix) {
+    for (const name of wanted) fetchNames.push(`${prefix}${name}`);
+  }
+  const uniqueFetch = [...new Set(fetchNames)];
+  const formula = `AND({Active}=1,OR(${uniqueFetch.map((name) => `{Setting_Name}='${name.replace(/'/g, "\\'")}'`).join(",")}))`;
+  const rows = await listRecords(env, "Pipeline Settings", { limit: 40, filterFormula: formula });
   const map = {};
   for (const row of rows) {
     const name = String(f(row, "Setting_Name") || "").trim();
     if (name) map[name] = String(f(row, "Setting_Value") || "").trim();
   }
-  return map;
+  const resolved = {};
+  for (const name of wanted) {
+    if (prefix && STUDIO_CITY_DESTINATION_KEYS.has(name)) {
+      resolved[name] = map[`${prefix}${name}`] || "";
+    } else {
+      resolved[name] = (prefix && map[`${prefix}${name}`]) || map[name] || "";
+    }
+  }
+  return resolved;
 }
 
 async function studioPulseMakeWebhook(env, url, recordId, target, extra = {}) {
@@ -23479,7 +23518,7 @@ async function studioAttachFacebookNativeCover(env, record) {
   const settings = await studioActivePipelineSettings(env, [
     "FACEBOOK_PAGE_ACCESS_TOKEN",
     "FACEBOOK_GRAPH_API_VERSION",
-  ]);
+  ], record);
   const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
   const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
   if (!token) return { ok: false, skipped: "missing-facebook-settings" };
@@ -24148,7 +24187,7 @@ async function studioPublishInstagramFeedPhotoInner(env, record) {
     "INSTAGRAM_BUSINESS_ACCOUNT_ID",
     "FACEBOOK_PAGE_ACCESS_TOKEN",
     "FACEBOOK_GRAPH_API_VERSION",
-  ]);
+  ], record);
   const igUserId = settings.INSTAGRAM_BUSINESS_ACCOUNT_ID;
   const token = settings.FACEBOOK_PAGE_ACCESS_TOKEN;
   const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
@@ -24249,7 +24288,7 @@ async function studioPublishFacebookPageStory(env, record) {
     "FACEBOOK_PAGE_ID",
     "FACEBOOK_PAGE_ACCESS_TOKEN",
     "FACEBOOK_GRAPH_API_VERSION",
-  ]);
+  ], record);
   const pageId = settings.FACEBOOK_PAGE_ID;
   const token = settings.FACEBOOK_PAGE_ACCESS_TOKEN;
   const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
