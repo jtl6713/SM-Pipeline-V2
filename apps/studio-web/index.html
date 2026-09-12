@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.295-library-picker-previews">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.296-ingest-profile">
 </head>
 <body>
  <header class="topbar">
@@ -1039,7 +1039,7 @@
  </section>
 
  <section id="page-library" class="page">
- <div class="page-heading"><div><span class="eyebrow" id="libraryEyebrow">Photos and clips</span><h1>Asset Manager</h1><p id="libraryBlurb">Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, rename a still or clip to refresh classification, or delete an unused Studio upload. Production and the wizard attach from this same catalogue. Published files is a separate list of live Platform Outputs.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
+ <div class="page-heading"><div><span class="eyebrow" id="libraryEyebrow">Photos and clips</span><h1>Asset Manager</h1><p id="libraryBlurb">Opens on the 5 most recent Drive stills and Raw Footage. Files dropped in the Drive ingestion folder wait here until you assign a Content Profile; that starts AI tagging. Each card shows when it was added, file size when known, and clips show duration when known. Add photos or clips, rename a still or clip to refresh classification, or delete an unused Studio upload. Production and the wizard attach from this same catalogue. Published files is a separate list of live Platform Outputs.</p></div><div class="heading-actions"><label class="primary-button native-file-label" id="libraryAddButton">+ Add assets<input id="libraryFileInput" class="native-file-input" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple></label><button class="secondary-button" data-refresh="library">Refresh</button></div></div>
  <section class="panel music-upload-panel" id="libraryUploadPanel">
  <div id="libraryDropBlock">
  <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Optional asset name numbers them in order (Space Museum 1, 2…) and continues after any matching names already in Airtable. Files go to Google Drive, register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
@@ -1071,6 +1071,7 @@
  <option value="">Photos and clips</option>
  <option value="photo">Photos only</option>
  <option value="video">Clips only</option>
+ <option value="needs_profile">Needs profile</option>
  <option value="published">Published files</option>
  </select>
  </label>
@@ -1525,7 +1526,8 @@
  <ul>
  <li>The tab opens on the 5 newest assets. Cards show an Added date when Intake_Date is known, file size when File_Size_Bytes or File_Size_MB is stored, and clips show duration (0:42 or 1:02:03) when Duration_Seconds is stored or can be measured. Use Show this many on page, then Previous and Next. Search by name or location. Opening the tab does not load every thumbnail.</li>
  <li>Use + Add assets or drop files on this page. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
- <li>Rename updates the Airtable name and the Drive file, then re-runs classification so tags, location, and description pick up the new name.</li>
+ <li>Files dropped in the Drive ingestion folder stay Needs Classification until you assign a Content Profile on the card. That assignment starts AI tagging for that city library.</li>
+ <li>Rename updates the Airtable name and the Drive file, then re-runs classification so tags, location, and description pick up the new name. Rename still needs a profile first.</li>
  <li>Delete removes the Airtable row and trashes the Drive file when nothing still has that asset attached.</li>
  <li>Show → Published files lists live Platform Outputs, not source stills or clips. Open live post confirms the public URL. Remove Drive copy trashes the rendered Drive file and keeps the Platform Output row, publish date, and post link for reporting.</li>
  <li>Library intake on Operations still scans the Drive intake folder for files that did not come through this page.</li>
@@ -1812,6 +1814,6 @@
 
  <script src="/assets/config-0621.js?v=0.6.295-library-picker-previews"></script>
  <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.295-library-picker-previews"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.296-ingest-profile"></script>
 </body>
 </html>

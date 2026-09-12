@@ -201,7 +201,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.295-library-picker-previews";
+  const BUILD_ID = "item4-0.6.296-ingest-profile";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13593,6 +13593,34 @@
     });
   }
 
+  function bindLibraryClassifyButtons(target) {
+    target.querySelectorAll("[data-library-classify]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = button.dataset.libraryClassify;
+        const select = target.querySelector(`[data-library-profile-select="${id}"]`);
+        const profileId = String(select?.value || "").trim();
+        if (!profileId) {
+          setLibraryUploadMessage("Choose a Content Profile first.", "error-text");
+          return;
+        }
+        button.disabled = true;
+        try {
+          const result = await api(`/api/library/${encodeURIComponent(id)}/profile`, {
+            method: "POST",
+            body: JSON.stringify({ content_profile_id: profileId }),
+            timeoutMs: 60000,
+            retries: 0,
+          });
+          setLibraryUploadMessage(result.message || "Assigned profile. Classifying in the background.", "success");
+          await loadLibrary();
+        } catch (error) {
+          setLibraryUploadMessage(error.message, "error-text");
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
   function bindLibraryRenameButtons(target) {
     target.querySelectorAll("[data-library-rename]").forEach((button) => {
       button.addEventListener("click", async () => {
@@ -13745,7 +13773,7 @@
     if (blurb) {
       blurb.textContent = published
         ? "These are published Platform Outputs, not source stills or clips. Confirm the live post, then Remove Drive copy to trash the rendered Drive file. The Airtable row, publish date, and post link stay for reporting."
-        : "Opens on the 5 most recent Drive stills and Raw Footage. Each card shows when it was added, file size when known, and clips show duration when known. Change how many show on the page, then use Previous and Next. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
+        : "Opens on the 5 most recent Drive stills and Raw Footage. Files dropped in the Drive ingestion folder wait here until you assign a Content Profile; that starts AI tagging. Each card shows when it was added, file size when known, and clips show duration when known. Add photos or clips, or delete an unused Studio upload. Production and the wizard attach from this same library. Published files is a separate list of live Platform Outputs.";
     }
     if (search) search.placeholder = published ? "Title, platform, or filename" : "Name or location";
     const sortNewest = $("librarySort")?.querySelector('option[value="newest"]');
@@ -13810,6 +13838,33 @@
     return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="platform_output"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind ${badgeClass}">${badge}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="music-actions">${live}${drive}${release}</div></article>`;
   }
 
+  function libraryClassificationBadge(r) {
+    const status = String(r.classification_status || "").trim();
+    if (status === "Classified") return `<span class="badge published">Classified</span>`;
+    if (status === "Processing") return `<span class="badge ready-for-review">Classifying</span>`;
+    if (status === "Classification Error") return `<span class="badge failed">Classify error</span>`;
+    if (!r.content_profile_id) return `<span class="badge ready-for-review">Needs profile</span>`;
+    return `<span class="badge ready-for-review">Needs classification</span>`;
+  }
+
+  function libraryNeedsManualClassify(r) {
+    const status = String(r.classification_status || "").trim();
+    return status !== "Processing" && status !== "Classified";
+  }
+
+  function libraryProfileSelectHtml(r) {
+    if (!libraryNeedsManualClassify(r)) {
+      return r.content_profile_name
+        ? `<div class="subtle">Profile ${escapeHtml(r.content_profile_name)}</div>`
+        : "";
+    }
+    const selected = r.content_profile_id || selectedProfileId || "";
+    const options = studioProfiles.map((profile) =>
+      `<option value="${escapeHtml(profile.id)}"${profile.id === selected ? " selected" : ""}>${escapeHtml(profile.name || profile.city_label || profile.id)}</option>`
+    ).join("");
+    return `<div class="library-classify"><label class="form-field"><span>Classify to profile</span><select data-library-profile-select="${escapeHtml(r.id)}">${options || '<option value="">No profiles</option>'}</select></label><button type="button" class="secondary-button" data-library-classify="${escapeHtml(r.id)}">Classify</button></div>`;
+  }
+
   function renderSourceLibraryCard(r) {
     const preview = libraryPreviewUrl(r);
     const video = String(r.media_kind || "").toLowerCase() === "video";
@@ -13849,8 +13904,10 @@
       duration ? `<span data-library-duration>${escapeHtml(duration)}</span>` : (video ? `<span data-library-duration hidden></span>` : ""),
       size ? `<span>${escapeHtml(size)}</span>` : "",
       r.location ? `<span>${value(r.location)}</span>` : "",
+      r.content_profile_name ? `<span>${escapeHtml(r.content_profile_name)}</span>` : "",
     ].filter(Boolean).join("");
-    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div><div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
+    const classify = libraryNeedsManualClassify(r) ? libraryProfileSelectHtml(r) : "";
+    return `<article class="library-card" data-library-id="${escapeHtml(r.id)}" data-library-record-type="media_asset" data-library-needs-duration="${needsDuration}"><div class="library-card-media"${playAttrs}>${media}<em class="library-kind">${video ? "Clip" : "Photo"}</em></div><h3>${value(r.name)}</h3><div class="library-meta">${meta}</div><div class="subtle">${value(r.description, "No description yet")}</div>${classify}<div class="music-actions">${r.google_drive_url ? `<a class="link-button" target="_blank" rel="noopener" href="${escapeHtml(r.google_drive_url)}">Open in Drive</a>` : ""}${r.studio_uploaded ? `<span class="badge ready-for-review">Studio upload</span>` : ""}${libraryClassificationBadge(r)}<span class="badge ${r.do_not_use ? "failed" : "published"}">${r.do_not_use ? "Do not use" : "Available"}</span><button type="button" class="text-button" data-library-rename="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "")}">Rename</button><button type="button" class="text-button" data-library-delete="${escapeHtml(r.id)}" data-library-name="${escapeHtml(r.name || "this asset")}">Delete</button></div></article>`;
   }
 
   function renderLibraryCards(records) {
@@ -13902,12 +13959,14 @@
     const query = String($("librarySearch")?.value || "").trim();
     const kind = libraryKindFilterValue();
     const published = kind === "published";
+    const needsProfile = kind === "needs_profile";
     const pager = $("libraryPager");
     if (pager) pager.hidden = true;
     target.innerHTML = '<div class="empty">Loading this page…</div>';
     const params = new URLSearchParams({ limit: String(libraryPageSize()) });
     if (query) params.set("q", query);
-    if (kind) params.set("kind", kind);
+    if (kind && !needsProfile) params.set("kind", kind);
+    if (needsProfile) params.set("needs_profile", "1");
     const sort = String($("librarySort")?.value || "newest").trim() || "newest";
     if (sort && sort !== "newest") params.set("sort", sort);
     else params.set("sort", sort);
@@ -13931,11 +13990,14 @@
             : '<div class="empty">No library photos or clips matched that search or date filter.</div>')
           : (published
             ? '<div class="empty">No published Platform Outputs on this page.</div>'
-            : '<div class="empty">No library photos or clips on this page.</div>');
+            : needsProfile
+              ? '<div class="empty">No Drive-ingested photos or clips are waiting for a profile.</div>'
+              : '<div class="empty">No library photos or clips on this page.</div>');
         updateLibraryPager();
         return;
       }
       target.innerHTML = renderLibraryCards(records);
+      bindLibraryClassifyButtons(target);
       bindLibraryRenameButtons(target);
       bindLibraryDeleteButtons(target);
       bindLibraryReleaseButtons(target);
@@ -15449,8 +15511,8 @@
     if (meta) {
       const names = (intake.needing_classification || []).map((row) => row.name).filter(Boolean).slice(0, 5);
       meta.textContent = names.length
-        ? `Waiting on classification: ${names.join(", ")}${intake.needing_classification.length > 5 ? "…" : ""}`
-        : "Classification queue is empty. Oversized videos still appear in the list below.";
+        ? `Waiting for profile assignment in Asset Manager: ${names.join(", ")}${intake.needing_classification.length > 5 ? "…" : ""}`
+        : "No Drive-ingested files are waiting for a profile. Oversized videos still appear in the list below.";
     }
   }
 

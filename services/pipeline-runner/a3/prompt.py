@@ -119,7 +119,29 @@ def metadata_block(record: dict[str, Any], *, extra: bool = False) -> str:
                 f"Do_Not_Use: {field(record, 'Do_Not_Use')}",
             ]
         )
-    return "\n".join(fields)
+    text = "\n".join(fields)
+    extra_profile = profile_block(record)
+    return f"{text}\n\n{extra_profile}" if extra_profile else text
+
+
+def profile_block(record: dict[str, Any]) -> str:
+    profile = record.get("_content_profile")
+    if not isinstance(profile, dict):
+        return ""
+    return "\n".join(
+        [
+            "Assigned Content Profile:",
+            f"Profile Name: {field_str(profile, 'Profile_Name')}",
+            f"Market Name: {field_str(profile, 'Market_Name')}",
+            f"Asset Filter Tag: {field_str(profile, 'Asset_Filter_Tag')}",
+            f"Priority Locations: {field_str(profile, 'Priority_Locations')}",
+            f"Avoid Topics: {field_str(profile, 'Avoid_Topics')}",
+            f"Local Context: {field_str(profile, 'Local_Context')}",
+            f"Allowed Content Themes: {field(profile, 'Allowed_Content_Themes')}",
+            "Treat this assigned market as the library this asset belongs to.",
+            "Location, Search_Keywords, Topic, and AI_Tags should match that city unless the visual evidence clearly contradicts it.",
+        ]
+    )
 
 
 def audio_prompt(record: dict[str, Any]) -> str:
@@ -191,6 +213,7 @@ Frame rules:
 - Vertical frames: Orientation=Portrait and Aspect_Ratio=9:16.
 - Horizontal frames: Orientation=Landscape and Aspect_Ratio=16:9.
 - Visual evidence wins when metadata conflicts.
+- When an Assigned Content Profile is present, treat that market as the owning library.
 
 {ALLOWED_VALUES}
 
@@ -252,6 +275,7 @@ Filename and embedded metadata are authoritative for tagging:
 - Preserve embedded keywords, captions, and descriptions from the image metadata response
   in Search_Keywords and AI_Tags instead of replacing them with invented synonyms.
 - You may add visual tags the metadata missed, but do not drop filename or embedded tags.
+- When an Assigned Content Profile is present, treat that market as the owning library.
 
 Required classification:
 - Media_Class=Image for ordinary photographic images.

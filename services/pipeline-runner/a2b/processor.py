@@ -74,7 +74,7 @@ def _backfill_fields(file: dict[str, Any], *, batch_id: str) -> dict[str, Any]:
 def process_request(
     *,
     dry_run: bool = False,
-    trigger_a3: bool = True,
+    trigger_a3: bool = False,
     wait_for_next: bool = True,
     test_run_id: str | None = None,
     drain: bool = False,

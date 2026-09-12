@@ -11,12 +11,12 @@ from a3.metadata_merge import merge_photo_metadata_fields
 from a3.openai_classify import classify_asset
 from a3.prompt import audio_prompt, image_prompt, video_frames_prompt, video_metadata_prompt
 from airtable.client import AirtableClient
-from airtable.constants import MEDIA_ASSETS_TABLE
+from airtable.constants import CONTENT_PROFILES_TABLE, MEDIA_ASSETS_TABLE
 from asset.chain import daisy_payload, trigger_next
 from asset.constants import A3_CLASSIFY_VIEW, A3_DRAIN_MAX_PASSES, A3_MAX_RECORDS
 from asset.helpers import as_bool, join_list, parse_int, uc_download_url
 from asset.routing import a3_mime_route, a3_needs_jpeg_preview, audio_role_fallback
-from render.fields import field_str
+from render.fields import field, field_str, first_linked_id
 
 
 def _as_list(value: Any) -> list[str]:
@@ -95,7 +95,30 @@ def _frame_urls(payload: dict[str, Any]) -> tuple[int, list[str], list[str]]:
     return count, unique_urls, urls
 
 
+def content_profile_id(record: dict[str, Any]) -> str | None:
+    return first_linked_id(field(record, "Content_Profile"))
+
+
+def attach_content_profile(client: AirtableClient, record: dict[str, Any]) -> dict[str, Any]:
+    profile_id = content_profile_id(record)
+    enriched = dict(record)
+    if not profile_id:
+        enriched["_content_profile"] = None
+        return enriched
+    try:
+        enriched["_content_profile"] = client.get_record(CONTENT_PROFILES_TABLE, profile_id)
+    except Exception:
+        enriched["_content_profile"] = None
+    return enriched
+
+
 def _classify_one(client: AirtableClient, record: dict[str, Any]) -> dict[str, Any]:
+    if not content_profile_id(record):
+        return {
+            "id": record["id"],
+            "status": "skipped_no_profile",
+            "error": "Content_Profile is required before A3",
+        }
     client.update_record(MEDIA_ASSETS_TABLE, record["id"], {"Classification_Status": "Processing"})
     try:
         return _classify_one_body(client, record)
@@ -113,7 +136,13 @@ def _classify_one(client: AirtableClient, record: dict[str, Any]) -> dict[str, A
 
 
 def _classify_one_body(client: AirtableClient, record: dict[str, Any]) -> dict[str, Any]:
-    fresh = client.get_record(MEDIA_ASSETS_TABLE, record["id"])
+    fresh = attach_content_profile(client, client.get_record(MEDIA_ASSETS_TABLE, record["id"]))
+    if not content_profile_id(fresh):
+        return {
+            "id": fresh["id"],
+            "status": "skipped_no_profile",
+            "error": "Content_Profile is required before A3",
+        }
     route = a3_mime_route(field_str(fresh, "MIME_Type"))
     if route == "audio":
         result = classify_asset(audio_prompt(fresh), max_output_tokens=4000)
@@ -224,13 +253,17 @@ def process_request(
     targeted = normalize_record_ids(record_ids)
 
     def _load_rows() -> list[dict[str, Any]]:
-        return client.list_records(
-            MEDIA_ASSETS_TABLE,
-            view=A3_CLASSIFY_VIEW,
-            max_records=limit,
-            sort_field="Intake_Date",
-            sort_direction="asc",
-        )
+        return [
+            row
+            for row in client.list_records(
+                MEDIA_ASSETS_TABLE,
+                view=A3_CLASSIFY_VIEW,
+                max_records=limit,
+                sort_field="Intake_Date",
+                sort_direction="asc",
+            )
+            if content_profile_id(row)
+        ]
 
     classified: list[dict[str, Any]] = []
     if targeted:
@@ -252,14 +285,28 @@ def process_request(
             classified.append(_classify_one(client, row))
         preview["classified"] = classified
         preview["classify_passes"] = 1
-        classified_ok = [item for item in classified if item.get("status") not in {"missing", "unsupported"}]
-        if not classified_ok and not any(item.get("status") == "unsupported" for item in classified):
-            return {
-                "processed": False,
-                "reason": "record_not_found",
-                "classified_count": 0,
-                **preview,
-            }
+        classified_ok = [
+            item
+            for item in classified
+            if item.get("status") not in {"missing", "unsupported", "skipped_no_profile"}
+        ]
+        if not classified_ok:
+            if any(item.get("status") == "skipped_no_profile" for item in classified) and not any(
+                item.get("status") == "missing" for item in classified
+            ):
+                return {
+                    "processed": False,
+                    "reason": "content_profile_required",
+                    "classified_count": 0,
+                    **preview,
+                }
+            if not any(item.get("status") == "unsupported" for item in classified):
+                return {
+                    "processed": False,
+                    "reason": "record_not_found",
+                    "classified_count": 0,
+                    **preview,
+                }
         return {
             "processed": True,
             "classified_count": len(classified_ok),

@@ -189,6 +189,8 @@ export default {
       const isAssetLibraryRecordRoute = /^\/api\/library\/rec[A-Za-z0-9]+$/.test(url.pathname);
       const isAssetLibraryDeleteWrite = isAssetLibraryRecordRoute && request.method === "DELETE";
       const isAssetLibraryRenameWrite = isAssetLibraryRecordRoute && request.method === "PATCH";
+      const isAssetLibraryProfileRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/profile$/.test(url.pathname);
+      const isAssetLibraryProfileWrite = isAssetLibraryProfileRoute && request.method === "POST";
       const isAssetLibraryDurationRoute = /^\/api\/library\/rec[A-Za-z0-9]+\/duration$/.test(url.pathname);
       const isAssetLibraryDurationWrite = isAssetLibraryDurationRoute && request.method === "POST";
       const isPublishedLibraryReleaseRoute = /^\/api\/library\/published\/rec[A-Za-z0-9]+\/release-file$/.test(url.pathname);
@@ -270,6 +272,7 @@ export default {
         isAssetLibraryUploadWrite ||
         isAssetLibraryDeleteWrite ||
         isAssetLibraryRenameWrite ||
+        isAssetLibraryProfileWrite ||
         isAssetLibraryDurationWrite ||
         isPublishedLibraryReleaseWrite ||
         isItem4AssetDeleteWrite ||
@@ -1119,6 +1122,11 @@ export default {
       if (isAssetLibraryDurationWrite) {
         assertWriteRequest(request, env);
         return patchAssetLibraryDuration(request, env, url);
+      }
+
+      if (isAssetLibraryProfileWrite) {
+        assertWriteRequest(request, env);
+        return assignLibraryAssetProfile(request, env, url, authorization, ctx);
       }
 
       if (isPublishedLibraryReleaseWrite) {
@@ -17095,12 +17103,17 @@ async function libraryProfileScopeFormula(env, authorization, url, options = {})
   });
 }
 
-function assetLibraryFilterFormula(query, kind) {
+function assetLibraryFilterFormula(query, kind, needsProfile = false) {
   const parts = [ASSET_LIBRARY_LIST_FORMULA];
   const normalizedKind = String(kind || "").trim().toLowerCase();
   if (normalizedKind === "video") parts.push("{Media_Class}='Video'");
+  const needsProfileFlag = needsProfile || normalizedKind === "needs_profile";
   if (normalizedKind === "photo" || normalizedKind === "image") {
     parts.push("OR({Media_Class}='Image',{Media_Class}='Graphic')");
+  }
+  if (needsProfileFlag) {
+    parts.push("{Content_Profile}=BLANK()");
+    parts.push("OR({Classification_Status}='Needs Classification',{Classification_Status}='Classification Error')");
   }
   const needle = String(query || "").trim().toLowerCase();
   if (needle) {
@@ -17111,13 +17124,15 @@ function assetLibraryFilterFormula(query, kind) {
   return `AND(${parts.join(",")})`;
 }
 
-function mapLibraryAsset(record) {
+function mapLibraryAsset(record, profilesById = {}) {
   const video = ideaLibraryIsEligibleVideo(record)
     || String(f(record, "Media_Class") || "").trim().toLowerCase() === "video"
     || String(f(record, "MIME_Type") || "").trim().toLowerCase().startsWith("video/");
   const transferId = String(f(record, "Studio_Transfer_ID") || "");
   const doNotUse = Boolean(f(record, "Do_Not_Use"));
   const sizeBytes = ideaLibraryFileBytes(record);
+  const profileId = firstLinkedRecordId(f(record, "Content_Profile"));
+  const profile = profileId ? profilesById[profileId] : null;
   return {
     record_type: "media_asset",
     id: record.id,
@@ -17138,6 +17153,9 @@ function mapLibraryAsset(record) {
     do_not_use: doNotUse,
     studio_uploaded: transferId.startsWith("LIB-"),
     intake_date: ideaLibraryIntakeDate(record) || null,
+    classification_status: String(f(record, "Classification_Status") || "").trim() || null,
+    content_profile_id: profileId || null,
+    content_profile_name: profile ? String(f(profile, "Profile_Name") || "").trim() || null : null,
   };
 }
 
@@ -17146,6 +17164,8 @@ async function listAssetLibrary(request, env, url, authorization) {
   if (kind === "published") return listPublishedLibraryFiles(request, env, url);
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
+  const needsProfile = ["1", "true", "yes"].includes(String(url.searchParams.get("needs_profile") || "").trim().toLowerCase())
+    || kind === "needs_profile";
   const requestedLimit = Number(url.searchParams.get("limit"));
   const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
   const offset = String(url.searchParams.get("offset") || "").trim() || null;
@@ -17154,25 +17174,30 @@ async function listAssetLibrary(request, env, url, authorization) {
   const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: false });
   const crossScope = await resolveLibraryCrossScope(env, url);
   const scopeFormula = await libraryProfileScopeFormula(env, authorization, url);
-  const page = await listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-    limit,
-    offset,
-    sortField: sort.sortField,
-    sortDirection: sort.sortDirection,
-    filterFormula: combineAirtableFormulas(
-      assetLibraryFilterFormula(query, kind),
-      libraryAddedDateFilterFormula(addedFrom, addedTo, "Intake_Date"),
-      scopeFormula,
-    ),
-  });
+  const [page, profiles] = await Promise.all([
+    listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
+      limit,
+      offset,
+      sortField: sort.sortField,
+      sortDirection: sort.sortDirection,
+      filterFormula: combineAirtableFormulas(
+        assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
+        libraryAddedDateFilterFormula(addedFrom, addedTo, "Intake_Date"),
+        scopeFormula,
+      ),
+    }),
+    listContentProfileRecords(env).catch(() => []),
+  ]);
+  const profilesById = Object.fromEntries((profiles || []).map((row) => [row.id, row]));
   const mapped = page.records
     .filter((record) => !/__\d+x\d+__/i.test(String(f(record, "Asset Name") || "")))
-    .map(mapLibraryAsset);
+    .map((record) => mapLibraryAsset(record, profilesById));
   return respond(request, env, {
     ok: true,
     idle: false,
     query: query || null,
     kind: kind || null,
+    needs_profile: needsProfile || null,
     sort: sort.sort,
     added_from: addedFrom,
     added_to: addedTo,
@@ -17418,6 +17443,62 @@ async function renameStudioAssetOnDrive(env, fileId, filename) {
     google_drive_file_id: driveId,
     filename: String(payload?.filename || name),
   };
+}
+
+async function libraryAssetProfilesById(env) {
+  const profiles = await listContentProfileRecords(env).catch(() => []);
+  return Object.fromEntries((profiles || []).map((row) => [row.id, row]));
+}
+
+function assertLibrarySourceAsset(record) {
+  const role = String(f(record, "Asset_Role") || "").trim();
+  const mediaClass = String(f(record, "Media_Class") || "").trim().toLowerCase();
+  if (role === "Music") throw new HttpError(409, "Rename music tracks from the Music Manager tab");
+  if (!["image", "graphic", "video"].includes(mediaClass) && role !== "Raw Footage") {
+    throw new HttpError(409, "Only photo and video library assets can be updated here");
+  }
+}
+
+async function assignLibraryAssetProfile(request, env, url, authorization, ctx) {
+  if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
+  const recordId = String(url.pathname.split("/")[3] || "");
+  if (!/^rec[A-Za-z0-9]+$/.test(recordId)) throw new HttpError(400, "Invalid library record");
+  let payload = {};
+  try { payload = await request.json(); } catch { payload = {}; }
+  const profileId = String(payload?.content_profile_id || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(profileId)) throw new HttpError(400, "Choose a Content Profile");
+  const profile = await resolveWorkingContentProfile(env, authorization, profileId);
+  const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
+  assertLibrarySourceAsset(record);
+  const updated = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      fields: {
+        Content_Profile: [profile.id],
+        Classification_Status: "Needs Classification",
+      },
+      typecast: true,
+    }),
+  });
+  const classify = (async () => {
+    try {
+      await pulseLibraryAssetClassification(env, recordId);
+    } catch (error) {
+      console.warn("library profile classify failed", error?.message || String(error));
+    }
+  })();
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(classify);
+  else await classify.catch(() => {});
+  const profilesById = await libraryAssetProfilesById(env);
+  const profileName = String(f(profile, "Profile_Name") || "").trim();
+  return respond(request, env, {
+    ok: true,
+    classifying: true,
+    id: recordId,
+    content_profile_id: profile.id,
+    record: mapLibraryAsset(updated || record, profilesById),
+    message: `Assigned ${profileName || "profile"}. Classifying in the background — refresh to see updated tags.`,
+  });
 }
 
 async function pulseLibraryAssetClassification(env, recordId) {
@@ -31176,19 +31257,11 @@ async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
     compression_triggered: compressionTriggered,
   };
   const status = await buildLibraryIntakeStatus(env, startedAt, knownA2);
-  const waitingClassify = (status.library_intake?.needing_classification || []).length;
-  if (!filesFound && waitingClassify) {
-    const classifyTask = item4PulsePipelineStage(env, "a3", {
-      extra: { drain: true, trigger_a4: true, wait_for_next: false },
-    }, "A3");
-    if (ctx?.waitUntil) ctx.waitUntil(classifyTask);
-    else await classifyTask;
-  }
   return respond(request, env, {
     ok: true,
     triggered: "a2-python",
     scenario_id: STUDIO_A2_SCENARIO_ID,
-    daisy_chain: ["A2", "A2B", "A3", "A4"],
+    daisy_chain: ["A2", "A2B"],
     hook_response: String(payload?.message || "python-a2").slice(0, 200),
     skipped_oversize_count: skippedOversizeCount,
     compression_triggered: compressionTriggered,
@@ -31212,12 +31285,12 @@ function mapLibraryIntakeSnapshot(needingClassification, oversized) {
   const classify = (needingClassification || []).map(mapLibraryIntakeAsset);
   const oversize = Array.isArray(oversized) ? oversized : [];
   const notices = [];
-  if (classify.length) notices.push(`${classify.length} asset${classify.length === 1 ? "" : "s"} waiting for classification`);
+  if (classify.length) notices.push(`${classify.length} asset${classify.length === 1 ? "" : "s"} waiting for profile assignment`);
   if (oversize.length) notices.push(`${oversize.length} oversized video${oversize.length === 1 ? "" : "s"} need compression`);
   return {
     a0_parked: true,
     a2_webhook: true,
-    daisy_chain: ["A2", "A2B", "A3", "A4"],
+    daisy_chain: ["A2", "A2B"],
     action_required: classify.length + oversize.length,
     notice: notices.length ? notices.join(". ") + "." : "No library assets currently require action.",
     needing_classification: classify,
@@ -31370,35 +31443,37 @@ async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const a2 = inferredA2 || firstRunSince(a2Runs, startedAt);
   const a2ResultPreview = describeA2Run(a2);
   const a2b = firstRunSince(a2bRuns, startedAt) || (a2 && a2bPython ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
-  const a3 = firstRunSince(a3Runs, startedAt) || (a2 && a3Python ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
-  const a4 = firstRunSince(a4Runs, startedAt) || (a2 && a4Python ? pythonIntakeRun(startedAt, a2ResultPreview.files_found ? 8 : 2) : null);
+  const a3 = firstRunSince(a3Runs, startedAt);
+  const a4 = firstRunSince(a4Runs, startedAt);
   const a2Result = describeA2Run(a2);
   const classifyCount = (needingClassification || []).length;
   const skipped = a2Result.files_found === false && !classifyCount ? "Skipped — no files to intake." : null;
-  const a3Detail = a3
-    ? (a3.state === "error" ? "A3 failed." : (classifyCount ? `${classifyCount} still waiting for classification.` : "A3 finished."))
-    : (skipped || (a2b ? "Starting A3…" : "Queued"));
+  const a3Detail = classifyCount
+    ? `${classifyCount} waiting for profile assignment in Asset Manager.`
+    : a3
+      ? (a3.state === "error" ? "A3 failed." : "A3 finished.")
+      : (skipped || "A3 waits until a profile is assigned in Asset Manager.");
   const stages = [
     { key: "A2", label: "Intake", run: a2, ...a2Result },
     { key: "A2B", label: "Video backfill", run: a2b, detail: a2b ? (a2b.state === "error" ? "A2B failed." : "A2B finished.") : (skipped || (a2 ? "Starting A2B…" : "Queued")) },
     { key: "A3", label: "Classification", run: a3, detail: a3Detail },
-    { key: "A4", label: "Reconciliation", run: a4, detail: a4 ? (a4.state === "error" ? "A4 failed." : (classifyCount ? "Waiting on A3." : "A4 finished.")) : (skipped || (a3 ? "Starting A4…" : "Queued")) },
+    { key: "A4", label: "Reconciliation", run: a4, detail: a4 ? (a4.state === "error" ? "A4 failed." : "A4 finished.") : (skipped || "Queued") },
   ];
   const failed = a2Result.result === "error" || [a2b, a3, a4].some((run) => run?.state === "error");
   const empty = a2Result.files_found === false && !classifyCount;
-  const processedDone = Boolean(a2Result.files_found && (a4 || (a3 && Date.now() - Date.parse(a3.timestamp || "") > 45000))) && !classifyCount;
-  const complete = failed || empty || processedDone;
-  const percent = empty || (complete && !failed) ? 100 : failed ? 40 : classifyCount ? 70 : a2Result.files_found ? 55 : 12;
+  const intakeDone = Boolean(a2) && a2Result.result !== "waiting" && a2Result.result !== "error";
+  const complete = failed || empty || intakeDone;
+  const percent = empty || (complete && !failed) ? 100 : failed ? 40 : a2Result.files_found ? 55 : 12;
   const summary = empty
     ? "A2 completed with no assets to process"
-    : classifyCount
-      ? `${classifyCount} asset${classifyCount === 1 ? "" : "s"} still waiting for classification.`
+    : classifyCount && intakeDone
+      ? `Intake finished. ${classifyCount} asset${classifyCount === 1 ? "" : "s"} need a profile in Asset Manager before classification.`
       : a2Result.result === "oversize_only"
       ? a2Result.detail
       : failed
         ? a2Result.detail
         : complete
-          ? "Intake finished. Downstream classification and reconciliation ran."
+          ? "Intake finished. Assign a profile in Asset Manager to classify Drive-ingested files."
           : a2Result.detail;
   return {
     started_at: startedAt,

@@ -17,7 +17,7 @@ def run(request: StageRequest):
         kwargs={
             "test_run_id": (request.test_run_id or extra.get("test_run_id") or "").strip() or None,
             "dry_run": as_bool(extra.get("dry_run")),
-            "trigger_a3": extra.get("trigger_a3") is not False,
+            "trigger_a3": extra.get("trigger_a3") is True,
             "wait_for_next": extra.get("wait_for_next") is not False,
             "drain": as_bool(extra.get("drain")),
         },
