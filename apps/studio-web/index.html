@@ -1571,7 +1571,7 @@
  <ul>
  <li><strong>off</strong> — inventory only. No tickets, no restarts, no PRs.</li>
  <li><strong>observe</strong> (default) — ticket a diagnosis pack only.</li>
- <li><strong>infra</strong> — also SYNC / VERIFY / one-service deploy when public health is down. Local companion on this Windows machine only. Dirty git checkout stops the companion; it never hard-resets.</li>
+ <li><strong>infra</strong> — also SYNC / VERIFY / one-service deploy when public health is down. Local companion on this Windows machine only. Away-from-home hourly keep-alive is <code>HOURLY-Local-Services.bat</code> (no pause). It calls stock START then VERIFY only when <code>/health</code> is down — never STOP ALL. Dirty checkout: log and skip deploy. Never hard-reset.</li>
  <li><strong>patch</strong> — also open PRs. You merge. After merge, ship Worker/Pages via the production trigger files, or PLAN/DEPLOY one local service.</li>
  <li><strong>automerge</strong> — leave off until proven. Allowlisted heal paths only, CI green, caps remain, and the same fingerprint is not repeating.</li>
  </ul>

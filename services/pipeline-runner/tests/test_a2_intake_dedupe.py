@@ -304,6 +304,52 @@ def test_drain_until_idle_processes_a_second_batch(monkeypatch):
     assert started == []
 
 
+def test_drain_until_idle_retries_failed_processed_residue(monkeypatch):
+    from a2.processor import drain_until_idle
+
+    leftover = {
+        "id": "dup1",
+        "name": "River Fog 1.jpg",
+        "mimeType": "image/jpeg",
+        "size": "100",
+        "fileExtension": "jpg",
+        "parents": [GDRIVE_INGESTION_FOLDER],
+    }
+    listings = [
+        [leftover],
+        [leftover],
+        [],
+    ]
+    drive = MagicMock()
+    drive.list_files.side_effect = lambda **_kwargs: listings.pop(0) if listings else []
+    drive.get_file.return_value = {"id": "lib1", "parents": [GDRIVE_PHOTOS_FOLDER]}
+    drive.trash_file.side_effect = [RuntimeError("Drive trash 403"), None]
+    airtable = MagicMock()
+
+    def list_records(*_args, **kwargs):
+        formula = str(kwargs.get("formula") or "")
+        if "Google Drive File ID" in formula and "dup1" in formula:
+            return []
+        if "Asset Name" in formula:
+            return [{"id": "recDUP", "fields": {"Google Drive File ID": "lib1"}}]
+        return []
+
+    airtable.list_records.side_effect = list_records
+
+    monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
+    monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
+    monkeypatch.setattr("a2.processor.GmailClient", lambda: MagicMock())
+    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
+    monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
+    monkeypatch.setattr("a2.processor._daisy_a2b", lambda **_kwargs: {"triggered": False})
+
+    result = drain_until_idle(trigger_a2b=False)
+    assert result["skipped_existing_count"] >= 1
+    assert result["skipped_error_count"] >= 1
+    assert result["intake_passes"] >= 2
+    assert drive.trash_file.call_count >= 2
+
+
 def test_drain_until_idle_starts_compression_then_continues(monkeypatch):
     from a2.processor import drain_until_idle
 
