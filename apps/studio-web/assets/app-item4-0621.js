@@ -203,7 +203,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.302-pr-voice-persist";
+  const BUILD_ID = "item4-0.6.303-library-classify-all";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13681,6 +13681,76 @@
     });
   }
 
+  function bindLibraryCard(card, record) {
+    bindLibraryProfileSelects(card);
+    bindLibraryClassifyButtons(card);
+    bindLibraryRenameButtons(card);
+    bindLibraryDeleteButtons(card);
+    bindLibraryReleaseButtons(card);
+    bindLibraryPreview(card);
+    item4BindClipPlayers(card);
+    bindLibraryPickerPreviews(card, record ? [record] : []);
+  }
+
+  // Swap one card for its fresh server copy so a saved profile shows without reloading the page.
+  function replaceLibraryCard(target, record) {
+    const current = target?.querySelector?.(`.library-card[data-library-id="${record?.id}"]`);
+    if (!current || !record) return false;
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = renderSourceLibraryCard(record);
+    const next = wrapper.firstElementChild;
+    if (!next) return false;
+    current.replaceWith(next);
+    bindLibraryCard(next, record);
+    fillLibraryClipPosters(next);
+    return true;
+  }
+
+  // Changing the dropdown saves the profile only. AI tagging waits for Classify / Classify all.
+  function bindLibraryProfileSelects(target) {
+    target.querySelectorAll("[data-library-profile-select]").forEach((select) => {
+      select.addEventListener("change", async () => {
+        const id = select.dataset.libraryProfileSelect;
+        const profileId = String(select.value || "").trim();
+        if (!id || !profileId) return;
+        select.disabled = true;
+        try {
+          const result = await api(`/api/library/${encodeURIComponent(id)}/profile`, {
+            method: "POST",
+            body: JSON.stringify({ content_profile_id: profileId, classify: false }),
+            timeoutMs: 30000,
+            retries: 0,
+          });
+          setLibraryUploadMessage(result.message || "Saved profile. Use Classify all when you are done.", "success");
+          if (!replaceLibraryCard(target, result.record)) select.disabled = false;
+        } catch (error) {
+          setLibraryUploadMessage(error.message, "error-text");
+          select.disabled = false;
+        }
+      });
+    });
+  }
+
+  async function classifyAllLibraryAssets() {
+    const button = $("libraryClassifyAll");
+    if (button) button.disabled = true;
+    setLibraryUploadMessage("Collecting assets that are waiting for classification…", "");
+    try {
+      const result = await api("/api/library/classify-all", {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: 60000,
+        retries: 0,
+      });
+      setLibraryUploadMessage(result.message || "Classifying in the background.", result.count ? "success" : "");
+      if (result.count) await loadLibrary();
+    } catch (error) {
+      setLibraryUploadMessage(error.message, "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   function bindLibraryClassifyButtons(target) {
     target.querySelectorAll("[data-library-classify]").forEach((button) => {
       button.addEventListener("click", async () => {
@@ -13946,11 +14016,14 @@
         ? `<div class="subtle">Profile ${escapeHtml(r.content_profile_name)}</div>`
         : "";
     }
-    const selected = r.content_profile_id || selectedProfileId || "";
+    // Picking a profile saves it immediately, so an unassigned asset starts on a blank
+    // placeholder instead of silently showing the header profile as if it were saved.
+    const selected = r.content_profile_id || "";
+    const placeholder = selected ? "" : '<option value="" selected>Choose a profile…</option>';
     const options = studioProfiles.map((profile) =>
       `<option value="${escapeHtml(profile.id)}"${profile.id === selected ? " selected" : ""}>${escapeHtml(profile.name || profile.city_label || profile.id)}</option>`
     ).join("");
-    return `<div class="library-classify"><label class="form-field"><span>Classify to profile</span><select data-library-profile-select="${escapeHtml(r.id)}">${options || '<option value="">No profiles</option>'}</select></label><button type="button" class="secondary-button" data-library-classify="${escapeHtml(r.id)}">Classify</button></div>`;
+    return `<div class="library-classify"><label class="form-field"><span>Profile <em>saves on change</em></span><select data-library-profile-select="${escapeHtml(r.id)}">${placeholder}${options || '<option value="">No profiles</option>'}</select></label><button type="button" class="secondary-button" data-library-classify="${escapeHtml(r.id)}" title="Save this profile and run AI tagging on this asset now">Classify</button></div>`;
   }
 
   function renderSourceLibraryCard(r) {
@@ -14085,6 +14158,7 @@
         return;
       }
       target.innerHTML = renderLibraryCards(records);
+      bindLibraryProfileSelects(target);
       bindLibraryClassifyButtons(target);
       bindLibraryRenameButtons(target);
       bindLibraryDeleteButtons(target);
@@ -14342,6 +14416,9 @@
       if ($("libraryAddedFrom")) $("libraryAddedFrom").value = "";
       if ($("libraryAddedTo")) $("libraryAddedTo").value = "";
       reloadLibraryFromDates();
+    });
+    $("libraryClassifyAll")?.addEventListener("click", () => {
+      classifyAllLibraryAssets();
     });
     $("libraryPageSize")?.addEventListener("change", () => {
       resetLibraryPage();

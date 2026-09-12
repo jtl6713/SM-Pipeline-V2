@@ -116,3 +116,44 @@ def test_metadata_block_includes_assigned_profile():
     assert "Assigned Content Profile" in text
     assert "Los Angeles" in text
     assert "la" in text
+
+
+def test_a3_background_runs_once_and_reports_already_running(monkeypatch):
+    import threading
+
+    import stages.a3 as stage
+    from config import StageRequest
+
+    release = threading.Event()
+    calls = []
+
+    def fake_process(**kwargs):
+        calls.append(kwargs)
+        release.wait(timeout=5)
+        return {"processed": True, "classified_count": len(kwargs.get("record_ids") or []), "classify_passes": 1}
+
+    monkeypatch.setattr(stage, "process_request", fake_process)
+    monkeypatch.setattr(stage, "_BACKGROUND_THREAD", None)
+
+    request = StageRequest.from_dict({
+        "extra": {"record_ids": ["recA", "recB"], "background": True, "trigger_a4": False, "wait_for_next": False},
+    })
+    first = stage.run(request)
+    assert first.status == "ok"
+    assert first.details["background"] is True
+    assert first.details["requested_count"] == 2
+
+    second = stage.run(request)
+    assert second.status == "skipped"
+    assert second.details["already_running"] is True
+
+    release.set()
+    stage._BACKGROUND_THREAD.join(timeout=5)
+    assert len(calls) == 1
+    assert calls[0]["record_ids"] == ["recA", "recB"]
+    assert calls[0]["trigger_a4"] is False
+
+    third = stage.run(request)
+    assert third.status == "ok"
+    stage._BACKGROUND_THREAD.join(timeout=5)
+    assert len(calls) == 2
