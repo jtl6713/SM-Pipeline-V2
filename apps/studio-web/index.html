@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.291-library-upload-one">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.292-library-sort-date">
 </head>
 <body>
  <header class="topbar">
@@ -1063,8 +1063,8 @@
  </section>
  <section class="panel" id="libraryResultsPanel">
  <div class="library-results-toolbar">
- <div class="panel-heading"><div><h2>Browse assets</h2><p>Search the catalogue, change what shows, then browse the results below.</p></div></div>
- <div class="library-toolbar">
+ <div class="panel-heading"><div><h2>Browse assets</h2><p>Search, sort, and filter by date added — works with or without a search — then browse the results below.</p></div></div>
+  <div class="library-toolbar">
  <label class="form-field"><span>Search</span><input id="librarySearch" type="search" placeholder="Name or location"></label>
  <label class="form-field"><span>Show</span>
  <select id="libraryKindFilter">
@@ -1072,6 +1072,14 @@
  <option value="photo">Photos only</option>
  <option value="video">Clips only</option>
  <option value="published">Published files</option>
+ </select>
+ </label>
+ <label class="form-field"><span>Sort</span>
+ <select id="librarySort">
+ <option value="newest" selected>Newest added</option>
+ <option value="oldest">Oldest added</option>
+ <option value="name_asc">Name A–Z</option>
+ <option value="name_desc">Name Z–A</option>
  </select>
  </label>
  <label class="form-field"><span>Layout</span>
@@ -1089,6 +1097,12 @@
  <option value="50">50</option>
  </select>
  </label>
+ </div>
+ <div class="library-toolbar library-toolbar-dates">
+ <label class="form-field"><span id="libraryAddedFromLabel">Added from</span><input id="libraryAddedFrom" type="date"></label>
+ <label class="form-field"><span id="libraryAddedToLabel">Added to</span><input id="libraryAddedTo" type="date"></label>
+ <div class="library-date-actions">
+ <button type="button" class="secondary-button" id="libraryClearDates">Clear dates</button>
  </div>
  </div>
  <div id="libraryList" class="library-grid"></div>
@@ -1650,7 +1664,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.291</span> </div>
+ <span id="uiBuildLabel">UI build 0.6.292</span> </div>
  </footer>
 
  <div class="drawer-backdrop" id="ideaDrawerBackdrop" hidden></div>
@@ -1796,8 +1810,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.291-library-upload-one"></script>
+ <script src="/assets/config-0621.js?v=0.6.292-library-sort-date"></script>
  <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.291-library-upload-one"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.292-library-sort-date"></script>
 </body>
 </html>

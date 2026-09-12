@@ -30,6 +30,60 @@ export function airtableSearchEscape(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+/** Accept only calendar days as YYYY-MM-DD for Asset Manager date filters. */
+export function parseLibraryDateParam(raw) {
+  const value = String(raw || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const utc = Date.UTC(year, month - 1, day);
+  const dt = new Date(utc);
+  if (dt.getUTCFullYear() !== year || dt.getUTCMonth() !== month - 1 || dt.getUTCDate() !== day) return null;
+  return value;
+}
+
+/**
+ * Sort for Asset Manager browse. Works with or without search/date filters.
+ * Media assets: Intake_Date / Asset Name. Published outputs: Published_At / Output_Title.
+ */
+export function resolveLibraryListSort(sortRaw, { published = false } = {}) {
+  const key = String(sortRaw || "newest").trim().toLowerCase().replace(/-/g, "_");
+  const dateField = published ? "Published_At" : "Intake_Date";
+  const nameField = published ? "Output_Title" : "Asset Name";
+  if (key === "oldest") {
+    return { sort: "oldest", sortField: dateField, sortDirection: "asc" };
+  }
+  if (key === "name_asc") {
+    return { sort: "name_asc", sortField: nameField, sortDirection: "asc" };
+  }
+  if (key === "name_desc") {
+    return { sort: "name_desc", sortField: nameField, sortDirection: "desc" };
+  }
+  return { sort: "newest", sortField: dateField, sortDirection: "desc" };
+}
+
+/** Inclusive date-added / published-at window for Airtable date or date-time fields. */
+export function libraryAddedDateFilterFormula(fromRaw, toRaw, fieldName = "Intake_Date") {
+  const field = String(fieldName || "Intake_Date").trim() || "Intake_Date";
+  if (!/^[A-Za-z0-9_ ]+$/.test(field)) return null;
+  const from = parseLibraryDateParam(fromRaw);
+  const to = parseLibraryDateParam(toRaw);
+  if (!from && !to) return null;
+  const parts = [`{${field}}!=""`];
+  if (from) {
+    const escaped = airtableSearchEscape(from);
+    parts.push(`OR(IS_SAME({${field}},DATETIME_PARSE("${escaped}"),"day"),IS_AFTER({${field}},DATETIME_PARSE("${escaped}")))`);
+  }
+  if (to) {
+    const escaped = airtableSearchEscape(to);
+    parts.push(`OR(IS_SAME({${field}},DATETIME_PARSE("${escaped}"),"day"),IS_BEFORE({${field}},DATETIME_PARSE("${escaped}")))`);
+  }
+  return parts.length === 1 ? parts[0] : `AND(${parts.join(",")})`;
+}
+
 export function publishedLibraryFilterFormula(query) {
   const parts = ["{Test_Run_ID}=BLANK()", "{Published_At}!=\"\""];
   const needle = String(query || "").trim().toLowerCase();
