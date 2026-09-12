@@ -39,7 +39,7 @@ def start_job(production_request_record_id: str, *, resume: bool = False) -> dic
         write_job(client, request_id, job)
     elif resume and job_is_terminal(job):
         route = job.get("route") or derive_route(request.get("fields") or {}, outputs)
-        step = pick_resume_step(request, outputs)
+        step = pick_resume_step(request, outputs, parent=parent, route=route)
         heal = dict(job.get("heal") or {}) if isinstance(job.get("heal"), dict) else {}
         # Manual/agent resume after escalate clears the escalation latch but keeps history.
         if str(job.get("step") or "") == "escalated":

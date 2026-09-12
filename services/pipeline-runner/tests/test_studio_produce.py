@@ -14,8 +14,10 @@ from studio_produce.steps import (
     pick_resume_step,
     render_progress_detail,
     thumbnail_required,
+    voiceover_missing,
     voiceover_required,
 )
+from studio_produce.thumbnail import cover_content_status_fields
 from studio_produce.thumbnail_prompt import COLORFUL_3D_RULE, build_finished_thumbnail_prompt
 
 
@@ -257,6 +259,46 @@ def test_pick_resume_step_jumps_to_stamp_when_selected():
         "Final_File_URL": "https://media.chicagoshining.com/studio/previews/x.mp4",
     }}]
     assert pick_resume_step(request, story_ready) == "done"
+
+
+def test_pick_resume_step_returns_to_audio_when_voiceover_missing():
+    # Output 432 / CI 137: Voiceover_Status said Ready and Content_Status was "Thumbnail Ready",
+    # but Voiceover_URL was blank. Resuming at stamp/render made R4 wait forever.
+    request = {"fields": {"Voiceover_Mode": "Yes", "Studio_Variant_Status": "Ready"}}
+    parent = {"id": "recParent", "fields": {"Voiceover_Status": "Ready", "Content_Status": "Thumbnail Ready"}}
+    selected = [{"fields": {"Asset_Selection_Status": "Selected", "Output_Status": "In Production"}}]
+    rendering = [{"fields": {"Render_Status": "Ready for Render", "Output_Status": "In Production"}}]
+    assert voiceover_missing(request, parent) is True
+    assert pick_resume_step(request, selected, parent=parent, route="ai:photo_sequence") == "audio"
+    assert pick_resume_step(request, rendering, parent=parent, route="ai:photo_sequence") == "audio"
+    # Once narration exists the normal resume rules apply again.
+    voiced = {"id": "recParent", "fields": {"Voiceover_Status": "Generated", "Voiceover_URL": "https://drive.google.com/uc?id=vo"}}
+    assert voiceover_missing(request, voiced) is False
+    assert pick_resume_step(request, selected, parent=voiced, route="ai:photo_sequence") == "stamp"
+    # Narration off / not needed never forces the audio step.
+    assert voiceover_missing(request, {"fields": {"Voiceover_Status": "Not Needed"}}) is False
+    assert pick_resume_step({"fields": {"Voiceover_Mode": "No"}}, selected, parent=parent, route="ai:photo_sequence") == "stamp"
+    # Finished-video passthrough never narrates.
+    finished = {"fields": {"Voiceover_Mode": "Yes", "Production_Notes": "ez-input=finished-video"}}
+    assert voiceover_missing(finished, parent) is False
+    assert pick_resume_step(finished, selected, parent=parent, route="finished:passthrough") == "stamp"
+    # Finished deliverables still win.
+    ready = [{"fields": {
+        "Output_Status": "Ready for Review",
+        "Studio_Output_Type": "Reel",
+        "Final_File_URL": "https://media.chicagoshining.com/studio/previews/x.mp4",
+        "Thumbnail_URL": "https://media.chicagoshining.com/studio/previews/thumbnails/recX/cover-9x16.png",
+    }}]
+    assert pick_resume_step(request, ready, parent=parent, route="ai:photo_sequence") == "done"
+
+
+def test_cover_write_keeps_p2_selector_until_voiceover_exists():
+    waiting = {"fields": {"Content_Status": "Ready for Voiceover", "Voiceover_URL": ""}}
+    assert cover_content_status_fields(waiting) == {}
+    voiced = {"fields": {"Content_Status": "Ready for Voiceover", "Voiceover_URL": "https://drive.google.com/uc?id=vo"}}
+    assert cover_content_status_fields(voiced) == {"Content_Status": "Thumbnail Ready"}
+    assert cover_content_status_fields({"fields": {"Content_Status": "In Production"}}) == {"Content_Status": "Thumbnail Ready"}
+    assert cover_content_status_fields(None) == {"Content_Status": "Thumbnail Ready"}
 
 
 def test_native_photo_detection():
