@@ -36,12 +36,9 @@ def test_process_request_skips_and_trashes_existing_files(monkeypatch):
         [],
     ]
     airtable.create_records.return_value = [{"id": "recNEW"}]
-    gmail = MagicMock()
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
     monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
         "Media_Class": "Photo",
@@ -74,12 +71,9 @@ def test_process_request_removes_ingestion_parent_for_same_drive_id(monkeypatch)
     drive.get_file.return_value = {"id": "same1", "parents": [GDRIVE_INGESTION_FOLDER, GDRIVE_PHOTOS_FOLDER]}
     airtable = MagicMock()
     airtable.list_records.return_value = [{"id": "recDUP", "fields": {"Google Drive File ID": "same1"}}]
-    gmail = MagicMock()
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
     monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
 
@@ -109,8 +103,6 @@ def test_process_request_retries_move_when_processed_file_never_left_ingestion(m
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: MagicMock())
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
     monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
 
@@ -142,8 +134,6 @@ def test_process_request_logs_residue_heal_failure(monkeypatch):
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: MagicMock())
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
     monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
 
@@ -193,12 +183,9 @@ def test_process_request_continues_after_one_file_fails(monkeypatch):
     airtable = MagicMock()
     airtable.list_records.return_value = []
     airtable.create_records.side_effect = [RuntimeError("unknown field"), [{"id": "recOK"}]]
-    gmail = MagicMock()
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "video")
     monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
         "Media_Class": "Video",
@@ -215,27 +202,23 @@ def test_process_request_continues_after_one_file_fails(monkeypatch):
     drive.move_file.assert_called_once()
 
 
-def test_process_request_intakes_when_gmail_fails(monkeypatch):
+def test_process_request_intakes_without_sending_email(monkeypatch):
     drive = MagicMock()
     drive.list_files.return_value = [
-        {"id": "ok1", "name": "Fine.MOV", "mimeType": "video/quicktime", "size": "200", "fileExtension": "MOV"},
+        {"id": "ok1", "name": "Fine.jpg", "mimeType": "image/jpeg", "size": "200", "fileExtension": "jpg"},
     ]
     drive.share_anyone_reader.return_value = {"webContentLink": "https://drive.example/ok"}
     drive.move_file.return_value = {"id": "ok1", "webContentLink": "https://drive.example/moved"}
     airtable = MagicMock()
     airtable.list_records.return_value = []
     airtable.create_records.return_value = [{"id": "recOK"}]
-    gmail = MagicMock()
-    gmail.send_html.side_effect = RuntimeError("gmail down")
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
-    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "video")
+    monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
     monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
-        "Media_Class": "Video",
-        "Asset_Role": "Raw Footage",
+        "Media_Class": "Photo",
+        "Asset_Role": "Raw Photo",
         "Raw_Source_Eligibility": "Eligible",
     })
     monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
@@ -244,6 +227,7 @@ def test_process_request_intakes_when_gmail_fails(monkeypatch):
     assert result["intaken_count"] == 1
     assert result["intaken_ids"] == ["recOK"]
     drive.move_file.assert_called_once()
+    airtable.create_records.assert_called_once()
 
 
 def test_create_intake_records_drops_unknown_duration_field():
@@ -281,13 +265,10 @@ def test_drain_until_idle_processes_a_second_batch(monkeypatch):
     airtable = MagicMock()
     airtable.list_records.return_value = []
     airtable.create_records.side_effect = [[{"id": "recA"}], [{"id": "recB"}]]
-    gmail = MagicMock()
     started = []
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
     monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
         "Media_Class": "Photo",
@@ -338,8 +319,6 @@ def test_drain_until_idle_retries_failed_processed_residue(monkeypatch):
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: MagicMock())
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.trigger_next", lambda *args, **kwargs: {"triggered": False})
     monkeypatch.setattr("a2.processor._daisy_a2b", lambda **_kwargs: {"triggered": False})
 
@@ -367,13 +346,10 @@ def test_drain_until_idle_starts_compression_then_continues(monkeypatch):
     airtable = MagicMock()
     airtable.list_records.return_value = []
     airtable.create_records.return_value = [{"id": "recOK"}]
-    gmail = MagicMock()
     started = []
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "image")
     monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
         "Media_Class": "Photo",
@@ -414,12 +390,9 @@ def test_process_request_converts_wav_audio(monkeypatch):
     airtable = MagicMock()
     airtable.list_records.return_value = []
     airtable.create_records.return_value = [{"id": "recWAV"}]
-    gmail = MagicMock()
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr(
         "a2.processor.apply_drive_wav_to_mp3",
         lambda *args, **kwargs: WavConvertResult(True, "Sunset drone bed.mp3", b"ID3", "audio/mpeg", 12),

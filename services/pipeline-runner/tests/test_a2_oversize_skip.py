@@ -46,12 +46,9 @@ def test_process_request_intakes_video_at_exactly_100mb(monkeypatch):
     airtable = MagicMock()
     airtable.list_records.return_value = []
     airtable.create_records.return_value = [{"id": "recEDGE"}]
-    gmail = MagicMock()
 
     monkeypatch.setattr("a2.processor.GoogleDriveClient", lambda: drive)
     monkeypatch.setattr("a2.processor.AirtableClient", lambda: airtable)
-    monkeypatch.setattr("a2.processor.GmailClient", lambda: gmail)
-    monkeypatch.setattr("a2.processor.load_settings", lambda: {"a2_email_to": "test@example.com"})
     monkeypatch.setattr("a2.processor.classify_intake_file", lambda name, mime: "video")
     monkeypatch.setattr("a2.processor.a2_route_fields", lambda *args, **kwargs: {
         "Media_Class": "Video",
