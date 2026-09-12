@@ -6451,6 +6451,17 @@ async function studioStampParentAiCoverOnOutput(env, po, parent) {
   return true;
 }
 
+// "Ready for Voiceover" is the P2 selector. A cover write that overwrites it with
+// "Thumbnail Ready" while Voiceover_URL is blank turns narration off and leaves R4
+// returning waiting_for_voiceover forever (Output 432 / CI 137). Keep the
+// selector until the voiceover exists.
+function studioCoverContentStatusFields(parent) {
+  const status = String(f(parent, "Content_Status") || "").trim();
+  const vo = String(f(parent, "Voiceover_URL") || "").trim();
+  if (/^ready for voiceover$/i.test(status) && !vo) return {};
+  return { Content_Status: "Thumbnail Ready" };
+}
+
 async function studioEnsurePublicAiCover(env, parent, requestRecord = null) {
   if (!parent?.id) return { url: "", skip: "missing_parent" };
   const existing = studioAiThumbnailUrl(f(parent, "Thumbnail_URL"));
@@ -6470,7 +6481,7 @@ async function studioEnsurePublicAiCover(env, parent, requestRecord = null) {
         Thumbnail_URL: staged.url,
         Thumbnail_Status: "Generated",
         Include_Thumbnail: "Yes",
-        Content_Status: "Thumbnail Ready",
+        ...studioCoverContentStatusFields(parent),
       },
       typecast: true,
     }),
@@ -8036,7 +8047,7 @@ async function azEnsurePublicCovers(env, requestId, options = {}) {
           Thumbnail_URL: publicUrl,
           Thumbnail_Status: "Generated",
           Include_Thumbnail: "Yes",
-          Content_Status: "Thumbnail Ready",
+          ...studioCoverContentStatusFields(parent),
         },
         typecast: true,
       }),
@@ -8994,9 +9005,89 @@ function studioLastModifiedStaleFormula(minutes) {
   return `IS_BEFORE(LAST_MODIFIED_TIME(), DATEADD(NOW(), -${n}, "minutes"))`;
 }
 
+function studioOutputVoiceoverRequired(row, parent = null) {
+  const mode = String(
+    f(row, "Studio_Effective_Voiceover_Mode")
+    || f(parent || {}, "Include_Voiceover")
+    || "",
+  ).trim().toLowerCase();
+  return mode === "yes" || mode === "true" || mode === "1";
+}
+
+// Ready for Render with no Remotion job while the output wants narration but has no
+// Voiceover_URL. R4 returns waiting_for_voiceover on every pulse, so pulsing R4 again is
+// useless. Either copy the parent's voiceover down or put the parent back on the P2
+// selector (Content_Status "Ready for Voiceover") and resume produce at audio.
+async function studioHealReadyNoJobVoiceover(env, row, cache = { parents: new Map(), requests: new Map() }) {
+  if (String(f(row, "Voiceover_URL") || "").trim()) return null;
+  const parentId = studioFirstLinkedId(f(row, "Content_Item"));
+  if (!parentId) return null;
+  if (!cache.parents.has(parentId)) {
+    cache.parents.set(parentId, await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId).catch(() => null));
+  }
+  const parent = cache.parents.get(parentId);
+  if (!parent) return null;
+  if (!studioOutputVoiceoverRequired(row, parent)) return null;
+  const voStatus = String(f(parent, "Voiceover_Status") || "").trim();
+  if (/^(not needed|skipped)$/i.test(voStatus)) return null;
+
+  const parentVo = String(f(parent, "Voiceover_URL") || "").trim();
+  if (parentVo) {
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: { Voiceover_URL: parentVo }, typecast: true }),
+    });
+    return { action: "copied_parent_voiceover", parent_id: parentId };
+  }
+
+  const requestId = studioFirstLinkedId(f(parent, "Production_Request"))
+    || studioFirstLinkedId(f(parent, "Production Requests"))
+    || studioFirstLinkedId(f(parent, "Production_Requests"));
+  let requestRecord = null;
+  if (requestId) {
+    if (!cache.requests.has(requestId)) {
+      cache.requests.set(requestId, await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId).catch(() => null));
+    }
+    requestRecord = cache.requests.get(requestId);
+  }
+
+  const fields = {};
+  if (!/^ready for voiceover$/i.test(String(f(parent, "Content_Status") || "").trim())) {
+    fields.Content_Status = "Ready for Voiceover";
+  }
+  if (!/^(ready|generated)$/i.test(voStatus)) fields.Voiceover_Status = "Ready";
+  if (String(f(parent, "Voiceover_Script") || "").trim() && String(f(parent, "Script_Status") || "").trim() !== "Generated") {
+    fields.Script_Status = "Generated";
+  }
+  if (Object.keys(fields).length) {
+    await airtableFetch(env, env.AIRTABLE_CONTENT_TABLE_ID, parentId, {
+      method: "PATCH",
+      body: JSON.stringify({ fields, typecast: true }),
+    });
+    cache.parents.delete(parentId);
+  }
+  const p2 = String(f(parent, "Voiceover_Script") || "").trim()
+    ? await pulseStudioP2Handoff(env, parentId, requestRecord || {}).catch(() => ({ ok: false }))
+    : { ok: false, skipped: "no_script" };
+  let resumed = false;
+  if (requestId) {
+    // Produce owns script generation; resuming lands on the audio step (pick_resume_step).
+    await enqueueStudioProductionJob(env, requestId, { resume: true }).then(() => { resumed = true; }).catch(() => null);
+  }
+  return {
+    action: "rearmed_voiceover",
+    parent_id: parentId,
+    request_id: requestId || null,
+    rearmed: Object.keys(fields),
+    p2_ok: Boolean(p2?.ok),
+    resumed,
+  };
+}
+
 async function healStuckStudioRenders(env) {
   const outputTable = env.AIRTABLE_OUTPUT_TABLE_ID;
   const pulses = [];
+  const voCache = { parents: new Map(), requests: new Map() };
   const readyNoJob = await listRecords(env, outputTable, {
     limit: 8,
     sortField: "Output_ID",
@@ -9004,6 +9095,16 @@ async function healStuckStudioRenders(env) {
     filterFormula: `AND(${STUDIO_R4_WORK_FORMULA},{Remotion_Job_ID}="")`,
   }).catch(() => []);
   for (const row of readyNoJob || []) {
+    try {
+      const vo = await studioHealReadyNoJobVoiceover(env, row, voCache);
+      if (vo) {
+        pulses.push({ key: "VO_STUCK_READY", id: row.id, payload: vo });
+        if (vo.action !== "copied_parent_voiceover") continue;
+      }
+    } catch (error) {
+      pulses.push({ key: "VO_STUCK_READY", id: row.id, error: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
     const timing = String(f(row, "Timing_Status") || "").trim();
     const timeline = String(f(row, "Timing_Timeline_JSON") || "").trim();
     if ((timing === "Pending" || !timing) && timeline) {
@@ -29653,7 +29754,7 @@ async function gatherStudioDeskInventory(env) {
     const job = parseStudioProductionJob(record) || {};
     push(classifyProduceJob({ ...job, request_id: record.id }, nowMs));
   }
-  scanned("render_ready_no_job", "render_long", "produce_orphan");
+  scanned("render_ready_no_job", "render_ready_waiting_voiceover", "render_long", "produce_orphan");
   for (const record of readyNoJob || []) {
     push(classifyRenderRow({
       id: record.id,
@@ -29661,6 +29762,10 @@ async function gatherStudioDeskInventory(env) {
       remotion_job_id: f(record, "Remotion_Job_ID"),
       final_file_url: f(record, "Final_File_URL"),
       output_status: f(record, "Output_Status"),
+      voiceover_required: studioOutputVoiceoverRequired(record),
+      voiceover_url: f(record, "Voiceover_URL"),
+      output_id: f(record, "Output_ID"),
+      content_item_id: studioFirstLinkedId(f(record, "Content_Item")),
     }, nowMs));
   }
   for (const record of longRendering || []) {

@@ -123,6 +123,8 @@ Leave mode at `observe` or `patch` until those rules have been proven on real in
 
 Same-place autonomous harvest, YouTube Drive-source Failed rows, and Ready-for-Review outputs that still cannot Open review: `docs/handoffs/autonomous-same-topic-harvest.md`. Inventory kinds `autonomous_topic_collision` (`data_repair`), `youtube_private_source_fail` (`transient` → Worker AP0 + YT reset), and `rfr_locked_missing_deliverable` (`transient` → Worker stages the public 3D still; `code_bug` if `wait_thumbnail` repeats past 15 minutes). Keep manual packages; do not recreate 2026-09-07 zoo extras; never `thumb_offset` when a native cover is required. Proven RFR-locked fixture: Big John’s Skeleton 391/393/395/396.
 
+Ready for Render with no Remotion job because the voiceover never generated (2026-09-12, Output 432 / Content Item 137): inventory kind `render_ready_waiting_voiceover` (`transient` → Worker `studioHealReadyNoJobVoiceover` copies the parent `Voiceover_URL` down or re-arms `Content_Status=Ready for Voiceover`, pulses P2, resumes produce at `audio`). Symptom pack: job JSON `Rendering 0/N` with heal exhausted, `Voiceover_Status=Ready` but blank `Voiceover_URL`, `Content_Status=Thumbnail Ready`, R4 `waiting_for_voiceover`. Cover staging must not overwrite `Ready for Voiceover` while `Voiceover_URL` is blank (`studioCoverContentStatusFields` / `cover_content_status_fields`). Same fingerprint after a heal tick → `code_bug`.
+
 ## Out of scope
 
 - Replacing Worker self-heal

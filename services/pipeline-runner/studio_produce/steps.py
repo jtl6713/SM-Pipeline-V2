@@ -62,6 +62,77 @@ def voiceover_required(request: dict[str, Any], parent: dict[str, Any] | None) -
     return directive_yes(field_str(request, "Voiceover_Mode"))
 
 
+def voiceover_missing(request: dict[str, Any], parent: dict[str, Any] | None) -> bool:
+    """True when the request wants narration but the parent has no Voiceover_URL yet."""
+    if not parent:
+        return False
+    if finished_origin_kind((request or {}).get("fields") or {}):
+        return False
+    return voiceover_required(request, parent) and not field_str(parent, "Voiceover_URL")
+
+
+def rearm_voiceover_parent(client: AirtableClient, request: dict[str, Any], parent: dict[str, Any]) -> dict[str, Any]:
+    """Put the Content Item back on the P2 voiceover selector.
+
+    P2 only runs when Content_Status is "Ready for Voiceover", Script_Status is
+    "Generated", Voiceover_Status is "Ready", and a script exists. Cover staging
+    (Worker or thumbnail.py) used to overwrite Content_Status with "Thumbnail
+    Ready" while Voiceover_URL was still blank, which silently switched P2 off
+    and left R4 returning waiting_for_voiceover forever (Output 432).
+    """
+    if not field_str(parent, "Voiceover_Script"):
+        ensure_voiceover_script(client, request, parent)
+        parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+    patch: dict[str, Any] = {}
+    if field_str(parent, "Script_Status") != "Generated" and field_str(parent, "Voiceover_Script"):
+        patch["Script_Status"] = "Generated"
+    if field_str(parent, "Voiceover_Status") not in {"Ready", "Generated"}:
+        patch["Voiceover_Status"] = "Ready"
+    if field_str(parent, "Content_Status") != "Ready for Voiceover":
+        patch["Content_Status"] = "Ready for Voiceover"
+    if patch:
+        client.update_record(CONTENT_ITEMS_TABLE, parent["id"], patch, typecast=True)
+        parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+    return parent
+
+
+def run_voiceover_p2(client: AirtableClient, ctx: dict[str, Any]) -> dict[str, Any]:
+    """Re-arm the parent and run P2. Returns the refreshed parent once Voiceover_URL exists.
+
+    Raises StepWait while P2 is still working and StepBlocked when P2 refuses the item.
+    """
+    from p2.processor import process_request
+
+    request = ctx["request"]
+    parent = rearm_voiceover_parent(client, request, ctx["parent"])
+    ctx["parent"] = parent
+    result = process_request(
+        content_item_record_id=parent["id"],
+        test_run_id=field_str(request, "Test_Run_ID") or None,
+    )
+    refreshed = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
+    ctx["parent"] = refreshed
+    if not field_str(refreshed, "Voiceover_URL"):
+        if result.get("processed"):
+            raise StepWait("Waiting for voiceover")
+        raise StepBlocked(result.get("reason") or "P2 did not generate voiceover")
+    return refreshed
+
+
+def copy_voiceover_to_outputs(client: AirtableClient, parent: dict[str, Any], outputs: list[dict[str, Any]]) -> int:
+    vo = field_str(parent or {}, "Voiceover_URL")
+    if not vo:
+        return 0
+    copied = 0
+    for output in outputs or []:
+        if field_str(output, "Voiceover_URL"):
+            continue
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], {"Voiceover_URL": vo}, typecast=True)
+        output.setdefault("fields", {})["Voiceover_URL"] = vo
+        copied += 1
+    return copied
+
+
 RENDERED_VIDEO_OUTPUTS = {
     "Reel",
     "Short",
@@ -96,12 +167,21 @@ def thumbnail_required(request: dict[str, Any], outputs: list[dict[str, Any]] | 
     return mode not in {"No", "Use Photo Frame", "Photo Frame", "Use photo frame"}
 
 
-def pick_resume_step(request: dict[str, Any], outputs: list[dict[str, Any]] | None = None) -> str:
+def pick_resume_step(
+    request: dict[str, Any],
+    outputs: list[dict[str, Any]] | None = None,
+    parent: dict[str, Any] | None = None,
+    route: str | None = None,
+) -> str:
     rows = outputs or []
     if rows and all(_output_file_ready(row) for row in rows):
         if any(_output_missing_review_cover(row) for row in rows):
             return "stamp"
         return "done"
+    # Narration is a render input. Resuming at stamp/render with no Voiceover_URL
+    # makes R4 return waiting_for_voiceover on every loop.
+    if not is_finished_route(route or "") and voiceover_missing(request, parent):
+        return "audio"
     if any(field_str(row, "Remotion_Job_ID") or field_str(row, "Render_Status").lower() == "rendering" for row in rows):
         return "render"
     if any(field_str(row, "Asset_Selection_Status") == "Selected" for row in rows):
@@ -347,19 +427,11 @@ def step_audio(client: AirtableClient, ctx: dict[str, Any]) -> str:
     has_thumb = is_designed_cover_url(field_str(parent, "Thumbnail_URL"))
     if (not want_voice or has_voice) and (not want_thumb or has_thumb):
         return "images"
-    if want_voice and not has_voice and not field_str(parent, "Voiceover_Script"):
-        ensure_voiceover_script(client, request, parent)
-        parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
-        ctx["parent"] = parent
     if want_voice and not has_voice:
         # P2 requires Ready for Voiceover + Generated script + Ready VO status.
+        parent = rearm_voiceover_parent(client, request, parent)
+        ctx["parent"] = parent
         patch = {}
-        if field_str(parent, "Script_Status") != "Generated" and field_str(parent, "Voiceover_Script"):
-            patch["Script_Status"] = "Generated"
-        if field_str(parent, "Voiceover_Status") not in {"Ready", "Generated"}:
-            patch["Voiceover_Status"] = "Ready"
-        if field_str(parent, "Content_Status") != "Ready for Voiceover":
-            patch["Content_Status"] = "Ready for Voiceover"
         if want_thumb and not field_str(parent, "Thumbnail_URL") and field_str(parent, "Thumbnail_Status") != "Ready":
             patch["Thumbnail_Status"] = "Ready"
         elif field_str(parent, "Thumbnail_Status") in {"", "Not Started", "None"} and not want_thumb:
@@ -688,6 +760,11 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
 
     if not ctx.get("outputs"):
         raise StepBlocked("No Platform Outputs found for this Production Request")
+    if voiceover_missing(ctx["request"], ctx.get("parent")):
+        # R4 refuses to start without narration. Generate it here instead of
+        # looping on "Rendering 0/N" with no Remotion job.
+        run_voiceover_p2(client, ctx)
+    copy_voiceover_to_outputs(client, ctx.get("parent") or {}, ctx["outputs"])
     test_run_id = field_str(ctx["request"], "Test_Run_ID") or None
     remaining = []
     transient = False
@@ -744,9 +821,12 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 timing = field_str(fresh, "Timing_Status")
                 if timing not in {"Ready", "Skipped"}:
                     process_t1(output_record_id=fresh["id"], test_run_id=test_run_id)
-                process_r4(output_record_id=fresh["id"], test_run_id=test_run_id)
-                started_r4 = True
-                busy_rendering = True
+                r4 = process_r4(output_record_id=fresh["id"], test_run_id=test_run_id) or {}
+                if r4.get("processed"):
+                    started_r4 = True
+                    busy_rendering = True
+                elif r4.get("reason") == "waiting_for_voiceover":
+                    raise StepWait("Waiting for voiceover")
                 remaining.append(fresh["id"])
                 continue
             if field_str(fresh, "Asset_Selection_Status") == "Selected" and not render_status:

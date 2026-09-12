@@ -67,6 +67,19 @@ def _public_thumb_url(client, parent_id: str, png_bytes: bytes, *, ratio_token: 
         return None
 
 
+def cover_content_status_fields(parent: dict[str, Any] | None) -> dict[str, str]:
+    """Content_Status patch that a cover write may apply.
+
+    "Ready for Voiceover" is the P2 selector. Overwriting it with "Thumbnail
+    Ready" while Voiceover_URL is still blank turns narration off and leaves
+    R4 waiting forever, so keep it until the voiceover exists.
+    """
+    status = field_str(parent or {}, "Content_Status")
+    if status == "Ready for Voiceover" and not field_str(parent or {}, "Voiceover_URL"):
+        return {}
+    return {"Content_Status": "Thumbnail Ready"}
+
+
 def _normalize_ratio(value: Any) -> str:
     ratio = str(value or "").replace("x", ":").strip()
     return ratio or "9:16"
@@ -115,7 +128,7 @@ def _stage_existing_drive_cover(client, parent: dict[str, Any]) -> str:
             "Thumbnail_URL": public,
             "Thumbnail_Status": "Generated",
             "Include_Thumbnail": "Yes",
-            "Content_Status": "Thumbnail Ready",
+            **cover_content_status_fields(parent),
         },
         typecast=True,
     )
@@ -167,7 +180,7 @@ def ensure_finished_thumbnail(
             "Include_Thumbnail": "Yes",
             "Thumbnail_Prompt": prompt,
             "Thumbnail_Google_Drive_File_ID": thumb_file.get("id"),
-            "Content_Status": "Thumbnail Ready",
+            **cover_content_status_fields(parent),
         },
         typecast=True,
     )
@@ -243,7 +256,7 @@ def ensure_platform_thumbnails(
                     "Include_Thumbnail": "Yes",
                     "Thumbnail_Prompt": prompt,
                     "Thumbnail_Google_Drive_File_ID": thumb_file.get("id"),
-                    "Content_Status": "Thumbnail Ready",
+                    **cover_content_status_fields(parent),
                 },
                 typecast=True,
             )

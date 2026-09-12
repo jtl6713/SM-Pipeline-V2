@@ -168,6 +168,14 @@ export const QUALITY_CHECKS = Object.freeze([
     heal: "resume_produce",
   }),
   check({
+    id: "render_ready_waiting_voiceover",
+    title: "Check for outputs Ready for Render with no Remotion job because the voiceover never generated",
+    lane: "service",
+    kind: "render_ready_waiting_voiceover",
+    actor: "worker_heal",
+    heal: "resume_produce",
+  }),
+  check({
     id: "render_long",
     title: "Check for renders still in progress past the stale window",
     lane: "service",

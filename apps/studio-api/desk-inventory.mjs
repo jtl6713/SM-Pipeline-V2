@@ -144,6 +144,21 @@ export function classifyRenderRow(row, nowMs = Date.now()) {
   const modified = Date.parse(String(row?.last_modified || row?.updated_at || ""));
   const ageMs = Number.isFinite(modified) ? nowMs - modified : Infinity;
 
+  if (renderStatus === "Ready for Render" && !jobId && row?.voiceover_required && !String(row?.voiceover_url || "").trim()) {
+    // R4 returns waiting_for_voiceover on every pulse; re-pulsing R4 cannot heal it.
+    // Worker copies the parent voiceover down or re-arms the P2 selector and resumes produce at audio.
+    return {
+      kind: "render_ready_waiting_voiceover",
+      class: "transient",
+      record_id: recordId || null,
+      fingerprint: fingerprint("render_ready_waiting_voiceover", recordId, "no_voiceover_url"),
+      actor: "worker_heal",
+      output_id: row?.output_id || null,
+      content_item_id: row?.content_item_id || null,
+      diagnosis: "Ready for Render with no Remotion job; output wants narration but Voiceover_URL is blank. "
+        + "Check parent Content_Status (P2 needs \"Ready for Voiceover\"; \"Thumbnail Ready\" switches P2 off) and Voiceover_Status.",
+    };
+  }
   if (renderStatus === "Ready for Render" && !jobId) {
     return {
       kind: "render_ready_no_job",
@@ -616,6 +631,7 @@ export const CLASSIFIER_KINDS = Object.freeze([
   "produce_escalated",
   "produce_stale",
   "render_ready_no_job",
+  "render_ready_waiting_voiceover",
   "render_long",
   "produce_orphan",
   "crop_parked",
