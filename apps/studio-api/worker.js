@@ -41,6 +41,7 @@ import {
   resolveLibraryCrossScopeFlag,
   resolveLibraryListSort,
   sanitizeLibraryAssetName,
+  stripLibraryAssetExtension,
 } from "./asset-library.mjs";
 import { attachCompressionJobs } from "./operations-oversized.mjs";
 import {
@@ -332,7 +333,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.294-library-sort-date-filter",
+          version: "0.10.295-library-batch-number-any-ext",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17229,7 +17230,10 @@ async function listLibraryBatchExistingNames(env, baseName, scopeFormula = null)
     filterFormula,
     fields: ["Asset Name"],
   }).catch(() => []);
-  return records.map((record) => String(f(record, "Asset Name") || "").trim()).filter(Boolean);
+  // Strip .jpg/.mp4/etc so the highest stem wins across photo and clip uploads.
+  return records
+    .map((record) => stripLibraryAssetExtension(f(record, "Asset Name")))
+    .filter(Boolean);
 }
 
 async function uploadAssetLibraryItems(request, env, authorization) {

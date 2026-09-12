@@ -13,6 +13,7 @@ import {
   mapPublishedLibraryFile,
   normalizeLibraryBatchBase,
   parseLibraryBatchSequence,
+  stripLibraryAssetExtension,
   publishedDurationSeconds,
   publishedFileReleaseGuard,
   publishedLibraryFilterFormula,
@@ -220,6 +221,35 @@ test("library batch sequence continues after existing Airtable names", () => {
   assert.deepEqual(allocateLibraryBatchNames("Space Museum", 2, []), ["Space Museum 1", "Space Museum 2"]);
   assert.match(libraryBatchNameFilterFormula("Space Museum"), /space museum/);
   assert.match(libraryBatchNameFilterFormula("Space Museum"), /REGEX_MATCH/);
+});
+
+test("library batch numbering continues from highest number no matter the file extension", () => {
+  assert.equal(stripLibraryAssetExtension("Navy Pier 12.JPG"), "Navy Pier 12");
+  assert.equal(stripLibraryAssetExtension("Navy Pier 12.mp4"), "Navy Pier 12");
+  assert.equal(parseLibraryBatchSequence("Navy Pier 12.jpg", "Navy Pier"), 12);
+  assert.equal(parseLibraryBatchSequence("Navy Pier 3.HEIC", "Navy Pier"), 3);
+  assert.equal(parseLibraryBatchSequence("Navy Pier.mp4", "Navy Pier"), 1);
+  assert.equal(parseLibraryBatchSequence("Navy Pier 12.jpg", "Navy Pier.jpg"), 12);
+  assert.equal(maxLibraryBatchSequence([
+    "Navy Pier 1.jpg",
+    "Navy Pier 8.MP4",
+    "Navy Pier 3.heic",
+    "Navy Pier 8.png",
+    "Other Spot 99.mov",
+  ], "Navy Pier"), 8);
+  assert.deepEqual(
+    allocateLibraryBatchNames("Navy Pier", 2, [
+      "Navy Pier 1.jpg",
+      "Navy Pier 8.mp4",
+      "Navy Pier 3.HEIC",
+    ]),
+    ["Navy Pier 9", "Navy Pier 10"]
+  );
+  assert.deepEqual(
+    allocateLibraryBatchNames("Navy Pier.mov", 1, ["Navy Pier 4.png"]),
+    ["Navy Pier 5"]
+  );
+  assert.match(libraryBatchNameFilterFormula("Navy Pier"), /\[\.\]/);
 });
 
 test("library profile scope formula isolates Content_Profile unless cross-scope is on", () => {
