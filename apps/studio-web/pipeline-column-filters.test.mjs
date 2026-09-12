@@ -73,6 +73,12 @@ test("column filters AND together and ignore empty selections", () => {
   assert.equal(recordMatchesPipelineColumnFilters(rows[1], { ...filters, platform: "" }), false);
 });
 
+test("output filter matches a substring of the output id or title", () => {
+  const filters = { ...blankPipelineColumnFilters(), output: "70" };
+  assert.equal(recordMatchesPipelineColumnFilters({ ...rows[0], outputSearch: "370 Riverwalk reel" }, filters), true);
+  assert.equal(recordMatchesPipelineColumnFilters({ ...rows[1], outputSearch: "371 Story" }, filters), false);
+});
+
 test("progress and creative use the same displayed labels as the table", () => {
   const filters = { ...blankPipelineColumnFilters(), progress: "2/6", creative: "Not ready yet" };
   assert.equal(recordMatchesPipelineColumnFilters(rows[1], filters), true);
@@ -94,5 +100,5 @@ test("Pipeline UI binds a filter control for every column header", () => {
   }
   assert.match(app, /pipelineColumnFilters/);
   assert.match(html, /pipelineFilterClear/);
-  assert.match(html, /Use the dropdown under each heading to filter/);
+  assert.match(html, /Type in Output or use the dropdown under each heading to filter/);
 });

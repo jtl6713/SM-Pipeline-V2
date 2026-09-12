@@ -12836,8 +12836,17 @@
 
   function pipelineRecordMatchesColumnFilters(record, filters = pipelineColumnFilters, records = pipelineOutputs) {
     for (const [key, selected] of Object.entries(filters || {})) {
-      if (!String(selected || "").trim()) continue;
-      if (pipelineColumnFilterValue(record, key, records) !== selected) return false;
+      const needle = String(selected || "").trim();
+      if (!needle) continue;
+      if (key === "output") {
+        const hay = [record?.output_id, record?.output_title, record?.content_title]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(needle.toLowerCase())) return false;
+        continue;
+      }
+      if (pipelineColumnFilterValue(record, key, records) !== needle) return false;
     }
     return true;
   }
@@ -12996,6 +13005,9 @@
 
   function pipelineColumnFilterControl(key, label) {
     const selected = String(pipelineColumnFilters[key] || "");
+    if (key === "output") {
+      return `<label class="pipeline-col-filter-label"><span class="pipeline-col-filter-sr">Filter ${escapeHtml(label)}</span><input type="search" class="pipeline-col-filter" data-pipeline-col-filter="output" value="${escapeHtml(selected)}" placeholder="All" aria-label="Filter by Output" title="Filter by output number or title"></label>`;
+    }
     const options = pipelineColumnOptionValues(key)
       .map((value) => `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(value)}</option>`)
       .join("");
@@ -13079,15 +13091,24 @@
       });
     }
     if (isPipeline) {
-      target.querySelectorAll("[data-pipeline-col-filter]").forEach((select) => {
-        select.addEventListener("click", (event) => event.stopPropagation());
-        select.addEventListener("mousedown", (event) => event.stopPropagation());
-        select.addEventListener("change", () => {
-          const key = select.dataset.pipelineColFilter;
+      target.querySelectorAll("[data-pipeline-col-filter]").forEach((control) => {
+        control.addEventListener("click", (event) => event.stopPropagation());
+        control.addEventListener("mousedown", (event) => event.stopPropagation());
+        const apply = () => {
+          const key = control.dataset.pipelineColFilter;
           if (!key) return;
-          pipelineColumnFilters[key] = select.value || "";
+          pipelineColumnFilters[key] = control.value || "";
+          const caret = control.selectionStart;
           renderOutputsTable(target, pipelineOutputs);
-        });
+          const next = target.querySelector(`[data-pipeline-col-filter="${key}"]`);
+          if (!next) return;
+          next.focus();
+          if (next.tagName === "INPUT" && typeof caret === "number" && typeof next.setSelectionRange === "function") {
+            try { next.setSelectionRange(caret, caret); } catch (_) { /* search inputs may reject a range */ }
+          }
+        };
+        if (control.tagName === "INPUT") control.addEventListener("input", apply);
+        else control.addEventListener("change", apply);
       });
     }
     if (isPipeline) {
