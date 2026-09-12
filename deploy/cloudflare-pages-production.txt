@@ -472,3 +472,5 @@ Library profile stamp + LA hub red Pages deploy: 2026-09-12 - Asset Manager brow
 Profile background + Admin context Pages deploy: 2026-09-12 — Per-profile Studio background color picker on Operations Daily ideas; header Profile switch scopes Admin to that profile. UI 0.6.300-profile-bg-admin.
 
 Profiles voice + music pool Pages deploy: 2026-09-12 — Operations Profiles tab with default narration voice and autonomous music multi-select. UI 0.6.301-profiles-voice-music.
+
+Production Request voice persist Pages deploy: 2026-09-12 — Continue refetches full PR before hydrate; catalog reload and quiet-save no longer overwrite Admin Hank with Kate. UI 0.6.302-pr-voice-persist.
