@@ -60,7 +60,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     creativeRequestChanges: "Save the current creative edits and request a new preview render. Publishing does not start until the new preview is approved.",
     creativeApprovePreview: "Approve this output for publishing. Immediate is the default. Choose Schedule and a local date/time to override. TikTok remains a draft.",
     pipelineFilterClear: "Remove Pipeline status and column-header filters and show all platform-output rows again.",
-    operationsRunDailyIdeas: "Run today's enabled daily-idea batches immediately. Only profiles whose Daily Ideas toggle is enabled are included.",
+    operationsRunDailyIdeas: "Run enabled daily-idea batches immediately. Only profiles whose Daily ideas toggle is on are included.",
     operationsRunAutonomous: "Run the autonomous Chicago trend-to-review path now. Only profiles with Autonomous produce enabled are included. This does not publish.",
     operationsAutonomousMeta: "Shows the last autonomous produce run or skip reason returned by the Operations API.",
     operationsRunIntake: "Scan the Drive intake folder now. The same drain also starts every 10 minutes and keeps going until remaining files are compressed if needed, recorded, and moved.",

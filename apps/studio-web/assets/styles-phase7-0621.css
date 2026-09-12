@@ -2755,11 +2755,18 @@ body:has(#page-content.active) .studio-footer-links button:hover{
 .ops-profile-context{margin:0 20px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#f7faf9;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
 .ops-profile-context[hidden]{display:none!important}
 .ops-profile-context strong{font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:var(--teal-dark)}
-.ops-profile-card{grid-template-columns:minmax(0,1.2fr) auto auto auto auto auto;gap:10px}
+.ops-profile-card{grid-template-columns:1fr;gap:12px;align-items:stretch}
+.ops-profile-card-top{display:grid;grid-template-columns:minmax(0,1.2fr) auto auto auto auto auto;gap:10px;align-items:center}
 .ops-profile-card.is-working-profile{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal-soft);background:var(--teal-soft)}
 .ops-profile-color{display:flex;align-items:center;gap:8px;font-size:.78rem;font-weight:750}
 .ops-profile-color input[type="color"]{width:42px;height:32px;padding:0;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
 .ops-profile-card .text-button{border:0;background:transparent;color:var(--teal-dark);font:inherit;font-size:.72rem;font-weight:800;cursor:pointer;padding:6px 8px;border-radius:8px}
 .ops-profile-card .text-button:hover{background:var(--teal-soft)}
 .ops-profile-card .text-button[hidden]{display:none!important}
-@media(max-width:900px){.ops-profile-card{grid-template-columns:minmax(0,1fr) auto;}}
+.ops-profile-voice-field,.ops-profile-music-field{display:grid;gap:6px;font-size:.78rem;font-weight:750}
+.ops-profile-voice-field select{width:100%;max-width:420px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;background:#fff}
+.ops-music-checklist{max-height:168px;overflow:auto;display:grid;gap:6px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}
+.ops-music-option{display:flex;align-items:flex-start;gap:8px;font-size:.8rem;font-weight:650;white-space:normal}
+.ops-music-option span{line-height:1.35}
+.ops-field-hint{font-weight:550}
+@media(max-width:900px){.ops-profile-card-top{grid-template-columns:minmax(0,1fr) auto;}}
