@@ -476,3 +476,5 @@ Profiles voice + music pool Pages deploy: 2026-09-12 — Operations Profiles tab
 Production Request voice persist Pages deploy: 2026-09-12 — Continue refetches full PR before hydrate; catalog reload and quiet-save no longer overwrite Admin Hank with Kate. UI 0.6.302-pr-voice-persist.
 
 Asset Manager classify-all Pages deploy: 2026-09-12 — profile dropdown saves on change and refreshes the card in place; Classify all button in the Browse toolbar. UI 0.6.303-library-classify-all.
+
+Asset Manager profile placeholders Pages deploy: 2026-09-12 — upload Asset name / Location examples follow the working profile (Chicago: Space Museum / Oak Street Beach; New York: Brooklyn Bridge / Central Park; Los Angeles: Santa Monica Pier / Griffith Observatory). UI 0.6.304-library-profile-placeholders.

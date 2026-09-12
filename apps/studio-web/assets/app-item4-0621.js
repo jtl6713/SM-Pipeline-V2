@@ -203,7 +203,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.303-library-classify-all";
+  const BUILD_ID = "item4-0.6.304-library-profile-placeholders";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -352,12 +352,40 @@
     });
   }
 
+  // Asset Manager upload placeholders follow the working profile so a New York operator
+  // is not shown Chicago landmarks as the example.
+  const LIBRARY_EXAMPLE_PLACES = {
+    chicago: { name: "Space Museum", location: "Oak Street Beach" },
+    nyc: { name: "Brooklyn Bridge", location: "Central Park" },
+    la: { name: "Santa Monica Pier", location: "Griffith Observatory" },
+  };
+
+  function libraryExamplePlaces(profile) {
+    const themed = LIBRARY_EXAMPLE_PLACES[profile?.theme || ""];
+    if (themed) return themed;
+    const city = String(profile?.city_label || profile?.market_name || "").trim();
+    if (city) return { name: `${city} Skyline`, location: `Downtown ${city}` };
+    return LIBRARY_EXAMPLE_PLACES.chicago;
+  }
+
+  function applyLibraryExamplePlaces(profile) {
+    const example = libraryExamplePlaces(profile);
+    const nameInput = $("libraryBatchName");
+    if (nameInput) nameInput.placeholder = example.name;
+    const locationInput = $("libraryLocation");
+    if (locationInput) locationInput.placeholder = example.location;
+    document.querySelectorAll("[data-library-example-name]").forEach((node) => {
+      node.textContent = example.name;
+    });
+  }
+
   function applyStudioProfile(profile, { reload = false } = {}) {
     if (!profile) return;
     selectedProfileId = profile.id;
     try { localStorage.setItem(PROFILE_STORAGE_KEY, profile.id); } catch {}
     document.documentElement.dataset.studioTheme = profile.theme || "chicago";
     applyStudioBackgroundColor(profile);
+    applyLibraryExamplePlaces(profile);
     const city = profile.city_label || "Chicago";
     const cityNode = $("ezPathBrandCity");
     if (cityNode) cityNode.textContent = city;
