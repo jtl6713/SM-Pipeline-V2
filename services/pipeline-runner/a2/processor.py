@@ -9,14 +9,12 @@ from typing import Any
 
 from a2.constants import MAKE_SCENARIO_ID, MAKE_SCENARIO_NAME
 from a2.dedupe import intake_duplicate_formulas, existing_drive_id, parent_ids, processed_residue_action
-from a2.email_builder import intake_email_html, intake_subject
 from airtable.client import AirtableClient
 from airtable.constants import MEDIA_ASSETS_TABLE
 from asset.chain import daisy_payload, trigger_next
 from asset.constants import (
     A2_DRAIN_MAX_PASSES,
     A2_DRIVE_PAGE_SIZE,
-    DEFAULT_EMAIL_TO,
     GDRIVE_FOLDERS,
     GDRIVE_INGESTION_FOLDER,
     MAX_FILE_BYTES,
@@ -26,19 +24,9 @@ from asset.routing import a2_route_fields, classify_intake_file
 from audio.leading_silence import STATUS_FAILED, apply_drive_leading_silence, is_voiceover_audio
 from audio.wav_to_mp3 import apply_drive_wav_to_mp3
 from carousel.timeutil import chicago_now, iso_ms
-from config import load_settings
-from integrations.gmail import GmailClient
 from integrations.google_drive import GoogleDriveClient
 
 logger = logging.getLogger(__name__)
-
-FOLDER_LABELS = {
-    "video": "ChicagoShining / Assets / Video",
-    "branding": "ChicagoShining / Assets / Branding",
-    "image": "ChicagoShining / Assets / Photos / Ingestion Intake",
-    "other": "ChicagoShining / Assets / Misc",
-    "audio": "ChicagoShining / Assets / Music",
-}
 
 _INTAKE_LOCK = threading.Lock()
 
@@ -247,9 +235,6 @@ def _intake_pass(
     skipped_errors: list[str] = []
     if files:
         client = AirtableClient()
-        gmail = GmailClient()
-        settings = load_settings()
-        to_addr = str(settings.get("a2_email_to") or DEFAULT_EMAIL_TO).strip()
         batch_id = str(preview["intake_batch_id"])
         for item in files:
             file_id = str(item.get("id") or "")
@@ -311,27 +296,7 @@ def _intake_pass(
                         overlay["Leading_Silence_Status"] = STATUS_FAILED
                         overlay["Leading_Silence_Removed_Seconds"] = 0
                 client.update_record(MEDIA_ASSETS_TABLE, record_id, overlay, typecast=True)
-                size_mb = round(size / 1048576, 2)
-                try:
-                    gmail.send_html(
-                        to=to_addr,
-                        subject=intake_subject(route, name),
-                        html_body=intake_email_html(
-                            route=route,
-                            name=name,
-                            media_class=str(overlay["Media_Class"]),
-                            asset_role=str(overlay["Asset_Role"]),
-                            eligibility=str(overlay["Raw_Source_Eligibility"]),
-                            folder_label=FOLDER_LABELS[route],
-                            size_mb=size_mb,
-                            mime=mime,
-                            drive_link=str(moved.get("webContentLink") or share_url),
-                            record_id=record_id,
-                            batch_id=batch_id,
-                        ),
-                    )
-                except Exception:
-                    logger.exception("A2 intake email failed for %s", name)
+                # Intake notification emails are intentionally disabled.
                 intaken.append(record_id)
             except Exception:
                 logger.exception("A2 intake failed for %s (%s); continuing remaining files", name, file_id)

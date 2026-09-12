@@ -1,4 +1,8 @@
-"""A2 intake notification email (Make 5531974 modules 32–36)."""
+"""A2 intake notification email templates (Make 5531974 modules 32–36).
+
+Retained for reference. A2 no longer sends intake emails when new assets
+are added; see a2.processor._intake_pass.
+"""
 
 from __future__ import annotations
 
