@@ -480,3 +480,5 @@ Asset Manager classify-all Pages deploy: 2026-09-12 — profile dropdown saves o
 Asset Manager profile placeholders Pages deploy: 2026-09-12 — upload Asset name / Location examples follow the working profile (Chicago: Space Museum / Oak Street Beach; New York: Brooklyn Bridge / Central Park; Los Angeles: Santa Monica Pier / Griffith Observatory). UI 0.6.304-library-profile-placeholders.
 
 Unused-photo harvest Pages deploy: 2026-09-13 — Ideas Use unused photos plus footer UI 0.6.310 so studio.chicagoshining.com leaves 0.6.309. UI 0.6.310-unused-photo-run.
+
+Unused-photo profile scope Pages deploy: 2026-09-13 — Use unused photos harvests the header Profile city (NYC Central Park, not Chicago). UI 0.6.311-unused-profile-scope.

@@ -204,7 +204,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.310-unused-photo-run";
+  const BUILD_ID = "item4-0.6.311-unused-profile-scope";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -818,6 +818,7 @@
         method: "POST",
         body: JSON.stringify({
           preferred_subject: String(preferredSubject || $("operationsAutonomousSubject")?.value || "").trim(),
+          content_profile_id: String($("studioProfileSelect")?.value || "").trim(),
         }),
         timeoutMs: 180000,
       });

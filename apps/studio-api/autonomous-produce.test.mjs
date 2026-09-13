@@ -37,6 +37,7 @@ import {
   buildAutonomousPickerPrompt,
   completeRelatedStillPick,
   parseAutonomousLinkedMediaIds,
+  pickAutonomousEnabledProfile,
   pickRelatedUnusedStillCluster,
   summarizeUnusedLibraryOverview,
   autonomousPreferredSubject,
@@ -366,6 +367,24 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     "recdGHU0uHq3ktPje",
     "recPy3fzh3rdnsVta",
   ]);
+});
+
+test("on-demand harvest uses the working profile, not the first enabled city", () => {
+  const nyc = { id: "recgtK8Z7eNADNtVy", name: "NYC - New York City" };
+  const chicago = { id: "recT2rbKX3MF7cVFU", name: "ChicagoShining - Chicago" };
+  assert.equal(pickAutonomousEnabledProfile([chicago, nyc], "recgtK8Z7eNADNtVy").name, "NYC - New York City");
+  assert.equal(pickAutonomousEnabledProfile([chicago, nyc], "").name, "ChicagoShining - Chicago");
+  const parkStills = [
+    { id: "recPark00000000001", location: "Central Park, Manhattan, New York City" },
+    { id: "recPark00000000002", location: "Central Park, Columbus Circle, Manhattan, New York City" },
+    { id: "recPark00000000003", location: "Central Park, Upper West Side, Manhattan, New York City" },
+    { id: "recPark00000000004", location: "Central Park, Manhattan, New York City" },
+    { id: "recPark00000000005", location: "Central Park, Manhattan, New York City" },
+  ];
+  assert.equal(autonomousPlaceSubjects("Central Park, Manhattan, New York City")[0], "central park");
+  const cluster = pickRelatedUnusedStillCluster(parkStills);
+  assert.equal(cluster?.key, "place:central park");
+  assert.equal(cluster?.assets.length, 5);
 });
 
 test("unused stills cluster into a related 5-10 set", () => {
