@@ -24,12 +24,17 @@ from yt.constants import (
     PACKAGE_READY,
     POLL_RETRY_MINUTES,
     PROCESSING_NOT_STARTED,
+    PROCESSING_SUCCEEDED,
     RETRY_MINUTES,
     STAGE_YT1,
+    STAGE_YT4,
+    THUMB_PENDING,
     UPLOAD_UPLOADED,
     UPLOAD_UPLOADING,
 )
 from yt.eligibility import yts1_eligibility_reason
+from yt.package import youtube_thumbnail_publish_enabled
+from yt.yts2 import yts2_needs_videos_list
 
 
 def process_request(
@@ -78,25 +83,34 @@ def process_request(
     result["video_id"] = video_id
     now = iso_utc()
     if 200 <= status_code <= 299 and job_status == "completed" and video_id:
-        client.update_record(
-            PLATFORM_OUTPUTS_TABLE,
-            record_id,
-            {
-                "YouTube_Video_ID": video_id,
-                "Publish_Error_Stage": "",
-                "Publish_Error_Message": "",
-                "Publish_Next_Retry_At": retry_at(POLL_RETRY_MINUTES),
-                "YouTube_Error_Message": "",
-                "YouTube_Response_JSON": response_json(body),
-                "YouTube_Upload_Status": UPLOAD_UPLOADED,
-                "Publish_Retry_Eligible": False,
-                "YouTube_Last_Checked_At": now,
-                "YouTube_Processing_Status": PROCESSING_NOT_STARTED,
-                "YouTube_Upload_Completed_At": body.get("completedAt") or now,
-                "YouTube_Upload_Progress_Percent": 100,
-            },
-        )
-        result["needs_processing_poll"] = True
+        thumb_publish = youtube_thumbnail_publish_enabled(PipelineSettings(client))
+        skip_list = not yts2_needs_videos_list(thumb_publish)
+        fields = {
+            "YouTube_Video_ID": video_id,
+            "Publish_Error_Stage": "",
+            "Publish_Error_Message": "",
+            "Publish_Next_Retry_At": None if skip_list else retry_at(POLL_RETRY_MINUTES),
+            "YouTube_Error_Message": "",
+            "YouTube_Response_JSON": response_json(body),
+            "YouTube_Upload_Status": UPLOAD_UPLOADED,
+            "Publish_Retry_Eligible": False,
+            "YouTube_Last_Checked_At": now,
+            "YouTube_Processing_Status": PROCESSING_SUCCEEDED if skip_list else PROCESSING_NOT_STARTED,
+            "YouTube_Upload_Completed_At": body.get("completedAt") or now,
+            "YouTube_Upload_Progress_Percent": 100,
+        }
+        if skip_list:
+            fields["YouTube_Stage"] = STAGE_YT4
+            fields["YouTube_Processing_Progress_Percent"] = 100
+            if not field_str(output, "YouTube_Thumbnail_Status"):
+                fields["YouTube_Thumbnail_Status"] = THUMB_PENDING
+        client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, fields)
+        result["thumbnail_publish"] = thumb_publish
+        result["skipped_videos_list"] = skip_list
+        result["needs_processing_poll"] = not skip_list
+        result["needs_finalize"] = skip_list
+        if skip_list:
+            result["youtube_stage"] = STAGE_YT4
         return {"processed": True, **result}
     if 200 <= status_code <= 299 and job_status not in {"completed", "failed"}:
         client.update_record(

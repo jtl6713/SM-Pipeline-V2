@@ -19,11 +19,13 @@ param(
         'pipeline-runner',
         'video-compressor',
         'timing-engine',
-        'task-organizer'
+        'task-organizer',
+        'ops-dashboard'
     )]
     [string]$Service,
 
     [string]$PipelineRoot = 'D:\Content Creation\ChicagoShining Pipeline',
+    [string]$RepoRoot = 'D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2',
     [switch]$StopFirst
 )
 
@@ -122,10 +124,29 @@ $Map = @{
         Title = '9 LOC Task Organizer :3360'
         Kind = 'uvicorn'
     }
+    'ops-dashboard' = @{
+        Name = 'Ops Dashboard'
+        Port = 3361
+        Dir = 'Services\ops-dashboard'
+        Title = '10 LOC Ops Dashboard :3361'
+        Kind = 'node'
+        File = 'server.js'
+        ExtraEnv = @{ PORT = '3361' }
+        SourceFallback = 'services\ops-dashboard'
+    }
 }
 
 $cfg = $Map[$Service]
 $runtime = Join-Path $PipelineRoot $cfg.Dir
+if (-not (Test-Path -LiteralPath $runtime)) {
+    if ($cfg.SourceFallback) {
+        $fallback = Join-Path $RepoRoot $cfg.SourceFallback
+        if (Test-Path -LiteralPath $fallback) {
+            Write-Host "Runtime missing; starting Ops Dashboard from Git checkout: $fallback" -ForegroundColor Yellow
+            $runtime = $fallback
+        }
+    }
+}
 if (-not (Test-Path -LiteralPath $runtime)) {
     throw "Runtime folder missing for ${Service}: $runtime"
 }

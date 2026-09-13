@@ -75,7 +75,11 @@ def main() -> int:
     if not args.dry_run and not token:
         raise SystemExit("CLOUDFLARE_API_TOKEN is required unless --dry-run")
 
-    origin = args.origin_url or service[f"{args.origin}_origin"]
+    origin = args.origin_url or service.get(f"{args.origin}_origin")
+    if not origin:
+        raise SystemExit(
+            f"{args.service} has no {args.origin}_origin (Windows-only hostnames stay on this PC)."
+        )
     hostname = service["hostname"]
     print(f"{hostname} -> {origin} ({args.origin})")
 

@@ -186,6 +186,14 @@ pause
 exit /b %RC%
 '@
 
+$opsBat = @'
+@echo off
+setlocal
+set "INSTALLER=D:\Content Creation\ChicagoShining Pipeline\Source Control\SM-Pipeline-V2\deploy\local-services\Install-OpsDashboard.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALLER%"
+exit /b %ERRORLEVEL%
+'@
+
 $deskBat = @'
 @echo off
 setlocal
@@ -207,6 +215,7 @@ $launcherFiles = @{
     'DEPLOY Pipeline Runner.bat' = $runnerBat
     'SYNC Local Git Checkout.bat' = $syncBat
     'DESK Companion.bat' = $deskBat
+    'OPS Dashboard.bat' = $opsBat
     'INSTALL Operator Shortcuts.bat' = $installBat
 }
 foreach ($root in $toolRoots) {
@@ -276,6 +285,7 @@ $rootShortcuts = @(
     @{ Name = 'VERIFY ChicagoShining Services.lnk'; Target = $verifyTarget; PreserveIfExists = $true; Description = 'Verify local + public service health' },
     @{ Name = 'SYNC Local Git Checkout.lnk'; Target = (Join-Path $ToolsRoot 'SYNC Local Git Checkout.bat'); PreserveIfExists = $false; Description = 'Fast-forward SM-Pipeline-V2 to origin/main' },
     @{ Name = 'DESK Companion.lnk'; Target = (Join-Path $ToolsRoot 'DESK Companion.bat'); PreserveIfExists = $false; Description = 'Service desk public health probe and gated local restart/deploy' },
+    @{ Name = 'OPS Dashboard.lnk'; Target = (Join-Path $ToolsRoot 'OPS Dashboard.bat'); PreserveIfExists = $false; Description = 'Open the local operator dashboard for START/STOP/VERIFY/DEPLOY' },
     @{ Name = 'PLAN Local Service Deployment.lnk'; Target = (Join-Path $ToolsRoot 'PLAN Local Service Deployment.bat'); PreserveIfExists = $false; Description = 'Read-only deployment plan from GitHub main' },
     @{ Name = 'DEPLOY Local Service.lnk'; Target = (Join-Path $ToolsRoot 'DEPLOY Local Service.bat'); PreserveIfExists = $false; Description = 'Deploy one approved service from GitHub main' },
     @{ Name = 'DEPLOY Pipeline Runner.lnk'; Target = (Join-Path $ToolsRoot 'DEPLOY Pipeline Runner.bat'); PreserveIfExists = $false; Description = 'Deploy pipeline-runner only' },

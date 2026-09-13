@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chicago Shining Ops</title>
+  <style>
+    :root {
+      --bg: #0b0b0c;
+      --panel: #141416;
+      --ink: #f4e7c3;
+      --muted: #b8a57a;
+      --line: #3a3120;
+      --gold: #d4af37;
+      --good: #6fbf73;
+      --warn: #e0b15a;
+      --bad: #d46565;
+      --danger: #c44747;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 "Segoe UI", sans-serif; }
+    body { min-height: 100vh; }
+    header {
+      padding: 22px 24px 10px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #1a1610 0%, #0b0b0c 100%);
+    }
+    h1 { margin: 0; font-size: 22px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold); }
+    .sub { color: var(--muted); margin-top: 6px; }
+    .wrap { padding: 20px 24px 48px; max-width: 1180px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; }
+    @media (max-width: 920px) { .grid { grid-template-columns: 1fr; } }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    h2 { margin: 0 0 12px; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); }
+    .svc {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #221c12;
+    }
+    .svc:last-child { border-bottom: 0; }
+    .name { font-weight: 600; }
+    .port { color: var(--muted); font-size: 12px; }
+    .pill {
+      min-width: 64px; text-align: center;
+      border-radius: 999px; padding: 3px 8px; font-size: 11px; letter-spacing: 0.04em;
+      border: 1px solid var(--line);
+    }
+    .up { color: var(--good); border-color: #2d5a32; }
+    .down { color: var(--warn); border-color: #5a4820; }
+    .miss { color: var(--muted); }
+    .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 0 0 10px; background: #101012; }
+    .card h3 { margin: 0 0 6px; font-size: 16px; }
+    .card p { margin: 0 0 8px; color: var(--muted); }
+    .meta { font-size: 12px; color: #8d7a52; margin-bottom: 10px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button, select, input {
+      background: #1c1913; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px; font: inherit;
+    }
+    button { cursor: pointer; color: #111; background: var(--gold); border-color: #aa8c22; font-weight: 650; }
+    button.ghost { background: transparent; color: var(--ink); }
+    button.warn { background: #8a6a1c; color: #fff; }
+    button.danger { background: var(--danger); color: #fff; border-color: #8a2d2d; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .login { max-width: 420px; margin: 48px auto; }
+    pre {
+      margin: 0; max-height: 420px; overflow: auto; white-space: pre-wrap;
+      background: #09090a; border: 1px solid var(--line); border-radius: 8px;
+      padding: 12px; color: #e8d7a5; font-size: 12px;
+    }
+    .err { color: var(--bad); margin-top: 10px; }
+    .group { margin: 18px 0 8px; color: var(--gold); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
+    a { color: var(--gold); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Chicago Shining Ops</h1>
+    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY. Allowlisted scripts only. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
+  </header>
+  <div class="wrap">
+    <div id="login" class="login" hidden>
+      <section>
+        <h2>Unlock</h2>
+        <p class="sub">Paste <code>DASHBOARD_TOKEN</code> from <code>Services\ops-dashboard\.env</code> once. This browser will remember it.</p>
+        <div class="row" style="margin-top:12px">
+          <input id="tokenInput" type="password" placeholder="DASHBOARD_TOKEN" style="flex:1" />
+          <button id="saveToken">Open</button>
+        </div>
+        <div id="loginErr" class="err"></div>
+      </section>
+    </div>
+    <div id="app" hidden>
+      <div class="grid">
+        <div>
+          <section>
+            <h2>Listeners</h2>
+            <div id="status"></div>
+          </section>
+          <section style="margin-top:18px">
+            <h2>Actions</h2>
+            <div class="row" style="margin-bottom:12px">
+              <label class="sub">Service for PLAN / DEPLOY / start-one / stop-one</label>
+              <select id="service"></select>
+            </div>
+            <div id="actions"></div>
+          </section>
+        </div>
+        <div>
+          <section>
+            <h2>Run log</h2>
+            <div id="jobMeta" class="meta">Idle. Pick an action.</div>
+            <pre id="log">No output yet.</pre>
+            <div id="runErr" class="err"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tokenKey = "ops_token";
+    const $ = (id) => document.getElementById(id);
+    let catalog = null;
+    let pollTimer = null;
+
+    function readCookie(name) {
+      const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+      return match ? decodeURIComponent(match[1]) : "";
+    }
+    function rememberToken(value) {
+      const token = String(value || "").trim();
+      if (!token) return;
+      localStorage.setItem(tokenKey, token);
+      sessionStorage.removeItem(tokenKey);
+      document.cookie = tokenKey + "=" + encodeURIComponent(token) + "; Max-Age=15552000; Path=/; SameSite=Lax";
+      if (new URLSearchParams(location.search).get("token")) {
+        history.replaceState({}, "", location.pathname);
+      }
+    }
+    function forgetToken() {
+      localStorage.removeItem(tokenKey);
+      sessionStorage.removeItem(tokenKey);
+      document.cookie = tokenKey + "=; Max-Age=0; Path=/";
+    }
+    function token() {
+      return localStorage.getItem(tokenKey) || sessionStorage.getItem(tokenKey) || readCookie(tokenKey) || new URLSearchParams(location.search).get("token") || "";
+    }
+    function headers() {
+      const h = { "Accept": "application/json" };
+      if (token()) h["X-Ops-Token"] = token();
+      return h;
+    }
+    async function api(path, opts = {}) {
+      const res = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) throw Object.assign(new Error("auth"), { auth: true });
+      if (res.status === 409 && data.job) return data;
+      if (!res.ok && res.status !== 202) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function pill(ok, labelYes, labelNo, unknown) {
+      if (ok === true) return `<span class="pill up">${labelYes}</span>`;
+      if (ok === false) return `<span class="pill down">${labelNo}</span>`;
+      return `<span class="pill miss">${unknown}</span>`;
+    }
+
+    async function loadStatus() {
+      const data = await api("/api/status");
+      $("status").innerHTML = data.rows.map((row) => `
+        <div class="svc">
+          <div>
+            <div class="name">${row.name}</div>
+            <div class="port">:${row.port}${row.publicUrl ? " · " + row.publicUrl.replace("https://","") : ""}</div>
+          </div>
+          ${pill(row.localUp, "LOCAL", "DOWN", "—")}
+          ${pill(row.publicOk, "PUBLIC", "DOWN", "NO PUBLIC")}
+        </div>
+      `).join("");
+      return data;
+    }
+
+    function renderActions() {
+      const groups = {};
+      for (const action of catalog.actions) {
+        (groups[action.group] ||= []).push(action);
+      }
+      const sel = $("service");
+      sel.innerHTML = catalog.services.map((s) => `<option value="${s.id}">${s.name}</option>`).join("");
+      $("actions").innerHTML = Object.entries(groups).map(([group, items]) => `
+        <div class="group">${group}</div>
+        ${items.map((action) => `
+          <article class="card">
+            <h3>${action.title}</h3>
+            <p>${action.summary}</p>
+            <div class="meta">${action.detail}${action.shortcut ? " Shortcut: " + action.shortcut + "." : ""}</div>
+            <div class="row">
+              <button class="${action.danger === "danger" ? "danger" : action.danger === "caution" ? "warn" : ""}"
+                data-action="${action.id}">Run</button>
+            </div>
+          </article>
+        `).join("")}
+      `).join("");
+      $("actions").onclick = (ev) => {
+        const btn = ev.target.closest("button[data-action]");
+        if (!btn) return;
+        runAction(btn.getAttribute("data-action"));
+      };
+    }
+
+    async function pollJob(id) {
+      const data = await api("/api/jobs/" + id);
+      const job = data.job;
+      $("jobMeta").textContent = `${job.action}${job.service ? " · " + job.service : ""} · ${job.status}` +
+        (job.exitCode == null ? "" : " · exit " + job.exitCode);
+      $("log").textContent = job.log || "(no output yet)";
+      $("log").scrollTop = $("log").scrollHeight;
+      document.querySelectorAll("button[data-action]").forEach((b) => { b.disabled = job.status === "running"; });
+      if (job.status === "running") {
+        pollTimer = setTimeout(() => pollJob(id), 1200);
+      } else {
+        loadStatus().catch(() => {});
+      }
+    }
+
+    async function runAction(id) {
+      $("runErr").textContent = "";
+      const spec = catalog.actions.find((a) => a.id === id);
+      const service = $("service").value;
+      if (spec.confirm) {
+        const extra = spec.needsService ? ` for ${service}` : "";
+        if (!confirm(`Run ${spec.title}${extra}?\n\n${spec.summary}`)) return;
+      }
+      try {
+        const data = await api("/api/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: id,
+            service: spec.needsService ? service : undefined,
+            confirm: spec.confirm ? true : undefined,
+          }),
+        });
+        if (pollTimer) clearTimeout(pollTimer);
+        if (data.error) $("runErr").textContent = data.error;
+        pollJob(data.job.id);
+      } catch (err) {
+        $("runErr").textContent = err.message;
+      }
+    }
+
+    async function boot() {
+      try {
+        const data = await api("/api/catalog");
+        catalog = data.catalog;
+        $("login").hidden = true;
+        $("app").hidden = false;
+        $("forgetDevice").hidden = false;
+        if (token()) rememberToken(token());
+        renderActions();
+        const status = await loadStatus();
+        if (status && status.activeJobId) pollJob(status.activeJobId);
+        setInterval(() => loadStatus().catch(() => {}), 20000);
+      } catch (err) {
+        $("app").hidden = true;
+        $("login").hidden = false;
+        if (!err.auth) $("loginErr").textContent = err.message;
+      }
+    }
+
+    $("saveToken").onclick = () => {
+      rememberToken($("tokenInput").value);
+      $("loginErr").textContent = "";
+      boot();
+    };
+    $("forgetDevice").onclick = (ev) => {
+      ev.preventDefault();
+      forgetToken();
+      $("forgetDevice").hidden = true;
+      $("app").hidden = true;
+      $("login").hidden = false;
+    };
+    if (token()) rememberToken(token());
+    boot();
+  </script>
+</body>
+</html>

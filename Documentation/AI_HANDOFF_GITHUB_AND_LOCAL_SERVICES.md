@@ -51,6 +51,7 @@ Required window titles remain `1 LOC` through `8 LOC` with those ports. Video Co
 - `https://pipeline.chicagoshining.com`
 - `https://compress.chicagoshining.com`
 - `https://timing.chicagoshining.com`
+- `https://ops.chicagoshining.com` (optional; Cloudflare Access + token; Windows Ops Dashboard on `:3361`)
 
 ## Deployment framework
 

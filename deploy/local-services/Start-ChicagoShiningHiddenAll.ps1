@@ -24,7 +24,8 @@ $order = @(
     'pipeline-runner',
     'video-compressor',
     'timing-engine',
-    'task-organizer'
+    'task-organizer',
+    'ops-dashboard'
 )
 
 function Test-PortListening([int]$Port) {
@@ -42,12 +43,14 @@ $ports = @{
     'video-compressor' = 3335
     'timing-engine' = 3336
     'task-organizer' = 3360
+    'ops-dashboard' = 3361
 }
 
 $optionalUntilPresent = @{
     'youtube-uploader-nyc' = 'Services\youtube-uploader-nyc\service\youtube-upload-service.js'
     'timing-engine' = 'Services\timing-engine\service\app.py'
     'task-organizer' = 'Source Control\chicago-shining-task-organizer'
+    'ops-dashboard' = 'Source Control\SM-Pipeline-V2\services\ops-dashboard\server.js'
 }
 
 $failed = New-Object System.Collections.Generic.List[string]

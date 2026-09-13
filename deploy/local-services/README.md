@@ -26,6 +26,7 @@ For the complete operator and AI-handoff procedure, read:
 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 |
 | YouTube Uploader NYC | `services/youtube-uploader` | `Services\youtube-uploader-nyc\service` | 3342 |
 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 |
+| Ops Dashboard | `services/ops-dashboard` | `Services\ops-dashboard` | 3361 |
 
 The numbered operational tab contract is `1 LOC` through `8 LOC` (Video Compressor is 7; Timing Engine is 8). Video Compressor stays on `Install-VideoCompressor.ps1` until the `Deploy-SMService.ps1` selector includes it. Linux/ARM compose for a later Oracle VM is [`deploy/cloud-vm/`](../cloud-vm/README.md); do not mix that into this Windows PLAN/DEPLOY path.
 
@@ -77,6 +78,7 @@ Installed under `Source Control\Production-Start-Stop-Verify-Services` (Git repo
 - `DESK Companion.bat` (service-desk public `/health` probe; optional restart/deploy)
 - Hourly keep-alive: `Register-DeskCompanionHourly.ps1` (VERIFY every hour; hidden START of a down service only; PLAN+DEPLOY one service when live stamp is behind `origin/main`)
 - Hidden launch: `Start-ChicagoShiningHidden.ps1` (no extra Windows Terminal / PowerShell windows)
+- `OPS Dashboard.bat` / `Install-OpsDashboard.ps1` (local operator site on `:3361`; optional `ops.chicagoshining.com` behind Access)
 - `ROLLBACK Local Service.bat`
 - `INSTALL Operator Shortcuts.bat` (refresh bats + pipeline-root `.lnk` files)
 

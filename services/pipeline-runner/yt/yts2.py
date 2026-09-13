@@ -44,6 +44,11 @@ from yt.eligibility import yts2_eligibility_reason
 from yt.package import youtube_thumbnail_publish_enabled
 
 
+def yts2_needs_videos_list(thumb_publish: bool) -> bool:
+    """videos.list is only needed to wait for processing before thumbnails.set."""
+    return bool(thumb_publish)
+
+
 def thumbnail_fallback_source(output: dict[str, Any], *, cover_required: bool) -> str | None:
     if cover_required:
         return None
@@ -98,13 +103,31 @@ def process_request(
     pipeline_settings = PipelineSettings(client)
     thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings)
     result["thumbnail_publish"] = thumb_publish
+    now = iso_utc()
+    if not yts2_needs_videos_list(thumb_publish):
+        client.update_record(
+            PLATFORM_OUTPUTS_TABLE,
+            record_id,
+            {
+                "YouTube_Stage": STAGE_YT4,
+                "Publish_Next_Retry_At": None,
+                "YouTube_Error_Message": "",
+                "YouTube_Last_Checked_At": now,
+                "YouTube_Processing_Status": PROCESSING_SUCCEEDED,
+                "YouTube_Processing_Progress_Percent": 100,
+                "YouTube_Thumbnail_Status": field_str(output, "YouTube_Thumbnail_Status") or THUMB_PENDING,
+            },
+        )
+        result["needs_finalize"] = True
+        result["skipped_videos_list"] = True
+        result["youtube_stage"] = STAGE_YT4
+        return {"processed": True, **result}
     settings = load_uploader_settings(pipeline_settings, output, client=client)
     uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
     status_code, body = uploader.video_status(video_id)
     status = processing_status(body).casefold()
     result["http_status"] = status_code
     result["processing_status"] = status
-    now = iso_utc()
     thumb_status = field_str(output, "YouTube_Thumbnail_Status")
     thumb_url = field_str(output, "Thumbnail_URL")
     from ap0.public_cover import (
