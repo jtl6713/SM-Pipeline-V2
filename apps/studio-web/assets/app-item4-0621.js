@@ -771,35 +771,83 @@
       setOperationsMessage(error.message || "Daily idea run failed.", "error-text");
     }
   });
-  $("operationsRunAutonomous")?.addEventListener("click", async () => {
-    const button = $("operationsRunAutonomous");
-    const idleLabel = button?.textContent || "Run autonomous now";
+  function autonomousProduceSkipMessage(reason) {
+    const key = String(reason || "").trim();
+    if (key === "no_related_unused_cluster") {
+      return "Need 5–10 unused photos of the same place or topic before a post can start.";
+    }
+    if (key === "no_unused_library_stills" || key === "no_matching_subject_stills") {
+      return "No unused library stills are available for this run.";
+    }
+    if (key === "already_ran_slot") {
+      return "This Chicago slot already harvested an idea. Resume the in-flight request, or wait for the next window.";
+    }
+    return key ? `Skipped: ${key}` : "Skipped.";
+  }
+
+  function autonomousProduceStatusMessage(result) {
+    if (result?.skipped) return autonomousProduceSkipMessage(result.skipped);
+    if (result?.status === "resuming") {
+      return `Resuming ${(result.resumed || []).length || "existing"} autonomous draft(s). No new idea will be picked.`;
+    }
+    if (result?.status === "waiting_variants") return "Plan is ready. Preparing platform frames in the background.";
+    if (result?.status === "producing" || result?.status === "promoted") {
+      return "Unused-photo idea is in production and will stop at Ready for Review.";
+    }
+    return "Unused-photo produce started.";
+  }
+
+  function setIdeasAutonomousMessage(text, className = "") {
+    const node = $("ideasAutonomousMessage");
+    if (!node) return;
+    node.textContent = text || "";
+    node.className = `form-message ${className}`.trim();
+  }
+
+  async function runAutonomousProduceNow({ preferredSubject = "", setMessage } = {}) {
+    const buttons = [$("ideasRunAutonomous"), $("operationsRunAutonomous")].filter(Boolean);
+    const idle = buttons.map((button) => button.textContent);
+    const report = typeof setMessage === "function" ? setMessage : setOperationsMessage;
     try {
-      if (button) {
+      buttons.forEach((button) => {
         button.disabled = true;
         button.textContent = "Running…";
-      }
-      setOperationsMessage("Starting autonomous produce… this can take a minute.");
+      });
+      report("Scanning unused photos and starting produce… this can take a minute.");
       const result = await api("/api/operations/ideas/run-autonomous", {
         method: "POST",
         body: JSON.stringify({
-          preferred_subject: String($("operationsAutonomousSubject")?.value || "").trim(),
+          preferred_subject: String(preferredSubject || $("operationsAutonomousSubject")?.value || "").trim(),
         }),
         timeoutMs: 180000,
       });
-      if (result.skipped) setOperationsMessage(`Skipped: ${result.skipped}`);
-      else if (result.status === "resuming") setOperationsMessage(`Resuming ${(result.resumed || []).length || "existing"} autonomous draft(s). No new idea will be picked.`);
-      else if (result.status === "waiting_variants") setOperationsMessage("Plan is ready. Preparing platform frames in the background.");
-      else if (result.status === "producing" || result.status === "promoted") setOperationsMessage("Autonomous piece is in production and will stop at Ready for Review.");
-      else setOperationsMessage("Autonomous produce started.");
-      loadOperations();
-    } catch (error) {
-      setOperationsMessage(error.message || "Autonomous produce failed.", "error-text");
-    } finally {
-      if (button) {
-        button.disabled = false;
-        button.textContent = idleLabel;
+      const message = autonomousProduceStatusMessage(result);
+      report(message, result?.skipped ? "error-text" : "");
+      setOperationsMessage(message, result?.skipped ? "error-text" : "");
+      if ($("ideasAutonomousMessage") && setMessage !== setIdeasAutonomousMessage) {
+        setIdeasAutonomousMessage(message, result?.skipped ? "error-text" : "");
       }
+      loadOperations();
+      loadIdeas().catch(() => {});
+      return result;
+    } catch (error) {
+      const message = error.message || "Unused-photo produce failed.";
+      report(message, "error-text");
+      setOperationsMessage(message, "error-text");
+      throw error;
+    } finally {
+      buttons.forEach((button, index) => {
+        button.disabled = false;
+        button.textContent = idle[index];
+      });
+    }
+  }
+
+  $("operationsRunAutonomous")?.addEventListener("click", async () => {
+    try {
+      await runAutonomousProduceNow({ setMessage: setOperationsMessage });
+    } catch {
+      /* message already shown */
     }
   });
   let intakePollTimer = null;
@@ -1666,6 +1714,13 @@
     }
   }
 
+  $("ideasRunAutonomous")?.addEventListener("click", async () => {
+    try {
+      await runAutonomousProduceNow({ setMessage: setIdeasAutonomousMessage });
+    } catch {
+      /* message already shown */
+    }
+  });
   $("generateIdeasButton")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: !ideaGenerationInFlight }));
   $("ideaGenerateCancel")?.addEventListener("click", () => setIdeaGeneratorOpen(false));
   $("ideaGenerateMore")?.addEventListener("click", () => setIdeaGeneratorOpen(true, { reset: true }));
@@ -15989,6 +16044,8 @@
       if (run) run.hidden = !data.can_edit_profiles;
       const runAuto = $("operationsRunAutonomous");
       if (runAuto) runAuto.hidden = !data.can_edit_profiles;
+      const ideasAuto = $("ideasRunAutonomous");
+      if (ideasAuto) ideasAuto.hidden = !data.can_edit_profiles;
       const deskMode = $("operationsDeskMode");
       if (deskMode) deskMode.hidden = !data.can_edit_profiles;
       const crossScopeField = $("operationsLibraryCrossScopeField");

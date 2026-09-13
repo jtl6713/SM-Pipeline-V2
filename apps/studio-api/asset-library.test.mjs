@@ -32,6 +32,7 @@ import {
   mediaAssetProfileScopeFormula,
   combineAirtableFormulas,
   ideaLibraryExcludeDerivedStillFormula,
+  libraryClassifyPendingFormula,
 } from "./asset-library.mjs";
 
 function output(fields) {
@@ -349,6 +350,16 @@ test("library list sort works for media and published catalogues", () => {
     sortField: "Published_At",
     sortDirection: "desc",
   });
+});
+
+test("classify-all pending formula includes false Classified stubs", () => {
+  const formula = libraryClassifyPendingFormula("AND({Media_Class}='Image')");
+  assert.match(formula, /Needs Classification/);
+  assert.match(formula, /Classification Error/);
+  assert.match(formula, /Search_Keywords/);
+  assert.match(formula, /Classified/);
+  assert.match(formula, /Content_Profile/);
+  assert.equal(libraryClassifyPendingFormula(""), null);
 });
 
 test("library added-date filter is inclusive and combines with search independently", () => {

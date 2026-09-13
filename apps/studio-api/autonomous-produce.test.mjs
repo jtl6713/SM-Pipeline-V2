@@ -30,9 +30,15 @@ import {
   parseRssItemTitles,
   summarizeObservations,
   autonomousIdeaConflictsOccupied,
+  AUTONOMOUS_RELATED_STILL_MAX,
+  AUTONOMOUS_RELATED_STILL_MIN,
   autonomousUnusedLibraryAssets,
   autonomousPlaceSubjects,
   buildAutonomousPickerPrompt,
+  completeRelatedStillPick,
+  parseAutonomousLinkedMediaIds,
+  pickRelatedUnusedStillCluster,
+  summarizeUnusedLibraryOverview,
   autonomousPreferredSubject,
   collectAutonomousOccupiedFromIdeas,
   collectAutonomousTopicCollisions,
@@ -177,7 +183,9 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   });
   assert.match(pinned, /OPERATOR PIN/);
   assert.match(pinned, /Chicago Theatre/);
-  assert.match(libraryFirst, /Start from the library stills/);
+  assert.match(libraryFirst, /Start from unused library stills/);
+  assert.match(libraryFirst, /5 to 10/);
+  assert.match(libraryFirst, /post_caption/);
   assert.match(libraryFirst, /no_unused_library_stills/);
   assert.match(libraryFirst, /Another angle of an occupied place/);
   assert.equal(libraryFirst.includes("no_asset_backed_trend"), false);
@@ -190,10 +198,12 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
     candidate_title: "Pilsen mural walk",
     idea_summary: "See the new wall before the weekend crowd.",
     suggested_format: "Vertical Short Video",
+    post_caption: "Pilsen walls are loud this week. Walk 18th before the weekend crowd.",
     media_asset_ids: ["recAsset1234567890"],
   });
   assert.equal(picked.skip, false);
   assert.equal(picked.media_asset_ids[0], "recAsset1234567890");
+  assert.match(picked.post_caption, /Pilsen walls/);
   assert.deepEqual(autonomousPlanOverrides("Vertical Short Video").Instagram, "Reel");
   assert.deepEqual(autonomousPlanOverrides("Carousel").Instagram, "Carousel");
   assert.deepEqual(autonomousPlanExtras(), [
@@ -356,6 +366,51 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     "recdGHU0uHq3ktPje",
     "recPy3fzh3rdnsVta",
   ]);
+});
+
+test("unused stills cluster into a related 5-10 set", () => {
+  assert.equal(AUTONOMOUS_RELATED_STILL_MIN, 5);
+  assert.equal(AUTONOMOUS_RELATED_STILL_MAX, 10);
+  assert.deepEqual(
+    parseAutonomousLinkedMediaIds(["recfgniLGTG1tTviX", { id: "rec1nTwk171jxI4sA" }]),
+    ["recfgniLGTG1tTviX", "rec1nTwk171jxI4sA"],
+  );
+  const unused = [
+    ...Array.from({ length: 7 }, (_, index) => ({
+      id: `recPilsen${String(index).padStart(10, "0")}`,
+      name: `Pilsen mural ${index + 1}.jpeg`,
+      location: "Pilsen",
+      topic: "Street art",
+      intake_date: "2026-09-10",
+    })),
+    ...Array.from({ length: 3 }, (_, index) => ({
+      id: `recRiver${String(index).padStart(11, "0")}`,
+      name: `Riverwalk ${index + 1}.jpeg`,
+      location: "Chicago River",
+      intake_date: "2026-09-11",
+    })),
+  ];
+  const overview = summarizeUnusedLibraryOverview(unused);
+  assert.equal(overview.unused_count, 10);
+  assert.equal(overview.clusters[0].label, "Pilsen");
+  assert.equal(overview.clusters[0].count, 7);
+  const cluster = pickRelatedUnusedStillCluster(unused);
+  assert.equal(cluster.label, "Pilsen");
+  assert.equal(cluster.assets.length, 7);
+  assert.equal(pickRelatedUnusedStillCluster(unused.slice(7)), null);
+  assert.deepEqual(
+    completeRelatedStillPick(["recPilsen0000000000"], cluster.assets).length,
+    7,
+  );
+  const occupiedRequest = mapAutonomousOccupiedRequest({
+    fields: {
+      Request_Status: "Promoted",
+      Primary_Location: "Pilsen",
+      Production_Request_ID: "PR-USED",
+      Studio_Master_Media_Assets: ["recPilsen0000000000"],
+    },
+  });
+  assert.deepEqual(occupiedRequest.media_asset_ids, ["recPilsen0000000000"]);
 });
 
 test("JSON fences unwrap and last-run notes stay readable", () => {
