@@ -62,6 +62,7 @@ def create_master_media_asset(
             else "Studio Item 4 authoritative master original preserved in Google Drive."
         ),
         "Studio_Transfer_ID": transfer_id,
+        "Classification_Status": "Needs Classification",
     }
     return client.create_records(MEDIA_ASSETS_TABLE, [body])[0]
 
@@ -100,7 +101,61 @@ def create_variant_media_asset(
         ),
         "Studio_Transfer_ID": transfer_id,
     }
+    source = find_by_drive_file_id(client, str(fields.get("Source_Drive_File_ID") or ""))
+    body.update(classification_fields_from_source(source))
     return client.create_records(MEDIA_ASSETS_TABLE, [body])[0]
+
+
+CLASSIFICATION_COPY_FIELDS = (
+    "Topic",
+    "Subtopic",
+    "Location",
+    "Visible_Subjects",
+    "Mood",
+    "Weather",
+    "Season",
+    "Time_Of_Day",
+    "Shot_Type",
+    "Movement",
+    "AI_Tags",
+    "Search_Keywords",
+    "Quality_Score",
+    "Usefulness_Score",
+)
+
+
+def classification_fields_from_source(source: dict[str, Any] | None) -> dict[str, Any]:
+    if not source:
+        return {"Classification_Status": "Needs Classification"}
+    src = source.get("fields") if isinstance(source.get("fields"), dict) else source
+    copied: dict[str, Any] = {}
+    for key in CLASSIFICATION_COPY_FIELDS:
+        value = src.get(key)
+        if value not in (None, "", []):
+            copied[key] = value
+    profile = src.get("Content_Profile")
+    if profile:
+        copied["Content_Profile"] = profile
+    copied["Classification_Status"] = "Classified" if copied.get("Search_Keywords") else "Needs Classification"
+    return copied
+
+
+def find_by_drive_file_id(client: AirtableClient, drive_id: str) -> dict | None:
+    file_id = str(drive_id or "").strip()
+    if not file_id:
+        return None
+    safe = file_id.replace("'", "\\'")
+    rows = client.list_records(
+        MEDIA_ASSETS_TABLE,
+        formula=f"{{Google Drive File ID}}='{safe}'",
+        max_records=5,
+    )
+    for row in rows:
+        name = str((row.get("fields") or row).get("Asset Name") or "")
+        if "fill-crop" in name.lower():
+            continue
+        return row
+    return rows[0] if rows else None
 
 
 def ensure_media_asset(

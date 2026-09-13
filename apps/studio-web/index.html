@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.307-profile-voice-briony">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.310-unused-photo-run">
 </head>
 <body>
  <header class="topbar">
@@ -110,9 +110,10 @@
 
  <section id="page-ideas" class="page">
  <div class="page-heading">
- <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then Promote to production. No review email is required. Add photos first if you want new footage on the request.</p></div>
- <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="generateIdeasButton">Generate AI ideas</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
+ <div><span class="eyebrow">Intake</span><h1>Ideas</h1><p>Write or pick a brief, then Promote to production. No review email is required. Add photos first if you want new footage on the request. Use unused photos scans the library for a related 5–10 still set that has not been posted yet, writes the idea and caption, and runs it through to Ready for Review.</p></div>
+ <div class="heading-actions"><button class="secondary-button" data-refresh="ideas">Refresh</button><button class="secondary-button" id="ideasRunAutonomous">Use unused photos</button><button class="secondary-button" id="generateIdeasButton">Generate AI ideas</button><button class="primary-button" id="newIdeaButton">+ New idea</button></div>
  </div>
+ <div class="form-message" id="ideasAutonomousMessage" aria-live="polite"></div>
  <section class="panel idea-generate-panel" id="ideaGeneratePanel" hidden>
  <form id="ideaGenerateForm" class="idea-generate-form">
  <div class="idea-generate-fields">
@@ -1175,7 +1176,7 @@
  <div id="operationsProfiles" class="ops-profile-list"></div>
  </div>
  <div class="ops-tab-panel" id="operationsProducePanel" data-ops-tab-panel="produce" role="tabpanel" aria-labelledby="operationsTabProduce" hidden>
- <div class="panel-heading"><div><h2>Autonomous produce</h2><p>When a profile toggle is on, Studio harvests Chicago trends, picks one idea the library can shoot, produces the standard template, and stops at Ready for Review. Nothing publishes. Runs around 8:00 a.m. and 4:00 p.m. Chicago.</p></div>
+ <div class="panel-heading"><div><h2>Autonomous produce</h2><p>When a profile toggle is on, Studio overviews unused library stills, picks 5–10 related photos that have not been used on a platform output, writes the idea and caption, produces the standard template, and stops at Ready for Review. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or run on demand here or from Ideas.</p></div>
  <button type="button" class="secondary-button" id="operationsRunAutonomous">Run autonomous now</button>
  </div>
  <label class="form-field" style="max-width:22rem"><span>Pin next run to a landmark</span><input id="operationsAutonomousSubject" type="text" maxlength="80" placeholder="e.g. Chicago Theatre"></label>
@@ -1463,6 +1464,7 @@
  </figure>
  <p>Ideas holds Idea Candidates before they become Content Items. Nothing here publishes.</p>
  <ul>
+ <li><strong>Use unused photos</strong> — scan unused library stills, pick a related 5–10 set, write the idea and caption, and produce through to Ready for Review. Nothing publishes.</li>
  <li><strong>Generate AI ideas</strong> — create 1–10 ideas. Studio waits until they show up in the table.</li>
  <li><strong>New idea</strong> — select an existing unpromoted candidate or enter a title/summary by hand.</li>
  <li><strong>Manage</strong> — edit copy, hold/restore, delete, or choose <em>Add new photos</em> / <em>Use existing</em> to open Production.</li>
@@ -1547,7 +1549,7 @@
  <ul>
  <li><strong>Service desk</strong> — Quality Agent service lane: stuck produce, render, crop, autonomous, and public health, plus the named check list. Desk mode is the kill switch. Worker cron still heals transients every two minutes. Full behavior is on the Quality Agent Help tab.</li>
  <li><strong>Profiles</strong> — per-profile Studio settings: overnight idea batch around 1:00 a.m. Chicago, hub background, default narration voice, and autonomous music pool. Toggle daily ideas on, or use Run ideas now for enabled profiles. Changing the header Profile switches Admin to that profile's context.</li>
- <li><strong>Autonomous produce</strong> — harvests a Chicago trend the library can shoot, produces the standard template, and <em>stops at Ready for Review</em>. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or Run autonomous now. Optional landmark pin applies to the next run. Studio will not pick a new autonomous idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
+ <li><strong>Autonomous produce</strong> — overviews unused library stills, picks a related 5–10 photo set that has not been used on a platform output, writes the idea and caption, produces the standard template, and <em>stops at Ready for Review</em>. Nothing publishes. Scheduled around 8:00 a.m. and 4:00 p.m. Chicago, or Use unused photos on Ideas / Run autonomous now. Optional landmark pin applies to the next run. Studio will not pick a new autonomous idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
  <li><strong>Library intake</strong> — Drive ingestion folder scan every 10 minutes. Process intake folder starts the same drain now. Oversized clips compress one at a time, then the next file starts immediately. Cap music leading silence rewrites catalog audio so the intro is no longer than 0.5 seconds.</li>
  <li><strong>Analytics</strong> — posting-time heatmap from similar public accounts (Chicago weekday/hour). Gold marks your upcoming scheduled posts. YouTube timing is live; Instagram timing is paused pending Meta permission; TikTok and Facebook stay reference-only. Run sequentially fetches one handle at a time. Suggested times never auto-apply.</li>
  <li><strong>Ready to schedule</strong> — approved outputs that still need a post date. Set the time here instead of waiting for a reminder email.</li>
@@ -1599,7 +1601,7 @@
  <p>Testing is the Quality Agent tester lane. The shared check catalog lives on the <button type="button" class="text-button" data-support-doc="desk">Quality Agent</button> Help tab. Studio testing means proving a path to Ready for Review without posting live, unless you explicitly Approve. Operations is where you pulse a run; Pipeline is where you inspect the result. Do not seed live mx1–mx5 platform-matrix rows on the 15-minute tick.</p>
  <h3>Safe Studio tests</h3>
  <ul>
- <li><strong>Autonomous produce</strong> — Operations → Autonomous produce → Run autonomous now. It must stop at Ready for Review. Nothing publishes. Do not harvest a second idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
+ <li><strong>Autonomous produce</strong> — Ideas → Use unused photos, or Operations → Autonomous produce → Run autonomous now. It must stop at Ready for Review. Nothing publishes. Do not harvest a second idea while a Draft, Ready, or Submitted autonomous request is already in flight.</li>
  <li><strong>Profiles</strong> — Run ideas now only for profiles whose Daily ideas toggle is on. Candidates land on Ideas; they are not production and not publish. Narration voice and music pool guide autonomous produce when AI picks audio.</li>
  <li><strong>Finished video (AZ)</strong> — Home drop of one MP4. Studio makes the 3D cover, captions, and a 7-day schedule. You can still change or cancel times in Pipeline before they fire. TikTok stays a draft.</li>
  <li><strong>Library intake / compress</strong> — Process intake or Compress all only when files are waiting. Watch the intake stages and the oversized banner instead of assuming it finished.</li>
@@ -1814,8 +1816,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.309-library-picker-no-ten"></script>
+ <script src="/assets/config-0621.js?v=0.6.310-unused-photo-run"></script>
  <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.309-library-picker-no-ten"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.310-unused-photo-run"></script>
 </body>
 </html>

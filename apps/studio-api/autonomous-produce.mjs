@@ -213,10 +213,11 @@ export function parseAutonomousPick(parsed) {
     required_assets: String(parsed?.required_assets || "").trim().slice(0, 160),
     why_this_should_work: String(parsed?.why_this_should_work || "").trim().slice(0, 160),
     cited_trend: String(parsed?.cited_trend || "").trim().slice(0, 200),
+    post_caption: String(parsed?.post_caption || parsed?.caption || "").trim().slice(0, 2200),
     content_type: format === "Carousel" || format === "Photo Set" || format === "Feed Post"
       ? format
       : "Vertical Short Video",
-    media_asset_ids: mediaIds.slice(0, 12),
+    media_asset_ids: mediaIds.slice(0, AUTONOMOUS_RELATED_STILL_MAX),
   };
 }
 
@@ -231,6 +232,8 @@ export function autonomousRequestNeedsContinue(requestStatus, notes) {
 }
 
 export const AUTONOMOUS_MAX_MASTER_ASSETS = 12;
+export const AUTONOMOUS_RELATED_STILL_MIN = 5;
+export const AUTONOMOUS_RELATED_STILL_MAX = 10;
 
 export function isDerivedLibraryStillName(name) {
   const text = String(name || "");
@@ -290,6 +293,17 @@ export function parseAutonomousNotedMediaIds(notes) {
   const match = String(notes || "").match(/media_asset_ids=([^\n]+)/i);
   if (!match) return [];
   return [...new Set(match[1].split(",").map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+export function parseAutonomousLinkedMediaIds(value) {
+  const rows = Array.isArray(value) ? value : (value ? [value] : []);
+  return [...new Set(rows.flatMap((item) => {
+    if (typeof item === "string") return [item.trim()];
+    if (item && typeof item === "object") {
+      return [String(item.id || item.record_id || "").trim()];
+    }
+    return [];
+  }).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
 }
 
 const AUTONOMOUS_TOPIC_STOP = new Set([
@@ -432,6 +446,99 @@ export function autonomousUnusedLibraryAssets(assets, occupied = []) {
   });
 }
 
+export function autonomousAssetClusterKey(row) {
+  const hay = autonomousOccupiedHaystack(row);
+  const place = autonomousPlaceSubjects(hay)[0];
+  if (place) return `place:${place}`;
+  const location = autonomousNormalizedPlace(row?.location);
+  if (location && location !== "chicago") return `location:${location}`;
+  const topic = autonomousNormalizedPlace(row?.topic);
+  if (topic) {
+    const subtopic = autonomousNormalizedPlace(row?.subtopic);
+    return subtopic ? `topic:${topic}/${subtopic}` : `topic:${topic}`;
+  }
+  return "";
+}
+
+export function autonomousAssetClusterLabel(row, key = "") {
+  const place = String(key || "").startsWith("place:") ? key.slice(6) : "";
+  return String(row?.location || row?.topic || place || row?.subtopic || "related stills")
+    .trim()
+    .slice(0, 80);
+}
+
+export function groupUnusedLibraryClusters(assets) {
+  const groups = new Map();
+  for (const row of assets || []) {
+    const key = autonomousAssetClusterKey(row);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return [...groups.entries()]
+    .map(([key, rows]) => ({
+      key,
+      label: autonomousAssetClusterLabel(rows[0], key),
+      count: rows.length,
+      assets: rows,
+    }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+}
+
+export function summarizeUnusedLibraryOverview(assets, { limit = 16 } = {}) {
+  const clusters = groupUnusedLibraryClusters(assets);
+  return {
+    unused_count: (assets || []).length,
+    cluster_count: clusters.length,
+    clusters: clusters.slice(0, limit).map(({ key, label, count }) => ({ key, label, count })),
+  };
+}
+
+export function pickRelatedUnusedStillCluster(assets, {
+  min = AUTONOMOUS_RELATED_STILL_MIN,
+  max = AUTONOMOUS_RELATED_STILL_MAX,
+} = {}) {
+  const clusters = groupUnusedLibraryClusters(assets).filter((row) => row.count >= min);
+  if (!clusters.length) return null;
+  clusters.sort((left, right) => {
+    const leftScore = Math.min(left.count, max);
+    const rightScore = Math.min(right.count, max);
+    if (rightScore !== leftScore) return rightScore - leftScore;
+    const leftNew = Math.max(...left.assets.map((row) => Date.parse(row?.intake_date) || 0));
+    const rightNew = Math.max(...right.assets.map((row) => Date.parse(row?.intake_date) || 0));
+    return rightNew - leftNew;
+  });
+  const best = clusters[0];
+  return {
+    key: best.key,
+    label: best.label,
+    assets: best.assets.slice(0, max),
+    leftover: Math.max(0, best.count - max),
+  };
+}
+
+export function completeRelatedStillPick(selectedIds, clusterAssets, {
+  min = AUTONOMOUS_RELATED_STILL_MIN,
+  max = AUTONOMOUS_RELATED_STILL_MAX,
+} = {}) {
+  const allowed = [];
+  for (const row of clusterAssets || []) {
+    const id = String(row?.id || row?.media_asset_id || "").trim();
+    if (/^rec[A-Za-z0-9]+$/.test(id) && !allowed.includes(id)) allowed.push(id);
+  }
+  const ordered = [];
+  for (const raw of selectedIds || []) {
+    const id = String(raw || "").trim();
+    if (!allowed.includes(id) || ordered.includes(id)) continue;
+    ordered.push(id);
+  }
+  for (const id of allowed) {
+    if (ordered.length >= max) break;
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+  return ordered.length >= min ? ordered.slice(0, max) : [];
+}
+
 export function autonomousIdeaStatusIsOccupied(status) {
   return AUTONOMOUS_OCCUPIED_STATUSES.includes(String(status || "").trim());
 }
@@ -468,7 +575,10 @@ export function mapAutonomousOccupiedRequest(record) {
     source: isAutonomousOrigin(notes) && ["Draft", "Ready", "Submitted"].includes(status) ? "in_flight" : "recent",
     title: title || location,
     location,
-    media_asset_ids: parseAutonomousNotedMediaIds(notes),
+    media_asset_ids: [...new Set([
+      ...parseAutonomousNotedMediaIds(notes),
+      ...parseAutonomousLinkedMediaIds(fields.Studio_Master_Media_Assets),
+    ])],
   };
 }
 
@@ -548,7 +658,16 @@ export function autonomousPreferredSubject(value) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
 }
 
-export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTitles, occupiedIdeas, preferredSubject }) {
+export function buildAutonomousPickerPrompt({
+  profile,
+  trends,
+  assets,
+  recentTitles,
+  occupiedIdeas,
+  preferredSubject,
+  overview,
+  clusterLabel,
+}) {
   const profileName = profile?.name || profile?.Profile_Name || "ChicagoShining";
   const avoid = profile?.avoid_topics || profile?.Avoid_Topics || "";
   const voice = profile?.brand_voice || profile?.Brand_Voice || "";
@@ -559,7 +678,10 @@ export function buildAutonomousPickerPrompt({ profile, trends, assets, recentTit
 OPERATOR PIN (this run only)
 Use only stills of: ${pin}. Title, location, and media_asset_ids must be that landmark. If none of the listed stills match, return {"skip":true,"reason":"no_matching_subject_stills"}.`
     : "";
-  return `You are ChicagoShining's autonomous producer. Start from the library stills. Review those photos and pick ONE unused set that can become a short.
+  const clusterLine = clusterLabel
+    ? `The listed stills are one unused related set: ${clusterLabel}. Use 5 to 10 of them.`
+    : "Pick 5 to 10 stills of ONE related unused topic. Do not mix unrelated places.";
+  return `You are ChicagoShining's autonomous producer. Start from unused library stills that have not appeared on a platform output. Review the unused overview, then write ONE idea that best uses a related set of 5 to 10 photos.
 
 Return ONLY one raw JSON object. No markdown.
 
@@ -570,7 +692,11 @@ Name: ${profileName}
 Voice: ${voice}
 Avoid topics: ${avoid}
 
-LIBRARY STILLS (review these; use only these media_asset_ids)
+UNUSED LIBRARY OVERVIEW (counts only; do not invent stills)
+${JSON.stringify(overview || {}, null, 2)}
+
+RELATED UNUSED SET (review these; use only these media_asset_ids)
+${clusterLine}
 ${JSON.stringify(assets, null, 2)}
 
 OPTIONAL TREND HARVEST (cite only if it actually fits the stills you picked)
@@ -581,6 +707,9 @@ ${JSON.stringify(occupiedIdeas || recentTitles || [], null, 2)}
 
 If every listed still conflicts with an in-flight or recent idea, return:
 {"skip":true,"reason":"no_unused_library_stills"}
+
+If the related set is too thin to make a post, return:
+{"skip":true,"reason":"no_related_unused_cluster"}
 
 Otherwise return:
 {
@@ -594,6 +723,7 @@ Otherwise return:
   "why_this_should_work": "max 12 words",
   "cited_trend": "matching harvest item, or library",
   "suggested_format": "Vertical Short Video or Carousel",
+  "post_caption": "publish-ready caption, 2-5 sentences, no invented facts",
   "media_asset_ids": ["rec..."]
 }`;
 }

@@ -480,3 +480,14 @@ export function combineAirtableFormulas(...parts) {
 export function ideaLibraryExcludeDerivedStillFormula() {
   return `AND(NOT(FIND("fill-crop",LOWER({Asset Name}&""))),NOT(REGEX_MATCH({Asset Name}&"","__[0-9]+x[0-9]+__")))`;
 }
+
+/**
+ * Studio uploads used to stamp Classification_Status=Classified with a stub
+ * description and no A3 tags. Classify all must pick those up, not only
+ * Needs Classification / Classification Error.
+ */
+export function libraryClassifyPendingFormula(listFormula) {
+  const list = String(listFormula || "").trim();
+  if (!list) return null;
+  return `AND(${list},{Content_Profile}!=BLANK(),OR({Classification_Status}='Needs Classification',{Classification_Status}='Classification Error',AND(OR({Classification_Status}='Classified',{Classification_Status}=BLANK()),{Search_Keywords}=BLANK())))`;
+}

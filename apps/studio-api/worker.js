@@ -34,6 +34,7 @@ import {
   libraryCrossScopeEnabled,
   libraryDriveFilename,
   ideaLibraryExcludeDerivedStillFormula,
+  libraryClassifyPendingFormula,
   mediaAssetIsHeic,
   mediaAssetProfileScopeFormula,
   normalizeLibraryBatchBase,
@@ -61,7 +62,7 @@ import {
   AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
-  AUTONOMOUS_MAX_MASTER_ASSETS,
+  AUTONOMOUS_RELATED_STILL_MIN,
   AUTONOMOUS_NEWS_FEEDS,
   AUTONOMOUS_STANDARD_PLATFORMS,
   AUTONOMOUS_YOUTUBE_QUERIES,
@@ -80,6 +81,9 @@ import {
   autonomousSlotAlreadyClaimed,
   autonomousUnusedLibraryAssets,
   buildAutonomousPickerPrompt,
+  completeRelatedStillPick,
+  pickRelatedUnusedStillCluster,
+  summarizeUnusedLibraryOverview,
   collectAutonomousOccupiedFromIdeas,
   collectAutonomousTopicCollisions,
   isAutonomousOrigin,
@@ -347,7 +351,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.302-library-classify-all",
+          version: "0.10.303-library-a3-on-upload",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1163,7 +1167,7 @@ export default {
       if (url.pathname === "/api/library") {
         if (request.method === "POST") {
           assertUploadWriteRequest(request, env);
-          return uploadAssetLibraryItems(request, env, authorization);
+          return uploadAssetLibraryItems(request, env, authorization, ctx);
         }
         return listAssetLibrary(request, env, url, authorization);
       }
@@ -17536,7 +17540,7 @@ async function listLibraryBatchExistingNames(env, baseName, scopeFormula = null)
     .filter(Boolean);
 }
 
-async function uploadAssetLibraryItems(request, env, authorization) {
+async function uploadAssetLibraryItems(request, env, authorization, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   if (!String(env.PIPELINE_RUNNER_URL || "").trim()) {
     throw new HttpError(503, "Pipeline runner is required to store assets in Google Drive");
@@ -17627,7 +17631,7 @@ async function uploadAssetLibraryItems(request, env, authorization) {
             Intake_Status: "Created",
             Intake_Date: new Date().toISOString().slice(0, 10),
             Drive_Access_Status: "Public",
-            Classification_Status: "Classified",
+            Classification_Status: "Needs Classification",
             Asset_Status: "Available",
             Active: true,
             Do_Not_Use: false,
@@ -17661,22 +17665,49 @@ async function uploadAssetLibraryItems(request, env, authorization) {
     }
     uploaded.push(mapLibraryAsset(record));
   }
+  const uploadedIds = uploaded.map((row) => row?.id).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
+  if (uploadedIds.length) {
+    const classify = (async () => {
+      try {
+        const { response, payload } = await item4PulsePipelineStage(env, "a3", {
+          extra: {
+            record_ids: uploadedIds,
+            trigger_a4: false,
+            wait_for_next: false,
+            drain: false,
+            background: true,
+          },
+        }, "A3");
+        if (!response.ok || payload?.status === "error") {
+          console.warn("library upload classify failed", payload?.message || payload?.error || response.status);
+        }
+      } catch (error) {
+        console.warn("library upload classify failed", error?.message || String(error));
+      }
+    })();
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(classify);
+    else await classify.catch(() => {});
+  }
   const namedMessage = batchBase && uploaded.length
     ? (uploaded.length === 1
       ? `Added as ${uploaded[0]?.name || batchNames[0]}.`
       : `Added ${uploaded.length} assets as ${batchNames[0]}–${batchNames[batchNames.length - 1]}.`)
     : null;
+  const addedMessage = namedMessage || (uploaded.length === 1
+    ? "Asset added to the library."
+    : `${uploaded.length} assets added to the library.`);
   return respond(request, env, {
     ok: true,
     uploaded: uploaded.length,
+    classifying: uploadedIds.length > 0,
     records: uploaded,
     content_profile_id: uploadProfile.id,
     content_profile_name: f(uploadProfile, "Profile_Name") || null,
     batch_base: batchBase,
     batch_names: batchNames,
-    message: namedMessage || (uploaded.length === 1
-      ? "Asset added to the library."
-      : `${uploaded.length} assets added to the library.`),
+    message: uploadedIds.length
+      ? `${addedMessage} Classifying in the background — refresh to see tags.`
+      : addedMessage,
   }, 201);
 }
 
@@ -17800,7 +17831,7 @@ async function assignLibraryAssetProfile(request, env, url, authorization, ctx) 
 }
 
 const LIBRARY_CLASSIFY_ALL_LIMIT = 200;
-const LIBRARY_CLASSIFY_PENDING_FORMULA = `AND(${ASSET_LIBRARY_LIST_FORMULA},{Content_Profile}!=BLANK(),OR({Classification_Status}='Needs Classification',{Classification_Status}='Classification Error'))`;
+const LIBRARY_CLASSIFY_PENDING_FORMULA = libraryClassifyPendingFormula(ASSET_LIBRARY_LIST_FORMULA);
 
 // Studio "Classify all": every photo/clip that already has a Content Profile and is still
 // Needs Classification / Classification Error goes to A3 in one background run.
@@ -30615,7 +30646,7 @@ async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = ""
   const crossScope = await readLibraryCrossScopeSetting(env);
   const scopeFormula = await mediaAssetProfileScopeForId(env, profileId, { crossScope, includeUnscoped: true });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-    limit: 80,
+    limit: 200,
     sortField: "Intake_Date",
     sortDirection: "desc",
     filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
@@ -30632,7 +30663,7 @@ async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = ""
       subtopic: f(record, "Subtopic") || null,
       intake_date: ideaLibraryIntakeDate(record) || null,
     });
-    if (rows.length >= 40) break;
+    if (rows.length >= 180) break;
   }
   return rows;
 }
@@ -30665,7 +30696,7 @@ async function harvestAutonomousOccupiedTopics(env) {
     }).catch(() => []);
   }
   const requests = (await listRecords(env, PRODUCTION_REQUEST_TABLE, {
-    limit: 25,
+    limit: 50,
     sortField: "Created_At",
     sortDirection: "desc",
     filterFormula: "AND({Test_Run_ID}=BLANK(),{Request_Status}!='Cancelled')",
@@ -30721,7 +30752,7 @@ async function createAutonomousIdea(env, profile, pick) {
     Production_Include_Voiceover: "Yes",
     Production_Include_Background_Music: "Yes",
     Production_Include_Thumbnail: "Yes",
-    Production_Config_Notes: `origin=autonomous\nmedia_asset_ids=${(pick.media_asset_ids || []).join(",")}\ncited_trend=${pick.cited_trend || ""}\n${pick.why_this_should_work || ""}`.slice(0, 3000),
+    Production_Config_Notes: `origin=autonomous\nmedia_asset_ids=${(pick.media_asset_ids || []).join(",")}\ncited_trend=${pick.cited_trend || ""}\ncluster=${pick.cluster_label || ""}\n${pick.why_this_should_work || ""}`.slice(0, 3000),
   };
   return airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, "", {
     method: "POST",
@@ -31123,6 +31154,8 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
   const recentTitles = occupiedIdeas.map((row) => row.title);
   const catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, profile?.id || profiles[0]?.id || "");
   const unusedAssets = autonomousUnusedLibraryAssets(catalog, occupiedIdeas);
+  const overview = summarizeUnusedLibraryOverview(unusedAssets);
+  const cluster = pickRelatedUnusedStillCluster(unusedAssets);
   const trends = { similar, news, youtube };
   if (!unusedAssets.length) {
     const result = {
@@ -31136,6 +31169,24 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     await studioSaveAutonomousLastRun(env, result);
     return result;
   }
+  if (!cluster) {
+    const result = {
+      skipped: "no_related_unused_cluster",
+      chicago_date: chicago.date,
+      slot,
+      status: "skipped",
+      skip_reason: "no_related_unused_cluster",
+      harvest: {
+        similar: similar.length,
+        news: news.length,
+        youtube: youtube.length,
+        assets: unusedAssets.length,
+        unused_clusters: overview.cluster_count,
+      },
+    };
+    await studioSaveAutonomousLastRun(env, result);
+    return result;
+  }
 
   const prompt = buildAutonomousPickerPrompt({
     profile: {
@@ -31144,7 +31195,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       avoid_topics: f(profile, "Avoid_Topics"),
     },
     trends,
-    assets: unusedAssets.slice(0, 24).map((row) => ({
+    assets: cluster.assets.map((row) => ({
       media_asset_id: row.id,
       name: row.name,
       location: row.location,
@@ -31154,6 +31205,8 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     recentTitles,
     occupiedIdeas,
     preferredSubject,
+    overview,
+    clusterLabel: cluster.label,
   });
 
   if (options.dry_run) {
@@ -31161,7 +31214,16 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       dry_run: true,
       chicago_date: chicago.date,
       slot,
-      harvest: { similar: similar.length, news: news.length, youtube: youtube.length, assets: unusedAssets.length },
+      harvest: {
+        similar: similar.length,
+        news: news.length,
+        youtube: youtube.length,
+        assets: unusedAssets.length,
+        unused_clusters: overview.cluster_count,
+        cluster: cluster.label,
+        cluster_count: cluster.assets.length,
+      },
+      overview,
       prompt,
     };
   }
@@ -31179,9 +31241,9 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  const allowed = new Set(unusedAssets.map((row) => row.id));
-  pick.media_asset_ids = pick.media_asset_ids.filter((id) => allowed.has(id)).slice(0, AUTONOMOUS_MAX_MASTER_ASSETS);
-  if (!pick.media_asset_ids.length) {
+  pick.media_asset_ids = completeRelatedStillPick(pick.media_asset_ids, cluster.assets);
+  pick.cluster_label = cluster.label;
+  if (pick.media_asset_ids.length < AUTONOMOUS_RELATED_STILL_MIN) {
     const result = {
       skipped: "picker_assets_not_in_harvest",
       chicago_date: chicago.date,
@@ -31232,6 +31294,8 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     voice_id: narration.voice_id || PHASE6_DEFAULT_VOICE_ID,
     voice_name: narration.voice_name || "Kate",
     carousel_image_mode: "Manual Upload",
+    caption_mode: pick.post_caption ? "AI improve" : "AI decides",
+    requested_caption: pick.post_caption || "",
     production_notes: `origin=autonomous cited_trend=${pick.cited_trend || ""}`.slice(0, 3000),
     primary_location: pick.primary_location || defaults.primary_location,
   }, env);
