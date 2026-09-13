@@ -453,3 +453,5 @@ Unused-photo all-cities Worker deploy: 2026-09-13 — If the first city has no u
 Unused-photo stamped IDs Worker deploy: 2026-09-13 — Scan only profile-stamped stills; unused means the file was not on an output. Occupied landmarks skip the next cluster, not the whole city. Worker 0.10.306-unused-stamped-ids.
 
 Autonomous reel pack Worker deploy: 2026-09-13 — Unused-photo ideas default to IG/FB Reel+Story, TikTok Video Draft, YouTube Short. Worker 0.10.307-autonomous-reel-pack.
+
+YouTube manual close Worker deploy: 2026-09-13 — Paste a watch URL to mark a YouTube output Published / Published Privately after a Studio cover or video upload. Worker 0.10.308-youtube-manual-close.

@@ -484,3 +484,5 @@ Unused-photo harvest Pages deploy: 2026-09-13 — Ideas Use unused photos plus f
 Unused-photo profile scope Pages deploy: 2026-09-13 — Use unused photos harvests the header Profile city (NYC Central Park, not Chicago). UI 0.6.311-unused-profile-scope.
 
 Unused-photo all-cities Pages deploy: 2026-09-13 — Operations harvest sends the header Profile on the request URL. UI 0.6.312-unused-all-cities.
+
+YouTube manual close Pages deploy: 2026-09-13 — Pipeline and Open review can paste a YouTube URL to close the output. UI 0.6.313-youtube-manual-close.

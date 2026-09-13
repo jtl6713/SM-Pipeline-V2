@@ -104,3 +104,115 @@ export function manualPublishRequiredFields({
     Manual_Completion_Status: "Required",
   };
 }
+
+const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+export function parseYouTubeVideoId(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return YOUTUBE_VIDEO_ID_RE.test(value) ? value : "";
+  }
+  const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+  if (host === "youtu.be") {
+    const id = parsed.pathname.split("/").filter(Boolean)[0] || "";
+    return YOUTUBE_VIDEO_ID_RE.test(id) ? id : "";
+  }
+  if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+    const fromQuery = String(parsed.searchParams.get("v") || "").trim();
+    if (YOUTUBE_VIDEO_ID_RE.test(fromQuery)) return fromQuery;
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (["shorts", "embed", "live"].includes(String(parts[0] || "").toLowerCase())) {
+      const id = parts[1] || "";
+      return YOUTUBE_VIDEO_ID_RE.test(id) ? id : "";
+    }
+  }
+  return "";
+}
+
+export function isYouTubePostUrl(url) {
+  return Boolean(parseYouTubeVideoId(url));
+}
+
+export function youtubeWatchUrl(videoId) {
+  const id = String(videoId || "").trim();
+  return YOUTUBE_VIDEO_ID_RE.test(id) ? `https://www.youtube.com/watch?v=${id}` : "";
+}
+
+export function youtubeCompleteEligibility(record = {}) {
+  const platform = String(record.platform || "").trim().toLowerCase();
+  if (platform !== "youtube") return "not_youtube";
+  if (record.do_not_publish) return "do_not_publish";
+  const publish = String(record.publish_status || "").trim().toLowerCase();
+  const output = String(record.output_status || "").trim().toLowerCase();
+  const stage = String(record.youtube_stage || "").trim().toLowerCase();
+  if (publish === "published" || publish === "published privately" || output === "published" || stage === "complete") {
+    return "already_published";
+  }
+  return null;
+}
+
+export function youtubeNeedsUrlEntry(record = {}) {
+  if (youtubeCompleteEligibility(record) !== null) return false;
+  const publish = String(record.publish_status || "").trim().toLowerCase();
+  const stage = String(record.youtube_stage || "").trim().toLowerCase();
+  const studio = String(record.studio_state || "").trim().toLowerCase();
+  const manual = String(record.manual_completion_status || "").trim().toLowerCase();
+  if (manual === "required" || studio.includes("manual action")) return true;
+  if (["publishing", "manual publish required", "failed", "ready to publish"].includes(publish)) return true;
+  if (["yt1", "yt2", "yt4"].includes(stage)) return true;
+  return youtubeManualActionRequired({
+    Platform: "YouTube",
+    Publish_Status: record.publish_status,
+    Publish_Error_Stage: record.publish_error_stage,
+    Publish_Error_Message: record.publish_error_message,
+    YouTube_Error_Message: record.youtube_error_message,
+    Manual_Fallback_Required: record.manual_fallback_required,
+    Manual_Completion_Status: record.manual_completion_status,
+  });
+}
+
+export function youtubeManualCloseFields({
+  url,
+  videoId = "",
+  now,
+  existingNotes = "",
+  privacy = "",
+} = {}) {
+  const stamp = String(now || "").trim() || new Date().toISOString();
+  const id = parseYouTubeVideoId(url) || String(videoId || "").trim();
+  const liveUrl = youtubeWatchUrl(id) || String(url || "").trim();
+  const privatePublish = String(privacy || "").trim().toLowerCase() === "private";
+  const note = `Studio YouTube publication confirmed at ${stamp}. URL: ${liveUrl}. Cover and/or video were completed in YouTube Studio.`;
+  const notes = String(existingNotes || "").trim() ? `${String(existingNotes).trim()}\n\n${note}` : note;
+  return {
+    Publish_Locked_At: null,
+    Publish_Locked_By: "",
+    Output_Notes: notes.slice(0, 10000),
+    Published_At: stamp,
+    YouTube_Published_At: stamp,
+    Output_Status: "Published",
+    Publish_Status: privatePublish ? "Published Privately" : "Published",
+    Platform_Post_ID: id,
+    Platform_Post_URL: liveUrl,
+    YouTube_Video_ID: id,
+    YouTube_Stage: "Complete",
+    YouTube_Package_Status: "Complete",
+    YouTube_Upload_Status: "Uploaded",
+    YouTube_Processing_Status: "Succeeded",
+    YouTube_Thumbnail_Status: "Uploaded",
+    YouTube_Privacy_Status: privatePublish ? "private" : (String(privacy || "").trim() || "public"),
+    Manual_Completion_At: stamp,
+    Manual_Published_URL: liveUrl,
+    Manual_Completion_Status: "Completed",
+    Manual_Fallback_Required: false,
+    Publish_Error_Stage: "",
+    Publish_Error_Message: "",
+    YouTube_Error_Message: "",
+    Publish_Next_Retry_At: null,
+    Publish_Retry_Eligible: false,
+  };
+}

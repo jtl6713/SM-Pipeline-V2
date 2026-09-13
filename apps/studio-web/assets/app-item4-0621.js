@@ -176,6 +176,7 @@
   const pipelineGroupOpen = new Map();
   const pipelineScheduleDrafts = new Map();
   const pipelineTiktokUrlDrafts = new Map();
+  const pipelineYoutubeUrlDrafts = new Map();
   let pipelineViewFilter = "all";
   let pipelineColumnFilters = {
     output: "",
@@ -204,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.312-unused-all-cities";
+  const BUILD_ID = "item4-0.6.313-youtube-manual-close";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11757,6 +11758,36 @@
     return /manual action/i.test(String(record?.music_status || "")) ? "no" : "not_requested";
   }
 
+  function youtubeNeedsUrlEntry(record) {
+    if (String(record?.platform || "").trim().toLowerCase() !== "youtube") return false;
+    if (record?.do_not_publish) return false;
+    const publish = String(record?.publish_status || "").trim().toLowerCase();
+    const output = String(record?.output_status || "").trim().toLowerCase();
+    const stage = String(record?.youtube_stage || "").trim().toLowerCase();
+    if (publish === "published" || publish === "published privately" || output === "published" || stage === "complete") return false;
+    const manual = String(record?.manual_completion_status || "").trim().toLowerCase();
+    const studio = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim().toLowerCase();
+    if (manual === "required" || studio.includes("manual action")) return true;
+    if (["publishing", "manual publish required", "failed", "ready to publish"].includes(publish)) return true;
+    return ["yt1", "yt2", "yt4"].includes(stage);
+  }
+
+  function youtubeLiveUrl(record) {
+    const posted = String(record?.platform_post_url || record?.manual_published_url || "").trim();
+    if (posted) return posted;
+    const id = String(record?.youtube_video_id || "").trim();
+    return id ? `https://www.youtube.com/watch?v=${id}` : "";
+  }
+
+  async function submitYoutubeComplete(recordId, { url } = {}) {
+    const postUrl = String(url || "").trim();
+    if (!/youtu(\.be|be\.com)/i.test(postUrl)) throw new Error("Paste a YouTube watch, Shorts, or youtu.be URL.");
+    return api(`/api/outputs/${encodeURIComponent(recordId)}/youtube-complete`, {
+      method: "POST",
+      body: JSON.stringify({ platform_post_url: postUrl }),
+    });
+  }
+
   async function submitTiktokComplete(recordId, { url, musicCompleted, record } = {}) {
     const postUrl = String(url || "").trim();
     if (!/tiktok\.com/i.test(postUrl)) throw new Error("Paste a live TikTok URL containing tiktok.com.");
@@ -11797,6 +11828,34 @@
     if (awaiting) input.value = posted;
     if (!awaiting && posted) {
       live.innerHTML = `Live post: <a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(posted)}">Open TikTok ↗</a>`;
+    } else if (!awaiting) {
+      live.hidden = true;
+    }
+  }
+
+  function renderCreativeYoutubeComplete(output) {
+    const card = $("creativeYoutubeComplete");
+    const form = $("creativeYoutubeCompleteForm");
+    const live = $("creativeYoutubeCompleteLive");
+    const input = $("creativeYoutubeUrl");
+    if (!card || !form || !live || !input) return;
+    const youtube = String(output?.platform || "").trim().toLowerCase() === "youtube";
+    const awaiting = youtube && youtubeNeedsUrlEntry(output);
+    const posted = youtube ? youtubeLiveUrl(output) : "";
+    if (!youtube || (!awaiting && !posted)) {
+      card.hidden = true;
+      form.hidden = true;
+      live.hidden = true;
+      live.innerHTML = "";
+      input.value = "";
+      return;
+    }
+    card.hidden = false;
+    form.hidden = !awaiting;
+    live.hidden = awaiting || !posted;
+    if (awaiting) input.value = posted;
+    if (!awaiting && posted) {
+      live.innerHTML = `Live post: <a class="table-link" target="_blank" rel="noopener" href="${escapeHtml(posted)}">Open YouTube ↗</a>`;
     } else if (!awaiting) {
       live.hidden = true;
     }
@@ -12357,6 +12416,7 @@
     showCreativeRenderedPreview(output);
     renderCreativeOutputMeta(output);
     renderCreativeTiktokComplete(output);
+    renderCreativeYoutubeComplete(output);
     populateCreativeGlobalControls(output);
     renderCreativeSlides();
     renderCreativeChangeProgress(data.handoff || creativeHandoffStatus);
@@ -12674,6 +12734,7 @@
       pipelineScheduleDrafts.set(id, String(input.value || "").trim());
     });
     rememberPipelineTiktokUrlDrafts();
+    rememberPipelineYoutubeUrlDrafts();
   }
 
   function rememberPipelineTiktokUrlDrafts() {
@@ -12689,10 +12750,29 @@
     return tiktokLiveUrl(record);
   }
 
+  function rememberPipelineYoutubeUrlDrafts() {
+    document.querySelectorAll("[data-youtube-complete] input[type=url]").forEach((input) => {
+      const id = input.closest("[data-youtube-complete]")?.dataset.youtubeComplete;
+      if (!id) return;
+      pipelineYoutubeUrlDrafts.set(id, String(input.value || "").trim());
+    });
+  }
+
+  function pipelineYoutubeUrlDraft(record) {
+    if (pipelineYoutubeUrlDrafts.has(record.id)) return pipelineYoutubeUrlDrafts.get(record.id);
+    return youtubeLiveUrl(record);
+  }
+
   function pipelineTiktokCompleteCell(record) {
     if (!tiktokNeedsUrlEntry(record)) return "";
     const current = pipelineTiktokUrlDraft(record);
     return `<form class="pipeline-tiktok-complete" data-tiktok-complete="${escapeHtml(record.id)}"><label><span>TikTok URL</span><input type="url" required placeholder="https://www.tiktok.com/@…/video/…" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`;
+  }
+
+  function pipelineYoutubeCompleteCell(record) {
+    if (!youtubeNeedsUrlEntry(record)) return "";
+    const current = pipelineYoutubeUrlDraft(record);
+    return `<form class="pipeline-tiktok-complete" data-youtube-complete="${escapeHtml(record.id)}"><label><span>YouTube URL</span><input type="url" required placeholder="https://www.youtube.com/watch?v=…" value="${escapeHtml(current)}" autocomplete="url"></label><button type="submit" class="secondary-button pipeline-tiktok-save">Save URL</button><span class="pipeline-tiktok-complete-msg" aria-live="polite"></span></form>`;
   }
 
   function bindPipelineTiktokComplete(root) {
@@ -12722,6 +12802,46 @@
         try {
           await submitTiktokComplete(id, { url: input.value, record });
           pipelineTiktokUrlDrafts.delete(id);
+          if (message) message.textContent = "Saved";
+          await refreshPipelineOutputs({ silent: true });
+        } catch (error) {
+          if (message) {
+            message.textContent = error.message || "Could not save URL.";
+            message.classList.add("error-text");
+          }
+        } finally {
+          if (button) button.disabled = false;
+        }
+      });
+    });
+  }
+
+  function bindPipelineYoutubeComplete(root) {
+    (root || document).querySelectorAll("[data-youtube-complete]").forEach((form) => {
+      const keepOnRow = (event) => event.stopPropagation();
+      form.addEventListener("click", keepOnRow);
+      form.addEventListener("mousedown", keepOnRow);
+      form.addEventListener("pointerdown", keepOnRow);
+      const input = form.querySelector("input[type=url]");
+      input?.addEventListener("input", () => {
+        const id = form.dataset.youtubeComplete;
+        if (id) pipelineYoutubeUrlDrafts.set(id, String(input.value || "").trim());
+      });
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = form.dataset.youtubeComplete;
+        const message = form.querySelector(".pipeline-tiktok-complete-msg");
+        const button = form.querySelector("button[type=submit]");
+        if (!id || !input) return;
+        if (button) button.disabled = true;
+        if (message) {
+          message.classList.remove("error-text");
+          message.textContent = "Saving…";
+        }
+        try {
+          await submitYoutubeComplete(id, { url: input.value });
+          pipelineYoutubeUrlDrafts.delete(id);
           if (message) message.textContent = "Saved";
           await refreshPipelineOutputs({ silent: true });
         } catch (error) {
@@ -13067,6 +13187,7 @@
       });
       pipelineScheduleDrafts.clear();
       pipelineTiktokUrlDrafts.clear();
+      pipelineYoutubeUrlDrafts.clear();
       await refreshPipelineOutputs({ silent: true });
       const approved = Number(result.approved_count || 0);
       const failed = Number(result.failed_count || 0);
@@ -13421,7 +13542,7 @@
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
       const subtleParts = [r.publish_method, timing].filter(Boolean).map((part) => escapeHtml(String(part)));
-      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? pipelineTiktokCompleteCell(r) : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
+      return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
       ? groupedPipelineRecords(source).map((group, index) => {
@@ -13500,6 +13621,7 @@
       });
       bindPipelineScheduleInputs(target);
       bindPipelineTiktokComplete(target);
+      bindPipelineYoutubeComplete(target);
       target.querySelectorAll("[data-pipeline-use-suggested]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
@@ -16285,6 +16407,31 @@
       refreshPipelineOutputs({ silent: true }).catch(() => {});
     } catch (error) {
       phase6Message(error.message || "Could not save the TikTok URL.", "error-text");
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+  $("creativeYoutubeCompleteForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const record = activeCreativeOutput;
+    const id = activeCreativeOutputId || record?.id;
+    const input = $("creativeYoutubeUrl");
+    const button = $("creativeYoutubeCompleteSave");
+    if (!id || !input) return;
+    if (button) button.disabled = true;
+    try {
+      phase6Message("Saving YouTube URL…");
+      const result = await submitYoutubeComplete(id, { url: input.value });
+      if (result?.record) {
+        activeCreativeOutput = { ...record, ...result.record };
+        renderCreativeOutputMeta(activeCreativeOutput);
+        renderCreativeYoutubeComplete(activeCreativeOutput);
+      }
+      pipelineYoutubeUrlDrafts.delete(id);
+      phase6Message("YouTube URL saved. This output is marked published.");
+      refreshPipelineOutputs({ silent: true }).catch(() => {});
+    } catch (error) {
+      phase6Message(error.message || "Could not save the YouTube URL.", "error-text");
     } finally {
       if (button) button.disabled = false;
     }
