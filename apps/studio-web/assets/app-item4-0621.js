@@ -204,7 +204,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.304-library-profile-placeholders";
+  const BUILD_ID = "item4-0.6.308-profile-idea-placeholders";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -354,28 +354,95 @@
     });
   }
 
-  // Asset Manager upload placeholders follow the working profile so a New York operator
+  // Sample / placeholder copy follows the working profile so a New York operator
   // is not shown Chicago landmarks as the example.
   const LIBRARY_EXAMPLE_PLACES = {
-    chicago: { name: "Space Museum", location: "Oak Street Beach" },
-    nyc: { name: "Brooklyn Bridge", location: "Central Park" },
-    la: { name: "Santa Monica Pier", location: "Griffith Observatory" },
+    chicago: {
+      name: "Space Museum",
+      location: "Oak Street Beach",
+      ideaTitle: "e.g. Chicago Riverwalk at sunset",
+      ideaSummary: "Golden hour along the river, the skyline, and the walkway.",
+      ezTitle: "e.g. Chicago Theatre marquee at dusk",
+      ezLocation: "e.g. Andersonville",
+      wizardTitle: "e.g. Ride the CTA: Chicago trains from the platform",
+      wizardLocation: "e.g. Chicago",
+      librarySearch: "Chicago Theatre, Navy Pier, skyline…",
+      ideaSearch: "Andersonville, Pilsen, neighborhood…",
+      azTitle: "e.g. Riverwalk sunset reel",
+      autonomous: "e.g. Chicago Theatre",
+    },
+    nyc: {
+      name: "Brooklyn Bridge",
+      location: "Central Park",
+      ideaTitle: "e.g. Brooklyn Bridge at sunset",
+      ideaSummary: "Golden hour on the walkway, the skyline, and the East River.",
+      ezTitle: "e.g. Grand Central clock at dusk",
+      ezLocation: "e.g. Lower Manhattan",
+      wizardTitle: "e.g. Ride the subway: New York trains from the platform",
+      wizardLocation: "e.g. New York",
+      librarySearch: "Brooklyn Bridge, Times Square, skyline…",
+      ideaSearch: "Williamsburg, SoHo, neighborhood…",
+      azTitle: "e.g. Brooklyn Bridge sunset reel",
+      autonomous: "e.g. Brooklyn Bridge",
+    },
+    la: {
+      name: "Santa Monica Pier",
+      location: "Griffith Observatory",
+      ideaTitle: "e.g. Santa Monica Pier at sunset",
+      ideaSummary: "Golden hour on the pier, the Pacific, and the Ferris wheel.",
+      ezTitle: "e.g. Hollywood sign from Griffith at dusk",
+      ezLocation: "e.g. Venice Beach",
+      wizardTitle: "e.g. Ride the Metro: Los Angeles trains from the platform",
+      wizardLocation: "e.g. Los Angeles",
+      librarySearch: "Santa Monica Pier, Griffith, skyline…",
+      ideaSearch: "Silver Lake, Venice, neighborhood…",
+      azTitle: "e.g. Santa Monica Pier sunset reel",
+      autonomous: "e.g. Griffith Observatory",
+    },
   };
 
   function libraryExamplePlaces(profile) {
     const themed = LIBRARY_EXAMPLE_PLACES[profile?.theme || ""];
     if (themed) return themed;
     const city = String(profile?.city_label || profile?.market_name || "").trim();
-    if (city) return { name: `${city} Skyline`, location: `Downtown ${city}` };
+    if (city) {
+      return {
+        name: `${city} Skyline`,
+        location: `Downtown ${city}`,
+        ideaTitle: `e.g. ${city} skyline at sunset`,
+        ideaSummary: `What should this ${city} content be about?`,
+        ezTitle: `e.g. Downtown ${city} at dusk`,
+        ezLocation: `e.g. Downtown ${city}`,
+        wizardTitle: `e.g. A day in ${city}`,
+        wizardLocation: `e.g. ${city}`,
+        librarySearch: `${city} skyline, downtown…`,
+        ideaSearch: `${city} neighborhood…`,
+        azTitle: `e.g. ${city} sunset reel`,
+        autonomous: `e.g. ${city}`,
+      };
+    }
     return LIBRARY_EXAMPLE_PLACES.chicago;
+  }
+
+  function setProfilePlaceholder(id, value) {
+    const input = $(id);
+    if (input && value) input.placeholder = value;
   }
 
   function applyLibraryExamplePlaces(profile) {
     const example = libraryExamplePlaces(profile);
-    const nameInput = $("libraryBatchName");
-    if (nameInput) nameInput.placeholder = example.name;
-    const locationInput = $("libraryLocation");
-    if (locationInput) locationInput.placeholder = example.location;
+    setProfilePlaceholder("libraryBatchName", example.name);
+    setProfilePlaceholder("libraryLocation", example.location);
+    setProfilePlaceholder("ideaTitle", example.ideaTitle);
+    setProfilePlaceholder("ideaSummary", example.ideaSummary);
+    setProfilePlaceholder("ezIdeaTitle", example.ezTitle);
+    setProfilePlaceholder("ezIdeaSummary", example.ideaSummary);
+    setProfilePlaceholder("ezPrimaryLocation", example.ezLocation);
+    setProfilePlaceholder("prPrimaryLocation", example.ezLocation);
+    setProfilePlaceholder("item4LibrarySearch", example.librarySearch);
+    setProfilePlaceholder("ideaLibrarySearch", example.ideaSearch);
+    setProfilePlaceholder("azFinishedTitle", example.azTitle);
+    setProfilePlaceholder("operationsAutonomousSubject", example.autonomous);
     document.querySelectorAll("[data-library-example-name]").forEach((node) => {
       node.textContent = example.name;
     });
@@ -4562,12 +4629,13 @@
     if (ezWizardStep === "ideaWrite") {
       prompt.textContent = "What’s the idea?";
       renderEzWizardChips([]);
+      const ideaExample = libraryExamplePlaces(studioProfiles.find((item) => item.id === selectedProfileId));
       ezWizardShowForm(
-        `<label>Title<input name="title" maxlength="160" required placeholder="e.g. Ride the CTA: Chicago trains from the platform"></label>
+        `<label>Title<input name="title" maxlength="160" required placeholder="${escapeHtml(ideaExample.wizardTitle)}"></label>
          <label>Summary <span style="text-transform:none;letter-spacing:0;font-weight:600;opacity:.7">(optional)</span>
-         <textarea name="summary" maxlength="5000" placeholder="What should this content be about?"></textarea></label>
+         <textarea name="summary" maxlength="5000" placeholder="${escapeHtml(ideaExample.ideaSummary)}"></textarea></label>
          <label>Primary location <span style="text-transform:none;letter-spacing:0;font-weight:600;opacity:.7">(optional)</span>
-         <input name="location" maxlength="200" placeholder="e.g. Chicago"></label>
+         <input name="location" maxlength="200" placeholder="${escapeHtml(ideaExample.wizardLocation)}"></label>
          <div class="ez-wizard-form-actions"><button type="submit">Continue</button></div>`,
         (data) => {
           const title = String(data.get("title") || "").trim();
