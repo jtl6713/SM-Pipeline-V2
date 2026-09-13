@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.304-library-profile-placeholders">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.307-profile-voice-briony">
 </head>
 <body>
  <header class="topbar">
@@ -257,7 +257,7 @@
  </label>
  <button type="button" class="voice-preview-button" id="ezAudioVoicePreview">▶ Preview</button>
  </div>
- <em class="ez-audio-hint" id="ezAudioVoiceHint">Kate is the default. Change it here.</em>
+ <em class="ez-audio-hint" id="ezAudioVoiceHint">Uses the profile narration default until you pick another voice.</em>
  </div>
  <label class="form-field"><span>Music</span>
  <select id="ezAudioMusic"><option value="Yes" selected>Yes</option><option value="No">No</option></select>
@@ -341,9 +341,9 @@
  <label class="form-field"><span>Duration (seconds)</span><input type="number" id="ezVideoDuration" min="5" max="600" value="30"></label>
  <label class="form-field"><span>Clip count</span><select id="ezVideoClipMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
  <div class="count-inputs">
- <label class="form-field exact-count" hidden><span>Exact</span><input type="number" id="ezVideoClipExact" min="1" max="30"></label>
- <label class="form-field range-count" hidden><span>Min</span><input type="number" id="ezVideoClipMin" min="1" max="30"></label>
- <label class="form-field range-count" hidden><span>Max</span><input type="number" id="ezVideoClipMax" min="1" max="30"></label>
+ <label class="form-field exact-count" hidden><span>Exact</span><input type="number" id="ezVideoClipExact" min="1" max="60"></label>
+ <label class="form-field range-count" hidden><span>Min</span><input type="number" id="ezVideoClipMin" min="1" max="60"></label>
+ <label class="form-field range-count" hidden><span>Max</span><input type="number" id="ezVideoClipMax" min="1" max="60"></label>
  </div>
  </div>
  <div class="ez-structure-card" id="ezCarouselStructure">
@@ -637,13 +637,13 @@
  </select>
  </label>
  <label>Exact
- <input id="prOverrideClipExact" type="number" min="1" max="15" step="1" placeholder="Inherit">
+ <input id="prOverrideClipExact" type="number" min="1" max="60" step="1" placeholder="Inherit">
  </label>
  <label>Min
- <input id="prOverrideClipMin" type="number" min="1" max="15" step="1" placeholder="Inherit">
+ <input id="prOverrideClipMin" type="number" min="1" max="60" step="1" placeholder="Inherit">
  </label>
  <label>Max
- <input id="prOverrideClipMax" type="number" min="1" max="15" step="1" placeholder="Inherit">
+ <input id="prOverrideClipMax" type="number" min="1" max="60" step="1" placeholder="Inherit">
  </label>
  </div>
  </div>
@@ -758,9 +758,9 @@
  <strong>Video</strong>
  <label class="form-field"><span>Clip count</span><select id="prVideoClipMode"><option>AI decides</option><option>Exact</option><option>Target range</option></select></label>
  <div class="count-inputs">
- <label class="form-field exact-count"><span>Exact</span><input type="number" id="prVideoClipExact" min="1" max="30"></label>
- <label class="form-field range-count"><span>Min</span><input type="number" id="prVideoClipMin" min="1" max="30"></label>
- <label class="form-field range-count"><span>Max</span><input type="number" id="prVideoClipMax" min="1" max="30"></label>
+ <label class="form-field exact-count"><span>Exact</span><input type="number" id="prVideoClipExact" min="1" max="60"></label>
+ <label class="form-field range-count"><span>Min</span><input type="number" id="prVideoClipMin" min="1" max="60"></label>
+ <label class="form-field range-count"><span>Max</span><input type="number" id="prVideoClipMax" min="1" max="60"></label>
  </div>
  </div>
 
@@ -796,7 +796,7 @@
  </label>
  <button type="button" class="voice-preview-button" id="prVoicePreview">▶ Preview</button>
  </div>
- <em class="ez-audio-hint" id="prVoiceHint">Kate is selected. Pick another voice if you want.</em>
+ <em class="ez-audio-hint" id="prVoiceHint">Uses the profile narration default until you pick another voice.</em>
  </div>
  <div class="ez-audio-extra" id="prMusicField" hidden>
  <div class="voice-select-wrap">
@@ -1772,7 +1772,7 @@
  <div class="promotion-subpanel" id="videoPromotionOptions" hidden>
  <div class="promotion-grid">
  <label class="form-field"><span>Video duration</span><select id="promoteVideoDuration"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="45">45 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option></select></label>
- <label class="form-field"><span>Clip count</span><select id="promoteVideoClipCount"><option value="Auto" selected>Auto / pipeline default</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10</option></select></label>
+ <label class="form-field"><span>Clip count</span><select id="promoteVideoClipCount"><option value="Auto" selected>Auto / pipeline default</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10</option><option value="12">12</option><option value="16">16</option><option value="20">20</option><option value="24">24</option><option value="30">30</option><option value="40">40</option><option value="50">50</option><option value="60">60</option></select></label>
  <label class="form-field"><span>Video after voiceover</span><select id="promoteVoiceoverTail"><option value="0">0 seconds</option><option value="1">1 second</option><option value="2" selected>2 seconds</option><option value="2.5">2.5 seconds</option><option value="3">3 seconds</option><option value="4">4 seconds</option><option value="5">5 seconds</option></select></label>
  </div>
  </div>
@@ -1814,8 +1814,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.304-library-profile-placeholders"></script>
+ <script src="/assets/config-0621.js?v=0.6.307-profile-voice-briony"></script>
  <script src="/assets/ez-plan.js?v=0.6.274-ops-activity-detail"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.304-library-profile-placeholders"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.307-profile-voice-briony"></script>
 </body>
 </html>

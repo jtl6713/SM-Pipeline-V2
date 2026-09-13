@@ -88,6 +88,7 @@ import {
   mergeAutonomousOccupied,
   parseAutonomousLastRun,
   pickAutonomousMusicAssetId,
+  pickNarrationVoiceFromProfiles,
   resolveAutonomousNarrationVoice,
   parseAutonomousPick,
   parseRssItemTitles,
@@ -871,7 +872,7 @@ export default {
         if (request.method === "POST") {
           assertWriteRequest(request, env);
           requirePermission(authorization, "production_configure");
-          return createProductionRequestFromBody(request, env, authorization);
+          return createProductionRequestFromBody(request, env, authorization, url);
         }
         // Item 4 opens by loading the Production Request collection before a
         // specific request/status route is necessarily selected. Trigger the Make
@@ -3169,6 +3170,8 @@ function mapStudioContentProfile(record) {
     theme,
     city_label: studioCityLabel(theme, record),
     background_color: studioBackgroundColorForRecord(record),
+    default_narration_voice_id: String(f(record, "Default_Narration_Voice_ID") || "").trim(),
+    default_narration_voice_name: String(f(record, "Default_Narration_Voice_Name") || "").trim(),
   };
 }
 
@@ -3896,9 +3899,9 @@ function cleanProductionRequestOutputPatch(payload) {
   choiceField("thumbnail_mode_override", "Thumbnail_Mode_Override", PRO_OUTPUT_THUMBNAIL_OVERRIDE);
   intField("video_duration_seconds_override", "Video_Duration_Seconds_Override", 5, 600, "Video duration override");
   choiceField("video_clip_count_mode_override", "Video_Clip_Count_Mode_Override", PRO_OUTPUT_COUNT_MODES);
-  intField("video_clip_count_exact_override", "Video_Clip_Count_Exact_Override", 1, 15, "Exact video clip count override");
-  intField("video_clip_count_min_override", "Video_Clip_Count_Min_Override", 1, 15, "Minimum video clip count override");
-  intField("video_clip_count_max_override", "Video_Clip_Count_Max_Override", 1, 15, "Maximum video clip count override");
+  intField("video_clip_count_exact_override", "Video_Clip_Count_Exact_Override", 1, 60, "Exact video clip count override");
+  intField("video_clip_count_min_override", "Video_Clip_Count_Min_Override", 1, 60, "Minimum video clip count override");
+  intField("video_clip_count_max_override", "Video_Clip_Count_Max_Override", 1, 60, "Maximum video clip count override");
   choiceField("carousel_slide_count_mode_override", "Carousel_Slide_Count_Mode_Override", PRO_OUTPUT_COUNT_MODES);
   intField("carousel_slide_count_exact_override", "Carousel_Slide_Count_Exact_Override", 1, 20, "Exact carousel slide count override");
   intField("carousel_slide_count_min_override", "Carousel_Slide_Count_Min_Override", 1, 20, "Minimum carousel slide count override");
@@ -3971,10 +3974,9 @@ async function updateProductionRequestOutput(request, env, url, authorization) {
 
 const ITEM4_MEDIA_PUBLIC_BASE = "https://media.chicagoshining.com";
 const ITEM4_MAPPING_TABLE = "Platform Output Mappings";
-const ITEM4_MAX_FILES = 20;
+const ITEM4_MAX_FILES = 60;
 const ITEM4_MAX_FILE_BYTES = 25 * 1024 * 1024;
 const ITEM4_MAX_TOTAL_BYTES = 150 * 1024 * 1024;
-const ITEM4_MAX_CLIP_FILES = 10;
 const ITEM4_MAX_CLIP_FILE_BYTES = 200 * 1024 * 1024;
 const ITEM4_FINISHED_VIDEO_HARD_MAX_BYTES = Math.round(1.5 * 1024 * 1024 * 1024);
 const ITEM4_LARGE_UPLOAD_PART_BYTES = 16 * 1024 * 1024;
@@ -5141,9 +5143,6 @@ async function uploadItem4MasterAssets(request, env, url, authorization, ctx) {
   );
   const finishedVideo = finishedKind === "finished-video";
   const mixedClips = clipOrigin && !finishedVideo;
-  if (mixedClips && videoFiles.length + existing.filter(item4LooksLikeVideoAsset).length > ITEM4_MAX_CLIP_FILES) {
-    throw new HttpError(400, `A Production Request can contain at most ${ITEM4_MAX_CLIP_FILES} video clips`);
-  }
   let total = 0;
   for (const file of files) {
     total += Number(file.size || 0);
@@ -10643,9 +10642,9 @@ async function cleanProductionRequestPayload(payload, env) {
   let voiceoverTailSeconds = nullableNumber(payload?.voiceover_tail_seconds, 0, 300, "Voiceover tail");
   voiceoverTailSeconds = autonomousDefaultVoiceoverTailSeconds(voiceoverTailSeconds);
 
-  let videoClipCountExact = nullableInt(payload?.video_clip_count_exact, 1, 30, "Exact video clip count");
-  let videoClipCountMin = nullableInt(payload?.video_clip_count_min, 1, 30, "Minimum video clip count");
-  let videoClipCountMax = nullableInt(payload?.video_clip_count_max, 1, 30, "Maximum video clip count");
+  let videoClipCountExact = nullableInt(payload?.video_clip_count_exact, 1, 60, "Exact video clip count");
+  let videoClipCountMin = nullableInt(payload?.video_clip_count_min, 1, 60, "Minimum video clip count");
+  let videoClipCountMax = nullableInt(payload?.video_clip_count_max, 1, 60, "Maximum video clip count");
 
   if (videoClipCountMode === "AI decides") {
     videoClipCountExact = videoClipCountMin = videoClipCountMax = null;
@@ -10862,40 +10861,91 @@ async function existingDraftForIdea(env, ideaRecordId, authorization) {
   }) || null;
 }
 
-async function resolveDraftNarrationVoice(env, idea, authorization, fallback = {}) {
+async function loadContentProfileRecord(env, authorization, profileId) {
+  const id = String(profileId || "").trim();
+  if (!id) return null;
+  try {
+    return await resolveWorkingContentProfile(env, authorization, id);
+  } catch {
+    try {
+      return await airtableFetch(env, "Content Profiles", id);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function resolveDraftNarrationVoice(env, idea, authorization, fallback = {}, preferredProfileId = null) {
   const fallbackId = String(fallback.voice_id || PHASE6_DEFAULT_VOICE_ID).trim() || PHASE6_DEFAULT_VOICE_ID;
   const fallbackName = String(fallback.voice_name || "Kate").trim() || "Kate";
   const ideaProfileId = arrayOrEmpty(f(idea, "Content_Profile"))[0]
     || arrayOrEmpty(f(idea, "Content Profiles"))[0]
     || "";
+  const candidateIds = [...new Set([ideaProfileId, preferredProfileId].filter(Boolean))];
+  const profiles = [];
   try {
-    const profileRecord = ideaProfileId
-      ? await resolveWorkingContentProfile(env, authorization, ideaProfileId).catch(async () => {
-          // Idea may point at a Content Profile id even when brand membership differs; load directly.
-          return airtableFetch(env, "Content Profiles", ideaProfileId);
-        })
-      : await resolveWorkingContentProfile(env, authorization, null);
-    return resolveAutonomousNarrationVoice(mapOperationsProfile(profileRecord), {
+    for (const profileId of candidateIds) {
+      const record = await loadContentProfileRecord(env, authorization, profileId);
+      if (record) profiles.push(mapOperationsProfile(record));
+    }
+    const working = await resolveWorkingContentProfile(env, authorization, preferredProfileId || null).catch(() => null);
+    if (working && !profiles.some((row) => row.id === working.id)) {
+      profiles.push(mapOperationsProfile(working));
+    }
+    return pickNarrationVoiceFromProfiles(profiles, {
       voice_id: fallbackId,
       voice_name: fallbackName,
     });
   } catch (error) {
     console.warn("draft narration voice profile lookup failed", idea?.id, error);
-    return { voice_id: fallbackId, voice_name: fallbackName };
+    return pickNarrationVoiceFromProfiles(profiles, {
+      voice_id: fallbackId,
+      voice_name: fallbackName,
+    });
   }
 }
 
-async function createDraftForIdea(env, idea, authorization, input = null) {
+function isUnsetOrKateDefaultVoice(voiceId, { explicit = false } = {}) {
+  if (explicit) return false;
+  const id = String(voiceId || "").trim();
+  return !id || id === PHASE6_DEFAULT_VOICE_ID;
+}
+
+async function maybeHealDraftNarrationVoice(env, record, idea, authorization, preferredProfileId = null) {
+  if (String(f(record, "Voiceover_Mode") || "Yes").trim() !== "Yes") return record;
+  const storedId = String(f(record, "Voice_ID") || "").trim();
+  if (!isUnsetOrKateDefaultVoice(storedId)) return record;
+  const narration = await resolveDraftNarrationVoice(env, idea, authorization, {
+    voice_id: PHASE6_DEFAULT_VOICE_ID,
+    voice_name: "Kate",
+  }, preferredProfileId);
+  if (!narration.voice_id || narration.voice_id === storedId) return record;
+  try {
+    return await item4UpdateRequestState(env, record.id, {
+      Voice_ID: narration.voice_id,
+      Voice_Name: narration.voice_name || narration.voice_id,
+    });
+  } catch (error) {
+    console.warn("draft narration voice heal failed", record.id, error);
+    return record;
+  }
+}
+
+async function createDraftForIdea(env, idea, authorization, input = null, { preferredProfileId = null } = {}) {
   const now = new Date().toISOString();
   const defaults = productionRequestDefaultsFromIdea(idea);
-  // Resolve Admin profile narration BEFORE cleanProductionRequestPayload — that cleaner
-  // otherwise fills a blank voice_id with Kate and would hide LA's Hank default.
+  // HTML/EZ defaults send Kate. Treat that as unset unless the operator explicitly
+  // picked a voice, so Admin profile defaults (Hank, etc.) still win.
   const incomingVoiceId = String(input?.voice_id || defaults.voice_id || "").trim();
-  if (String((input || defaults).voiceover_mode || "Yes").trim() === "Yes" && !incomingVoiceId) {
+  const explicitVoice = Boolean(input?.voice_explicit);
+  if (
+    String((input || defaults).voiceover_mode || "Yes").trim() === "Yes"
+    && isUnsetOrKateDefaultVoice(incomingVoiceId, { explicit: explicitVoice })
+  ) {
     const narration = await resolveDraftNarrationVoice(env, idea, authorization, {
       voice_id: PHASE6_DEFAULT_VOICE_ID,
       voice_name: "Kate",
-    });
+    }, preferredProfileId);
     defaults.voice_id = narration.voice_id || PHASE6_DEFAULT_VOICE_ID;
     defaults.voice_name = narration.voice_name || "Kate";
     if (input && typeof input === "object") {
@@ -10945,6 +10995,8 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
     throw new HttpError(409, "Restore this idea before configuring production");
   }
 
+  let preferredProfileId = null;
+  try { preferredProfileId = requestedProfileId(url, await request.clone().json().catch(() => ({}))); } catch { preferredProfileId = requestedProfileId(url); }
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
   if (existing) {
     let record = existing;
@@ -10964,14 +11016,15 @@ async function getOrCreateProductionRequestForIdea(request, env, url, authorizat
         console.warn("photo-wait rehydrate on open failed", ideaRecordId, error);
       }
     }
+    record = await maybeHealDraftNarrationVoice(env, record, idea, authorization, preferredProfileId);
     return respond(request, env, { ok: true, created: false, record: mapProductionRequest(record) });
   }
 
-  const created = await createDraftForIdea(env, idea, authorization);
+  const created = await createDraftForIdea(env, idea, authorization, null, { preferredProfileId });
   return respond(request, env, { ok: true, created: true, record: mapProductionRequest(created) }, 201);
 }
 
-async function createProductionRequestFromBody(request, env, authorization) {
+async function createProductionRequestFromBody(request, env, authorization, url) {
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const ideaRecordId = String(payload?.idea_record_id || "").trim();
@@ -10979,11 +11032,22 @@ async function createProductionRequestFromBody(request, env, authorization) {
 
   const idea = await loadAuthorizedIdea(env, ideaRecordId, authorization);
   if (promotionCompleted(idea)) throw new HttpError(409, "This idea has already been promoted");
+  const preferredProfileId = requestedProfileId(url, payload);
   const existing = await existingDraftForIdea(env, ideaRecordId, authorization);
-  if (existing) return respond(request, env, { ok: true, created: false, record: mapProductionRequest(existing) });
+  if (existing) {
+    const healed = await maybeHealDraftNarrationVoice(env, existing, idea, authorization, preferredProfileId);
+    return respond(request, env, { ok: true, created: false, record: mapProductionRequest(healed) });
+  }
 
+  const explicitVoice = Boolean(payload?.voice_explicit)
+    || (String(payload?.voice_id || "").trim() && String(payload.voice_id).trim() !== PHASE6_DEFAULT_VOICE_ID);
   const input = await cleanProductionRequestPayload(payload, env);
-  const created = await createDraftForIdea(env, idea, authorization, input);
+  if (!explicitVoice && String(input.voiceover_mode || "Yes").trim() === "Yes") {
+    input.voice_id = "";
+    input.voice_name = "";
+  }
+  input.voice_explicit = explicitVoice;
+  const created = await createDraftForIdea(env, idea, authorization, input, { preferredProfileId });
   return respond(request, env, { ok: true, created: true, record: mapProductionRequest(created) }, 201);
 }
 
@@ -11052,8 +11116,22 @@ async function listProductionRequests(request, env, url, authorization) {
 
 async function getProductionRequest(request, env, url, authorization) {
   const recordId = productionRequestRecordIdFromPath(url);
-  const record = await loadAuthorizedProductionRequest(env, recordId, authorization);
+  let record = await loadAuthorizedProductionRequest(env, recordId, authorization);
   const ideaId = ideaRecordIdFromProductionRequest(record);
+  if (ideaId) {
+    try {
+      const idea = await loadAuthorizedIdea(env, ideaId, authorization);
+      record = await maybeHealDraftNarrationVoice(
+        env,
+        record,
+        idea,
+        authorization,
+        requestedProfileId(url)
+      );
+    } catch (error) {
+      console.warn("production request voice heal skipped", recordId, error);
+    }
+  }
   const ideaTitles = await loadIdeaTitlesByRecordId(env, [ideaId]);
   return respond(request, env, {
     ok: true,
@@ -11462,8 +11540,8 @@ function productionRequestCompatibilityIssues(record) {
     }
 
     if (mode === "Exact") {
-      if (!Number.isInteger(exact) || exact < 1 || exact > 15) {
-        issues.push("Enter an exact video clip count from 1 through 15.");
+      if (!Number.isInteger(exact) || exact < 1 || exact > 60) {
+        issues.push("Enter an exact video clip count from 1 through 60.");
       }
     }
 
@@ -11472,10 +11550,10 @@ function productionRequestCompatibilityIssues(record) {
         !Number.isInteger(min) ||
         !Number.isInteger(max) ||
         min < 1 ||
-        max > 15 ||
+        max > 60 ||
         min > max
       ) {
-        issues.push("Enter a valid video clip-count range from 1 through 15 with minimum less than or equal to maximum.");
+        issues.push("Enter a valid video clip-count range from 1 through 60 with minimum less than or equal to maximum.");
       }
     }
   }
@@ -12032,7 +12110,7 @@ function outputWorkItemIssues(outputRow, route, effective) {
   if (effective.video_clip_count_mode === "Exact" &&
       (!Number.isInteger(effective.video_clip_count_exact) ||
        effective.video_clip_count_exact < 1 ||
-       effective.video_clip_count_exact > 15)) {
+       effective.video_clip_count_exact > 60)) {
     issues.push("Exact video clip count is invalid.");
   }
 
@@ -12040,7 +12118,7 @@ function outputWorkItemIssues(outputRow, route, effective) {
       (!Number.isInteger(effective.video_clip_count_min) ||
        !Number.isInteger(effective.video_clip_count_max) ||
        effective.video_clip_count_min < 1 ||
-       effective.video_clip_count_max > 15 ||
+       effective.video_clip_count_max > 60 ||
        effective.video_clip_count_min > effective.video_clip_count_max)) {
     issues.push("Video clip-count range is invalid.");
   }
@@ -16047,8 +16125,8 @@ function cleanPromotionPayload(payload) {
   let videoClipCount = null;
   if (clipRaw !== null && clipRaw !== undefined && String(clipRaw).trim() !== "" && String(clipRaw).trim().toLowerCase() !== "auto") {
     const clipNumber = Number(clipRaw);
-    if (!Number.isFinite(clipNumber) || clipNumber < 1 || clipNumber > 30) {
-      throw new HttpError(400, "Video clip count must be Auto or between 1 and 30");
+    if (!Number.isFinite(clipNumber) || clipNumber < 1 || clipNumber > 60) {
+      throw new HttpError(400, "Video clip count must be Auto or between 1 and 60");
     }
     videoClipCount = Math.trunc(clipNumber);
   }
