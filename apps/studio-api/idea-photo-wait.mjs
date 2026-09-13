@@ -29,6 +29,10 @@ export const IDEA_LIBRARY_NAMED_PLACES = [
   "museum campus", "navy pier", "near north side", "old town", "pilsen",
   "printers row", "ravenswood", "river north", "rogers park", "south loop",
   "streeterville", "ukrainian village", "uptown", "west loop", "wicker park",
+  "central park", "times square", "brooklyn bridge", "statue of liberty",
+  "high line", "washington square", "bryant park", "grand central",
+  "one world trade", "santa monica pier", "griffith observatory",
+  "venice beach", "rodeo drive", "hollywood sign",
 ];
 
 export function ideaLibraryTokens(text) {

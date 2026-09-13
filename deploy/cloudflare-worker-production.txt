@@ -445,3 +445,5 @@ Production Request voice persist Worker deploy: 2026-09-12 — Draft list return
 Asset Manager classify-all Worker deploy: 2026-09-12 — profile dropdown saves without classifying (classify=false), POST /api/library/classify-all sends every pending profiled asset to A3 in one background run; also ships the Ready-for-Render voiceover heal from #226. Worker 0.10.302-library-classify-all.
 
 Unused-photo harvest Worker deploy: 2026-09-13 — Cluster 5-10 unused related stills, write caption, run autonomous produce on demand. Worker 0.10.303-library-a3-on-upload.
+
+Unused-photo profile scope Worker deploy: 2026-09-13 — On-demand harvest uses the working Content Profile so NYC unused stills are visible. Worker 0.10.304-unused-profile-scope.

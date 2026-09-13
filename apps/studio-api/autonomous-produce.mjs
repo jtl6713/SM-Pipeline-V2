@@ -658,6 +658,16 @@ export function autonomousPreferredSubject(value) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
 }
 
+export function pickAutonomousEnabledProfile(profiles, requestedId) {
+  const rows = Array.isArray(profiles) ? profiles : [];
+  const wanted = String(requestedId || "").trim();
+  if (/^rec[A-Za-z0-9]+$/.test(wanted)) {
+    const hit = rows.find((row) => row.id === wanted);
+    if (hit) return hit;
+  }
+  return rows[0] || null;
+}
+
 export function buildAutonomousPickerPrompt({
   profile,
   trends,

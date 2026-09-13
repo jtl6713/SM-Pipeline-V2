@@ -75,6 +75,7 @@ import {
   autonomousPlanExtras,
   autonomousPlanOverrides,
   autonomousPreferredSubject,
+  pickAutonomousEnabledProfile,
   autonomousRequestNeedsContinue,
   autonomousRunIsBusy,
   autonomousSlot,
@@ -351,7 +352,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.303-library-a3-on-upload",
+          version: "0.10.304-unused-profile-scope",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5571,6 +5572,10 @@ const IDEA_LIBRARY_NAMED_PLACES = [
   "museum campus", "navy pier", "near north side", "old town", "pilsen",
   "printers row", "ravenswood", "river north", "rogers park", "south loop",
   "streeterville", "ukrainian village", "uptown", "west loop", "wicker park",
+  "central park", "times square", "brooklyn bridge", "statue of liberty",
+  "high line", "washington square", "bryant park", "grand central",
+  "one world trade", "santa monica pier", "griffith observatory",
+  "venice beach", "rodeo drive", "hollywood sign",
 ];
 
 function ideaLibraryTokens(text) {
@@ -31137,13 +31142,14 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     limit: 50,
     filterFormula: "AND({Active}=1,{Autonomous_Produce_Enabled}=1)",
   })).map(mapOperationsProfile);
-  if (!profiles.length) {
+  const selected = pickAutonomousEnabledProfile(profiles, options.content_profile_id);
+  if (!selected) {
     const result = { skipped: "no_enabled_profiles", chicago_date: chicago.date, slot, status: "skipped", skip_reason: "no_enabled_profiles" };
     if (options.scheduled) await studioSaveAutonomousLastRun(env, result);
     return result;
   }
 
-  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, profiles[0].id);
+  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, selected.id);
   const observations = await studioInsightsLoadObservations(env, { profile: "chicago", limit: 80 }).catch(() => []);
   const similar = summarizeObservations(observations);
   const [news, youtube, occupiedIdeas] = await Promise.all([
@@ -31152,7 +31158,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     harvestAutonomousOccupiedTopics(env),
   ]);
   const recentTitles = occupiedIdeas.map((row) => row.title);
-  const catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, profile?.id || profiles[0]?.id || "");
+  const catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, profile?.id || selected.id);
   const unusedAssets = autonomousUnusedLibraryAssets(catalog, occupiedIdeas);
   const overview = summarizeUnusedLibraryOverview(unusedAssets);
   const cluster = pickRelatedUnusedStillCluster(unusedAssets);
@@ -31324,17 +31330,20 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 async function runStudioAutonomousProduce(request, env, authorization, ctx, options = {}) {
   let dryRun = Boolean(options.dry_run);
   let preferredSubject = options.preferred_subject;
+  let contentProfileId = options.content_profile_id;
   if (request) {
     try {
       const payload = await request.json();
       dryRun = Boolean(payload?.dry_run);
       if (payload?.preferred_subject) preferredSubject = payload.preferred_subject;
+      if (payload?.content_profile_id) contentProfileId = payload.content_profile_id;
     } catch {}
   }
   const result = await executeStudioAutonomousProduce(env, ctx, {
     ...options,
     dry_run: dryRun,
     preferred_subject: preferredSubject,
+    content_profile_id: contentProfileId,
     authorization: authorization?.user?.record_id ? authorization : null,
   });
   if (!request) return result;
