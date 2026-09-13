@@ -1,4 +1,4 @@
-"""Store Studio Asset Manager uploads in Drive photos/video folders. No R2."""
+"""Store Studio Asset Manager uploads in Drive Studio Intake / video folders. No R2."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from asset.constants import GDRIVE_PHOTOS_FOLDER, GDRIVE_VIDEO_FOLDER
+from asset.constants import GDRIVE_STUDIO_INTAKE_FOLDER, GDRIVE_VIDEO_FOLDER
 from asset.helpers import drive_video_duration_seconds
 from integrations.google_drive import GoogleDriveClient
 
@@ -43,7 +43,7 @@ def classify_library_file(*, filename: str, mime_type: str = "") -> dict[str, An
             "kind": "image",
             "media_class": "Image",
             "asset_role": "Other",
-            "folder_id": GDRIVE_PHOTOS_FOLDER,
+            "folder_id": GDRIVE_STUDIO_INTAKE_FOLDER,
             "max_bytes": MAX_IMAGE_BYTES,
             "mime_type": mime or "image/jpeg",
         }

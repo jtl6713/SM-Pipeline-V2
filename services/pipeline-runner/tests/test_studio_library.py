@@ -1,3 +1,4 @@
+from asset.constants import GDRIVE_PHOTOS_FOLDER, GDRIVE_STUDIO_INTAKE_FOLDER, GDRIVE_VIDEO_FOLDER
 from studio_library.processor import classify_library_file, probe_library_video_duration, rename_studio_library_asset
 from asset.helpers import drive_video_duration_seconds
 
@@ -6,9 +7,12 @@ def test_classify_library_photo_and_clip():
     photo = classify_library_file(filename="riverwalk.jpg", mime_type="image/jpeg")
     assert photo["kind"] == "image"
     assert photo["media_class"] == "Image"
+    assert photo["folder_id"] == GDRIVE_STUDIO_INTAKE_FOLDER
+    assert photo["folder_id"] != GDRIVE_PHOTOS_FOLDER
     clip = classify_library_file(filename="take.mov", mime_type="video/quicktime")
     assert clip["kind"] == "video"
     assert clip["asset_role"] == "Raw Footage"
+    assert clip["folder_id"] == GDRIVE_VIDEO_FOLDER
 
 
 def test_classify_library_rejects_audio():

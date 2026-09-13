@@ -16,8 +16,10 @@ MAKE_A4_WEBHOOK_URL = ""
 GDRIVE_INGESTION_FOLDER = "1VpjoRDHbwUlQrrEjfEpkGrIz1HFFtNNX"
 GDRIVE_VIDEO_FOLDER = "1U5BbeeTBEBrMuYKpA5FoQoKY6qbTEwMi"
 GDRIVE_BRANDING_FOLDER = "1xwldx93IdH-esoZDsaKJZaaL8O7kMFVC"
-# Library stills after A2. Parent Photos folder holds Studio Intake / Variants too.
+# A2 stills land here (Drive folder name: Ingestion Intake, under Photos).
 GDRIVE_PHOTOS_FOLDER = "16CCKNXzRZV6yBAihf_Mocc3uOFulJ1cm"
+# Studio Asset Manager stills. Sibling of Ingestion Intake under Photos.
+GDRIVE_STUDIO_INTAKE_FOLDER = "1l5VyNuNiePjIa1HETfGJhVfit2zr3plY"
 GDRIVE_MISC_FOLDER = "1mSXEuMAEjxTpe0TJ5E1p9DOBck5Pxngl"
 GDRIVE_MUSIC_FOLDER = "1mzNHcVmeXb6I2WybJD5iOTrJUDRQJIN3"
 
