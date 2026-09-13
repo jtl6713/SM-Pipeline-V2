@@ -451,3 +451,5 @@ Unused-photo profile scope Worker deploy: 2026-09-13 — On-demand harvest uses 
 Unused-photo all-cities Worker deploy: 2026-09-13 — If the first city has no unused 5-10 set, keep scanning other enabled profiles (NYC Central Park). Worker 0.10.305-unused-all-cities.
 
 Unused-photo stamped IDs Worker deploy: 2026-09-13 — Scan only profile-stamped stills; unused means the file was not on an output. Occupied landmarks skip the next cluster, not the whole city. Worker 0.10.306-unused-stamped-ids.
+
+Autonomous reel pack Worker deploy: 2026-09-13 — Unused-photo ideas default to IG/FB Reel+Story, TikTok Video Draft, YouTube Short. Worker 0.10.307-autonomous-reel-pack.

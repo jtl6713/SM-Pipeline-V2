@@ -130,12 +130,12 @@ test("wizard origin notes parse and stay on ez-button contract", () => {
   assert.match(notes, /ez-package=video/);
 });
 
-test("autonomous origin continues through Submitted and uses reel or carousel packs", () => {
+test("autonomous origin continues through Submitted and uses the reel pack", () => {
   assert.equal(isAutonomousOrigin("origin=autonomous; library stills"), true);
   assert.equal(autonomousRequestNeedsContinue("Submitted", "origin=autonomous"), true);
   assert.equal(autonomousRequestNeedsContinue("Submitted", "origin=ez-wizard"), false);
   assert.equal(autonomousPlanOverrides("Vertical Short Video").Instagram, "Reel");
-  assert.equal(autonomousPlanOverrides("Carousel").Instagram, "Carousel");
+  assert.equal(autonomousPlanOverrides("Carousel").YouTube, "Short");
   assert.deepEqual(autonomousPlanExtras().map((row) => `${row.platform}::${row.output_type}`), [
     "Instagram::Story",
     "Facebook::Story",

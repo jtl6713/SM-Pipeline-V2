@@ -7,6 +7,7 @@ import {
   isDerivedLibraryStillName,
   autonomousMasterMediaIds,
   autonomousPlanOverrides,
+  autonomousCanonicalContentType,
   autonomousPlanExtras,
   autonomousDefaultVoiceoverSeconds,
   autonomousDefaultVoiceoverTailSeconds,
@@ -207,8 +208,14 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.equal(picked.skip, false);
   assert.equal(picked.media_asset_ids[0], "recAsset1234567890");
   assert.match(picked.post_caption, /Pilsen walls/);
-  assert.deepEqual(autonomousPlanOverrides("Vertical Short Video").Instagram, "Reel");
-  assert.deepEqual(autonomousPlanOverrides("Carousel").Instagram, "Carousel");
+  assert.deepEqual(autonomousPlanOverrides("Vertical Short Video"), {
+    Instagram: "Reel",
+    Facebook: "Slideshow Reel",
+    TikTok: "Video Draft",
+    YouTube: "Short",
+  });
+  assert.deepEqual(autonomousPlanOverrides("Carousel"), autonomousPlanOverrides("Vertical Short Video"));
+  assert.equal(autonomousCanonicalContentType("Carousel"), "Vertical Short Video");
   assert.deepEqual(autonomousPlanExtras(), [
     { platform: "Instagram", output_type: "Story" },
     { platform: "Facebook", output_type: "Story" },
