@@ -9,6 +9,7 @@
     "timing",
     "pipeline",
     "youtube",
+    "youtube-nyc",
     "remotion"
   ],
   "services": {
@@ -53,6 +54,12 @@
       "port": 3340,
       "windows_origin": "http://localhost:3340",
       "vm_origin": "http://localhost:3340"
+    },
+    "youtube-nyc": {
+      "hostname": "youtube-upload-nyc.chicagoshining.com",
+      "port": 3342,
+      "windows_origin": "http://localhost:3342",
+      "vm_origin": "http://localhost:3342"
     },
     "pipeline": {
       "hostname": "pipeline.chicagoshining.com",

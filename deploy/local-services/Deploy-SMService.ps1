@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','pipeline-runner','timing-engine')]
+    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','pipeline-runner','timing-engine')]
     [string]$Service,
 
     [string]$Commit = '',
@@ -89,6 +89,18 @@ $ServiceMap = @{
         DependencyKind = 'node'
         RuntimeDirs = @('node_modules','data','tmp','temp','logs','uploads','downloads')
     }
+    'youtube-uploader-nyc' = @{
+        DisplayName = 'YouTube Uploader NYC'
+        RepoPath = 'services\youtube-uploader'
+        RuntimePath = 'Services\youtube-uploader-nyc\service'
+        Port = 3342
+        PublicUrl = 'https://youtube-upload-nyc.chicagoshining.com'
+        WindowTitle = '5b LOC YouTube Uploader NYC :3342'
+        StartKind = 'node'
+        StartFile = 'youtube-upload-service.js'
+        DependencyKind = 'node'
+        RuntimeDirs = @('node_modules','data','tmp','temp','logs','uploads','downloads')
+    }
     'pipeline-runner' = @{
         DisplayName = 'Pipeline Runner'
         RepoPath = 'services\pipeline-runner'
@@ -168,17 +180,19 @@ function Select-Service {
     Write-Host '  2  Remotion Renderer'
     Write-Host '  3  Watermark'
     Write-Host '  4  Voiceover Normalizer'
-    Write-Host '  5  YouTube Uploader'
+    Write-Host '  5  YouTube Uploader (Chicago)'
+    Write-Host '  5n YouTube Uploader NYC'
     Write-Host '  6  Pipeline Runner'
     Write-Host '  7  Timing Engine'
     Write-Host ''
-    $choice = Read-Host 'Enter 1-7'
+    $choice = Read-Host 'Enter 1-7 or 5n'
     switch ($choice) {
         '1' { return 'frame-extractor' }
         '2' { return 'remotion-renderer' }
         '3' { return 'watermark' }
         '4' { return 'voiceover-normalizer' }
         '5' { return 'youtube-uploader' }
+        '5n' { return 'youtube-uploader-nyc' }
         '6' { return 'pipeline-runner' }
         '7' { return 'timing-engine' }
         default { throw "Invalid service selection: $choice" }

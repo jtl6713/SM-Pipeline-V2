@@ -71,6 +71,7 @@ These folders contain the running services and runtime-only material. The deploy
 | 3 | Watermark | `services/watermark` | `Services\Watermark` | 3011 | `https://watermark.chicagoshining.com` | `3 LOC Watermark :3011` |
 | 4 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 | `https://voiceover.chicagoshining.com` | `4 LOC Voiceover Normalizer :3012` |
 | 5 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 | `https://youtube-upload.chicagoshining.com` | `5 LOC YouTube Uploader :3340` |
+| 5b | YouTube Uploader NYC | `services/youtube-uploader` | `Services\youtube-uploader-nyc\service` | 3342 | `https://youtube-upload-nyc.chicagoshining.com` | `5b LOC YouTube Uploader NYC :3342` |
 | 6 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 | `https://pipeline.chicagoshining.com` | `6 LOC Pipeline Runner :3350` |
 | 7 | Video Compressor | `services/video-compressor` | `Services\Video_Compressor` | 3335 | `https://compress.chicagoshining.com` | `7 LOC Video Compressor :3335` |
 | 8 | Timing Engine | `services/timing-engine` | `Services\timing-engine\service` | 3336 | `https://timing.chicagoshining.com` | `8 LOC Timing Engine :3336` |
@@ -304,6 +305,7 @@ render.chicagoshining.com
 watermark.chicagoshining.com
 voiceover.chicagoshining.com
 youtube-upload.chicagoshining.com
+youtube-upload-nyc.chicagoshining.com
 ```
 
 Some root URLs intentionally return HTTP 404 while still proving reachability. Deployment validation uses `/health`.
