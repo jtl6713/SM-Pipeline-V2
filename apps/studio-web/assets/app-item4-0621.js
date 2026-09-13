@@ -9495,7 +9495,6 @@
     );
     if (hint) {
       const { toAdd, toRemove } = item4LibraryDiff();
-      const max = libraryPickerMaxCount();
       hint.textContent = `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked. Uncheck to remove, search to add.${toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : ""}`;
     }
     syncItem4LibraryAdd();
