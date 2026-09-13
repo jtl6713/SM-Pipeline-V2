@@ -668,6 +668,19 @@ export function pickAutonomousEnabledProfile(profiles, requestedId) {
   return rows[0] || null;
 }
 
+export function autonomousProfileHarvestOrder(profiles, requestedId) {
+  const selected = pickAutonomousEnabledProfile(profiles, requestedId);
+  const ordered = [];
+  const seen = new Set();
+  for (const row of [selected, ...(Array.isArray(profiles) ? profiles : [])]) {
+    const id = String(row?.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ordered.push(row);
+  }
+  return ordered;
+}
+
 export function buildAutonomousPickerPrompt({
   profile,
   trends,

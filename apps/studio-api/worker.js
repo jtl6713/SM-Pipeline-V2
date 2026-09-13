@@ -76,6 +76,7 @@ import {
   autonomousPlanOverrides,
   autonomousPreferredSubject,
   pickAutonomousEnabledProfile,
+  autonomousProfileHarvestOrder,
   autonomousRequestNeedsContinue,
   autonomousRunIsBusy,
   autonomousSlot,
@@ -352,7 +353,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.304-unused-profile-scope",
+          version: "0.10.305-unused-all-cities",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -31149,7 +31150,6 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  const profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, selected.id);
   const observations = await studioInsightsLoadObservations(env, { profile: "chicago", limit: 80 }).catch(() => []);
   const similar = summarizeObservations(observations);
   const [news, youtube, occupiedIdeas] = await Promise.all([
@@ -31158,10 +31158,32 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     harvestAutonomousOccupiedTopics(env),
   ]);
   const recentTitles = occupiedIdeas.map((row) => row.title);
-  const catalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, profile?.id || selected.id);
-  const unusedAssets = autonomousUnusedLibraryAssets(catalog, occupiedIdeas);
-  const overview = summarizeUnusedLibraryOverview(unusedAssets);
-  const cluster = pickRelatedUnusedStillCluster(unusedAssets);
+  let profile = null;
+  let catalog = [];
+  let unusedAssets = [];
+  let overview = { unused_count: 0, cluster_count: 0, clusters: [] };
+  let cluster = null;
+  for (const candidate of autonomousProfileHarvestOrder(profiles, selected.id)) {
+    const nextCatalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, candidate.id);
+    const nextUnused = autonomousUnusedLibraryAssets(nextCatalog, occupiedIdeas);
+    const nextOverview = summarizeUnusedLibraryOverview(nextUnused);
+    const nextCluster = pickRelatedUnusedStillCluster(nextUnused);
+    if (!catalog.length) {
+      catalog = nextCatalog;
+      unusedAssets = nextUnused;
+      overview = nextOverview;
+    }
+    if (!nextCluster) continue;
+    profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, candidate.id);
+    catalog = nextCatalog;
+    unusedAssets = nextUnused;
+    overview = nextOverview;
+    cluster = nextCluster;
+    break;
+  }
+  if (!profile) {
+    profile = await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, selected.id);
+  }
   const trends = { similar, news, youtube };
   if (!unusedAssets.length) {
     const result = {
@@ -31170,7 +31192,13 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
       slot,
       status: "skipped",
       skip_reason: preferredSubject ? "no_matching_subject_stills" : "no_unused_library_stills",
-      harvest: { similar: similar.length, news: news.length, youtube: youtube.length, assets: catalog.length },
+      harvest: {
+        similar: similar.length,
+        news: news.length,
+        youtube: youtube.length,
+        assets: catalog.length,
+        profile_id: profile?.id || selected.id,
+      },
     };
     await studioSaveAutonomousLastRun(env, result);
     return result;
@@ -31332,12 +31360,19 @@ async function runStudioAutonomousProduce(request, env, authorization, ctx, opti
   let preferredSubject = options.preferred_subject;
   let contentProfileId = options.content_profile_id;
   if (request) {
+    let payload = {};
     try {
-      const payload = await request.json();
-      dryRun = Boolean(payload?.dry_run);
-      if (payload?.preferred_subject) preferredSubject = payload.preferred_subject;
+      payload = await request.json();
+    } catch {
+      payload = {};
+    }
+    dryRun = Boolean(payload?.dry_run);
+    if (payload?.preferred_subject) preferredSubject = payload.preferred_subject;
+    try {
+      contentProfileId = requestedProfileId(new URL(request.url), payload) || contentProfileId;
+    } catch {
       if (payload?.content_profile_id) contentProfileId = payload.content_profile_id;
-    } catch {}
+    }
   }
   const result = await executeStudioAutonomousProduce(env, ctx, {
     ...options,

@@ -482,3 +482,5 @@ Asset Manager profile placeholders Pages deploy: 2026-09-12 — upload Asset nam
 Unused-photo harvest Pages deploy: 2026-09-13 — Ideas Use unused photos plus footer UI 0.6.310 so studio.chicagoshining.com leaves 0.6.309. UI 0.6.310-unused-photo-run.
 
 Unused-photo profile scope Pages deploy: 2026-09-13 — Use unused photos harvests the header Profile city (NYC Central Park, not Chicago). UI 0.6.311-unused-profile-scope.
+
+Unused-photo all-cities Pages deploy: 2026-09-13 — Operations harvest sends the header Profile on the request URL. UI 0.6.312-unused-all-cities.

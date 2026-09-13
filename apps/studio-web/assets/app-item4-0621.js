@@ -204,7 +204,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.311-unused-profile-scope";
+  const BUILD_ID = "item4-0.6.312-unused-all-cities";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -291,7 +291,8 @@
       || pathname === "/api/insights/captions"
       || pathname === "/api/insights/discover"
       || pathname === "/api/library"
-      || pathname === "/api/media-assets/library-stills";
+      || pathname === "/api/media-assets/library-stills"
+      || pathname.startsWith("/api/operations/");
     if (!scoped) return path;
     const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1));
     params.set("profile", selectedProfileId);
