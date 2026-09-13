@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','pipeline-runner','timing-engine')]
+    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','pipeline-runner','timing-engine','ops-dashboard')]
     [string]$Service,
 
     [string]$Commit = '',
@@ -126,6 +126,19 @@ $ServiceMap = @{
         PublicHealthRequired = $false
         RuntimeDirs = @('.venv','venv','__pycache__','work','logs','tmp','temp')
     }
+    'ops-dashboard' = @{
+        DisplayName = 'Ops Dashboard'
+        RepoPath = 'services\ops-dashboard'
+        RuntimePath = 'Services\ops-dashboard'
+        Port = 3361
+        PublicUrl = 'https://ops.chicagoshining.com'
+        WindowTitle = '10 LOC Ops Dashboard :3361'
+        StartKind = 'node'
+        StartFile = 'server.js'
+        DependencyKind = 'none'
+        PublicHealthRequired = $false
+        RuntimeDirs = @('logs','tmp','temp')
+    }
 }
 
 function Write-Step([string]$Text) {
@@ -184,8 +197,9 @@ function Select-Service {
     Write-Host '  5n YouTube Uploader NYC'
     Write-Host '  6  Pipeline Runner'
     Write-Host '  7  Timing Engine'
+    Write-Host '  10 Ops Dashboard'
     Write-Host ''
-    $choice = Read-Host 'Enter 1-7 or 5n'
+    $choice = Read-Host 'Enter 1-7, 5n, or 10'
     switch ($choice) {
         '1' { return 'frame-extractor' }
         '2' { return 'remotion-renderer' }
@@ -195,6 +209,7 @@ function Select-Service {
         '5n' { return 'youtube-uploader-nyc' }
         '6' { return 'pipeline-runner' }
         '7' { return 'timing-engine' }
+        '10' { return 'ops-dashboard' }
         default { throw "Invalid service selection: $choice" }
     }
 }

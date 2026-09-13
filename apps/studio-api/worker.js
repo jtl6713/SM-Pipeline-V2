@@ -360,7 +360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.309-youtube-thumb-pause",
+          version: "0.10.310-yt-skip-list-finalize",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -24988,7 +24988,11 @@ async function studioEnsureYoutubePublish(env, record) {
   }
   if (/^yt2$/i.test(stage)) {
     const uploaded = await studioPulseYtRecord(env, "yts1", "YTS1", record);
-    if (!uploaded.ok || uploaded.still_processing || !uploaded.needs_processing_poll) return uploaded;
+    if (!uploaded.ok || uploaded.still_processing) return uploaded;
+    if (uploaded.needs_finalize && !uploaded.needs_processing_poll) {
+      return { ...await studioPulseYtRecord(env, "yts3", "YTS3", record), upload: uploaded };
+    }
+    if (!uploaded.needs_processing_poll) return uploaded;
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const processed = await studioPulseYtRecord(env, "yts2", "YTS2", record);
     if (!processed.ok || processed.still_processing || !processed.needs_finalize) {
@@ -25001,8 +25005,11 @@ async function studioEnsureYoutubePublish(env, record) {
     if (!started.ok || started.skipped || !started.needs_poll) return started;
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const uploaded = await studioPulseYtRecord(env, "yts1", "YTS1", record);
-    if (!uploaded.ok || uploaded.still_processing || !uploaded.needs_processing_poll) {
+    if (!uploaded.ok || uploaded.still_processing) {
       return { ...uploaded, start: started };
+    }
+    if (uploaded.needs_finalize && !uploaded.needs_processing_poll) {
+      return { ...await studioPulseYtRecord(env, "yts3", "YTS3", record), start: started, upload: uploaded };
     }
     return { ...uploaded, start: started };
   }

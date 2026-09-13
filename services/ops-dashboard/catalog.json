@@ -1,0 +1,160 @@
+{
+  "services": [
+    { "id": "frame-extractor", "name": "Frame Extractor", "port": 3334, "publicUrl": "https://frames.chicagoshining.com", "deployable": true },
+    { "id": "remotion-renderer", "name": "Remotion Renderer", "port": 3333, "publicUrl": "https://render.chicagoshining.com", "deployable": true },
+    { "id": "watermark", "name": "Watermark", "port": 3011, "publicUrl": "https://watermark.chicagoshining.com", "deployable": true },
+    { "id": "voiceover-normalizer", "name": "Voiceover Normalizer", "port": 3012, "publicUrl": "https://voiceover.chicagoshining.com", "deployable": true },
+    { "id": "youtube-uploader", "name": "YouTube Uploader Chicago", "port": 3340, "publicUrl": "https://youtube-upload.chicagoshining.com", "deployable": true },
+    { "id": "youtube-uploader-nyc", "name": "YouTube Uploader NYC", "port": 3342, "publicUrl": "https://youtube-upload-nyc.chicagoshining.com", "deployable": true },
+    { "id": "pipeline-runner", "name": "Pipeline Runner", "port": 3350, "publicUrl": "https://pipeline.chicagoshining.com", "deployable": true },
+    { "id": "video-compressor", "name": "Video Compressor", "port": 3335, "publicUrl": "https://compress.chicagoshining.com", "deployable": false },
+    { "id": "timing-engine", "name": "Timing Engine", "port": 3336, "publicUrl": "https://timing.chicagoshining.com", "deployable": true },
+    { "id": "task-organizer", "name": "Task Organizer", "port": 3360, "publicUrl": null, "deployable": false },
+    { "id": "ops-dashboard", "name": "Ops Dashboard", "port": 3361, "publicUrl": "https://ops.chicagoshining.com", "deployable": true }
+  ],
+  "actions": [
+    {
+      "id": "start-all",
+      "title": "START all services",
+      "group": "Daily",
+      "danger": "safe",
+      "needsService": false,
+      "confirm": false,
+      "shortcut": "START ChicagoShining Services",
+      "summary": "Starts every down listener with no extra console windows. Same as the START shortcut.",
+      "detail": "Calls Start-ChicagoShiningHiddenAll.ps1. Already-up ports are skipped. cloudflared is not started here; that Windows service must already be running for public hostnames."
+    },
+    {
+      "id": "stop-all",
+      "title": "STOP all services",
+      "group": "Daily",
+      "danger": "caution",
+      "needsService": false,
+      "confirm": true,
+      "shortcut": "STOP ChicagoShining Services",
+      "summary": "Stops the local listeners (ports 3011–3360). Leaves this dashboard and cloudflared running so you can start again.",
+      "detail": "Runs the stock 99-stop helper. Does not stop cloudflared and does not stop the Ops Dashboard on :3361."
+    },
+    {
+      "id": "verify",
+      "title": "VERIFY health",
+      "group": "Daily",
+      "danger": "safe",
+      "needsService": false,
+      "confirm": false,
+      "shortcut": "VERIFY ChicagoShining Services",
+      "summary": "Checks local and public /health the same way the VERIFY shortcut does.",
+      "detail": "Runs verify-chicagoshining-local-services.ps1. A green VERIFY means listeners and Cloudflare routes answer; it does not mean new Git code is in Services\\."
+    },
+    {
+      "id": "desk-probe",
+      "title": "DESK companion (probe)",
+      "group": "Daily",
+      "danger": "safe",
+      "needsService": false,
+      "confirm": false,
+      "shortcut": "DESK Companion",
+      "summary": "Read-only public /health probe plus git drift. Does not restart or deploy.",
+      "detail": "Invoke-DeskCompanion.ps1 with no -RestartDown. Use this first when something looks down."
+    },
+    {
+      "id": "desk-restart",
+      "title": "DESK companion (restart down)",
+      "group": "Daily",
+      "danger": "caution",
+      "needsService": false,
+      "confirm": true,
+      "shortcut": "DESK Companion",
+      "summary": "Probe, then hidden-start one down service when Desk mode is infra or higher.",
+      "detail": "Invoke-DeskCompanion.ps1 -RestartDown. Will not deploy. Mode below infra only reports."
+    },
+    {
+      "id": "close-orphans",
+      "title": "Close orphan consoles",
+      "group": "Daily",
+      "danger": "safe",
+      "needsService": false,
+      "confirm": false,
+      "shortcut": null,
+      "summary": "Closes leftover Chicago Shining PowerShell windows that are not actually listening.",
+      "detail": "Close-OrphanChicagoShiningConsoles.ps1. Keeps any process that still owns a listen port."
+    },
+    {
+      "id": "start-one",
+      "title": "Start one service",
+      "group": "Per service",
+      "danger": "safe",
+      "needsService": true,
+      "confirm": false,
+      "shortcut": null,
+      "summary": "Hidden-start a single listener if its port is down.",
+      "detail": "Start-ChicagoShiningHidden.ps1 -Service <id>. Prefer this over opening Windows Terminal tabs."
+    },
+    {
+      "id": "stop-one",
+      "title": "Stop one service",
+      "group": "Per service",
+      "danger": "caution",
+      "needsService": true,
+      "confirm": true,
+      "shortcut": null,
+      "summary": "Stop the listener on that service's port.",
+      "detail": "Uses the same port-guard stop as DEPLOY. Refuses to stop this dashboard from its own Stop one control (use the Windows process or close the app)."
+    },
+    {
+      "id": "sync",
+      "title": "SYNC Git checkout",
+      "group": "Source + deploy",
+      "danger": "caution",
+      "needsService": false,
+      "confirm": true,
+      "shortcut": "SYNC Local Git Checkout",
+      "summary": "Fast-forward SM-Pipeline-V2 to origin/main. Does not copy into Services\\ or restart anything.",
+      "detail": "git checkout main && git pull --ff-only origin main. Dirty or diverged checkouts fail; it never reset --hard."
+    },
+    {
+      "id": "plan",
+      "title": "PLAN deploy",
+      "group": "Source + deploy",
+      "danger": "safe",
+      "needsService": true,
+      "confirm": false,
+      "shortcut": "PLAN Local Service Deployment",
+      "summary": "Read-only plan: which files would change from origin/main. No production mutation.",
+      "detail": "Deploy-SMService.ps1 -Service <id> -PlanOnly -Yes. Video Compressor and Task Organizer are not in this selector."
+    },
+    {
+      "id": "deploy",
+      "title": "DEPLOY service",
+      "group": "Source + deploy",
+      "danger": "danger",
+      "needsService": true,
+      "confirm": true,
+      "shortcut": "DEPLOY Local Service",
+      "summary": "Copy approved origin/main into the live Services folder for one service, then restart and health-check.",
+      "detail": "Deploy-SMService.ps1 -Service <id> -Yes. Preserves .env and runtime data. First-install can create the live folder. Public /health is required except where the service marks it optional (Timing Engine, this dashboard until the tunnel hostname exists)."
+    },
+    {
+      "id": "deploy-pipeline-runner",
+      "title": "DEPLOY Pipeline Runner",
+      "group": "Source + deploy",
+      "danger": "danger",
+      "needsService": false,
+      "confirm": true,
+      "shortcut": "DEPLOY Pipeline Runner",
+      "summary": "Same as DEPLOY with pipeline-runner preselected. VERIFY health alone does not ship new Flask routes.",
+      "detail": "Deploy-SMService.ps1 -Service pipeline-runner -Yes."
+    },
+    {
+      "id": "rollback",
+      "title": "ROLLBACK latest deploy",
+      "group": "Source + deploy",
+      "danger": "danger",
+      "needsService": true,
+      "confirm": true,
+      "shortcut": "ROLLBACK Local Service",
+      "summary": "Restore the newest local backup for that service and restart it.",
+      "detail": "Deploy-SMService.ps1 -Service <id> -RollbackLatest -Yes. Fails if no backup exists."
+    }
+  ]
+}

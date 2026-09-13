@@ -24,6 +24,7 @@ from yt.constants import (
     UPLOAD_UPLOADING,
 )
 from yt.eligibility import upload_source_url, ytp1_eligibility_reason
+from yt.package import youtube_tags
 
 
 def process_request(
@@ -71,6 +72,7 @@ def process_request(
         "sourceUrl": source_url,
         "title": field_str(output, "Output_Title"),
         "description": field_str(output, "YouTube_Description_Final"),
+        "tags": youtube_tags(output),
         "categoryId": field_str(output, "YouTube_Category_ID"),
         "privacyStatus": upload_privacy,
         "publishAt": publish_at,

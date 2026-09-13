@@ -12,6 +12,7 @@ $rows = @(
     @{ Name = 'Video Compressor'; Port = 3335 }
     @{ Name = 'Timing Engine'; Port = 3336 }
     @{ Name = 'Task Organizer'; Port = 3360 }
+    @{ Name = 'Ops Dashboard'; Port = 3361 }
 )
 
 Write-Host ''

@@ -66,6 +66,13 @@
       "port": 3350,
       "windows_origin": "http://localhost:3350",
       "vm_origin": "http://localhost:3350"
+    },
+    "ops-dashboard": {
+      "hostname": "ops.chicagoshining.com",
+      "port": 3361,
+      "windows_origin": "http://localhost:3361",
+      "vm_origin": null,
+      "notes": "Windows-only operator dashboard. Do not cut over to the Oracle VM. Require Cloudflare Access plus DASHBOARD_TOKEN before publishing the hostname."
     }
   }
 }

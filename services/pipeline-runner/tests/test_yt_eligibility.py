@@ -9,8 +9,15 @@ from yt.eligibility import (
     yts3_eligibility_reason,
 )
 from yt.constants import THUMB_NOT_NEEDED, THUMB_PENDING
-from yt.package import description_final, idempotency_key, thumbnail_status, youtube_thumbnail_publish_enabled
-from yt.yts2 import thumbnail_fallback_source, vertical_still_attached
+from yt.package import (
+    description_final,
+    hashtag_tokens,
+    idempotency_key,
+    thumbnail_status,
+    youtube_tags,
+    youtube_thumbnail_publish_enabled,
+)
+from yt.yts2 import thumbnail_fallback_source, vertical_still_attached, yts2_needs_videos_list
 
 
 def _record(**fields):
@@ -89,6 +96,8 @@ def test_youtube_thumbnail_publish_defaults_off():
     assert youtube_thumbnail_publish_enabled() is False
     assert youtube_thumbnail_publish_enabled({"YOUTUBE_AUTO_UPLOAD_THUMBNAIL": "true"}) is True
     assert youtube_thumbnail_publish_enabled({"YOUTUBE_AUTO_UPLOAD_THUMBNAIL": "0"}) is False
+    assert yts2_needs_videos_list(False) is False
+    assert yts2_needs_videos_list(True) is True
 
 
 def test_vertical_still_is_required_for_shorts():
@@ -109,6 +118,17 @@ def test_package_helpers():
     assert package_source_url(record) == "https://drive.example/final.mp4"
     assert upload_source_url(record) == "https://media.chicagoshining.com/pub.mp4"
     assert description_final(record) == "Caption\n\n#Chicago"
+    assert youtube_tags(record) == ["Chicago"]
+    assert hashtag_tokens("#NewYorkCity #LowerManhattan", "also #NewYorkCity") == [
+        "NewYorkCity",
+        "LowerManhattan",
+    ]
+    assert youtube_tags(
+        _record(
+            Output_Caption="Lower Manhattan views\n#NewYorkCity #LowerManhattan",
+            Output_Hashtags="#NewYorkShining",
+        )
+    ) == ["NewYorkShining", "NewYorkCity", "LowerManhattan"]
     assert idempotency_key(record) == "YT-233-recABCDEFGHIJKLMN-BASE"
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from asset.helpers import as_bool
@@ -8,6 +9,10 @@ from publish.location import PublishLocation, append_location_line
 from render.fields import field, field_str
 from ap0.public_cover import native_grid_cover_required
 from yt.constants import DEFAULT_CATEGORY_ID, DEFAULT_PRIVACY, THUMB_NOT_NEEDED, THUMB_PENDING
+
+_HASHTAG = re.compile(r"#([^\s#]+)")
+_TAG_SPLIT = re.compile(r"[\s,;]+")
+YOUTUBE_TAGS_CHAR_BUDGET = 500
 
 
 def setting_is_true(value: str) -> bool:
@@ -44,6 +49,46 @@ def strip_leading_title(body: str, title: str) -> str:
     if first.casefold() == heading.casefold():
         return "\n".join(lines[1:]).lstrip("\n").strip()
     return text
+
+
+def hashtag_tokens(*texts: str, allow_plain: bool = False) -> list[str]:
+    """Parse Airtable hashtags / #tokens into YouTube Studio tags (no #)."""
+    seen: set[str] = set()
+    tags: list[str] = []
+    used = 0
+    for text in texts:
+        raw = str(text or "").strip()
+        if not raw:
+            continue
+        hashed = [part.strip() for part in _HASHTAG.findall(raw)]
+        if hashed:
+            parts = hashed
+        elif allow_plain:
+            parts = [part.strip() for part in _TAG_SPLIT.split(raw)]
+        else:
+            continue
+        for part in parts:
+            tag = part.lstrip("#").strip(".,;:!").strip()
+            if not tag:
+                continue
+            key = tag.casefold()
+            if key in seen:
+                continue
+            extra = len(tag) + (1 if tags else 0)
+            if used + extra > YOUTUBE_TAGS_CHAR_BUDGET:
+                continue
+            seen.add(key)
+            tags.append(tag)
+            used += extra
+    return tags
+
+
+def youtube_tags(record: dict[str, Any]) -> list[str]:
+    tagged = hashtag_tokens(field_str(record, "Output_Hashtags"), allow_plain=True)
+    if tagged:
+        extra = hashtag_tokens(field_str(record, "Output_Caption"))
+        return hashtag_tokens(" ".join(f"#{tag}" for tag in tagged + extra))
+    return hashtag_tokens(field_str(record, "Output_Caption"))
 
 
 def description_final(

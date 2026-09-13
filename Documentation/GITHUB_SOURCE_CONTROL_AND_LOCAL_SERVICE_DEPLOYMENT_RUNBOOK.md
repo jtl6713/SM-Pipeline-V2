@@ -75,6 +75,7 @@ These folders contain the running services and runtime-only material. The deploy
 | 6 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 | `https://pipeline.chicagoshining.com` | `6 LOC Pipeline Runner :3350` |
 | 7 | Video Compressor | `services/video-compressor` | `Services\Video_Compressor` | 3335 | `https://compress.chicagoshining.com` | `7 LOC Video Compressor :3335` |
 | 8 | Timing Engine | `services/timing-engine` | `Services\timing-engine\service` | 3336 | `https://timing.chicagoshining.com` | `8 LOC Timing Engine :3336` |
+| 10 | Ops Dashboard | `services/ops-dashboard` | `Services\ops-dashboard` | 3361 | `https://ops.chicagoshining.com` (optional, Access + token) | `10 LOC Ops Dashboard :3361` |
 
 All five services were captured from the authoritative live Windows sources and placed under Git source control on 2026-08-17.
 
@@ -174,6 +175,7 @@ Friendly launchers under `Production Start-Stop-Verify Services`:
 - `DEPLOY Local Service.bat`
 - `DEPLOY Pipeline Runner.bat`
 - `ROLLBACK Local Service.bat`
+- `OPS Dashboard.bat`
 - `INSTALL Operator Shortcuts.bat`
 
 ChicagoShining Pipeline **root** should also have shortcuts for START / STOP / VERIFY plus SYNC / PLAN / DEPLOY / DEPLOY Pipeline Runner / ROLLBACK. Re-run after pulling:
