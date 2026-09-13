@@ -11,7 +11,13 @@ from yt.constants import DEFAULT_CATEGORY_ID, DEFAULT_PRIVACY, THUMB_NOT_NEEDED,
 
 
 def setting_is_true(value: str) -> bool:
-    return str(value or "").strip().casefold() == "true"
+    return str(value or "").strip().casefold() in {"true", "1", "yes", "on"}
+
+
+def youtube_thumbnail_publish_enabled(settings: PipelineSettings | None = None) -> bool:
+    """YouTube thumbnails.set is paused unless this setting is explicitly on."""
+    raw = settings.get("YOUTUBE_AUTO_UPLOAD_THUMBNAIL") if settings is not None else ""
+    return setting_is_true(raw)
 
 
 def youtube_defaults(settings: PipelineSettings) -> dict[str, str]:

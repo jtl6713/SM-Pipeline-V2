@@ -455,3 +455,5 @@ Unused-photo stamped IDs Worker deploy: 2026-09-13 — Scan only profile-stamped
 Autonomous reel pack Worker deploy: 2026-09-13 — Unused-photo ideas default to IG/FB Reel+Story, TikTok Video Draft, YouTube Short. Worker 0.10.307-autonomous-reel-pack.
 
 YouTube manual close Worker deploy: 2026-09-13 — Paste a watch URL to mark a YouTube output Published / Published Privately after a Studio cover or video upload. Worker 0.10.308-youtube-manual-close.
+
+YouTube thumbnail publish pause Worker deploy: 2026-09-13 — Honor YOUTUBE_AUTO_UPLOAD_THUMBNAIL=false so Studio still generates covers but YTS2/YTS3 do not call thumbnails.set. Worker 0.10.309-youtube-thumb-pause.
