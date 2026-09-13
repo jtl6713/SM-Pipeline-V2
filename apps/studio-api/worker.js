@@ -54,8 +54,11 @@ import {
 } from "./youtube-public-mp4.mjs";
 import {
   YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
+  isYouTubePostUrl,
   manualPublishRequiredFields,
+  youtubeCompleteEligibility,
   youtubeManualActionRequired,
+  youtubeManualCloseFields,
 } from "./youtube-manual-publish.mjs";
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
@@ -163,6 +166,7 @@ export default {
       const isOutputCreativeReviewRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/review$/.test(url.pathname);
       const isOutputApproveAllRoute = url.pathname === "/api/outputs/approve-all";
       const isOutputTiktokCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/tiktok-complete$/.test(url.pathname);
+      const isOutputYoutubeCompleteRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/youtube-complete$/.test(url.pathname);
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
@@ -241,6 +245,7 @@ export default {
       const isOutputCreativeReviewWrite = isOutputCreativeReviewRoute && request.method === "POST";
       const isOutputApproveAllWrite = isOutputApproveAllRoute && request.method === "POST";
       const isOutputTiktokCompleteWrite = isOutputTiktokCompleteRoute && request.method === "POST";
+      const isOutputYoutubeCompleteWrite = isOutputYoutubeCompleteRoute && request.method === "POST";
       const isOutputCreativeContinueWrite = isOutputCreativeContinueRoute && request.method === "POST";
       const isAdminMakeDeployWrite = isAdminMakeDeployRoute && request.method === "POST";
       const isAdminRepairControlWrite = isAdminRepairControlRoute && request.method === "POST";
@@ -302,6 +307,7 @@ export default {
         isOutputCreativeReviewWrite ||
         isOutputApproveAllWrite ||
         isOutputTiktokCompleteWrite ||
+        isOutputYoutubeCompleteWrite ||
         isOutputCreativeContinueWrite ||
         (isAdminMakeDeployRoute && request.method === "GET") ||
         (isAdminRepairControlRoute && request.method === "GET") ||
@@ -354,10 +360,11 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.307-autonomous-reel-pack",
+          version: "0.10.308-youtube-manual-close",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
+          studio_youtube_complete_v1: true,
           studio_auto_compress_v1: true,
           studio_autonomous_produce_v1: true,
           studio_az_finished_video_v1: true,
@@ -1094,6 +1101,12 @@ export default {
         assertWriteRequest(request, env);
         requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
         return markStudioTiktokComplete(request, env, url);
+      }
+
+      if (isOutputYoutubeCompleteWrite) {
+        assertWriteRequest(request, env);
+        requireAnyPermission(authorization, ["outputs_review", "publishing_control"]);
+        return markStudioYoutubeComplete(request, env, url);
       }
 
       if (isOutputCreativeReviewRoute) {
@@ -2882,6 +2895,12 @@ function mapOutput(record, job = null) {
     output_url: f(record, "Output_URL"),
     platform_post_url: f(record, "Platform_Post_URL"),
     published_at: f(record, "Published_At"),
+    youtube_video_id: f(record, "YouTube_Video_ID"),
+    youtube_privacy_status: f(record, "YouTube_Privacy_Status"),
+    youtube_error_message: f(record, "YouTube_Error_Message"),
+    publish_error_stage: f(record, "Publish_Error_Stage"),
+    publish_error_message: f(record, "Publish_Error_Message"),
+    manual_fallback_required: Boolean(f(record, "Manual_Fallback_Required")),
     tiktok_draft_status: f(record, "TikTok_Draft_Status"),
     manual_completion_status: f(record, "Manual_Completion_Status"),
     manual_published_url: f(record, "Manual_Published_URL"),
@@ -31611,6 +31630,62 @@ async function patchTiktokManualPublish(env, record, { url, musicCompleted } = {
   });
 }
 
+function youtubeCompleteViewFromRecord(record) {
+  return {
+    platform: f(record, "Platform"),
+    do_not_publish: Boolean(f(record, "Do_Not_Publish")),
+    publish_status: f(record, "Publish_Status"),
+    output_status: f(record, "Output_Status"),
+    youtube_stage: f(record, "YouTube_Stage"),
+    youtube_video_id: f(record, "YouTube_Video_ID"),
+    youtube_privacy_status: f(record, "YouTube_Privacy_Status"),
+    youtube_error_message: f(record, "YouTube_Error_Message"),
+    publish_error_stage: f(record, "Publish_Error_Stage"),
+    publish_error_message: f(record, "Publish_Error_Message"),
+    manual_completion_status: f(record, "Manual_Completion_Status"),
+    manual_fallback_required: Boolean(f(record, "Manual_Fallback_Required")),
+    studio_state: normalizedOutputState(record),
+  };
+}
+
+const YOUTUBE_COMPLETE_ERRORS = {
+  not_youtube: "This output is not a YouTube row.",
+  do_not_publish: "Publishing is blocked on this output.",
+  already_published: "This YouTube output is already marked Published.",
+};
+
+async function patchYoutubeManualClose(env, record, { url } = {}) {
+  const fields = youtubeManualCloseFields({
+    url,
+    videoId: f(record, "YouTube_Video_ID"),
+    now: new Date().toISOString(),
+    existingNotes: f(record, "Output_Notes"),
+    privacy: f(record, "YouTube_Privacy_Status"),
+  });
+  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+    method: "PATCH",
+    body: JSON.stringify({ fields, typecast: true }),
+  });
+}
+
+async function markStudioYoutubeComplete(request, env, url) {
+  const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/youtube-complete$/.exec(url.pathname);
+  if (!match) throw new HttpError(400, "Invalid output path");
+  let payload;
+  try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
+  const postUrl = String(payload?.platform_post_url || payload?.youtube_url || "").trim();
+  if (!isYouTubePostUrl(postUrl)) throw new HttpError(400, "Paste a YouTube watch, Shorts, or youtu.be URL.");
+  const current = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  if (!current?.id) throw new HttpError(404, "Platform Output was not found");
+  const reason = youtubeCompleteEligibility(youtubeCompleteViewFromRecord(current));
+  if (reason === "already_published") {
+    return respond(request, env, { ok: true, already_published: true, record: mapOutput(current) });
+  }
+  if (reason) throw new HttpError(reason === "do_not_publish" ? 409 : 400, YOUTUBE_COMPLETE_ERRORS[reason] || reason);
+  const updated = await patchYoutubeManualClose(env, current, { url: postUrl });
+  return respond(request, env, { ok: true, published: true, record: mapOutput(updated) });
+}
+
 async function markStudioTiktokComplete(request, env, url) {
   const match = /^\/api\/outputs\/(rec[A-Za-z0-9]+)\/tiktok-complete$/.exec(url.pathname);
   if (!match) throw new HttpError(400, "Invalid output path");
@@ -31648,6 +31723,16 @@ async function markStudioOutputPublished(request, env, url, authorization) {
       musicCompleted: payload?.music_completed,
     });
     return respond(request, env, { ok: true, record: mapOperationsOutput(updatedTikTok) });
+  }
+  if (String(f(current, "Platform") || "").trim().toLowerCase() === "youtube") {
+    if (!isYouTubePostUrl(postUrl)) throw new HttpError(400, "Paste a YouTube watch, Shorts, or youtu.be URL.");
+    const reason = youtubeCompleteEligibility(youtubeCompleteViewFromRecord(current));
+    if (reason === "already_published") {
+      return respond(request, env, { ok: true, already_published: true, record: mapOperationsOutput(current) });
+    }
+    if (reason) throw new HttpError(reason === "do_not_publish" ? 409 : 400, YOUTUBE_COMPLETE_ERRORS[reason] || reason);
+    const updatedYouTube = await patchYoutubeManualClose(env, current, { url: postUrl });
+    return respond(request, env, { ok: true, record: mapOperationsOutput(updatedYouTube) });
   }
   const existingNotes = String(f(current, "Output_Notes") || "").trim();
   const stamp = new Date().toISOString();
