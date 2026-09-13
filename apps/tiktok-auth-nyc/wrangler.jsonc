@@ -1,0 +1,23 @@
+{
+  "name": "chicagoshining-tiktok-auth-nyc",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-25",
+  "account_id": "cbb5651c94e9bd2efc4594dc87229acb",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "auth-nyc.chicagoshining.com",
+      "custom_domain": true
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "TIKTOK_AUTH",
+      "id": "5dfd7b41bf7f43c1845d0ce1c93d99d5"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
