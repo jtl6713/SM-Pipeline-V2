@@ -447,3 +447,5 @@ Asset Manager classify-all Worker deploy: 2026-09-12 — profile dropdown saves 
 Unused-photo harvest Worker deploy: 2026-09-13 — Cluster 5-10 unused related stills, write caption, run autonomous produce on demand. Worker 0.10.303-library-a3-on-upload.
 
 Unused-photo profile scope Worker deploy: 2026-09-13 — On-demand harvest uses the working Content Profile so NYC unused stills are visible. Worker 0.10.304-unused-profile-scope.
+
+Unused-photo all-cities Worker deploy: 2026-09-13 — If the first city has no unused 5-10 set, keep scanning other enabled profiles (NYC Central Park). Worker 0.10.305-unused-all-cities.

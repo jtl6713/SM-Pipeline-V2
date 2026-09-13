@@ -37,6 +37,7 @@ import {
   buildAutonomousPickerPrompt,
   completeRelatedStillPick,
   parseAutonomousLinkedMediaIds,
+  autonomousProfileHarvestOrder,
   pickAutonomousEnabledProfile,
   pickRelatedUnusedStillCluster,
   summarizeUnusedLibraryOverview,
@@ -374,6 +375,10 @@ test("on-demand harvest uses the working profile, not the first enabled city", (
   const chicago = { id: "recT2rbKX3MF7cVFU", name: "ChicagoShining - Chicago" };
   assert.equal(pickAutonomousEnabledProfile([chicago, nyc], "recgtK8Z7eNADNtVy").name, "NYC - New York City");
   assert.equal(pickAutonomousEnabledProfile([chicago, nyc], "").name, "ChicagoShining - Chicago");
+  assert.deepEqual(
+    autonomousProfileHarvestOrder([chicago, nyc], "recgtK8Z7eNADNtVy").map((row) => row.name),
+    ["NYC - New York City", "ChicagoShining - Chicago"],
+  );
   const parkStills = [
     { id: "recPark00000000001", location: "Central Park, Manhattan, New York City" },
     { id: "recPark00000000002", location: "Central Park, Columbus Circle, Manhattan, New York City" },
