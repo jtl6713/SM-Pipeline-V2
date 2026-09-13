@@ -41,6 +41,7 @@ import {
   pickAutonomousEnabledProfile,
   pickRelatedUnusedStillCluster,
   summarizeUnusedLibraryOverview,
+  autonomousClusterConflictsOccupied,
   autonomousPreferredSubject,
   collectAutonomousOccupiedFromIdeas,
   collectAutonomousTopicCollisions,
@@ -286,7 +287,23 @@ test("occupied ideas block the same stills or the same place and subject", () =>
   assert.deepEqual(autonomousUnusedLibraryAssets([
     { id: "recZooStill0000002", name: "Zoo rhino.jpeg", location: "Lincoln Park Zoo" },
     { id: "recPierAsset000001", name: "Navy Pier.jpeg", location: "Navy Pier" },
-  ], zooOccupied).map((row) => row.id), ["recPierAsset000001"]);
+  ], zooOccupied).map((row) => row.id), ["recZooStill0000002", "recPierAsset000001"]);
+  assert.equal(autonomousClusterConflictsOccupied({
+    label: "Lincoln Park Zoo",
+    assets: [{ id: "recZooStill0000002", location: "Lincoln Park Zoo" }],
+  }, zooOccupied), true);
+  assert.deepEqual(pickRelatedUnusedStillCluster([
+    { id: "recZooStill0000002", location: "Lincoln Park Zoo" },
+    { id: "recZooStill0000003", location: "Lincoln Park Zoo" },
+    { id: "recZooStill0000004", location: "Lincoln Park Zoo" },
+    { id: "recZooStill0000005", location: "Lincoln Park Zoo" },
+    { id: "recZooStill0000006", location: "Lincoln Park Zoo" },
+    { id: "recPierAsset000001", location: "Navy Pier" },
+    { id: "recPierAsset000002", location: "Navy Pier" },
+    { id: "recPierAsset000003", location: "Navy Pier" },
+    { id: "recPierAsset000004", location: "Navy Pier" },
+    { id: "recPierAsset000005", location: "Navy Pier" },
+  ], { occupied: zooOccupied })?.key, "place:navy pier");
   assert.equal(AUTONOMOUS_IDEA_CREATED_FIELD, "Create_Date");
   const occupiedFromAirtable = collectAutonomousOccupiedFromIdeas([
     {
@@ -387,7 +404,17 @@ test("on-demand harvest uses the working profile, not the first enabled city", (
     { id: "recPark00000000005", location: "Central Park, Manhattan, New York City" },
   ];
   assert.equal(autonomousPlaceSubjects("Central Park, Manhattan, New York City")[0], "central park");
-  const cluster = pickRelatedUnusedStillCluster(parkStills);
+  const occupiedManhattan = [{
+    source: "in_flight",
+    title: "Lower Manhattan: Where New York Hits Different",
+    location: "Lower Manhattan",
+    media_asset_ids: ["recLowerManhattan01"],
+  }];
+  assert.deepEqual(
+    autonomousUnusedLibraryAssets(parkStills, occupiedManhattan).map((row) => row.id),
+    parkStills.map((row) => row.id),
+  );
+  const cluster = pickRelatedUnusedStillCluster(parkStills, { occupied: occupiedManhattan });
   assert.equal(cluster?.key, "place:central park");
   assert.equal(cluster?.assets.length, 5);
 });
