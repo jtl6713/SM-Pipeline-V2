@@ -126,7 +126,7 @@ test("manual close fields mark the output fully published and stop retries", () 
   assert.equal(fields.Publish_Status, "Published Privately");
   assert.equal(fields.Output_Status, "Published");
   assert.equal(fields.YouTube_Stage, "Complete");
-  assert.equal(fields.YouTube_Thumbnail_Status, "Uploaded");
+  assert.equal(fields.YouTube_Thumbnail_Status, "Pending");
   assert.equal(fields.Manual_Completion_Status, "Completed");
   assert.equal(fields.Publish_Retry_Eligible, false);
   assert.match(fields.Output_Notes, /Studio YouTube publication confirmed/);

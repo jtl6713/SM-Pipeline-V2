@@ -9,7 +9,7 @@ from yt.eligibility import (
     yts3_eligibility_reason,
 )
 from yt.constants import THUMB_NOT_NEEDED, THUMB_PENDING
-from yt.package import description_final, idempotency_key, thumbnail_status
+from yt.package import description_final, idempotency_key, thumbnail_status, youtube_thumbnail_publish_enabled
 from yt.yts2 import thumbnail_fallback_source, vertical_still_attached
 
 
@@ -80,8 +80,15 @@ def test_ytp1_and_poll_gates():
         Platform_Output_Type="YouTube Short",
     )
     assert yts3_eligibility_reason(short) == "native_cover_not_uploaded"
+    assert yts3_eligibility_reason(short, require_native_cover=False) is None
     short["fields"]["YouTube_Thumbnail_Status"] = "Uploaded"
     assert yts3_eligibility_reason(short) is None
+
+
+def test_youtube_thumbnail_publish_defaults_off():
+    assert youtube_thumbnail_publish_enabled() is False
+    assert youtube_thumbnail_publish_enabled({"YOUTUBE_AUTO_UPLOAD_THUMBNAIL": "true"}) is True
+    assert youtube_thumbnail_publish_enabled({"YOUTUBE_AUTO_UPLOAD_THUMBNAIL": "0"}) is False
 
 
 def test_vertical_still_is_required_for_shorts():

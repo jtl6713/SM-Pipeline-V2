@@ -41,6 +41,7 @@ from yt.constants import (
     UPLOAD_UPLOADED,
 )
 from yt.eligibility import yts2_eligibility_reason
+from yt.package import youtube_thumbnail_publish_enabled
 
 
 def thumbnail_fallback_source(output: dict[str, Any], *, cover_required: bool) -> str | None:
@@ -94,7 +95,10 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
-    settings = load_uploader_settings(PipelineSettings(client), output, client=client)
+    pipeline_settings = PipelineSettings(client)
+    thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings)
+    result["thumbnail_publish"] = thumb_publish
+    settings = load_uploader_settings(pipeline_settings, output, client=client)
     uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
     status_code, body = uploader.video_status(video_id)
     status = processing_status(body).casefold()
@@ -111,8 +115,12 @@ def process_request(
     )
 
     cover_required = native_grid_cover_required(output)
-    if 200 <= status_code <= 299 and status == "succeeded" and thumb_status.casefold() != "uploaded" and (
-        cover_required or thumb_url
+    if (
+        thumb_publish
+        and 200 <= status_code <= 299
+        and status == "succeeded"
+        and thumb_status.casefold() != "uploaded"
+        and (cover_required or thumb_url)
     ):
         try:
             staged = ensure_youtube_short_cover_url(client, output) if cover_required else ensure_public_cover_url(client, output)
@@ -228,7 +236,9 @@ def process_request(
         return {"processed": True, "retry": True, **result}
 
     if 200 <= status_code <= 299 and status == "succeeded" and (
-        thumb_status.casefold() == "uploaded" or (not cover_required and not thumb_url)
+        (not thumb_publish)
+        or thumb_status.casefold() == "uploaded"
+        or (not cover_required and not thumb_url)
     ):
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,

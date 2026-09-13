@@ -203,7 +203,7 @@ export function youtubeManualCloseFields({
     YouTube_Package_Status: "Complete",
     YouTube_Upload_Status: "Uploaded",
     YouTube_Processing_Status: "Succeeded",
-    YouTube_Thumbnail_Status: "Uploaded",
+    YouTube_Thumbnail_Status: "Pending",
     YouTube_Privacy_Status: privatePublish ? "private" : (String(privacy || "").trim() || "public"),
     Manual_Completion_At: stamp,
     Manual_Published_URL: liveUrl,

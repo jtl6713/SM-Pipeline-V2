@@ -25,6 +25,7 @@ from yt.constants import (
     THUMB_UPLOADED,
 )
 from yt.eligibility import yts3_eligibility_reason
+from yt.package import youtube_thumbnail_publish_enabled
 from yt.yts2 import thumbnail_fallback_source, vertical_still_attached
 
 
@@ -52,10 +53,14 @@ def process_request(
     if test_run_id and field_str(output, "Test_Run_ID") != test_run_id:
         return {"processed": False, "reason": "test_run_mismatch", **result}
 
+    pipeline_settings = PipelineSettings(client)
+    thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings)
+    result["thumbnail_publish"] = thumb_publish
     reason = yts3_eligibility_reason(
         output,
         replace_transaction_id=replace_transaction_id,
         replace_fingerprint=replace_fingerprint,
+        require_native_cover=thumb_publish,
     )
     video_id = field_str(output, "YouTube_Video_ID")
     privacy = field_str(output, "YouTube_Privacy_Status")
@@ -69,7 +74,7 @@ def process_request(
 
     now = iso_utc()
     cover_required = native_grid_cover_required(output)
-    if cover_required:
+    if thumb_publish and cover_required:
         settings = load_uploader_settings(PipelineSettings(client), output, client=client)
         uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
         try:

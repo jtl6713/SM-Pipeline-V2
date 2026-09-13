@@ -140,6 +140,7 @@ def yts3_eligibility_reason(
     *,
     replace_transaction_id: str | None = None,
     replace_fingerprint: str | None = None,
+    require_native_cover: bool = True,
 ) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
@@ -149,7 +150,11 @@ def yts3_eligibility_reason(
         return "missing_youtube_video_id"
     if _ci(field_str(record, "YouTube_Processing_Status")) != "succeeded":
         return "processing_not_succeeded"
-    if native_grid_cover_required(record) and _ci(field_str(record, "YouTube_Thumbnail_Status")) != "uploaded":
+    if (
+        require_native_cover
+        and native_grid_cover_required(record)
+        and _ci(field_str(record, "YouTube_Thumbnail_Status")) != "uploaded"
+    ):
         return "native_cover_not_uploaded"
     if replace_mismatch(
         record,
