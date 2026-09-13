@@ -118,6 +118,7 @@
   // Do not seed Kate here — a hard default made catalog reloads / Continue-from-list
   // quiet-save overwrite Admin profile voices (e.g. LA Hank) stored on the Production Request.
   let ezSelectedVoiceId = "";
+  let voiceUserPicked = false;
   const DEFAULT_VOICE_ID = "xVQH621DS3eyBYrseRt5";
   const DEFAULT_VOICE_NAME = "Kate";
   let ezStarting = false;
@@ -246,6 +247,8 @@
   const PROFILE_STORAGE_KEY = "studio.content_profile_id";
   let selectedProfileId = "";
   let studioProfiles = [];
+  let profileVoicesLoaded = false;
+  let profileVoicesPromise = null;
   const uiBuildMatch = /item4-(\d+\.\d+\.\d+)/.exec(BUILD_ID);
   const uiBuildLabel = $("uiBuildLabel");
   if (uiBuildLabel) uiBuildLabel.textContent = `UI build ${uiBuildMatch ? uiBuildMatch[1] : BUILD_ID}`;
@@ -278,19 +281,18 @@
     if (!selectedProfileId) return path;
     const qIndex = String(path || "").indexOf("?");
     const pathname = qIndex === -1 ? path : path.slice(0, qIndex);
-    if (![
-      "/api/ideas",
-      "/api/content",
-      "/api/outputs",
-      "/api/dashboard",
-      "/api/production-requests",
-      "/api/insights/best-times",
-      "/api/insights/similar-times",
-      "/api/insights/captions",
-      "/api/insights/discover",
-      "/api/library",
-      "/api/media-assets/library-stills",
-    ].includes(pathname)) return path;
+    const scoped = pathname === "/api/ideas" || pathname.startsWith("/api/ideas/")
+      || pathname === "/api/production-requests" || pathname.startsWith("/api/production-requests/")
+      || pathname === "/api/content"
+      || pathname === "/api/outputs"
+      || pathname === "/api/dashboard"
+      || pathname === "/api/insights/best-times"
+      || pathname === "/api/insights/similar-times"
+      || pathname === "/api/insights/captions"
+      || pathname === "/api/insights/discover"
+      || pathname === "/api/library"
+      || pathname === "/api/media-assets/library-stills";
+    if (!scoped) return path;
     const params = new URLSearchParams(qIndex === -1 ? "" : path.slice(qIndex + 1));
     params.set("profile", selectedProfileId);
     return `${pathname}?${params.toString()}`;
@@ -430,6 +432,7 @@
       || null;
     renderStudioProfileSelects();
     if (next) applyStudioProfile(next);
+    ensureProfileNarrationDefaults().catch(() => {});
   }
 
   function pipelineDisplayPercent(record) {
@@ -3174,9 +3177,86 @@
     select.value = id;
   }
 
+  function ideaContentProfileId() {
+    const links = activeIdea?.content_profile_links;
+    const first = Array.isArray(links) ? links[0] : null;
+    if (!first) return "";
+    if (typeof first === "string") return first.trim();
+    return String(first.id || "").trim();
+  }
+
+  function profileRecordVoice(profile) {
+    const id = String(profile?.default_narration_voice_id || "").trim();
+    if (!id) return { voice_id: "", voice_name: "" };
+    return {
+      voice_id: id,
+      voice_name: String(profile?.default_narration_voice_name || id).trim() || id,
+    };
+  }
+
+  function mergeProfileNarrationVoices(profiles) {
+    (Array.isArray(profiles) ? profiles : []).forEach((opsProfile) => {
+      const idx = studioProfiles.findIndex((item) => item.id === opsProfile.id);
+      if (idx < 0) return;
+      studioProfiles[idx] = {
+        ...studioProfiles[idx],
+        default_narration_voice_id: String(opsProfile.default_narration_voice_id || "").trim(),
+        default_narration_voice_name: String(opsProfile.default_narration_voice_name || "").trim(),
+      };
+    });
+  }
+
+  function profileDefaultVoice() {
+    const ideaVoice = profileRecordVoice(studioProfiles.find((item) => item.id === ideaContentProfileId()));
+    if (ideaVoice.voice_id) return ideaVoice;
+    return profileRecordVoice(studioProfiles.find((item) => item.id === selectedProfileId));
+  }
+
+  async function ensureProfileNarrationDefaults() {
+    if (profileVoicesLoaded) return profileDefaultVoice();
+    if (studioProfiles.some((row) => String(row?.default_narration_voice_id || "").trim())) {
+      profileVoicesLoaded = true;
+      return profileDefaultVoice();
+    }
+    if (!profileVoicesPromise) {
+      profileVoicesPromise = api("/api/operations")
+        .then((data) => {
+          mergeProfileNarrationVoices(data?.profiles || []);
+          return profileDefaultVoice();
+        })
+        .catch(() => profileDefaultVoice())
+        .finally(() => { profileVoicesLoaded = true; });
+    }
+    return profileVoicesPromise;
+  }
+
+  function applyResolvedDefaultVoice() {
+    if (voiceUserPicked) return resolvedDefaultVoice();
+    const next = resolvedDefaultVoice();
+    applyVoiceToSelects(next.voice_id, next.voice_name);
+    return next;
+  }
+
+  function resolvedDefaultVoice() {
+    const savedId = String(activeProductionRequest?.voice_id || "").trim();
+    const savedName = String(activeProductionRequest?.voice_name || "").trim();
+    if (savedId && savedId !== DEFAULT_VOICE_ID) {
+      return { voice_id: savedId, voice_name: savedName || savedId };
+    }
+    const profile = profileDefaultVoice();
+    if (profile.voice_id) return profile;
+    if (savedId) return { voice_id: savedId, voice_name: savedName || DEFAULT_VOICE_NAME };
+    return { voice_id: DEFAULT_VOICE_ID, voice_name: DEFAULT_VOICE_NAME };
+  }
+
   function applyVoiceToSelects(voiceId, voiceName) {
-    const id = String(voiceId || DEFAULT_VOICE_ID).trim() || DEFAULT_VOICE_ID;
-    const name = String(voiceName || DEFAULT_VOICE_NAME).trim() || DEFAULT_VOICE_NAME;
+    const fallback = resolvedDefaultVoice();
+    const incoming = String(voiceId || "").trim();
+    const useIncoming = incoming && (voiceUserPicked || incoming !== DEFAULT_VOICE_ID);
+    const id = (useIncoming ? incoming : fallback.voice_id) || DEFAULT_VOICE_ID;
+    const name = String(
+      useIncoming ? (voiceName || fallback.voice_name) : (fallback.voice_name || voiceName || DEFAULT_VOICE_NAME)
+    ).trim() || DEFAULT_VOICE_NAME;
     ensureVoiceOption($("ezAudioVoice"), id, name);
     ensureVoiceOption($("prVoice"), id, name);
     ezSelectedVoiceId = id;
@@ -3189,21 +3269,20 @@
     const picked = phase6SelectedVoice(select);
     const savedId = String(activeProductionRequest?.voice_id || "").trim();
     const savedName = String(activeProductionRequest?.voice_name || "").trim();
-    // Quiet-save guard: if the DOM fell back to Kate while the open request still has a
-    // non-Kate Admin voice (Hank), keep the saved voice unless the operator picked Kate
-    // (ezSelectedVoiceId tracks deliberate selection).
-    if (
-      savedId
-      && savedId !== DEFAULT_VOICE_ID
-      && (!picked.id || picked.id === DEFAULT_VOICE_ID)
-      && ezSelectedVoiceId !== DEFAULT_VOICE_ID
-    ) {
+    if (voiceUserPicked) {
+      return {
+        voice_id: picked.id || savedId || DEFAULT_VOICE_ID,
+        voice_name: picked.name || savedName || DEFAULT_VOICE_NAME,
+        voice_explicit: true,
+      };
+    }
+    if (savedId && savedId !== DEFAULT_VOICE_ID) {
       return { voice_id: savedId, voice_name: savedName || savedId };
     }
-    return {
-      voice_id: picked.id || savedId || DEFAULT_VOICE_ID,
-      voice_name: picked.name || savedName || DEFAULT_VOICE_NAME,
-    };
+    const profile = profileDefaultVoice();
+    if (profile.voice_id) return profile;
+    if (savedId) return { voice_id: savedId, voice_name: savedName || savedId };
+    return { voice_id: "", voice_name: "" };
   }
 
   function resolvedAudioMode(kind) {
@@ -3263,7 +3342,8 @@
         ? $("ezAudioVoice")
         : (($("prVoice")?.value && $("prVoice")) || $("ezAudioVoice") || $("prVoice"));
       const picked = phase6SelectedVoice(source);
-      applyVoiceToSelects(picked.id || DEFAULT_VOICE_ID, picked.name || DEFAULT_VOICE_NAME);
+      const fallback = resolvedDefaultVoice();
+      applyVoiceToSelects(picked.id || fallback.voice_id, picked.name || fallback.voice_name);
     } else {
       ezSelectedVoiceId = "";
     }
@@ -3480,6 +3560,7 @@
   function hydrateEzConfigFromRequest(record = activeProductionRequest) {
     ezDirty.clear();
     audioUserTouched.clear();
+    voiceUserPicked = false;
     if (!record) {
       syncEzStructureCounts();
       return;
@@ -3488,7 +3569,7 @@
       $("ezAudioVoiceover").value = record.voiceover_mode === "No" ? "No" : "Yes";
     }
     if (record.voiceover_mode === "Yes") {
-      applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
+      applyVoiceToSelects(record.voice_id || resolvedDefaultVoice().voice_id, record.voice_name || resolvedDefaultVoice().voice_name);
     }
     if ($("ezAudioMusic")) {
       $("ezAudioMusic").value = record.background_music_mode === "No" ? "No" : "Yes";
@@ -3546,24 +3627,22 @@
       const prHint = $("prVoiceHint");
       if (hint) hint.textContent = "Loading ElevenLabs voices…";
       if (prHint) prHint.textContent = "Loading ElevenLabs voices…";
-      const result = await api("/api/voices", { timeoutMs: 45000 });
+      const [, result] = await Promise.all([
+        ensureProfileNarrationDefaults(),
+        api("/api/voices", { timeoutMs: 45000 }),
+      ]);
       const voices = phase6NormalizeVoices(result.voices || result.records || result.items || []);
-      // Authority order: in-memory selection, then saved Production Request voice, then DOM, then Kate.
-      // Never let a late catalog response re-select Kate over Hank after populateProductionRequestForm.
-      const savedId = String(activeProductionRequest?.voice_id || "").trim();
-      const savedName = String(activeProductionRequest?.voice_name || "").trim();
-      const current = ezSelectedVoiceId || savedId || voiceSelect?.value || prVoice?.value || DEFAULT_VOICE_ID;
-      const currentName = (ezSelectedVoiceId && ezSelectedVoiceId === current
-        ? (phase6SelectedVoice(voiceSelect || prVoice).name || savedName)
-        : savedName) || DEFAULT_VOICE_NAME;
-      const options = phase6VoiceOptionList(voices, current || DEFAULT_VOICE_ID, currentName || DEFAULT_VOICE_NAME);
+      const next = resolvedDefaultVoice();
+      const current = voiceUserPicked
+        ? (ezSelectedVoiceId || next.voice_id || DEFAULT_VOICE_ID)
+        : (next.voice_id || DEFAULT_VOICE_ID);
+      const currentName = voiceUserPicked
+        ? (phase6SelectedVoice(voiceSelect || prVoice).name || next.voice_name || DEFAULT_VOICE_NAME)
+        : (next.voice_name || DEFAULT_VOICE_NAME);
+      const options = phase6VoiceOptionList(voices, current, currentName);
       if (voiceSelect) voiceSelect.innerHTML = options;
       if (prVoice) prVoice.innerHTML = options;
-      const selected = phase6SelectedVoice(voiceSelect || prVoice);
-      applyVoiceToSelects(
-        selected.id || current || DEFAULT_VOICE_ID,
-        selected.name || currentName || DEFAULT_VOICE_NAME
-      );
+      applyVoiceToSelects(current, currentName);
       const hintText = voices.length && result.live_connected
         ? `${voices.length} ElevenLabs voices`
         : voices.length
@@ -4201,6 +4280,7 @@
       if ($("prVoiceover")) $("prVoiceover").value = "Yes";
       if ($("prMusicMode")) $("prMusicMode").value = "Yes";
       audioUserTouched.clear();
+      voiceUserPicked = false;
     }
     if ($("ezThumbnail")) $("ezThumbnail").value = "Yes";
     if ($("prThumbnail")) $("prThumbnail").value = "Yes";
@@ -4600,12 +4680,12 @@
         onClick: () => ezWizardPick(`${n} clip${n === 1 ? "" : "s"}`, { clipCount: n }, "package"),
       })));
       ezWizardShowForm(
-        `<label>Other count<input name="count" type="number" min="1" max="12" step="1" required></label>
+        `<label>Other count<input name="count" type="number" min="1" max="60" step="1" required></label>
          <div class="ez-wizard-form-actions"><button type="submit">Use this count</button></div>`,
         (data) => {
           const n = Number(data.get("count"));
-          if (!Number.isFinite(n) || n < 1 || n > 12) {
-            ezWizardSetMessage("Enter a clip count between 1 and 12.", "error-text");
+          if (!Number.isFinite(n) || n < 1 || n > 60) {
+            ezWizardSetMessage("Enter a clip count between 1 and 60.", "error-text");
             return;
           }
           ezWizardPick(`${Math.round(n)} clips`, { clipCount: Math.round(n) }, "package");
@@ -5287,6 +5367,7 @@
         if (event.isTrusted !== false && (id === "ezAudioVoiceover" || id === "ezAudioMusic")) {
           audioUserTouched.add(id);
         }
+        if (event.isTrusted !== false && id === "ezAudioVoice") voiceUserPicked = true;
         stopStudioAudioPreview();
         syncRequestAudioUi({ fromEz: true, userChanged: true });
         if (activeProductionRequest?.id) saveActiveProductionRequest({ quiet: true }).catch(() => {});
@@ -8845,6 +8926,7 @@
   }
 
   function populateProductionRequestForm(record, { reveal = true } = {}) {
+    voiceUserPicked = false;
     activeProductionRequest = record;
     productionOutputMatrixLoaded = false;
     if (reveal && ezEntryPath !== "content") {
@@ -8872,7 +8954,7 @@
     setSelectValue("prMusicMode", record.background_music_mode, "Yes");
     setSelectValue("prThumbnail", record.thumbnail_mode, "Yes");
     if (record.voiceover_mode === "Yes") {
-      applyVoiceToSelects(record.voice_id || DEFAULT_VOICE_ID, record.voice_name || DEFAULT_VOICE_NAME);
+      applyVoiceToSelects(record.voice_id || resolvedDefaultVoice().voice_id, record.voice_name || resolvedDefaultVoice().voice_name);
     }
     syncRequestVoiceUi();
     $("prVideoDuration").value = record.video_duration_seconds ?? 30;
@@ -8925,6 +9007,7 @@
     hydrateEzConfigFromRequest(record);
     // Always start collapsed; operators can expand when they need the matrix.
     setEzAdvancedOpen(false);
+    ensureProfileNarrationDefaults().then(() => applyResolvedDefaultVoice()).catch(() => {});
     loadEzAudioOptions().catch(() => {});
     syncFinishedMediaHeadings();
   }
@@ -9793,6 +9876,7 @@
       if (event.isTrusted !== false && (id === "prVoiceover" || id === "prMusicMode")) {
         audioUserTouched.add(id);
       }
+      if (event.isTrusted !== false && id === "prVoice") voiceUserPicked = true;
       stopStudioAudioPreview();
       if ((id === "prMusicAsset" && $("prMusicAsset")?.value) || (id === "prVoice" && $("prVoice")?.value)) {
         clearPreviewPickMessage();
@@ -10029,7 +10113,7 @@
               : "";
             if ($("prMusicAsset")) $("prMusicAsset").value = musicId || "";
             if (fullRecord.voiceover_mode === "Yes") {
-              applyVoiceToSelects(fullRecord.voice_id || DEFAULT_VOICE_ID, fullRecord.voice_name || DEFAULT_VOICE_NAME);
+              applyVoiceToSelects(fullRecord.voice_id || resolvedDefaultVoice().voice_id, fullRecord.voice_name || resolvedDefaultVoice().voice_name);
             }
             syncRequestVoiceUi();
           } catch (e) {
@@ -15440,14 +15524,20 @@
     if (opsIdx >= 0) profiles[opsIdx] = { ...profiles[opsIdx], ...updated };
     const idx = studioProfiles.findIndex((item) => item.id === profileId);
     if (idx >= 0) {
-      studioProfiles[idx] = {
-        ...studioProfiles[idx],
-        background_color: updated.background_color !== undefined
-          ? (updated.background_color || "")
-          : studioProfiles[idx].background_color,
-        theme: updated.theme || studioProfiles[idx].theme,
-        city_label: updated.city_label || studioProfiles[idx].city_label,
-      };
+          studioProfiles[idx] = {
+            ...studioProfiles[idx],
+            background_color: updated.background_color !== undefined
+              ? (updated.background_color || "")
+              : studioProfiles[idx].background_color,
+            theme: updated.theme || studioProfiles[idx].theme,
+            city_label: updated.city_label || studioProfiles[idx].city_label,
+            default_narration_voice_id: updated.default_narration_voice_id !== undefined
+              ? updated.default_narration_voice_id
+              : studioProfiles[idx].default_narration_voice_id,
+            default_narration_voice_name: updated.default_narration_voice_name !== undefined
+              ? updated.default_narration_voice_name
+              : studioProfiles[idx].default_narration_voice_name,
+          };
     }
   }
 
@@ -15801,9 +15891,13 @@
             background_color: opsProfile.background_color || studioProfiles[idx].background_color || "",
             theme: opsProfile.theme || studioProfiles[idx].theme,
             city_label: opsProfile.city_label || studioProfiles[idx].city_label,
+            default_narration_voice_id: opsProfile.default_narration_voice_id || studioProfiles[idx].default_narration_voice_id || "",
+            default_narration_voice_name: opsProfile.default_narration_voice_name || studioProfiles[idx].default_narration_voice_name || "",
           };
         }
       });
+      profileVoicesLoaded = true;
+      if (!$("productionRequestWorkspace")?.hidden) applyResolvedDefaultVoice();
       const working = studioProfiles.find((item) => item.id === selectedProfileId);
       if (working) applyStudioBackgroundColor(working);
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));

@@ -63,6 +63,17 @@ export function resolveAutonomousNarrationVoice(profile, defaults = {}) {
   return { voice_id: fallbackId, voice_name: fallbackName };
 }
 
+/** First profile that actually set a narration default wins; empty defaults are skipped. */
+export function pickNarrationVoiceFromProfiles(profiles, fallback = {}) {
+  const fallbackId = String(fallback.voice_id || "").trim();
+  const fallbackName = String(fallback.voice_name || "").trim() || "Kate";
+  for (const profile of Array.isArray(profiles) ? profiles : []) {
+    const resolved = resolveAutonomousNarrationVoice(profile, { voice_id: "", voice_name: "" });
+    if (resolved.voice_id) return resolved;
+  }
+  return { voice_id: fallbackId, voice_name: fallbackName };
+}
+
 export function autonomousSlot(chicago) {
   const date = String(chicago?.date || "").trim();
   const hour = Number(chicago?.hour);

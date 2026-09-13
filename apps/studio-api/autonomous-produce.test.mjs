@@ -14,6 +14,7 @@ import {
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
   AUTONOMOUS_IDEA_CREATED_FIELD,
   pickAutonomousMusicAssetId,
+  pickNarrationVoiceFromProfiles,
   resolveAutonomousNarrationVoice,
   autonomousRunIsBusy,
   autonomousSlot,
@@ -82,6 +83,25 @@ test("narration voice uses profile default then Kate fallback", () => {
   assert.deepEqual(
     resolveAutonomousNarrationVoice({}, { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" }),
     { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" },
+  );
+});
+
+test("idea profile without a voice yields to the working profile default", () => {
+  assert.deepEqual(
+    pickNarrationVoiceFromProfiles(
+      [
+        { default_narration_voice_id: "", default_narration_voice_name: "" },
+        {
+          default_narration_voice_id: "6F5Zhi321D3Oq7v1oNT4",
+          default_narration_voice_name: "Hank - Deep and Engaging Narrator",
+        },
+      ],
+      { voice_id: "xVQH621DS3eyBYrseRt5", voice_name: "Kate" },
+    ),
+    {
+      voice_id: "6F5Zhi321D3Oq7v1oNT4",
+      voice_name: "Hank - Deep and Engaging Narrator",
+    },
   );
 });
 
