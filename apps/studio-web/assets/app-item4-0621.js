@@ -204,7 +204,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.308-profile-idea-placeholders";
+  const BUILD_ID = "item4-0.6.309-library-picker-no-ten";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9221,10 +9221,7 @@
   }
 
   function libraryPickerMaxCount() {
-    const ideaMax = Number(activeIdea?.carousel_slide_count_max || 0);
-    const requestMax = Number(activeProductionRequest?.carousel_slide_count_max || 0);
-    const cap = ideaMax || requestMax || 10;
-    return Math.min(20, Math.max(1, cap));
+    return 60;
   }
 
   async function fetchLibraryBrowse(query = "", ideaId = null) {
@@ -9330,10 +9327,9 @@
     if (hint) {
       const checked = ideaLibrarySelected.size;
       const suggested = ideaLibrarySuggestedIds.size;
-      const max = libraryPickerMaxCount();
       hint.textContent = suggested
-        ? `${suggested} suggested. ${checked} checked (max ${max}). Uncheck to drop, search to add.`
-        : `No place match yet. ${checked} checked (max ${max}). Search the Drive library and check stills to add.`;
+        ? `${suggested} suggested. ${checked} checked. Uncheck to drop, search to add.`
+        : `No place match yet. ${checked} checked. Search the Drive library and check stills to add.`;
     }
     syncIdeaLibraryContinue();
     item4BindClipPlayers(grid);
@@ -9500,7 +9496,7 @@
     if (hint) {
       const { toAdd, toRemove } = item4LibraryDiff();
       const max = libraryPickerMaxCount();
-      hint.textContent = `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked (max ${max}). Uncheck to remove, search to add.${toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : ""}`;
+      hint.textContent = `${item4LibrarySuggestedIds.size} suggested. ${item4LibrarySelected.size} checked. Uncheck to remove, search to add.${toAdd.length || toRemove.length ? ` Apply will add ${toAdd.length} and remove ${toRemove.length}.` : ""}`;
     }
     syncItem4LibraryAdd();
     item4BindClipPlayers(grid);
