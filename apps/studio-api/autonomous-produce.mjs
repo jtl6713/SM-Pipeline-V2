@@ -21,14 +21,10 @@ export const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
   Instagram: "Reel",
   Facebook: "Slideshow Reel",
   TikTok: "Video Draft",
-  YouTube: "Slideshow Video",
+  YouTube: "Short",
 });
-export const AUTONOMOUS_CAROUSEL_OVERRIDES = Object.freeze({
-  Instagram: "Carousel",
-  Facebook: "Multi-Image Post",
-  TikTok: "Video Draft",
-  YouTube: "Slideshow Video",
-});
+/** Library stills still go out as Reels / Shorts, not native carousels. */
+export const AUTONOMOUS_CAROUSEL_OVERRIDES = AUTONOMOUS_REEL_OVERRIDES;
 export const AUTONOMOUS_PLAN_EXTRAS = Object.freeze([
   { platform: "Instagram", output_type: "Story" },
   { platform: "Facebook", output_type: "Story" },
@@ -261,10 +257,13 @@ export function autonomousIncomingMediaIds(existingAssets, mediaAssetIds, max = 
   return incoming;
 }
 
-export function autonomousPlanOverrides(contentType) {
-  if (contentType === "Carousel" || contentType === "Photo Set" || contentType === "Feed Post") {
-    return { ...AUTONOMOUS_CAROUSEL_OVERRIDES };
-  }
+export function autonomousCanonicalContentType(contentType) {
+  const raw = String(contentType || "").trim();
+  if (raw === "Longform Video") return raw;
+  return "Vertical Short Video";
+}
+
+export function autonomousPlanOverrides(_contentType) {
   return { ...AUTONOMOUS_REEL_OVERRIDES };
 }
 
@@ -762,7 +761,7 @@ Otherwise return:
   "required_assets": "max 12 words",
   "why_this_should_work": "max 12 words",
   "cited_trend": "matching harvest item, or library",
-  "suggested_format": "Vertical Short Video or Carousel",
+  "suggested_format": "Vertical Short Video",
   "post_caption": "publish-ready caption, 2-5 sentences, no invented facts",
   "media_asset_ids": ["rec..."]
 }`;

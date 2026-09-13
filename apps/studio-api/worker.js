@@ -72,6 +72,7 @@ import {
   autonomousInWindow,
   autonomousIncomingMediaIds,
   autonomousMasterMediaIds,
+  autonomousCanonicalContentType,
   autonomousPlanExtras,
   autonomousPlanOverrides,
   autonomousPreferredSubject,
@@ -353,7 +354,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.306-unused-stamped-ids",
+          version: "0.10.307-autonomous-reel-pack",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -30948,8 +30949,9 @@ async function resumeAutonomousDrafts(env, authorization, ctx, drafts, chicago, 
         continue;
       }
       const idea = await airtableFetch(env, env.AIRTABLE_IDEA_TABLE_ID, ideaId);
-      const contentType = String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
-        || "Vertical Short Video";
+      const contentType = autonomousCanonicalContentType(
+        String(f(idea, "Production_Content_Type") || "Vertical Short Video").trim()
+      );
       const mediaAssetIds = autonomousMasterMediaIds(item4ParseJson(f(requestRecord, "Studio_Master_Assets_JSON"), []));
       if (!mediaAssetIds.length) {
         results.push({
@@ -31281,6 +31283,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
 
   pick.media_asset_ids = completeRelatedStillPick(pick.media_asset_ids, cluster.assets);
   pick.cluster_label = cluster.label;
+  pick.content_type = autonomousCanonicalContentType(pick.content_type);
   if (pick.media_asset_ids.length < AUTONOMOUS_RELATED_STILL_MIN) {
     const result = {
       skipped: "picker_assets_not_in_harvest",
