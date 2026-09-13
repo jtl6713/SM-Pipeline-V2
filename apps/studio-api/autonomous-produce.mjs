@@ -427,22 +427,35 @@ export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
   return { conflict: false };
 }
 
-export function autonomousUnusedLibraryAssets(assets, occupied = []) {
-  const used = new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []));
-  const occupiedPlaces = new Set((occupied || []).flatMap((row) => autonomousPlaceSubjects(autonomousOccupiedHaystack(row))));
-  const occupiedLocations = new Set(
+export function autonomousOccupiedPlaceKeys(occupied = []) {
+  return new Set((occupied || []).flatMap((row) => autonomousPlaceSubjects(autonomousOccupiedHaystack(row))));
+}
+
+export function autonomousOccupiedLocationKeys(occupied = []) {
+  return new Set(
     (occupied || [])
       .map((row) => autonomousNormalizedPlace(row?.location))
       .filter((value) => value && value !== "chicago")
   );
+}
+
+export function autonomousClusterConflictsOccupied(cluster, occupied = []) {
+  const sample = cluster?.assets?.[0];
+  if (!sample) return false;
+  const occupiedPlaces = autonomousOccupiedPlaceKeys(occupied);
+  const hay = autonomousOccupiedHaystack(sample);
+  if (autonomousPlaceSubjects(hay).some((place) => occupiedPlaces.has(place))) return true;
+  const location = autonomousNormalizedPlace(sample?.location);
+  const occupiedLocations = autonomousOccupiedLocationKeys(occupied);
+  return Boolean(location && occupiedLocations.has(location));
+}
+
+/** Unused means the still ID has not appeared on an in-flight or recent output. Occupied places are skipped later, at cluster pick. */
+export function autonomousUnusedLibraryAssets(assets, occupied = []) {
+  const used = new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []));
   return (assets || []).filter((row) => {
     const id = String(row?.id || row?.media_asset_id || "").trim();
-    if (!/^rec[A-Za-z0-9]+$/.test(id) || used.has(id)) return false;
-    const hay = autonomousOccupiedHaystack(row);
-    if (autonomousPlaceSubjects(hay).some((place) => occupiedPlaces.has(place))) return false;
-    const location = autonomousNormalizedPlace(row?.location);
-    if (location && occupiedLocations.has(location)) return false;
-    return true;
+    return /^rec[A-Za-z0-9]+$/.test(id) && !used.has(id);
   });
 }
 
@@ -497,8 +510,12 @@ export function summarizeUnusedLibraryOverview(assets, { limit = 16 } = {}) {
 export function pickRelatedUnusedStillCluster(assets, {
   min = AUTONOMOUS_RELATED_STILL_MIN,
   max = AUTONOMOUS_RELATED_STILL_MAX,
+  occupied = [],
 } = {}) {
-  const clusters = groupUnusedLibraryClusters(assets).filter((row) => row.count >= min);
+  const clusters = groupUnusedLibraryClusters(assets).filter((row) => {
+    if (row.count < min) return false;
+    return !autonomousClusterConflictsOccupied(row, occupied);
+  });
   if (!clusters.length) return null;
   clusters.sort((left, right) => {
     const leftScore = Math.min(left.count, max);

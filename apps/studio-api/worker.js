@@ -353,7 +353,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.305-unused-all-cities",
+          version: "0.10.306-unused-stamped-ids",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -30650,13 +30650,16 @@ async function harvestAutonomousYoutube(env, options = {}) {
 async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = "") {
   const pin = autonomousPreferredSubject(subject);
   const crossScope = await readLibraryCrossScopeSetting(env);
-  const scopeFormula = await mediaAssetProfileScopeForId(env, profileId, { crossScope, includeUnscoped: true });
+  const scopeFormula = await mediaAssetProfileScopeForId(env, profileId, { crossScope, includeUnscoped: false });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
-    limit: 200,
+    limit: 400,
     sortField: "Intake_Date",
     sortDirection: "desc",
     filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
-  }).catch(() => []);
+  }).catch((error) => {
+    console.warn("autonomous library catalog failed", profileId, error);
+    return [];
+  });
   const rows = [];
   for (const record of records || []) {
     if (!ideaLibraryIsEligibleImage(record)) continue;
@@ -31167,8 +31170,8 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     const nextCatalog = await harvestAutonomousLibraryCatalog(env, preferredSubject, candidate.id);
     const nextUnused = autonomousUnusedLibraryAssets(nextCatalog, occupiedIdeas);
     const nextOverview = summarizeUnusedLibraryOverview(nextUnused);
-    const nextCluster = pickRelatedUnusedStillCluster(nextUnused);
-    if (!catalog.length) {
+    const nextCluster = pickRelatedUnusedStillCluster(nextUnused, { occupied: occupiedIdeas });
+    if (!catalog.length || nextUnused.length > unusedAssets.length) {
       catalog = nextCatalog;
       unusedAssets = nextUnused;
       overview = nextOverview;
@@ -31197,6 +31200,7 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
         news: news.length,
         youtube: youtube.length,
         assets: catalog.length,
+        unused: unusedAssets.length,
         profile_id: profile?.id || selected.id,
       },
     };

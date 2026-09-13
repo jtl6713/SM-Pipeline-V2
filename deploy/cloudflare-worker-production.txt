@@ -449,3 +449,5 @@ Unused-photo harvest Worker deploy: 2026-09-13 — Cluster 5-10 unused related s
 Unused-photo profile scope Worker deploy: 2026-09-13 — On-demand harvest uses the working Content Profile so NYC unused stills are visible. Worker 0.10.304-unused-profile-scope.
 
 Unused-photo all-cities Worker deploy: 2026-09-13 — If the first city has no unused 5-10 set, keep scanning other enabled profiles (NYC Central Park). Worker 0.10.305-unused-all-cities.
+
+Unused-photo stamped IDs Worker deploy: 2026-09-13 — Scan only profile-stamped stills; unused means the file was not on an output. Occupied landmarks skip the next cluster, not the whole city. Worker 0.10.306-unused-stamped-ids.
