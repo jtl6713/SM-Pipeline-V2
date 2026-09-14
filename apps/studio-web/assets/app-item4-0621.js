@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.313-youtube-manual-close";
+  const BUILD_ID = "item4-0.6.317-intake-refresh";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -268,6 +268,34 @@
   let pipelinePollInFlight = false;
   let operationsTimezone = null;
   let operationsAnalyticsAccounts = [];
+  let operationsWatchlistAll = [];
+
+  function workingStudioTheme() {
+    return studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago";
+  }
+
+  function workingStudioCityLabel() {
+    const profile = studioProfiles.find((item) => item.id === selectedProfileId);
+    if (profile?.city_label) return profile.city_label;
+    const theme = workingStudioTheme();
+    if (theme === "la") return "Los Angeles";
+    if (theme === "nyc") return "New York";
+    if (theme === "miami") return "Miami";
+    return "Chicago";
+  }
+
+  function watchlistForWorkingProfile(accounts) {
+    const theme = workingStudioTheme();
+    return (accounts || []).filter((row) => String(row.profile || "chicago").toLowerCase() === theme);
+  }
+
+  function watchlistProfileLabel(theme) {
+    const key = String(theme || "chicago").toLowerCase();
+    if (key === "la") return "Los Angeles";
+    if (key === "nyc") return "New York";
+    if (key === "miami") return "Miami";
+    return "Chicago";
+  }
   const operationsAnalyticsQueue = { running: false, stop: false };
   const operationsActivityOpenKeys = new Set();
   let operationsActivityLogsBound = false;
@@ -355,6 +383,8 @@
     document.querySelectorAll(".ops-profile-card[data-profile-id]").forEach((card) => {
       card.classList.toggle("is-working-profile", Boolean(profile && card.dataset.profileId === profile.id));
     });
+    const discover = $("operationsDiscoverCreators");
+    if (discover && !operationsAnalyticsQueue.running) discover.textContent = "Find creators";
   }
 
   // Sample / placeholder copy follows the working profile so a New York operator
@@ -689,11 +719,12 @@
         button.disabled = true;
         button.textContent = "Searching…";
       }
-      setOperationsMessage("Searching YouTube for Chicago content creators…");
+      const city = workingStudioCityLabel();
+      setOperationsMessage(`Searching YouTube for ${city} creators…`);
       const result = await api("/api/insights/discover", {
         method: "POST",
         body: JSON.stringify({
-          profile: studioProfiles.find((item) => item.id === selectedProfileId)?.theme || "chicago",
+          profile: workingStudioTheme(),
           limit: 8,
         }),
         timeoutMs: 60000,
@@ -705,7 +736,7 @@
     } finally {
       if (button) {
         button.disabled = false;
-        button.textContent = "Find Chicago creators";
+        button.textContent = "Find creators";
       }
     }
   });
@@ -720,8 +751,7 @@
     }
     try {
       const current = await api("/api/insights/watchlist");
-      const profile = studioProfiles.find((item) => item.id === selectedProfileId);
-      const accounts = [...(current.accounts || []), { platform, handle, profile: profile?.theme || "chicago" }];
+      const accounts = [...(current.accounts || []), { platform, handle, profile: workingStudioTheme() }];
       await api("/api/insights/watchlist", { method: "POST", body: JSON.stringify({ accounts }) });
       if ($("operationsWatchlistHandle")) $("operationsWatchlistHandle").value = "";
       setOperationsMessage("Handle added.");
@@ -857,12 +887,54 @@
   let intakePollTimer = null;
   let intakePollStartedAt = null;
   let intakePollDeadline = 0;
+  const INTAKE_FORM_REFRESH_MS = 10000;
+  let intakeFormRefreshTimer = null;
+  let intakeFormRefreshInFlight = false;
   function stopIntakePoll() {
     if (intakePollTimer) {
       clearInterval(intakePollTimer);
       intakePollTimer = null;
     }
   }
+  function stopIntakeFormRefresh() {
+    if (intakeFormRefreshTimer) {
+      clearInterval(intakeFormRefreshTimer);
+      intakeFormRefreshTimer = null;
+    }
+  }
+  function startIntakeFormRefresh() {
+    if (intakeFormRefreshTimer) return;
+    intakeFormRefreshTimer = setInterval(() => {
+      refreshLibraryIntakeForm().catch(() => {});
+    }, INTAKE_FORM_REFRESH_MS);
+  }
+  async function refreshLibraryIntakeForm() {
+    if (activeNavPage() !== "operations" || document.hidden) return;
+    if (intakeFormRefreshInFlight || intakePollTimer) return;
+    intakeFormRefreshInFlight = true;
+    try {
+      const qs = intakePollStartedAt
+        ? `?started_at=${encodeURIComponent(intakePollStartedAt)}`
+        : "";
+      const status = await api(`/api/operations/intake${qs}`);
+      if (status.library_intake) renderLibraryIntakeNotice(status.library_intake);
+      if (intakePollStartedAt && !intakeIsFinished(status)) showIntakeProgress(status);
+    } catch {
+      /* keep the last successful intake snapshot */
+    } finally {
+      intakeFormRefreshInFlight = false;
+    }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopIntakeFormRefresh();
+      return;
+    }
+    if (activeNavPage() === "operations") {
+      startIntakeFormRefresh();
+      refreshLibraryIntakeForm().catch(() => {});
+    }
+  });
   function intakeIsFinished(status) {
     return Boolean(status?.complete || status?.failed || status?.a2?.result === "empty");
   }
@@ -12956,8 +13028,8 @@
     let ms = Date.parse(candidateIso);
     if (Number.isNaN(ms)) ms = Date.now();
     let guard = 0;
-    while ((occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs) && guard < 36) {
-      ms += gapMs;
+    while ((occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs) && guard < 7) {
+      ms += 24 * 60 * 60 * 1000;
       guard += 1;
     }
     return new Date(ms).toISOString();
@@ -15127,7 +15199,7 @@
             : "";
         return `
       <article class="ops-profile-card${statusClass}">
-        <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(account.profile || "")}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
+        <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(watchlistProfileLabel(account.profile))}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
         <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed && !queueBusy ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : platform === "instagram" ? "Paused until Meta business_discovery permission is fixed" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit && !queueBusy ? "" : "disabled"}>Remove</button>
       </article>`;
@@ -15137,7 +15209,15 @@
     target.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (!canEdit || operationsAnalyticsQueue.running) return;
-        const next = accounts.filter((_, i) => i !== Number(button.dataset.watchlistRemove));
+        const removed = accounts[Number(button.dataset.watchlistRemove)];
+        const next = (operationsWatchlistAll || []).filter((row) => {
+          if (!removed) return true;
+          return !(
+            String(row.platform || "").toLowerCase() === String(removed.platform || "").toLowerCase()
+            && String(row.handle || "").toLowerCase() === String(removed.handle || "").toLowerCase()
+            && String(row.profile || "chicago").toLowerCase() === String(removed.profile || "chicago").toLowerCase()
+          );
+        });
         try {
           await api("/api/insights/watchlist", { method: "POST", body: JSON.stringify({ accounts: next }) });
           setOperationsMessage("Watchlist updated.");
@@ -16144,7 +16224,8 @@
       const working = studioProfiles.find((item) => item.id === selectedProfileId);
       if (working) applyStudioBackgroundColor(working);
       renderOperationsProfiles(data.profiles || [], Boolean(data.can_edit_profiles));
-      const watchlist = data.similar_accounts || [];
+      operationsWatchlistAll = data.similar_accounts || [];
+      const watchlist = watchlistForWorkingProfile(operationsWatchlistAll);
       renderOperationsWatchlist(watchlist, Boolean(data.can_edit_profiles));
       try {
         const similar = await api(`/api/insights/similar-times?profile=${encodeURIComponent(selectedProfileId || "chicago")}&season=${encodeURIComponent(selectedInsightsSeason())}`);
@@ -16195,6 +16276,7 @@
       if (analyticsScopeLabel) analyticsScopeLabel.hidden = !data.can_edit_profiles;
       const stopAnalytics = $("operationsStopAnalytics");
       if (stopAnalytics && !data.can_edit_profiles) stopAnalytics.hidden = true;
+      startIntakeFormRefresh();
     } catch (error) {
       setOperationsMessage(error.message || "Could not load operations.", "error-text");
       if (meta) meta.textContent = "Unable to load operations.";
@@ -16220,9 +16302,19 @@
       notice.textContent = intake.notice || "No library assets currently require action.";
     }
     if (meta) {
-      const names = (intake.needing_classification || []).map((row) => row.name).filter(Boolean).slice(0, 5);
-      meta.textContent = names.length
-        ? `Waiting for profile assignment in Asset Manager: ${names.join(", ")}${intake.needing_classification.length > 5 ? "…" : ""}`
+      const needProfile = (intake.needing_profile || []).filter((row) => row.name);
+      const needClassify = (intake.awaiting_classification || []).filter((row) => row.name);
+      const profileNames = needProfile.map((row) => row.name).slice(0, 5);
+      const classifyNames = needClassify.map((row) => row.name).slice(0, 5);
+      const parts = [];
+      if (profileNames.length) {
+        parts.push(`Waiting for a Content Profile in Asset Manager: ${profileNames.join(", ")}${needProfile.length > 5 ? "…" : ""}`);
+      }
+      if (classifyNames.length) {
+        parts.push(`Waiting for classification: ${classifyNames.join(", ")}${needClassify.length > 5 ? "…" : ""}`);
+      }
+      meta.textContent = parts.length
+        ? parts.join(" ")
         : "No Drive-ingested files are waiting for a profile. Oversized videos still appear in the list below.";
     }
   }
@@ -16291,6 +16383,9 @@
     if (page !== "operations") {
       stopIntakePoll();
       stopCompressionPoll();
+      stopIntakeFormRefresh();
+    } else {
+      startIntakeFormRefresh();
     }
     if (page === "home" || page === "dashboard") return loadDashboard();
     if (page === "ideas") return loadIdeas();

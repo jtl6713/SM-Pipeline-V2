@@ -349,19 +349,21 @@
   }
 
   const EZ_SCHEDULE_GAP_MS = 90 * 60 * 1000;
+  const EZ_SUGGEST_HORIZON_DAYS = 7;
+  const EZ_SUGGEST_LEAD_MS = 10 * 60 * 1000;
 
   function ezIndustryBestWindows(platform, outputType) {
     const p = String(platform || "").toLowerCase();
     const t = String(outputType || "").toLowerCase();
-    if (p.includes("tiktok")) return { windows: ["19:00-21:00"] };
-    if (p.includes("youtube") && (t.includes("standard") || t.includes("long"))) return { windows: ["10:00-16:00"] };
-    if (p.includes("youtube")) return { windows: ["14:00-16:00", "20:00-22:00"] };
-    if (t.includes("story")) return { windows: ["16:00-18:00", "19:00-21:00"] };
+    if (p.includes("tiktok")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["19:00-21:00"] };
+    if (p.includes("youtube") && (t.includes("standard") || t.includes("long"))) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["10:00-16:00"] };
+    if (p.includes("youtube")) return { days: ["Wed", "Thu", "Fri", "Sat"], windows: ["14:00-16:00", "20:00-22:00"] };
+    if (t.includes("story")) return { days: ["Mon", "Tue", "Wed", "Thu", "Fri"], windows: ["16:00-18:00", "19:00-21:00"] };
     if (t.includes("carousel") || t.includes("single") || t.includes("feed") || t.includes("multi-image") || t.includes("photo")) {
-      return { windows: ["12:00-14:00", "18:00-20:00"] };
+      return { days: ["Wed", "Thu"], windows: ["12:00-14:00", "18:00-20:00"] };
     }
-    if (p.includes("facebook")) return { windows: ["12:00-13:00", "18:00-20:00"] };
-    return { windows: ["11:00-13:00", "18:00-21:00"] };
+    if (p.includes("facebook")) return { days: ["Tue", "Wed", "Thu"], windows: ["12:00-13:00", "18:00-20:00"] };
+    return { days: ["Tue", "Wed", "Thu"], windows: ["11:00-13:00", "18:00-21:00"] };
   }
 
   function ezChicagoDateTimeParts(date = new Date()) {
@@ -413,18 +415,83 @@
     return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
   }
 
-  function ezSuggestedChicagoIso(windows, now = new Date()) {
-    const first = String(windows?.[0] || "12:00-13:00");
+  function ezChicagoWeekdayShort(date = new Date()) {
+    return new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(date);
+  }
+
+  function ezCivilKey(year, month, day) {
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  function ezOccupiedOnDay(occupiedMs, civil) {
+    return (occupiedMs || []).filter((ms) => {
+      if (!Number.isFinite(ms)) return false;
+      const parts = ezChicagoDateTimeParts(new Date(ms));
+      return ezCivilKey(parts.year, parts.month, parts.day) === civil.key;
+    });
+  }
+
+  function ezFlattenOccupied(occupiedByPlatform) {
+    return Object.values(occupiedByPlatform || {}).flat().filter((ms) => Number.isFinite(ms));
+  }
+
+  function ezScheduleConflicts(ms, occupiedMs, gapMs = EZ_SCHEDULE_GAP_MS) {
+    if (!Number.isFinite(ms)) return false;
+    return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
+  }
+
+  function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
+    const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
+    const occupiedMs = options.occupiedMs || [];
+    const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
+    const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
+    const nowMs = now.getTime() + EZ_SUGGEST_LEAD_MS;
+    const chicago = ezChicagoDateTimeParts(now);
+    let best = null;
+    for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
+      const civilBase = i === 0
+        ? { year: chicago.year, month: chicago.month, day: chicago.day }
+        : ezAddCivilDays(chicago.year, chicago.month, chicago.day, i);
+      const noonMs = ezChicagoWallToUtcMs(civilBase.year, civilBase.month, civilBase.day, 12, 0);
+      const civil = {
+        ...civilBase,
+        index: i,
+        weekday: ezChicagoWeekdayShort(new Date(noonMs)),
+        key: ezCivilKey(civilBase.year, civilBase.month, civilBase.day),
+      };
+      const preferred = !daysPref.length || daysPref.includes(civil.weekday);
+      const crowding = ezOccupiedOnDay(occupiedMs, civil).length;
+      const platformCrowding = ezOccupiedOnDay(platformOccupiedMs, civil).length;
+      for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
+        const first = String(windowList[windowIndex] || "12:00-13:00").split("-")[0] || "12:00";
+        const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
+        const ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
+        if (ms <= nowMs) continue;
+        if (ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+        let score = 80;
+        score += preferred ? 22 : 0;
+        score += Math.max(0, 16 - windowIndex * 6);
+        score -= crowding * 26;
+        score -= platformCrowding * 14;
+        score -= i * 2;
+        if (!best || score > best.score) best = { score, ms };
+      }
+    }
+    if (best) return new Date(best.ms).toISOString();
+    const first = String(windowList[0] || "12:00-13:00");
     const start = first.split("-")[0] || "12:00";
     const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
-    const chicago = ezChicagoDateTimeParts(now);
     let civil = { year: chicago.year, month: chicago.month, day: chicago.day };
     let ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-    if (ms <= now.getTime() + 10 * 60 * 1000) {
+    if (ms <= nowMs) {
       civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
       ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
     }
     return new Date(ms).toISOString();
+  }
+
+  function ezSuggestedChicagoIso(windows, now = new Date(), options = {}) {
+    return ezPickBalancedSuggestedIso(windows, now, options);
   }
 
   function ezNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = EZ_SCHEDULE_GAP_MS) {
@@ -483,8 +550,11 @@
         continue;
       }
       const industry = ezIndustryBestWindows(platform, outputType);
-      const suggested = ezSuggestedChicagoIso(industry.windows, now);
-      const iso = ezNextOpenScheduleIso(suggested, reserved[platform] || []);
+      const iso = ezPickBalancedSuggestedIso(industry.windows, now, {
+        days: industry.days,
+        occupiedMs: ezFlattenOccupied(reserved),
+        platformOccupiedMs: reserved[platform] || [],
+      });
       stamps.set(key, iso);
       (reserved[platform] ||= []).push(Date.parse(iso));
     }

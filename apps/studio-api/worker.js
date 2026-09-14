@@ -360,7 +360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.311-fb-cover-multipart",
+          version: "0.10.314-intake-classify-copy",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -8307,7 +8307,9 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
       : "";
     if (!iso) {
       const industry = studioIndustryBestWindows(f(row, "Platform"), f(row, "Studio_Output_Type") || f(row, "Format"));
-      iso = studioSuggestedLocalDatetime(industry.windows || ["12:00-13:00"]);
+      iso = studioSuggestedLocalDatetime(industry.windows || ["12:00-13:00"], new Date(), {
+        days: industry.days,
+      });
     }
     await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
       scheduled_post_date: iso,
@@ -13697,18 +13699,92 @@ function studioAddCivilDays(year, month, day, delta) {
   return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() };
 }
 
-function studioSuggestedLocalDatetime(windows, now = new Date()) {
-  const first = String(windows?.[0] || "12:00-13:00");
+const STUDIO_SUGGEST_HORIZON_DAYS = 7;
+const STUDIO_SUGGEST_LEAD_MS = 10 * 60 * 1000;
+
+function studioSuggestCivilKey(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function studioSuggestParseWindowStart(window) {
+  const first = String(window || "12:00-13:00").split("-")[0] || "12:00";
+  const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
+  return { hour: hh, minute: mm || 0 };
+}
+
+function studioSuggestHorizon(now = new Date(), horizonDays = STUDIO_SUGGEST_HORIZON_DAYS) {
+  const chicago = studioChicagoDateTimeParts(now);
+  const days = [];
+  for (let i = 0; i < horizonDays; i++) {
+    const civil = i === 0
+      ? { year: chicago.year, month: chicago.month, day: chicago.day }
+      : studioAddCivilDays(chicago.year, chicago.month, chicago.day, i);
+    const noonMs = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, 12, 0);
+    days.push({
+      ...civil,
+      index: i,
+      weekday: studioChicagoWeekdayShort(new Date(noonMs)),
+      key: studioSuggestCivilKey(civil.year, civil.month, civil.day),
+    });
+  }
+  return days;
+}
+
+function studioOccupiedOnCivilDay(occupiedMs, civil) {
+  return (occupiedMs || []).filter((ms) => {
+    if (!Number.isFinite(ms)) return false;
+    const parts = studioChicagoDateTimeParts(new Date(ms));
+    return studioSuggestCivilKey(parts.year, parts.month, parts.day) === civil.key;
+  });
+}
+
+function studioFlattenOccupiedByPlatform(occupiedByPlatform) {
+  return Object.values(occupiedByPlatform || {}).flat().filter((ms) => Number.isFinite(ms));
+}
+
+function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
+  const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
+  const occupiedMs = options.occupiedMs || [];
+  const platformOccupiedMs = options.platformOccupiedMs || occupiedMs;
+  const gapMs = options.gapMs ?? STUDIO_SCHEDULE_GAP_MS;
+  const leadMs = options.leadMs ?? STUDIO_SUGGEST_LEAD_MS;
+  const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
+  const nowMs = now.getTime() + leadMs;
+  let best = null;
+  for (const civil of studioSuggestHorizon(now, options.horizonDays || STUDIO_SUGGEST_HORIZON_DAYS)) {
+    const preferred = !daysPref.length || daysPref.includes(civil.weekday);
+    const crowding = studioOccupiedOnCivilDay(occupiedMs, civil).length;
+    const platformCrowding = studioOccupiedOnCivilDay(platformOccupiedMs, civil).length;
+    for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
+      const { hour, minute } = studioSuggestParseWindowStart(windowList[windowIndex]);
+      const ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hour, minute);
+      if (ms <= nowMs) continue;
+      if (studioScheduleConflicts(ms, platformOccupiedMs, gapMs)) continue;
+      let score = 80;
+      score += preferred ? 22 : 0;
+      score += Math.max(0, 16 - windowIndex * 6);
+      score -= crowding * 26;
+      score -= platformCrowding * 14;
+      score -= civil.index * 2;
+      if (!best || score > best.score) best = { score, ms };
+    }
+  }
+  if (best) return new Date(best.ms).toISOString();
+  const first = String(windowList[0] || "12:00-13:00");
   const start = first.split("-")[0] || "12:00";
   const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
   const chicago = studioChicagoDateTimeParts(now);
   let civil = { year: chicago.year, month: chicago.month, day: chicago.day };
   let ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-  if (ms <= now.getTime() + 10 * 60 * 1000) {
+  if (ms <= nowMs) {
     civil = studioAddCivilDays(civil.year, civil.month, civil.day, 1);
     ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
   }
   return new Date(ms).toISOString();
+}
+
+function studioSuggestedLocalDatetime(windows, now = new Date(), options = {}) {
+  return studioPickBalancedSuggestedIso(windows, now, options);
 }
 
 function studioScheduleStoryRank(outputType) {
@@ -13752,8 +13828,11 @@ function studioBuildSuggestedScheduleMap(items, occupiedByPlatform = {}, now = n
       continue;
     }
     const industry = studioIndustryBestWindows(platform, outputType);
-    const suggested = studioSuggestedLocalDatetime(industry.windows, now);
-    const iso = studioNextOpenScheduleIso(suggested, reserved[platform] || []);
+    const iso = studioPickBalancedSuggestedIso(industry.windows, now, {
+      days: industry.days,
+      occupiedMs: studioFlattenOccupiedByPlatform(reserved),
+      platformOccupiedMs: reserved[platform] || [],
+    });
     stamps.set(key, iso);
     (reserved[platform] ||= []).push(Date.parse(iso));
   }
@@ -14808,7 +14887,7 @@ function studioInsightsBuildOverview({ posts, accounts, timed, reference, cache,
   };
 }
 
-function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts: providedPosts, own_schedule: providedOwn }) {
+function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season, posts: providedPosts, own_schedule: providedOwn, occupiedMs = [] }) {
   const timed = studioTimedWatchlistAccounts(accounts, theme, platform);
   const reference = (accounts || []).filter((row) => !STUDIO_SIMILAR_TIMED_PLATFORMS.has(row.platform) && (!theme || (row.profile || "chicago") === theme));
   const posts = Array.isArray(providedPosts) ? providedPosts : [];
@@ -14874,7 +14953,12 @@ function studioBuildSimilarTimesView({ accounts, cache, theme, platform, season,
       ? { total: Number(providedOwn.total) || 0, buckets: Array.isArray(providedOwn.buckets) ? providedOwn.buckets : [] }
       : { total: 0, buckets: [] },
     suggested: heatmap.suggested,
-    suggested_iso: heatmap.suggested ? studioSuggestedLocalDatetime(heatmap.suggested.windows) : null,
+    suggested_iso: heatmap.suggested
+      ? studioSuggestedLocalDatetime(heatmap.suggested.windows, new Date(), {
+          days: heatmap.suggested.days,
+          occupiedMs: occupiedMs || [],
+        })
+      : null,
     caption: captionLearned,
     as_of: cache?.as_of || null,
     remaining_to_sweep: stale.length,
@@ -14927,6 +15011,7 @@ async function studioLoadSimilarTimesView(env, url, authorization) {
     season,
     posts,
     own_schedule: studioOwnScheduleHeatmap(occupiedByPlatform),
+    occupiedMs: studioFlattenOccupiedByPlatform(occupiedByPlatform),
   });
 }
 
@@ -14946,7 +15031,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     source: "industry_default",
     sample_size: 0,
     suggested: industry,
-    suggested_iso: studioSuggestedLocalDatetime(industry.windows),
+    suggested_iso: studioSuggestedLocalDatetime(industry.windows, new Date(), { days: industry.days }),
     similar: null,
     similar_sample_size: 0,
     similar_profile: theme,
@@ -15046,7 +15131,7 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       source,
       sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
       suggested: chosen,
-      suggested_iso: studioSuggestedLocalDatetime(chosen.windows),
+      suggested_iso: studioSuggestedLocalDatetime(chosen.windows, new Date(), { days: chosen.days }),
       similar: similar?.suggested || null,
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
@@ -15378,6 +15463,12 @@ const STUDIO_INSIGHTS_DISCOVERY_QUERIES = Object.freeze({
     "things to do in New York",
     "NYC city guide",
   ],
+  miami: [
+    "Miami travel vlog",
+    "things to do in Miami",
+    "Miami city guide",
+    "Miami Beach food tour",
+  ],
 });
 
 async function studioStampYoutubeCreatorDiscoveryRun(env, ranAt = new Date().toISOString()) {
@@ -15413,7 +15504,7 @@ async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
   const settings = await studioActivePipelineSettings(env, ["YOUTUBE_API_KEY"]).catch(() => ({}));
   const youtubeKey = settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY;
   if (!youtubeKey) {
-    return { ok: false, status: "needs_key", added: [], discovered: [], message: "Add YOUTUBE_API_KEY to discover Chicago creators on YouTube." };
+    return { ok: false, status: "needs_key", added: [], discovered: [], message: `Add YOUTUBE_API_KEY to discover ${studioSimilarProfileLabel(theme)} creators on YouTube.` };
   }
   const queries = STUDIO_INSIGHTS_DISCOVERY_QUERIES[theme] || STUDIO_INSIGHTS_DISCOVERY_QUERIES.chicago;
   const query = queries[Math.floor(Math.random() * queries.length)];
@@ -15457,10 +15548,10 @@ async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
     });
   }
   const accounts = await studioEnsureSimilarWatchlist(env);
-  const existing = new Set(accounts.map((row) => studioSimilarAccountKey(row.platform, row.handle)));
+  const existing = new Set(accounts.map((row) => `${row.profile || "chicago"}:${studioSimilarAccountKey(row.platform, row.handle)}`));
   const added = [];
   for (const row of discovered) {
-    const key = studioSimilarAccountKey(row.platform, row.handle);
+    const key = `${theme}:${studioSimilarAccountKey(row.platform, row.handle)}`;
     if (existing.has(key)) continue;
     accounts.push({
       platform: row.platform,
@@ -15476,9 +15567,10 @@ async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
       env,
       STUDIO_SIMILAR_WATCHLIST_SETTING,
       JSON.stringify(accounts),
-      "Chicago similar-account watchlist including YouTube discovery results."
+      `${studioSimilarProfileLabel(theme)} similar-account watchlist including YouTube discovery results.`
     );
   }
+  const city = studioSimilarProfileLabel(theme);
   return {
     ok: true,
     status: "ok",
@@ -15487,9 +15579,9 @@ async function studioDiscoverYoutubeChicagoCreators(env, options = {}) {
     added,
     ran_at: ranAt,
     message: added.length
-      ? `Discovered and added ${added.length} YouTube Chicago creator(s) from “${query}”.`
+      ? `Discovered and added ${added.length} YouTube ${city} creator(s) from “${query}”.`
       : discovered.length
-        ? `Found ${discovered.length} YouTube channel(s) for “${query}”; all were already on the watchlist.`
+        ? `Found ${discovered.length} YouTube channel(s) for “${query}”; all were already on the ${city} watchlist.`
         : `No YouTube channels found for “${query}”.`,
   };
 }
@@ -31983,6 +32075,7 @@ async function pulseStudioLibraryIntake(request, env, authorization, ctx) {
 }
 
 function mapLibraryIntakeAsset(record) {
+  const profileId = firstLinkedRecordId(f(record, "Content_Profile"));
   return {
     id: record.id,
     name: f(record, "Asset Name"),
@@ -31990,14 +32083,19 @@ function mapLibraryIntakeAsset(record) {
     classification_status: f(record, "Classification_Status"),
     intake_status: f(record, "Intake_Status"),
     file_size_mb: f(record, "File_Size_MB"),
+    content_profile_id: profileId || null,
+    needs_profile: !profileId,
   };
 }
 
 function mapLibraryIntakeSnapshot(needingClassification, oversized) {
   const classify = (needingClassification || []).map(mapLibraryIntakeAsset);
+  const needProfile = classify.filter((row) => row.needs_profile);
+  const needClassify = classify.filter((row) => !row.needs_profile);
   const oversize = Array.isArray(oversized) ? oversized : [];
   const notices = [];
-  if (classify.length) notices.push(`${classify.length} asset${classify.length === 1 ? "" : "s"} waiting for profile assignment`);
+  if (needProfile.length) notices.push(`${needProfile.length} asset${needProfile.length === 1 ? "" : "s"} waiting for a Content Profile in Asset Manager`);
+  if (needClassify.length) notices.push(`${needClassify.length} asset${needClassify.length === 1 ? "" : "s"} waiting for classification`);
   if (oversize.length) notices.push(`${oversize.length} oversized video${oversize.length === 1 ? "" : "s"} need compression`);
   return {
     a0_parked: true,
@@ -32006,6 +32104,8 @@ function mapLibraryIntakeSnapshot(needingClassification, oversized) {
     action_required: classify.length + oversize.length,
     notice: notices.length ? notices.join(". ") + "." : "No library assets currently require action.",
     needing_classification: classify,
+    needing_profile: needProfile,
+    awaiting_classification: needClassify,
     oversized_count: oversize.length,
   };
 }
@@ -32158,13 +32258,20 @@ async function buildLibraryIntakeStatus(env, startedAt, knownA2 = null) {
   const a3 = firstRunSince(a3Runs, startedAt);
   const a4 = firstRunSince(a4Runs, startedAt);
   const a2Result = describeA2Run(a2);
-  const classifyCount = (needingClassification || []).length;
+  const classifyRows = (needingClassification || []).map(mapLibraryIntakeAsset);
+  const classifyCount = classifyRows.length;
+  const needProfileCount = classifyRows.filter((row) => row.needs_profile).length;
+  const needClassifyCount = classifyCount - needProfileCount;
   const skipped = a2Result.files_found === false && !classifyCount ? "Skipped — no files to intake." : null;
-  const a3Detail = classifyCount
-    ? `${classifyCount} waiting for profile assignment in Asset Manager.`
-    : a3
-      ? (a3.state === "error" ? "A3 failed." : "A3 finished.")
-      : (skipped || "A3 waits until a profile is assigned in Asset Manager.");
+  const a3Detail = needProfileCount && needClassifyCount
+    ? `${needProfileCount} need a Content Profile; ${needClassifyCount} waiting for classification.`
+    : needProfileCount
+      ? `${needProfileCount} waiting for a Content Profile in Asset Manager.`
+      : needClassifyCount
+        ? `${needClassifyCount} waiting for classification (profile already set).`
+        : a3
+          ? (a3.state === "error" ? "A3 failed." : "A3 finished.")
+          : (skipped || "A3 classifies after a Content Profile is on the asset.");
   const stages = [
     { key: "A2", label: "Intake", run: a2, ...a2Result },
     { key: "A2B", label: "Video backfill", run: a2b, detail: a2b ? (a2b.state === "error" ? "A2B failed." : "A2B finished.") : (skipped || (a2 ? "Starting A2B…" : "Queued")) },
