@@ -360,7 +360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.314-intake-classify-copy",
+          version: "0.10.315-manual-analytics",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1331,11 +1331,7 @@ export default {
       } catch (error) {
         console.warn("insights sweep cron failed", error);
       }
-      try {
-        await studioSweepSimilarAccountTimes(env, { limit: 1 });
-      } catch (error) {
-        console.warn("similar-account times sweep cron failed", error);
-      }
+      // Similar-account analytics are manual from Operations. Cron must not spend YouTube/Meta quota.
       try {
         await studioIngestFirstPartyObservations(env, { limit: 12 });
       } catch (error) {
@@ -14827,6 +14823,16 @@ function studioTimedWatchlistAccounts(accounts, theme, platform) {
   });
 }
 
+function studioManualSweepWatchlistAccounts(accounts, theme, platform) {
+  const wantedPlatform = String(platform || "").trim().toLowerCase();
+  return (accounts || []).filter((row) => {
+    if (row.platform !== "youtube" && row.platform !== "instagram") return false;
+    if (theme && (row.profile || "chicago") !== theme) return false;
+    if (wantedPlatform && row.platform !== wantedPlatform && !wantedPlatform.includes(row.platform)) return false;
+    return true;
+  });
+}
+
 function studioSimilarAccountStale(entry, now = Date.now()) {
   if (!entry?.fetched_at) return true;
   const ts = Date.parse(entry.fetched_at);
@@ -15210,16 +15216,8 @@ async function getInsightsCaptions(request, env, url, authorization) {
 }
 
 async function getInsightsSimilarTimes(request, env, url, authorization, ctx) {
+  void ctx;
   const view = await studioLoadSimilarTimesView(env, url, authorization);
-  if (ctx && view.remaining_to_sweep) {
-    const asOf = view.as_of ? Date.parse(view.as_of) : 0;
-    const quiet = Number.isFinite(asOf) && Date.now() - asOf < 10 * 60 * 1000;
-    if (!quiet) {
-      ctx.waitUntil(studioSweepSimilarAccountTimes(env, { limit: 1, theme: view.profile, skipRecompute: true }).catch((error) => {
-        console.warn("similar-times on-demand sweep failed", error);
-      }));
-    }
-  }
   return respond(request, env, { ok: true, ...view });
 }
 
@@ -15606,7 +15604,11 @@ async function studioSweepSimilarAccountTimes(env, options = {}) {
   const requestedPlatform = String(options.platform || "").trim().toLowerCase();
   const requestedHandle = String(options.handle || "").trim().replace(/^@/, "").toLowerCase();
   const accounts = await studioEnsureSimilarWatchlist(env);
-  const timed = studioTimedWatchlistAccounts(accounts, options.theme || null).filter((row) => {
+  const manual = Boolean(options.force || requestedPlatform || requestedHandle);
+  const timed = (manual
+    ? studioManualSweepWatchlistAccounts(accounts, options.theme || null, requestedPlatform)
+    : studioTimedWatchlistAccounts(accounts, options.theme || null)
+  ).filter((row) => {
     if (requestedPlatform && row.platform !== requestedPlatform) return false;
     if (requestedHandle && String(row.handle || "").toLowerCase() !== requestedHandle) return false;
     return true;

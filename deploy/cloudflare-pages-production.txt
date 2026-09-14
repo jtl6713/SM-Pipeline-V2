@@ -488,3 +488,5 @@ Unused-photo all-cities Pages deploy: 2026-09-13 — Operations harvest sends th
 YouTube manual close Pages deploy: 2026-09-13 — Pipeline and Open review can paste a YouTube URL to close the output. UI 0.6.313-youtube-manual-close.
 
 Find-creators profile + 7-day suggest Pages deploy: 2026-09-14 — Footer UI 0.6.317. Find creators is city-neutral; intake status refreshes every 10s. Suggested times look out 7 Chicago days.
+
+Manual analytics Pages deploy: 2026-09-14 — Run analytics is clickable for YouTube and Instagram. No background similar-account sweep. UI 0.6.318-manual-analytics.

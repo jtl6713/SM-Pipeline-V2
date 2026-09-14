@@ -461,3 +461,5 @@ YouTube thumbnail publish pause Worker deploy: 2026-09-13 — Honor YOUTUBE_AUTO
 YouTube skip videos.list Worker deploy: 2026-09-13 — When thumbnail publish is off, YTS1/YTS2 skip videos.list and finalize through YTS3. Studio Tags get Output_Hashtags. Worker 0.10.310-yt-skip-list-finalize.
 
 Find-creators profile + 7-day suggest Worker deploy: 2026-09-14 — Discover uses the working profile city; suggested times score a 7-day horizon. Intake notice splits profile vs classification. Worker 0.10.314-intake-classify-copy.
+
+Manual analytics Worker deploy: 2026-09-14 — Stop cron and Operations-load similar-account sweeps. Manual Run analytics can fetch YouTube and Instagram. Worker 0.10.315-manual-analytics.

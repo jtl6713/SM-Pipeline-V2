@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.317-intake-refresh";
+  const BUILD_ID = "item4-0.6.318-manual-analytics";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -15060,8 +15060,8 @@
     });
     document.querySelectorAll("[data-watchlist-run]").forEach((button) => {
       const account = operationsAnalyticsAccounts[Number(button.dataset.watchlistRun)];
-      const timed = String(account?.platform || "").toLowerCase() === "youtube";
-      button.disabled = running || !timed;
+      const runnable = similarAccountRunAllowed(account?.platform);
+      button.disabled = running || !runnable;
     });
     document.querySelectorAll("[data-watchlist-remove]").forEach((button) => {
       button.disabled = running;
@@ -15181,8 +15181,8 @@
     const queueBusy = operationsAnalyticsQueue.running;
     target.innerHTML = sections.map((platform) => {
       const rows = groups.get(platform) || [];
-        const timed = platform === "youtube";
-        const groupMode = platform === "youtube" ? "timed" : platform === "instagram" ? "paused" : "review only";
+        const timed = similarAccountRunAllowed(platform);
+        const groupMode = timed ? "manual" : "review only";
         const groupRun = canEdit && similarAccountRunAllowed(platform)
         ? `<button type="button" class="text-button" data-watchlist-run-platform="${escapeHtml(platform)}" ${queueBusy ? "disabled" : ""} title="Fetch every ${escapeHtml(platform)} handle one at a time">Run this platform</button>`
         : "";
@@ -15200,7 +15200,7 @@
         return `
       <article class="ops-profile-card${statusClass}">
         <div><strong>${handle}</strong><div class="subtle" title="${escapeHtml(account.error || "")}">${escapeHtml(watchlistProfileLabel(account.profile))}${account.source ? ` · ${escapeHtml(account.source)}` : ""}${account.status ? ` · ${escapeHtml(similarAccountStatusLabel(account.status))}` : ""}</div></div>
-        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed && !queueBusy ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : platform === "instagram" ? "Paused until Meta business_discovery permission is fixed" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
+        <button type="button" class="secondary-button" data-watchlist-run="${index}" ${canEdit && timed && !queueBusy ? "" : "disabled"} title="${timed ? "Fetch this account now and add its public posts to analytics" : "Public post analytics are unavailable for this platform"}">Run analytics</button>
         <button type="button" class="text-button" data-watchlist-remove="${index}" ${canEdit && !queueBusy ? "" : "disabled"}>Remove</button>
       </article>`;
       }).join("");
@@ -16234,7 +16234,7 @@
         renderOperationsWatchlist(watchlist.map((row) => ({
           ...row,
           status: statusByKey.get(`${row.platform}:${String(row.handle || "").toLowerCase()}`)?.status
-            || (row.platform === "instagram" ? "paused" : row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
+            || (row.platform === "tiktok" || row.platform === "facebook" ? "reference" : null),
         })), Boolean(data.can_edit_profiles));
       } catch (error) {
         const similarMeta = $("operationsSimilarTimesMeta");
