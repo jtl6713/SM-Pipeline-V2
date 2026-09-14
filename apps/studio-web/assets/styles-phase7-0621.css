@@ -1384,6 +1384,32 @@ html[data-studio-theme="nyc"]{
   --home-choice-overlay-alt:linear-gradient(180deg,rgba(76,29,149,.22),rgba(30,11,59,.58));
   --home-choice-body:linear-gradient(180deg,rgba(36,16,70,.32),rgba(30,11,59,.82))
 }
+html[data-studio-theme="miami"]{
+  --bg:#e6f4f2;
+  --line:#cfe8e3;
+  --hub-nav-hover:#dff4ef;
+  --hub-nav-active:#c8ebe3;
+  --hub-nav-ink:#0f766e;
+  --hub-topbar-line:#c5e6df;
+  --hub-chip:#eef8f6;
+  --teal:#0d9488;
+  --teal-dark:#0f766e;
+  --teal-soft:#ccfbf1;
+  --topbar-bg:#115e59;
+  --home-canvas:#134e4a;
+  --home-hero:url("/assets/home/miami-south-beach.jpg");
+  --home-idea:url("/assets/home/miami-downtown-skyline.jpg");
+  --home-content:url("/assets/home/miami-wynwood.jpg");
+  --home-hero-position:center 48%;
+  --home-hero-overlay:linear-gradient(180deg,rgba(17,94,89,.24) 0%,rgba(15,118,110,.14) 42%,rgba(19,78,74,.56) 100%);
+  --home-hero-fade:linear-gradient(180deg,transparent,rgba(19,78,74,.34));
+  --home-choice-bg:#0f3f3c;
+  --home-choice-step:#0f766e;
+  --home-choice-step-alt:#0d9488;
+  --home-choice-overlay:linear-gradient(180deg,rgba(13,148,136,.22),rgba(19,78,74,.58));
+  --home-choice-overlay-alt:linear-gradient(180deg,rgba(15,118,110,.22),rgba(19,78,74,.58));
+  --home-choice-body:linear-gradient(180deg,rgba(15,63,60,.32),rgba(19,78,74,.82))
+}
 
 .support-shot{margin:14px 0 8px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#0b1220}
 .support-shot img{width:100%;height:auto;display:block;vertical-align:middle}
