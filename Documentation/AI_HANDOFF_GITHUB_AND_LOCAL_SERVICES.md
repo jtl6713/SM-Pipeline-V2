@@ -34,6 +34,7 @@ Read these before making changes:
 | 4 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 |
 | 5 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 |
 | 5b | YouTube Uploader NYC | `services/youtube-uploader` | `Services\youtube-uploader-nyc\service` | 3342 |
+| 5c | YouTube Uploader Miami | `services/youtube-uploader` | `Services\youtube-uploader-miami\service` | 3343 |
 | 6 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 |
 | 7 | Video Compressor | `services/video-compressor` | `Services\Video_Compressor` | 3335 |
 | 8 | Timing Engine | `services/timing-engine` | `Services\timing-engine\service` | 3336 |
@@ -48,6 +49,7 @@ Required window titles remain `1 LOC` through `8 LOC` with those ports. Video Co
 - `https://voiceover.chicagoshining.com`
 - `https://youtube-upload.chicagoshining.com`
 - `https://youtube-upload-nyc.chicagoshining.com`
+- `https://youtube-upload-miami.chicagoshining.com`
 - `https://pipeline.chicagoshining.com`
 - `https://compress.chicagoshining.com`
 - `https://timing.chicagoshining.com`

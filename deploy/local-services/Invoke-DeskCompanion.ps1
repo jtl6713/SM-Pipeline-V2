@@ -35,6 +35,7 @@ $HealthTargets = @(
     @{ Id = 'voiceover-normalizer'; Url = 'https://voiceover.chicagoshining.com/health'; Service = 'voiceover-normalizer' }
     @{ Id = 'youtube-uploader'; Url = 'https://youtube-upload.chicagoshining.com/health'; Service = 'youtube-uploader' }
     @{ Id = 'youtube-uploader-nyc'; Url = 'https://youtube-upload-nyc.chicagoshining.com/health'; Service = 'youtube-uploader-nyc' }
+    @{ Id = 'youtube-uploader-miami'; Url = 'https://youtube-upload-miami.chicagoshining.com/health'; Service = 'youtube-uploader-miami' }
 )
 
 function Get-DeskRank([string]$Mode) {
@@ -131,6 +132,7 @@ $RuntimePaths = @{
     'voiceover-normalizer' = 'Services\voiceover-normalizer\service'
     'youtube-uploader' = 'Services\youtube-uploader\service'
     'youtube-uploader-nyc' = 'Services\youtube-uploader-nyc\service'
+    'youtube-uploader-miami' = 'Services\youtube-uploader-miami\service'
     'pipeline-runner' = 'Services\pipeline-runner\service'
     'timing-engine' = 'Services\timing-engine\service'
 }
@@ -263,7 +265,7 @@ if ($git.Dirty) {
 }
 
 $behind = New-Object System.Collections.Generic.List[string]
-foreach ($svc in @('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','pipeline-runner','timing-engine')) {
+foreach ($svc in @('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','youtube-uploader-miami','pipeline-runner','timing-engine')) {
     $live = Get-LiveDeployedCommit $svc
     if (Test-LiveBehindOriginMain $live $git.OriginMain) {
         Write-Host ("  {0} live={1} origin/main={2} (behind)" -f $svc, $live.Substring(0, [Math]::Min(12, $live.Length)), $git.OriginMain.Substring(0, 12))

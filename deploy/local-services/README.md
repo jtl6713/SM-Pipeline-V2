@@ -25,6 +25,7 @@ For the complete operator and AI-handoff procedure, read:
 | Voiceover Normalizer | `services/voiceover-normalizer` | `Services\voiceover-normalizer\service` | 3012 |
 | YouTube Uploader | `services/youtube-uploader` | `Services\youtube-uploader\service` | 3340 |
 | YouTube Uploader NYC | `services/youtube-uploader` | `Services\youtube-uploader-nyc\service` | 3342 |
+| YouTube Uploader Miami | `services/youtube-uploader` | `Services\youtube-uploader-miami\service` | 3343 |
 | Pipeline Runner | `services/pipeline-runner` | `Services\pipeline-runner\service` | 3350 |
 | Ops Dashboard | `services/ops-dashboard` | `Services\ops-dashboard` | 3361 |
 

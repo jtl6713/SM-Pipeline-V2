@@ -22,6 +22,7 @@ Linux/ARM containers for a free-tier VM live next to each service (`Dockerfile`)
 | Voiceover Normalizer | `services/voiceover-normalizer/` | `Services\voiceover-normalizer\service` | 3012 | Source captured and controlled deployment validated. |
 | YouTube Uploader | `services/youtube-uploader/` | `Services\youtube-uploader\service` | 3340 | Source captured and controlled deployment validated; `.env`, OAuth material, and runtime job data remain local only. |
 | YouTube Uploader NYC | `services/youtube-uploader/` | `Services\youtube-uploader-nyc\service` | 3342 | Same Git source as Chicago; separate `.env` refresh token and `data/youtube-jobs.json`. Public route `youtube-upload-nyc.chicagoshining.com`. |
+| YouTube Uploader Miami | `services/youtube-uploader/` | `Services\youtube-uploader-miami\service` | 3343 | Same Git source as Chicago; separate `.env` refresh token and `data/youtube-jobs.json`. Public route `youtube-upload-miami.chicagoshining.com`. |
 | Pipeline Runner | `services/pipeline-runner/` | `Services\pipeline-runner\service` | 3350 | Source controlled; retain existing deployment/health contract. |
 | Video Compressor | `services/video-compressor/` | `Services\Video_Compressor` | 3335 | Deployed and integrated with central start/stop/verify; authenticated private-Drive A1 compression proven end to end. |
 | Ops Dashboard | `services/ops-dashboard/` | `Services\ops-dashboard` | 3361 | Operator site for START/STOP/VERIFY/SYNC/PLAN/DEPLOY. Local `:3361`; optional `ops.chicagoshining.com` behind Cloudflare Access + token. |

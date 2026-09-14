@@ -32,6 +32,7 @@ $HealthTargets = @(
     'https://voiceover.chicagoshining.com/health'
     'https://youtube-upload.chicagoshining.com/health'
     'https://youtube-upload-nyc.chicagoshining.com/health'
+    'https://youtube-upload-miami.chicagoshining.com/health'
 )
 
 function Test-PublicHealth([string]$Url) {
