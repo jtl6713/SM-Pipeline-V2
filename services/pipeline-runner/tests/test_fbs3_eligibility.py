@@ -92,6 +92,10 @@ def test_fbs4_status_rules():
     assert reel_is_ready({"status": {"publishing_phase": {"status": "complete"}}})
     assert reel_is_ready({"status": {"video_status": "ready"}})
     assert not reel_is_ready({"status": {"video_status": "processing"}})
+    assert not reel_is_ready({
+        "permalink_url": "https://www.facebook.com/reel/1/",
+        "status": {"video_status": "processing"},
+    })
     assert reel_is_terminal_error({"status": {"video_status": "error"}}, 200)
     assert reel_is_terminal_error({"error": {"message": "bad request"}}, 400)
     assert not reel_is_terminal_error({"status": {"video_status": "processing"}}, 200)

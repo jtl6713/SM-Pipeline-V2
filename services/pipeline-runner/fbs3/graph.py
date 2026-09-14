@@ -144,10 +144,32 @@ class FacebookReelClient:
         return response.status_code, data
 
     def attach_thumbnail(self, video_id: str, thumbnail_url: str) -> dict[str, Any]:
+        image = requests.get(str(thumbnail_url or "").strip(), timeout=60)
+        if not image.ok or not image.content:
+            raise FacebookReelError(
+                f"cover download {image.status_code}",
+                status_code=image.status_code,
+                payload={"error": {"message": f"Could not download cover ({image.status_code})"}},
+                stage="FBS3_THUMBNAIL",
+            )
+        mime = (image.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip() or "image/jpeg"
+        body = image.content
+        filename = "cover.jpg"
+        if "png" in mime or str(thumbnail_url).lower().endswith(".png"):
+            try:
+                from ap0.public_cover import cover_as_jpeg
+
+                body, mime = cover_as_jpeg(body)
+            except Exception:
+                filename = "cover.png"
+                mime = mime if "png" in mime else "image/png"
+        elif "jpeg" not in mime and "jpg" not in mime:
+            filename = "cover.bin"
         response = requests.post(
             self._url(f"{video_id}/thumbnails"),
-            params={"is_preferred": "true", "url": thumbnail_url},
+            params={"is_preferred": "true"},
             headers={"Authorization": f"Bearer {self._token}"},
+            files={"source": (filename, body, mime)},
             timeout=60,
         )
         data = response.json() if response.content else {}

@@ -360,7 +360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.310-yt-skip-list-finalize",
+          version: "0.10.311-fb-cover-multipart",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -3134,6 +3134,7 @@ function studioThemeForProfile(record) {
   ].map((value) => String(value || "").toLowerCase()).join(" ");
   if (hay.includes("los angeles") || hay.includes("la shining") || hay.includes("la -") || /\bla\b/.test(hay) || hay.includes("hollywood")) return "la";
   if (hay.includes("new york") || hay.includes("nyc") || hay.includes("manhattan")) return "nyc";
+  if (hay.includes("miami") || hay.includes("miami shining")) return "miami";
   return "chicago";
 }
 
@@ -3164,6 +3165,7 @@ async function studioThemeForPublishRecord(env, record) {
 function studioCityLabel(theme, record) {
   if (theme === "la") return "Los Angeles";
   if (theme === "nyc") return "New York";
+  if (theme === "miami") return "Miami";
   const market = String(f(record, "Market_Name") || "").trim();
   if (market) return market;
   return "Chicago";
@@ -14563,12 +14565,14 @@ function studioNormalizeSimilarProfile(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (raw === "la" || raw === "los angeles" || raw === "losangeles") return "la";
   if (raw === "nyc" || raw === "new york" || raw === "newyork") return "nyc";
+  if (raw === "miami" || raw === "miami shining" || raw === "miamishining") return "miami";
   return "chicago";
 }
 
 function studioSimilarProfileLabel(theme) {
   if (theme === "la") return "Los Angeles";
   if (theme === "nyc") return "New York";
+  if (theme === "miami") return "Miami";
   return "Chicago";
 }
 
@@ -14708,7 +14712,7 @@ async function studioEnsureSimilarWatchlist(env) {
 
 async function studioResolveSimilarTimesTheme(env, url, authorization) {
   const raw = String(url?.searchParams?.get("profile") || url?.searchParams?.get("theme") || "").trim();
-  if (["chicago", "la", "nyc"].includes(raw.toLowerCase())) return raw.toLowerCase();
+  if (["chicago", "la", "nyc", "miami"].includes(raw.toLowerCase())) return raw.toLowerCase();
   if (/^rec[A-Za-z0-9]+$/.test(raw) && authorization) {
     const profiles = await resolveAuthorizedContentProfiles(env, authorization).catch(() => []);
     const found = profiles.find((record) => record.id === raw);
@@ -23765,7 +23769,7 @@ async function studioActivePipelineSettings(env, names, contextRecord) {
   const wanted = [...new Set((names || []).map((name) => String(name || "").trim()).filter(Boolean))];
   if (!wanted.length) return {};
   const theme = contextRecord ? await studioThemeForPublishRecord(env, contextRecord) : "chicago";
-  const prefix = theme === "la" ? "LA_" : theme === "nyc" ? "NYC_" : "";
+  const prefix = theme === "la" ? "LA_" : theme === "nyc" ? "NYC_" : theme === "miami" ? "MIAMI_" : "";
   const fetchNames = [...wanted];
   if (prefix) {
     for (const name of wanted) fetchNames.push(`${prefix}${name}`);
@@ -23831,6 +23835,13 @@ function studioFacebookVideoSurface(record) {
     || outputType === "Story";
 }
 
+function studioFacebookNativeCoverRequired(record) {
+  const mapping = String(f(record, "Platform_Output_Type") || "").trim();
+  const outputType = String(f(record, "Studio_Output_Type") || "").trim();
+  if (mapping === "Facebook Story" || outputType === "Story") return false;
+  return mapping === "Facebook Reel" || outputType === "Slideshow Reel";
+}
+
 function studioFacebookNativeCoverUrl(record) {
   const thumb = studioAiThumbnailUrl(f(record, "Thumbnail_URL"));
   const staged = studioClipPublicCdnUrl(thumb) || (item4UrlIsPublicPublishCdn(thumb) ? thumb : "");
@@ -23852,7 +23863,7 @@ async function studioAttachFacebookNativeCover(env, record) {
   if (String(f(record, "Platform") || "").trim() !== "Facebook") {
     return { ok: true, skipped: "not-facebook" };
   }
-  if (!studioFacebookVideoSurface(record)) return { ok: true, skipped: "not-facebook-video" };
+  if (!studioFacebookNativeCoverRequired(record)) return { ok: true, skipped: "not-facebook-reel" };
   if (Boolean(f(record, "Do_Not_Publish"))) return { ok: true, skipped: "do-not-publish" };
   if (studioFacebookCoverAlreadyAttached(record)) return { ok: true, skipped: "already-attached" };
   const videoId = studioFacebookVideoId(record);
@@ -23867,19 +23878,24 @@ async function studioAttachFacebookNativeCover(env, record) {
   const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
   if (!token) return { ok: false, skipped: "missing-facebook-settings" };
   const endpoint = `https://graph.facebook.com/${version}/${videoId}/thumbnails`;
-  const attempts = [
-    { is_preferred: "true", url: coverUrl },
-    { is_preferred: "true", source: coverUrl },
-  ];
-  let last = { status: 0, payload: {} };
-  for (const params of attempts) {
-    const response = await fetch(`${endpoint}?${new URLSearchParams(params).toString()}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const payload = await response.json().catch(() => ({}));
-    last = { status: response.status, payload };
-    if (response.ok && !payload?.error) {
+  const image = await fetch(coverUrl);
+  if (!image.ok) {
+    return { ok: false, video_id: videoId, cover_url: coverUrl, status: image.status, message: `cover download ${image.status}` };
+  }
+  const bytes = await image.arrayBuffer();
+  const rawType = String(image.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  const isPng = rawType.includes("png") || /\.png(\?|$)/i.test(coverUrl);
+  const mime = isPng ? "image/png" : "image/jpeg";
+  const form = new FormData();
+  form.append("source", new Blob([bytes], { type: mime }), isPng ? "cover.png" : "cover.jpg");
+  const response = await fetch(`${endpoint}?${new URLSearchParams({ is_preferred: "true" }).toString()}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const payload = await response.json().catch(() => ({}));
+  const last = { status: response.status, payload };
+  if (response.ok && !payload?.error) {
       const published = /published/i.test(String(f(record, "Publish_Status") || "")) || Boolean(f(record, "Published_At"));
       const note = [String(f(record, "Studio_Publish_Dispatch_Note") || "").trim(), STUDIO_FB_COVER_ATTACHED_MARK]
         .filter(Boolean)
@@ -23911,8 +23927,7 @@ async function studioAttachFacebookNativeCover(env, record) {
           },
         }),
       });
-      return { ok: true, attached: true, video_id: videoId, cover_url: coverUrl, status: response.status };
-    }
+    return { ok: true, attached: true, video_id: videoId, cover_url: coverUrl, status: response.status };
   }
   const message = last.payload?.error?.message || `thumbnail attach ${last.status}`;
   if (!/published/i.test(String(f(record, "Publish_Status") || "")) && !f(record, "Published_At")) {
@@ -26232,12 +26247,12 @@ async function studioReconcileFacebookPublicMake(env, options = {}) {
 }
 
 async function studioReconcileFacebookVideoCovers(env, options = {}) {
-  const limit = Number(options.limit || 3);
+  const limit = Number(options.limit || 8);
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
       limit,
-      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,OR({Platform_Post_ID}!="",{FB_Slideshow_Meta_Video_ID}!=""),OR({Platform_Output_Type}="Facebook Reel",{Platform_Output_Type}="Facebook Story",{Studio_Output_Type}="Slideshow Reel",{Studio_Output_Type}="Story"))',
+      filterFormula: 'AND({Test_Run_ID}=BLANK(),{Platform}="Facebook",{Do_Not_Publish}=0,OR({Platform_Post_ID}!="",{FB_Slideshow_Meta_Video_ID}!=""),OR({Platform_Output_Type}="Facebook Reel",{Studio_Output_Type}="Slideshow Reel"),FIND("facebook-cover=attached",{Studio_Publish_Dispatch_Note}&"")=0)',
     });
   } catch (error) {
     console.warn("facebook native cover reconcile scan failed", error);
@@ -26245,7 +26260,7 @@ async function studioReconcileFacebookVideoCovers(env, options = {}) {
   }
   const results = [];
   for (const row of rows) {
-    if (!studioFacebookVideoSurface(row) || studioFacebookCoverAlreadyAttached(row)) continue;
+    if (!studioFacebookNativeCoverRequired(row) || studioFacebookCoverAlreadyAttached(row)) continue;
     if (!studioFacebookVideoId(row) || !studioFacebookNativeCoverUrl(row)) continue;
     try {
       const attached = await studioAttachFacebookNativeCover(env, row);

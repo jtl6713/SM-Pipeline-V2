@@ -56,12 +56,15 @@ def _phase_status(status: Any, key: str) -> str:
 
 
 def reel_is_ready(data: dict[str, Any]) -> bool:
-    if str(data.get("permalink_url") or "").strip():
-        return True
     status = data.get("status") if isinstance(data.get("status"), dict) else {}
+    video_status = _ci(status.get("video_status"))
+    if video_status in {"processing", "uploading"}:
+        return False
     if _phase_status(status, "publishing_phase") == "complete":
         return True
-    return _ci(status.get("video_status")) == "ready"
+    if video_status == "ready":
+        return True
+    return bool(str(data.get("permalink_url") or "").strip())
 
 
 def reel_permalink(data: dict[str, Any], video_id: str) -> str:
@@ -134,14 +137,23 @@ def process_request(
         # Cover attach is best-effort. Holding still_processing here left already-live
         # reels (and Publish_Status=Published zombies) burning the FBS4 cron budget so
         # Published Pending Finalize rows never got a poll slot.
-        thumbnail_ok = _attach_thumbnail(graph, client, output, video_id)
+        thumbnail_ok, thumbnail_error = _attach_thumbnail(graph, client, output, video_id)
         permalink = reel_permalink(data, video_id)
-        _mark_published(client, output, video_id, data, permalink=permalink, thumbnail_ok=thumbnail_ok)
+        _mark_published(
+            client,
+            output,
+            video_id,
+            data,
+            permalink=permalink,
+            thumbnail_ok=thumbnail_ok,
+            thumbnail_error=thumbnail_error,
+        )
         return {
             "processed": True,
             "video_id": video_id,
             "permalink": permalink,
             "thumbnail_ok": thumbnail_ok,
+            "thumbnail_error": thumbnail_error,
             **preview,
         }
     if reel_is_terminal_error(data, status_code):
@@ -152,21 +164,26 @@ def process_request(
     return {"processed": True, "still_processing": True, "status_code": status_code, **preview}
 
 
-def _attach_thumbnail(graph: FacebookReelClient, client: AirtableClient, output: dict[str, Any], video_id: str) -> bool:
+def _attach_thumbnail(
+    graph: FacebookReelClient,
+    client: AirtableClient,
+    output: dict[str, Any],
+    video_id: str,
+) -> tuple[bool, str]:
     from ap0.public_cover import ensure_public_cover_url, graph_fetchable_cover_url
 
     try:
-        ensure_public_cover_url(client, output)
-    except Exception:
-        return False
+        ensure_public_cover_url(client, output, prefer_jpeg=True)
+    except Exception as exc:
+        return False, str(exc)
     thumbnail_url = graph_fetchable_cover_url(field_str(output, "Thumbnail_URL"))
     if not thumbnail_url:
-        return False
+        return False, "missing_public_cover"
     try:
         graph.attach_thumbnail(video_id, thumbnail_url)
-        return True
-    except Exception:
-        return False
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
 
 
 def _published_at(data: dict[str, Any]) -> str:
@@ -191,8 +208,12 @@ def _mark_published(
     *,
     permalink: str,
     thumbnail_ok: bool,
+    thumbnail_error: str = "",
 ) -> None:
     post_id = str(data.get("id") or video_id).strip() or video_id
+    note = field_str(output, "Studio_Publish_Dispatch_Note")
+    if thumbnail_ok and "facebook-cover=attached" not in note:
+        note = "\n".join(part for part in (note, "facebook-cover=attached") if part)
     client.update_record(
         PLATFORM_OUTPUTS_TABLE,
         output["id"],
@@ -213,7 +234,9 @@ def _mark_published(
             "FB_Slideshow_Meta_Video_ID": post_id,
             "FB_Slideshow_Response_JSON": (
                 f"{data} Native grid cover attach: {'ok' if thumbnail_ok else 'failed'}."
+                + (f" {thumbnail_error}" if thumbnail_error and not thumbnail_ok else "")
             ),
+            **({"Studio_Publish_Dispatch_Note": note[:900]} if thumbnail_ok and note else {}),
         },
         typecast=True,
     )
