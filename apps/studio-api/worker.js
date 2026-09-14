@@ -14559,6 +14559,23 @@ const STUDIO_SIMILAR_SEEDS = Object.freeze([
   { platform: "facebook", handle: "nycgo", source: "research", profile: "nyc" },
   { platform: "facebook", handle: "metmuseum", source: "research", profile: "nyc" },
   { platform: "facebook", handle: "MoMATheMuseumofModernArt", source: "research", profile: "nyc" },
+  { platform: "instagram", handle: "miamiandbeaches", source: "research", profile: "miami" },
+  { platform: "instagram", handle: "timeoutmiami", source: "research", profile: "miami" },
+  { platform: "instagram", handle: "wynwoodmiami", source: "research", profile: "miami" },
+  { platform: "instagram", handle: "vizcayamuseum", source: "research", profile: "miami" },
+  { platform: "instagram", handle: "pamm", source: "research", profile: "miami" },
+  { platform: "instagram", handle: "eater_miami", source: "research", profile: "miami" },
+  { platform: "instagram", handle: "southbeach", source: "research", profile: "miami" },
+  { platform: "instagram", handle: "brickell", source: "research", profile: "miami" },
+  { platform: "youtube", handle: "MiamiandBeaches", source: "research", profile: "miami" },
+  { platform: "youtube", handle: "TimeOutMiami", source: "research", profile: "miami" },
+  { platform: "youtube", handle: "VisitFlorida", source: "research", profile: "miami" },
+  { platform: "tiktok", handle: "miamiandbeaches", source: "research", profile: "miami" },
+  { platform: "tiktok", handle: "timeoutmiami", source: "research", profile: "miami" },
+  { platform: "tiktok", handle: "wynwoodmiami", source: "research", profile: "miami" },
+  { platform: "facebook", handle: "MiamiandBeaches", source: "research", profile: "miami" },
+  { platform: "facebook", handle: "VizcayaMuseum", source: "research", profile: "miami" },
+  { platform: "facebook", handle: "PAMM", source: "research", profile: "miami" },
 ]);
 
 function studioNormalizeSimilarProfile(value) {

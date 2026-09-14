@@ -309,6 +309,7 @@
     chicago: "#e8eef6",
     la: "#f6e8e8",
     nyc: "#f5f2fa",
+    miami: "#e6f4f2",
   };
 
   function normalizeStudioBackgroundColor(value) {
