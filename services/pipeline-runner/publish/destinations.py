@@ -1,4 +1,4 @@
-"""City-prefixed publish credentials. LA/NYC destination keys never fall back to Chicago."""
+"""City-prefixed publish credentials. LA/NYC/Miami destination keys never fall back to Chicago."""
 
 from __future__ import annotations
 
@@ -31,6 +31,8 @@ def setting_prefix(theme: str) -> str:
         return "LA_"
     if theme == "nyc":
         return "NYC_"
+    if theme == "miami":
+        return "MIAMI_"
     return ""
 
 
@@ -74,6 +76,8 @@ def theme_from_records(*records: dict[str, Any] | None) -> str:
         return "la"
     if "new york" in hay or "nyc" in hay or "manhattan" in hay:
         return "nyc"
+    if "miami" in hay or "miami shining" in hay:
+        return "miami"
     return "chicago"
 
 

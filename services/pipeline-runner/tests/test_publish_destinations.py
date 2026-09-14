@@ -13,6 +13,14 @@ def test_theme_la_from_profile_name():
     assert theme_from_records({"fields": {"Profile_Name": "LA - Los Angeles"}}) == "la"
 
 
+def test_theme_miami_from_profile_name():
+    assert theme_from_records({"fields": {"Profile_Name": "Miami - Miami"}}) == "miami"
+
+
+def test_theme_miami_from_brand_name():
+    assert theme_from_records({"fields": {"Brand_Name": "Miami Shining"}}) == "miami"
+
+
 def test_theme_chicago_does_not_match_la_word():
     assert theme_from_records({"fields": {"Market_Name": ["Chicago"]}}) == "chicago"
 
@@ -31,11 +39,35 @@ def test_la_tiktok_url_never_falls_back_to_chicago():
     assert destination_value(empty, "TIKTOK_WORKER_BASE_URL", "la") == ""
 
 
+def test_miami_tiktok_url_never_falls_back_to_chicago():
+    settings = FakeSettings(
+        {
+            "TIKTOK_WORKER_BASE_URL": "https://auth.chicagoshining.com",
+            "MIAMI_TIKTOK_WORKER_BASE_URL": "https://auth-miami.chicagoshining.com",
+        }
+    )
+    assert destination_value(settings, "TIKTOK_WORKER_BASE_URL", "miami") == (
+        "https://auth-miami.chicagoshining.com"
+    )
+    empty = FakeSettings({"TIKTOK_WORKER_BASE_URL": "https://auth.chicagoshining.com"})
+    assert destination_value(empty, "TIKTOK_WORKER_BASE_URL", "miami") == ""
+
+
 def test_shared_secret_falls_back_for_la():
     settings = FakeSettings({"TIKTOK_PIPELINE_SECRET": "shared"})
     assert destination_value(settings, "TIKTOK_PIPELINE_SECRET", "la") == "shared"
 
 
+def test_shared_secret_falls_back_for_miami():
+    settings = FakeSettings({"TIKTOK_PIPELINE_SECRET": "shared"})
+    assert destination_value(settings, "TIKTOK_PIPELINE_SECRET", "miami") == "shared"
+
+
 def test_resolve_theme_from_output_market_lookup():
     output = {"id": "recOut", "fields": {"Market_Name": ["Los Angeles"]}}
     assert resolve_publish_theme(output=output) == "la"
+
+
+def test_resolve_theme_from_miami_market():
+    output = {"id": "recOut", "fields": {"Market_Name": ["Miami"]}}
+    assert resolve_publish_theme(output=output) == "miami"
