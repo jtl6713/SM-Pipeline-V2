@@ -1,0 +1,23 @@
+﻿{
+  "name": "chicagoshining-tiktok-auth-miami",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-25",
+  "account_id": "cbb5651c94e9bd2efc4594dc87229acb",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "auth-miami.chicagoshining.com",
+      "custom_domain": true
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "TIKTOK_AUTH",
+      "id": "REPLACE_WITH_MIAMI_TIKTOK_AUTH_KV_ID"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

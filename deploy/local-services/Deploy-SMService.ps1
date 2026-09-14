@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','pipeline-runner','timing-engine','ops-dashboard')]
+    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','youtube-uploader-miami','pipeline-runner','timing-engine','ops-dashboard')]
     [string]$Service,
 
     [string]$Commit = '',
@@ -101,6 +101,18 @@ $ServiceMap = @{
         DependencyKind = 'node'
         RuntimeDirs = @('node_modules','data','tmp','temp','logs','uploads','downloads')
     }
+    'youtube-uploader-miami' = @{
+        DisplayName = 'YouTube Uploader Miami'
+        RepoPath = 'services\youtube-uploader'
+        RuntimePath = 'Services\youtube-uploader-miami\service'
+        Port = 3343
+        PublicUrl = 'https://youtube-upload-miami.chicagoshining.com'
+        WindowTitle = '5c LOC YouTube Uploader Miami :3343'
+        StartKind = 'node'
+        StartFile = 'youtube-upload-service.js'
+        DependencyKind = 'node'
+        RuntimeDirs = @('node_modules','data','tmp','temp','logs','uploads','downloads')
+    }
     'pipeline-runner' = @{
         DisplayName = 'Pipeline Runner'
         RepoPath = 'services\pipeline-runner'
@@ -195,11 +207,12 @@ function Select-Service {
     Write-Host '  4  Voiceover Normalizer'
     Write-Host '  5  YouTube Uploader (Chicago)'
     Write-Host '  5n YouTube Uploader NYC'
+    Write-Host '  5m YouTube Uploader Miami'
     Write-Host '  6  Pipeline Runner'
     Write-Host '  7  Timing Engine'
     Write-Host '  10 Ops Dashboard'
     Write-Host ''
-    $choice = Read-Host 'Enter 1-7, 5n, or 10'
+    $choice = Read-Host 'Enter 1-7, 5n, 5m, or 10'
     switch ($choice) {
         '1' { return 'frame-extractor' }
         '2' { return 'remotion-renderer' }
@@ -207,6 +220,7 @@ function Select-Service {
         '4' { return 'voiceover-normalizer' }
         '5' { return 'youtube-uploader' }
         '5n' { return 'youtube-uploader-nyc' }
+        '5m' { return 'youtube-uploader-miami' }
         '6' { return 'pipeline-runner' }
         '7' { return 'timing-engine' }
         '10' { return 'ops-dashboard' }
