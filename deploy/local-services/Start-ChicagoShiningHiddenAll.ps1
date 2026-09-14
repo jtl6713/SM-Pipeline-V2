@@ -21,6 +21,7 @@ $order = @(
     'voiceover-normalizer',
     'youtube-uploader',
     'youtube-uploader-nyc',
+    'youtube-uploader-miami',
     'pipeline-runner',
     'video-compressor',
     'timing-engine',
@@ -39,6 +40,7 @@ $ports = @{
     'voiceover-normalizer' = 3012
     'youtube-uploader' = 3340
     'youtube-uploader-nyc' = 3342
+    'youtube-uploader-miami' = 3343
     'pipeline-runner' = 3350
     'video-compressor' = 3335
     'timing-engine' = 3336
@@ -48,6 +50,7 @@ $ports = @{
 
 $optionalUntilPresent = @{
     'youtube-uploader-nyc' = 'Services\youtube-uploader-nyc\service\youtube-upload-service.js'
+    'youtube-uploader-miami' = 'Services\youtube-uploader-miami\service\youtube-upload-service.js'
     'timing-engine' = 'Services\timing-engine\service\app.py'
     'task-organizer' = 'Source Control\chicago-shining-task-organizer'
     'ops-dashboard' = 'Source Control\SM-Pipeline-V2\services\ops-dashboard\server.js'

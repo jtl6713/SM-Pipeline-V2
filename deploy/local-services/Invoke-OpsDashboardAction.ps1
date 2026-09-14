@@ -40,6 +40,7 @@ $Deployable = @(
     'voiceover-normalizer',
     'youtube-uploader',
     'youtube-uploader-nyc',
+    'youtube-uploader-miami',
     'pipeline-runner',
     'timing-engine',
     'ops-dashboard'
@@ -54,6 +55,7 @@ $Ports = @{
     'voiceover-normalizer' = 3012
     'youtube-uploader' = 3340
     'youtube-uploader-nyc' = 3342
+    'youtube-uploader-miami' = 3343
     'pipeline-runner' = 3350
     'video-compressor' = 3335
     'timing-engine' = 3336

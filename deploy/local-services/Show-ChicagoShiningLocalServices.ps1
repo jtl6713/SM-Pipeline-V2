@@ -8,6 +8,7 @@ $rows = @(
     @{ Name = 'Voiceover Normalizer'; Port = 3012 }
     @{ Name = 'YouTube Uploader Chicago'; Port = 3340 }
     @{ Name = 'YouTube Uploader NYC'; Port = 3342 }
+    @{ Name = 'YouTube Uploader Miami'; Port = 3343 }
     @{ Name = 'Pipeline Runner'; Port = 3350 }
     @{ Name = 'Video Compressor'; Port = 3335 }
     @{ Name = 'Timing Engine'; Port = 3336 }
