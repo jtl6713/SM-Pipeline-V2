@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.318-manual-analytics";
+  const BUILD_ID = "item4-0.6.319-multi-clips";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14770,12 +14770,28 @@
       input.accept = libraryPhotoAccept();
     });
     libraryClipInputs().forEach((input) => {
-      input.multiple = !phone;
+      // Same multi-select path as photos so Asset name can number Clip 1, 2, …
+      input.multiple = true;
       input.accept = libraryClipAccept();
     });
+    const chooseClip = $("libraryChooseClip");
+    if (chooseClip) {
+      const labelText = chooseClip.childNodes?.[0];
+      if (labelText && labelText.nodeType === Node.TEXT_NODE) {
+        labelText.textContent = "Choose clips";
+      } else if (!/choose clips/i.test(chooseClip.textContent || "")) {
+        chooseClip.childNodes.forEach((node) => {
+          if (node.nodeType === Node.TEXT_NODE && /choose clip/i.test(node.textContent || "")) {
+            node.textContent = "Choose clips";
+          }
+        });
+      }
+    }
     const hint = $("libraryUploadHint");
-    if (hint && phone) {
-      hint.textContent = "Select multiple photos in Photo Library. Clips one at a time. JPG, PNG, WEBP, HEIC, MP4, MOV · 25 MB photos · 100 MB clips";
+    if (hint) {
+      hint.textContent = phone
+        ? "Select multiple photos or clips. Optional Asset name numbers them in order. JPG, PNG, WEBP, HEIC, MP4, MOV · 25 MB photos · 100 MB clips"
+        : "JPG, PNG, WEBP, HEIC, MP4, MOV · select multiple photos or clips · optional Asset name numbers them in order · 25 MB photos · 100 MB clips";
     }
     ["libraryBatchName", "libraryLocation"].forEach((id) => {
       $(id)?.addEventListener("input", () => {
@@ -14792,7 +14808,7 @@
       window.setTimeout(() => {
         if (!libraryPickerWasAbandoned()) return;
         libraryDisarmPicker();
-        setLibraryUploadMessage("Photo Library closed before Studio received the clips. On iPhone add one clip at a time and keep this tab open.", "error-text");
+        setLibraryUploadMessage("Photo Library closed before Studio received the clips. Keep this tab open, then choose the clips again.", "error-text");
       }, 400);
     });
     zone?.addEventListener("keydown", (event) => {

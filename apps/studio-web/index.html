@@ -1056,14 +1056,14 @@
  <div class="item4-upload-zone music-upload-zone" id="libraryUploadZone" tabindex="0" role="button" aria-label="Upload photos or video clips">
  <input id="libraryZoneInput" class="native-file-input native-file-input--cover" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple>
  <div class="item4-upload-icon">＋</div>
- <div><strong>Drop photos or clips here or choose files</strong><span id="libraryUploadHint">JPG, PNG, WEBP, HEIC, MP4, MOV · select multiple photos · 25 MB photos · 100 MB clips</span></div>
+ <div><strong>Drop photos or clips here or choose files</strong><span id="libraryUploadHint">JPG, PNG, WEBP, HEIC, MP4, MOV · select multiple photos or clips · optional Asset name numbers them in order · 25 MB photos · 100 MB clips</span></div>
  <div class="library-choose-row">
  <label class="secondary-button native-file-label" id="libraryChooseFiles">Choose photos<input id="libraryChooseInput" class="native-file-input" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple></label>
- <label class="secondary-button native-file-label" id="libraryChooseClip">Choose clip<input id="libraryClipInput" class="native-file-input" type="file" accept="video/*,.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime"></label>
+ <label class="secondary-button native-file-label" id="libraryChooseClip">Choose clips<input id="libraryClipInput" class="native-file-input" type="file" accept="video/*,.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime" multiple></label>
  </div>
  </div>
  <div class="library-upload-fields">
- <label class="form-field music-upload-name"><span>Asset name <em>optional — numbers each file (<span data-library-example-name>Space Museum</span> 1, 2…) and continues after names already in the catalog</em></span><input id="libraryBatchName" type="text" maxlength="120" placeholder="Space Museum" autocomplete="off" enterkeyhint="done"></label>
+ <label class="form-field music-upload-name"><span>Asset name <em>optional — numbers each photo or clip (<span data-library-example-name>Space Museum</span> 1, 2…) and continues after names already in the catalog</em></span><input id="libraryBatchName" type="text" maxlength="120" placeholder="Space Museum" autocomplete="off" enterkeyhint="done"></label>
  <label class="form-field music-upload-name"><span>Location <em>optional</em></span><input id="libraryLocation" maxlength="120" placeholder="Oak Street Beach"></label>
  </div>
  <div class="form-message" id="libraryUploadMessage" aria-live="polite"></div>
@@ -1537,7 +1537,7 @@
  <p>Asset Manager is the Drive DAM catalogue of stills and Raw Footage. Music stays on its own tab.</p>
  <ul>
  <li>The tab opens on the 5 newest assets. Cards show an Added date when Intake_Date is known, file size when File_Size_Bytes or File_Size_MB is stored, and clips show duration (0:42 or 1:02:03) when Duration_Seconds is stored or can be measured. Use Show this many on page, then Previous and Next. Search by name or location. Opening the tab does not load every thumbnail.</li>
- <li>Use + Add assets or drop files on this page. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
+ <li>Use + Add assets or drop files on this page. Choose photos or Choose clips both allow multiple files. Optional Asset name numbers them in order (Space Museum 1, 2…) and continues after matching names already in the catalog. Photos go to the Drive photos folder; clips go to the video folder. Studio writes a Media Asset and does not keep a catalog copy on R2.</li>
  <li>Files dropped in the Drive ingestion folder stay Needs Classification until you assign a Content Profile on the card. That assignment starts AI tagging for that city library.</li>
  <li>Rename updates the Airtable name and the Drive file, then re-runs classification so tags, location, and description pick up the new name. Rename still needs a profile first.</li>
  <li>Delete removes the Airtable row and trashes the Drive file when nothing still has that asset attached.</li>
@@ -1678,7 +1678,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.318</span> </div>
+ <span id="uiBuildLabel">UI build 0.6.319</span> </div>
  </footer>
 
  <div class="drawer-backdrop" id="ideaDrawerBackdrop" hidden></div>
@@ -1824,8 +1824,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.318-manual-analytics"></script>
+ <script src="/assets/config-0621.js?v=0.6.319-multi-clips"></script>
  <script src="/assets/ez-plan.js?v=0.6.315-suggest-7d"></script>
- <script src="/assets/app-item4-0621.js?v=0.6.318-manual-analytics"></script>
+ <script src="/assets/app-item4-0621.js?v=0.6.319-multi-clips"></script>
 </body>
 </html>
