@@ -24,6 +24,33 @@ def clips_have_video(clips: list[dict[str, Any]]) -> bool:
     return any(is_video_clip(clip) for clip in clips)
 
 
+def unique_video_usable_seconds(clips: list[dict[str, Any]], *, fps: int = FPS_DEFAULT) -> float:
+    """Sum unique video source spans. Duplicate rows of the same file count once."""
+    spans: dict[str, float] = {}
+    for index, clip in enumerate(clips):
+        if not is_video_clip(clip):
+            continue
+        key = source_key(clip) or f"video:{index}"
+        start, end = _source_span(clip, fps)
+        spans[key] = max(spans.get(key, 0.0), max(0.0, end - start))
+    return float(sum(spans.values()))
+
+
+def photo_floor_seconds(clips: list[dict[str, Any]], *, fps: int = FPS_DEFAULT) -> float:
+    total = 0.0
+    for clip in clips:
+        if is_video_clip(clip):
+            continue
+        frames = int(clip.get("durationFrames") or clip.get("duration_frames") or 0)
+        if frames > 0:
+            total += frames / max(1, fps)
+    return float(total)
+
+
+def footage_usable_seconds(clips: list[dict[str, Any]], *, fps: int = FPS_DEFAULT) -> float:
+    return unique_video_usable_seconds(clips, fps=fps) + photo_floor_seconds(clips, fps=fps)
+
+
 def source_key(clip: dict[str, Any]) -> str:
     return str(
         clip.get("googleDriveFileId")
@@ -112,8 +139,7 @@ def pick_in_point(
     if wrap:
         used[key] = [(start, start + window)]
         return start
-    used.setdefault(key, []).append((start, start + window))
-    return start
+    return None
 
 
 def _merge_transition(existing: Any, planned: Any) -> dict[str, Any] | None:
@@ -158,6 +184,7 @@ def expand_to_timeline(
     *,
     scene_times: dict[str, list[float]] | None = None,
     fps: int = FPS_DEFAULT,
+    allow_video_wrap: bool = False,
 ) -> list[dict[str, Any]]:
     plan = timeline.get("timeline") or timeline
     plan_clips = [item for item in (plan.get("clips") or []) if isinstance(item, dict)]
@@ -170,14 +197,21 @@ def expand_to_timeline(
     start = 0
     updated: list[dict[str, Any]] = []
 
+    def _clamp_video_frames(source: dict[str, Any], in_seconds: float, frames: int) -> int:
+        _source_start, source_end = _source_span(source, fps_i)
+        remaining = max(0.0, source_end - max(0.0, in_seconds))
+        max_frames = max(1, int(remaining * fps_i + 1e-6))
+        return max(1, min(frames, max_frames))
+
     if len(plan_clips) <= len(sources) and (not videos or len(plan_clips) == len(sources)):
         for index, source in enumerate(sources):
             plan_clip = plan_clips[index] if index < len(plan_clips) else {}
             frames = max(1, int(plan_clip.get("duration_frames") or source.get("durationFrames") or 1))
             if is_video_clip(source):
-                available = max(1, round((_source_span(source, fps_i)[1]) * fps_i))
-                frames = min(frames, available)
-                in_seconds = pick_in_point(source, frames / fps_i, used, scene_times)
+                in_seconds = pick_in_point(source, frames / fps_i, used, scene_times, wrap=False)
+                if in_seconds is None:
+                    in_seconds = _source_span(source, fps_i)[0]
+                frames = _clamp_video_frames(source, in_seconds, frames)
             else:
                 in_seconds = 0.0
             item = _copy_source(source, in_seconds=in_seconds, frames=frames, fps=fps_i)
@@ -195,22 +229,53 @@ def expand_to_timeline(
     for index, plan_clip in enumerate(plan_clips[:MAX_SLICES]):
         frames = max(1, int(plan_clip.get("duration_frames") or 1))
         slot_seconds = frames / fps_i
+        source: dict[str, Any] | None = None
+        in_seconds = 0.0
         if index in photo_slots:
             source = next(photo_iter, None)
             if source is None and videos:
-                source = videos[video_rr % len(videos)]
-                in_seconds = pick_in_point(source, slot_seconds, used, scene_times, wrap=True)
-                video_rr += 1
+                placed = False
+                for _ in range(len(videos)):
+                    candidate = videos[video_rr % len(videos)]
+                    video_rr += 1
+                    picked = pick_in_point(
+                        candidate, slot_seconds, used, scene_times, wrap=allow_video_wrap
+                    )
+                    if picked is None:
+                        continue
+                    source = candidate
+                    in_seconds = picked
+                    frames = _clamp_video_frames(source, in_seconds, frames)
+                    placed = True
+                    break
+                if not placed:
+                    break
             else:
-                source = source or photos[0]
+                source = source or (photos[0] if photos else None)
+                if source is None:
+                    break
                 in_seconds = 0.0
         elif videos:
-            source = videos[video_rr % len(videos)]
-            in_seconds = pick_in_point(source, slot_seconds, used, scene_times, wrap=True)
-            video_rr += 1
+            placed = False
+            for _ in range(len(videos)):
+                candidate = videos[video_rr % len(videos)]
+                video_rr += 1
+                picked = pick_in_point(
+                    candidate, slot_seconds, used, scene_times, wrap=allow_video_wrap
+                )
+                if picked is None:
+                    continue
+                source = candidate
+                in_seconds = picked
+                frames = _clamp_video_frames(source, in_seconds, frames)
+                placed = True
+                break
+            if not placed:
+                break
         else:
             source = photos[index % len(photos)] if photos else sources[index % len(sources)]
             in_seconds = 0.0
+        assert source is not None
         item = _copy_source(source, in_seconds=in_seconds, frames=frames, fps=fps_i)
         item["id"] = f"{source.get('id') or 'studio-source'}-slice-{index + 1}"
         item["order"] = index + 1

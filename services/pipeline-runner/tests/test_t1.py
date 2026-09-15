@@ -318,3 +318,73 @@ def test_scene_times_use_cache_and_probe():
     assert probed == ["vid2"]
     assert times["vid2"] == [1.0, 4.0]
 
+def test_footage_usable_seconds_sums_unique_videos_once():
+    from t1.slice import footage_usable_seconds
+
+    clips = [
+        {"id": "v1", "url": "https://cdn/1.mp4", "media_kind": "video", "sourceDurationSeconds": 3, "googleDriveFileId": "g1"},
+        {"id": "v1-dup", "url": "https://cdn/1.mp4", "media_kind": "video", "sourceDurationSeconds": 3, "googleDriveFileId": "g1"},
+        {"id": "v2", "url": "https://cdn/2.mp4", "media_kind": "video", "sourceDurationSeconds": 4, "googleDriveFileId": "g2"},
+        {"id": "p1", "url": "https://cdn/a.jpg", "media_kind": "photo", "durationFrames": 60},
+    ]
+    # unique videos 3+4, photo floor 2s
+    assert footage_usable_seconds(clips) == 9.0
+
+
+def test_expand_to_timeline_does_not_wrap_short_video_library():
+    from t1.slice import expand_to_timeline
+
+    clips = [
+        {
+            "id": f"v{index}",
+            "url": f"https://cdn/{index}.mp4",
+            "media_kind": "video",
+            "sourceDurationSeconds": 3,
+            "googleDriveFileId": f"g{index}",
+        }
+        for index in range(1, 9)
+    ]
+    # Old recycle behavior would wrap these 8 clips across 20 beat slots.
+    plan_clips = [{"duration_frames": 90, "start_frame": index * 90} for index in range(20)]
+    timed = expand_to_timeline(clips, {"timeline": {"fps": 30, "clips": plan_clips}})
+    assert len(timed) == 8
+    assert sum(clip["durationFrames"] for clip in timed) == 720
+
+
+def test_expand_to_timeline_clamps_slot_to_source_duration():
+    from t1.slice import expand_to_timeline
+
+    clips = [{
+        "id": "v1",
+        "url": "https://cdn/short.mp4",
+        "media_kind": "video",
+        "sourceDurationSeconds": 3,
+        "googleDriveFileId": "g1",
+    }]
+    timed = expand_to_timeline(
+        clips,
+        {"timeline": {"fps": 30, "clips": [{"duration_frames": 219}]}},
+    )
+    assert len(timed) == 1
+    assert timed[0]["durationFrames"] == 90
+
+
+def test_t1_caps_requested_duration_to_usable_footage():
+    from t1.slice import footage_usable_seconds
+
+    clips = [
+        {
+            "id": f"v{index}",
+            "url": f"https://cdn/{index}.mp4",
+            "media_kind": "video",
+            "sourceDurationSeconds": 3,
+            "googleDriveFileId": f"g{index}",
+        }
+        for index in range(1, 9)
+    ]
+    requested = 30.0
+    usable = footage_usable_seconds(clips)
+    assert usable == 24.0
+    capped = min(requested, usable)
+    assert capped == 24.0
+

@@ -37,7 +37,7 @@ from t1.constants import (
 )
 from t1.formulas import t1_exact_output_formula, t1_production_formula
 from t1.scenes import scene_times_for_clips
-from t1.slice import clips_have_video, expand_to_timeline
+from t1.slice import clips_have_video, expand_to_timeline, footage_usable_seconds
 
 
 def existing_timeline_json(output: dict[str, Any]) -> str:
@@ -165,6 +165,15 @@ def process_one(
         if vo_end:
             output = {**output, "fields": {**(output.get("fields") or {}), "Voiceover_Duration_Seconds": vo_end}}
             start, duration = analysis_window(output)
+    footage_capped = False
+    if has_video:
+        usable = footage_usable_seconds(clips)
+        if usable > 0 and usable + 1e-6 < duration:
+            # Prefer a shorter beat-aligned edit over recycling short clips to fill
+            # the requested owner duration (freezes + repeats).
+            duration = max(0.25, usable)
+            rules = {**rules, "recycle": False}
+            footage_capped = True
     request_body = {
         "schema_version": "timing.request.1",
         "music_start_seconds": start,
@@ -211,6 +220,9 @@ def process_one(
             "Render_Total_Frames": total_frames,
             "Selected_Clip_Count": len(timed),
         }
+        if footage_capped:
+            # Keep Remotion from re-padding an explicit owner duration past the footage.
+            fields["Studio_Effective_Video_Duration_Seconds"] = duration
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)
         if content_item_id:
             client.update_record(
