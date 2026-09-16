@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.319-multi-clips";
+  const BUILD_ID = "item4-0.6.320-approved-state";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1236,11 +1236,27 @@
 
   function pipelineStudioStateLabel(record) {
     if (pipelineIsRetryingRender(record)) return "Trying Again";
+    const state = String(record?.studio_state || "").trim();
+    // Per-output success/publish states win over the parent produce job. Sibling
+    // rows still rendering used to paint every approved row as "Rendering"
+    // because studio_job_label collapses job.step=render / "Rendering N/M".
+    if ([
+      "Ready for Review",
+      "Approved",
+      "Scheduled",
+      "Published",
+      "Uploading",
+      "Platform Processing",
+      "Draft Delivered",
+      "Manual Action Required",
+      "Skipped",
+    ].includes(state)) {
+      return state;
+    }
     const job = record?.studio_production_job;
     const step = String(job?.step || "").trim();
     if (step === "blocked") return "Blocked";
     if (step === "escalated") return "Escalated — needs investigation";
-    const state = String(record?.studio_state || "").trim();
     // Per-row badge stays simple. Job counters like "Rendering 2/6" are PR-level,
     // not meaningful on each Platform Output row.
     if (state === "Rendering" || /^Rendering(\s+\d+\/\d+)?$/i.test(String(record?.studio_job_label || "").trim())) {
