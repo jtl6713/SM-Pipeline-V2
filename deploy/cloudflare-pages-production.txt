@@ -492,3 +492,5 @@ Find-creators profile + 7-day suggest Pages deploy: 2026-09-14 — Footer UI 0.6
 Manual analytics Pages deploy: 2026-09-14 — Run analytics is clickable for YouTube and Instagram. No background similar-account sweep. UI 0.6.318-manual-analytics.
 
 Asset Manager multi-clip upload Pages deploy: 2026-09-15 — Choose clips accepts multiple videos; optional Asset name still numbers them in order. UI 0.6.319-multi-clips. Source commit 20f95b8.
+
+Approved rows keep Approved while siblings render: 2026-09-16 — Pipeline studio-state badge no longer inherits parent job "Rendering N/M". UI 0.6.320-approved-state.
