@@ -24,6 +24,13 @@ test("catalog actions are allowlisted in the PowerShell runner", () => {
   assert.match(runner, /TranscriptPath/);
 });
 
+test("Invoke-Ps1 leaves -Switch names unquoted so Deploy -Service binds", () => {
+  assert.match(runner, /\$text -match '\^-'/);
+  assert.match(runner, /Named switches\/parameters must stay unquoted/);
+  assert.match(runner, /deploy-pipeline-runner/);
+  assert.match(runner, /'-Service', 'pipeline-runner', '-Yes'/);
+});
+
 test("hidden start and deploy know ops-dashboard", () => {
   assert.match(hidden, /ops-dashboard/);
   assert.match(hidden, /3361/);
