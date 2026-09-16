@@ -85,9 +85,20 @@ function Invoke-Ps1([string]$Path, [string[]]$NativeArgs) {
         Stop-Transcript | Out-Null
         $script:OuterTranscriptActive = $false
     }
+    # Named switches/parameters must stay unquoted. Quoting '-Service' makes PowerShell
+    # bind the literal string "-Service" as the $Service value (ValidateSet fails).
     $argLine = ''
     if ($NativeArgs -and $NativeArgs.Count -gt 0) {
-        $argLine = (($NativeArgs | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ' ')
+        $argLine = @(
+            foreach ($arg in $NativeArgs) {
+                $text = [string]$arg
+                if ($text -match '^-') {
+                    $text
+                } else {
+                    "'" + ($text -replace "'", "''") + "'"
+                }
+            }
+        ) -join ' '
     }
     $pathLit = $Path.Replace("'", "''")
     $logLit = $childLog.Replace("'", "''")
