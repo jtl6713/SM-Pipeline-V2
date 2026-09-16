@@ -74,6 +74,7 @@ def health():
             "ok": True,
             "service": "pipeline-runner",
             "version": settings["service_version"],
+            "t1_shorten_to_footage": True,
             "stages_registered": len(STAGE_NAMES),
             "stages_implemented": sum(1 for name in STAGE_NAMES if is_implemented(name)),
             "public_base_url": settings.get("public_base_url") or None,
