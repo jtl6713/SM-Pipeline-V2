@@ -469,3 +469,5 @@ Open Review reschedule Worker deploy: 2026-09-18 — Approved unpublished output
 Classify-all Processing stamp Worker deploy: 2026-09-18 — Classify all stamps Classification_Status=Processing so Asset Manager shows Classifying. Worker 0.10.321-classify-all-processing.
 
 Library Added_At sort Worker deploy: 2026-09-18 — Newest/oldest added sorts Media Assets by Added_At so same-day uploads stay in create order. Worker 0.10.322-library-added-at.
+
+Classify-all stamp-first Worker deploy: 2026-09-18 — Stamp Processing before A3 pulse, newest first, so Classify all shows Classifying. Worker 0.10.323-classify-all-stamp-first.

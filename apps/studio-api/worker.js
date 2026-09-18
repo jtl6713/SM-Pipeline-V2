@@ -361,7 +361,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.322-library-added-at",
+          version: "0.10.323-classify-all-stamp-first",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17999,8 +17999,8 @@ async function classifyAllLibraryAssets(request, env, url, authorization, ctx) {
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const rows = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID, {
     limit: LIBRARY_CLASSIFY_ALL_LIMIT,
-    sortField: "Intake_Date",
-    sortDirection: "asc",
+    sortField: "Added_At",
+    sortDirection: "desc",
     filterFormula: LIBRARY_CLASSIFY_PENDING_FORMULA,
     fields: ["Asset Name", "Classification_Status", "Content_Profile"],
   });
@@ -18012,6 +18012,11 @@ async function classifyAllLibraryAssets(request, env, url, authorization, ctx) {
       count: 0,
       message: "Nothing is waiting for classification. Assign a profile to an asset first.",
     });
+  }
+  try {
+    await stampLibraryAssetsClassifying(env, recordIds);
+  } catch (error) {
+    console.warn("library classify-all stamp Processing failed", error?.message || String(error));
   }
   const { response, payload } = await item4PulsePipelineStage(env, "a3", {
     extra: {
@@ -18030,16 +18035,9 @@ async function classifyAllLibraryAssets(request, env, url, authorization, ctx) {
   }
   const alreadyRunning = Boolean(payload?.details?.already_running);
   const truncated = recordIds.length >= LIBRARY_CLASSIFY_ALL_LIMIT;
-  if (!alreadyRunning) {
-    try {
-      await stampLibraryAssetsClassifying(env, recordIds);
-    } catch (error) {
-      console.warn("library classify-all stamp Processing failed", error?.message || String(error));
-    }
-  }
   return respond(request, env, {
     ok: true,
-    classifying: !alreadyRunning,
+    classifying: true,
     already_running: alreadyRunning,
     count: recordIds.length,
     record_ids: recordIds,
