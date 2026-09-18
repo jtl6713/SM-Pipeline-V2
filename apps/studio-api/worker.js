@@ -39,6 +39,7 @@ import {
   mediaAssetProfileScopeFormula,
   normalizeLibraryBatchBase,
   parseLibraryDateParam,
+  libraryAssetAddedAt,
   resolveLibraryCrossScopeFlag,
   resolveLibraryListSort,
   resolveLibraryUploadProfileId,
@@ -360,7 +361,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.321-classify-all-processing",
+          version: "0.10.322-library-added-at",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -4643,7 +4644,7 @@ async function item4CreateMasterMediaAsset(env, recordId, asset, driveId, driveU
           File_Extension: String(asset.source_format || item4FileExtension(asset.name) || "").toLowerCase(),
           File_Size_Bytes: Number(asset.size_bytes || 0) || null,
           Intake_Status: "Created",
-          Intake_Date: new Date().toISOString().slice(0, 10),
+          Intake_Date: new Date().toISOString(),
           Drive_Access_Status: "Private",
           Asset_Status: "Available",
           Active: true,
@@ -5706,8 +5707,7 @@ function ideaLibraryHaystack(record) {
 }
 
 function ideaLibraryIntakeDate(record) {
-  const raw = String(f(record, "Intake_Date") || "").trim();
-  return raw.slice(0, 10);
+  return libraryAssetAddedAt(record);
 }
 
 function ideaLibraryFileBytes(record) {
@@ -17195,7 +17195,7 @@ async function uploadMusicLibraryTracks(request, env, authorization) {
               Leading_Silence_Removed_Seconds: drive.Leading_Silence_Removed_Seconds,
               Leading_Silence_Processed_At: drive.Leading_Silence_Processed_At || null,
               Intake_Status: "Created",
-              Intake_Date: new Date().toISOString().slice(0, 10),
+              Intake_Date: new Date().toISOString(),
               Drive_Access_Status: "Public",
               Classification_Status: "Classified",
               Asset_Status: "Available",
@@ -17603,7 +17603,7 @@ async function listAssetLibrary(request, env, url, authorization) {
       sortDirection: sort.sortDirection,
       filterFormula: combineAirtableFormulas(
         assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
-        libraryAddedDateFilterFormula(addedFrom, addedTo, "Intake_Date"),
+        libraryAddedDateFilterFormula(addedFrom, addedTo, "Added_At"),
         scopeFormula,
       ),
     }),
@@ -17771,7 +17771,7 @@ async function uploadAssetLibraryItems(request, env, authorization, ctx) {
             File_Size_Bytes: Number(drive.file_size_bytes || file.size || 0) || null,
             Duration_Seconds: durationSeconds,
             Intake_Status: "Created",
-            Intake_Date: new Date().toISOString().slice(0, 10),
+            Intake_Date: new Date().toISOString(),
             Drive_Access_Status: "Public",
             Classification_Status: "Needs Classification",
             Asset_Status: "Available",

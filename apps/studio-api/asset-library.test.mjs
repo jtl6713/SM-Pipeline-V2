@@ -18,6 +18,8 @@ import {
   publishedFileReleaseGuard,
   publishedLibraryFilterFormula,
   parseLibraryDateParam,
+  LIBRARY_ADDED_AT_FIELD,
+  libraryAssetAddedAt,
   resolveLibraryListSort,
   libraryAddedDateFilterFormula,
   publishedLibraryObjectKey,
@@ -327,12 +329,12 @@ test("library date param accepts only real YYYY-MM-DD days", () => {
 test("library list sort works for media and published catalogues", () => {
   assert.deepEqual(resolveLibraryListSort(""), {
     sort: "newest",
-    sortField: "Intake_Date",
+    sortField: LIBRARY_ADDED_AT_FIELD,
     sortDirection: "desc",
   });
   assert.deepEqual(resolveLibraryListSort("oldest"), {
     sort: "oldest",
-    sortField: "Intake_Date",
+    sortField: LIBRARY_ADDED_AT_FIELD,
     sortDirection: "asc",
   });
   assert.deepEqual(resolveLibraryListSort("name-asc"), {
@@ -352,6 +354,17 @@ test("library list sort works for media and published catalogues", () => {
   });
 });
 
+test("library added-at prefers Added_At then createdTime", () => {
+  assert.equal(libraryAssetAddedAt({
+    createdTime: "2026-09-18T22:00:00.000Z",
+    fields: { Added_At: "2026-09-18T23:15:00.000Z", Intake_Date: "2026-09-18" },
+  }), "2026-09-18T23:15:00.000Z");
+  assert.equal(libraryAssetAddedAt({
+    createdTime: "2026-09-18T22:01:00.000Z",
+    fields: { Intake_Date: "2026-09-18" },
+  }), "2026-09-18T22:01:00.000Z");
+});
+
 test("classify-all pending formula includes false Classified stubs", () => {
   const formula = libraryClassifyPendingFormula("AND({Media_Class}='Image')");
   assert.match(formula, /Needs Classification/);
@@ -365,7 +378,7 @@ test("classify-all pending formula includes false Classified stubs", () => {
 test("library added-date filter is inclusive and combines with search independently", () => {
   assert.equal(libraryAddedDateFilterFormula("", ""), null);
   const fromOnly = libraryAddedDateFilterFormula("2026-09-01", "");
-  assert.match(fromOnly, /Intake_Date/);
+  assert.match(fromOnly, /Added_At/);
   assert.match(fromOnly, /2026-09-01/);
   assert.match(fromOnly, /IS_AFTER/);
   const both = libraryAddedDateFilterFormula("2026-09-01", "2026-09-12", "Published_At");
