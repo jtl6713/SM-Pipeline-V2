@@ -502,3 +502,5 @@ Open Review reschedule path bust: 2026-09-18 — Rename app-item4-0621.js to 062
 Pipeline schedule refresh Pages deploy: 2026-09-18 — After Open Review Save schedule, replace the leftover Pipeline time instead of keeping the old draft. UI 0.6.322-schedule-refresh.
 
 Pipeline date save Pages deploy: 2026-09-18 — Changing the Time field on Pipeline writes Scheduled_Post_Date immediately. UI 0.6.323-pipeline-schedule.
+
+Asset Manager upload status + classify-all Pages deploy: 2026-09-18 — Red Status line above Drop photos (idle Status: ready). Classify all shows Classifying immediately. UI 0.6.325-classify-all-status.
