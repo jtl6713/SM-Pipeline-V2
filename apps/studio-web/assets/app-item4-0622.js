@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.323-pipeline-schedule";
+  const BUILD_ID = "item4-0.6.324-library-upload-status";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14092,8 +14092,9 @@
   function setLibraryUploadMessage(text, className = "") {
     const node = $("libraryUploadMessage");
     if (!node) return;
-    node.textContent = text || "";
-    node.className = `form-message ${className}`.trim();
+    const trimmed = String(text || "").trim();
+    node.textContent = trimmed || "Status: ready";
+    node.className = `form-message library-upload-status ${className}`.trim();
   }
 
   function libraryPreviewUrl(record) {
@@ -14868,6 +14869,7 @@
     const inputs = libraryFileInputs();
     if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
+    setLibraryUploadMessage("");
     const phone = libraryPickerIsPhone();
     libraryPhotoInputs().forEach((input) => {
       input.multiple = true;
