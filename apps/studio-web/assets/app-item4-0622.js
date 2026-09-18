@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.325-classify-all-status";
+  const BUILD_ID = "item4-0.6.326-library-added-at";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14488,7 +14488,7 @@
       duration_seconds: item4KnownClipDuration(r),
     });
     const size = librarySizeLine(r);
-    const publishedLine = r.published_at ? `Published ${formatStudioDate(r.published_at)}` : "";
+    const publishedLine = r.published_at ? `Published ${formatStudioDateTime(r.published_at)}` : "";
     const badge = r.file_released ? "File removed" : "Published";
     const badgeClass = r.file_released ? "is-released" : "is-published";
     let media = "";
@@ -14587,7 +14587,7 @@
       media_kind: video ? "video" : "photo",
       duration_seconds: item4KnownClipDuration(r),
     });
-    const added = r.intake_date ? `Added ${formatStudioDate(r.intake_date)}` : "";
+    const added = r.intake_date ? `Added ${formatStudioDateTime(r.intake_date)}` : "";
     const needsDuration = video && !duration ? "1" : "0";
     const stream = video ? libraryStreamUrl(r) : "";
     const localPoster = video ? (item4LocalClipPoster(r.name) || item4LocalClipPoster(r.id)) : "";

@@ -1,0 +1,23 @@
+---
+description: Always deploy Studio Pages and the API Worker after a Studio fix
+alwaysApply: true
+---
+
+# Always ship Studio Pages and the Worker
+
+When you change Asset Manager, Pipeline, Open Review, library classify/upload, or `apps/studio-api/worker.js` / `apps/studio-web/**`, **publish it in the same piece of work**.
+
+A merge to `main` without the deploy trigger files does **not** update studio.chicagoshining.com. Joseph cannot tell if a fix works until Pages and the Worker are live.
+
+## Always
+
+- Append a line to `deploy/cloudflare-pages-production.txt` for any `apps/studio-web/**` change.
+- Append a line to `deploy/cloudflare-worker-production.txt` for any `apps/studio-api/worker.js` change.
+- Bump `BUILD_ID` / UI label (and Worker `version`) so the footer proves the new build.
+- Commit those trigger files with the fix (or immediately after merge) and push so the production deploy workflows run.
+- Tell Joseph to hard-refresh and what footer version to look for.
+
+## Never
+
+- Leave a Studio UI or Worker behavior change only on a feature branch or merged `main` without firing Pages/Worker deploys.
+- Treat “commit and push the branch” as shipped. Shipped means production deploy ran.

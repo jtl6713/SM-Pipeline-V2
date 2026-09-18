@@ -45,13 +45,25 @@ export function parseLibraryDateParam(raw) {
   return value;
 }
 
+/** Created-time field on Media Assets. Newest/oldest added sorts here, not date-only Intake_Date. */
+export const LIBRARY_ADDED_AT_FIELD = "Added_At";
+
+/** Exact add time: Added_At, else Airtable createdTime, else Intake_Date. */
+export function libraryAssetAddedAt(record) {
+  const added = text(record, LIBRARY_ADDED_AT_FIELD);
+  if (added) return added;
+  const created = String(record?.createdTime || "").trim();
+  if (created) return created;
+  return text(record, "Intake_Date") || null;
+}
+
 /**
  * Sort for Asset Manager browse. Works with or without search/date filters.
- * Media assets: Intake_Date / Asset Name. Published outputs: Published_At / Output_Title.
+ * Media assets: Added_At / Asset Name. Published outputs: Published_At / Output_Title.
  */
 export function resolveLibraryListSort(sortRaw, { published = false } = {}) {
   const key = String(sortRaw || "newest").trim().toLowerCase().replace(/-/g, "_");
-  const dateField = published ? "Published_At" : "Intake_Date";
+  const dateField = published ? "Published_At" : LIBRARY_ADDED_AT_FIELD;
   const nameField = published ? "Output_Title" : "Asset Name";
   if (key === "oldest") {
     return { sort: "oldest", sortField: dateField, sortDirection: "asc" };
@@ -66,8 +78,8 @@ export function resolveLibraryListSort(sortRaw, { published = false } = {}) {
 }
 
 /** Inclusive date-added / published-at window for Airtable date or date-time fields. */
-export function libraryAddedDateFilterFormula(fromRaw, toRaw, fieldName = "Intake_Date") {
-  const field = String(fieldName || "Intake_Date").trim() || "Intake_Date";
+export function libraryAddedDateFilterFormula(fromRaw, toRaw, fieldName = LIBRARY_ADDED_AT_FIELD) {
+  const field = String(fieldName || LIBRARY_ADDED_AT_FIELD).trim() || LIBRARY_ADDED_AT_FIELD;
   if (!/^[A-Za-z0-9_ ]+$/.test(field)) return null;
   const from = parseLibraryDateParam(fromRaw);
   const to = parseLibraryDateParam(toRaw);
