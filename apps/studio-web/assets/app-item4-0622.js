@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.322-schedule-refresh";
+  const BUILD_ID = "item4-0.6.323-pipeline-schedule";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12999,10 +12999,55 @@
       input.addEventListener("pointerdown", keepOnRow);
       input.addEventListener("keydown", keepOnRow);
       input.addEventListener("change", () => {
-        const id = input.dataset.pipelineSchedule;
-        if (id) pipelineScheduleDrafts.set(id, String(input.value || "").trim());
+        savePipelineScheduleInput(input).catch((error) => {
+          setPipelineLiveHint(error.message || "Could not save schedule.");
+        });
       });
     });
+  }
+
+  async function savePipelineScheduleInput(input) {
+    const id = input?.dataset?.pipelineSchedule;
+    if (!id || input.dataset.saving === "1") return;
+    const record = (pipelineOutputs || []).find((row) => row.id === id);
+    if (!record) return;
+    const raw = String(input.value || "").trim();
+    pipelineScheduleDrafts.set(id, raw);
+    const status = input.parentElement?.querySelector("[data-pipeline-schedule-status]");
+    if (!raw) {
+      if (status) status.textContent = "";
+      return;
+    }
+    const parsed = Date.parse(raw);
+    if (Number.isNaN(parsed)) {
+      if (status) status.textContent = "Invalid time";
+      return;
+    }
+    const previousMs = Date.parse(record.scheduled_post_date || "");
+    if (!Number.isNaN(previousMs) && Math.abs(previousMs - parsed) < 60000) {
+      if (status) status.textContent = "";
+      return;
+    }
+    input.dataset.saving = "1";
+    if (status) status.textContent = "Saving…";
+    try {
+      const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
+        method: "POST",
+        body: JSON.stringify({ scheduled_post_date: new Date(parsed).toISOString() }),
+      });
+      if (result?.record) applySavedPipelineSchedule(result.record);
+      if (status) status.textContent = "Saved";
+      setPipelineLiveHint("Schedule saved.");
+      refreshPipelineOutputs({ silent: true, force: true }).catch(() => {});
+    } catch (error) {
+      const previous = formatDateTimeLocalInput(record.scheduled_post_date);
+      input.value = previous;
+      pipelineScheduleDrafts.set(id, previous);
+      if (status) status.textContent = error.message || "Not saved";
+      setPipelineLiveHint(error.message || "Could not save schedule.");
+    } finally {
+      delete input.dataset.saving;
+    }
   }
 
   function collectPipelineSchedules() {
@@ -13668,7 +13713,7 @@
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
       const scheduleCell = isPipeline && (ready || creativeCanReschedule(r))
-        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Leave empty to publish now"> ${scheduleValue ? "" : "Now"}<div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
+        ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Pick a time to save it. Leave empty only until you approve."> <span data-pipeline-schedule-status aria-live="polite"></span><div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
         : "";
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
       const rowOpen = isPipeline && canOpen ? ` class="pipeline-open-row" data-open-output-id="${escapeHtml(r.id)}" tabindex="0"` : "";
