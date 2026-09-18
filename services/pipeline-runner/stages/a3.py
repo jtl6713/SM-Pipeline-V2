@@ -4,7 +4,7 @@ import logging
 import threading
 
 from a3.constants import MAKE_SCENARIO_ID
-from a3.processor import process_request
+from a3.processor import normalize_record_ids, process_request
 from asset.helpers import as_bool
 from config import StageRequest, StageResult
 from stages._carousel import run_named_stage
@@ -13,8 +13,11 @@ logger = logging.getLogger(__name__)
 
 # Studio "Classify all" fires A3 in the background. One drain at a time: a second
 # click while the first is still classifying would double-bill OpenAI for the same rows.
+# Extra clicks enqueue those record IDs so they still run after the current batch.
 _BACKGROUND_LOCK = threading.Lock()
 _BACKGROUND_THREAD: threading.Thread | None = None
+_QUEUED_IDS: list[str] = []
+_ACTIVE_IDS: list[str] = []
 
 
 def background_running() -> bool:
@@ -22,30 +25,65 @@ def background_running() -> bool:
     return bool(thread and thread.is_alive())
 
 
+def _extend_unique(dest: list[str], incoming: list[str]) -> None:
+    seen = set(dest)
+    for record_id in incoming:
+        if record_id in seen:
+            continue
+        dest.append(record_id)
+        seen.add(record_id)
+
+
 def _run_background(kwargs: dict) -> None:
+    global _ACTIVE_IDS
     try:
-        result = process_request(**kwargs)
-        logger.info(
-            "A3 background classify finished classified=%s passes=%s",
-            result.get("classified_count"),
-            result.get("classify_passes"),
-        )
+        while True:
+            with _BACKGROUND_LOCK:
+                _ACTIVE_IDS = list(normalize_record_ids(kwargs.get("record_ids")))
+            result = process_request(**kwargs)
+            logger.info(
+                "A3 background classify finished classified=%s passes=%s",
+                result.get("classified_count"),
+                result.get("classify_passes"),
+            )
+            with _BACKGROUND_LOCK:
+                queued = list(_QUEUED_IDS)
+                _QUEUED_IDS.clear()
+                _ACTIVE_IDS = list(queued)
+            if not queued:
+                break
+            kwargs = {**kwargs, "record_ids": queued}
+            logger.info("A3 background classify continuing with %s queued assets", len(queued))
     except Exception:
         logger.exception("A3 background classify crashed")
+    finally:
+        with _BACKGROUND_LOCK:
+            _ACTIVE_IDS = []
 
 
 def start_background(kwargs: dict) -> StageResult:
-    global _BACKGROUND_THREAD
-    requested = kwargs.get("record_ids")
-    count = len(requested) if isinstance(requested, (list, tuple)) else None
+    global _BACKGROUND_THREAD, _ACTIVE_IDS
+    requested = normalize_record_ids(kwargs.get("record_ids"))
+    count = len(requested) if requested else None
     with _BACKGROUND_LOCK:
         if background_running():
+            extra = [record_id for record_id in requested if record_id not in _ACTIVE_IDS and record_id not in _QUEUED_IDS]
+            _extend_unique(_QUEUED_IDS, extra)
             return StageResult(
                 stage="a3",
                 status="skipped",
                 message="A3 is already classifying in the background (already_running)",
-                details={"make_scenario_id": MAKE_SCENARIO_ID, "background": True, "already_running": True},
+                details={
+                    "make_scenario_id": MAKE_SCENARIO_ID,
+                    "background": True,
+                    "already_running": True,
+                    "queued": len(requested),
+                    "queued_total": len(_QUEUED_IDS),
+                },
             )
+        if requested:
+            kwargs = {**kwargs, "record_ids": requested}
+        _ACTIVE_IDS = list(requested)
         _BACKGROUND_THREAD = threading.Thread(
             target=_run_background,
             kwargs={"kwargs": kwargs},

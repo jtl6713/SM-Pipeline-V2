@@ -506,3 +506,5 @@ Pipeline date save Pages deploy: 2026-09-18 — Changing the Time field on Pipel
 Asset Manager upload status + classify-all Pages deploy: 2026-09-18 — Red Status line above Drop photos (idle Status: ready). Classify all shows Classifying immediately. UI 0.6.325-classify-all-status.
 
 Asset Manager added datetime Pages deploy: 2026-09-18 — Newest added sorts by Added_At (date and time). Cards show Added with time. UI 0.6.326-library-added-at.
+
+Classify-all stamp-first Pages deploy: 2026-09-18 — Classify all flips cards to Classifying immediately and keeps them after refresh. UI 0.6.327-classify-all-stamp.

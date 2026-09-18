@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.326-library-added-at";
+  const BUILD_ID = "item4-0.6.327-classify-all-stamp";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14267,6 +14267,7 @@
     const button = $("libraryClassifyAll");
     if (button) button.disabled = true;
     setLibraryUploadMessage("Collecting assets that are waiting for classification…", "");
+    markLibraryCardsClassifying();
     try {
       const result = await api("/api/library/classify-all", {
         method: "POST",
@@ -14278,6 +14279,7 @@
       if (result.count) {
         markLibraryCardsClassifying(result.record_ids);
         await loadLibrary();
+        markLibraryCardsClassifying(result.record_ids);
       }
     } catch (error) {
       setLibraryUploadMessage(error.message, "error-text");

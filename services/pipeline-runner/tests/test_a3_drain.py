@@ -157,3 +157,42 @@ def test_a3_background_runs_once_and_reports_already_running(monkeypatch):
     assert third.status == "ok"
     stage._BACKGROUND_THREAD.join(timeout=5)
     assert len(calls) == 2
+
+
+def test_a3_background_queues_new_ids_without_double_billing_the_active_batch(monkeypatch):
+    import threading
+
+    import stages.a3 as stage
+    from config import StageRequest
+
+    release = threading.Event()
+    calls = []
+
+    def fake_process(**kwargs):
+        calls.append(list(kwargs.get("record_ids") or []))
+        release.wait(timeout=5)
+        return {"processed": True, "classified_count": len(kwargs.get("record_ids") or []), "classify_passes": 1}
+
+    monkeypatch.setattr(stage, "process_request", fake_process)
+    monkeypatch.setattr(stage, "_BACKGROUND_THREAD", None)
+    stage._QUEUED_IDS.clear()
+    stage._ACTIVE_IDS = []
+
+    first = stage.run(StageRequest.from_dict({
+        "extra": {"record_ids": ["recA"], "background": True, "trigger_a4": False, "wait_for_next": False},
+    }))
+    assert first.status == "ok"
+
+    same = stage.run(StageRequest.from_dict({
+        "extra": {"record_ids": ["recA"], "background": True, "trigger_a4": False, "wait_for_next": False},
+    }))
+    extra = stage.run(StageRequest.from_dict({
+        "extra": {"record_ids": ["recC"], "background": True, "trigger_a4": False, "wait_for_next": False},
+    }))
+    assert same.details["already_running"] is True
+    assert extra.details["already_running"] is True
+    assert extra.details["queued"] == 1
+
+    release.set()
+    stage._BACKGROUND_THREAD.join(timeout=5)
+    assert calls == [["recA"], ["recC"]]
