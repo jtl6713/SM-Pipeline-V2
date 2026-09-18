@@ -500,3 +500,5 @@ Open Review reschedule Pages deploy: 2026-09-18 — Pipeline Open Review can Sav
 Open Review reschedule path bust: 2026-09-18 — Rename app-item4-0621.js to 0622 and BUILD_ID item4-0.6.321-reschedule so the footer cannot stay on 0.6.320.
 
 Pipeline schedule refresh Pages deploy: 2026-09-18 — After Open Review Save schedule, replace the leftover Pipeline time instead of keeping the old draft. UI 0.6.322-schedule-refresh.
+
+Pipeline date save Pages deploy: 2026-09-18 — Changing the Time field on Pipeline writes Scheduled_Post_Date immediately. UI 0.6.323-pipeline-schedule.
