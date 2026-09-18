@@ -360,7 +360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.315-manual-analytics",
+          version: "0.10.320-open-review-reschedule",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -372,6 +372,7 @@ export default {
           studio_az_large_video_staging_v1: true,
           studio_ig_carousel_due_publish_v1: true,
           studio_schedule_spacing_v1: true,
+          studio_open_review_reschedule_v1: true,
           studio_insights_watchlist_v2: true,
           studio_idea_library_pick_v1: true,
           studio_library_browse_v1: true,
@@ -6307,7 +6308,7 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
   }
   const resolvedIso = occupiedMs ? studioNextOpenScheduleIso(requestedIso, occupiedMs) : requestedIso;
   const bumped = Date.parse(resolvedIso) - Date.parse(requestedIso) >= 60 * 1000;
-  if (immediate && !bumped) return {};
+  if (immediate && !bumped && !options.forceWrite) return {};
   const iso = resolvedIso;
   const due = Date.parse(iso) <= Date.now() + 120000;
   const fields = {
@@ -31624,26 +31625,22 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
   let payload;
   try { payload = await request.json(); } catch { throw new HttpError(400, "Request body must be valid JSON"); }
   const value = String(payload?.scheduled_post_date || "").trim();
-  if (!value || Number.isNaN(Date.parse(value))) throw new HttpError(400, "Scheduled date/time is invalid");
   const existing = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]);
+  if (Boolean(f(existing, "Do_Not_Publish"))) {
+    throw new HttpError(409, "Do_Not_Publish outputs cannot be rescheduled");
+  }
+  const published = /published/i.test(String(f(existing, "Publish_Status") || ""))
+    || String(f(existing, "Output_Status") || "").trim() === "Published"
+    || Boolean(f(existing, "Published_At"));
+  if (published) throw new HttpError(409, "Published outputs cannot be rescheduled");
   const platform = String(f(existing, "Platform") || "").trim();
   const occupied = await studioLoadOccupiedSchedules(env, { excludeIds: [match[1]] });
-  const iso = studioNextOpenScheduleIso(new Date(value).toISOString(), occupied[platform] || []);
-  const due = Date.parse(iso) <= Date.now() + 120000;
-  const fields = {
-    Scheduled_Post_Date: iso,
-    Publish_Status: due ? "Ready to Publish" : "Ready to Schedule",
-  };
-  if (platform === "YouTube") {
-    fields.YouTube_Scheduled_Publish_At = iso;
-    fields.YouTube_Privacy_Status = "public";
-  }
-  if (platform === "TikTok") {
-    const draft = String(f(existing, "TikTok_Draft_Status") || "").trim();
-    if (!draft || draft === "Ready for Assets" || draft === "Waiting for Schedule" || draft === "Not Selected") {
-      fields.TikTok_Draft_Status = due ? "Ready for Assets" : "Waiting for Schedule";
-    }
-  }
+  const fields = studioPublishScheduleFields(
+    { scheduled_post_date: value || "immediate" },
+    existing,
+    { occupiedMs: occupied[platform] || [], forceWrite: true },
+  );
+  fields.Publish_Error_Message = "";
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
     method: "PATCH",
     body: JSON.stringify({
@@ -31651,8 +31648,34 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
       typecast: true,
     }),
   });
-  if (due) cadenceScheduleSync(ctx, env, { startPublish: true });
-  return respond(request, env, { ok: true, record: mapOperationsOutput(updated) });
+  const due = studioPublishIsDue(updated);
+  const approved = String(f(updated, "Output_Status") || "").trim() === "Approved for Publishing"
+    || String(f(updated, "Review_Status") || "").trim() === "Approved";
+  let dispatch = null;
+  if (due && approved && (payload?.publish_now === true || !value || value.toLowerCase() === "immediate")) {
+    dispatch = await studioDispatchApprovedPublishNow(env, updated);
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(studioDispatchApprovedPublishTail(env, updated, dispatch).catch((error) => {
+        console.warn("schedule publish-now tail failed", match[1], error);
+      }));
+    }
+  } else if (due) {
+    cadenceScheduleSync(ctx, env, { startPublish: true });
+  }
+  return respond(request, env, {
+    ok: true,
+    record: mapOperationsOutput(
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1]).catch(() => updated)
+    ),
+    dispatch: dispatch
+      ? {
+          ok: dispatch?.ok !== false,
+          skipped: dispatch?.skipped || null,
+          target: dispatch?.target || dispatch?.plan?.target || null,
+          message: dispatch?.message || null,
+        }
+      : null,
+  });
 }
 
 function isTikTokPostUrl(url) {

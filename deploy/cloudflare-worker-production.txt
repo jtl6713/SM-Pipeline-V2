@@ -463,3 +463,5 @@ YouTube skip videos.list Worker deploy: 2026-09-13 — When thumbnail publish is
 Find-creators profile + 7-day suggest Worker deploy: 2026-09-14 — Discover uses the working profile city; suggested times score a 7-day horizon. Intake notice splits profile vs classification. Worker 0.10.314-intake-classify-copy.
 
 Manual analytics Worker deploy: 2026-09-14 — Stop cron and Operations-load similar-account sweeps. Manual Run analytics can fetch YouTube and Instagram. Worker 0.10.315-manual-analytics.
+
+Open Review reschedule Worker deploy: 2026-09-18 — Approved unpublished outputs can change Scheduled_Post_Date or Immediate and publish-now from Open Review. Worker 0.10.320-open-review-reschedule.

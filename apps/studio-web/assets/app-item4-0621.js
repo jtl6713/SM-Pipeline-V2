@@ -11344,7 +11344,7 @@
   }
 
   function setCreativeBusy(busy) {
-    ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "reloadCreativeEditor", "creativeUnlockTitles"].forEach((id) => {
+    ["saveCreativeEditor", "creativeRequestChanges", "creativeApprovePreview", "reloadCreativeEditor", "creativeUnlockTitles", "creativeSaveSchedule", "creativePublishNow"].forEach((id) => {
       const button = $(id);
       if (button) {
         button.disabled = Boolean(busy);
@@ -11359,6 +11359,9 @@
         if ($("creativeApprovePreview")) $("creativeApprovePreview").disabled = !creativeCanApproveForPublishing() || creativeMixInProgress();
         if ($("reloadCreativeEditor")) $("reloadCreativeEditor").disabled = !creativeEditorDirty;
       }
+      const canReschedule = creativeCanReschedule();
+      if ($("creativeSaveSchedule")) $("creativeSaveSchedule").disabled = !canReschedule;
+      if ($("creativePublishNow")) $("creativePublishNow").disabled = !canReschedule;
     }
   }
 
@@ -12543,6 +12546,7 @@
     $("creativeApprovePreview").disabled = watchOnly
       ? (!creativeCanApproveForPublishing(output) || creativeMixInProgress(data.handoff || creativeHandoffStatus, output))
       : false;
+    syncCreativeScheduleActions(output);
     if ($("reloadCreativeEditor") && watchOnly) $("reloadCreativeEditor").disabled = !creativeEditorDirty;
     if ($("creativeUnlockTitles")) {
       $("creativeUnlockTitles").hidden = !titleLocked;
@@ -12796,6 +12800,33 @@
     if (!hasFile && !creativeIsNativePhotoPackage(output)) return false;
     if (!output.creative_available) return false;
     return status === "Ready for Review" || review === "Review Sent";
+  }
+
+  function creativeIsPublished(output = activeCreativeOutput) {
+    if (!output) return false;
+    const status = String(output.output_status || "").trim();
+    const publish = String(output.publish_status || "").trim();
+    return status === "Published" || publish === "Published" || Boolean(output.published_at);
+  }
+
+  function creativeCanReschedule(output = activeCreativeOutput) {
+    if (!output || output.do_not_publish) return false;
+    if (creativeIsPublished(output)) return false;
+    const review = String(output.review_status || "").trim();
+    const status = String(output.output_status || "").trim();
+    return status === "Approved for Publishing" || review === "Approved";
+  }
+
+  function syncCreativeScheduleActions(output = activeCreativeOutput) {
+    const box = $("creativeScheduleActions");
+    const hint = $("creativeScheduleHint");
+    const can = creativeCanReschedule(output);
+    if (box) box.hidden = !can;
+    if (hint) {
+      hint.textContent = can
+        ? "This output is already approved. Save schedule keeps the new time. Publish now sends it as soon as the slot is open."
+        : "Immediate publishes as soon as you approve. Schedule uses your local time.";
+    }
   }
 
   function pipelineApprovableOutputs(records = pipelineOutputs) {
@@ -13184,6 +13215,7 @@
   async function refreshPipelineScheduleSuggestions(records) {
     const ready = (Array.isArray(records) ? records : []).filter((record) =>
       /ready for review/i.test(String(record?.studio_state || record?.output_status || record?.review_status || ""))
+      || creativeCanReschedule(record)
     );
     const byId = new Map(ready.map((record) => [record.id, record]));
     const nodes = Array.from(document.querySelectorAll("[data-pipeline-schedule-suggest]"));
@@ -13625,7 +13657,7 @@
       const notReadyTitle = escapeHtml(String(r.studio_job_error || r.studio_job_label || PHASE6_BUTTON_HELP["Not ready yet"]));
       const ready = /ready for review/i.test(String(r.studio_state || r.output_status || r.review_status || ""));
       const scheduleValue = pipelineScheduleInputValue(r);
-      const scheduleCell = isPipeline && ready
+      const scheduleCell = isPipeline && (ready || creativeCanReschedule(r))
         ? `<div class="subtle pipeline-schedule-cell">Time <input type="datetime-local" data-pipeline-schedule="${escapeHtml(r.id)}" value="${escapeHtml(scheduleValue)}" title="Leave empty to publish now"> ${scheduleValue ? "" : "Now"}<div class="pipeline-schedule-suggest" data-pipeline-schedule-suggest="${escapeHtml(r.id)}"></div><button type="button" class="text-button" data-pipeline-use-suggested="${escapeHtml(r.id)}" hidden>Use suggested</button></div>`
         : "";
       const creativeCell = isPipeline ? `<td class="creative-output-action-cell"><button type="button" class="creative-button" data-creative-output-id="${escapeHtml(r.id)}" ${canOpen ? "" : "disabled"} title="${canOpen ? "" : notReadyTitle}">${canOpen ? "Open review" : notReadyLabel}</button>${scheduleCell}</td>` : "";
@@ -16500,6 +16532,79 @@
     document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
       radio.checked = radio.value === "schedule";
     });
+  });
+
+  async function submitCreativeScheduleChange(publishNow) {
+    const record = activeCreativeOutput;
+    const id = activeCreativeOutputId || record?.id;
+    if (!id) return;
+    if (!creativeCanReschedule(record)) {
+      phase6Message("This output cannot be rescheduled.", "error-text");
+      return;
+    }
+    const payload = publishNow
+      ? { scheduled_post_date: "immediate", publish_now: true }
+      : collectCreativeSchedulePayload();
+    if (!publishNow && payload.scheduled_post_date) {
+      const parsed = Date.parse(payload.scheduled_post_date);
+      if (Number.isNaN(parsed)) {
+        phase6Message("Choose a valid date and time, or switch to Immediate.", "error-text");
+        return;
+      }
+    }
+    const saveBtn = $("creativeSaveSchedule");
+    const nowBtn = $("creativePublishNow");
+    if (saveBtn) saveBtn.disabled = true;
+    if (nowBtn) nowBtn.disabled = true;
+    try {
+      phase6Message(publishNow ? "Publishing now…" : "Saving schedule…");
+      const result = await api(`/api/operations/outputs/${encodeURIComponent(id)}/schedule`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (result?.record) {
+        activeCreativeOutput = { ...record, ...result.record };
+        renderCreativeOutputMeta(activeCreativeOutput);
+        syncCreativeScheduleActions(activeCreativeOutput);
+        if ($("creativeScheduleAt") && activeCreativeOutput.scheduled_post_date) {
+          $("creativeScheduleAt").value = formatDateTimeLocalInput(activeCreativeOutput.scheduled_post_date);
+          if (!publishNow && payload.scheduled_post_date) {
+            document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
+              radio.checked = radio.value === "schedule";
+            });
+          }
+        }
+        if (publishNow) {
+          document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {
+            radio.checked = radio.value === "immediate";
+          });
+        }
+      }
+      const skipped = result?.dispatch?.skipped;
+      if (publishNow && skipped === "scheduled-hold") {
+        phase6Message("Saved as Immediate, but the next open slot is later. Use that time or wait for cadence.");
+      } else if (publishNow && result?.dispatch && result.dispatch.ok === false) {
+        phase6Message(result.dispatch.message || "Publish now was saved, but the publisher did not start.", "error-text");
+      } else {
+        phase6Message(publishNow ? "Publish now sent." : "Schedule saved.");
+      }
+      refreshPipelineOutputs({ silent: true }).catch(() => {});
+    } catch (error) {
+      phase6Message(error.message || "Could not update the schedule.", "error-text");
+    } finally {
+      syncCreativeScheduleActions(activeCreativeOutput);
+      const canReschedule = creativeCanReschedule(activeCreativeOutput);
+      if (saveBtn) saveBtn.disabled = !canReschedule;
+      if (nowBtn) nowBtn.disabled = !canReschedule;
+    }
+  }
+
+  $("creativeSaveSchedule")?.addEventListener("click", () => {
+    submitCreativeScheduleChange(false);
+  });
+  $("creativePublishNow")?.addEventListener("click", () => {
+    if (!window.confirm("Publish this output now?\n\nInstagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.")) return;
+    submitCreativeScheduleChange(true);
   });
   $("creativeApprovePreview")?.addEventListener("click", () => {
     if (creativeWatchOnly()) {
