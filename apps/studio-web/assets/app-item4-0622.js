@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.321-reschedule";
+  const BUILD_ID = "item4-0.6.322-schedule-refresh";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12857,6 +12857,16 @@
     rememberPipelineYoutubeUrlDrafts();
   }
 
+  function applySavedPipelineSchedule(record) {
+    const id = record?.id;
+    if (!id) return;
+    const local = formatDateTimeLocalInput(record.scheduled_post_date);
+    pipelineScheduleDrafts.set(id, local);
+    const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
+    if (input) input.value = local;
+    pipelineOutputs = (pipelineOutputs || []).map((row) => (row.id === id ? { ...row, ...record } : row));
+  }
+
   function rememberPipelineTiktokUrlDrafts() {
     document.querySelectorAll("[data-tiktok-complete] input[type=url]").forEach((input) => {
       const id = input.closest("[data-tiktok-complete]")?.dataset.tiktokComplete;
@@ -13790,6 +13800,7 @@
       r.platform_post_url,
       r.tiktok_draft_status,
       r.manual_completion_status,
+      r.scheduled_post_date,
     ]));
   }
 
@@ -13843,10 +13854,10 @@
     }, PIPELINE_POLL_MS);
   }
 
-  async function refreshPipelineOutputs({ silent = false } = {}) {
+  async function refreshPipelineOutputs({ silent = false, force = false } = {}) {
     const target = $("outputsList");
     if (!target) return;
-    if (silent && pipelinePollInFlight) return;
+    if (silent && pipelinePollInFlight && !force) return;
     pipelinePollInFlight = true;
     if (!silent) {
       target.innerHTML = '<div class="empty">Loading outputs…</div>';
@@ -13854,7 +13865,7 @@
     }
     try {
       const { records = [] } = await api("/api/outputs?limit=100");
-      const unchanged = silent && target.querySelector("table") && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs);
+      const unchanged = !force && silent && target.querySelector("table") && pipelineFingerprint(records) === pipelineFingerprint(pipelineOutputs);
       pipelineOutputs = records;
       updatePipelineApproveAllButton();
       if (!unchanged) {
@@ -16564,6 +16575,7 @@
       });
       if (result?.record) {
         activeCreativeOutput = { ...record, ...result.record };
+        applySavedPipelineSchedule(activeCreativeOutput);
         renderCreativeOutputMeta(activeCreativeOutput);
         syncCreativeScheduleActions(activeCreativeOutput);
         if ($("creativeScheduleAt") && activeCreativeOutput.scheduled_post_date) {
@@ -16588,7 +16600,7 @@
       } else {
         phase6Message(publishNow ? "Publish now sent." : "Schedule saved.");
       }
-      refreshPipelineOutputs({ silent: true }).catch(() => {});
+      refreshPipelineOutputs({ silent: true, force: true }).catch(() => {});
     } catch (error) {
       phase6Message(error.message || "Could not update the schedule.", "error-text");
     } finally {
