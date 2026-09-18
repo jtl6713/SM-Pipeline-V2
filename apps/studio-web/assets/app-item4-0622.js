@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.327-classify-all-stamp";
+  const BUILD_ID = "item4-0.6.328-classify-poll";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14542,6 +14542,109 @@
     return `<span class="badge ready-for-review" data-library-classification>Needs classification</span>`;
   }
 
+  const LIBRARY_CLASSIFY_POLL_MS = 3000;
+  let libraryClassifyPollTimer = null;
+  let libraryClassifyPollInFlight = false;
+
+  function stopLibraryClassifyPoll() {
+    if (libraryClassifyPollTimer) {
+      window.clearTimeout(libraryClassifyPollTimer);
+      libraryClassifyPollTimer = null;
+    }
+  }
+
+  function libraryVisibleClassifying() {
+    return [...document.querySelectorAll("#libraryList [data-library-classification]")]
+      .some((node) => /Classifying/i.test(node.textContent || ""));
+  }
+
+  function libraryListQueryParams() {
+    const query = String($("librarySearch")?.value || "").trim();
+    const kind = libraryKindFilterValue();
+    const needsProfile = kind === "needs_profile";
+    const published = kind === "published";
+    const params = new URLSearchParams({ limit: String(libraryPageSize()) });
+    if (query) params.set("q", query);
+    if (kind && !needsProfile) params.set("kind", kind);
+    if (needsProfile) params.set("needs_profile", "1");
+    const sort = String($("librarySort")?.value || "newest").trim() || "newest";
+    params.set("sort", sort);
+    const addedFrom = String($("libraryAddedFrom")?.value || "").trim();
+    const addedTo = String($("libraryAddedTo")?.value || "").trim();
+    if (addedFrom) params.set("added_from", addedFrom);
+    if (addedTo) params.set("added_to", addedTo);
+    const offset = libraryPage.offsets[libraryPage.index];
+    if (offset) params.set("offset", offset);
+    return { params, published, needsProfile, query, addedFrom, addedTo };
+  }
+
+  function patchLibraryClassificationCard(record) {
+    const card = document.querySelector(`#libraryList article[data-library-id="${record.id}"][data-library-record-type="media_asset"]`);
+    if (!card) return;
+    const badge = card.querySelector("[data-library-classification]");
+    if (badge) badge.outerHTML = libraryClassificationBadge(record);
+    const desc = card.querySelector(":scope > .subtle");
+    if (desc && record.description) desc.textContent = record.description;
+    const needs = libraryNeedsManualClassify(record);
+    const classify = card.querySelector(".library-classify");
+    if (!needs && classify) classify.remove();
+    if (needs && !classify) {
+      card.querySelector(".music-actions")?.insertAdjacentHTML("beforebegin", libraryProfileSelectHtml(record));
+      bindLibraryProfileSelects(card);
+      bindLibraryClassifyButtons(card);
+    }
+  }
+
+  function scheduleLibraryClassifyPoll(force = false) {
+    if (activeNavPage() !== "library" || libraryKindFilterValue() === "published") {
+      stopLibraryClassifyPoll();
+      return;
+    }
+    if (!force && !libraryVisibleClassifying()) {
+      stopLibraryClassifyPoll();
+      return;
+    }
+    if (libraryClassifyPollTimer) return;
+    libraryClassifyPollTimer = window.setTimeout(() => {
+      libraryClassifyPollTimer = null;
+      pollLibraryClassification().catch(() => scheduleLibraryClassifyPoll(true));
+    }, LIBRARY_CLASSIFY_POLL_MS);
+  }
+
+  async function pollLibraryClassification() {
+    if (activeNavPage() !== "library") {
+      stopLibraryClassifyPoll();
+      return;
+    }
+    if (document.visibilityState === "hidden") {
+      scheduleLibraryClassifyPoll(true);
+      return;
+    }
+    const query = libraryListQueryParams();
+    if (query.published) {
+      stopLibraryClassifyPoll();
+      return;
+    }
+    if (libraryClassifyPollInFlight) {
+      scheduleLibraryClassifyPoll(true);
+      return;
+    }
+    libraryClassifyPollInFlight = true;
+    try {
+      const data = await api(`/api/library?${query.params.toString()}`);
+      const records = data.records || [];
+      let still = false;
+      for (const record of records) {
+        if (String(record.record_type || "") === "platform_output") continue;
+        patchLibraryClassificationCard(record);
+        if (String(record.classification_status || "").trim() === "Processing") still = true;
+      }
+      if (still || libraryVisibleClassifying()) scheduleLibraryClassifyPoll(true);
+    } finally {
+      libraryClassifyPollInFlight = false;
+    }
+  }
+
   function markLibraryCardsClassifying(ids) {
     const wanted = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
     document.querySelectorAll('#libraryList article[data-library-record-type="media_asset"]').forEach((card) => {
@@ -14558,6 +14661,7 @@
       if (badge) badge.outerHTML = html;
       else card.querySelector(".music-actions")?.insertAdjacentHTML("beforeend", html);
     });
+    scheduleLibraryClassifyPoll(true);
   }
 
   function libraryNeedsManualClassify(r) {
@@ -14672,26 +14776,10 @@
     if (!target) return;
     syncLibraryPublishedMode();
     applyLibraryViewMode();
-    const query = String($("librarySearch")?.value || "").trim();
-    const kind = libraryKindFilterValue();
-    const published = kind === "published";
-    const needsProfile = kind === "needs_profile";
+    const { params, published, needsProfile, query, addedFrom, addedTo } = libraryListQueryParams();
     const pager = $("libraryPager");
     if (pager) pager.hidden = true;
     target.innerHTML = '<div class="empty">Loading this page…</div>';
-    const params = new URLSearchParams({ limit: String(libraryPageSize()) });
-    if (query) params.set("q", query);
-    if (kind && !needsProfile) params.set("kind", kind);
-    if (needsProfile) params.set("needs_profile", "1");
-    const sort = String($("librarySort")?.value || "newest").trim() || "newest";
-    if (sort && sort !== "newest") params.set("sort", sort);
-    else params.set("sort", sort);
-    const addedFrom = String($("libraryAddedFrom")?.value || "").trim();
-    const addedTo = String($("libraryAddedTo")?.value || "").trim();
-    if (addedFrom) params.set("added_from", addedFrom);
-    if (addedTo) params.set("added_to", addedTo);
-    const offset = libraryPage.offsets[libraryPage.index];
-    if (offset) params.set("offset", offset);
     try {
       const data = await api(`/api/library?${params.toString()}`);
       const records = data.records || [];
@@ -14723,6 +14811,7 @@
       bindLibraryPickerPreviews(target, records);
       updateLibraryPager();
       if (!published) fillLibraryClipPosters(target);
+      scheduleLibraryClassifyPoll();
     } catch (e) {
       target.innerHTML = `<div class="error">${escapeHtml(e.message)}</div>`;
       if (pager) pager.hidden = true;
@@ -15016,6 +15105,13 @@
       libraryPage.offsets[libraryPage.index + 1] = libraryPage.nextOffset;
       libraryPage.index += 1;
       loadLibrary();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      if (libraryVisibleClassifying()) {
+        stopLibraryClassifyPoll();
+        pollLibraryClassification().catch(() => scheduleLibraryClassifyPoll(true));
+      }
     });
   }
 
