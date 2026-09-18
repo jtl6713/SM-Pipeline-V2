@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.323-pipeline-schedule";
+  const BUILD_ID = "item4-0.6.325-classify-all-status";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14092,8 +14092,9 @@
   function setLibraryUploadMessage(text, className = "") {
     const node = $("libraryUploadMessage");
     if (!node) return;
-    node.textContent = text || "";
-    node.className = `form-message ${className}`.trim();
+    const trimmed = String(text || "").trim();
+    node.textContent = trimmed || "Status: ready";
+    node.className = `form-message library-upload-status ${className}`.trim();
   }
 
   function libraryPreviewUrl(record) {
@@ -14274,7 +14275,10 @@
         retries: 0,
       });
       setLibraryUploadMessage(result.message || "Classifying in the background.", result.count ? "success" : "");
-      if (result.count) await loadLibrary();
+      if (result.count) {
+        markLibraryCardsClassifying(result.record_ids);
+        await loadLibrary();
+      }
     } catch (error) {
       setLibraryUploadMessage(error.message, "error-text");
     } finally {
@@ -14529,11 +14533,29 @@
 
   function libraryClassificationBadge(r) {
     const status = String(r.classification_status || "").trim();
-    if (status === "Classified") return `<span class="badge published">Classified</span>`;
-    if (status === "Processing") return `<span class="badge ready-for-review">Classifying</span>`;
-    if (status === "Classification Error") return `<span class="badge failed">Classify error</span>`;
-    if (!r.content_profile_id) return `<span class="badge ready-for-review">Needs profile</span>`;
-    return `<span class="badge ready-for-review">Needs classification</span>`;
+    if (status === "Classified") return `<span class="badge published" data-library-classification>Classified</span>`;
+    if (status === "Processing") return `<span class="badge ready-for-review" data-library-classification>Classifying</span>`;
+    if (status === "Classification Error") return `<span class="badge failed" data-library-classification>Classify error</span>`;
+    if (!r.content_profile_id) return `<span class="badge ready-for-review" data-library-classification>Needs profile</span>`;
+    return `<span class="badge ready-for-review" data-library-classification>Needs classification</span>`;
+  }
+
+  function markLibraryCardsClassifying(ids) {
+    const wanted = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
+    document.querySelectorAll('#libraryList article[data-library-record-type="media_asset"]').forEach((card) => {
+      const id = card.getAttribute("data-library-id") || "";
+      if (wanted.size && !wanted.has(id)) return;
+      if (!wanted.size) {
+        const select = card.querySelector("[data-library-profile-select]");
+        if (!card.querySelector("[data-library-classify]")) return;
+        if (select && !String(select.value || "").trim()) return;
+      }
+      card.querySelector(".library-classify")?.remove();
+      const html = `<span class="badge ready-for-review" data-library-classification>Classifying</span>`;
+      const badge = card.querySelector("[data-library-classification]");
+      if (badge) badge.outerHTML = html;
+      else card.querySelector(".music-actions")?.insertAdjacentHTML("beforeend", html);
+    });
   }
 
   function libraryNeedsManualClassify(r) {
@@ -14868,6 +14890,7 @@
     const inputs = libraryFileInputs();
     if (!inputs.length || (zone && zone.dataset.bound)) return;
     if (zone) zone.dataset.bound = "true";
+    setLibraryUploadMessage("");
     const phone = libraryPickerIsPhone();
     libraryPhotoInputs().forEach((input) => {
       input.multiple = true;

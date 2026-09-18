@@ -2440,6 +2440,8 @@ body{
 .library-results-toolbar .panel-heading{padding:0;margin:0}
 .library-results-toolbar .panel-heading h2{margin:0 0 4px}
 .library-results-toolbar .panel-heading p{margin:0}
+.library-upload-status,#libraryUploadMessage{color:#c62828;font-weight:800;min-height:1.35em;margin:0}
+.library-upload-status.success,#libraryUploadMessage.success,.library-upload-status.error-text,#libraryUploadMessage.error-text{color:#c62828}
 .library-upload-fields{display:grid;gap:12px;max-width:640px}
 .library-upload-fields .music-upload-name{max-width:none}
 #libraryUploadPanel{margin-bottom:16px}

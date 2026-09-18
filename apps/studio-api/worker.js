@@ -360,7 +360,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.320-open-review-reschedule",
+          version: "0.10.321-classify-all-processing",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17942,7 +17942,7 @@ async function assignLibraryAssetProfile(request, env, url, authorization, ctx) 
     body: JSON.stringify({
       fields: {
         Content_Profile: [profile.id],
-        Classification_Status: "Needs Classification",
+        Classification_Status: shouldClassify ? "Processing" : "Needs Classification",
       },
       typecast: true,
     }),
@@ -17974,6 +17974,24 @@ async function assignLibraryAssetProfile(request, env, url, authorization, ctx) 
 
 const LIBRARY_CLASSIFY_ALL_LIMIT = 200;
 const LIBRARY_CLASSIFY_PENDING_FORMULA = libraryClassifyPendingFormula(ASSET_LIBRARY_LIST_FORMULA);
+
+async function stampLibraryAssetsClassifying(env, recordIds) {
+  const ids = [...new Set((recordIds || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, "", {
+      method: "PATCH",
+      body: JSON.stringify({
+        typecast: true,
+        records: chunk.map((id) => ({
+          id,
+          fields: { Classification_Status: "Processing" },
+        })),
+      }),
+    });
+  }
+  return ids;
+}
 
 // Studio "Classify all": every photo/clip that already has a Content Profile and is still
 // Needs Classification / Classification Error goes to A3 in one background run.
@@ -18012,15 +18030,23 @@ async function classifyAllLibraryAssets(request, env, url, authorization, ctx) {
   }
   const alreadyRunning = Boolean(payload?.details?.already_running);
   const truncated = recordIds.length >= LIBRARY_CLASSIFY_ALL_LIMIT;
+  if (!alreadyRunning) {
+    try {
+      await stampLibraryAssetsClassifying(env, recordIds);
+    } catch (error) {
+      console.warn("library classify-all stamp Processing failed", error?.message || String(error));
+    }
+  }
   return respond(request, env, {
     ok: true,
     classifying: !alreadyRunning,
     already_running: alreadyRunning,
     count: recordIds.length,
+    record_ids: recordIds,
     truncated,
     message: alreadyRunning
       ? `A3 is already classifying in the background. ${recordIds.length} assets are still waiting — refresh in a few minutes.`
-      : `Classifying ${recordIds.length} assets in the background${truncated ? " (first batch)" : ""}. Refresh to see updated tags.`,
+      : `Classifying ${recordIds.length} assets in the background${truncated ? " (first batch)" : ""}.`,
   });
 }
 
@@ -18065,7 +18091,7 @@ async function renameAssetLibraryItem(request, env, url, ctx) {
     body: JSON.stringify({
       fields: {
         "Asset Name": sanitized.name,
-        Classification_Status: "Needs Classification",
+        Classification_Status: "Processing",
       },
       typecast: true,
     }),

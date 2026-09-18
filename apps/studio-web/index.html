@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.310-unused-photo-run">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.325-classify-all-status">
 </head>
 <body>
  <header class="topbar">
@@ -1057,6 +1057,7 @@
  <div id="libraryDropBlock">
  <div class="panel-heading"><div><h2>Add assets</h2><p>Drop photos or video clips here. Optional asset name numbers them in order (<span data-library-example-name>Space Museum</span> 1, 2…) and continues after any matching names already in Airtable. Files go to Google Drive, register as Media Assets, and become selectable in Production. Nothing stays on R2.</p></div></div>
  <div class="music-upload-body">
+ <div class="form-message library-upload-status" id="libraryUploadMessage" aria-live="polite">Status: ready</div>
  <div class="item4-upload-zone music-upload-zone" id="libraryUploadZone" tabindex="0" role="button" aria-label="Upload photos or video clips">
  <input id="libraryZoneInput" class="native-file-input native-file-input--cover" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple>
  <div class="item4-upload-icon">＋</div>
@@ -1070,7 +1071,6 @@
  <label class="form-field music-upload-name"><span>Asset name <em>optional — numbers each photo or clip (<span data-library-example-name>Space Museum</span> 1, 2…) and continues after names already in the catalog</em></span><input id="libraryBatchName" type="text" maxlength="120" placeholder="Space Museum" autocomplete="off" enterkeyhint="done"></label>
  <label class="form-field music-upload-name"><span>Location <em>optional</em></span><input id="libraryLocation" maxlength="120" placeholder="Oak Street Beach"></label>
  </div>
- <div class="form-message" id="libraryUploadMessage" aria-live="polite"></div>
  </div>
  </div>
  </section>
@@ -1682,7 +1682,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.323</span> </div>
+ <span id="uiBuildLabel">UI build 0.6.325</span> </div>
  </footer>
 
  <div class="drawer-backdrop" id="ideaDrawerBackdrop" hidden></div>
@@ -1830,6 +1830,6 @@
 
  <script src="/assets/config-0621.js?v=0.6.320-approved-state"></script>
  <script src="/assets/ez-plan.js?v=0.6.315-suggest-7d"></script>
- <script src="/assets/app-item4-0622.js?v=0.6.323-pipeline-schedule"></script>
+ <script src="/assets/app-item4-0622.js?v=0.6.325-classify-all-status"></script>
 </body>
 </html>
