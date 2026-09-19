@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildIdeaLibraryKeys,
   ideaPhotoWaitApplies,
+  ideaProductionConfigFields,
   rankIdeaLibraryFields,
   selectMatchedPhotos,
 } from "./idea-photo-wait.mjs";
@@ -169,4 +170,41 @@ test("neighborhood place on Location or Asset Name stays high", () => {
   });
   assert.equal(mural.confidence, "high");
   assert.ok(mural.match_reasons.includes("location:pilsen"));
+});
+
+test("idea save persists platforms and exact slide count", () => {
+  assert.deepEqual(ideaProductionConfigFields({ title: "Only title" }), {});
+  const fields = ideaProductionConfigFields({
+    save_production_config: true,
+    content_type: "Carousel",
+    platforms: ["Facebook", "Instagram", "Instagram"],
+    include_voiceover: "Yes",
+    include_background_music: "No",
+    include_thumbnail: "Use Profile Default",
+    video_duration: 30,
+    video_clip_count: "Auto",
+    voiceover_tail_seconds: 2,
+    carousel_slide_count: 7,
+    carousel_slide_count_mode: "Exact",
+    carousel_image_mode: "Manual Upload",
+    production_notes: "Seven slides",
+  });
+  assert.deepEqual(fields.Production_Target_Platforms, ["Facebook", "Instagram"]);
+  assert.equal(fields.Production_Content_Type, "Carousel");
+  assert.equal(fields.Production_Carousel_Slide_Count, 7);
+  assert.equal(fields.Production_Carousel_Slide_Count_Mode, "Exact");
+  assert.equal(fields.Production_Video_Clip_Count, null);
+  assert.equal(fields.Production_Config_Notes, "Seven slides");
+});
+
+test("idea save rejects a slide count outside 1-20", () => {
+  assert.throws(() => ideaProductionConfigFields({
+    save_production_config: true,
+    platforms: ["Instagram"],
+    carousel_slide_count: 0,
+  }), /Slide count must be between 1 and 20/);
+  assert.throws(() => ideaProductionConfigFields({
+    save_production_config: true,
+    platforms: ["Threads"],
+  }), /Unsupported target platforms/);
 });

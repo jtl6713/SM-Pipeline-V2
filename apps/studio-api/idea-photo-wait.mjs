@@ -221,3 +221,136 @@ export function selectMatchedPhotos({ matches, min, max, pendingBatchIds, force 
     reason: "min_met_take_all_up_to_max",
   };
 }
+
+const IDEA_SAVE_CONTENT_TYPES = new Set([
+  "Vertical Short Video",
+  "Story",
+  "Carousel",
+  "Feed Post",
+  "Text Post",
+  "Thread",
+  "Longform Video",
+  "Thumbnail / Promo Still",
+  "Event / Flyer Post",
+  "Photo Set",
+]);
+const IDEA_SAVE_PLATFORMS = new Set(["Instagram", "Facebook", "TikTok", "YouTube"]);
+const IDEA_SAVE_TRISTATE = new Set(["Use Profile Default", "Yes", "No"]);
+
+function ideaSaveInt(value, min, max, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < min || number > max) {
+    throw new Error(`${label} must be between ${min} and ${max}`);
+  }
+  return Math.trunc(number);
+}
+
+/**
+ * Airtable fields for the idea drawer production form.
+ * Save must persist these. The drawer used to PATCH only title/summary, then
+ * reload, which cleared platforms and reset slide count to 5.
+ * Absent `save_production_config` keeps title-only patches unchanged.
+ */
+export function ideaProductionConfigFields(payload) {
+  if (!payload || payload.save_production_config !== true) return {};
+  const fields = {};
+
+  if (!Array.isArray(payload.platforms)) {
+    throw new Error("Target platforms must be a list");
+  }
+  const platforms = [...new Set(payload.platforms.map((value) => String(value || "").trim()).filter(Boolean))];
+  const unsupported = platforms.filter((platform) => !IDEA_SAVE_PLATFORMS.has(platform));
+  if (unsupported.length) {
+    throw new Error(`Unsupported target platforms: ${unsupported.join(", ")}`);
+  }
+  fields.Production_Target_Platforms = platforms;
+
+  const contentType = String(payload.content_type || "").trim();
+  if (contentType) {
+    if (!IDEA_SAVE_CONTENT_TYPES.has(contentType)) {
+      throw new Error("Choose a valid production content type");
+    }
+    fields.Production_Content_Type = contentType;
+  }
+
+  const tri = (value, field, label) => {
+    if (value === undefined || value === null || String(value).trim() === "") return;
+    const normalized = String(value).trim();
+    if (!IDEA_SAVE_TRISTATE.has(normalized)) {
+      throw new Error(`${label} must be Use Profile Default, Yes, or No`);
+    }
+    fields[field] = normalized;
+  };
+  tri(payload.include_voiceover, "Production_Include_Voiceover", "Voiceover");
+  tri(payload.include_background_music, "Production_Include_Background_Music", "Background music");
+  tri(payload.include_thumbnail, "Production_Include_Thumbnail", "Thumbnail");
+
+  if (payload.video_duration !== undefined && payload.video_duration !== null && String(payload.video_duration).trim() !== "") {
+    fields.Production_Video_Duration = ideaSaveInt(payload.video_duration, 5, 600, "Video duration");
+  }
+
+  const clipRaw = payload.video_clip_count;
+  if (clipRaw !== undefined) {
+    const clipText = String(clipRaw ?? "").trim();
+    if (!clipText || clipText.toLowerCase() === "auto") {
+      fields.Production_Video_Clip_Count = null;
+    } else {
+      fields.Production_Video_Clip_Count = ideaSaveInt(clipText, 1, 60, "Video clip count");
+    }
+  }
+
+  if (payload.voiceover_tail_seconds !== undefined && payload.voiceover_tail_seconds !== null && String(payload.voiceover_tail_seconds).trim() !== "") {
+    const tail = Number(payload.voiceover_tail_seconds);
+    if (!Number.isFinite(tail) || tail < 0 || tail > 10) {
+      throw new Error("Voiceover tail must be between 0 and 10 seconds");
+    }
+    fields.Voiceover_Tail_Seconds = Math.round(tail * 2) / 2;
+  }
+
+  if (payload.carousel_slide_count !== undefined && payload.carousel_slide_count !== null && String(payload.carousel_slide_count).trim() !== "") {
+    fields.Production_Carousel_Slide_Count = ideaSaveInt(payload.carousel_slide_count, 1, 20, "Slide count");
+  }
+
+  const slideMode = String(payload.carousel_slide_count_mode || "").trim();
+  if (slideMode) {
+    if (!["Exact", "Target range"].includes(slideMode)) {
+      throw new Error("Slide count mode must be Exact or Target range");
+    }
+    fields.Production_Carousel_Slide_Count_Mode = slideMode;
+  }
+
+  if (payload.carousel_slide_count_min !== undefined && String(payload.carousel_slide_count_min ?? "").trim() !== "") {
+    fields.Production_Carousel_Slide_Count_Min = ideaSaveInt(payload.carousel_slide_count_min, 1, 20, "Minimum photos");
+  }
+  if (payload.carousel_slide_count_max !== undefined && String(payload.carousel_slide_count_max ?? "").trim() !== "") {
+    fields.Production_Carousel_Slide_Count_Max = ideaSaveInt(payload.carousel_slide_count_max, 1, 20, "Maximum photos");
+  }
+  if (
+    fields.Production_Carousel_Slide_Count_Mode === "Target range"
+    && fields.Production_Carousel_Slide_Count_Min
+    && fields.Production_Carousel_Slide_Count_Max
+    && fields.Production_Carousel_Slide_Count_Min > fields.Production_Carousel_Slide_Count_Max
+  ) {
+    throw new Error("Minimum photo count cannot exceed maximum");
+  }
+
+  const imageModeRaw = String(payload.carousel_image_mode || "").trim();
+  if (imageModeRaw) {
+    const imageMode = imageModeRaw === "Wait for matching photos" ? "Manual Upload" : imageModeRaw;
+    if (!["Make AI Generated", "Manual Upload"].includes(imageMode)) {
+      throw new Error("Image mode must be Make AI Generated, Manual Upload, or Wait for matching photos");
+    }
+    fields.Production_Carousel_Image_Mode = imageMode;
+    if (imageModeRaw === "Wait for matching photos" && !fields.Production_Carousel_Slide_Count_Mode) {
+      fields.Production_Carousel_Slide_Count_Mode = "Target range";
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "production_notes")) {
+    const notes = String(payload.production_notes || "").trim();
+    if (notes.length > 3000) throw new Error("Production notes must be 3000 characters or fewer");
+    fields.Production_Config_Notes = notes || null;
+  }
+
+  return fields;
+}

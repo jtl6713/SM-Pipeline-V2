@@ -112,6 +112,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
+import { ideaProductionConfigFields } from "./idea-photo-wait.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -2640,6 +2641,7 @@ function mapIdea(record) {
     include_thumbnail: f(record, "Production_Include_Thumbnail"),
     video_duration: f(record, "Production_Video_Duration"),
     voiceover_tail_seconds: f(record, "Voiceover_Tail_Seconds"),
+    production_notes: String(f(record, "Production_Config_Notes") || "").trim(),
     created_at: f(record, "Create_Date"),
     content_item_links: f(record, "Content Items") || [],
     promoted_content_record_id: f(record, "Promoted_Content_Record_ID"),
@@ -3411,9 +3413,16 @@ async function updateIdea(request, env, url, authorization) {
   assertIdeaNotApproved(record, "Editing");
 
   const input = cleanIdeaUpdatePayload(payload);
+  let productionFields = {};
+  try {
+    productionFields = ideaProductionConfigFields(payload);
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : "Invalid production options");
+  }
   const fields = {
     Candidate_Title: input.title,
     Idea_Summary: input.summary || null,
+    ...productionFields,
   };
   if (Object.prototype.hasOwnProperty.call(payload || {}, "primary_location")) {
     fields.Primary_Location = input.primary_location || null;
@@ -3432,7 +3441,8 @@ async function updateIdea(request, env, url, authorization) {
     method: "PATCH",
     body: JSON.stringify({
       fields,
-      typecast: false,
+      // Select fields (platforms, content type) need typecast. Text-only saves stay strict.
+      typecast: Object.keys(productionFields).length > 0,
     }),
   });
 
