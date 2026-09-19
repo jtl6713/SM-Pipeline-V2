@@ -29,6 +29,7 @@ import {
   LIBRARY_CROSS_SCOPE_SETTING,
   libraryCrossScopeEnabled,
   resolveLibraryCrossScopeFlag,
+  resolveAssetManagerCrossScopeFlag,
   firstLinkedRecordId,
   resolveLibraryUploadProfileId,
   mediaAssetProfileScopeFormula,
@@ -282,6 +283,9 @@ test("library profile scope formula isolates Content_Profile unless cross-scope 
   assert.equal(libraryCrossScopeEnabled("0"), false);
   assert.equal(resolveLibraryCrossScopeFlag({ searchParams: new URLSearchParams("cross_scope=1") }, "0"), true);
   assert.equal(resolveLibraryCrossScopeFlag({ searchParams: new URLSearchParams("") }, "on"), true);
+  assert.equal(resolveAssetManagerCrossScopeFlag({ searchParams: new URLSearchParams("") }), false);
+  assert.equal(resolveAssetManagerCrossScopeFlag({ searchParams: new URLSearchParams("cross_scope=1") }), true);
+  assert.equal(resolveAssetManagerCrossScopeFlag({ searchParams: new URLSearchParams("cross_scope=0") }), false);
   assert.equal(firstLinkedRecordId(["recProfileChicago1"]), "recProfileChicago1");
   assert.equal(firstLinkedRecordId([{ id: "recProfileLa2" }]), "recProfileLa2");
   assert.equal(mediaAssetProfileScopeFormula("recProfileChicago1", { crossScope: true }), null);

@@ -520,3 +520,5 @@ Asset Manager classify until done Pages deploy: 2026-09-18 — Upload classify s
 Asset Manager classify after add Pages deploy: 2026-09-18 — After the last file is stored, the Adding N of N line no longer blocks Classifying N. UI 0.6.331-classify-after-add.
 
 Asset Manager classify X of Y Pages deploy: 2026-09-18 — Keep Classifying X of Y remaining across refresh by remembering the batch. UI 0.6.332-classify-xy.
+
+Asset Manager profile scope Pages deploy: 2026-09-18 — Header profile always filters Asset Manager. UI 0.6.333-library-profile.

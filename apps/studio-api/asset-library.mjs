@@ -419,6 +419,16 @@ export function resolveLibraryCrossScopeFlag(url, settingRaw) {
 }
 
 /**
+ * Asset Manager browse stays on the header Content Profile.
+ * LIBRARY_INCLUDE_CROSS_SCOPE is only for idea matching / harvest.
+ * Pass cross_scope=1 on the request if a tool truly needs every city.
+ */
+export function resolveAssetManagerCrossScopeFlag(url) {
+  if (!url?.searchParams?.has("cross_scope")) return false;
+  return libraryCrossScopeEnabled(url.searchParams.get("cross_scope"));
+}
+
+/**
  * Asset Manager uploads must use the operator-chosen profile.
  * Prefer the form field (header select) over the query string. Never fall back
  * to a default market — that stamps Chicago while the header shows LA.

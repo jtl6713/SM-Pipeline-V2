@@ -42,6 +42,7 @@ import {
   normalizeLibraryBatchBase,
   parseLibraryDateParam,
   libraryAssetAddedAt,
+  resolveAssetManagerCrossScopeFlag,
   resolveLibraryCrossScopeFlag,
   resolveLibraryListSort,
   resolveLibraryUploadProfileId,
@@ -363,7 +364,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.325-classify-until-done",
+          version: "0.10.326-library-profile-scope",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17468,7 +17469,8 @@ async function readLibraryCrossScopeSetting(env) {
   return libraryCrossScopeEnabled(f(row, "Setting_Value"));
 }
 
-async function resolveLibraryCrossScope(env, url) {
+async function resolveLibraryCrossScope(env, url, { useSetting = true } = {}) {
+  if (!useSetting) return resolveAssetManagerCrossScopeFlag(url);
   const settingEnabled = await readLibraryCrossScopeSetting(env);
   return resolveLibraryCrossScopeFlag(url, settingEnabled ? "1" : "0");
 }
@@ -17515,7 +17517,9 @@ async function resolveLibraryScopeProfile(env, authorization, url, options = {})
 }
 
 async function libraryProfileScopeFormula(env, authorization, url, options = {}) {
-  const crossScope = await resolveLibraryCrossScope(env, url);
+  const crossScope = options.crossScope != null
+    ? Boolean(options.crossScope)
+    : await resolveLibraryCrossScope(env, url);
   const profile = await resolveLibraryScopeProfile(env, authorization, url, options);
   return mediaAssetProfileScopeFormula(profile?.id || "", {
     crossScope,
@@ -17594,10 +17598,13 @@ async function listAssetLibrary(request, env, url, authorization) {
   const addedFrom = parseLibraryDateParam(url.searchParams.get("added_from"));
   const addedTo = parseLibraryDateParam(url.searchParams.get("added_to"));
   const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: false });
-  const crossScope = await resolveLibraryCrossScope(env, url);
+  const crossScope = await resolveLibraryCrossScope(env, url, { useSetting: false });
+  const scopedProfileId = requestedIds.length || needsProfile || crossScope
+    ? ""
+    : await resolveLibraryScopeProfileId(env, authorization, url);
   const scopeFormula = requestedIds.length || needsProfile
     ? null
-    : await libraryProfileScopeFormula(env, authorization, url, { includeUnscoped: false });
+    : await libraryProfileScopeFormula(env, authorization, url, { includeUnscoped: false, crossScope });
   const [page, profiles] = await Promise.all([
     listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
       limit: requestedIds.length ? Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Math.max(requestedIds.length, 1)) : limit,
@@ -17617,7 +17624,8 @@ async function listAssetLibrary(request, env, url, authorization) {
   const profilesById = Object.fromEntries((profiles || []).map((row) => [row.id, row]));
   const mapped = page.records
     .filter((record) => !/__\d+x\d+__/i.test(String(f(record, "Asset Name") || "")))
-    .map((record) => mapLibraryAsset(record, profilesById));
+    .map((record) => mapLibraryAsset(record, profilesById))
+    .filter((row) => !scopedProfileId || row.content_profile_id === scopedProfileId);
   return respond(request, env, {
     ok: true,
     idle: false,
@@ -17633,6 +17641,7 @@ async function listAssetLibrary(request, env, url, authorization) {
     offset: page.offset || null,
     limit,
     cross_scope: crossScope,
+    content_profile_id: scopedProfileId || null,
     records: mapped,
   });
 }
@@ -30445,7 +30454,7 @@ async function patchLibraryCrossScope(request, env) {
     env,
     LIBRARY_CROSS_SCOPE_SETTING,
     enabled ? "1" : "0",
-    "Admin: include Media Assets from other Content Profiles in Asset Manager and matching"
+    "Admin: include Media Assets from other Content Profiles in idea matching and harvest"
   );
   return respond(request, env, {
     ok: true,
