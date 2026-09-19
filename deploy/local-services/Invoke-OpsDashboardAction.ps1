@@ -75,6 +75,31 @@ function Assert-Service([string[]]$Allowed) {
     }
 }
 
+function Write-ChildLogDelta([string]$ChildLog, [ref]$LastLength) {
+    if (-not (Test-Path -LiteralPath $ChildLog -PathType Leaf)) { return }
+    try {
+        $stream = [System.IO.File]::Open(
+            $ChildLog,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::ReadWrite
+        )
+        try {
+            $reader = New-Object System.IO.StreamReader($stream)
+            $text = $reader.ReadToEnd()
+        } finally {
+            if ($reader) { $reader.Dispose() }
+            $stream.Dispose()
+        }
+        if ($text.Length -gt $LastLength.Value) {
+            Write-Host $text.Substring($LastLength.Value)
+            $LastLength.Value = $text.Length
+        }
+    } catch {
+        # Transcript may be mid-write; next poll will retry.
+    }
+}
+
 function Invoke-Ps1([string]$Path, [string[]]$NativeArgs) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Missing script: $Path"
@@ -114,15 +139,22 @@ try {
 }
 exit `$code
 "@
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $cmd
-    $exitCode = [int]$LASTEXITCODE
-    if (Test-Path -LiteralPath $childLog) {
-        $childText = Get-Content -LiteralPath $childLog -Raw
-        if ($childText) {
-            Write-Host $childText
-        }
-        Remove-Item -LiteralPath $childLog -Force -ErrorAction SilentlyContinue
+    $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        $cmd
+    ) -PassThru -WindowStyle Hidden
+    $lastLen = 0
+    while ($null -eq $proc.HasExited -or -not $proc.HasExited) {
+        Write-ChildLogDelta -ChildLog $childLog -LastLength ([ref]$lastLen)
+        Start-Sleep -Milliseconds 400
     }
+    $proc.WaitForExit() | Out-Null
+    Write-ChildLogDelta -ChildLog $childLog -LastLength ([ref]$lastLen)
+    $exitCode = if ($null -ne $proc.ExitCode) { [int]$proc.ExitCode } else { 1 }
+    Remove-Item -LiteralPath $childLog -Force -ErrorAction SilentlyContinue
     return $exitCode
 }
 
@@ -136,15 +168,9 @@ $StopHelper = Join-Path $ToolsRoot '_startup_helpers\99-stop-chicagoshining-loca
 $VerifyPs1 = Join-Path $ToolsRoot 'verify-chicagoshining-local-services.ps1'
 $PortGuard = Join-Path $ToolsRoot '_startup_helpers\00-port-guard.ps1'
 
-$script:OuterTranscriptActive = $false
-if (-not [string]::IsNullOrWhiteSpace($TranscriptPath)) {
-    $dir = Split-Path -Parent $TranscriptPath
-    if ($dir -and -not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Force -Path $dir | Out-Null
-    }
-    Start-Transcript -Path $TranscriptPath -Force | Out-Null
-    $script:OuterTranscriptActive = $true
-}
+# TranscriptPath is kept for dashboard compatibility but intentionally unused.
+# Outer Start-Transcript/Stop-Transcript can hang after nested deploy/start scripts
+# finish, which leaves Ops jobs stuck on "running" even when the service is healthy.
 
 $code = 0
 try {
@@ -232,11 +258,6 @@ switch ($Action) {
 } catch {
     Write-Host $_.Exception.Message
     $code = 1
-} finally {
-    if ($script:OuterTranscriptActive) {
-        Stop-Transcript | Out-Null
-        $script:OuterTranscriptActive = $false
-    }
 }
 
 exit $code

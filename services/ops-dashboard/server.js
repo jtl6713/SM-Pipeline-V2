@@ -165,20 +165,6 @@ function appendLog(job, line) {
   if (job.log.length > 400000) job.log = job.log.slice(-300000);
 }
 
-function readTranscript(filePath) {
-  try {
-    if (!filePath || !fs.existsSync(filePath)) return '';
-    return fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return '';
-  }
-}
-
-function syncTranscript(job) {
-  const text = readTranscript(job.transcriptPath);
-  if (text && text !== job.log) job.log = text;
-}
-
 function startJob(action, service) {
   const job = {
     id: randomUUID(),
@@ -189,7 +175,6 @@ function startJob(action, service) {
     endedAt: null,
     exitCode: null,
     log: 'Starting… VERIFY and DEPLOY can take a minute. Output appears as PowerShell writes it.\n',
-    transcriptPath: path.join(os.tmpdir(), `ops-dashboard-${randomUUID()}.log`),
   };
   jobs.set(job.id, job);
   activeJobId = job.id;
@@ -206,8 +191,6 @@ function startJob(action, service) {
     PIPELINE_ROOT,
     '-RepoRoot',
     REPO_ROOT,
-    '-TranscriptPath',
-    job.transcriptPath,
   ];
   if (service) {
     args.push('-Service', service);
@@ -216,6 +199,7 @@ function startJob(action, service) {
   const child = spawn('powershell.exe', args, {
     windowsHide: true,
     cwd: REPO_ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   job.child = child;
 
@@ -225,19 +209,17 @@ function startJob(action, service) {
     if (job.endedAt) return;
     if (pump) clearInterval(pump);
     if (timeoutTimer) clearTimeout(timeoutTimer);
-    syncTranscript(job);
     if (errText) appendLog(job, `\n${errText}\n`);
     if (!job.log || job.log.trim() === 'Starting… VERIFY and DEPLOY can take a minute. Output appears as PowerShell writes it.') {
-      appendLog(job, '\n(No PowerShell transcript was captured.)\n');
+      appendLog(job, '\n(No PowerShell output was captured.)\n');
     }
     job.exitCode = code == null ? 1 : code;
     job.status = job.exitCode === 0 ? 'ok' : 'failed';
     job.endedAt = new Date().toISOString();
+    job.child = null;
     if (activeJobId === job.id) activeJobId = null;
-    try { if (fs.existsSync(job.transcriptPath)) fs.unlinkSync(job.transcriptPath); } catch { /* keep */ }
   };
   pump = setInterval(() => {
-    syncTranscript(job);
     if (child.exitCode !== null) finish(child.exitCode);
   }, 800);
   timeoutTimer = setTimeout(() => {
@@ -251,6 +233,7 @@ function startJob(action, service) {
   child.stdout.on('data', (buf) => appendLog(job, buf.toString('utf8')));
   child.stderr.on('data', (buf) => appendLog(job, buf.toString('utf8')));
   child.on('error', (err) => finish(1, `ERROR ${err.message}`));
+  child.on('exit', (code) => finish(code));
   child.on('close', (code) => finish(code));
   return job;
 }
@@ -356,7 +339,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/run') {
       if (activeJobId) {
         const current = jobs.get(activeJobId);
-        if (current) syncTranscript(current);
         json(res, 409, {
           ok: false,
           error: 'That first click is still running. Showing its log.',

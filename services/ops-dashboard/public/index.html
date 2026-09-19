@@ -85,7 +85,7 @@
 <body>
   <header>
     <h1>Chicago Shining Ops</h1>
-    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY. Allowlisted scripts only. Catalog 2026-09-19-restart-one. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
+    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY. Allowlisted scripts only. Catalog 2026-09-19-job-finish. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
   </header>
   <div class="wrap">
     <div id="login" class="login" hidden>
@@ -135,6 +135,7 @@
     const $ = (id) => document.getElementById(id);
     let catalog = null;
     let pollTimer = null;
+    let pollFailures = 0;
 
     function readCookie(name) {
       const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
@@ -231,6 +232,8 @@
       try {
         const data = await api("/api/jobs/" + id);
         const job = data.job;
+        pollFailures = 0;
+        $("runErr").textContent = "";
         $("jobMeta").textContent = `${job.action}${job.service ? " · " + job.service : ""} · ${job.status}` +
           (job.exitCode == null ? "" : " · exit " + job.exitCode);
         $("log").textContent = job.log || "(no output yet)";
@@ -242,8 +245,29 @@
           loadStatus().catch(() => {});
         }
       } catch (err) {
+        pollFailures += 1;
+        if (pollFailures < 8) {
+          $("runErr").textContent = "Connection hiccup while polling. Retrying…";
+          pollTimer = setTimeout(() => pollJob(id), 1500);
+          return;
+        }
+        try {
+          const status = await api("/api/status");
+          if (status.activeJobId && status.activeJobId !== id) {
+            pollFailures = 0;
+            pollJob(status.activeJobId);
+            return;
+          }
+          if (!status.activeJobId) {
+            setActionsLocked(false);
+            $("jobMeta").textContent = "Idle. The last job finished while the page was disconnected.";
+            $("runErr").textContent = "";
+            loadStatus().catch(() => {});
+            return;
+          }
+        } catch { /* fall through */ }
         setActionsLocked(false);
-        $("runErr").textContent = err.message || "That job is gone. You can run again.";
+        $("runErr").textContent = err.message || "Could not read the job. Unlock and run again if needed.";
       }
     }
 
