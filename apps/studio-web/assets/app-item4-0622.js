@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.330-classify-until-done";
+  const BUILD_ID = "item4-0.6.331-classify-after-add";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14100,8 +14100,7 @@
   const libraryClassifyWatch = { ids: new Set(), total: 0 };
 
   function libraryUploadMessageBusy() {
-    return /adding \d+ of|adding as next|adding .+\.\.\.|collecting assets that are waiting/i
-      .test(String($("libraryUploadMessage")?.textContent || ""));
+    return $("libraryUploadZone")?.dataset?.busy === "true";
   }
 
   function collectLibraryClassifyIds(result, extraIds) {
@@ -15020,6 +15019,7 @@
         }
       }
       inputs.forEach((input) => { input.value = ""; });
+      if (zone) delete zone.dataset.busy;
       if (uploaded) await startLibraryBrowse();
       const namedSummary = namedUploads.length === 1
         ? `Added as ${namedUploads[0]}.`
