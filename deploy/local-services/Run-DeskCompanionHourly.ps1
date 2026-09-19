@@ -24,16 +24,22 @@ $StartBat = Join-Path $PlaybookDir 'start-chicagoshining-local-services.bat'
 $VerifyBat = Join-Path $PlaybookDir 'verify-chicagoshining-local-services.bat'
 
 $HealthTargets = @(
-    'https://pipeline.chicagoshining.com/health'
-    'https://render.chicagoshining.com/health'
-    'https://frames.chicagoshining.com/health'
-    'https://compress.chicagoshining.com/health'
-    'https://watermark.chicagoshining.com/health'
-    'https://voiceover.chicagoshining.com/health'
-    'https://youtube-upload.chicagoshining.com/health'
-    'https://youtube-upload-nyc.chicagoshining.com/health'
-    'https://youtube-upload-miami.chicagoshining.com/health'
+    @{ Url = 'https://pipeline.chicagoshining.com/health' }
+    @{ Url = 'https://render.chicagoshining.com/health' }
+    @{ Url = 'https://frames.chicagoshining.com/health' }
+    @{ Url = 'https://compress.chicagoshining.com/health' }
+    @{ Url = 'https://watermark.chicagoshining.com/health' }
+    @{ Url = 'https://voiceover.chicagoshining.com/health' }
+    @{ Url = 'https://youtube-upload.chicagoshining.com/health' }
+    @{ Url = 'https://youtube-upload-nyc.chicagoshining.com/health' }
+    @{ Url = 'https://youtube-upload-miami.chicagoshining.com/health'; OptionalRuntime = 'Services\youtube-uploader-miami\service\youtube-upload-service.js' }
 )
+
+function Test-HourlyTargetInstalled($Target) {
+    $rel = [string]$Target.OptionalRuntime
+    if (-not $rel) { return $true }
+    return (Test-Path -LiteralPath (Join-Path $PipelineRoot $rel))
+}
 
 function Test-PublicHealth([string]$Url) {
     try {
@@ -84,7 +90,12 @@ try {
     }
 
     $down = @()
-    foreach ($url in $HealthTargets) {
+    foreach ($target in $HealthTargets) {
+        $url = [string]$target.Url
+        if (-not (Test-HourlyTargetInstalled $target)) {
+            Write-Host ("  {0,-42} SKIP" -f $url)
+            continue
+        }
         $ok = Test-PublicHealth $url
         $state = if ($ok) { 'ok' } else { 'DOWN' }
         Write-Host ("  {0,-42} {1}" -f $url, $state)

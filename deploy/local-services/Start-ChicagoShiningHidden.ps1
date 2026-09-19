@@ -95,6 +95,7 @@ $Map = @{
         Kind = 'node'
         File = 'youtube-upload-service.js'
         ExtraEnv = @{ PORT = '3343' }
+        OptionalUntilInstalled = $true
     }
     'pipeline-runner' = @{
         Name = 'Pipeline Runner'
@@ -158,6 +159,10 @@ if (-not (Test-Path -LiteralPath $runtime)) {
     }
 }
 if (-not (Test-Path -LiteralPath $runtime)) {
+    if ($cfg.OptionalUntilInstalled) {
+        Write-Host "SKIP ${Service}: runtime not installed yet ($runtime)" -ForegroundColor Yellow
+        exit 0
+    }
     throw "Runtime folder missing for ${Service}: $runtime"
 }
 
