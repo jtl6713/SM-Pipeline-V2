@@ -35,14 +35,8 @@ $HealthTargets = @(
     @{ Id = 'voiceover-normalizer'; Url = 'https://voiceover.chicagoshining.com/health'; Service = 'voiceover-normalizer' }
     @{ Id = 'youtube-uploader'; Url = 'https://youtube-upload.chicagoshining.com/health'; Service = 'youtube-uploader' }
     @{ Id = 'youtube-uploader-nyc'; Url = 'https://youtube-upload-nyc.chicagoshining.com/health'; Service = 'youtube-uploader-nyc' }
-    @{ Id = 'youtube-uploader-miami'; Url = 'https://youtube-upload-miami.chicagoshining.com/health'; Service = 'youtube-uploader-miami'; OptionalRuntime = 'Services\youtube-uploader-miami\service\youtube-upload-service.js' }
+    @{ Id = 'youtube-uploader-miami'; Url = 'https://youtube-upload-miami.chicagoshining.com/health'; Service = 'youtube-uploader-miami' }
 )
-
-function Test-OptionalServiceInstalled([hashtable]$Target) {
-    $rel = [string]$Target.OptionalRuntime
-    if (-not $rel) { return $true }
-    return (Test-Path -LiteralPath (Join-Path $PipelineRoot $rel))
-}
 
 function Get-DeskRank([string]$Mode) {
     switch ($Mode.ToLowerInvariant()) {
@@ -177,19 +171,6 @@ $git = Get-GitState
 $caps = Get-DeskCaps
 $probes = @()
 foreach ($target in $HealthTargets) {
-    if (-not (Test-OptionalServiceInstalled $target)) {
-        $probes += [pscustomobject]@{
-            id = $target.Id
-            url = $target.Url
-            service = $target.Service
-            ok = $true
-            status = 0
-            error = $null
-            warnOnly = $false
-            skipped = $true
-        }
-        continue
-    }
     $probe = Test-PublicHealth $target.Url
     $probes += [pscustomobject]@{
         id = $target.Id
@@ -199,14 +180,13 @@ foreach ($target in $HealthTargets) {
         status = $probe.Status
         error = $probe.Error
         warnOnly = [bool]$target.WarnOnly
-        skipped = $false
     }
 }
 
-$down = @($probes | Where-Object { -not $_.ok -and -not $_.warnOnly -and -not $_.skipped })
+$down = @($probes | Where-Object { -not $_.ok -and -not $_.warnOnly })
 Write-Host "Desk companion mode=$DeskMode dirty=$($git.Dirty) behind=$($git.Behind) down=$($down.Count)"
 $probes | ForEach-Object {
-    $state = if ($_.skipped) { 'SKIP' } elseif ($_.ok) { 'ok' } elseif ($_.warnOnly) { 'WARN' } else { 'DOWN' }
+    $state = if ($_.ok) { 'ok' } elseif ($_.warnOnly) { 'WARN' } else { 'DOWN' }
     Write-Host ("  {0,-22} {1}" -f $_.id, $state)
 }
 
@@ -259,11 +239,6 @@ if ($down.Count -eq 0) {
     foreach ($row in $down) {
         $svc = $row.service
         if (-not $svc) { $svc = $row.id }
-        $target = $HealthTargets | Where-Object { $_.Id -eq $row.id -or $_.Service -eq $svc } | Select-Object -First 1
-        if ($target -and -not (Test-OptionalServiceInstalled $target)) {
-            Write-Host "SKIP hidden start $svc (runtime not installed)"
-            continue
-        }
         Write-Host "Hidden start $svc"
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HiddenStart -Service $svc -StopFirst
         if ($LASTEXITCODE -ne 0) {

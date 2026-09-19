@@ -32,14 +32,8 @@ $HealthTargets = @(
     @{ Url = 'https://voiceover.chicagoshining.com/health' }
     @{ Url = 'https://youtube-upload.chicagoshining.com/health' }
     @{ Url = 'https://youtube-upload-nyc.chicagoshining.com/health' }
-    @{ Url = 'https://youtube-upload-miami.chicagoshining.com/health'; OptionalRuntime = 'Services\youtube-uploader-miami\service\youtube-upload-service.js' }
+    @{ Url = 'https://youtube-upload-miami.chicagoshining.com/health' }
 )
-
-function Test-HourlyTargetInstalled($Target) {
-    $rel = [string]$Target.OptionalRuntime
-    if (-not $rel) { return $true }
-    return (Test-Path -LiteralPath (Join-Path $PipelineRoot $rel))
-}
 
 function Test-PublicHealth([string]$Url) {
     try {
@@ -92,10 +86,6 @@ try {
     $down = @()
     foreach ($target in $HealthTargets) {
         $url = [string]$target.Url
-        if (-not (Test-HourlyTargetInstalled $target)) {
-            Write-Host ("  {0,-42} SKIP" -f $url)
-            continue
-        }
         $ok = Test-PublicHealth $url
         $state = if ($ok) { 'ok' } else { 'DOWN' }
         Write-Host ("  {0,-42} {1}" -f $url, $state)
