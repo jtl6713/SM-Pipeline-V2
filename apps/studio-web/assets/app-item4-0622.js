@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.329-classify-status";
+  const BUILD_ID = "item4-0.6.330-classify-until-done";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14115,11 +14115,17 @@
     return [...new Set(ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
   }
 
+  function libraryClassificationInProgress(status) {
+    const value = String(status || "").trim();
+    return value !== "Classified" && value !== "Classification Error";
+  }
+
   function watchLibraryClassification(ids) {
     const next = collectLibraryClassifyIds({ record_ids: ids });
     if (!next.length) return;
     next.forEach((id) => libraryClassifyWatch.ids.add(id));
     libraryClassifyWatch.total = Math.max(libraryClassifyWatch.total, libraryClassifyWatch.ids.size);
+    syncLibraryClassifyStatusMessage(libraryClassifyWatch.ids.size);
     scheduleLibraryClassifyPoll(true);
   }
 
@@ -14710,7 +14716,7 @@
       for (const record of records) {
         if (String(record.record_type || "") === "platform_output") continue;
         patchLibraryClassificationCard(record);
-        if (String(record.classification_status || "").trim() === "Processing") still += 1;
+        if (libraryClassificationInProgress(record.classification_status)) still += 1;
       }
       if (watchIds.length) {
         const seen = new Set(records.map((record) => record.id).filter(Boolean));
@@ -15015,7 +15021,6 @@
       }
       inputs.forEach((input) => { input.value = ""; });
       if (uploaded) await startLibraryBrowse();
-      if (uploadedClassifyIds.length) watchLibraryClassification(uploadedClassifyIds);
       const namedSummary = namedUploads.length === 1
         ? `Added as ${namedUploads[0]}.`
         : (namedUploads.length > 1
@@ -15026,13 +15031,17 @@
           ? `${uploaded ? `${uploaded} added. ` : ""}${errors.join(" ")}`
           : (uploaded ? `${uploaded === 1 ? "The other asset was added" : `The other ${uploaded} assets were added`} to the library.` : "");
         setLibraryUploadMessage(extra ? `${item4OversizedClipNotice} ${extra}` : item4OversizedClipNotice, "error-text");
+      } else if (uploaded && errors.length) {
+        setLibraryUploadMessage(`${namedSummary || `${uploaded} added.`} ${errors.join(" ")}`.trim(), "error-text");
+      } else if (!uploaded) {
+        setLibraryUploadMessage(errors.join(" ") || "Could not add those assets.", "error-text");
+      }
+      if (uploadedClassifyIds.length) {
+        watchLibraryClassification(uploadedClassifyIds);
+        markLibraryCardsClassifying(uploadedClassifyIds);
       } else if (uploaded && !errors.length) {
         setLibraryUploadMessage(namedSummary
           || (uploaded === 1 ? "Asset added to the library." : `${uploaded} assets added to the library.`), "success");
-      } else if (uploaded) {
-        setLibraryUploadMessage(`${namedSummary || `${uploaded} added.`} ${errors.join(" ")}`.trim(), "error-text");
-      } else {
-        setLibraryUploadMessage(errors.join(" ") || "Could not add those assets.", "error-text");
       }
     } finally {
       if (zone) delete zone.dataset.busy;

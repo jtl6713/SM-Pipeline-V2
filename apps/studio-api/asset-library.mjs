@@ -493,6 +493,11 @@ export function parseLibraryRecordIdsParam(value) {
   return [...new Set(raw.split(/[\s,]+/).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
 }
 
+export function libraryClassificationInProgress(status) {
+  const value = String(status || "").trim();
+  return value !== "Classified" && value !== "Classification Error";
+}
+
 export function libraryRecordIdsFilterFormula(ids) {
   const clean = parseLibraryRecordIdsParam(Array.isArray(ids) ? ids.join(",") : ids);
   if (!clean.length) return null;
