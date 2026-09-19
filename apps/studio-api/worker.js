@@ -367,7 +367,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.327-autonomous-fresh-stills",
+          version: "0.10.328-scheduled-over-retry",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2495,15 +2495,15 @@ function normalizedOutputState(record) {
     || fields.Manual_Fallback_Required
   ) return "Manual Action Required";
   if (has("FB_Slideshow_Status", "reel processing") || has("IG_Story_Status", "publishing")) return "Platform Processing";
-  // A leftover retry flag must not hide a YouTube video that is already on the platform.
-  if (!youtubeVideoReady && (fields.Publish_Retry_Eligible || fields.Asset_Selection_Retry_Eligible || has("FB_Slideshow_Status", "retry") || has("TikTok_Draft_Status", "retry"))) return "Retry Pending";
   if (youtubeVideoReady && !has("Publish_Status", "published") && text("YouTube_Stage") !== "Complete") return "Platform Processing";
   if (has("TikTok_Draft_Status", "draft delivered")) return "Draft Delivered";
   if (has("YouTube_Upload_Status", "uploading") || has("FB_Slideshow_Status", "uploading") || has("Publish_Status", "publishing")) return "Uploading";
   if (has("YouTube_Processing_Status", "processing") || has("FB_Slideshow_Status", "processing") || has("TikTok_Draft_Status", "processing") || has("IG_Carousel_Status", "processing")) return "Platform Processing";
-  // "Ready to Schedule" must win over Approved — future-dated posts are armed, not incomplete.
+  // "Ready to Schedule" must win over stale Publish_Retry_Eligible and Approved — future-dated posts are armed, not waiting on retry.
   if (has("Publish_Status", "ready to schedule") || text("Publish_Status").toLowerCase() === "scheduled" || has("TikTok_Draft_Status", "waiting for schedule")) return "Scheduled";
   if (has("Publish_Status", "scheduled")) return "Scheduled";
+  // A leftover retry flag must not hide a YouTube video that is already on the platform.
+  if (!youtubeVideoReady && (fields.Publish_Retry_Eligible || fields.Asset_Selection_Retry_Eligible || has("FB_Slideshow_Status", "retry") || has("TikTok_Draft_Status", "retry"))) return "Retry Pending";
   // Publisher "Ready for Assets" is the start of upload, not a rewind to Studio
   // asset selection. Approved/reviewable work must win or Approve drops 65% → 30%.
   if (has("Review_Status", "approved") || has("Output_Status", "approved")) return "Approved";

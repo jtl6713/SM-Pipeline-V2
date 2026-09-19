@@ -479,3 +479,5 @@ Library upload Processing stamp Worker deploy: 2026-09-18 — Studio uploads sta
 Asset Manager profile scope Worker deploy: 2026-09-18 — GET /api/library ignores LIBRARY_INCLUDE_CROSS_SCOPE and keeps the header Content Profile. Worker 0.10.326-library-profile-scope.
 
 Autonomous fresh-stills Worker deploy: 2026-09-18 — NYC/LA manual runs scope occupied ideas to the header profile and allow new photos at familiar landmarks. Worker 0.10.327-autonomous-fresh-stills.
+
+Scheduled-over-retry Worker deploy: 2026-09-19 — Ready to Schedule wins over stale Publish_Retry_Eligible in pipeline badges. Worker 0.10.328-scheduled-over-retry.
