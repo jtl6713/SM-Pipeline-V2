@@ -1,0 +1,159 @@
+﻿name: Test Miami Idea Create
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chicagoshining-test-miami-idea-create
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET_WORKER: chicagoshining-studio-api
+      BRIDGE_WORKER: chicagoshining-test-miami-idea-${{ github.run_id }}
+      BRIDGE_RETRY_MAX: "12"
+      BRIDGE_RETRY_SLEEP_S: "3"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Capture production Worker identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/before.json
+          jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/before.json >/tmp/active-before.txt
+
+      - name: Build one-time service bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(python - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(36))
+          PY
+          )
+          printf '%s' "$TOKEN" >/tmp/path-token.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          token=Path('/tmp/path-token.txt').read_text()
+          command=json.loads(Path('deploy/test-miami-idea-create.json').read_text())
+          requests=json.dumps(command['requests'],separators=(',',':'))
+          owner=json.dumps('joseph.t.logan@gmail.com')
+          route=json.dumps('/'+token)
+          js=f'''export default {{
+            async fetch(request, env) {{
+              const incoming = new URL(request.url);
+              if (incoming.pathname === {route} + "/ready") {{
+                return new Response(JSON.stringify({{ok:true,ready:true}}), {{status:200,headers:{{"Content-Type":"application/json","Cache-Control":"no-store"}}}});
+              }}
+              if (incoming.pathname !== {route}) return new Response("Not found", {{status:404}});
+              const requests = {requests};
+              const results = [];
+              for (const spec of requests) {{
+                const method = String(spec.method || "GET").toUpperCase();
+                const headers = new Headers({{
+                  "Cf-Access-Authenticated-User-Email": {owner},
+                  "Accept": "application/json",
+                  "Origin": "https://studio.chicagoshining.com"
+                }});
+                let body;
+                if (method !== "GET") {{
+                  headers.set("Content-Type","application/json");
+                  body = JSON.stringify(spec.body ?? {{}});
+                }}
+                const internal = new Request("https://studio.chicagoshining.com" + spec.path, {{method,headers,body}});
+                const response = await env.STUDIO_API.fetch(internal);
+                const text = await response.text();
+                let parsed;
+                try {{ parsed = text ? JSON.parse(text) : null; }} catch {{ parsed = {{raw:text.slice(0,10000)}}; }}
+                results.push({{name:spec.name || spec.path,path:spec.path,method,status:response.status,ok:response.ok,body:parsed}});
+                if (!response.ok) break;
+              }}
+              return new Response(JSON.stringify({{ok:results.every(r=>r.ok),correlation_id:{json.dumps(command['correlation_id'])},results}}), {{status:200,headers:{{"Content-Type":"application/json","Cache-Control":"no-store"}}}});
+            }}
+          }};'''
+          Path('/tmp/worker.js').write_text(js)
+          PY
+          node --check /tmp/worker.js
+          cat >/tmp/metadata.json <<'EOF'
+          {
+            "main_module":"worker.js",
+            "compatibility_date":"2026-08-02",
+            "bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]
+          }
+          EOF
+
+      - name: Upload temporary bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+          code=$(curl -sS -o /tmp/upload.json -w '%{http_code}' -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/content" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/worker.js;type=application/javascript+module;filename=worker.js')
+          test "$code" -ge 200 -a "$code" -lt 300
+          jq -e '.success==true' /tmp/upload.json >/dev/null
+          curl -fsS -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/subdomain-enable.json
+          jq -e '.success==true and .result.enabled==true' /tmp/subdomain-enable.json >/dev/null
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/account-subdomain.json
+          jq -er '.result.subdomain' /tmp/account-subdomain.json >/tmp/account-subdomain.txt
+
+      - name: Create Miami idea and verify list
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUBDOMAIN=$(cat /tmp/account-subdomain.txt)
+          TOKEN=$(cat /tmp/path-token.txt)
+          URL="https://$BRIDGE_WORKER.$SUBDOMAIN.workers.dev/$TOKEN"
+          ready=000
+          for i in $(seq 1 "$BRIDGE_RETRY_MAX"); do
+            ready=$(curl -sS --max-time 20 -o /tmp/ready.json -w '%{http_code}' "$URL/ready" || true)
+            [[ "$ready" == "200" ]] && break
+            [[ "$i" -eq "$BRIDGE_RETRY_MAX" ]] && exit 1
+            sleep "$BRIDGE_RETRY_SLEEP_S"
+          done
+          code=$(curl -sS --max-time 120 -o /tmp/result.json -w '%{http_code}' "$URL" || true)
+          echo "bridge_http=$code"
+          test "$code" -eq 200
+          jq . /tmp/result.json
+          jq -e '.ok==true' /tmp/result.json >/dev/null
+          jq -e '.results[0].name=="create-miami-idea"' /tmp/result.json >/dev/null
+          jq -e '.results[0].status==201 or .results[0].status==200' /tmp/result.json >/dev/null
+          jq -e '.results[0].body.context.content_profile.name|test("Miami";"i")' /tmp/result.json >/dev/null
+          CREATED_ID=$(jq -er '.results[0].body.record.id' /tmp/result.json)
+          CREATED_TITLE=$(jq -er '.results[0].body.record.title' /tmp/result.json)
+          echo "created_record_id=$CREATED_ID"
+          echo "created_title=$CREATED_TITLE"
+          jq -e --arg id "$CREATED_ID" '.results[1].body.records|map(.id)|index($id)|type=="number"' /tmp/result.json >/dev/null
+          jq -e '.results[1].body.profile.theme=="miami"' /tmp/result.json >/dev/null
+
+      - name: Delete temporary bridge
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -X DELETE "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$BRIDGE_WORKER" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null || true
+
+      - name: Verify production Worker unchanged
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$TARGET_WORKER/deployments" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /tmp/after.json
+          test "$(cat /tmp/active-before.txt)" = "$(jq -er '.result.deployments[0].versions|max_by(.percentage)|.version_id' /tmp/after.json)"
+

@@ -1,0 +1,23 @@
+{
+  "correlation_id": "MIAMI-IDEA-SMOKE-20260914",
+  "miami_profile_id": "recpNlNn6U6eq0M9r",
+  "title": "Miami profile smoke test – South Beach Art Deco at golden hour",
+  "summary": "Automated Studio API smoke test confirming Idea Candidates attach to the Miami Content Profile.",
+  "requests": [
+    {
+      "name": "create-miami-idea",
+      "method": "POST",
+      "path": "/api/ideas",
+      "body": {
+        "title": "Miami profile smoke test – South Beach Art Deco at golden hour",
+        "summary": "Automated Studio API smoke test confirming Idea Candidates attach to the Miami Content Profile.",
+        "content_profile_id": "recpNlNn6U6eq0M9r"
+      }
+    },
+    {
+      "name": "list-miami-ideas",
+      "method": "GET",
+      "path": "/api/ideas?profile=recpNlNn6U6eq0M9r&limit=25"
+    }
+  ]
+}
