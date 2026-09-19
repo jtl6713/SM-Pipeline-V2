@@ -45,7 +45,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     ideaLibrarySearch: "Search Drive stills by place or name. Suggested photos stay checked until you uncheck them.",
     editIdeaTitle: "Name this idea in the Ideas list. This is not the on-post title used on Instagram or YouTube.",
     editIdeaSummary: "Required before Promote. Used to write captions and the spoken script. You can still edit this after saving.",
-    promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration, clip count, and video after voiceover. Carousel, Photo Set, and Feed Post show slide options instead.",
+    promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration, clip count, and video after voiceover. Carousel, Photo Set, and Feed Post show slide options instead. Photo Set turns stills into Reels; Carousel keeps swipeable photos. Help → Ideas has a graphic of every type and what Pipeline builds.",
     promoteVoiceover: "Spoken narration on video outputs. Native stills ignore this. On this screen there is no separate voiceover-length field — spoken time is Video duration minus Video after voiceover.",
     promoteMusic: "Background music on video outputs. Native stills ignore this. The track is chosen later from the profile or Music library.",
     promoteThumbnail: "3D ChicagoShining grid cover for Reels, Shorts, and video drafts. No skips lettering on the video, not the native platform cover. Stories and TikTok drafts cannot take a separate cover.",

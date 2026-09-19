@@ -536,3 +536,5 @@ Idea save keeps stills Pages deploy: 2026-09-19 — Save persists checked librar
 Suggested times occupancy Pages deploy: 2026-09-19 — Use suggested avoids other scheduled posts and spreads across 7 days. UI 0.6.339-schedule-occupancy.
 
 Best-times stay in analytics windows Pages deploy: 2026-09-19 — Occupancy spreads inside first-party / learned / industry windows. UI 0.6.340-best-times-spread.
+
+Idea type graphic Pages deploy: 2026-09-19 — Help → Ideas shows each master content type and what Pipeline builds. UI 0.6.341-idea-types.

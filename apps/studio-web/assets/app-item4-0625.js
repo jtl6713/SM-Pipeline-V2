@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.340-best-times-spread";
+  const BUILD_ID = "item4-0.6.341-idea-types";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -11714,7 +11714,7 @@
     prMusicAsset: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
     prThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover. Carousel is a separate still post, not the Reel cover.",
     prVoiceoverTail: "Picture and music after narration ends. Does not shorten an explicit Voiceover duration. For a 30s video with a 15s voiceover this is often 15. If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
-    promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration, clip count, and video after voiceover. Carousel, Photo Set, and Feed Post show slide options instead.",
+    promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration, clip count, and video after voiceover. Carousel, Photo Set, and Feed Post show slide options instead. Photo Set turns stills into Reels; Carousel keeps swipeable photos. Help → Ideas has a graphic of every type and what Pipeline builds.",
     promoteVoiceover: "Spoken narration on video outputs. Native stills ignore this. On this screen there is no separate voiceover-length field — spoken time is Video duration minus Video after voiceover.",
     promoteMusic: "Background music on video outputs. Native stills ignore this. The track is chosen later from the profile or Music library.",
     promoteThumbnail: "3D ChicagoShining grid cover for Reels, Shorts, and video drafts. No skips lettering on the video, not the native platform cover.",

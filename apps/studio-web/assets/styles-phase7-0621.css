@@ -1431,6 +1431,26 @@ html[data-studio-theme="miami"]{
 .support-steps{display:grid;gap:16px;padding-left:1.2rem}
 .support-steps li{display:grid;gap:6px}
 .support-steps .text-button,.support-article .primary-button{justify-self:start;width:fit-content;margin-top:4px}
+.idea-type-guide{margin:12px 0 18px;padding:14px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#f8fbfb,#fff)}
+.idea-type-guide-kicker{margin:0 0 10px;font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--teal-dark)}
+.support-article .idea-type-flow{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px;padding:0}
+.idea-type-flow li{display:grid;gap:2px;padding:10px 12px;border-radius:12px;background:#0f3f3c;color:#ecfdf8}
+.idea-type-flow-step{width:22px;height:22px;border-radius:999px;display:grid;place-items:center;background:#c9a227;color:#3d2d08;font-size:.72rem;font-weight:800}
+.idea-type-flow strong{font-size:.86rem}
+.idea-type-flow span:last-child{font-size:.74rem;color:#99f6e4}
+.idea-type-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.idea-type-card{display:grid;gap:6px;align-content:start;padding:12px;border:1px solid var(--line);border-radius:14px;background:#fff}
+.idea-type-card[data-family="video"]{border-top:3px solid #0f766e}
+.idea-type-card[data-family="still"]{border-top:3px solid #c9a227}
+.idea-type-card[data-family="copy"]{border-top:3px solid #64748b}
+.idea-type-card-icon{width:48px;height:48px}
+.idea-type-card h4{margin:0;font-size:.92rem}
+.idea-type-card p{margin:0;font-size:.78rem;line-height:1.4;color:var(--muted)}
+.idea-type-builds{color:var(--ink)!important;font-weight:650}
+.idea-type-builds span{display:inline-block;margin-right:6px;padding:1px 6px;border-radius:999px;background:#ecfdf8;color:#0f766e;font-size:.68rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.idea-type-impact{padding-top:4px;border-top:1px dashed #e2e8f0}
+.idea-type-help-link{margin-top:6px;font-size:.78rem}
+@media(max-width:640px){.idea-type-flow{grid-template-columns:1fr}}
 @media(max-width:860px){.support-layout{grid-template-columns:1fr}.support-docs-body{padding:16px}}
 
 .similar-heatmap{padding:0 20px 18px}
