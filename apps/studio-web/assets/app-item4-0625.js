@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.337-idea-tips";
+  const BUILD_ID = "item4-0.6.338-save-stills";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2091,7 +2091,37 @@
     }
   }
 
+  function ideaUserProductionNotes(idea) {
+    if (idea?.production_notes_user != null && String(idea.production_notes_user).trim() !== "") {
+      return String(idea.production_notes_user).trim();
+    }
+    if (idea?.production_notes_user === "") return "";
+    return String(idea?.production_notes || "")
+      .split(/\r?\n/)
+      .filter((line) => !/^(origin|media_asset_ids|cited_trend|cluster|ez-input)=/i.test(line.trim()))
+      .join("\n")
+      .trim();
+  }
+
+  function ideaLibraryIdsFromIdea(idea) {
+    const fromField = Array.isArray(idea?.library_asset_ids) ? idea.library_asset_ids : [];
+    const fromLinks = Array.isArray(idea?.matched_media_asset_links) ? idea.matched_media_asset_links : [];
+    const fromNotes = String(idea?.production_notes || "").match(/media_asset_ids=([^\n]+)/i);
+    const noted = fromNotes
+      ? fromNotes[1].split(/[,\s]+/).map((value) => String(value || "").trim())
+      : [];
+    return [...new Set([...fromField, ...fromLinks, ...noted].map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  }
+
   function updateIdeaDrawer(idea) {
+    const sameIdea = Boolean(activeIdea?.id && idea?.id && activeIdea.id === idea.id);
+    const picker = $("ideaLibraryPicker");
+    const pickerWasOpen = sameIdea && picker && !picker.hidden;
+    const preservedSelected = pickerWasOpen ? new Set(ideaLibrarySelected) : null;
+    const preservedItems = pickerWasOpen ? ideaLibraryPickerItems.slice() : null;
+    const preservedSuggested = pickerWasOpen ? new Set(ideaLibrarySuggestedIds) : null;
+    const preservedSeeded = pickerWasOpen ? ideaLibrarySeeded : false;
+    const preservedSearch = pickerWasOpen ? String($("ideaLibrarySearch")?.value || "") : "";
     activeIdea = idea;
     $("ideaDrawerHeading").textContent = idea?.title || "Manage idea";
     $("ideaDetailStatus").innerHTML = badge(ideaStatusLabel(idea));
@@ -2128,7 +2158,7 @@
       ? "Wait for matching photos"
       : idea?.carousel_image_mode;
     setSelectValue("promoteCarouselImageMode", waitImageMode, "Make AI Generated");
-    $("promoteProductionNotes").value = idea?.production_notes || "";
+    $("promoteProductionNotes").value = ideaUserProductionNotes(idea);
     syncPromotionPanels();
     fillIdeaProductionSnapshot(idea);
 
@@ -2151,7 +2181,13 @@
       useExistingButton.disabled = promoted || Boolean(idea?.is_on_hold);
       useExistingButton.hidden = promoted;
     }
-    resetIdeaLibraryPicker();
+    restoreIdeaLibraryPickerAfterDrawerUpdate(idea, pickerWasOpen ? {
+      selected: preservedSelected,
+      items: preservedItems,
+      suggested: preservedSuggested,
+      seeded: preservedSeeded,
+      search: preservedSearch,
+    } : null);
     $("holdIdeaButton").hidden = Boolean(idea?.is_on_hold);
     $("restoreIdeaButton").hidden = !idea?.is_on_hold;
     $("holdIdeaButton").disabled = !modifiable;
@@ -2220,6 +2256,7 @@
       carousel_slide_count_max: $("promoteCarouselSlideMax")?.value || "",
       carousel_image_mode: $("promoteCarouselImageMode")?.value || "",
       production_notes: $("promoteProductionNotes")?.value.trim() || "",
+      ...(ideaLibraryPickerTouched || ideaLibrarySelected.size ? { library_asset_ids: [...ideaLibrarySelected] } : {}),
     };
   }
 
@@ -2249,7 +2286,8 @@
     if (String(sent.include_voiceover || "") !== String(idea.include_voiceover || "Use Profile Default")) return true;
     if (String(sent.include_background_music || "") !== String(idea.include_background_music || "Use Profile Default")) return true;
     if (String(sent.include_thumbnail || "") !== String(idea.include_thumbnail || "Use Profile Default")) return true;
-    if (String(sent.production_notes || "") !== String(idea.production_notes || "")) return true;
+    if (String(sent.production_notes || "") !== ideaUserProductionNotes(idea)) return true;
+    if (!samePlatformList(sent.library_asset_ids, ideaLibraryIdsFromIdea(idea))) return true;
     return false;
   }
 
@@ -2376,9 +2414,24 @@
     setManageMessage();
 
     try {
+      const pickerOpen = Boolean($("ideaLibraryPicker") && !$("ideaLibraryPicker").hidden);
+      const selectedIds = [...ideaLibrarySelected];
       const record = await saveManagedIdeaIdentity({ quiet: false, reloadList: true, forceProduction: true });
-      if (record) fillIdeaProductionSnapshot(record);
-      setManageMessage("Changes saved.", "success");
+      if (record) {
+        activeIdea = mergeIdeaProduction(record, managedIdeaProductionPayload());
+        if (selectedIds.length) {
+          activeIdea.library_asset_ids = selectedIds;
+          ideaLibrarySelected = new Set(selectedIds);
+        }
+        fillIdeaProductionSnapshot(activeIdea);
+        if (pickerOpen) {
+          const picker = $("ideaLibraryPicker");
+          if (picker) picker.hidden = false;
+          renderIdeaLibraryPicker();
+        }
+      }
+      const kept = ideaLibrarySelected.size;
+      setManageMessage(kept ? `Changes saved. ${kept} photo${kept === 1 ? "" : "s"} still selected.` : "Changes saved.", "success");
     } catch (e) {
       setManageMessage(e.message, "error-text");
     } finally {
@@ -2526,6 +2579,7 @@
       carousel_slide_count_max: $("promoteCarouselSlideMax")?.value || "",
       carousel_image_mode: $("promoteCarouselImageMode").value,
       production_notes: $("promoteProductionNotes").value.trim(),
+      ...(ideaLibraryPickerTouched || ideaLibrarySelected.size ? { library_asset_ids: [...ideaLibrarySelected] } : {}),
     };
 
     try {
@@ -9445,6 +9499,7 @@
   let ideaLibrarySelected = new Set();
   let ideaLibrarySuggestedIds = new Set();
   let ideaLibrarySeeded = false;
+  let ideaLibraryPickerTouched = false;
   let ideaLibrarySearchTimer = 0;
 
   function resetIdeaLibraryPicker() {
@@ -9452,6 +9507,7 @@
     ideaLibrarySelected = new Set();
     ideaLibrarySuggestedIds = new Set();
     ideaLibrarySeeded = false;
+    ideaLibraryPickerTouched = false;
     const picker = $("ideaLibraryPicker");
     const grid = $("ideaLibraryGrid");
     const search = $("ideaLibrarySearch");
@@ -9460,6 +9516,25 @@
     if (grid) grid.innerHTML = "";
     if (search) search.value = "";
     if (continueButton) continueButton.disabled = true;
+  }
+
+  function restoreIdeaLibraryPickerAfterDrawerUpdate(idea, preserved) {
+    const persisted = ideaLibraryIdsFromIdea(idea);
+    if (preserved) {
+      ideaLibrarySelected = new Set([...(preserved.selected || []), ...persisted]);
+      ideaLibraryPickerItems = preserved.items || [];
+      ideaLibrarySuggestedIds = preserved.suggested || new Set();
+      ideaLibrarySeeded = Boolean(preserved.seeded);
+      ideaLibraryPickerTouched = true;
+      const picker = $("ideaLibraryPicker");
+      const search = $("ideaLibrarySearch");
+      if (search) search.value = preserved.search || "";
+      if (picker) picker.hidden = false;
+      renderIdeaLibraryPicker();
+      return;
+    }
+    resetIdeaLibraryPicker();
+    if (persisted.length) ideaLibrarySelected = new Set(persisted);
   }
 
   function libraryPickerApiPreviewUrl(item) {
@@ -9536,7 +9611,7 @@
   function seedLibrarySelection(current, suggested, attachedIds, max, seed) {
     const next = new Set(current || []);
     for (const id of attachedIds || []) if (id) next.add(id);
-    if (seed) {
+    if (seed && next.size === 0) {
       for (const item of suggested || []) {
         if (next.size >= max) break;
         if (item?.id) next.add(item.id);
@@ -9568,7 +9643,7 @@
         }) || (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy">` : `<img alt="">`))
         : (preview ? `<img src="${escapeHtml(preview)}" alt="" loading="lazy"${item.google_drive_file_id ? ` data-drive-id="${escapeHtml(item.google_drive_file_id)}"` : ""}>` : `<img alt="">`);
       return `<div class="idea-library-card" role="button" tabindex="0" ${idAttr}="${escapeHtml(item.id)}" data-selected="${checked ? "true" : "false"}">
-        <input type="checkbox" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
+        <input type="checkbox" form="ideaLibraryPickerForm" tabindex="-1" ${checked ? "checked" : ""} aria-hidden="true">
         ${media}
         ${tag}
         <span>${escapeHtml(item.name || item.id)}${duration ? ` · ${escapeHtml(duration)}` : ""}</span>
@@ -9629,7 +9704,7 @@
     ideaLibrarySelected = seedLibrarySelection(
       ideaLibrarySelected,
       suggested,
-      [],
+      ideaLibraryIdsFromIdea(activeIdea),
       libraryPickerMaxCount(),
       !ideaLibrarySeeded
     );
@@ -9638,6 +9713,7 @@
   }
 
   async function openIdeaLibraryPicker() {
+    ideaLibraryPickerTouched = true;
     const picker = $("ideaLibraryPicker");
     if (picker) picker.hidden = false;
     picker?.scrollIntoView({ block: "nearest" });
@@ -9983,9 +10059,14 @@
     if (!card) return;
     const id = String(card.dataset.libraryId || "").trim();
     if (!id) return;
+    ideaLibraryPickerTouched = true;
     if (ideaLibrarySelected.has(id)) ideaLibrarySelected.delete(id);
     else ideaLibrarySelected.add(id);
     renderIdeaLibraryPicker();
+  });
+
+  $("ideaLibraryPickerForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
   });
 
   $("ideaLibrarySearch")?.addEventListener("input", () => {
@@ -11683,7 +11764,7 @@
     item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
     item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. If a run stalls, Retry remaining requeues leftover crops. Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
     closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
-    saveIdeaButton: "Save the title, summary, platforms, and these production options without promoting. Promote is a separate step.",
+    saveIdeaButton: "Save the title, summary, checked library stills, platforms, and these options. Save does not drop photo selections.",
     holdIdeaButton: "Put this idea on hold so it stays out of the active queue without deleting it.",
     promoteIdeaButton: "Create the content item from this idea. No review email is sent. Nothing publishes until Ready for Review → Approve publish.",
     configureProductionButton: "Create an empty Production request and upload new stills from this device.",

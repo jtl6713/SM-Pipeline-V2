@@ -53,7 +53,7 @@ window.CHICAGOSHINING_STUDIO_CONFIG = {
     promoteVideoClipCount: "How many stills or clips to use. Auto lets the pipeline pick from the attached photos and the profile default.",
     promoteVoiceoverTail: "Seconds of picture and music after narration ends. Spoken length here is Video duration minus this tail (30s − 2s = 28s of speech). If you later set Voiceover duration on Production, that spoken length wins and this tail is extra after it. If speech + tail is longer than Video duration, Video duration still wins and the end is cut.",
     promoteProductionNotes: "Optional direction for pacing, style, or what to emphasize. Saved with the idea and copied onto the production request.",
-    saveIdeaButton: "Save the title, summary, platforms, and these production options without promoting. Promote is a separate step.",
+    saveIdeaButton: "Save the title, summary, checked library stills, platforms, and these options. Save does not drop photo selections.",
     promotePlatformInstagram: "Include Instagram. Vertical video becomes a Reel. A Story can be added later on Production.",
     promotePlatformFacebook: "Include Facebook. Vertical video becomes a Reel. A Story can be added later on Production.",
     promotePlatformTikTok: "Include TikTok. The posting API creates an inbox draft. You set the cover in the TikTok app.",

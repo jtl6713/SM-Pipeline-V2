@@ -112,7 +112,7 @@ import {
   summarizeObservations,
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
-import { ideaProductionConfigFields } from "./idea-photo-wait.mjs";
+import { ideaProductionConfigFields, parseIdeaMachineNotes, parseIdeaNotedMediaIds } from "./idea-photo-wait.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -368,7 +368,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.329-idea-save",
+          version: "0.10.330-idea-save-stills",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2634,6 +2634,11 @@ function mapIdea(record) {
     photo_wait_status: f(record, "Studio_Photo_Wait_Status") || null,
     photo_match: parseIdeaPhotoMatchJson(f(record, "Studio_Photo_Match_JSON")),
     matched_media_asset_links: f(record, "Studio_Matched_Media_Assets") || [],
+    library_asset_ids: [...new Set([
+      ...(Array.isArray(f(record, "Studio_Matched_Media_Assets")) ? f(record, "Studio_Matched_Media_Assets") : []),
+      ...parseIdeaNotedMediaIds(f(record, "Production_Config_Notes")),
+    ].map((id) => String(id || "").trim()).filter(Boolean))],
+    production_notes_user: parseIdeaMachineNotes(f(record, "Production_Config_Notes")).user,
     production_request_links: f(record, "Production Requests") || f(record, "Production_Request") || [],
     video_clip_count: f(record, "Production_Video_Clip_Count"),
     include_voiceover: f(record, "Production_Include_Voiceover"),
@@ -3415,7 +3420,7 @@ async function updateIdea(request, env, url, authorization) {
   const input = cleanIdeaUpdatePayload(payload);
   let productionFields = {};
   try {
-    productionFields = ideaProductionConfigFields(payload);
+    productionFields = ideaProductionConfigFields(payload, String(f(record, "Production_Config_Notes") || ""));
   } catch (error) {
     throw new HttpError(400, error instanceof Error ? error.message : "Invalid production options");
   }

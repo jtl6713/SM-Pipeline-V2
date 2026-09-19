@@ -245,13 +245,49 @@ function ideaSaveInt(value, min, max, label) {
   return Math.trunc(number);
 }
 
+export const IDEA_MACHINE_NOTE_PREFIX = /^(origin|media_asset_ids|cited_trend|cluster|ez-input)=/i;
+
+export function parseIdeaMachineNotes(notes) {
+  const machine = [];
+  const user = [];
+  for (const line of String(notes || "").split(/\r?\n/)) {
+    if (IDEA_MACHINE_NOTE_PREFIX.test(line.trim())) machine.push(line.trim());
+    else if (String(line || "").trim()) user.push(line);
+  }
+  return { machine, user: user.join("\n").trim() };
+}
+
+export function parseIdeaNotedMediaIds(notes) {
+  const match = String(notes || "").match(/media_asset_ids=([^\n]+)/i);
+  if (!match) return [];
+  return [...new Set(match[1].split(/[,\s]+/).map((value) => String(value || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+export function ideaLibraryAssetIdsFromPayload(payload) {
+  if (!payload || !Object.prototype.hasOwnProperty.call(payload, "library_asset_ids")) return null;
+  const raw = Array.isArray(payload.library_asset_ids) ? payload.library_asset_ids : [];
+  return [...new Set(raw.map((value) => String(value || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+export function mergeIdeaProductionNotes(existingNotes, userNotes, libraryAssetIds) {
+  const parsed = parseIdeaMachineNotes(existingNotes);
+  const machine = parsed.machine.filter((line) => !/^media_asset_ids=/i.test(line));
+  const ids = libraryAssetIds === null || libraryAssetIds === undefined
+    ? parseIdeaNotedMediaIds(existingNotes)
+    : [...libraryAssetIds];
+  if (ids.length) machine.unshift(`media_asset_ids=${ids.join(",")}`);
+  const user = userNotes === undefined ? parsed.user : String(userNotes || "").trim();
+  return [...machine, user].filter(Boolean).join("\n").slice(0, 3000) || null;
+}
+
 /**
  * Airtable fields for the idea drawer production form.
  * Save must persist these. The drawer used to PATCH only title/summary, then
  * reload, which cleared platforms and reset slide count to 5.
  * Absent `save_production_config` keeps title-only patches unchanged.
+ * Production notes never wipe origin= / media_asset_ids= machine lines.
  */
-export function ideaProductionConfigFields(payload) {
+export function ideaProductionConfigFields(payload, existingNotes = "") {
   if (!payload || payload.save_production_config !== true) return {};
   const fields = {};
 
@@ -346,10 +382,18 @@ export function ideaProductionConfigFields(payload) {
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(payload, "production_notes")) {
-    const notes = String(payload.production_notes || "").trim();
-    if (notes.length > 3000) throw new Error("Production notes must be 3000 characters or fewer");
-    fields.Production_Config_Notes = notes || null;
+  const libraryIds = ideaLibraryAssetIdsFromPayload(payload);
+  if (libraryIds) {
+    fields.Studio_Matched_Media_Assets = libraryIds;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "production_notes") || libraryIds) {
+    const userNotes = Object.prototype.hasOwnProperty.call(payload, "production_notes")
+      ? payload.production_notes
+      : undefined;
+    const merged = mergeIdeaProductionNotes(existingNotes, userNotes, libraryIds);
+    if (merged && merged.length > 3000) throw new Error("Production notes must be 3000 characters or fewer");
+    fields.Production_Config_Notes = merged;
   }
 
   return fields;

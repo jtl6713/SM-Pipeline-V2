@@ -530,3 +530,5 @@ Worker version footer Pages deploy: 2026-09-18 — Footer shows live Worker buil
 Idea Save Pages deploy: 2026-09-19 — Manage idea Save keeps platforms and slide count. UI 0.6.336-idea-save. app-item4-0625.js.
 
 Idea promote tooltips Pages deploy: 2026-09-19 — Help dots and timing note on Manage idea. Video duration wins if speech + tail overflow. UI 0.6.337-idea-tips.
+
+Idea save keeps stills Pages deploy: 2026-09-19 — Save persists checked library stills and does not hide the picker. UI 0.6.338-save-stills.

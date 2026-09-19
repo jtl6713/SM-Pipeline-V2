@@ -5,6 +5,8 @@ import {
   buildIdeaLibraryKeys,
   ideaPhotoWaitApplies,
   ideaProductionConfigFields,
+  mergeIdeaProductionNotes,
+  parseIdeaNotedMediaIds,
   rankIdeaLibraryFields,
   selectMatchedPhotos,
 } from "./idea-photo-wait.mjs";
@@ -207,4 +209,34 @@ test("idea save rejects a slide count outside 1-20", () => {
     save_production_config: true,
     platforms: ["Threads"],
   }), /Unsupported target platforms/);
+});
+
+test("idea save keeps origin and photo ids when production notes are blank", () => {
+  const existing = "origin=autonomous\nmedia_asset_ids=recPhoto1,recPhoto2\ncluster=bridge";
+  const kept = mergeIdeaProductionNotes(existing, "", null);
+  assert.match(kept, /origin=autonomous/);
+  assert.match(kept, /media_asset_ids=recPhoto1,recPhoto2/);
+  assert.match(kept, /cluster=bridge/);
+  assert.deepEqual(parseIdeaNotedMediaIds(existing), ["recPhoto1", "recPhoto2"]);
+  const fields = ideaProductionConfigFields({
+    save_production_config: true,
+    platforms: ["Instagram"],
+    production_notes: "",
+  }, existing);
+  assert.match(fields.Production_Config_Notes, /origin=autonomous/);
+  assert.match(fields.Production_Config_Notes, /media_asset_ids=recPhoto1,recPhoto2/);
+});
+
+test("idea save persists checked library stills and does not drop origin", () => {
+  const fields = ideaProductionConfigFields({
+    save_production_config: true,
+    platforms: ["Instagram"],
+    production_notes: "Keep the river light",
+    library_asset_ids: ["recStillA", "recStillA", "recStillB"],
+  }, "origin=autonomous\nmedia_asset_ids=recOld");
+  assert.deepEqual(fields.Studio_Matched_Media_Assets, ["recStillA", "recStillB"]);
+  assert.match(fields.Production_Config_Notes, /origin=autonomous/);
+  assert.match(fields.Production_Config_Notes, /media_asset_ids=recStillA,recStillB/);
+  assert.match(fields.Production_Config_Notes, /Keep the river light/);
+  assert.doesNotMatch(fields.Production_Config_Notes, /recOld/);
 });

@@ -483,3 +483,5 @@ Autonomous fresh-stills Worker deploy: 2026-09-18 — NYC/LA manual runs scope o
 Scheduled-over-retry Worker deploy: 2026-09-19 — Ready to Schedule wins over stale Publish_Retry_Eligible in pipeline badges. Worker 0.10.328-scheduled-over-retry.
 
 Idea Save Worker deploy: 2026-09-19 — Manage idea Save writes platforms, slide count, and the rest of the production options. Worker 0.10.329-idea-save.
+
+Idea save keeps stills Worker deploy: 2026-09-19 — Save merges photo IDs into notes and Studio_Matched_Media_Assets. Worker 0.10.330-idea-save-stills.
