@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.336-idea-save";
+  const BUILD_ID = "item4-0.6.337-idea-tips";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2011,6 +2011,20 @@
     };
   }
 
+  function syncPromoteTimingHint() {
+    const hint = $("promoteTimingHint");
+    if (!hint) return;
+    const duration = Number($("promoteVideoDuration")?.value || 30);
+    const tail = Number($("promoteVoiceoverTail")?.value || 2);
+    const voiceover = String($("promoteVoiceover")?.value || "");
+    const spoken = Math.max(1, Math.round((duration - tail) * 10) / 10);
+    if (voiceover === "No") {
+      hint.textContent = "Voiceover is off, so Video after voiceover is unused. Video duration is the finished length.";
+      return;
+    }
+    hint.textContent = `Spoken voiceover uses leftover time: ${spoken}s (${duration}s video − ${tail}s after voiceover). Video duration is the hard cap. If you later set Voiceover duration on Production, that spoken length wins and this tail is extra after it — unless they add up past the video cap, in which case the video is cut at the duration.`;
+  }
+
   function setSelectValue(id, value, fallback) {
     const el = $(id);
     if (!el) return;
@@ -2037,6 +2051,7 @@
     if (wait.image_mode === "Wait for matching photos" && $("promoteCarouselSlideMode")) {
       $("promoteCarouselSlideMode").value = "Target range";
     }
+    syncPromoteTimingHint();
   }
 
   function selectedPromotionPlatforms() {
@@ -2307,6 +2322,8 @@
     $("ideaManageDrawer").classList.add("open");
     $("ideaManageDrawer").setAttribute("aria-hidden", "false");
     document.body.classList.add("drawer-open");
+    productionDecorateTooltips($("ideaManageDrawer"));
+    syncPromoteTimingHint();
     setTimeout(() => {
       if (focusPromote) {
         $("ideaLibraryPromote")?.setAttribute("open", "");
@@ -2424,6 +2441,9 @@
   $("promoteContentType").addEventListener("change", syncPromotionPanels);
   $("promoteCarouselSlideMode")?.addEventListener("change", syncPromotionPanels);
   $("promoteCarouselImageMode")?.addEventListener("change", syncPromotionPanels);
+  ["promoteVoiceover", "promoteVideoDuration", "promoteVoiceoverTail"].forEach((id) => {
+    $(id)?.addEventListener("change", syncPromoteTimingHint);
+  });
 
   $("matchIdeaPhotosButton")?.addEventListener("click", async () => {
     if (!activeIdea?.id) return;
@@ -11582,8 +11602,9 @@
     ezScriptMode: "AI decides writes the spoken script. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     ezRequestedScript: "Paste spoken words here only if you want to control the voiceover. Leave blank to let AI write it.",
     ezThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover on Instagram Reels, Facebook Reels, and YouTube Shorts. You do not add Carousel for that. This control only applies to still-only posts.",
-    ezVoiceoverTail: "Extra seconds of picture after narration ends, so the last word is not cut off.",
-    ezVideoDuration: "Hard cap for the rendered video length. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
+    ezVoiceoverTail: "Picture and music after narration ends. Does not shorten an explicit Voiceover duration. If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
+    ezVideoDuration: "Hard cap for the finished video. Wins if Voiceover duration + Video after voiceover would run longer. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
+    ezVoiceoverDuration: "Spoken narration length. This wins over Video after voiceover for how long speech lasts. If you set only this field, leftover time becomes the tail. If speech + tail is longer than Video duration, Video duration wins.",
     ezVideoClipMode: "How many clips Studio should aim for in a video. AI decides unless you force a count or range.",
     ezVideoClipExact: "Exact number of clips to use in the video.",
     ezVideoClipMin: "Minimum clip count when using a target range.",
@@ -11594,8 +11615,8 @@
     ezCarouselSlideMax: "Maximum slide count when using a target range.",
     ezCarouselImageMode: "Use the photos you uploaded, or let Studio generate additional images.",
     ezProductionNotes: "Anything extra for pacing, style, or execution. Saved with the production request.",
-    prVideoDuration: "Hard cap for slideshows and rendered videos. Long uploads are trimmed or sliced to fit this length; with music, cuts land on beats. Autonomous runs stay at 30 seconds.",
-    prVoiceoverDuration: "Spoken voiceover length in seconds. Autonomous runs use half the video duration (15 seconds of a 30-second slideshow).",
+    prVideoDuration: "Hard cap for the finished video. Wins if Voiceover duration + Video after voiceover would run longer. Autonomous runs stay at 30 seconds. Long uploads are trimmed or sliced to fit; with music, cuts land on beats.",
+    prVoiceoverDuration: "Spoken narration length. This wins over Video after voiceover for how long speech lasts. Autonomous defaults to half the video (15s of a 30s slideshow). If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
     prMusicStart: "Seconds into the song file to skip before playback. The video still starts at 0:00; this only fast-forwards the track so you can skip the intro.",
     prVideoClipMode: "How many clips Studio should aim for in a video.",
     prVideoClipExact: "Exact number of clips to use in the video.",
@@ -11611,7 +11632,23 @@
     prVoice: "ElevenLabs voice used when narration is generated. Kate is the default.",
     prMusicAsset: "Pick a specific music bed, or leave it so AI / the brand profile chooses.",
     prThumbnail: "Rendered videos always get the 3D ChicagoShining grid cover. Carousel is a separate still post, not the Reel cover.",
-    prVoiceoverTail: "Seconds of picture and music after narration ends. For a 30-second video with a 15-second voiceover, this is 15.",
+    prVoiceoverTail: "Picture and music after narration ends. Does not shorten an explicit Voiceover duration. For a 30s video with a 15s voiceover this is often 15. If speech + tail is longer than Video duration, Video duration wins and the end is cut.",
+    promoteContentType: "Master format for this piece. Vertical Short Video and Longform Video show duration, clip count, and video after voiceover. Carousel, Photo Set, and Feed Post show slide options instead.",
+    promoteVoiceover: "Spoken narration on video outputs. Native stills ignore this. On this screen there is no separate voiceover-length field — spoken time is Video duration minus Video after voiceover.",
+    promoteMusic: "Background music on video outputs. Native stills ignore this. The track is chosen later from the profile or Music library.",
+    promoteThumbnail: "3D ChicagoShining grid cover for Reels, Shorts, and video drafts. No skips lettering on the video, not the native platform cover.",
+    promoteVideoDuration: "Hard cap for the finished video. Spoken voiceover plus Video after voiceover must fit inside this. If they add up to more, the video is cut here — duration wins.",
+    promoteVideoClipCount: "How many stills or clips to use. Auto lets the pipeline pick from the attached photos and the profile default.",
+    promoteVoiceoverTail: "Seconds of picture and music after narration ends. Spoken length here is Video duration minus this tail. If you later set Voiceover duration on Production, that spoken length wins and this tail is extra after it. If speech + tail is longer than Video duration, Video duration still wins.",
+    promoteProductionNotes: "Optional direction for pacing, style, or what to emphasize. Saved with the idea and copied onto the production request.",
+    promoteCarouselSlideMode: "Exact uses a fixed slide count. Target range approves the idea and waits until enough high-confidence photos exist.",
+    promoteCarouselSlideCount: "Exact number of slides or photos to attach.",
+    promoteCarouselSlideMin: "Minimum high-confidence photos before this idea opens Production.",
+    promoteCarouselSlideMax: "Maximum photos to attach when matching runs.",
+    promoteCarouselImageMode: "AI generated creates slides. Manual Upload uses attached photos. Wait for matching photos auto-attaches related library stills.",
+    editIdeaTitle: "Name this idea in the Ideas list. This is not the on-post title used on Instagram or YouTube.",
+    editIdeaSummary: "Required before Promote. Used to write captions and the spoken script.",
+    ideaLibrarySearch: "Search Drive stills by place or name. Suggested photos stay checked until you uncheck them.",
     prTitleMode: "AI decides writes the on-post title. Force exact uses your wording. AI improve keeps your draft and rewrites it.",
     prRequestedTitle: "The on-post title. Separate from the idea name.",
     prCaptionMode: "This is the post caption on Instagram, Facebook, TikTok, and YouTube. It is separate from the on-photo labels under each crop.",
@@ -11646,6 +11683,12 @@
     item4BuildPlan: "Recommend the strongest format for each selected platform from the photos you uploaded.",
     item4PrepareVariants: "Create the cropped 4:5, 9:16, 1:1, or 16:9 versions required by the plan. If a run stalls, Retry remaining requeues leftover crops. Files must finish saving to Google Drive first. Drag each photo to keep the important part in frame.",
     closeProductionRequest: "Close this request and return to the draft list. Saved photos stay in Studio.",
+    saveIdeaButton: "Save the title, summary, platforms, and these production options without promoting. Promote is a separate step.",
+    holdIdeaButton: "Put this idea on hold so it stays out of the active queue without deleting it.",
+    promoteIdeaButton: "Create the content item from this idea. No review email is sent. Nothing publishes until Ready for Review → Approve publish.",
+    configureProductionButton: "Create an empty Production request and upload new stills from this device.",
+    useExistingLibraryButton: "Open suggested Drive stills for this idea. Uncheck any you do not want, or search the library to add more.",
+    ideaLibraryContinueButton: "Attach the selected library stills to a Production request and open customize.",
     saveProductionRequest: "Save the current draft without promoting it into the pipeline.",
     syncProductionRequestDirectives: "Copy advanced options from this form onto the requested platform outputs.",
     promoteProductionRequest: "Approve this request and send it into the production pipeline. Publishing stays a later step.",
@@ -11783,6 +11826,22 @@
       if (!target || target.closest?.("#creativeEditorPanel")) return;
       phase6BindTooltipTarget(target, text);
     });
+
+    const promoteHeading = $("ideaPromotionHeading");
+    if (promoteHeading && (searchRoot === document || searchRoot === page || searchRoot.contains(promoteHeading) || searchRoot === promoteHeading)) {
+      phase6BindTooltipTarget(promoteHeading, "Creates the content item from this idea. No review email is sent. Attach photos first with Add new photos or Use existing if you want footage on the request.");
+    }
+    const platformFieldset = $("promotePlatformFieldset");
+    if (platformFieldset && (searchRoot === document || searchRoot === page || searchRoot.contains(platformFieldset))) {
+      const legend = platformFieldset.querySelector("legend");
+      const platformHelp = "Which destinations get an output. You can add Stories or drop a platform later on Production.";
+      if (legend) {
+        phase6AttachHelpDot(legend, platformHelp);
+        phase6BindTooltipTarget(legend, platformHelp);
+      }
+    }
+    const timingHint = $("promoteTimingHint");
+    if (timingHint) phase6BindTooltipTarget(timingHint, PRODUCTION_CONTROL_HELP.promoteVoiceoverTail);
 
     searchRoot.querySelectorAll?.("[data-pr-id]").forEach((button) => {
       phase6BindTooltipTarget(button, "Open this draft to continue photos, platform plan, crops, and promote.");
