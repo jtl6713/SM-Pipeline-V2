@@ -363,7 +363,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.324-classify-status-live",
+          version: "0.10.325-classify-until-done",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17779,7 +17779,7 @@ async function uploadAssetLibraryItems(request, env, authorization, ctx) {
             Intake_Status: "Created",
             Intake_Date: new Date().toISOString(),
             Drive_Access_Status: "Public",
-            Classification_Status: "Needs Classification",
+            Classification_Status: "Processing",
             Asset_Status: "Available",
             Active: true,
             Do_Not_Use: false,
@@ -17815,6 +17815,11 @@ async function uploadAssetLibraryItems(request, env, authorization, ctx) {
   }
   const uploadedIds = uploaded.map((row) => row?.id).filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
   if (uploadedIds.length) {
+    try {
+      await stampLibraryAssetsClassifying(env, uploadedIds);
+    } catch (error) {
+      console.warn("library upload stamp Processing failed", error?.message || String(error));
+    }
     const classify = (async () => {
       try {
         const { response, payload } = await item4PulsePipelineStage(env, "a3", {

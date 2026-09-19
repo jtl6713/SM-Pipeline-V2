@@ -514,3 +514,5 @@ Asset Manager classify poll Pages deploy: 2026-09-18 — While any card is Class
 Asset Manager classify status Pages deploy: 2026-09-18 — The red Classifying N assets line counts down and returns to Status: ready when A3 finishes. UI 0.6.329-classify-status.
 
 Asset Manager classify status refresh Pages deploy: 2026-09-18 — Hard-refresh mid-batch still updates the red classify line. UI 0.6.329-classify-status.
+
+Asset Manager classify until done Pages deploy: 2026-09-18 — Upload classify status stays until every watched asset is Classified or Classification Error. UI 0.6.330-classify-until-done.

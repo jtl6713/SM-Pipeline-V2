@@ -37,6 +37,7 @@ import {
   libraryClassifyPendingFormula,
   parseLibraryRecordIdsParam,
   libraryRecordIdsFilterFormula,
+  libraryClassificationInProgress,
 } from "./asset-library.mjs";
 
 function output(fields) {
@@ -365,6 +366,14 @@ test("library added-at prefers Added_At then createdTime", () => {
     createdTime: "2026-09-18T22:01:00.000Z",
     fields: { Intake_Date: "2026-09-18" },
   }), "2026-09-18T22:01:00.000Z");
+});
+
+test("classification is in progress until Classified or Classification Error", () => {
+  assert.equal(libraryClassificationInProgress("Processing"), true);
+  assert.equal(libraryClassificationInProgress("Needs Classification"), true);
+  assert.equal(libraryClassificationInProgress(""), true);
+  assert.equal(libraryClassificationInProgress("Classified"), false);
+  assert.equal(libraryClassificationInProgress("Classification Error"), false);
 });
 
 test("library record id filter lists only requested Media Assets", () => {
