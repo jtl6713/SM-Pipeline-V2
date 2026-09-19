@@ -475,3 +475,5 @@ Classify-all stamp-first Worker deploy: 2026-09-18 — Stamp Processing before A
 Library classify status Worker deploy: 2026-09-18 — GET /api/library?ids= returns those Media Assets so Asset Manager can refresh classify progress. Worker 0.10.324-classify-status-live.
 
 Library upload Processing stamp Worker deploy: 2026-09-18 — Studio uploads stamp Classification_Status=Processing before A3 so classify status does not drop to ready. Worker 0.10.325-classify-until-done.
+
+Asset Manager profile scope Worker deploy: 2026-09-18 — GET /api/library ignores LIBRARY_INCLUDE_CROSS_SCOPE and keeps the header Content Profile. Worker 0.10.326-library-profile-scope.

@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.332-classify-xy";
+  const BUILD_ID = "item4-0.6.333-library-profile";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14650,12 +14650,21 @@
     return libraryClassifyWatch.ids.size > 0;
   }
 
+  function libraryRecordsForWorkingProfile(records, { published = false, needsProfile = false, crossScope = false } = {}) {
+    if (published || needsProfile || crossScope || !selectedProfileId) return records;
+    return (records || []).filter((row) => {
+      if (String(row.record_type || "") === "platform_output") return true;
+      return row.content_profile_id === selectedProfileId;
+    });
+  }
+
   function libraryListQueryParams() {
     const query = String($("librarySearch")?.value || "").trim();
     const kind = libraryKindFilterValue();
     const needsProfile = kind === "needs_profile";
     const published = kind === "published";
     const params = new URLSearchParams({ limit: String(libraryPageSize()) });
+    if (selectedProfileId) params.set("profile", selectedProfileId);
     if (query) params.set("q", query);
     if (kind && !needsProfile) params.set("kind", kind);
     if (needsProfile) params.set("needs_profile", "1");
@@ -14899,7 +14908,11 @@
     target.innerHTML = '<div class="empty">Loading this page…</div>';
     try {
       const data = await api(`/api/library?${params.toString()}`);
-      const records = data.records || [];
+      const records = libraryRecordsForWorkingProfile(data.records || [], {
+        published,
+        needsProfile,
+        crossScope: Boolean(data.cross_scope),
+      });
       libraryPage.nextOffset = data.offset || null;
       libraryPage.hasMore = Boolean(data.has_more);
       libraryPage.count = records.length;
@@ -15720,8 +15733,8 @@
       if (toggle) toggle.checked = Boolean(result.library_include_cross_scope);
       setOperationsMessage(
         result.library_include_cross_scope
-          ? "Asset Manager and matching can use images from every Content Profile."
-          : "Asset Manager and matching stay scoped to the selected Content Profile."
+          ? "Idea matching and harvest can use images from every Content Profile. Asset Manager still stays on the header profile."
+          : "Idea matching and harvest stay scoped to the selected Content Profile."
       );
       if (activeNavPage() === "library") loadLibrary().catch(() => {});
     } catch (error) {
