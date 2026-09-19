@@ -489,3 +489,5 @@ Idea save keeps stills Worker deploy: 2026-09-19 — Save merges photo IDs into 
 Suggested times occupancy Worker deploy: 2026-09-19 — Best-times and AZ load upcoming Scheduled_Post_Date / Scheduled_At and skip 90-min collisions. Worker 0.10.331-schedule-occupancy.
 
 Best-times stay in analytics windows Worker deploy: 2026-09-19 — Suggested ISO prefers analytics days/windows, then skips booked slots. Worker 0.10.332-best-times-spread.
+
+Pipeline list field name Worker deploy: 2026-09-19 — Platform Outputs uses Studio_Scheduled_At, not Scheduled_At. Worker 0.10.333-studio-scheduled-at.

@@ -368,7 +368,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.332-best-times-spread",
+          version: "0.10.333-studio-scheduled-at",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2900,7 +2900,7 @@ function mapOutput(record, job = null) {
     output_hashtags: f(record, "Output_Hashtags"),
     thumbnail_url: f(record, "Thumbnail_URL"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
-    scheduled_at: f(record, "Scheduled_At"),
+    scheduled_at: f(record, "Studio_Scheduled_At"),
     youtube_scheduled_publish_at: f(record, "YouTube_Scheduled_Publish_At"),
     studio_preview_url: studioMappedPreviewUrl(record),
     native_still_url: studioNativeStillPreviewUrl(record) || null,
@@ -6297,7 +6297,7 @@ const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
 const STUDIO_OCCUPIED_LIST_LIMIT = 250;
 const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
 const STUDIO_OCCUPIED_HORIZON_MS = 10 * 24 * 60 * 60 * 1000;
-const STUDIO_OCCUPIED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Scheduled_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))';
+const STUDIO_OCCUPIED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Studio_Scheduled_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))';
 let studioOccupiedScheduleCache = { at: 0, rows: null, inflight: null };
 
 function studioInvalidateOccupiedScheduleCache() {
@@ -6305,7 +6305,7 @@ function studioInvalidateOccupiedScheduleCache() {
 }
 
 function studioOccupiedMsFromRow(row, now = Date.now()) {
-  const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Scheduled_At");
+  const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Studio_Scheduled_At");
   const status = String(f(row, "Publish_Status") || "").trim();
   const imminent = status === "Publishing" || status === "Ready to Publish";
   const ms = raw ? studioScheduleMs(raw) : null;
@@ -6325,7 +6325,7 @@ async function studioLoadOccupiedScheduleRows(env) {
     sortField: "Scheduled_Post_Date",
     sortDirection: "desc",
     filterFormula: STUDIO_OCCUPIED_FORMULA,
-    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Scheduled_At", "Publish_Status"],
+    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Studio_Scheduled_At", "Publish_Status"],
   }).then((rows) => {
     studioOccupiedScheduleCache = { at: Date.now(), rows: rows || [], inflight: null };
     return studioOccupiedScheduleCache.rows;
@@ -8360,7 +8360,7 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     const platform = String(f(row, "Platform") || "").trim();
     const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
     const key = studioAzScheduleKey(platform, f(row, "Studio_Output_Type") || f(row, "Format"));
-    const existingIso = String(f(row, "Scheduled_Post_Date") || f(row, "Scheduled_At") || "").trim();
+    const existingIso = String(f(row, "Scheduled_Post_Date") || f(row, "Studio_Scheduled_At") || "").trim();
     let iso = existingIso && !Number.isNaN(Date.parse(existingIso))
       ? new Date(existingIso).toISOString()
       : "";
@@ -16964,7 +16964,7 @@ const OUTPUT_LIST_FIELDS = [
   "Clip_1_URL",
   "Selected_Clip_1_URL",
   "Scheduled_Post_Date",
-  "Scheduled_At",
+  "Studio_Scheduled_At",
   "YouTube_Scheduled_Publish_At",
   "Studio_Preview_URL",
   "Studio_Preview_Updated_At",
