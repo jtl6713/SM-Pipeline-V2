@@ -140,7 +140,7 @@ export function pickBalancedSuggestedIso(windows, now = new Date(), options = {}
     }
   }
   if (best) return new Date(best.ms).toISOString();
-  return suggestedChicagoIsoFallback(windowList, now, leadMs);
+  return nextOpenScheduleIso(suggestedChicagoIsoFallback(windowList, now, leadMs), platformOccupiedMs, gapMs);
 }
 
 function suggestedChicagoIsoFallback(windows, now, leadMs = SUGGESTED_LEAD_MS) {

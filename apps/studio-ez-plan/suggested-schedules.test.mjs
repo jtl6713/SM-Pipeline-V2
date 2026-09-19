@@ -89,6 +89,19 @@ test("vertical video stamps stay in the 7-day window and spread across days", ()
   assert.ok(mainDays.size >= 2, "empty calendar should not park every platform on one day");
 });
 
+test("a booked preferred-day window moves the next suggestion later inside 7 days", () => {
+  const occupiedMs = [chicagoWallToUtcMs(2026, 9, 8, 11, 0)];
+  const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
+    days: ["Tue", "Wed", "Thu"],
+    occupiedMs,
+    platformOccupiedMs: occupiedMs,
+  });
+  const horizon = new Set(listHorizonCivils(SATURDAY_EVENING).map((day) => day.key));
+  assert.ok(horizon.has(civilFromIso(iso)));
+  assert.notEqual(iso, "2026-09-08T16:00:00.000Z");
+  assert.equal(iso, "2026-09-09T16:00:00.000Z");
+});
+
 test("a typed Reel time wins, and a Story still stays 90 minutes off that platform", () => {
   const stamps = buildSuggestedScheduleMap([
     { platform: "Instagram", output_type: "Reel", scheduled_at: "2026-09-06T21:00:00.000Z" },

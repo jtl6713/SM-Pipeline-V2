@@ -532,3 +532,5 @@ Idea Save Pages deploy: 2026-09-19 — Manage idea Save keeps platforms and slid
 Idea promote tooltips Pages deploy: 2026-09-19 — Help dots and timing note on Manage idea. Video duration wins if speech + tail overflow. UI 0.6.337-idea-tips.
 
 Idea save keeps stills Pages deploy: 2026-09-19 — Save persists checked library stills and does not hide the picker. UI 0.6.338-save-stills.
+
+Suggested times occupancy Pages deploy: 2026-09-19 — Use suggested avoids other scheduled posts and spreads across 7 days. UI 0.6.339-schedule-occupancy.

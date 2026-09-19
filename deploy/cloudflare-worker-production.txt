@@ -485,3 +485,5 @@ Scheduled-over-retry Worker deploy: 2026-09-19 — Ready to Schedule wins over s
 Idea Save Worker deploy: 2026-09-19 — Manage idea Save writes platforms, slide count, and the rest of the production options. Worker 0.10.329-idea-save.
 
 Idea save keeps stills Worker deploy: 2026-09-19 — Save merges photo IDs into notes and Studio_Matched_Media_Assets. Worker 0.10.330-idea-save-stills.
+
+Suggested times occupancy Worker deploy: 2026-09-19 — Best-times and AZ load upcoming Scheduled_Post_Date / Scheduled_At and skip 90-min collisions. Worker 0.10.331-schedule-occupancy.

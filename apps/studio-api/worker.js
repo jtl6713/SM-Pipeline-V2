@@ -368,7 +368,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.330-idea-save-stills",
+          version: "0.10.331-schedule-occupancy",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2900,6 +2900,8 @@ function mapOutput(record, job = null) {
     output_hashtags: f(record, "Output_Hashtags"),
     thumbnail_url: f(record, "Thumbnail_URL"),
     scheduled_post_date: f(record, "Scheduled_Post_Date"),
+    scheduled_at: f(record, "Scheduled_At"),
+    youtube_scheduled_publish_at: f(record, "YouTube_Scheduled_Publish_At"),
     studio_preview_url: studioMappedPreviewUrl(record),
     native_still_url: studioNativeStillPreviewUrl(record) || null,
     preview_kind: studioPreviewKind(record),
@@ -6291,24 +6293,59 @@ function studioNextOpenScheduleIso(candidateIso, occupiedMs, gapMs = STUDIO_SCHE
   return new Date(ms).toISOString();
 }
 
+const STUDIO_OCCUPIED_CACHE_MS = 45 * 1000;
+const STUDIO_OCCUPIED_LIST_LIMIT = 250;
+const STUDIO_OCCUPIED_LOOKBACK_MS = 12 * 60 * 60 * 1000;
+const STUDIO_OCCUPIED_HORIZON_MS = 10 * 24 * 60 * 60 * 1000;
+const STUDIO_OCCUPIED_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Scheduled_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))';
+let studioOccupiedScheduleCache = { at: 0, rows: null, inflight: null };
+
+function studioInvalidateOccupiedScheduleCache() {
+  studioOccupiedScheduleCache = { at: 0, rows: null, inflight: null };
+}
+
+function studioOccupiedMsFromRow(row, now = Date.now()) {
+  const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At") || f(row, "Scheduled_At");
+  const status = String(f(row, "Publish_Status") || "").trim();
+  const imminent = status === "Publishing" || status === "Ready to Publish";
+  const ms = raw ? studioScheduleMs(raw) : null;
+  if (ms == null) return imminent ? now : null;
+  if (ms >= now - STUDIO_OCCUPIED_LOOKBACK_MS && ms <= now + STUDIO_OCCUPIED_HORIZON_MS) return ms;
+  return imminent ? now : null;
+}
+
+async function studioLoadOccupiedScheduleRows(env) {
+  const now = Date.now();
+  if (studioOccupiedScheduleCache.rows && now - studioOccupiedScheduleCache.at < STUDIO_OCCUPIED_CACHE_MS) {
+    return studioOccupiedScheduleCache.rows;
+  }
+  if (studioOccupiedScheduleCache.inflight) return studioOccupiedScheduleCache.inflight;
+  studioOccupiedScheduleCache.inflight = listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+    limit: STUDIO_OCCUPIED_LIST_LIMIT,
+    sortField: "Scheduled_Post_Date",
+    sortDirection: "desc",
+    filterFormula: STUDIO_OCCUPIED_FORMULA,
+    fields: ["Platform", "Scheduled_Post_Date", "YouTube_Scheduled_Publish_At", "Scheduled_At", "Publish_Status"],
+  }).then((rows) => {
+    studioOccupiedScheduleCache = { at: Date.now(), rows: rows || [], inflight: null };
+    return studioOccupiedScheduleCache.rows;
+  }).catch((error) => {
+    studioOccupiedScheduleCache.inflight = null;
+    throw error;
+  });
+  return studioOccupiedScheduleCache.inflight;
+}
+
 async function studioLoadOccupiedSchedules(env, { excludeIds = [] } = {}) {
   const skip = new Set((excludeIds || []).filter(Boolean));
-  const rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
-    limit: 100,
-    sortField: "Scheduled_Post_Date",
-    sortDirection: "asc",
-    filterFormula: 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publish}=0,{Published_At}=BLANK(),OR({Scheduled_Post_Date}!="",{YouTube_Scheduled_Publish_At}!="",{Publish_Status}="Publishing",{Publish_Status}="Ready to Publish"))',
-  });
+  const rows = await studioLoadOccupiedScheduleRows(env);
+  const now = Date.now();
   const byPlatform = {};
-  for (const row of rows) {
+  for (const row of rows || []) {
     if (skip.has(row.id)) continue;
     const platform = String(f(row, "Platform") || "").trim();
     if (!platform) continue;
-    const raw = f(row, "Scheduled_Post_Date") || f(row, "YouTube_Scheduled_Publish_At");
-    const status = String(f(row, "Publish_Status") || "").trim();
-    const ms = raw
-      ? studioScheduleMs(raw)
-      : (status === "Publishing" || status === "Ready to Publish" ? Date.now() : null);
+    const ms = studioOccupiedMsFromRow(row, now);
     if (ms == null) continue;
     (byPlatform[platform] ||= []).push(ms);
   }
@@ -8312,26 +8349,39 @@ async function azAutoApproveIfReady(env, requestId, options = {}) {
     };
   }
   const remainingApprove = Math.max(0, assessed.filter((item) => item.ready).length - toApprove.length);
-  // Prefer times already on the row (Pipeline schedule fields). Avoid insights + occupancy
-  // list scans that blow the Worker subrequest budget during AZ kick.
+  // One occupancy scan for the batch (cached). Empty occupiedMs used to stamp
+  // every AZ output onto the same industry window as already-scheduled posts.
+  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env);
+  const reservedAll = studioFlattenOccupiedByPlatform(occupiedByPlatform);
   const stamp = new Date().toISOString();
   const approved = [];
   const scheduled = {};
   for (const row of toApprove) {
-    const key = studioAzScheduleKey(f(row, "Platform"), f(row, "Studio_Output_Type") || f(row, "Format"));
-    const existingIso = String(f(row, "Scheduled_Post_Date") || "").trim();
+    const platform = String(f(row, "Platform") || "").trim();
+    const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
+    const key = studioAzScheduleKey(platform, f(row, "Studio_Output_Type") || f(row, "Format"));
+    const existingIso = String(f(row, "Scheduled_Post_Date") || f(row, "Scheduled_At") || "").trim();
     let iso = existingIso && !Number.isNaN(Date.parse(existingIso))
       ? new Date(existingIso).toISOString()
       : "";
     if (!iso) {
-      const industry = studioIndustryBestWindows(f(row, "Platform"), f(row, "Studio_Output_Type") || f(row, "Format"));
+      const industry = studioIndustryBestWindows(platform, f(row, "Studio_Output_Type") || f(row, "Format"));
       iso = studioSuggestedLocalDatetime(industry.windows || ["12:00-13:00"], new Date(), {
         days: industry.days,
+        occupiedMs: reservedAll,
+        platformOccupiedMs: occupiedMs,
       });
+    } else {
+      iso = studioNextOpenScheduleIso(iso, occupiedMs);
     }
     await approveOutputRecordForPublishing(env, row, "AZ finished-video auto-queue", stamp, {
       scheduled_post_date: iso,
-    }, { occupiedMs: [] });
+    }, { occupiedMs });
+    const booked = studioScheduleMs(iso) ?? Date.parse(iso);
+    if (Number.isFinite(booked)) {
+      (occupiedByPlatform[platform] ||= []).push(booked);
+      reservedAll.push(booked);
+    }
     approved.push(row.id);
     scheduled[key] = iso;
   }
@@ -13760,6 +13810,17 @@ function studioFlattenOccupiedByPlatform(occupiedByPlatform) {
   return Object.values(occupiedByPlatform || {}).flat().filter((ms) => Number.isFinite(ms));
 }
 
+function studioOccupiedForPlatform(occupiedByPlatform, platform) {
+  const want = String(platform || "").trim().toLowerCase();
+  if (!want) return [];
+  const exact = occupiedByPlatform?.[platform];
+  if (Array.isArray(exact)) return exact;
+  for (const [key, times] of Object.entries(occupiedByPlatform || {})) {
+    if (String(key || "").trim().toLowerCase() === want) return times || [];
+  }
+  return [];
+}
+
 function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
   const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
   const occupiedMs = options.occupiedMs || [];
@@ -13798,7 +13859,7 @@ function studioPickBalancedSuggestedIso(windows, now = new Date(), options = {})
     civil = studioAddCivilDays(civil.year, civil.month, civil.day, 1);
     ms = studioChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
   }
-  return new Date(ms).toISOString();
+  return studioNextOpenScheduleIso(new Date(ms).toISOString(), platformOccupiedMs, gapMs);
 }
 
 function studioSuggestedLocalDatetime(windows, now = new Date(), options = {}) {
@@ -15049,6 +15110,12 @@ async function getInsightsBestTimes(request, env, url, authorization) {
   const season = studioInsightsResolveSeason(url);
   const industry = studioIndustryBestWindows(platform, outputType);
   const seasonLabel = studioSeasonLabel(season);
+  const occupiedByPlatform = await studioOccupiedSchedulesOrEmpty(env);
+  const occupiedOpts = {
+    occupiedMs: studioFlattenOccupiedByPlatform(occupiedByPlatform),
+    platformOccupiedMs: studioOccupiedForPlatform(occupiedByPlatform, platform),
+  };
+  const occupiedMsForClient = occupiedOpts.platformOccupiedMs;
   const industryPayload = (theme = null, note = null) => ({
     ok: true,
     timezone: "America/Chicago",
@@ -15059,7 +15126,9 @@ async function getInsightsBestTimes(request, env, url, authorization) {
     source: "industry_default",
     sample_size: 0,
     suggested: industry,
-    suggested_iso: studioSuggestedLocalDatetime(industry.windows, new Date(), { days: industry.days }),
+    suggested_iso: studioSuggestedLocalDatetime(industry.windows, new Date(), { days: industry.days, ...occupiedOpts }),
+    occupied_ms: occupiedMsForClient,
+    occupied_count: occupiedMsForClient.length,
     similar: null,
     similar_sample_size: 0,
     similar_profile: theme,
@@ -15159,7 +15228,9 @@ async function getInsightsBestTimes(request, env, url, authorization) {
       source,
       sample_size: useFirstParty ? firstHeatmap.sample_size : useLearned ? learned.sample_size : useSimilar ? similar.sample_size : sample.length,
       suggested: chosen,
-      suggested_iso: studioSuggestedLocalDatetime(chosen.windows, new Date(), { days: chosen.days }),
+      suggested_iso: studioSuggestedLocalDatetime(chosen.windows, new Date(), { days: chosen.days, ...occupiedOpts }),
+      occupied_ms: occupiedMsForClient,
+      occupied_count: occupiedMsForClient.length,
       similar: similar?.suggested || null,
       similar_sample_size: similar?.sample_size || 0,
       similar_profile: similar?.profile || theme,
@@ -16872,6 +16943,8 @@ const OUTPUT_LIST_FIELDS = [
   "Clip_1_URL",
   "Selected_Clip_1_URL",
   "Scheduled_Post_Date",
+  "Scheduled_At",
+  "YouTube_Scheduled_Publish_At",
   "Studio_Preview_URL",
   "Studio_Preview_Updated_At",
   "Output_URL",
@@ -26654,10 +26727,12 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
   const preparedHandoff = studioPublishHandoffFields(prepared, {
     scheduledPostDate: scheduleFields.Scheduled_Post_Date || f(prepared, "Scheduled_Post_Date") || scheduledIso,
   });
-  return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
+  const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, prepared.id || id, {
     method: "PATCH",
     body: JSON.stringify({ fields: { ...fields, ...preparedHandoff, ...scheduleFields }, typecast: true }),
   });
+  studioInvalidateOccupiedScheduleCache();
+  return updated;
 }
 
 function mapApprovedOutputSummary(record) {
@@ -26700,7 +26775,7 @@ async function approveAllOutputsForPublishing(request, env, authorization, ctx =
   for (const record of eligible) {
     try {
       const platform = String(f(record, "Platform") || "").trim();
-      const occupiedMs = occupiedByPlatform[platform] || [];
+      const occupiedMs = studioOccupiedForPlatform(occupiedByPlatform, platform);
       const rowSchedule = schedules[record.id] !== undefined ? schedules[record.id] : payload?.scheduled_post_date;
       const updated = await approveOutputRecordForPublishing(env, record, note, stamp, {
         scheduled_post_date: rowSchedule,
@@ -31703,7 +31778,7 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
   const fields = studioPublishScheduleFields(
     { scheduled_post_date: value || "immediate" },
     existing,
-    { occupiedMs: occupied[platform] || [], forceWrite: true },
+    { occupiedMs: studioOccupiedForPlatform(occupied, platform), forceWrite: true },
   );
   fields.Publish_Error_Message = "";
   const updated = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, match[1], {
@@ -31713,6 +31788,7 @@ async function scheduleStudioPublishOutput(request, env, url, authorization, ctx
       typecast: true,
     }),
   });
+  studioInvalidateOccupiedScheduleCache();
   const due = studioPublishIsDue(updated);
   const approved = String(f(updated, "Output_Status") || "").trim() === "Approved for Publishing"
     || String(f(updated, "Review_Status") || "").trim() === "Approved";
