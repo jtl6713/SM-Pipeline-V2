@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.328-classify-poll";
+  const BUILD_ID = "item4-0.6.329-classify-status";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14097,6 +14097,55 @@
     node.className = `form-message library-upload-status ${className}`.trim();
   }
 
+  const libraryClassifyWatch = { ids: new Set(), total: 0 };
+
+  function libraryUploadMessageBusy() {
+    return /adding \d+ of|adding as next|adding .+\.\.\.|collecting assets that are waiting/i
+      .test(String($("libraryUploadMessage")?.textContent || ""));
+  }
+
+  function collectLibraryClassifyIds(result, extraIds) {
+    const ids = [];
+    if (Array.isArray(result?.record_ids)) ids.push(...result.record_ids);
+    if (result?.id) ids.push(result.id);
+    if (Array.isArray(result?.records)) {
+      for (const record of result.records) if (record?.id) ids.push(record.id);
+    }
+    if (Array.isArray(extraIds)) ids.push(...extraIds);
+    return [...new Set(ids.map((id) => String(id || "").trim()).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+  }
+
+  function watchLibraryClassification(ids) {
+    const next = collectLibraryClassifyIds({ record_ids: ids });
+    if (!next.length) return;
+    next.forEach((id) => libraryClassifyWatch.ids.add(id));
+    libraryClassifyWatch.total = Math.max(libraryClassifyWatch.total, libraryClassifyWatch.ids.size);
+    scheduleLibraryClassifyPoll(true);
+  }
+
+  function clearLibraryClassificationWatch() {
+    libraryClassifyWatch.ids.clear();
+    libraryClassifyWatch.total = 0;
+  }
+
+  function syncLibraryClassifyStatusMessage(remaining) {
+    if (libraryUploadMessageBusy()) return;
+    const total = libraryClassifyWatch.total || remaining;
+    const left = Math.max(0, Number(remaining) || 0);
+    if (left > 0) {
+      setLibraryUploadMessage(
+        total > left
+          ? `Classifying ${left} of ${total} remaining.`
+          : `Classifying ${left} asset${left === 1 ? "" : "s"} in the background.`,
+        "",
+      );
+      return;
+    }
+    const current = String($("libraryUploadMessage")?.textContent || "");
+    if (/classifying|still waiting/i.test(current)) setLibraryUploadMessage("Status: ready");
+    clearLibraryClassificationWatch();
+  }
+
   function libraryPreviewUrl(record) {
     const path = String(record?.preview_url || record?.preview_path || "").trim();
     if (path.startsWith("http")) return path;
@@ -14275,11 +14324,15 @@
         timeoutMs: 60000,
         retries: 0,
       });
-      setLibraryUploadMessage(result.message || "Classifying in the background.", result.count ? "success" : "");
+      setLibraryUploadMessage(result.message || "Classifying in the background.", result.count ? "" : "");
       if (result.count) {
+        watchLibraryClassification(result.record_ids);
         markLibraryCardsClassifying(result.record_ids);
         await loadLibrary();
         markLibraryCardsClassifying(result.record_ids);
+        syncLibraryClassifyStatusMessage(libraryClassifyWatch.ids.size);
+      } else {
+        clearLibraryClassificationWatch();
       }
     } catch (error) {
       setLibraryUploadMessage(error.message, "error-text");
@@ -14306,7 +14359,8 @@
             timeoutMs: 60000,
             retries: 0,
           });
-          setLibraryUploadMessage(result.message || "Assigned profile. Classifying in the background.", "success");
+          setLibraryUploadMessage(result.message || "Assigned profile. Classifying in the background.", result.classifying ? "" : "success");
+          if (result.classifying) watchLibraryClassification(collectLibraryClassifyIds(result, [id]));
           await loadLibrary();
         } catch (error) {
           setLibraryUploadMessage(error.message, "error-text");
@@ -14333,7 +14387,8 @@
             timeoutMs: 60000,
             retries: 0,
           });
-          setLibraryUploadMessage(result.message || `Renamed to ${trimmed}. Reclassifying in the background — refresh to see updated tags.`, "success");
+          setLibraryUploadMessage(result.message || `Renamed to ${trimmed}. Reclassifying in the background.`, result.classifying ? "" : "success");
+          if (result.classifying) watchLibraryClassification(collectLibraryClassifyIds(result, [id]));
           await loadLibrary();
         } catch (error) {
           setLibraryUploadMessage(error.message, "error-text");
@@ -14558,6 +14613,10 @@
       .some((node) => /Classifying/i.test(node.textContent || ""));
   }
 
+  function libraryClassifyWatchActive() {
+    return libraryClassifyWatch.ids.size > 0;
+  }
+
   function libraryListQueryParams() {
     const query = String($("librarySearch")?.value || "").trim();
     const kind = libraryKindFilterValue();
@@ -14600,7 +14659,7 @@
       stopLibraryClassifyPoll();
       return;
     }
-    if (!force && !libraryVisibleClassifying()) {
+    if (!force && !libraryVisibleClassifying() && !libraryClassifyWatchActive()) {
       stopLibraryClassifyPoll();
       return;
     }
@@ -14609,6 +14668,17 @@
       libraryClassifyPollTimer = null;
       pollLibraryClassification().catch(() => scheduleLibraryClassifyPoll(true));
     }, LIBRARY_CLASSIFY_POLL_MS);
+  }
+
+  async function fetchLibraryClassificationRecords(ids) {
+    const wanted = [...new Set((ids || []).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+    const records = [];
+    for (let i = 0; i < wanted.length; i += 50) {
+      const chunk = wanted.slice(i, i + 50);
+      const data = await api(`/api/library?ids=${encodeURIComponent(chunk.join(","))}&limit=${chunk.length}`);
+      records.push(...(data.records || []));
+    }
+    return records;
   }
 
   async function pollLibraryClassification() {
@@ -14631,15 +14701,25 @@
     }
     libraryClassifyPollInFlight = true;
     try {
-      const data = await api(`/api/library?${query.params.toString()}`);
+      const watchIds = [...libraryClassifyWatch.ids];
+      const data = watchIds.length
+        ? { records: await fetchLibraryClassificationRecords(watchIds) }
+        : await api(`/api/library?${query.params.toString()}`);
       const records = data.records || [];
-      let still = false;
+      let still = 0;
       for (const record of records) {
         if (String(record.record_type || "") === "platform_output") continue;
         patchLibraryClassificationCard(record);
-        if (String(record.classification_status || "").trim() === "Processing") still = true;
+        if (String(record.classification_status || "").trim() === "Processing") still += 1;
       }
-      if (still || libraryVisibleClassifying()) scheduleLibraryClassifyPoll(true);
+      if (watchIds.length) {
+        const seen = new Set(records.map((record) => record.id).filter(Boolean));
+        still += watchIds.filter((id) => !seen.has(id)).length;
+        syncLibraryClassifyStatusMessage(still);
+      } else if (!still && !libraryVisibleClassifying()) {
+        syncLibraryClassifyStatusMessage(0);
+      }
+      if (still || libraryVisibleClassifying() || libraryClassifyWatchActive()) scheduleLibraryClassifyPoll(true);
     } finally {
       libraryClassifyPollInFlight = false;
     }
@@ -14877,6 +14957,7 @@
     inputs.forEach((input) => { input.disabled = true; });
     const errors = [];
     const namedUploads = [];
+    const uploadedClassifyIds = [];
     let uploaded = 0;
     let completedFiles = 0;
     try {
@@ -14917,6 +14998,7 @@
               if (record?.name) namedUploads.push(record.name);
             }
           }
+          uploadedClassifyIds.push(...collectLibraryClassifyIds(result));
         } catch (error) {
           completedFiles += chunk.length;
           const raw = String(error?.message || "upload failed");
@@ -14929,6 +15011,7 @@
       }
       inputs.forEach((input) => { input.value = ""; });
       if (uploaded) await startLibraryBrowse();
+      if (uploadedClassifyIds.length) watchLibraryClassification(uploadedClassifyIds);
       const namedSummary = namedUploads.length === 1
         ? `Added as ${namedUploads[0]}.`
         : (namedUploads.length > 1
@@ -15108,7 +15191,7 @@
     });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState !== "visible") return;
-      if (libraryVisibleClassifying()) {
+      if (libraryVisibleClassifying() || libraryClassifyWatchActive()) {
         stopLibraryClassifyPoll();
         pollLibraryClassification().catch(() => scheduleLibraryClassifyPoll(true));
       }
