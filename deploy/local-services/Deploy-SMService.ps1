@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-nyc','youtube-uploader-miami','pipeline-runner','timing-engine','ops-dashboard')]
+    [ValidateSet('frame-extractor','remotion-renderer','watermark','voiceover-normalizer','youtube-uploader','youtube-uploader-la','youtube-uploader-nyc','youtube-uploader-miami','pipeline-runner','timing-engine','ops-dashboard')]
     [string]$Service,
 
     [string]$Commit = '',
@@ -84,6 +84,18 @@ $ServiceMap = @{
         Port = 3340
         PublicUrl = 'https://youtube-upload.chicagoshining.com'
         WindowTitle = '5 LOC YouTube Uploader :3340'
+        StartKind = 'node'
+        StartFile = 'youtube-upload-service.js'
+        DependencyKind = 'node'
+        RuntimeDirs = @('node_modules','data','tmp','temp','logs','uploads','downloads')
+    }
+    'youtube-uploader-la' = @{
+        DisplayName = 'YouTube Uploader LA'
+        RepoPath = 'services\youtube-uploader'
+        RuntimePath = 'Services\youtube-uploader-la\service'
+        Port = 3341
+        PublicUrl = 'https://youtube-upload-la.chicagoshining.com'
+        WindowTitle = '5a LOC YouTube Uploader LA :3341'
         StartKind = 'node'
         StartFile = 'youtube-upload-service.js'
         DependencyKind = 'node'
@@ -206,19 +218,21 @@ function Select-Service {
     Write-Host '  3  Watermark'
     Write-Host '  4  Voiceover Normalizer'
     Write-Host '  5  YouTube Uploader (Chicago)'
+    Write-Host '  5l YouTube Uploader LA'
     Write-Host '  5n YouTube Uploader NYC'
     Write-Host '  5m YouTube Uploader Miami'
     Write-Host '  6  Pipeline Runner'
     Write-Host '  7  Timing Engine'
     Write-Host '  10 Ops Dashboard'
     Write-Host ''
-    $choice = Read-Host 'Enter 1-7, 5n, 5m, or 10'
+    $choice = Read-Host 'Enter 1-7, 5l, 5n, 5m, or 10'
     switch ($choice) {
         '1' { return 'frame-extractor' }
         '2' { return 'remotion-renderer' }
         '3' { return 'watermark' }
         '4' { return 'voiceover-normalizer' }
         '5' { return 'youtube-uploader' }
+        '5l' { return 'youtube-uploader-la' }
         '5n' { return 'youtube-uploader-nyc' }
         '5m' { return 'youtube-uploader-miami' }
         '6' { return 'pipeline-runner' }

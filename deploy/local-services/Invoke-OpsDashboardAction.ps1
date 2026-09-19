@@ -39,6 +39,7 @@ $Deployable = @(
     'watermark',
     'voiceover-normalizer',
     'youtube-uploader',
+    'youtube-uploader-la',
     'youtube-uploader-nyc',
     'youtube-uploader-miami',
     'pipeline-runner',
@@ -54,6 +55,7 @@ $Ports = @{
     'watermark' = 3011
     'voiceover-normalizer' = 3012
     'youtube-uploader' = 3340
+    'youtube-uploader-la' = 3341
     'youtube-uploader-nyc' = 3342
     'youtube-uploader-miami' = 3343
     'pipeline-runner' = 3350

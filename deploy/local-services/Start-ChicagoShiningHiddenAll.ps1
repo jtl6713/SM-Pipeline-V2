@@ -20,6 +20,7 @@ $order = @(
     'watermark',
     'voiceover-normalizer',
     'youtube-uploader',
+    'youtube-uploader-la',
     'youtube-uploader-nyc',
     'youtube-uploader-miami',
     'pipeline-runner',
@@ -39,6 +40,7 @@ $ports = @{
     'watermark' = 3011
     'voiceover-normalizer' = 3012
     'youtube-uploader' = 3340
+    'youtube-uploader-la' = 3341
     'youtube-uploader-nyc' = 3342
     'youtube-uploader-miami' = 3343
     'pipeline-runner' = 3350
@@ -49,6 +51,7 @@ $ports = @{
 }
 
 $optionalUntilPresent = @{
+    'youtube-uploader-la' = 'Services\youtube-uploader-la\service\youtube-upload-service.js'
     'youtube-uploader-nyc' = 'Services\youtube-uploader-nyc\service\youtube-upload-service.js'
     'youtube-uploader-miami' = 'Services\youtube-uploader-miami\service\youtube-upload-service.js'
     'timing-engine' = 'Services\timing-engine\service\app.py'

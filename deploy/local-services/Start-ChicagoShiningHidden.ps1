@@ -15,6 +15,7 @@ param(
         'watermark',
         'voiceover-normalizer',
         'youtube-uploader',
+        'youtube-uploader-la',
         'youtube-uploader-nyc',
         'youtube-uploader-miami',
         'pipeline-runner',
@@ -77,6 +78,15 @@ $Map = @{
         Kind = 'node'
         File = 'youtube-upload-service.js'
         ExtraEnv = @{ PORT = '3340' }
+    }
+    'youtube-uploader-la' = @{
+        Name = 'YouTube Uploader LA'
+        Port = 3341
+        Dir = 'Services\youtube-uploader-la\service'
+        Title = '5a LOC YouTube Uploader LA :3341'
+        Kind = 'node'
+        File = 'youtube-upload-service.js'
+        ExtraEnv = @{ PORT = '3341' }
     }
     'youtube-uploader-nyc' = @{
         Name = 'YouTube Uploader NYC'
