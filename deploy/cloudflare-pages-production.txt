@@ -510,3 +510,5 @@ Asset Manager added datetime Pages deploy: 2026-09-18 — Newest added sorts by 
 Classify-all stamp-first Pages deploy: 2026-09-18 — Classify all flips cards to Classifying immediately and keeps them after refresh. UI 0.6.327-classify-all-stamp.
 
 Asset Manager classify poll Pages deploy: 2026-09-18 — While any card is Classifying, badges update every 3s without a page refresh. UI 0.6.328-classify-poll.
+
+Asset Manager classify status Pages deploy: 2026-09-18 — The red Classifying N assets line counts down and returns to Status: ready when A3 finishes. UI 0.6.329-classify-status.

@@ -488,6 +488,18 @@ export function combineAirtableFormulas(...parts) {
   return `AND(${clauses.join(",")})`;
 }
 
+export function parseLibraryRecordIdsParam(value) {
+  const raw = Array.isArray(value) ? value.join(",") : String(value || "");
+  return [...new Set(raw.split(/[\s,]+/).filter((id) => /^rec[A-Za-z0-9]+$/.test(id)))];
+}
+
+export function libraryRecordIdsFilterFormula(ids) {
+  const clean = parseLibraryRecordIdsParam(Array.isArray(ids) ? ids.join(",") : ids);
+  if (!clean.length) return null;
+  const parts = clean.map((id) => `RECORD_ID()="${id}"`);
+  return parts.length === 1 ? parts[0] : `OR(${parts.join(",")})`;
+}
+
 /** Drop Item 4 fill-crop / aspect variants from library + photo-wait Airtable scans. */
 export function ideaLibraryExcludeDerivedStillFormula() {
   return `AND(NOT(FIND("fill-crop",LOWER({Asset Name}&""))),NOT(REGEX_MATCH({Asset Name}&"","__[0-9]+x[0-9]+__")))`;

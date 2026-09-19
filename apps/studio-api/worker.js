@@ -35,6 +35,8 @@ import {
   libraryDriveFilename,
   ideaLibraryExcludeDerivedStillFormula,
   libraryClassifyPendingFormula,
+  libraryRecordIdsFilterFormula,
+  parseLibraryRecordIdsParam,
   mediaAssetIsHeic,
   mediaAssetProfileScopeFormula,
   normalizeLibraryBatchBase,
@@ -361,7 +363,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.323-classify-all-stamp-first",
+          version: "0.10.324-classify-status-live",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17583,29 +17585,32 @@ async function listAssetLibrary(request, env, url, authorization) {
   if (kind === "published") return listPublishedLibraryFiles(request, env, url);
   if (!env.AIRTABLE_MEDIA_TABLE_ID) throw new HttpError(503, "Media Assets table is not configured");
   const query = String(url.searchParams.get("q") || "").trim();
+  const requestedIds = parseLibraryRecordIdsParam(url.searchParams.get("ids"));
   const needsProfile = ["1", "true", "yes"].includes(String(url.searchParams.get("needs_profile") || "").trim().toLowerCase())
     || kind === "needs_profile";
   const requestedLimit = Number(url.searchParams.get("limit"));
   const limit = Math.max(1, Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : ASSET_LIBRARY_PAGE_SIZE));
-  const offset = String(url.searchParams.get("offset") || "").trim() || null;
+  const offset = requestedIds.length ? null : (String(url.searchParams.get("offset") || "").trim() || null);
   const addedFrom = parseLibraryDateParam(url.searchParams.get("added_from"));
   const addedTo = parseLibraryDateParam(url.searchParams.get("added_to"));
   const sort = resolveLibraryListSort(url.searchParams.get("sort"), { published: false });
   const crossScope = await resolveLibraryCrossScope(env, url);
-  const scopeFormula = needsProfile
+  const scopeFormula = requestedIds.length || needsProfile
     ? null
     : await libraryProfileScopeFormula(env, authorization, url, { includeUnscoped: false });
   const [page, profiles] = await Promise.all([
     listRecordsPage(env, env.AIRTABLE_MEDIA_TABLE_ID, {
-      limit,
+      limit: requestedIds.length ? Math.min(ASSET_LIBRARY_MAX_PAGE_SIZE, Math.max(requestedIds.length, 1)) : limit,
       offset,
-      sortField: sort.sortField,
-      sortDirection: sort.sortDirection,
-      filterFormula: combineAirtableFormulas(
-        assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
-        libraryAddedDateFilterFormula(addedFrom, addedTo, "Added_At"),
-        scopeFormula,
-      ),
+      sortField: requestedIds.length ? undefined : sort.sortField,
+      sortDirection: requestedIds.length ? undefined : sort.sortDirection,
+      filterFormula: requestedIds.length
+        ? libraryRecordIdsFilterFormula(requestedIds)
+        : combineAirtableFormulas(
+          assetLibraryFilterFormula(query, needsProfile ? "" : kind, needsProfile),
+          libraryAddedDateFilterFormula(addedFrom, addedTo, "Added_At"),
+          scopeFormula,
+        ),
     }),
     listContentProfileRecords(env).catch(() => []),
   ]);
@@ -17617,6 +17622,7 @@ async function listAssetLibrary(request, env, url, authorization) {
     ok: true,
     idle: false,
     query: query || null,
+    ids: requestedIds.length ? requestedIds : null,
     kind: kind || null,
     needs_profile: needsProfile || null,
     sort: sort.sort,
@@ -17847,6 +17853,7 @@ async function uploadAssetLibraryItems(request, env, authorization, ctx) {
     content_profile_name: f(uploadProfile, "Profile_Name") || null,
     batch_base: batchBase,
     batch_names: batchNames,
+    record_ids: uploadedIds,
     message: uploadedIds.length
       ? `${addedMessage} Classifying in the background — refresh to see tags.`
       : addedMessage,

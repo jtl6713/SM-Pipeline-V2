@@ -35,6 +35,8 @@ import {
   combineAirtableFormulas,
   ideaLibraryExcludeDerivedStillFormula,
   libraryClassifyPendingFormula,
+  parseLibraryRecordIdsParam,
+  libraryRecordIdsFilterFormula,
 } from "./asset-library.mjs";
 
 function output(fields) {
@@ -363,6 +365,16 @@ test("library added-at prefers Added_At then createdTime", () => {
     createdTime: "2026-09-18T22:01:00.000Z",
     fields: { Intake_Date: "2026-09-18" },
   }), "2026-09-18T22:01:00.000Z");
+});
+
+test("library record id filter lists only requested Media Assets", () => {
+  assert.deepEqual(parseLibraryRecordIdsParam("recAAA, recBBB recAAA"), ["recAAA", "recBBB"]);
+  assert.equal(libraryRecordIdsFilterFormula([]), null);
+  assert.equal(libraryRecordIdsFilterFormula(["recAAA"]), 'RECORD_ID()="recAAA"');
+  assert.equal(
+    libraryRecordIdsFilterFormula(["recAAA", "recBBB"]),
+    'OR(RECORD_ID()="recAAA",RECORD_ID()="recBBB")',
+  );
 });
 
 test("classify-all pending formula includes false Classified stubs", () => {
