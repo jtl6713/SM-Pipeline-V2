@@ -13,6 +13,7 @@ param(
         'desk-restart',
         'close-orphans',
         'start-one',
+        'restart-one',
         'stop-one',
         'sync',
         'plan',
@@ -175,6 +176,13 @@ switch ($Action) {
     'start-one' {
         Assert-Service $Startable
         $code = Invoke-Ps1 $Hidden @('-Service', $Service)
+    }
+    'restart-one' {
+        Assert-Service $Startable
+        if ($Service -eq 'ops-dashboard') {
+            throw 'Refusing to restart the Ops Dashboard from itself. Use DEPLOY ops-dashboard or restart the Node process on :3361.'
+        }
+        $code = Invoke-Ps1 $Hidden @('-Service', $Service, '-StopFirst')
     }
     'stop-one' {
         Assert-Service $Startable

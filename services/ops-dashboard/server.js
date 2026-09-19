@@ -322,6 +322,24 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/jobs/unlock') {
+      if (activeJobId) {
+        const job = jobs.get(activeJobId);
+        if (job && job.status === 'running') {
+          appendLog(job, '\nUnlocked by operator.\n');
+          job.status = 'failed';
+          job.exitCode = 1;
+          job.endedAt = new Date().toISOString();
+          try {
+            if (job.child && !job.child.killed) job.child.kill();
+          } catch { /* ignore */ }
+        }
+        activeJobId = null;
+      }
+      json(res, 200, { ok: true, unlocked: true });
+      return;
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/run') {
       if (activeJobId) {
         const current = jobs.get(activeJobId);

@@ -90,7 +90,18 @@
       "confirm": false,
       "shortcut": null,
       "summary": "Hidden-start a single listener if its port is down.",
-      "detail": "Start-ChicagoShiningHidden.ps1 -Service <id>. Prefer this over opening Windows Terminal tabs."
+      "detail": "Start-ChicagoShiningHidden.ps1 -Service <id>. Skips when the port is already listening."
+    },
+    {
+      "id": "restart-one",
+      "title": "Restart one service",
+      "group": "Per service",
+      "danger": "caution",
+      "needsService": true,
+      "confirm": true,
+      "shortcut": null,
+      "summary": "Stop the port, then hidden-start that service again.",
+      "detail": "Start-ChicagoShiningHidden.ps1 -Service <id> -StopFirst. Use after OAuth or .env changes on YouTube uploaders."
     },
     {
       "id": "stop-one",

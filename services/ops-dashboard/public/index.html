@@ -70,6 +70,7 @@
     button.warn { background: #8a6a1c; color: #fff; }
     button.danger { background: var(--danger); color: #fff; border-color: #8a2d2d; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .lock-note { color: var(--warn); font-size: 12px; margin: 0 0 10px; }
     .login { max-width: 420px; margin: 48px auto; }
     pre {
       margin: 0; max-height: 420px; overflow: auto; white-space: pre-wrap;
@@ -84,7 +85,7 @@
 <body>
   <header>
     <h1>Chicago Shining Ops</h1>
-    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY. Allowlisted scripts only. Catalog 2026-09-19-city-uploaders. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
+    <div class="sub">START / STOP / VERIFY / SYNC / PLAN / DEPLOY. Allowlisted scripts only. Catalog 2026-09-19-restart-one. <a href="#" id="forgetDevice" hidden>Forget token on this device</a></div>
   </header>
   <div class="wrap">
     <div id="login" class="login" hidden>
@@ -108,8 +109,12 @@
           <section style="margin-top:18px">
             <h2>Actions</h2>
             <div class="row" style="margin-bottom:12px">
-              <label class="sub">Service for PLAN / DEPLOY / start-one / stop-one</label>
+              <label class="sub">Service for PLAN / DEPLOY / start-one / restart-one / stop-one</label>
               <select id="service"></select>
+            </div>
+            <div id="lockNote" class="lock-note" hidden>Another action is still running. Wait for it to finish, or unlock below.</div>
+            <div class="row" style="margin-bottom:12px">
+              <button type="button" class="ghost" id="unlockActions" hidden>Unlock actions</button>
             </div>
             <div id="actions"></div>
           </section>
@@ -216,18 +221,29 @@
       };
     }
 
+    function setActionsLocked(locked) {
+      document.querySelectorAll("button[data-action]").forEach((b) => { b.disabled = locked; });
+      $("unlockActions").hidden = !locked;
+      $("lockNote").hidden = !locked;
+    }
+
     async function pollJob(id) {
-      const data = await api("/api/jobs/" + id);
-      const job = data.job;
-      $("jobMeta").textContent = `${job.action}${job.service ? " · " + job.service : ""} · ${job.status}` +
-        (job.exitCode == null ? "" : " · exit " + job.exitCode);
-      $("log").textContent = job.log || "(no output yet)";
-      $("log").scrollTop = $("log").scrollHeight;
-      document.querySelectorAll("button[data-action]").forEach((b) => { b.disabled = job.status === "running"; });
-      if (job.status === "running") {
-        pollTimer = setTimeout(() => pollJob(id), 1200);
-      } else {
-        loadStatus().catch(() => {});
+      try {
+        const data = await api("/api/jobs/" + id);
+        const job = data.job;
+        $("jobMeta").textContent = `${job.action}${job.service ? " · " + job.service : ""} · ${job.status}` +
+          (job.exitCode == null ? "" : " · exit " + job.exitCode);
+        $("log").textContent = job.log || "(no output yet)";
+        $("log").scrollTop = $("log").scrollHeight;
+        setActionsLocked(job.status === "running");
+        if (job.status === "running") {
+          pollTimer = setTimeout(() => pollJob(id), 1200);
+        } else {
+          loadStatus().catch(() => {});
+        }
+      } catch (err) {
+        setActionsLocked(false);
+        $("runErr").textContent = err.message || "That job is gone. You can run again.";
       }
     }
 
@@ -287,6 +303,18 @@
       $("forgetDevice").hidden = true;
       $("app").hidden = true;
       $("login").hidden = false;
+    };
+    $("unlockActions").onclick = async () => {
+      $("runErr").textContent = "";
+      try {
+        await api("/api/jobs/unlock", { method: "POST" });
+        setActionsLocked(false);
+        $("jobMeta").textContent = "Idle. Actions unlocked.";
+        if (pollTimer) clearTimeout(pollTimer);
+        loadStatus().catch(() => {});
+      } catch (err) {
+        $("runErr").textContent = err.message;
+      }
     };
     if (token()) rememberToken(token());
     boot();
