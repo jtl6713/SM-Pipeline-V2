@@ -174,6 +174,22 @@ async function accessToken() {
   return refreshed.token;
 }
 
+async function linkedChannelId(token) {
+  const response = await fetch(
+    "https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true",
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(`channels.list failed ${response.status}: ${JSON.stringify(data)}`);
+  }
+  const item = (data.items || [])[0];
+  return {
+    channelId: item?.id || "",
+    channelTitle: item?.snippet?.title || "",
+  };
+}
+
 async function oauthStatus() {
   const result = {
     ok: false,
@@ -184,6 +200,8 @@ async function oauthStatus() {
     truncated: refreshTokenLooksTruncated(cfg.refreshToken),
     refresh_ok: false,
     access_token_expires_in: null,
+    channel_id: "",
+    channel_title: "",
     error: null,
     checked_at: now(),
     google_consent_publishing: "not_visible_from_token_api",
@@ -195,10 +213,26 @@ async function oauthStatus() {
     result.refresh_ok = true;
     result.ok = true;
     result.access_token_expires_in = refreshed.expiresIn;
+    const channel = await linkedChannelId(refreshed.token);
+    result.channel_id = channel.channelId;
+    result.channel_title = channel.channelTitle;
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
   }
   return result;
+}
+
+async function deleteVideo(videoId) {
+  const id = String(videoId || "").trim();
+  if (!id) throw new Error("videoId is required");
+  const token = await accessToken();
+  const response = await fetch(`https://www.googleapis.com/youtube/v3/videos?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 204) return { deleted: true, videoId: id };
+  const data = await response.text();
+  throw new Error(`videos.delete failed ${response.status}: ${data}`);
 }
 
 async function downloadToFile(url, file) {
@@ -636,6 +670,13 @@ async function handler(req, res) {
         return json(res, 400, { error: "videoId and privacyStatus are required" });
       }
       return json(res, 200, await updatePrivacy(payload.videoId, payload.privacyStatus));
+    }
+    if (req.method === "POST" && url.pathname === "/youtube/delete") {
+      const payload = await readJson(req);
+      if (!payload.videoId) {
+        return json(res, 400, { error: "videoId is required" });
+      }
+      return json(res, 200, await deleteVideo(payload.videoId));
     }
     if (req.method === "POST" && url.pathname === "/youtube/snippet") {
       const payload = await readJson(req);

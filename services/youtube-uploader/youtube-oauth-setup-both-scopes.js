@@ -28,6 +28,8 @@ if (!clientId || !clientSecret) {
 const scopes = [
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.readonly",
+  // Required for privacy updates, scheduled publish changes, and videos.delete remediation.
+  "https://www.googleapis.com/auth/youtube.force-ssl",
 ];
 
 const state = Math.random().toString(36).slice(2) + Date.now().toString(36);

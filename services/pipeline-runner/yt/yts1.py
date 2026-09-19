@@ -9,7 +9,7 @@ from airtable.constants import PLATFORM_OUTPUTS_TABLE
 from carousel.timeutil import iso_utc
 from item4.settings import PipelineSettings
 from render.fields import field_str
-from yt.client import YouTubeUploaderClient, load_uploader_settings
+from yt.client import YouTubeUploaderClient, load_uploader_settings, verify_upload_channel
 from yt.common import (
     is_quota_exceeded,
     manual_publish_required_fields,
@@ -74,8 +74,10 @@ def process_request(
     if dry_run:
         return {"processed": False, "dry_run": True, **result}
 
-    settings = load_uploader_settings(PipelineSettings(client), output, client=client)
-    status_code, body = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"]).job_status(job_id)
+    pipeline_settings = PipelineSettings(client)
+    settings = load_uploader_settings(pipeline_settings, output, client=client)
+    uploader = YouTubeUploaderClient(base_url=settings["url"], secret=settings["secret"])
+    status_code, body = uploader.job_status(job_id)
     job_status = str(body.get("status") or "").strip().casefold()
     video_id = str(body.get("videoId") or "").strip()
     result["http_status"] = status_code
@@ -83,7 +85,35 @@ def process_request(
     result["video_id"] = video_id
     now = iso_utc()
     if 200 <= status_code <= 299 and job_status == "completed" and video_id:
-        thumb_publish = youtube_thumbnail_publish_enabled(PipelineSettings(client))
+        channel_error, upload_theme, expected_channel = verify_upload_channel(
+            settings=pipeline_settings,
+            output=output,
+            client=client,
+            uploader=uploader,
+            video_id=video_id,
+        )
+        result["upload_theme"] = upload_theme
+        result["expected_channel_id"] = expected_channel
+        if channel_error:
+            fields = manual_publish_required_fields(
+                error_stage="YTS1_CHANNEL_MISMATCH",
+                publish_message=channel_error,
+                youtube_message=channel_error,
+                body=body,
+                youtube_stage=STAGE_YT1,
+                clear_upload_job=True,
+                package_status=PACKAGE_READY,
+                extra={
+                    "YouTube_Last_Checked_At": now,
+                    "YouTube_Video_ID": "",
+                    "Platform_Post_ID": "",
+                    "Platform_Post_URL": "",
+                },
+            )
+            client.update_record(PLATFORM_OUTPUTS_TABLE, record_id, fields, typecast=True)
+            result["channel_mismatch"] = True
+            return {"processed": True, "manual_publish_required": True, **result}
+        thumb_publish = youtube_thumbnail_publish_enabled(pipeline_settings)
         skip_list = not yts2_needs_videos_list(thumb_publish)
         fields = {
             "YouTube_Video_ID": video_id,

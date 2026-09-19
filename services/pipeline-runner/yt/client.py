@@ -10,6 +10,54 @@ from publish.destinations import destination_value, resolve_publish_theme
 from yt.constants import THUMBNAIL_MAX_BYTES, THUMBNAIL_QUALITY_FLOOR
 
 
+def video_channel_id(payload: dict[str, Any]) -> str:
+    items = payload.get("items") if isinstance(payload, dict) else None
+    first = items[0] if isinstance(items, list) and items else payload
+    if not isinstance(first, dict):
+        return ""
+    snippet = first.get("snippet") if isinstance(first.get("snippet"), dict) else {}
+    return str(snippet.get("channelId") or "").strip()
+
+
+def expected_youtube_channel_id(
+    settings: PipelineSettings,
+    output: dict[str, Any] | None = None,
+    *,
+    client=None,
+) -> tuple[str, str]:
+    theme = resolve_publish_theme(output=output, client=client)
+    return theme, destination_value(settings, "YOUTUBE_CHANNEL_ID", theme)
+
+
+def verify_upload_channel(
+    *,
+    settings: PipelineSettings,
+    output: dict[str, Any] | None,
+    client,
+    uploader: "YouTubeUploaderClient",
+    video_id: str,
+) -> tuple[str | None, str, str]:
+    theme, expected = expected_youtube_channel_id(settings, output, client=client)
+    if not expected:
+        return None, theme, expected
+    status_code, body = uploader.video_status(video_id)
+    if not (200 <= status_code <= 299):
+        raise YouTubeUploaderError(
+            f"upload-channel-check-failed HTTP {status_code}",
+            status_code=status_code,
+            body=body,
+        )
+    actual = video_channel_id(body)
+    if actual and actual != expected:
+        return (
+            f"YouTube upload landed on channel {actual} but {theme.upper()} expects {expected}. "
+            "Fix the city uploader OAuth token before retrying.",
+            theme,
+            expected,
+        )
+    return None, theme, expected
+
+
 class YouTubeUploaderError(RuntimeError):
     def __init__(self, message: str, *, status_code: int = 0, body: Any = None) -> None:
         super().__init__(message)
