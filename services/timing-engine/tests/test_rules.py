@@ -201,3 +201,32 @@ def test_voiceover_source_emits_end_event():
     assert len(events) == 1
     assert events[0].kind == "voiceover_end"
     assert events[0].time_seconds == 7.5
+
+
+def test_equal_beats_share_duration_and_land_on_beats():
+    beats = [index * 0.5 for index in range(1, 17)]
+    cuts, meta = apply_rules(
+        beats,
+        clip_count=4,
+        duration_seconds=8,
+        rules={"strategy": "equal_beats"},
+        min_clip_seconds=0.4,
+    )
+    assert meta["beat_count"] == 15
+    assert meta["beats_per_clip"] == 3
+    assert meta["beats_used"] == 12
+    assert cuts == [1.5, 3.0, 4.5]
+    assert meta["timeline_end_seconds"] == 6.0
+    plan = build_timeline(
+        beats_in_window=beats,
+        clip_count=4,
+        duration_seconds=8,
+        fps=30,
+        rules={"strategy": "equal_beats"},
+        transition={"type": "fade", "duration_frames": 12},
+    )
+    frames = [clip["duration_frames"] for clip in plan["clips"]]
+    assert frames == [45, 45, 45, 45]
+    assert [item["at_seconds"] for item in plan["transitions"]] == [1.5, 3.0, 4.5]
+    assert plan["duration_frames"] == 180
+    assert plan["metadata"]["beat_count"] == 15

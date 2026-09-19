@@ -220,7 +220,17 @@ def process_one(
             "Render_Total_Frames": total_frames,
             "Selected_Clip_Count": len(timed),
         }
-        if footage_capped:
+        timeline = response.get("timeline") if isinstance(response.get("timeline"), dict) else {}
+        meta = timeline.get("metadata") if isinstance(timeline.get("metadata"), dict) else {}
+        try:
+            beat_end = float(meta.get("timeline_end_seconds") or 0)
+        except (TypeError, ValueError):
+            beat_end = 0
+        if beat_end > 0 and beat_end + 0.05 < duration:
+            # Drop leftover beats so the last still/clip is not longer than the others.
+            fields["Music_Duration_Seconds"] = round(beat_end, 3)
+            fields["Studio_Effective_Video_Duration_Seconds"] = round(beat_end, 3)
+        elif footage_capped:
             # Keep Remotion from re-padding an explicit owner duration past the footage.
             fields["Studio_Effective_Video_Duration_Seconds"] = duration
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], fields, typecast=True)

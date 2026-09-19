@@ -2,23 +2,19 @@ MAKE_SCENARIO_ID = 0
 MAKE_SCENARIO_NAME = "T1 - Timing Engine"
 MAX_RECORDS = 5
 DEFAULT_RULES = {
-    "strategy": "vo_phased",
+    "strategy": "equal_beats",
     "recycle": False,
-    "vo_clip_share": 0.35,
     "rules": [
-        {"until": "voiceover_end", "every_n_beats": 2, "spread": True},
-        {"remaining": True, "every_n_beats": 1},
+        {"equal_duration": True},
     ],
 }
 VIDEO_RULES = {
-    "strategy": "vo_phased",
-    "recycle": True,
+    "strategy": "equal_beats",
+    "recycle": False,
     "max_clips": 60,
-    "vo_clip_share": 0.35,
     "post_voiceover_transition_frames": 2,
     "rules": [
-        {"until": "voiceover_end", "every_n_beats": 2, "spread": True},
-        {"remaining": True, "every_n_beats": 1},
+        {"equal_duration": True},
     ],
 }
 DENSE_VIDEO_TRANSITION = {"type": "fade", "duration_frames": 2}

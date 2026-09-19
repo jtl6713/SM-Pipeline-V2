@@ -126,19 +126,20 @@ def test_music_and_window_helpers():
     }
     assert music_is_enabled(output) is True
     assert analysis_window(output) == (4.0, 20.0)
-    assert resolve_rules(output)["rules"][0]["until"] == "voiceover_end"
-    assert resolve_rules(output)["rules"][0]["every_n_beats"] == 2
-    assert resolve_rules(output)["strategy"] == "vo_phased"
+    assert resolve_rules(output)["rules"][0]["equal_duration"] is True
+    assert resolve_rules(output)["strategy"] == "equal_beats"
     output["fields"]["Timing_Rules_JSON"] = '{"rules":[{"remaining":true,"every_n_beats":2}]}'
-    assert resolve_rules(output)["strategy"] == "vo_phased"
+    assert resolve_rules(output)["strategy"] == "equal_beats"
     output["fields"]["Timing_Rules_JSON"] = '{"recycle": true}'
     merged = resolve_rules(output)
     assert merged["recycle"] is True
-    assert merged["rules"][0]["until"] == "voiceover_end"
+    assert merged["strategy"] == "equal_beats"
+    assert merged["rules"][0]["equal_duration"] is True
     output["fields"]["Studio_Effective_Background_Music_Mode"] = "No"
     assert music_is_enabled(output) is False
     video_rules = resolve_rules({"fields": {}}, has_video=True)
-    assert video_rules["recycle"] is True
+    assert video_rules["recycle"] is False
+    assert video_rules["strategy"] == "equal_beats"
     assert video_rules["max_clips"] == 60
 
 

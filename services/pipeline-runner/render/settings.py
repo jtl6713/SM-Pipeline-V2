@@ -55,7 +55,9 @@ def get_timing_defaults(client: AirtableClient) -> tuple[str, dict]:
             parsed = json.loads(raw)
             legacy_default = {"rules": [{"remaining": True, "every_n_beats": 2}]}
             if isinstance(parsed, dict) and parsed.get("rules") and parsed != legacy_default:
-                rules = parsed
+                strategy = str(parsed.get("strategy") or "").strip().lower()
+                if strategy not in {"", "vo_phased", "equal_beats", "spread", "beat_fill"}:
+                    rules = parsed
         except json.JSONDecodeError:
             pass
     return url, rules

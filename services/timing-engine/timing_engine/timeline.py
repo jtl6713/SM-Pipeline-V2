@@ -58,13 +58,21 @@ def build_timeline(
     )
     planned = int(rule_meta.get("effective_clip_count") or count)
     count = max(1, planned)
-    total_frames = max(count, round(duration * fps_i))
-    boundaries = [0.0, *cuts, duration]
-    clip_seconds = [
-        max(min_clip, boundaries[index + 1] - boundaries[index])
-        for index in range(count)
-    ]
-    clip_frames = _seconds_to_frames(clip_seconds, fps_i, total_frames)
+    end_seconds = float(rule_meta.get("timeline_end_seconds") or duration)
+    equal_beats = str(rule_meta.get("strategy") or "") == "equal_beats" and int(rule_meta.get("beats_per_clip") or 0) > 0
+    if equal_beats:
+        span = float(cuts[0]) if cuts else end_seconds
+        frames_each = max(1, round(span * fps_i))
+        clip_frames = [frames_each] * count
+        total_frames = frames_each * count
+    else:
+        total_frames = max(count, round(duration * fps_i))
+        boundaries = [0.0, *cuts, duration]
+        clip_seconds = [
+            max(min_clip, boundaries[index + 1] - boundaries[index])
+            for index in range(count)
+        ]
+        clip_frames = _seconds_to_frames(clip_seconds, fps_i, total_frames)
     start_frame = 0
     clips: list[dict[str, Any]] = []
     transitions: list[dict[str, Any]] = []
@@ -84,6 +92,8 @@ def build_timeline(
                     boundary_transition["duration_frames"],
                     post_voiceover_transition_frames,
                 )
+            if equal_beats and boundary_transition["duration_frames"] >= frames:
+                boundary_transition["duration_frames"] = max(1, frames - 1)
             clip["transition"] = boundary_transition
             transitions.append({
                 "at_seconds": round(start_seconds, 4),

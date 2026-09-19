@@ -101,18 +101,25 @@ def resolve_rules(
     has_video: bool = False,
 ) -> dict[str, Any]:
     parsed = parse_json_field(field(output, "Timing_Rules_JSON"))
+    if isinstance(parsed, dict) and str(parsed.get("strategy") or "").strip().lower() in {"vo_phased", "spread", "beat_fill"}:
+        # Old phased/recycle plans made stills and clips different lengths.
+        parsed = {
+            key: parsed[key]
+            for key in ("recycle", "max_clips", "post_voiceover_transition_frames")
+            if key in parsed
+        }
     base = VIDEO_RULES if has_video else (default_rules or DEFAULT_RULES)
-    if has_video and default_rules and default_rules.get("recycle"):
+    if has_video and default_rules and str((default_rules or {}).get("strategy") or "") not in {"", "equal_beats", "vo_phased"}:
         base = default_rules
     elif has_video:
         base = VIDEO_RULES
     legacy_default = {"rules": [{"remaining": True, "every_n_beats": 2}]}
     if parsed == legacy_default:
         return base
-    if isinstance(parsed, dict) and parsed.get("rules"):
+    if isinstance(parsed, dict) and parsed.get("rules") and str(parsed.get("strategy") or "").strip().lower() not in {"", "equal_beats"}:
         return parsed
     if isinstance(parsed, dict) and (parsed.get("recycle") is not None or parsed.get("strategy") or parsed.get("max_clips")):
-        return {**base, **parsed}
+        return {**base, **parsed, "strategy": "equal_beats"}
     return base
 
 

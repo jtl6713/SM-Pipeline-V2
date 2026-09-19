@@ -3,12 +3,10 @@ from __future__ import annotations
 from typing import Any, Callable
 
 DEFAULT_RULES: dict[str, Any] = {
-    "strategy": "vo_phased",
+    "strategy": "equal_beats",
     "recycle": False,
-    "vo_clip_share": 0.35,
     "rules": [
-        {"until": "voiceover_end", "every_n_beats": 2, "spread": True},
-        {"remaining": True, "every_n_beats": 1},
+        {"equal_duration": True},
     ],
 }
 
@@ -419,6 +417,78 @@ def _apply_phased(
     }
 
 
+def _equal_beat_plan(
+    beats: list[float],
+    clip_count: int,
+    duration: float,
+    min_clip_seconds: float,
+) -> tuple[list[float], dict[str, Any]]:
+    """Same on-screen length for every still and clip, with each cut on a beat.
+
+    Count beats that fall inside the required render. Each item then owns the
+    same whole number of those beats. Leftover beats at the end are dropped so
+    the last item is not longer than the others. The edit ends on a beat.
+    """
+    window = [float(time) for time in beats if 0 < float(time) < duration]
+    count = max(1, int(clip_count))
+    beat_count = len(window)
+    meta: dict[str, Any] = {
+        "rules_applied": [],
+        "fallback": "",
+        "beat_count": beat_count,
+        "beats_per_clip": 0,
+        "beats_used": 0,
+        "strategy": "equal_beats",
+        "effective_clip_count": count,
+        "recycle": False,
+        "timeline_end_seconds": round(duration, 4),
+        "voiceover_end_seconds": None,
+    }
+    if count <= 1:
+        meta["beats_per_clip"] = beat_count
+        meta["beats_used"] = beat_count
+        meta["rules_applied"] = [{"rule": "equal_beats", "beats_per_clip": beat_count, "beat_count": beat_count}]
+        return [], meta
+
+    per = beat_count // count
+    if per < 1:
+        needed = count - 1
+        ideals = [duration * index / count for index in range(1, count)]
+        taken: set[int] = set()
+        cuts = []
+        for ideal in ideals:
+            snapped = _nearest_unused(ideal, window, taken, 0.0, duration)
+            cuts.append(snapped if snapped is not None else ideal)
+        cuts = _enforce_spacing(cuts, 0.0, duration, min_clip_seconds, needed)
+        meta["fallback"] = "even_split_remainder"
+        meta["rules_applied"] = [{"rule": "equal_beats", "added": list(cuts), "beat_count": beat_count}]
+        return cuts, meta
+
+    end = float(window[(count * per) - 1])
+    cuts = [float(window[(index * per) - 1]) for index in range(1, count)]
+    cuts = [cut for cut in cuts if min_clip_seconds <= cut < end]
+    if len(cuts) < count - 1:
+        meta["fallback"] = "even_split_remainder"
+        needed = count - 1
+        start = cuts[-1] if cuts else 0.0
+        remaining = needed - len(cuts)
+        span = max(0.0, end - start)
+        for index in range(1, remaining + 1):
+            cuts.append(start + (span * index / (remaining + 1)))
+        cuts = _enforce_spacing(cuts, 0.0, end, min_clip_seconds, needed)
+    meta["beats_per_clip"] = per
+    meta["beats_used"] = count * per
+    meta["timeline_end_seconds"] = round(end, 4)
+    meta["rules_applied"] = [{
+        "rule": "equal_beats",
+        "added": list(cuts),
+        "beats_per_clip": per,
+        "beat_count": beat_count,
+        "beats_used": count * per,
+    }]
+    return cuts, meta
+
+
 def apply_rules(
     beats_in_window: list[float],
     clip_count: int,
@@ -446,6 +516,8 @@ def apply_rules(
         payload = {**DEFAULT_RULES, **payload}
 
     voiceover_end = _resolve_voiceover_end(voiceover_end_seconds, payload, duration)
+    if str(payload.get("strategy") or "").strip().lower() == "equal_beats":
+        return _equal_beat_plan(beats, int(clip_count), duration, min_clip_seconds)
     if _uses_phased(payload, rule_list):
         return _apply_phased(
             beats,
