@@ -481,3 +481,5 @@ Asset Manager profile scope Worker deploy: 2026-09-18 — GET /api/library ignor
 Autonomous fresh-stills Worker deploy: 2026-09-18 — NYC/LA manual runs scope occupied ideas to the header profile and allow new photos at familiar landmarks. Worker 0.10.327-autonomous-fresh-stills.
 
 Scheduled-over-retry Worker deploy: 2026-09-19 — Ready to Schedule wins over stale Publish_Retry_Eligible in pipeline badges. Worker 0.10.328-scheduled-over-retry.
+
+Idea Save Worker deploy: 2026-09-19 — Manage idea Save writes platforms, slide count, and the rest of the production options. Worker 0.10.329-idea-save.

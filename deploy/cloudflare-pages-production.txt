@@ -526,3 +526,5 @@ Asset Manager profile scope Pages deploy: 2026-09-18 — Header profile always f
 Asset Manager profile scope Pages path-bust: 2026-09-18 — Rename app JS to app-item4-0623.js so studio.chicagoshining.com cannot keep footer 0.6.322. UI 0.6.334-library-profile.
 
 Worker version footer Pages deploy: 2026-09-18 — Footer shows live Worker build from /api/health next to UI build. UI 0.6.335-worker-footer.
+
+Idea Save Pages deploy: 2026-09-19 — Manage idea Save keeps platforms and slide count. UI 0.6.336-idea-save. app-item4-0625.js.
