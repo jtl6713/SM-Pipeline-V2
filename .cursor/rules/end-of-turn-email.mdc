@@ -1,0 +1,16 @@
+---
+description: Email Joseph a brief status at the end of every agent turn
+alwaysApply: true
+---
+
+# End-of-turn email to Joseph
+
+At the **end of every turn** (after the user-facing reply is ready), send a short email via Gmail MCP (`plugin-gmail-gmail` / `send_message`):
+
+- **To:** `joseph.t.logan@gmail.com`
+- **Subject:** `SM Pipeline — [short topic] — [status]` (e.g. blocked / done / need you)
+- **Body:** 3–8 lines max: what happened, what’s blocked, exact next action for Joseph (codes, passwords, paste secrets, approve), and any links.
+
+Do this even when the turn is a short pause/question. Skip only if Gmail MCP is unavailable or auth fails — then note that in chat once.
+
+Never put full secrets, access tokens, or passwords in the email; say “paste in chat / Cloudflare dashboard” instead.

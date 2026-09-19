@@ -13,7 +13,7 @@
   "kv_namespaces": [
     {
       "binding": "TIKTOK_AUTH",
-      "id": "REPLACE_WITH_MIAMI_TIKTOK_AUTH_KV_ID"
+      "id": "b77b23c7ca0541e9a86013d021631493"
     }
   ],
   "observability": {
