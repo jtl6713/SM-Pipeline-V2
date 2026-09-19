@@ -46,6 +46,7 @@ jobs:
           jq -c '[.result[]? | {type, name, content, proxied}]' /tmp/dns.json 2>/dev/null || echo 'dns_unavailable'
           for url in \
             'https://chicagoshining-studio.pages.dev/' \
+            'https://chicagoshining-studio.pages.dev/assets/app-item4-0623.js' \
             'https://chicagoshining-studio.pages.dev/assets/app-item4-0622.js' \
             'https://chicagoshining-studio.pages.dev/assets/app-item4-0619.js'
           do
