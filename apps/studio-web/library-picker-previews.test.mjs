@@ -12,7 +12,7 @@ import {
 } from "./library-picker-previews.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const app = fs.readFileSync(path.join(here, "assets", "app-item4-0622.js"), "utf8");
+const app = fs.readFileSync(path.join(here, "assets", "app-item4-0623.js"), "utf8");
 
 test("library picker prefers the authenticated preview then a Drive JPEG thumb", () => {
   const item = {

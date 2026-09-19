@@ -522,3 +522,5 @@ Asset Manager classify after add Pages deploy: 2026-09-18 — After the last fil
 Asset Manager classify X of Y Pages deploy: 2026-09-18 — Keep Classifying X of Y remaining across refresh by remembering the batch. UI 0.6.332-classify-xy.
 
 Asset Manager profile scope Pages deploy: 2026-09-18 — Header profile always filters Asset Manager. UI 0.6.333-library-profile.
+
+Asset Manager profile scope Pages path-bust: 2026-09-18 — Rename app JS to app-item4-0623.js so studio.chicagoshining.com cannot keep footer 0.6.322. UI 0.6.334-library-profile.
