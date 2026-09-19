@@ -72,9 +72,21 @@ jobs:
         run: |
           set -euo pipefail
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" -o /tmp/zone.json
-          ZONE_ID=$(jq -er ".result[0].id" /tmp/zone.json)
           TARGET="${TUNNEL_ID}.cfargotunnel.com"
+          if ! curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" -o /tmp/zone.json; then
+            {
+              echo "## Miami YouTube DNS needs manual step"
+              echo ""
+              echo "Tunnel ingress is configured. \`CLOUDFLARE_API_TOKEN\` cannot read zone DNS (403)."
+              echo "In Cloudflare DNS for \`chicagoshining.com\`, add a proxied CNAME:"
+              echo "\`youtube-upload-miami\` -> \`${TARGET}\`"
+              echo ""
+              echo "Or open Zero Trust → Networks → Tunnels → Public Hostname and save \`${HOSTNAME}\` -> \`http://localhost:3343\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "dns_cname=manual_required"
+            exit 0
+          fi
+          ZONE_ID=$(jq -er ".result[0].id" /tmp/zone.json)
           curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${HOSTNAME}" -H "$AUTH" -o /tmp/dns-before.json
           EXISTING=$(jq -r '.result[0].id // empty' /tmp/dns-before.json)
           BODY=$(jq -nc --arg name "$HOSTNAME" --arg content "$TARGET" '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')
@@ -85,8 +97,12 @@ jobs:
             curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
               -H "$AUTH" -H "Content-Type: application/json" --data "$BODY" -o /tmp/dns-put.json
           fi
-          jq -e ".success == true" /tmp/dns-put.json >/dev/null
-          echo "dns_cname=${HOSTNAME}->${TARGET}"
+          if jq -e ".success == true" /tmp/dns-put.json >/dev/null 2>&1; then
+            echo "dns_cname=${HOSTNAME}->${TARGET}"
+          else
+            cat /tmp/dns-put.json || true
+            echo "dns_cname=manual_required"
+          fi
 
       - name: Verify public health when listener is up
         shell: bash
