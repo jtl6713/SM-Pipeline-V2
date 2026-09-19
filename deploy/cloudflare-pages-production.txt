@@ -518,3 +518,5 @@ Asset Manager classify status refresh Pages deploy: 2026-09-18 — Hard-refresh 
 Asset Manager classify until done Pages deploy: 2026-09-18 — Upload classify status stays until every watched asset is Classified or Classification Error. UI 0.6.330-classify-until-done.
 
 Asset Manager classify after add Pages deploy: 2026-09-18 — After the last file is stored, the Adding N of N line no longer blocks Classifying N. UI 0.6.331-classify-after-add.
+
+Asset Manager classify X of Y Pages deploy: 2026-09-18 — Keep Classifying X of Y remaining across refresh by remembering the batch. UI 0.6.332-classify-xy.

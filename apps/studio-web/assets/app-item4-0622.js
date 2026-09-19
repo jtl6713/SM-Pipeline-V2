@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.331-classify-after-add";
+  const BUILD_ID = "item4-0.6.332-classify-xy";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14097,7 +14097,33 @@
     node.className = `form-message library-upload-status ${className}`.trim();
   }
 
+  const LIBRARY_CLASSIFY_WATCH_KEY = "studioLibraryClassifyWatch";
   const libraryClassifyWatch = { ids: new Set(), total: 0 };
+
+  function persistLibraryClassifyWatch() {
+    try {
+      if (!libraryClassifyWatch.ids.size) {
+        sessionStorage.removeItem(LIBRARY_CLASSIFY_WATCH_KEY);
+        return;
+      }
+      sessionStorage.setItem(LIBRARY_CLASSIFY_WATCH_KEY, JSON.stringify({
+        ids: [...libraryClassifyWatch.ids],
+        total: libraryClassifyWatch.total,
+      }));
+    } catch { /* ignore */ }
+  }
+
+  function restoreLibraryClassifyWatch() {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(LIBRARY_CLASSIFY_WATCH_KEY) || "null");
+      const ids = Array.isArray(parsed?.ids) ? parsed.ids : [];
+      ids.forEach((id) => {
+        if (/^rec[A-Za-z0-9]+$/.test(id)) libraryClassifyWatch.ids.add(id);
+      });
+      libraryClassifyWatch.total = Math.max(Number(parsed?.total) || 0, libraryClassifyWatch.ids.size);
+    } catch { /* ignore */ }
+    if (libraryClassifyWatch.ids.size) scheduleLibraryClassifyPoll(true);
+  }
 
   function libraryUploadMessageBusy() {
     return $("libraryUploadZone")?.dataset?.busy === "true";
@@ -14124,6 +14150,7 @@
     if (!next.length) return;
     next.forEach((id) => libraryClassifyWatch.ids.add(id));
     libraryClassifyWatch.total = Math.max(libraryClassifyWatch.total, libraryClassifyWatch.ids.size);
+    persistLibraryClassifyWatch();
     syncLibraryClassifyStatusMessage(libraryClassifyWatch.ids.size);
     scheduleLibraryClassifyPoll(true);
   }
@@ -14131,17 +14158,18 @@
   function clearLibraryClassificationWatch() {
     libraryClassifyWatch.ids.clear();
     libraryClassifyWatch.total = 0;
+    persistLibraryClassifyWatch();
   }
 
   function syncLibraryClassifyStatusMessage(remaining) {
     if (libraryUploadMessageBusy()) return;
-    const total = libraryClassifyWatch.total || remaining;
     const left = Math.max(0, Number(remaining) || 0);
+    const total = Math.max(libraryClassifyWatch.total || 0, left);
     if (left > 0) {
       setLibraryUploadMessage(
-        total > left
+        total
           ? `Classifying ${left} of ${total} remaining.`
-          : `Classifying ${left} asset${left === 1 ? "" : "s"} in the background.`,
+          : `Classifying ${left} remaining.`,
         "",
       );
       return;
@@ -15073,6 +15101,7 @@
 
   function bindLibraryUpload() {
     restoreLibraryViewMode();
+    restoreLibraryClassifyWatch();
     const zone = $("libraryUploadZone");
     const inputs = libraryFileInputs();
     if (!inputs.length || (zone && zone.dataset.bound)) return;
