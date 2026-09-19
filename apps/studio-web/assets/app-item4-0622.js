@@ -14716,8 +14716,12 @@
         const seen = new Set(records.map((record) => record.id).filter(Boolean));
         still += watchIds.filter((id) => !seen.has(id)).length;
         syncLibraryClassifyStatusMessage(still);
-      } else if (!still && !libraryVisibleClassifying()) {
-        syncLibraryClassifyStatusMessage(0);
+      } else {
+        const visible = [...document.querySelectorAll("#libraryList [data-library-classification]")]
+          .filter((node) => /Classifying/i.test(node.textContent || "")).length;
+        const left = Math.max(still, visible);
+        if (left) syncLibraryClassifyStatusMessage(left);
+        else syncLibraryClassifyStatusMessage(0);
       }
       if (still || libraryVisibleClassifying() || libraryClassifyWatchActive()) scheduleLibraryClassifyPoll(true);
     } finally {
