@@ -89,6 +89,29 @@ test("vertical video stamps stay in the 7-day window and spread across days", ()
   assert.ok(mainDays.size >= 2, "empty calendar should not park every platform on one day");
 });
 
+test("a busy non-preferred day does not beat an open analytics window", () => {
+  const occupiedMs = [
+    chicagoWallToUtcMs(2026, 9, 6, 11, 0),
+    chicagoWallToUtcMs(2026, 9, 6, 18, 0),
+    chicagoWallToUtcMs(2026, 9, 7, 11, 0),
+  ];
+  const iso = suggestedChicagoIso(["11:00-13:00", "18:00-21:00"], SATURDAY_EVENING, {
+    days: ["Tue", "Wed", "Thu"],
+    occupiedMs,
+  });
+  assert.equal(iso, "2026-09-08T16:00:00.000Z");
+});
+
+test("cross-platform crowding leaves the first-party Tuesday window in place", () => {
+  const occupiedMs = [chicagoWallToUtcMs(2026, 9, 8, 12, 0)];
+  const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {
+    days: ["Tue", "Wed", "Thu"],
+    occupiedMs,
+    platformOccupiedMs: [],
+  });
+  assert.equal(iso, "2026-09-08T16:00:00.000Z");
+});
+
 test("a booked preferred-day window moves the next suggestion later inside 7 days", () => {
   const occupiedMs = [chicagoWallToUtcMs(2026, 9, 8, 11, 0)];
   const iso = suggestedChicagoIso(["11:00-13:00"], SATURDAY_EVENING, {

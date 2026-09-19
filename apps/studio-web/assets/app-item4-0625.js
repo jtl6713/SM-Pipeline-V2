@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.339-schedule-occupancy";
+  const BUILD_ID = "item4-0.6.340-best-times-spread";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13358,6 +13358,20 @@
   }
 
   const pipelineServerOccupiedMs = {};
+  const pipelineSuggestedHintByPlatform = {};
+
+  function rememberSuggestedHint(platform, hint) {
+    const key = String(platform || "").trim().toLowerCase();
+    if (!key || !hint) return;
+    const days = Array.isArray(hint.days) ? hint.days.filter(Boolean) : [];
+    const windows = Array.isArray(hint.windows) ? hint.windows.filter(Boolean) : [];
+    if (!days.length && !windows.length) return;
+    pipelineSuggestedHintByPlatform[key] = { days, windows };
+  }
+
+  function hintForPlatform(platform) {
+    return pipelineSuggestedHintByPlatform[String(platform || "").trim().toLowerCase()] || {};
+  }
 
   function rememberOccupiedFromBestTimes(data, platform) {
     const key = String(platform || "").trim().toLowerCase();
@@ -13397,7 +13411,38 @@
     return [...taken];
   }
 
-  function nextOpenScheduleIso(candidateIso, occupiedMs, gapMs = PIPELINE_SCHEDULE_GAP_MS) {
+  function suggestedTimeHint(data, extra = {}) {
+    const suggested = data?.suggested && typeof data.suggested === "object" ? data.suggested : {};
+    const days = Array.isArray(extra.days) ? extra.days : (Array.isArray(suggested.days) ? suggested.days.filter(Boolean) : []);
+    const windows = Array.isArray(extra.windows) ? extra.windows : (Array.isArray(suggested.windows) ? suggested.windows.filter(Boolean) : []);
+    return { days, windows };
+  }
+
+  function parseSuggestedHintDataset(el) {
+    const read = (key) => {
+      try {
+        const value = JSON.parse(el?.dataset?.[key] || "[]");
+        return Array.isArray(value) ? value.filter(Boolean) : [];
+      } catch {
+        return [];
+      }
+    };
+    return { days: read("suggestedDays"), windows: read("suggestedWindows") };
+  }
+
+  function nextOpenScheduleIso(candidateIso, occupiedMs, hint = {}, gapMs = PIPELINE_SCHEDULE_GAP_MS) {
+    const days = Array.isArray(hint.days) ? hint.days.filter(Boolean) : [];
+    const windows = Array.isArray(hint.windows) ? hint.windows.filter(Boolean) : [];
+    const picker = typeof window.ChicagoShiningEzPlan?.ezPickBalancedSuggestedIso === "function"
+      ? window.ChicagoShiningEzPlan.ezPickBalancedSuggestedIso
+      : null;
+    if (picker && (days.length || windows.length)) {
+      return picker(windows.length ? windows : ["12:00-13:00"], new Date(), {
+        days,
+        occupiedMs,
+        platformOccupiedMs: occupiedMs,
+      });
+    }
     let ms = Date.parse(candidateIso);
     if (Number.isNaN(ms)) ms = Date.now();
     let guard = 0;
@@ -13430,7 +13475,9 @@
         const suggested = String(data?.suggested_iso || "").trim();
         if (!suggested) continue;
         const platform = String(record.platform || "").trim().toLowerCase();
-        const iso = nextOpenScheduleIso(suggested, reserved[platform] || []);
+        const hint = suggestedTimeHint(data);
+        rememberSuggestedHint(platform, hint);
+        const iso = nextOpenScheduleIso(suggested, reserved[platform] || [], hint);
         const input = document.querySelector(`[data-pipeline-schedule="${record.id}"]`);
         if (input) applySuggestedIsoToScheduleInput(input, iso);
         else pipelineScheduleDrafts.set(record.id, formatDateTimeLocalInput(iso));
@@ -13459,7 +13506,7 @@
     for (const record of ordered) {
       const platform = String(record.platform || "").trim().toLowerCase();
       const requested = next[record.id] || new Date().toISOString();
-      const iso = nextOpenScheduleIso(requested, reserved[platform] || []);
+      const iso = nextOpenScheduleIso(requested, reserved[platform] || [], hintForPlatform(platform));
       next[record.id] = iso;
       (reserved[platform] ||= []).push(Date.parse(iso));
       rememberBookedScheduleMs(platform, iso);
@@ -13471,6 +13518,7 @@
 
   const pipelineBestTimesCache = new Map();
   let creativeSuggestedIso = "";
+  let creativeSuggestedHint = {};
 
   function formatBestTimesSuggestion(data) {
     const suggested = data?.suggested;
@@ -13493,8 +13541,8 @@
       : "";
     const captionNote = data?.caption?.label ? ` ${data.caption.label}.` : "";
     const occupiedNote = Number(data?.occupied_count) > 0
-      ? ` Avoids ${data.occupied_count} already scheduled ${data.occupied_count === 1 ? "post" : "posts"} in the next 7 days.`
-      : "";
+      ? ` Stays in those best windows and avoids ${data.occupied_count} already scheduled ${data.occupied_count === 1 ? "post" : "posts"}.`
+      : " Stays in those best windows; later posts spread to the next open one.";
     return `Suggested: ${days.join(", ")} · ${windows.join(" or ")} (${data.season_label || studioInsightsSeasonLabel(studioInsightsSeason())} · ${sourceLabel}).${similarNote}${captionNote}${occupiedNote} Now stays selected unless you pick a time.`;
   }
 
@@ -13510,6 +13558,7 @@
     )
       .then((data) => {
         rememberOccupiedFromBestTimes(data, platform);
+        rememberSuggestedHint(platform, suggestedTimeHint(data));
         pipelineBestTimesCache.set(key, data);
         return data;
       })
@@ -13535,12 +13584,15 @@
     const useButton = $("creativeUseSuggestedTime");
     if (!hint) return;
     creativeSuggestedIso = "";
+    creativeSuggestedHint = {};
     if (useButton) useButton.hidden = true;
     hint.textContent = "Loading suggested publish time…";
     try {
       const data = await fetchBestTimesForOutput(record);
       const text = formatBestTimesSuggestion(data);
       creativeSuggestedIso = String(data?.suggested_iso || "").trim();
+      creativeSuggestedHint = suggestedTimeHint(data);
+      rememberSuggestedHint(record?.platform, creativeSuggestedHint);
       hint.textContent = text || String(data?.note || "No suggested time available yet.");
       if (useButton) useButton.hidden = !creativeSuggestedIso;
     } catch (error) {
@@ -13569,16 +13621,20 @@
         const data = await fetchBestTimesForOutput(record);
         const text = formatBestTimesSuggestion(data);
         const iso = String(data?.suggested_iso || "").trim();
+        const hint = suggestedTimeHint(data);
         rememberOccupiedFromBestTimes(data, record.platform);
+        rememberSuggestedHint(record.platform, hint);
         suggestEl.textContent = text || String(data?.note || "No suggestion yet.");
         suggestEl.dataset.suggestedIso = iso;
         if (useBtn) {
           useBtn.hidden = !iso;
           useBtn.dataset.suggestedIso = iso;
+          useBtn.dataset.suggestedDays = JSON.stringify(hint.days);
+          useBtn.dataset.suggestedWindows = JSON.stringify(hint.windows);
         }
         if (pipelineUseDefaultSchedules() && iso && !pipelineRowHasSchedule(record)) {
           const input = document.querySelector(`[data-pipeline-schedule="${id}"]`);
-          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleMs(record.platform, record.id));
+          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleMs(record.platform, record.id), hint);
           if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record.platform, openIso);
         }
       } catch (error) {
@@ -14089,7 +14145,8 @@
           const iso = button.dataset.suggestedIso || "";
           const record = (pipelineOutputs || []).find((row) => row.id === id);
           const input = target.querySelector(`[data-pipeline-schedule="${id}"]`);
-          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleMs(record?.platform, id));
+          const hint = parseSuggestedHintDataset(button);
+          const openIso = nextOpenScheduleIso(iso, pipelineOccupiedScheduleMs(record?.platform, id), hint);
           if (applySuggestedIsoToScheduleInput(input, openIso)) rememberBookedScheduleMs(record?.platform, openIso);
         });
       });
@@ -17128,7 +17185,11 @@
   $("creativeUseSuggestedTime")?.addEventListener("click", () => {
     const input = $("creativeScheduleAt");
     const record = activeCreativeOutput;
-    const openIso = nextOpenScheduleIso(creativeSuggestedIso, pipelineOccupiedScheduleMs(record?.platform, record?.id));
+    const openIso = nextOpenScheduleIso(
+      creativeSuggestedIso,
+      pipelineOccupiedScheduleMs(record?.platform, record?.id),
+      creativeSuggestedHint,
+    );
     if (!applySuggestedIsoToScheduleInput(input, openIso)) return;
     rememberBookedScheduleMs(record?.platform, openIso);
     document.querySelectorAll("input[name='creativeScheduleMode']").forEach((radio) => {

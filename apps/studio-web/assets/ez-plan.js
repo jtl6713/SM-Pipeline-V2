@@ -440,6 +440,16 @@
     return (occupiedMs || []).some((other) => Number.isFinite(other) && Math.abs(other - ms) < gapMs);
   }
 
+  function ezScoreAnalyticsSlot({ preferred, windowIndex, crowding, platformCrowding, dayIndex }) {
+    let score = 100;
+    score += preferred ? 40 : 0;
+    score += Math.max(0, 16 - windowIndex * 6);
+    score -= Math.min(platformCrowding, 4) * 6;
+    score -= Math.min(crowding, 6) * 2;
+    score -= dayIndex * 2;
+    return score;
+  }
+
   function ezPickBalancedSuggestedIso(windows, now = new Date(), options = {}) {
     const daysPref = Array.isArray(options.days) ? options.days.filter(Boolean) : [];
     const occupiedMs = options.occupiedMs || [];
@@ -447,37 +457,50 @@
     const windowList = Array.isArray(windows) && windows.length ? windows : ["12:00-13:00"];
     const nowMs = now.getTime() + EZ_SUGGEST_LEAD_MS;
     const chicago = ezChicagoDateTimeParts(now);
-    let best = null;
+    const horizon = [];
     for (let i = 0; i < EZ_SUGGEST_HORIZON_DAYS; i++) {
       const civilBase = i === 0
         ? { year: chicago.year, month: chicago.month, day: chicago.day }
         : ezAddCivilDays(chicago.year, chicago.month, chicago.day, i);
       const noonMs = ezChicagoWallToUtcMs(civilBase.year, civilBase.month, civilBase.day, 12, 0);
-      const civil = {
+      horizon.push({
         ...civilBase,
         index: i,
         weekday: ezChicagoWeekdayShort(new Date(noonMs)),
         key: ezCivilKey(civilBase.year, civilBase.month, civilBase.day),
-      };
-      const preferred = !daysPref.length || daysPref.includes(civil.weekday);
-      const crowding = ezOccupiedOnDay(occupiedMs, civil).length;
-      const platformCrowding = ezOccupiedOnDay(platformOccupiedMs, civil).length;
-      for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
-        const first = String(windowList[windowIndex] || "12:00-13:00").split("-")[0] || "12:00";
-        const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
-        const ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
-        if (ms <= nowMs) continue;
-        if (ezScheduleConflicts(ms, platformOccupiedMs)) continue;
-        let score = 80;
-        score += preferred ? 22 : 0;
-        score += Math.max(0, 16 - windowIndex * 6);
-        score -= crowding * 26;
-        score -= platformCrowding * 14;
-        score -= i * 2;
-        if (!best || score > best.score) best = { score, ms };
-      }
+      });
     }
-    if (best) return new Date(best.ms).toISOString();
+
+    const collect = (preferredOnly) => {
+      let best = null;
+      for (const civil of horizon) {
+        const preferred = !daysPref.length || daysPref.includes(civil.weekday);
+        if (preferredOnly && daysPref.length && !preferred) continue;
+        const crowding = ezOccupiedOnDay(occupiedMs, civil).length;
+        const platformCrowding = ezOccupiedOnDay(platformOccupiedMs, civil).length;
+        for (let windowIndex = 0; windowIndex < windowList.length; windowIndex++) {
+          const first = String(windowList[windowIndex] || "12:00-13:00").split("-")[0] || "12:00";
+          const [hh, mm] = first.split(":").map((n) => Number(n) || 0);
+          const ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
+          if (ms <= nowMs) continue;
+          if (ezScheduleConflicts(ms, platformOccupiedMs)) continue;
+          const score = ezScoreAnalyticsSlot({
+            preferred,
+            windowIndex,
+            crowding,
+            platformCrowding,
+            dayIndex: civil.index,
+          });
+          if (!best || score > best.score) best = { score, ms };
+        }
+      }
+      return best;
+    };
+
+    const preferred = collect(true);
+    if (preferred) return new Date(preferred.ms).toISOString();
+    const openWindow = collect(false);
+    if (openWindow) return new Date(openWindow.ms).toISOString();
     const first = String(windowList[0] || "12:00-13:00");
     const start = first.split("-")[0] || "12:00";
     const [hh, mm] = start.split(":").map((n) => Number(n) || 0);
@@ -487,7 +510,7 @@
       civil = ezAddCivilDays(civil.year, civil.month, civil.day, 1);
       ms = ezChicagoWallToUtcMs(civil.year, civil.month, civil.day, hh, mm || 0);
     }
-    return new Date(ms).toISOString();
+    return ezNextOpenScheduleIso(new Date(ms).toISOString(), platformOccupiedMs);
   }
 
   function ezSuggestedChicagoIso(windows, now = new Date(), options = {}) {
@@ -646,5 +669,6 @@
     ezWizardResolvePackage,
     ezPlanScheduleItems,
     ezBuildSuggestedScheduleMap,
+    ezPickBalancedSuggestedIso,
   };
 })();
