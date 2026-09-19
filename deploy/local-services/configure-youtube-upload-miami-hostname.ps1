@@ -69,6 +69,29 @@ if (-not $result.success) {
 }
 Write-Host 'PASS tunnel ingress updated.' -ForegroundColor Green
 
+Write-Host 'Ensuring DNS CNAME...' -ForegroundColor Cyan
+$zone = Invoke-CfApi -Method GET -Path '/zones?name=chicagoshining.com'
+$zoneId = [string]$zone.result[0].id
+$target = "$TunnelId.cfargotunnel.com"
+$existing = Invoke-CfApi -Method GET -Path "/zones/$zoneId/dns_records?name=$Hostname"
+$dnsBody = @{
+    type = 'CNAME'
+    name = $Hostname
+    content = $target
+    proxied = $true
+    ttl = 1
+}
+if ($existing.result -and $existing.result.Count -gt 0) {
+    $recordId = [string]$existing.result[0].id
+    $dnsResult = Invoke-CfApi -Method PUT -Path "/zones/$zoneId/dns_records/$recordId" -Body $dnsBody
+} else {
+    $dnsResult = Invoke-CfApi -Method POST -Path "/zones/$zoneId/dns_records" -Body $dnsBody
+}
+if (-not $dnsResult.success) {
+    throw ("Cloudflare DNS update failed: " + ($dnsResult | ConvertTo-Json -Compress))
+}
+Write-Host "PASS DNS CNAME $Hostname -> $target" -ForegroundColor Green
+
 Write-Host ''
 Write-Host 'Waiting for public /health (up to 3 minutes)...' -ForegroundColor Cyan
 $deadline = (Get-Date).AddMinutes(3)

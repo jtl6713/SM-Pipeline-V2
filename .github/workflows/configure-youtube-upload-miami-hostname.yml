@@ -67,6 +67,27 @@ jobs:
           jq -e ".success == true" /tmp/tunnel-put.json >/dev/null
           echo "tunnel_ingress=updated"
 
+      - name: Ensure DNS CNAME for youtube-upload-miami.chicagoshining.com
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS "https://api.cloudflare.com/client/v4/zones?name=chicagoshining.com" -H "$AUTH" -o /tmp/zone.json
+          ZONE_ID=$(jq -er ".result[0].id" /tmp/zone.json)
+          TARGET="${TUNNEL_ID}.cfargotunnel.com"
+          curl -fsS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${HOSTNAME}" -H "$AUTH" -o /tmp/dns-before.json
+          EXISTING=$(jq -r '.result[0].id // empty' /tmp/dns-before.json)
+          BODY=$(jq -nc --arg name "$HOSTNAME" --arg content "$TARGET" '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')
+          if [[ -n "$EXISTING" ]]; then
+            curl -fsS -X PUT "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$EXISTING" \
+              -H "$AUTH" -H "Content-Type: application/json" --data "$BODY" -o /tmp/dns-put.json
+          else
+            curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+              -H "$AUTH" -H "Content-Type: application/json" --data "$BODY" -o /tmp/dns-put.json
+          fi
+          jq -e ".success == true" /tmp/dns-put.json >/dev/null
+          echo "dns_cname=${HOSTNAME}->${TARGET}"
+
       - name: Verify public health when listener is up
         shell: bash
         run: |
