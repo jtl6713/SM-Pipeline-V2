@@ -28,6 +28,7 @@ import {
   allocateLibraryBatchNames,
   combineAirtableFormulas,
   firstLinkedRecordId,
+  LIBRARY_ADDED_AT_FIELD,
   LIBRARY_CROSS_SCOPE_SETTING,
   libraryAddedDateFilterFormula,
   libraryBatchNameFilterFormula,
@@ -73,6 +74,8 @@ import {
   AUTONOMOUS_NEWS_FEEDS,
   AUTONOMOUS_STANDARD_PLATFORMS,
   AUTONOMOUS_YOUTUBE_QUERIES,
+  autonomousYoutubeQueriesForTheme,
+  filterAutonomousOccupiedForProfile,
   autonomousDefaultVoiceoverSeconds,
   autonomousDefaultVoiceoverTailSeconds,
   autonomousIdeaConflictsOccupied,
@@ -364,7 +367,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.326-library-profile-scope",
+          version: "0.10.327-autonomous-fresh-stills",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -30797,6 +30800,7 @@ async function harvestAutonomousNewsHeadlines() {
 }
 
 async function harvestAutonomousYoutube(env, options = {}) {
+  const queries = autonomousYoutubeQueriesForTheme(options.theme);
   const force = options.force === true;
   if (!force) {
     const cacheRow = await studioSettingsByName(env, STUDIO_YOUTUBE_AUTONOMOUS_HARVEST_SETTING).catch(() => null);
@@ -30817,7 +30821,7 @@ async function harvestAutonomousYoutube(env, options = {}) {
   const youtubeKey = settings.YOUTUBE_API_KEY || env.YOUTUBE_API_KEY;
   if (!youtubeKey) return [];
   const publishedAfter = youtubePublishedAfterIso();
-  const query = AUTONOMOUS_YOUTUBE_QUERIES[Math.floor(Math.random() * AUTONOMOUS_YOUTUBE_QUERIES.length)];
+  const query = queries[Math.floor(Math.random() * queries.length)];
   const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=date&maxResults=8&publishedAfter=${encodeURIComponent(publishedAfter)}&q=${encodeURIComponent(query)}&key=${encodeURIComponent(youtubeKey)}`;
   try {
     const response = await fetch(searchUrl);
@@ -30852,7 +30856,7 @@ async function harvestAutonomousLibraryCatalog(env, subject = "", profileId = ""
   const scopeFormula = await mediaAssetProfileScopeForId(env, profileId, { crossScope, includeUnscoped: false });
   const records = await listRecords(env, env.AIRTABLE_MEDIA_TABLE_ID || ITEM4_MEDIA_ASSET_TABLE, {
     limit: 400,
-    sortField: "Intake_Date",
+    sortField: LIBRARY_ADDED_AT_FIELD,
     sortDirection: "desc",
     filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(pin ? [pin.toLowerCase()] : []), scopeFormula),
   }).catch((error) => {
@@ -30889,7 +30893,7 @@ async function harvestAutonomousRecentTitles(env) {
     .slice(0, 8);
 }
 
-async function harvestAutonomousOccupiedTopics(env) {
+async function harvestAutonomousOccupiedTopics(env, profileId = "") {
   const ideaQuery = {
     limit: 50,
     sortField: AUTONOMOUS_IDEA_CREATED_FIELD,
@@ -30910,11 +30914,11 @@ async function harvestAutonomousOccupiedTopics(env) {
     filterFormula: "AND({Test_Run_ID}=BLANK(),{Request_Status}!='Cancelled')",
   }).catch(() => [])) || [];
   const published = await harvestAutonomousRecentTitles(env);
-  return mergeAutonomousOccupied([
+  return filterAutonomousOccupiedForProfile(mergeAutonomousOccupied([
     collectAutonomousOccupiedFromIdeas(ideas || []),
     (requests || []).map(mapAutonomousOccupiedRequest),
     published.map((title) => ({ source: "recent", title, location: "", media_asset_ids: [] })),
-  ]);
+  ]), profileId);
 }
 
 async function studioAutonomousOpenAiPick(env, prompt) {
@@ -31353,12 +31357,13 @@ async function executeStudioAutonomousProduce(env, ctx, options = {}) {
     return result;
   }
 
-  const observations = await studioInsightsLoadObservations(env, { profile: "chicago", limit: 80 }).catch(() => []);
+  const profileTheme = studioThemeForProfile(await airtableFetch(env, STUDIO_IDEA_PROFILE_TABLE_ID, selected.id).catch(() => selected));
+  const observations = await studioInsightsLoadObservations(env, { profile: profileTheme, limit: 80 }).catch(() => []);
   const similar = summarizeObservations(observations);
   const [news, youtube, occupiedIdeas] = await Promise.all([
-    harvestAutonomousNewsHeadlines(),
-    harvestAutonomousYoutube(env),
-    harvestAutonomousOccupiedTopics(env),
+    profileTheme === "chicago" ? harvestAutonomousNewsHeadlines() : Promise.resolve([]),
+    harvestAutonomousYoutube(env, { theme: profileTheme }),
+    harvestAutonomousOccupiedTopics(env, selected.id),
   ]);
   const recentTitles = occupiedIdeas.map((row) => row.title);
   let profile = null;

@@ -48,6 +48,9 @@ import {
   collectAutonomousTopicCollisions,
   mapAutonomousOccupiedRequest,
   mergeAutonomousOccupied,
+  filterAutonomousOccupiedForProfile,
+  autonomousPickUsesFreshMedia,
+  autonomousYoutubeQueriesForTheme,
 } from "./autonomous-produce.mjs";
 
 test("music pool picks only from profile subset and falls back", () => {
@@ -191,7 +194,7 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.match(libraryFirst, /5 to 10/);
   assert.match(libraryFirst, /post_caption/);
   assert.match(libraryFirst, /no_unused_library_stills/);
-  assert.match(libraryFirst, /Another angle of an occupied place/);
+  assert.match(libraryFirst, /Fresh unused stills at a familiar landmark are OK/);
   assert.equal(libraryFirst.includes("no_asset_backed_trend"), false);
   assert.deepEqual(autonomousUnusedLibraryAssets([
     { id: "recAsset1234567890" },
@@ -285,8 +288,7 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     neighborhood_or_area: "Lincoln Park",
     media_asset_ids: ["recZooStill0000002"],
   }, zooOccupied);
-  assert.equal(anotherZooAngle.conflict, true);
-  assert.equal(anotherZooAngle.reason, "similar_to_recent");
+  assert.equal(anotherZooAngle.conflict, false);
   assert.deepEqual(autonomousPlaceSubjects("Free Zoo Escape Lincoln Park Zoo"), [
     "lincoln park zoo",
     "lincoln park",
@@ -298,6 +300,10 @@ test("occupied ideas block the same stills or the same place and subject", () =>
   assert.equal(autonomousClusterConflictsOccupied({
     label: "Lincoln Park Zoo",
     assets: [{ id: "recZooStill0000002", location: "Lincoln Park Zoo" }],
+  }, zooOccupied), false);
+  assert.equal(autonomousClusterConflictsOccupied({
+    label: "Lincoln Park Zoo",
+    assets: [{ id: "recZooStill0000001", location: "Lincoln Park Zoo" }],
   }, zooOccupied), true);
   assert.deepEqual(pickRelatedUnusedStillCluster([
     { id: "recZooStill0000002", location: "Lincoln Park Zoo" },
@@ -310,7 +316,7 @@ test("occupied ideas block the same stills or the same place and subject", () =>
     { id: "recPierAsset000003", location: "Navy Pier" },
     { id: "recPierAsset000004", location: "Navy Pier" },
     { id: "recPierAsset000005", location: "Navy Pier" },
-  ], { occupied: zooOccupied })?.key, "place:navy pier");
+  ], { occupied: zooOccupied })?.key, "place:lincoln park zoo");
   assert.equal(AUTONOMOUS_IDEA_CREATED_FIELD, "Create_Date");
   const occupiedFromAirtable = collectAutonomousOccupiedFromIdeas([
     {
@@ -399,6 +405,19 @@ test("on-demand harvest uses the working profile, not the first enabled city", (
   const chicago = { id: "recT2rbKX3MF7cVFU", name: "ChicagoShining - Chicago" };
   assert.equal(pickAutonomousEnabledProfile([chicago, nyc], "recgtK8Z7eNADNtVy").name, "NYC - New York City");
   assert.equal(pickAutonomousEnabledProfile([chicago, nyc], "").name, "ChicagoShining - Chicago");
+  assert.equal(
+    filterAutonomousOccupiedForProfile([
+      { title: "Chicago zoo", content_profile_id: "recT2rbKX3MF7cVFU" },
+      { title: "NYC pier", content_profile_id: "recgtK8Z7eNADNtVy" },
+      { title: "No profile", content_profile_id: null },
+    ], "recgtK8Z7eNADNtVy").length,
+    2,
+  );
+  assert.equal(autonomousPickUsesFreshMedia(
+    { media_asset_ids: ["recNew1", "recNew2"] },
+    [{ media_asset_ids: ["recOld1"], title: "Lower Manhattan" }],
+  ), true);
+  assert.equal(autonomousYoutubeQueriesForTheme("nyc")[0], "New York City");
   assert.deepEqual(
     autonomousProfileHarvestOrder([chicago, nyc], "recgtK8Z7eNADNtVy").map((row) => row.name),
     ["NYC - New York City", "ChicagoShining - Chicago"],

@@ -1,5 +1,6 @@
 /** Pure helpers for the twice-daily Chicago autonomous produce path. */
 
+import { firstLinkedRecordId } from "./asset-library.mjs";
 import { IDEA_LIBRARY_NAMED_PLACES } from "./idea-photo-wait.mjs";
 
 export const AUTONOMOUS_WINDOWS = Object.freeze([8, 16]);
@@ -11,6 +12,12 @@ export const AUTONOMOUS_YOUTUBE_QUERIES = Object.freeze([
   "Chicago news today",
   "things to do in Chicago",
 ]);
+export const AUTONOMOUS_YOUTUBE_QUERIES_BY_THEME = Object.freeze({
+  chicago: AUTONOMOUS_YOUTUBE_QUERIES,
+  nyc: Object.freeze(["New York City", "NYC news today", "things to do in NYC"]),
+  la: Object.freeze(["Los Angeles", "LA news today", "things to do in Los Angeles"]),
+  miami: Object.freeze(["Miami", "Miami news today", "things to do in Miami"]),
+});
 export const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze([
   "Instagram",
   "Facebook",
@@ -395,12 +402,33 @@ function autonomousConflictResult(row) {
   };
 }
 
+export function autonomousOccupiedMediaIdSet(occupied = []) {
+  return new Set((occupied || []).flatMap((row) => row?.media_asset_ids || []).filter(Boolean));
+}
+
+export function autonomousPickUsesFreshMedia(pick, occupied = []) {
+  const pickMedia = new Set((pick?.media_asset_ids || []).filter(Boolean));
+  if (!pickMedia.size) return false;
+  const used = autonomousOccupiedMediaIdSet(occupied);
+  for (const id of pickMedia) {
+    if (used.has(id)) return false;
+  }
+  return true;
+}
+
+export function filterAutonomousOccupiedForProfile(occupied = [], profileId = "") {
+  const id = String(profileId || "").trim();
+  if (!/^rec[A-Za-z0-9]+$/.test(id)) return occupied || [];
+  return (occupied || []).filter((row) => !row?.content_profile_id || row.content_profile_id === id);
+}
+
 export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
   const pickMedia = new Set(pick?.media_asset_ids || []);
   const pickHay = autonomousPickHaystack(pick);
   const pickTokens = autonomousTopicTokens(pickHay);
   const pickPlaces = new Set(autonomousPlaceSubjects(pickHay));
   const pickLocation = autonomousNormalizedPlace(pick?.primary_location || pick?.location);
+  const freshMedia = autonomousPickUsesFreshMedia(pick, occupied);
   for (const row of occupied) {
     const otherMedia = new Set(row?.media_asset_ids || []);
     const sharedMedia = [...pickMedia].filter((id) => otherMedia.has(id));
@@ -408,6 +436,7 @@ export function autonomousIdeaConflictsOccupied(pick, occupied = []) {
     if (sharedMedia.length >= 3 || (sharedMedia.length >= 2 && mediaRatio >= 0.5)) {
       return autonomousConflictResult(row);
     }
+    if (freshMedia) continue;
     const otherHay = autonomousOccupiedHaystack(row);
     const otherPlaces = autonomousPlaceSubjects(otherHay);
     if (otherPlaces.some((place) => pickPlaces.has(place))) {
@@ -439,14 +468,13 @@ export function autonomousOccupiedLocationKeys(occupied = []) {
 }
 
 export function autonomousClusterConflictsOccupied(cluster, occupied = []) {
-  const sample = cluster?.assets?.[0];
-  if (!sample) return false;
-  const occupiedPlaces = autonomousOccupiedPlaceKeys(occupied);
-  const hay = autonomousOccupiedHaystack(sample);
-  if (autonomousPlaceSubjects(hay).some((place) => occupiedPlaces.has(place))) return true;
-  const location = autonomousNormalizedPlace(sample?.location);
-  const occupiedLocations = autonomousOccupiedLocationKeys(occupied);
-  return Boolean(location && occupiedLocations.has(location));
+  const assets = cluster?.assets || [];
+  if (!assets.length) return false;
+  const used = autonomousOccupiedMediaIdSet(occupied);
+  return assets.some((row) => {
+    const id = String(row?.id || row?.media_asset_id || "").trim();
+    return id && used.has(id);
+  });
 }
 
 /** Unused means the still ID has not appeared on an in-flight or recent output. Occupied places are skipped later, at cluster pick. */
@@ -572,6 +600,7 @@ export function mapAutonomousOccupiedIdea(record, nowMs = Date.now()) {
     title,
     location: String(fields.Primary_Location || fields.Neighborhood_or_Area || "").trim(),
     media_asset_ids: parseAutonomousNotedMediaIds(fields.Production_Config_Notes),
+    content_profile_id: firstLinkedRecordId(fields.Content_Profile) || null,
   };
 }
 
@@ -595,6 +624,7 @@ export function mapAutonomousOccupiedRequest(record) {
       ...parseAutonomousNotedMediaIds(notes),
       ...parseAutonomousLinkedMediaIds(fields.Studio_Master_Media_Assets),
     ])],
+    content_profile_id: firstLinkedRecordId(fields.Content_Profile) || null,
   };
 }
 
@@ -674,6 +704,11 @@ export function autonomousPreferredSubject(value) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
 }
 
+export function autonomousYoutubeQueriesForTheme(theme) {
+  const key = String(theme || "chicago").trim().toLowerCase();
+  return AUTONOMOUS_YOUTUBE_QUERIES_BY_THEME[key] || AUTONOMOUS_YOUTUBE_QUERIES;
+}
+
 export function pickAutonomousEnabledProfile(profiles, requestedId) {
   const rows = Array.isArray(profiles) ? profiles : [];
   const wanted = String(requestedId || "").trim();
@@ -724,7 +759,7 @@ Use only stills of: ${pin}. Title, location, and media_asset_ids must be that la
 
 Return ONLY one raw JSON object. No markdown.
 
-A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not pick the same landmark, neighborhood, zoo, pier, park, or stills as an in-flight or recently published idea. Another angle of an occupied place is still a repeat — skip instead.${pinBlock}
+A news/social trend is optional flavor. Do not skip because no headline matches a still. Do not invent events, dates, prices, or rankings. Do not pick generic skyline filler. Do not reuse media_asset_ids from an in-flight or recent idea. Fresh unused stills at a familiar landmark are OK when every media_asset_id in your pick is new.${pinBlock}
 
 ACTIVE PROFILE
 Name: ${profileName}
