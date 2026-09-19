@@ -6,7 +6,7 @@ from studio_produce.constants import STEP_LABELS, STEP_PERCENT
 from studio_produce.context import outputs_formula
 from studio_produce.job import derive_route, finished_origin_kind, is_finished_route, job_is_stale, job_is_terminal, new_job, next_step, parse_job, with_step
 from studio_produce.queue import master_transfer_id, rebuild_variant_manifest, required_ratios, ratios_for_asset, variant_transfer_id
-from studio_produce.media import asset_is_video, playable_url
+from studio_produce.media import asset_is_video, playable_url, remotion_clip_url
 from studio_produce.queue import rebuild_variant_manifest
 from studio_produce.stamp import assign_clip_frames, finished_source_package, is_native_photo, photo_sequence_url, source_package, stamp_fields
 from studio_produce.steps import (
@@ -839,6 +839,79 @@ def test_video_playable_url_uses_drive_authority_not_poster():
         "google_drive_url": "https://drive.google.com/file/d/video-drive-id/view",
         "preview_url": "https://media.example/video-poster.jpg",
     }) == "https://drive.google.com/file/d/video-drive-id/view"
+
+
+def test_remotion_clip_url_uses_drive_when_variant_is_studio_stream():
+    master = {
+        "media_kind": "video",
+        "google_drive_file_id": "drive-video-1",
+        "media_asset_record_id": "recVID0000000001",
+    }
+    variant = {
+        "preview_url": "/api/media-assets/recVID0000000001/stream",
+        "media_asset_record_id": "recVID0000000001",
+        "google_drive_file_id": "drive-video-1",
+    }
+    assert remotion_clip_url(master, variant) == (
+        "https://drive.google.com/uc?export=download&id=drive-video-1"
+    )
+
+
+def test_stamp_video_without_public_http_uses_drive_in_render_clip_list():
+    # queue.py sets preview_url to /api/media-assets/.../stream when playable_url is empty.
+    # Remotion cannot fetch that path; stamp must emit Drive instead.
+    request = {
+        "id": "recPRVideoDrive",
+        "fields": {
+            "Production_Notes": "origin=ez-wizard; ez-input=photos-and-clips",
+            "Studio_Variant_Status": "Ready",
+            "Studio_Master_Assets_JSON": json.dumps([
+                {
+                    "id": "v1",
+                    "order": 1,
+                    "name": "walk.mp4",
+                    "mime_type": "video/mp4",
+                    "media_kind": "video",
+                    "google_drive_file_id": "dvid",
+                    "media_asset_record_id": "recVID0000000001",
+                    "duration_seconds": 8,
+                }
+            ]),
+            "Studio_Variant_Manifest_JSON": json.dumps({
+                "assets": [{
+                    "id": "v1",
+                    "order": 1,
+                    "name": "walk.mp4",
+                    "media_kind": "video",
+                    "google_drive_file_id": "dvid",
+                    "media_asset_record_id": "recVID0000000001",
+                    "variants": {
+                        "9:16": {
+                            "aspect_ratio": "9:16",
+                            "media_kind": "video",
+                            "google_drive_file_id": "dvid",
+                            "media_asset_record_id": "recVID0000000001",
+                            "preview_url": "/api/media-assets/recVID0000000001/stream",
+                            "preview_status": "Ready",
+                            "duration_seconds": 8,
+                        }
+                    },
+                }]
+            }),
+            "Studio_Output_Plan_JSON": json.dumps({
+                "items": [{"platform": "Facebook", "output_type": "Reel", "aspect_ratio": "9:16"}]
+            }),
+        },
+    }
+    output = {
+        "id": "recPOVideoDrive",
+        "fields": {"Platform": "Facebook", "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16"},
+    }
+    package = source_package(request, output, None)
+    assert package is not None
+    clip_url = json.loads(package["render_clip_list_json"])[0]["url"]
+    assert clip_url == "https://drive.google.com/uc?export=download&id=dvid"
+    assert not clip_url.startswith("/api/media-assets/")
 
 
 def test_finished_thumbnail_prompt_prefers_gold_lettering():
