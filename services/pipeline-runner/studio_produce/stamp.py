@@ -14,7 +14,9 @@ from studio_produce.media import (
     asset_media_kind,
     clip_in_out_seconds,
     distribute_frames,
+    drive_download_url,
     playable_url,
+    remotion_clip_url,
     source_duration_seconds,
 )
 
@@ -293,6 +295,11 @@ def _clip_still_urls(raw: Any) -> set[str]:
     return urls
 
 
+def _remotion_fetchable(url: str) -> bool:
+    value = str(url or "").strip()
+    return value.startswith(("http://", "https://")) and not value.startswith("/api/media-assets/")
+
+
 def photo_sequence_url(master: dict[str, Any], variant: dict[str, Any] | None) -> str:
     """Prefer the original still. Derived 9:16 fill-crops cut square/4:5 flyers.
 
@@ -302,7 +309,13 @@ def photo_sequence_url(master: dict[str, Any], variant: dict[str, Any] | None) -
     original = _public_cdn_url(master.get("preview_url"))
     if original and not _is_derived_fill_crop_url(original):
         return original
-    return str((variant or {}).get("preview_url") or "").strip() or playable_url(master)
+    variant_url = str((variant or {}).get("preview_url") or "").strip()
+    if _remotion_fetchable(variant_url):
+        return variant_url
+    url = playable_url(master)
+    if _remotion_fetchable(url):
+        return url
+    return drive_download_url(master, variant) or ""
 
 
 def finished_source_package(
@@ -557,11 +570,7 @@ def source_package(
         merged = {**master, **source}
         video = asset_is_video(merged)
         variant = pick_variant(source, ratio)
-        url = (
-            playable_url(merged) or str((variant or {}).get("preview_url") or "").strip()
-            if video
-            else photo_sequence_url(master, variant)
-        )
+        url = remotion_clip_url(merged, variant) if video else photo_sequence_url(master, variant)
         media_id = str(
             merged.get("media_asset_record_id")
             or (variant or {}).get("media_asset_record_id")

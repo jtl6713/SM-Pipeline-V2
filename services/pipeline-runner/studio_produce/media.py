@@ -4,6 +4,7 @@ from typing import Any
 
 
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".m4v", ".webm")
+DRIVE_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id={file_id}"
 
 
 def asset_is_video(asset: dict[str, Any] | None) -> bool:
@@ -22,18 +23,48 @@ def asset_media_kind(asset: dict[str, Any] | None) -> str:
     return "video" if asset_is_video(asset) else "photo"
 
 
+def _is_http_url(value: str) -> bool:
+    return value.startswith("http://") or value.startswith("https://")
+
+
+def _is_studio_stream_path(value: str) -> bool:
+    return str(value or "").strip().startswith("/api/media-assets/")
+
+
+def drive_download_url(*records: dict[str, Any] | None) -> str:
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        drive_id = str(record.get("google_drive_file_id") or record.get("googleDriveFileId") or "").strip()
+        if drive_id:
+            return DRIVE_DOWNLOAD_URL.format(file_id=drive_id)
+    return ""
+
+
 def playable_url(asset: dict[str, Any] | None) -> str:
     item = asset or {}
     if asset_is_video(item):
         for key in ("google_drive_url", "url", "src"):
             value = str(item.get(key) or "").strip()
-            if value.startswith("http://") or value.startswith("https://"):
+            if _is_http_url(value):
                 return value
     for key in ("preview_url", "url", "src", "google_drive_url"):
         value = str(item.get(key) or "").strip()
-        if value.startswith("http://") or value.startswith("https://"):
+        if _is_http_url(value):
             return value
     return ""
+
+
+def remotion_clip_url(master: dict[str, Any] | None, variant: dict[str, Any] | None = None) -> str:
+    """Absolute fetch URL for Remotion. Never a Studio /api/media-assets stream path."""
+    merged = {**(master or {}), **(variant or {})}
+    url = playable_url(merged)
+    if _is_http_url(url) and not _is_studio_stream_path(url):
+        return url
+    variant_url = str((variant or {}).get("preview_url") or "").strip()
+    if _is_http_url(variant_url) and not _is_studio_stream_path(variant_url):
+        return variant_url
+    return drive_download_url(master, variant, merged)
 
 
 def clip_in_out_seconds(asset: dict[str, Any] | None, *, default_duration: float = 5.0) -> tuple[float, float]:
