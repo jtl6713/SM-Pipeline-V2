@@ -79,15 +79,9 @@ function Invoke-Ps1([string]$Path, [string[]]$NativeArgs) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Missing script: $Path"
     }
-    # Child scripts use Write-Host. A redirected powershell.exe hides that unless we transcript.
-    $childLog = $TranscriptPath
-    if ([string]::IsNullOrWhiteSpace($childLog)) {
-        $childLog = Join-Path $env:TEMP ('ops-dash-child-' + [guid]::NewGuid().ToString('N') + '.log')
-    }
-    if ($script:OuterTranscriptActive) {
-        Stop-Transcript | Out-Null
-        $script:OuterTranscriptActive = $false
-    }
+    # Child scripts use Write-Host. Nested runs always get their own temp log so we never
+    # nest Start-Transcript on the dashboard transcript file (that can hang the outer job).
+    $childLog = Join-Path $env:TEMP ('ops-dash-child-' + [guid]::NewGuid().ToString('N') + '.log')
     # Named switches/parameters must stay unquoted. Quoting '-Service' makes PowerShell
     # bind the literal string "-Service" as the $Service value (ValidateSet fails).
     $argLine = ''
@@ -122,12 +116,12 @@ exit `$code
 "@
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $cmd
     $exitCode = [int]$LASTEXITCODE
-    if ([string]::IsNullOrWhiteSpace($TranscriptPath) -and (Test-Path -LiteralPath $childLog)) {
-        [Console]::Out.Write((Get-Content -LiteralPath $childLog -Raw))
-    }
-    if (-not [string]::IsNullOrWhiteSpace($TranscriptPath)) {
-        Start-Transcript -Path $TranscriptPath -Append -Force | Out-Null
-        $script:OuterTranscriptActive = $true
+    if (Test-Path -LiteralPath $childLog) {
+        $childText = Get-Content -LiteralPath $childLog -Raw
+        if ($childText) {
+            Write-Host $childText
+        }
+        Remove-Item -LiteralPath $childLog -Force -ErrorAction SilentlyContinue
     }
     return $exitCode
 }

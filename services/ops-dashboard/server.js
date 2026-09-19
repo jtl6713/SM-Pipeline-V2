@@ -219,10 +219,12 @@ function startJob(action, service) {
   });
   job.child = child;
 
-  const pump = setInterval(() => syncTranscript(job), 800);
+  let pump = null;
+  let timeoutTimer = null;
   const finish = (code, errText) => {
     if (job.endedAt) return;
-    clearInterval(pump);
+    if (pump) clearInterval(pump);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
     syncTranscript(job);
     if (errText) appendLog(job, `\n${errText}\n`);
     if (!job.log || job.log.trim() === 'Starting… VERIFY and DEPLOY can take a minute. Output appears as PowerShell writes it.') {
@@ -234,6 +236,17 @@ function startJob(action, service) {
     if (activeJobId === job.id) activeJobId = null;
     try { if (fs.existsSync(job.transcriptPath)) fs.unlinkSync(job.transcriptPath); } catch { /* keep */ }
   };
+  pump = setInterval(() => {
+    syncTranscript(job);
+    if (child.exitCode !== null) finish(child.exitCode);
+  }, 800);
+  timeoutTimer = setTimeout(() => {
+    if (job.endedAt) return;
+    try {
+      if (child && !child.killed) child.kill();
+    } catch { /* ignore */ }
+    finish(1, 'ERROR job timed out after 30 minutes');
+  }, 30 * 60 * 1000);
 
   child.stdout.on('data', (buf) => appendLog(job, buf.toString('utf8')));
   child.stderr.on('data', (buf) => appendLog(job, buf.toString('utf8')));
