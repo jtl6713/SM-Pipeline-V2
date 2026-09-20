@@ -545,3 +545,4 @@ Vertical short output defaults Pages deploy: 2026-09-20 — Vertical Short Video
 Finished-video resilient upload Pages deploy: 2026-09-20 — Upload starts before heavy workspace refreshes, every MP4/MOV uses resumable parts, exact errors stay visible, and Optional details begins with Caption. UI 0.6.346-finished-upload-options.
 Unified lower-third burn-in Pages deploy: 2026-09-20 — Creative editor and preview default to TikTok-style lower-third overlay on 9:16 for all platforms. UI 0.6.347-unified-lower-third.
 Shared vertical short render Pages deploy: 2026-09-20 — Review mix copy explains one shared render and synced audio for IG/FB/YT/TikTok. UI 0.6.348-shared-vertical-render.
+2026-09-20 deploy Studio UI 0.6.349 content-level approve-all
