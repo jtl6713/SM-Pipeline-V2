@@ -548,3 +548,4 @@ Shared vertical short render Pages deploy: 2026-09-20 — Review mix copy explai
 2026-09-20 deploy Studio UI 0.6.349 content-level approve-all
 2026-09-20 deploy Studio UI 0.6.350 always-visible content approve-all
 Pipeline archived section Pages deploy: 2026-09-20 — Fully published content items collapse into an Archived section at the bottom of Pipeline. UI 0.6.351-pipeline-archived.
+Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare first when crops have not started; still finishing only while Preparing. UI 0.6.352-variant-prepare-copy.
