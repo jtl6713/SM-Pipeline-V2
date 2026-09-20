@@ -174,6 +174,7 @@
   let ideasSort = { key: "idea", dir: "desc" };
   let contentSort = { key: "content", dir: "desc" };
   const pipelineGroupOpen = new Map();
+  let pipelineArchivedSectionOpen = false;
   const pipelineScheduleDrafts = new Map();
   const pipelineTiktokUrlDrafts = new Map();
   const pipelineYoutubeUrlDrafts = new Map();
@@ -205,7 +206,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.350-content-approve-visible";
+  const BUILD_ID = "item4-0.6.351-pipeline-archived";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14062,6 +14063,32 @@
     return `Content piece · ${suffix}${destHint}`;
   }
 
+  function pipelineContentGroupRecords(key, records = pipelineOutputs) {
+    return (records || []).filter((row) => pipelineContentGroupKey(row) === key);
+  }
+
+  function pipelineOutputFullyPublished(record) {
+    const state = String(record?.studio_state || pipelineStudioStateLabel(record) || "").trim();
+    return state === "Published" || state === "Skipped";
+  }
+
+  function pipelineContentGroupFullyPublished(key, allRecords = pipelineOutputs) {
+    const groupRecords = pipelineContentGroupRecords(key, allRecords);
+    if (!groupRecords.length) return false;
+    return groupRecords.every(pipelineOutputFullyPublished);
+  }
+
+  function partitionPipelineGroups(source, allRecords = pipelineOutputs) {
+    const groups = groupedPipelineRecords(source);
+    const active = [];
+    const archived = [];
+    for (const group of groups) {
+      if (pipelineContentGroupFullyPublished(group.key, allRecords)) archived.push(group);
+      else active.push(group);
+    }
+    return { active, archived };
+  }
+
   function groupedPipelineRecords(records) {
     const groups = [];
     const index = new Map();
@@ -14079,9 +14106,31 @@
     return groups;
   }
 
-  function isPipelineGroupExpanded(key, isNewest) {
+  function isPipelineGroupExpanded(key, { isNewest = false, isArchived = false } = {}) {
     if (pipelineGroupOpen.has(key)) return pipelineGroupOpen.get(key);
+    if (isArchived) return false;
     return Boolean(isNewest);
+  }
+
+  function renderPipelineGroupTbody(group, pipelineRow, { isNewest = false, isArchived = false } = {}) {
+    const open = isPipelineGroupExpanded(group.key, { isNewest, isArchived });
+    const label = pipelineContentGroupLabel(group.records);
+    const groupReady = pipelineManualApprovableOutputs(group.records);
+    const approveButton = `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
+    const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button>${approveButton}</div></td></tr>`;
+    return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}${isArchived ? " pipeline-archived-group" : ""}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
+  }
+
+  function renderPipelineArchivedSection(archivedGroups, pipelineRow) {
+    if (!archivedGroups.length) return "";
+    const itemCount = archivedGroups.length;
+    const outputCount = archivedGroups.reduce((total, group) => total + group.records.length, 0);
+    const sectionOpen = pipelineArchivedSectionOpen;
+    const banner = `<tbody class="pipeline-archived-section${sectionOpen ? "" : " is-collapsed"}" data-pipeline-archived-section><tr class="pipeline-archived-section-row"><td colspan="9"><button type="button" class="pipeline-archived-section-toggle" data-pipeline-archived-toggle aria-expanded="${sectionOpen ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${sectionOpen ? "▾" : "▸"}</span><span class="pipeline-archived-section-title">Archived</span><span class="pipeline-archived-section-meta">${itemCount} content item${itemCount === 1 ? "" : "s"} · ${outputCount} output${outputCount === 1 ? "" : "s"}</span></button></td></tr></tbody>`;
+    const groups = sectionOpen
+      ? archivedGroups.map((group) => renderPipelineGroupTbody(group, pipelineRow, { isArchived: true })).join("")
+      : "";
+    return `${banner}${groups}`;
   }
 
   function pipelineSortValue(record, key) {
@@ -14187,15 +14236,12 @@
       return `<tr${rowOpen}><td><div class="title-cell">Output ${value(r.output_id)}</div><div class="subtle">${subtleParts.join(" · ") || "—"}</div>${postLink}</td><td>${value(r.platform)}</td>${typeCell}<td>${badge(pipelineStudioStateLabel(r))}${isPipeline ? `${pipelineTiktokCompleteCell(r)}${pipelineYoutubeCompleteCell(r)}` : ""}</td><td>${value(pipelineRenderLabel(r))}</td><td>${value(r.review_status)}</td><td>${value(r.platform_publish_status || r.publish_status)}</td><td>${pipelineProgressCell(r, groupRecords)}</td>${creativeCell}</tr>`;
     };
     const body = isPipeline
-      ? groupedPipelineRecords(source).map((group, index) => {
-          const newest = index === 0;
-          const open = isPipelineGroupExpanded(group.key, newest);
-          const label = pipelineContentGroupLabel(group.records);
-          const groupReady = pipelineManualApprovableOutputs(group.records);
-          const approveButton = `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
-          const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button>${approveButton}</div></td></tr>`;
-          return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
-        }).join("")
+      ? (() => {
+          const { active, archived } = partitionPipelineGroups(source);
+          const activeBody = active.map((group, index) => renderPipelineGroupTbody(group, pipelineRow, { isNewest: index === 0 })).join("");
+          const archivedBody = renderPipelineArchivedSection(archived, pipelineRow);
+          return `${activeBody}${archivedBody}`;
+        })()
       : `<tbody>${sortedSource.map((row) => pipelineRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
     const head = isPipeline
       ? `<tr>${pipelineColumnHeader("output", "Output", { filterable: true })}${pipelineColumnHeader("platform", "Platform", { filterable: true })}${pipelineColumnHeader("type", "Type / ratio", { filterable: true })}${pipelineColumnHeader("state", "Studio state", { filterable: true })}${pipelineColumnHeader("render", "Render", { filterable: true })}${pipelineColumnHeader("review", "Review", { filterable: true })}${pipelineColumnHeader("publish", "Publish", { filterable: true })}${pipelineColumnHeader("progress", "Progress", { filterable: true })}${pipelineColumnHeader("creative", "Creative", { sortable: false, filterable: true })}</tr>`
@@ -14243,6 +14289,13 @@
       });
     }
     if (isPipeline) {
+      target.querySelectorAll("[data-pipeline-archived-toggle]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          pipelineArchivedSectionOpen = !pipelineArchivedSectionOpen;
+          renderOutputsTable(target, pipelineOutputs);
+        });
+      });
       target.querySelectorAll("[data-pipeline-group-toggle]").forEach((button) => {
         button.addEventListener("click", (event) => {
           event.stopPropagation();
