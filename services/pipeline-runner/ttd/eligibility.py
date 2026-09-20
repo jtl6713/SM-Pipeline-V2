@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from asset.helpers import as_bool
@@ -19,6 +20,7 @@ from ttd.constants import (
     STATUS_READY_FOR_DELIVERY,
     STATUS_RETRY,
     STATUS_WAITING_FOR_SCHEDULE,
+    TIKTOK_INBOX_LEAD_MINUTES,
 )
 
 
@@ -46,6 +48,32 @@ def is_retry_for(record: dict[str, Any], prefix: str) -> bool:
     return _ci(field_str(record, "TikTok_Draft_Status")) == _ci(STATUS_RETRY) and error_stage_starts(record, prefix)
 
 
+def _scheduled_ms(record: dict[str, Any]) -> int | None:
+    raw = field_str(record, "Scheduled_Post_Date")
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except (TypeError, ValueError):
+        return None
+
+
+def tiktok_inbox_is_due(
+    record: dict[str, Any],
+    *,
+    now_ms: int | None = None,
+    lead_minutes: int = TIKTOK_INBOX_LEAD_MINUTES,
+) -> bool:
+    scheduled_ms = _scheduled_ms(record)
+    if scheduled_ms is None:
+        return True
+    now = now_ms if now_ms is not None else int(datetime.now(timezone.utc).timestamp() * 1000)
+    return scheduled_ms <= now + (lead_minutes * 60 * 1000)
+
+
 def ttd0_eligibility_reason(record: dict[str, Any]) -> str | None:
     if not str(record.get("id") or "").strip():
         return "missing_record_id"
@@ -60,11 +88,11 @@ def ttd0_eligibility_reason(record: dict[str, Any]) -> str | None:
     if field_str(record, "Platform_Post_ID"):
         return "already_has_platform_post"
     status = _ci(field_str(record, "TikTok_Draft_Status"))
-    if (
-        status == _ci(STATUS_READY_FOR_ASSETS)
-        or status == _ci(STATUS_WAITING_FOR_SCHEDULE)
-        or is_retry_for(record, STAGE_TTD0)
-    ):
+    if status == _ci(STATUS_WAITING_FOR_SCHEDULE):
+        return "tiktok_draft_waiting_for_schedule"
+    if status == _ci(STATUS_READY_FOR_ASSETS) or is_retry_for(record, STAGE_TTD0):
+        if not tiktok_inbox_is_due(record):
+            return "tiktok_draft_before_inbox_lead_window"
         return None
     return "tiktok_draft_not_ready_for_assets"
 

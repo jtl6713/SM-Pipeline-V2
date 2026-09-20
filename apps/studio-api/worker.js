@@ -113,6 +113,12 @@ import {
   youtubePublishedAfterIso,
 } from "./autonomous-produce.mjs";
 import { ideaProductionConfigFields, parseIdeaMachineNotes, parseIdeaNotedMediaIds } from "./idea-photo-wait.mjs";
+import {
+  STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA,
+  STUDIO_TIKTOK_INBOX_DUE_FORMULA,
+  studioTikTokArmedDraftStatus,
+  studioTikTokInboxIsDue,
+} from "./tiktok-inbox-schedule.mjs";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=UTF-8",
@@ -370,7 +376,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.336-vertical-reel-story",
+          version: "0.10.337-tiktok-inbox-lead",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2187,12 +2193,6 @@ function studioArmedPublishStatus(record, scheduledPostDate = null) {
   return ms <= Date.now() + 120000 ? "Ready to Publish" : "Ready to Schedule";
 }
 
-function studioTikTokArmedDraftStatus(record, scheduledPostDate = null) {
-  return studioArmedPublishStatus(record, scheduledPostDate) === "Ready to Schedule"
-    ? "Waiting for Schedule"
-    : "Ready for Assets";
-}
-
 function studioPublishHandoffFields(record, options = {}) {
   const platform = String(f(record, "Platform") || "").trim();
   const outputType = String(f(record, "Studio_Output_Type") || "").trim();
@@ -2831,7 +2831,7 @@ function platformPublishStatus(record) {
     // Future-dated TikTok drafts keep an internal arming status, but the Pipeline
     // publish column should say the post is waiting on schedule — not asset work.
     if (/waiting for schedule/i.test(draft)) return draft;
-    if (/ready to schedule/i.test(publish) || (!studioPublishIsDue(record) && /ready for assets/i.test(draft))) {
+    if (/ready to schedule/i.test(publish) || (!studioTikTokInboxIsDue(record) && /ready for assets/i.test(draft))) {
       return "Waiting for Schedule";
     }
     return draft || publish;
@@ -6393,7 +6393,10 @@ function studioPublishScheduleFields(payload = {}, record = null, options = {}) 
   if (platform === "TikTok") {
     const draft = String(f(record, "TikTok_Draft_Status") || "").trim();
     if (!draft || draft === "Ready for Assets" || draft === "Waiting for Schedule" || draft === "Not Selected") {
-      fields.TikTok_Draft_Status = due ? "Ready for Assets" : "Waiting for Schedule";
+      fields.TikTok_Draft_Status = studioTikTokArmedDraftStatus(
+        { fields: { ...(record?.fields || {}), Scheduled_Post_Date: iso } },
+        iso,
+      );
     }
   }
   return fields;
@@ -6413,21 +6416,30 @@ function studioPublishIsDue(record, graceMs = 120000) {
 }
 
 function studioPublishCanDispatchNow(record) {
+  const platform = String(f(record, "Platform") || "").trim();
+  if (platform === "TikTok") return studioTikTokInboxIsDue(record);
   if (studioPublishIsDue(record)) return true;
   // YouTube can upload now and let the channel release at publishAt.
-  const platform = String(f(record, "Platform") || "").trim();
   return platform === "YouTube" && Boolean(String(f(record, "YouTube_Scheduled_Publish_At") || "").trim());
 }
 
 async function studioPromoteDuePublishStatus(env, record) {
-  const status = String(f(record, "Publish_Status") || "").trim();
-  if (status === "Ready to Publish" || status === "Publishing" || status === "Published") return record;
-  if (studioArmedPublishStatus(record) !== "Ready to Publish") return record;
   const id = String(record?.id || "").trim();
   if (!id) return record;
-  const fields = { Publish_Status: "Ready to Publish" };
+  const platform = String(f(record, "Platform") || "").trim();
   const tiktok = String(f(record, "TikTok_Draft_Status") || "").trim();
-  if (tiktok === "Waiting for Schedule") fields.TikTok_Draft_Status = "Ready for Assets";
+  const fields = {};
+  if (platform === "TikTok" && tiktok === "Waiting for Schedule" && studioTikTokInboxIsDue(record)) {
+    fields.TikTok_Draft_Status = "Ready for Assets";
+  }
+  const status = String(f(record, "Publish_Status") || "").trim();
+  if (status !== "Ready to Publish" && status !== "Publishing" && status !== "Published"
+    && studioArmedPublishStatus(record) === "Ready to Publish") {
+    fields.Publish_Status = "Ready to Publish";
+    if (tiktok === "Waiting for Schedule") fields.TikTok_Draft_Status = "Ready for Assets";
+  } else if (!Object.keys(fields).length) {
+    return record;
+  }
   const outputType = String(f(record, "Platform_Output_Type") || "").trim();
   const storyStatus = String(f(record, "IG_Story_Status") || "").trim();
   if (outputType === "Instagram Story" && (!storyStatus || storyStatus === "Not Needed")) {
@@ -26017,7 +26029,7 @@ const STUDIO_PUBLISH_RECONCILE_FORMULA = 'AND({Test_Run_ID}=BLANK(),{Do_Not_Publ
   + 'OR({TikTok_Draft_Status}=BLANK(),{TikTok_Draft_Status}="Not Selected",{TikTok_Draft_Status}="Ready for Assets",{TikTok_Draft_Status}="Waiting for Schedule"),'
   + 'OR({FB_Slideshow_Status}=BLANK(),{FB_Slideshow_Status}="Not Required",{FB_Slideshow_Status}="Ready to Render"),'
   + 'OR({FB_Publish_Status}=BLANK(),{FB_Publish_Status}="Ready for Assets"),'
-  + 'OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),'
+  + `${STUDIO_PUBLISH_RECONCILE_SCHEDULE_FORMULA},`
   + 'OR({Studio_Publish_Dispatch_Count}=BLANK(),{Studio_Publish_Dispatch_Count}<8),'
   + 'OR({Studio_Publish_Dispatch_At}=BLANK(),DATETIME_DIFF(NOW(),{Studio_Publish_Dispatch_At},"minutes")>=6))';
 
@@ -26307,7 +26319,7 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
     {
       stage: "ttd0",
       pulse: studioPulseTtd0,
-      formula: 'AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",OR({Scheduled_Post_Date}=BLANK(),IS_BEFORE({Scheduled_Post_Date},NOW())),OR({TikTok_Draft_Status}="Ready for Assets",{TikTok_Draft_Status}="Waiting for Schedule",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))',
+      formula: `AND({Test_Run_ID}=BLANK(),{Platform}="TikTok",{Do_Not_Publish}=0,{Auto_Publish_Enabled}=1,{TikTok_Draft_Publish_ID}="",${STUDIO_TIKTOK_INBOX_DUE_FORMULA},OR({TikTok_Draft_Status}="Ready for Assets",AND({TikTok_Draft_Status}="Retry Pending",FIND("TTD0",UPPER({Publish_Error_Stage}&""))>0)))`,
       sortField: "Scheduled_Post_Date",
       sortDirection: "asc",
     },
@@ -26342,8 +26354,10 @@ async function studioReconcileTiktokDrafts(env, options = {}) {
     }
     for (const row of rows) {
       try {
-        const pulsed = await scan.pulse(env, row);
-        results.push({ id: row.id, stage: scan.stage, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
+        let current = row;
+        if (scan.stage === "ttd0") current = await studioPromoteDuePublishStatus(env, row);
+        const pulsed = await scan.pulse(env, current);
+        results.push({ id: current.id, stage: scan.stage, ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`tiktok ${scan.stage} reconcile failed`, row.id, error);
