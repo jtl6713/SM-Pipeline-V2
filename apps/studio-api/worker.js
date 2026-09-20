@@ -72,6 +72,13 @@ import {
   staleManualFlagsOnPublishedFields,
 } from "./youtube-manual-publish.mjs";
 import {
+  FINISHED_STORY_TEASER_SECONDS,
+  finishedCompanionStoryFields,
+  finishedStoryTeaserClipFlags,
+  pickDuplicateOutputKeepers,
+  uniquePlanItems,
+} from "./az-finished-video.mjs";
+import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
   AUTONOMOUS_DEFAULT_VIDEO_SECONDS,
   AUTONOMOUS_DEFAULT_VOICEOVER_TAIL_SECONDS,
@@ -382,7 +389,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.342-yt-published-wins-manual",
+          version: "0.10.343-finished-passthrough-six",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -447,6 +454,8 @@ export default {
           studio_story_variant_relink_v1: true,
           studio_story_still_preview_v1: true,
           studio_story_teaser_15s_v1: true,
+          studio_finished_story_teaser_10s_v1: true,
+          studio_finished_passthrough_six_v1: true,
           studio_p3_promote_pulse_v1: true,
           studio_r3_seed_selected_v1: true,
           production_make_idle_cadence_v1: true,
@@ -3846,7 +3855,9 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
     const item = normalized[i];
     const key = `${item.platform}::${item.output_type}`;
     const current = byKey.get(key);
-    const storyFields = item4CompanionStoryFields(item.output_type);
+    const storyFields = item4CompanionStoryFields(item.output_type, {
+      finishedVideo: studioFinishedOriginKind(parent) === "finished-video",
+    });
     const scheduledAt = studioDestinationScheduleStamp(current, key, stamps, scheduleOverrides);
 
     if (current) {
@@ -3927,6 +3938,7 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
   });
   updatedParent = await item4ReconcilePlanWithEnabledOutputs(env, updatedParent, normalized);
   updatedParent = await item4RelinkVariantQueueOutputs(env, updatedParent);
+  await item4CollapseDuplicatePlanOutputs(env, await outputRowsForProductionRequest(env, productionRequestId));
 
   const rows = await outputRowsForProductionRequest(env, productionRequestId);
   return respond(request, env, {
@@ -6354,6 +6366,18 @@ function studioIsFinishedVideoFilePassthrough(record) {
   return !studioAzIsStory(studioOutputTypeLabel(record));
 }
 
+function item4FinishedStoryTeaserReady(record) {
+  const notes = String(f(record, "Output_Notes") || "");
+  const frames = Number(f(record, "Render_Total_Frames") || 0);
+  const clips = item4ParseJson(f(record, "Render_Clip_List_JSON"), []);
+  const keepAudio = Array.isArray(clips) && clips.some((clip) => clip?.keepSourceAudio || clip?.muted === false);
+  return /story teaser|finished_story_teaser/i.test(notes)
+    && /keep original audio|keepSourceAudio|first 10s/i.test(notes)
+    && frames >= Math.round(FINISHED_STORY_TEASER_SECONDS * 30)
+    && keepAudio
+    && String(f(record, "Composition_ID") || "").trim() === "ChicagoShiningPhotoSequence";
+}
+
 function item4FinishedPublicUrl(asset) {
   return String(asset?.url || "").startsWith("https://media.chicagoshining.com/");
 }
@@ -6867,8 +6891,9 @@ function item4ResolvedVideoDurationSeconds({ storyTeaser, clipCount, effective, 
   return Math.min(30, Math.max(clipCount * 3, 9));
 }
 
-function item4CompanionStoryFields(outputType) {
+function item4CompanionStoryFields(outputType, { finishedVideo = false } = {}) {
   if (!item4IsCompanionOutputType(outputType)) return {};
+  if (finishedVideo) return finishedCompanionStoryFields();
   return {
     Voiceover_Mode_Override: "No",
     Background_Music_Mode_Override: "Yes",
@@ -6876,6 +6901,54 @@ function item4CompanionStoryFields(outputType) {
     Video_Clip_Count_Mode_Override: "Exact",
     Video_Clip_Count_Exact_Override: 1,
   };
+}
+
+function item4RowHasPlatformOutput(row) {
+  return arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+}
+
+async function item4CollapseDuplicatePlanOutputs(env, rows) {
+  const mapped = (rows || []).map((row) => ({
+    id: row.id,
+    row,
+    platform: String(f(row, "Platform") || "").trim(),
+    output_type: String(f(row, "Output_Type") || "").trim(),
+    has_platform_output: item4RowHasPlatformOutput(row),
+    output_order: Number(f(row, "Output_Order") || 0),
+    created_at: String(f(row, "Created_At") || ""),
+  }));
+  const { extras } = pickDuplicateOutputKeepers(mapped);
+  const now = new Date().toISOString();
+  let collapsed = 0;
+  for (const extra of extras) {
+    const poIds = arrayOrEmpty(f(extra.row, "Platform_Output"));
+    await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, extra.id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        fields: { Enabled: false, Active: false, Updated_At: now },
+        typecast: false,
+      }),
+    });
+    for (const poId of poIds) {
+      if (!/^rec[A-Za-z0-9]+$/.test(String(poId || ""))) continue;
+      await airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, poId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          fields: {
+            Output_Status: "Cancelled",
+            Do_Not_Publish: true,
+            Output_Notes: [
+              String(f(extra.row, "Output_Notes") || "").trim(),
+              "Cancelled duplicate platform kit row.",
+            ].filter(Boolean).join("\n"),
+          },
+          typecast: true,
+        }),
+      }).catch(() => null);
+    }
+    collapsed += 1;
+  }
+  return { collapsed, extra_ids: extras.map((item) => item.id) };
 }
 
 function item4NormalizePlanExtras(payloadExtras, platforms, existingItems = []) {
@@ -7035,13 +7108,15 @@ async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
 
 async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = null } = {}) {
   const productionRequestId = requestRecord.id;
+  const uniqueItems = uniquePlanItems(items);
+  const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
   const existing = await outputRowsForProductionRequest(env, productionRequestId);
   const byKey = new Map(existing.map(row => [`${String(f(row,"Platform")||"").trim()}::${String(f(row,"Output_Type")||"").trim()}`, row]));
   const wanted = new Set();
   const now = new Date().toISOString();
   const scheduleOverrides = studioScheduleOverridesFromPayload({ schedules });
   const occupied = await studioOccupiedSchedulesOrEmpty(env);
-  const stamps = studioBuildSuggestedScheduleMap((items || []).map((item) => {
+  const stamps = studioBuildSuggestedScheduleMap(uniqueItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
     const current = byKey.get(key);
     return {
@@ -7050,12 +7125,12 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
       scheduled_at: scheduleOverrides.get(key) || (current ? f(current, "Scheduled_At") : "") || "",
     };
   }), occupied);
-  for (let i=0; i<items.length; i++) {
-    const item = items[i];
+  for (let i=0; i<uniqueItems.length; i++) {
+    const item = uniqueItems[i];
     const key = `${item.platform}::${item.output_type}`;
     wanted.add(key);
     const current = byKey.get(key);
-    const storyFields = item4CompanionStoryFields(item.output_type);
+    const storyFields = item4CompanionStoryFields(item.output_type, { finishedVideo });
     const scheduledAt = studioDestinationScheduleStamp(current, key, stamps, scheduleOverrides);
     if (current) {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, current.id, {
@@ -7063,7 +7138,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
         body:JSON.stringify({fields:{Enabled:true,Active:true,Output_Order:i+1,Output_Status:"Draft",Carousel_Image_Mode_Override:"Manual Upload",...(scheduledAt ? { Scheduled_At: scheduledAt } : {}),...storyFields,Updated_At:now},typecast:false}),
       });
     } else {
-      await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
+      const created = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
         method:"POST",
         body:JSON.stringify({fields:{
           Production_Request_Output_ID:makeProductionRequestOutputId(), Production_Request:[productionRequestId],
@@ -7073,6 +7148,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
           Carousel_Image_Mode_Override:"Manual Upload", Scheduled_At: scheduledAt || stamps.get(key) || null, ...storyFields, Created_At:now, Updated_At:now,
         },typecast:false}),
       });
+      if (created?.id) byKey.set(key, created);
     }
   }
   for (const row of existing) {
@@ -7081,6 +7157,7 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, row.id, {method:"PATCH",body:JSON.stringify({fields:{Enabled:false,Active:false,Updated_At:now},typecast:false})});
     }
   }
+  await item4CollapseDuplicatePlanOutputs(env, await outputRowsForProductionRequest(env, productionRequestId));
 }
 
 async function buildItem4OutputPlan(request, env, url, authorization) {
@@ -8355,11 +8432,10 @@ async function azRestampFinishedStories(env, requestId, options = {}) {
   for (const row of stories) {
     const notes = String(f(row, "Output_Notes") || "");
     const render = String(f(row, "Render_Status") || "").trim();
-    const alreadyTeaser = /story teaser|finished_story_teaser/i.test(notes)
-      && /ready for render|rendering|rendered/i.test(render)
-      && String(f(row, "Composition_ID") || "").trim() === "ChicagoShiningPhotoSequence";
-    const needsTeaser = !alreadyTeaser && (
-      /Finished passthrough/i.test(notes)
+    const alreadyTeaser = item4FinishedStoryTeaserReady(row)
+      && /ready for render|rendering|rendered/i.test(render);
+    const needsTeaser = !alreadyTeaser && !/^rendering$/i.test(render) && (
+      /Finished passthrough|story teaser|finished_story_teaser/i.test(notes)
       || (render === "Rendered" && Boolean(String(f(row, "Final_File_URL") || "").trim()))
       || !String(f(row, "Render_Clip_List_JSON") || "").trim()
     );
@@ -8534,14 +8610,14 @@ async function azBuildPlanItems(env, record) {
   const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   const existingItems = Array.isArray(existingPlan?.items) ? existingPlan.items : [];
   if (existingItems.length) {
-    return existingItems
+    return uniquePlanItems(existingItems
       .map((item) => ({
         platform: String(item?.platform || "").trim(),
         output_type: String(item?.output_type || "").trim(),
         aspect_ratio: String(item?.aspect_ratio || "").trim() || null,
         companion: Boolean(item?.companion) || item4IsCompanionOutputType(item?.output_type),
       }))
-      .filter((item) => item.platform && item.output_type);
+      .filter((item) => item.platform && item.output_type));
   }
   const items = [];
   for (const platform of AZ_DEFAULT_PLATFORMS) {
@@ -8553,7 +8629,7 @@ async function azBuildPlanItems(env, record) {
       console.warn("AZ default plan item failed", platform, error);
     }
   }
-  const extras = item4NormalizePlanExtras([...AZ_DEFAULT_EXTRAS], [...AZ_DEFAULT_PLATFORMS], items);
+  const extras = item4NormalizePlanExtras([...AZ_DEFAULT_EXTRAS], [...AZ_DEFAULT_PLATFORMS], uniquePlanItems(items));
   for (const extra of extras) {
     try {
       const chosen = item4PlanChoice(extra.platform, extra.output_type, photoCount, { hasVideo, packageId: "video" });
@@ -8562,7 +8638,7 @@ async function azBuildPlanItems(env, record) {
       continue;
     }
   }
-  return items;
+  return uniquePlanItems(items);
 }
 
 async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
@@ -8574,6 +8650,10 @@ async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
   const batchLimit = Math.max(1, Math.min(10, Number(options.limit) || 6));
 
   let proRows = await outputRowsForProductionRequest(env, requestRecord.id);
+  const collapsed = await item4CollapseDuplicatePlanOutputs(env, proRows);
+  if (collapsed.collapsed) {
+    proRows = await outputRowsForProductionRequest(env, requestRecord.id);
+  }
   let enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
   let synced = false;
   if (!enabled.length) {
@@ -13109,13 +13189,14 @@ function item4FinishedSourcePackageForOutput(requestRecord, outputRow, effective
     const photos = masters.filter((asset) => !item4LooksLikeVideoAsset(asset));
     chosen = photos.length ? photos : masters;
   }
-  // Finished-video Stories: short Remotion teaser from the start of the master, not full passthrough.
+  // Finished-video Stories: first ~10s of the master with original audio, not a remixed Remotion cut.
   if (kind === "finished-video" && studioAzIsStory(outputType)) {
     const master = chosen[0];
     const url = item4FinishedMasterPlayUrl(master, requestRecord);
     if (!url) return null;
-    const frames = Math.max(1, Math.round(ITEM4_STORY_TEASER_SECONDS * 30));
-    const sourceDuration = Number(master?.duration_seconds || master?.source_duration_seconds || 0) || ITEM4_STORY_TEASER_SECONDS;
+    const audioFlags = finishedStoryTeaserClipFlags();
+    const frames = Math.max(1, Math.round(FINISHED_STORY_TEASER_SECONDS * 30));
+    const sourceDuration = Number(master?.duration_seconds || master?.source_duration_seconds || 0) || FINISHED_STORY_TEASER_SECONDS;
     const clip = {
       id: "finished-story-teaser-1",
       order: Number(master?.order || 1),
@@ -13132,19 +13213,20 @@ function item4FinishedSourcePackageForOutput(requestRecord, outputRow, effective
       media_kind: "video",
       mediaKind: "video",
       in_seconds: 0,
-      out_seconds: ITEM4_STORY_TEASER_SECONDS,
+      out_seconds: FINISHED_STORY_TEASER_SECONDS,
       inSeconds: 0,
-      outSeconds: ITEM4_STORY_TEASER_SECONDS,
+      outSeconds: FINISHED_STORY_TEASER_SECONDS,
       startFromSeconds: 0,
       sourceDurationSeconds: sourceDuration,
       source_duration_seconds: sourceDuration,
       sourceInSeconds: 0,
-      sourceOutSeconds: Math.min(sourceDuration, ITEM4_STORY_TEASER_SECONDS),
+      sourceOutSeconds: Math.min(sourceDuration, FINISHED_STORY_TEASER_SECONDS),
       source: "finished_story_teaser",
       aspect_ratio: ratio,
       google_drive_file_id: String(master?.google_drive_file_id || "").trim() || null,
       overlay: undefined,
       caption: "",
+      ...audioFlags,
     };
     const filename = `studio-${String(f(requestRecord, "Production_Request_ID") || requestRecord.id)}-${platform.toLowerCase() || "platform"}-story-teaser.mp4`;
     const clipList = [{
@@ -13162,13 +13244,14 @@ function item4FinishedSourcePackageForOutput(requestRecord, outputRow, effective
       media_kind: "video",
       googleDriveFileId: clip.google_drive_file_id || null,
       inSeconds: 0,
-      outSeconds: ITEM4_STORY_TEASER_SECONDS,
+      outSeconds: FINISHED_STORY_TEASER_SECONDS,
       startFromSeconds: 0,
       sourceDurationSeconds: sourceDuration,
       sourceInSeconds: 0,
-      sourceOutSeconds: Math.min(sourceDuration, ITEM4_STORY_TEASER_SECONDS),
+      sourceOutSeconds: Math.min(sourceDuration, FINISHED_STORY_TEASER_SECONDS),
       overlay: null,
       caption: "",
+      ...audioFlags,
     }];
     const selected = {
       schema_version: "studio.source-selection.2",
@@ -13772,15 +13855,25 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Requested_Carousel_Slide_Count_Max: effective.carousel_slide_count_mode === "Target range" ? effective.carousel_slide_count_max : null,
     Studio_Effective_Carousel_Image_Mode: effective.carousel_image_mode,
     Preferred_Music_Media_Asset_ID: effective.music?.record_id || null,
-    Preferred_Music_URL: effective.music?.url || null,
-    Music_URL: effective.music?.url || null,
-    Selected_Music_URL: effective.music?.url || null,
-    Selected_Music_Media_Asset_ID: effective.music?.record_id || null,
-    Music_Volume: effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0,
+    Preferred_Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
+      ? null
+      : (effective.music?.url || null),
+    Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
+      ? null
+      : (effective.music?.url || null),
+    Selected_Music_URL: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
+      ? null
+      : (effective.music?.url || null),
+    Selected_Music_Media_Asset_ID: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
+      ? null
+      : (effective.music?.record_id || null),
+    Music_Volume: (sourcePackage?.story_teaser || studioIsFinishedPassthrough(requestRecord))
+      ? 0
+      : (effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0),
     Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
       ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
       : null,
-    ...studioFinishedSeedOverlay(requestRecord, clips, nativeReady),
+    ...(sourcePackage?.story_teaser ? {} : studioFinishedSeedOverlay(requestRecord, clips, nativeReady)),
     ...(function scheduledStamp() {
       const raw = String(effective.scheduled_at || "").trim();
       if (!raw || Number.isNaN(Date.parse(raw))) return {};
@@ -22888,10 +22981,15 @@ async function studioContinuationStampPackage(env, po, context) {
     fields.Asset_Selection_Status = "Selected";
     fields.Composition_ID = "ChicagoShiningPhotoSequence";
     fields.Output_Filename = sourcePackage.output_filename || seed.Output_Filename || null;
-    fields.Render_Total_Frames = sourcePackage.total_frames || seed.Render_Total_Frames || Math.round(ITEM4_STORY_TEASER_SECONDS * 30);
+    fields.Render_Total_Frames = sourcePackage.total_frames || seed.Render_Total_Frames || Math.round(FINISHED_STORY_TEASER_SECONDS * 30);
     fields.Render_Clip_List_JSON = sourcePackage.render_clip_list_json || seed.Render_Clip_List_JSON || null;
     fields.Selected_Assets_JSON = sourcePackage.selected_assets_json || seed.Selected_Assets_JSON || null;
     fields.Timing_Status = "Skipped";
+    fields.Preferred_Music_URL = null;
+    fields.Music_URL = null;
+    fields.Selected_Music_URL = null;
+    fields.Selected_Music_Media_Asset_ID = null;
+    fields.Music_Volume = 0;
     fields.Final_File_URL = null;
     fields.Final_File_ID = null;
     fields.Studio_Preview_URL = null;
@@ -22900,8 +22998,8 @@ async function studioContinuationStampPackage(env, po, context) {
     fields.Review_Status = null;
     fields.Review_Email_Sent_At = null;
     fields.Output_Notes = az
-      ? `origin=az-finished-video; ez-input=finished-video. Story teaser: first ${ITEM4_STORY_TEASER_SECONDS}s of the finished file (Remotion). Skip P1/voiceover. az-auto-queue=1.`
-      : `origin=ez-wizard; ez-input=finished-video. Story teaser: first ${ITEM4_STORY_TEASER_SECONDS}s of the finished file (Remotion). Skip P1/voiceover.`;
+      ? `origin=az-finished-video; ez-input=finished-video. Story teaser: first ${FINISHED_STORY_TEASER_SECONDS}s of the finished file, keep original audio (keepSourceAudio). Skip P1/voiceover/library music. az-auto-queue=1.`
+      : `origin=ez-wizard; ez-input=finished-video. Story teaser: first ${FINISHED_STORY_TEASER_SECONDS}s of the finished file, keep original audio (keepSourceAudio). Skip P1/voiceover/library music.`;
   } else if (nativePhoto && (sourcePackage?.clips || []).length) {
     fields.Output_Status = "Ready for Review";
     fields.Render_Status = "Native Photo Route";
@@ -23002,8 +23100,14 @@ async function studioContinuationInspectOutput(env, po, cache) {
   if (studioIsFinishedPassthrough(po) && studioAzIsStory(studioOutputTypeLabel(po))) {
     const notes = String(f(po, "Output_Notes") || "");
     const render = String(f(po, "Render_Status") || "").trim();
-    const needsTeaser = /Finished passthrough/i.test(notes)
-      || (render === "Rendered" && !/story teaser|finished_story_teaser/i.test(notes));
+    const needsTeaser = !item4FinishedStoryTeaserReady(po)
+      && !/^rendering$/i.test(render)
+      && (
+        /Finished passthrough/i.test(notes)
+        || /story teaser|finished_story_teaser/i.test(notes)
+        || (render === "Rendered" && !/keep original audio|keepSourceAudio|first 10s/i.test(notes))
+        || !String(f(po, "Render_Clip_List_JSON") || "").trim()
+      );
     if (needsTeaser) {
       const context = await studioContinuationLoadContext(env, po, cache).catch(() => null);
       if (context) {

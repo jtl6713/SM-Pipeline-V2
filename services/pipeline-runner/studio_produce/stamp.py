@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from airtable.client import AirtableClient
 
 
-STORY_TEASER_SECONDS = 5
+STORY_TEASER_SECONDS = 10
 SINGLE_STILL_SECONDS = 5
 PHOTO_FLOOR_SECONDS = 3
 FPS = 30
@@ -391,6 +391,8 @@ def finished_source_package(
             "google_drive_file_id": str(master.get("google_drive_file_id") or "") or None,
             "overlay": None,
             "caption": "",
+            "keepSourceAudio": True,
+            "muted": False,
         }
         safe_type = "story"
         filename = f"studio-{field_str(request, 'Production_Request_ID') or request['id']}-{str(effective['platform'] or 'platform').lower()}-{safe_type}-teaser.mp4"
@@ -416,6 +418,8 @@ def finished_source_package(
             "sourceOutSeconds": min(source_duration, STORY_TEASER_SECONDS),
             "overlay": None,
             "caption": "",
+            "keepSourceAudio": True,
+            "muted": False,
         }]
         selected = {
             "schema_version": "studio.source-selection.2",
@@ -822,6 +826,9 @@ def stamp_fields(
             "Output_Filename": package.get("output_filename"),
             "Render_Total_Frames": package.get("total_frames"),
             "Timing_Status": "Skipped",
+            "Music_URL": None,
+            "Preferred_Music_URL": None,
+            "Music_Volume": 0,
             "Final_File_URL": None,
             "Final_File_ID": None,
             "Studio_Preview_URL": None,

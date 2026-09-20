@@ -14,8 +14,17 @@ def _output(**fields):
 def test_shared_render_eligibility():
     reel = _output(id="recIG", Platform="Instagram", Studio_Output_Type="Reel", Aspect_Ratio="9:16")
     story = _output(id="recST", Platform="Instagram", Studio_Output_Type="Story", Aspect_Ratio="9:16")
+    finished = _output(
+        id="recFIN",
+        Platform="Instagram",
+        Studio_Output_Type="Reel",
+        Aspect_Ratio="9:16",
+        Output_Notes="origin=az-finished-video; ez-input=finished-video. Finished passthrough.",
+        Render_Status="Rendered",
+    )
     assert is_shared_render_eligible(reel) is True
     assert is_shared_render_eligible(story) is False
+    assert is_shared_render_eligible(finished) is False
 
 
 def test_pick_canonical_prefers_instagram():

@@ -148,6 +148,8 @@ export type ChicagoShiningPhotoClip = {
     volume?: number;
     measuredDurationSeconds?: number;
   };
+  keepSourceAudio?: boolean;
+  muted?: boolean;
   overlay?: {
     enabled?: boolean;
     text?: string;
@@ -756,10 +758,12 @@ const MediaFill: React.FC<{
 }> = ({clip, source, style}) => {
   const {fps} = useVideoConfig();
   if (isVideoClip(clip)) {
+    const keepSourceAudio = Boolean(clip.keepSourceAudio) || clip.muted === false;
     return (
       <OffthreadVideo
         src={source}
-        muted
+        muted={!keepSourceAudio}
+        volume={keepSourceAudio ? 1 : 0}
         startFrom={clipStartFromFrames(clip, fps)}
         style={style}
       />
