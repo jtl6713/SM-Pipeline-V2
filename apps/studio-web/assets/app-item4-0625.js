@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.348-shared-vertical-render";
+  const BUILD_ID = "item4-0.6.349-content-approve-all";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -13515,8 +13515,8 @@
     return new Date(ms).toISOString();
   }
 
-  async function applyDefaultSchedulesToReadyRows() {
-    const ready = pipelineApprovableOutputs()
+  async function applyDefaultSchedulesToReadyRows(records = pipelineOutputs) {
+    const ready = pipelineApprovableOutputs(records)
       .slice()
       .sort((a, b) => pipelineOutputNumber(a) - pipelineOutputNumber(b));
     const reserved = {};
@@ -13782,6 +13782,70 @@
       if (button) {
         button.dataset.busy = "false";
         updatePipelineApproveAllButton();
+      }
+    }
+  }
+
+  async function approvePipelineContentGroup(groupKey, button = null) {
+    const groupRecords = (pipelineOutputs || []).filter((record) => pipelineContentGroupKey(record) === groupKey);
+    const ready = pipelineManualApprovableOutputs(groupRecords);
+    if (!ready.length) return;
+    if (pipelineUseDefaultSchedules()) {
+      setPipelineLiveHint("Applying default schedules for this content…");
+      await applyDefaultSchedulesToReadyRows(groupRecords);
+    }
+    const schedules = staggerApproveAllSchedules(collectPipelineSchedules(), ready);
+    const list = ready.map((record) => {
+      const iso = schedules[record.id];
+      const when = iso ? formatStudioDateTime(iso) : "now";
+      return `• ${pipelineOutputLabel(record)} — ${when}`;
+    }).join("\n");
+    const title = String(groupRecords[0]?.output_title || groupRecords[0]?.content_title || "this content").trim() || "this content";
+    const scheduleNote = pipelineUseDefaultSchedules()
+      ? "Default schedules fill empty times. Same-platform posts stay at least 90 minutes apart. A time already on a row is kept unless it clashes.\n\n"
+      : "Empty times publish now. Same-platform posts still stay at least 90 minutes apart.\n\n";
+    const confirmed = window.confirm(
+      `Approve ${ready.length} ready output${ready.length === 1 ? "" : "s"} for “${title}”?\n\n${scheduleNote}Only this content item is included. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft.\n\n${list}`
+    );
+    if (!confirmed) return;
+    try {
+      if (button) {
+        button.dataset.busy = "true";
+        button.disabled = true;
+        button.textContent = "Approving…";
+      }
+      setPipelineLiveHint(`Approving ${ready.length} output${ready.length === 1 ? "" : "s"} for this content…`);
+      const result = await api("/api/outputs/approve-all", {
+        method: "POST",
+        body: JSON.stringify({
+          notes: "Studio Pipeline Approve Content",
+          schedules,
+          record_ids: ready.map((record) => record.id),
+        }),
+        timeoutMs: 120000,
+      });
+      ready.forEach((record) => {
+        pipelineScheduleDrafts.delete(record.id);
+        pipelineTiktokUrlDrafts.delete(record.id);
+        pipelineYoutubeUrlDrafts.delete(record.id);
+      });
+      await refreshPipelineOutputs({ silent: true, force: true });
+      const approved = Number(result.approved_count || 0);
+      const failed = Number(result.failed_count || 0);
+      if (failed) {
+        setPipelineLiveHint(result.message || `Approved ${approved}, ${failed} failed`);
+      } else if (result.dispatch_deferred) {
+        setPipelineLiveHint(result.message || `Approved ${approved} for this content. Publishers start from the approved queue.`);
+      } else {
+        setPipelineLiveHint(result.message || `Approved ${approved} output${approved === 1 ? "" : "s"} for this content`);
+      }
+    } catch (error) {
+      setPipelineLiveHint(error.message || "Approve content failed");
+      throw error;
+    } finally {
+      if (button) {
+        button.dataset.busy = "false";
+        button.disabled = false;
       }
     }
   }
@@ -14127,7 +14191,11 @@
           const newest = index === 0;
           const open = isPipelineGroupExpanded(group.key, newest);
           const label = pipelineContentGroupLabel(group.records);
-          const header = `<tr class="pipeline-group-row"><td colspan="9"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button></td></tr>`;
+          const groupReady = pipelineManualApprovableOutputs(group.records);
+          const approveButton = groupReady.length
+            ? `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="Approve only the ready outputs in this content item">Approve all (${groupReady.length})</button>`
+            : "";
+          const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button>${approveButton}</div></td></tr>`;
           return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
         }).join("")
       : `<tbody>${sortedSource.map((row) => pipelineRow(row, sortedSource.filter((peer) => pipelineContentGroupKey(peer) === pipelineContentGroupKey(row)))).join("")}</tbody>`;
@@ -14189,6 +14257,16 @@
           button.setAttribute("aria-expanded", open ? "false" : "true");
           const chevron = button.querySelector(".pipeline-group-chevron");
           if (chevron) chevron.textContent = open ? "▸" : "▾";
+        });
+      });
+      target.querySelectorAll("[data-pipeline-group-approve]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const key = button.dataset.pipelineGroupApprove;
+          if (!key || button.dataset.busy === "true") return;
+          approvePipelineContentGroup(key, button).catch((error) => {
+            setPipelineLiveHint(error.message || "Approve content failed");
+          });
         });
       });
       target.querySelectorAll("[data-creative-output-id]").forEach((button) => {
