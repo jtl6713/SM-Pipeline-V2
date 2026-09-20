@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from stages.registry import STAGE_NAMES, is_implemented
 from ttd.assets import draft_type_for_photos, is_photo_route, is_video_route, photo_manifest, video_manifest
 from ttd.eligibility import (
@@ -34,7 +36,21 @@ def test_ttd0_gates():
     ready = _record(Platform="TikTok", Auto_Publish_Enabled=True, TikTok_Draft_Status="Ready for Assets")
     assert ttd0_eligibility_reason(ready) is None
     waiting = _record(Platform="TikTok", Auto_Publish_Enabled=True, TikTok_Draft_Status="Waiting for Schedule")
-    assert ttd0_eligibility_reason(waiting) is None
+    assert ttd0_eligibility_reason(waiting) == "tiktok_draft_waiting_for_schedule"
+    far_future = _record(
+        Platform="TikTok",
+        Auto_Publish_Enabled=True,
+        TikTok_Draft_Status="Ready for Assets",
+        Scheduled_Post_Date=(datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    )
+    assert ttd0_eligibility_reason(far_future) == "tiktok_draft_before_inbox_lead_window"
+    soon = _record(
+        Platform="TikTok",
+        Auto_Publish_Enabled=True,
+        TikTok_Draft_Status="Ready for Assets",
+        Scheduled_Post_Date=(datetime.now(timezone.utc) + timedelta(minutes=10)).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    )
+    assert ttd0_eligibility_reason(soon) is None
     assert ttd0_eligibility_reason(_record(Platform="Instagram", Auto_Publish_Enabled=True, TikTok_Draft_Status="Ready for Assets")) == "not_tiktok"
     assert ttd0_eligibility_reason(_record(Platform="TikTok", Auto_Publish_Enabled=False, TikTok_Draft_Status="Ready for Assets")) == "auto_publish_disabled"
     assert ttd0_eligibility_reason(_record(Platform="TikTok", Auto_Publish_Enabled=True, Do_Not_Publish=True, TikTok_Draft_Status="Ready for Assets")) == "do_not_publish"
