@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.345-vertical-reel-story";
+  const BUILD_ID = "item4-0.6.346-finished-upload-options";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -483,6 +483,7 @@
     setProfilePlaceholder("item4LibrarySearch", example.librarySearch);
     setProfilePlaceholder("ideaLibrarySearch", example.ideaSearch);
     setProfilePlaceholder("azFinishedTitle", example.azTitle);
+    setProfilePlaceholder("azFinishedLocation", example.ezLocation);
     setProfilePlaceholder("operationsAutonomousSubject", example.autonomous);
     document.querySelectorAll("[data-library-example-name]").forEach((node) => {
       node.textContent = example.name;
@@ -5550,6 +5551,17 @@
       const created = await createEzProductionRequest(activeIdea.id, requestPayload);
       setEzAdvancedOpen(false);
       populateProductionRequestForm(created.record, { reveal: false });
+      if (ezIsAzFinishedPath()) {
+        await uploadItem4Files(nextFiles, { preserveOversizedNotice: true });
+        const uploadedVideo = (item4Workspace?.assets || []).some(item4AssetLooksLikeVideo);
+        if (!uploadedVideo) {
+          const visibleError = String($("azFinishedMessage")?.textContent || $("productionRequestMessage")?.textContent || "").trim();
+          throw new Error(visibleError || "The video did not finish uploading. Please choose it again.");
+        }
+        renderEzPhotoStrip();
+        startAzFinishedProgressPolling();
+        return true;
+      }
       await loadProductionRequestOutputs(created.record);
       applyEzExtraOutputs(extras);
       if (extras.length) await saveProductionRequestOutputs(created.record);
@@ -5574,7 +5586,9 @@
       return Boolean(activeProductionRequest?.id || allowEmpty);
     } catch (error) {
       const saved = Boolean(activeProductionRequest?.id);
-      const message = saved
+      const message = ezIsAzFinishedPath()
+        ? (error.message || "The video did not finish uploading. Please choose it again.")
+        : saved
         ? `Your photos are still here, but Studio could not finish saving (${error.message}). You can keep editing captions.`
         : error.message;
       setEzMessage(message, "error-text");
@@ -5620,6 +5634,27 @@
       if ($("prRequestedTitle")) $("prRequestedTitle").value = title;
       ["ezTitleMode", "ezRequestedTitle"].forEach((id) => ezDirty.add(id));
     }
+    const caption = String($("azFinishedCaption")?.value || "").trim();
+    if (caption) {
+      ezCaptionDefault = "manual";
+      if ($("ezCaptionMode")) $("ezCaptionMode").value = "Force exact";
+      if ($("ezRequestedCaption")) $("ezRequestedCaption").value = caption;
+      if ($("prCaptionMode")) $("prCaptionMode").value = "Force exact";
+      if ($("prRequestedCaption")) $("prRequestedCaption").value = caption;
+      ["ezCaptionMode", "ezRequestedCaption"].forEach((id) => ezDirty.add(id));
+    }
+    const location = String($("azFinishedLocation")?.value || "").trim();
+    if (location) {
+      if ($("ezPrimaryLocation")) $("ezPrimaryLocation").value = location;
+      if ($("prPrimaryLocation")) $("prPrimaryLocation").value = location;
+      primaryLocationUserEdited = true;
+    }
+    const notes = String($("azFinishedNotes")?.value || "").trim();
+    if (notes) {
+      if ($("ezProductionNotes")) $("ezProductionNotes").value = notes;
+      if ($("prProductionNotes")) $("prProductionNotes").value = notes;
+      ezDirty.add("ezProductionNotes");
+    }
   }
 
   async function beginAzFinishedVideo(fileList) {
@@ -5662,9 +5697,11 @@
     try {
       const started = await startEzProduction({ files: videos.slice(0, 1), preserveOversizedNotice: true });
       if (!started || !activeProductionRequest?.id) {
+        const visibleError = String($("azFinishedMessage")?.textContent || "").trim();
         failAzFinishedIngest(
           item4OversizedClipNotice
-            || "Studio could not start this upload. Refresh and try again with an MP4 under 1.5 GB.",
+            || visibleError
+            || "Studio could not start this upload. Choose the video again.",
         );
         return;
       }
@@ -8261,8 +8298,7 @@
 
   function item4ShouldUseLargeFinishedUpload(file) {
     return (ezIsFinishedVideo() || ezIsAzFinishedPath())
-      && item4FileLooksLikeVideo(file)
-      && Number(file?.size || 0) > ITEM4_DIRECT_UPLOAD_MAX_BYTES;
+      && item4FileLooksLikeVideo(file);
   }
 
   async function postItem4MasterFile(file, poster) {
@@ -8403,7 +8439,11 @@
           const result = await postItem4MasterFile(file, poster);
           if (result?.record) activeProductionRequest = result.record;
           item4UploadBatchDone += 1;
-          await loadItem4Workspace(activeProductionRequest);
+          if (Array.isArray(result?.assets)) {
+            item4ApplyAssetsLocally(result.assets);
+          } else {
+            await loadItem4Workspace(activeProductionRequest);
+          }
           ezStagedFiles = files.slice(index + 1);
           updateItem4MasterProgress(item4Workspace || {});
         } catch (error) {

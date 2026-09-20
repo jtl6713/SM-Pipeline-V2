@@ -791,6 +791,37 @@ input, select, textarea, button {
   padding:10px 12px;
   font:inherit
 }
+.az-optional-fields{
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:12px;
+  background:rgba(8,20,42,.2);
+  overflow:hidden
+}
+.az-optional-fields summary{
+  padding:11px 13px;
+  color:#eef4ff;
+  font-size:.9rem;
+  font-weight:750;
+  cursor:pointer
+}
+.az-optional-fields-body{
+  display:grid;
+  gap:12px;
+  padding:0 13px 13px
+}
+.az-optional-fields .form-field span{color:rgba(226,236,255,.88)}
+.az-optional-fields input,.az-optional-fields textarea{
+  width:100%;
+  box-sizing:border-box;
+  margin-top:6px;
+  border:1px solid rgba(255,255,255,.22);
+  border-radius:10px;
+  background:rgba(8,20,42,.45);
+  color:#fff;
+  padding:10px 12px;
+  font:inherit
+}
+.az-optional-fields textarea{resize:vertical}
 .az-drop-zone{
   border-color:rgba(255,255,255,.35)!important;
   background:rgba(8,20,42,.28)!important;

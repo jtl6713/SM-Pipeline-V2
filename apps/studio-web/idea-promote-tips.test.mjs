@@ -13,8 +13,8 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(html, /id="promoteTimingHint"/);
   assert.match(html, /id="promoteVoiceoverTail"/);
   assert.match(html, /id="promoteVideoDuration"/);
-  assert.match(html, /UI build 0\.6\.345/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.345-vertical-reel-story/);
+  assert.match(html, /UI build 0\.6\.346/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.346-finished-upload-options/);
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -24,7 +24,7 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(config, /Video duration still wins/);
   assert.match(config, /prVoiceoverDuration: "Spoken narration length/);
   assert.match(config, /Help → Ideas has a graphic/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.345-vertical-reel-story"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.346-finished-upload-options"/);
   assert.match(app, /function syncPromoteTimingHint/);
   assert.match(app, /Video duration is the hard cap/);
   assert.match(app, /library_asset_ids/);

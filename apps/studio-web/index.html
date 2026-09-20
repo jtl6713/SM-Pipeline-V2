@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.344-idea-mixed-media">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.346-finished-upload-options">
 </head>
 <body>
  <header class="topbar">
@@ -59,15 +59,29 @@
  </div>
  <section class="az-drop" id="azFinishedDrop">
  <h2>Publish a finished video</h2>
- <p>Drop one MP4 up to 1.5 GB. Studio skips music and voiceover, makes the 3D cover, picks a 7-day window, and queues Instagram and Facebook Reels + Stories, YouTube Short, and a TikTok draft. Large files upload in parts and compress automatically — you can close this tab after the upload finishes.</p>
+ <p>Drop one MP4 or MOV up to 1.5 GB. Studio skips music and voiceover, makes the 3D cover, picks a 7-day window, and queues Instagram and Facebook Reels + Stories, YouTube Short, and a TikTok draft. Files upload in safe parts — keep this tab open until the upload finishes.</p>
  <label class="form-field az-drop-title"><span>Title <em>optional</em></span>
  <input id="azFinishedTitle" maxlength="160" placeholder="e.g. Riverwalk sunset reel" autocomplete="off">
  </label>
+ <details class="az-optional-fields">
+ <summary>Optional details</summary>
+ <div class="az-optional-fields-body">
+ <label class="form-field"><span>Caption <em>optional</em></span>
+ <textarea id="azFinishedCaption" rows="4" maxlength="10000" placeholder="Use this exact caption instead of asking AI to write one."></textarea>
+ </label>
+ <label class="form-field"><span>Primary location <em>optional</em></span>
+ <input id="azFinishedLocation" maxlength="200" placeholder="e.g. Little Havana" autocomplete="off">
+ </label>
+ <label class="form-field"><span>Production notes <em>optional</em></span>
+ <textarea id="azFinishedNotes" rows="3" maxlength="10000" placeholder="Cover, scheduling, or publishing direction."></textarea>
+ </label>
+ </div>
+ </details>
  <div class="item4-upload-zone az-drop-zone" id="azFinishedZone" tabindex="0" role="button" aria-label="Drop a finished MP4 to publish">
  <input id="azFinishedInput" type="file" accept="video/mp4,video/quicktime,video/*,.mp4,.mov,.m4v" hidden>
  <div class="item4-upload-icon">＋</div>
  <div>
- <strong>Drop a finished MP4</strong>
+ <strong>Drop a finished MP4 or MOV</strong>
  <span>Or click to choose. Ingesting → compressing → cover/caption → scheduled → queued.</span>
  </div>
  </div>
@@ -1785,7 +1799,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.345</span>
+ <span id="uiBuildLabel">UI build 0.6.346</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -1937,6 +1951,6 @@
 
  <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
  <script src="/assets/ez-plan.js?v=0.6.345-vertical-reel-story"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.345-vertical-reel-story"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.346-finished-upload-options"></script>
 </body>
 </html>
