@@ -376,7 +376,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.338-unified-lower-third",
+          version: "0.10.339-shared-vertical-render",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -4544,6 +4544,89 @@ function studioBurnedInOverlayPosition(aspectRatio = "9:16") {
 
 function phase6DefaultOverlayPosition(aspectRatio = "") {
   return String(aspectRatio || "").replace("x", ":") === "9:16" ? "lower-third" : "center";
+}
+
+const STUDIO_SHARED_VERTICAL_SHORT_TYPES = new Set(["Reel", "Short", "Video Draft"]);
+
+function studioSharedVerticalShortOutput(record) {
+  const ratio = String(f(record, "Aspect_Ratio") || "").replace("x", ":");
+  const outputType = String(f(record, "Studio_Output_Type") || f(record, "Output_Type") || "").trim();
+  return ratio === "9:16" && STUDIO_SHARED_VERTICAL_SHORT_TYPES.has(outputType);
+}
+
+async function studioSiblingVerticalShortOutputs(env, record) {
+  const contentId = studioFirstLinkedId(f(record, "Content_Item"));
+  if (!contentId) return studioSharedVerticalShortOutput(record) ? [record] : [];
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit: 20,
+      filterFormula: `AND({Test_Run_ID}=BLANK(),FIND("${String(contentId).replace(/"/g, '\\"')}", ARRAYJOIN({Content_Item})))`,
+    });
+  } catch (error) {
+    console.warn("shared vertical short sibling lookup failed", record?.id, error);
+    return studioSharedVerticalShortOutput(record) ? [record] : [];
+  }
+  return rows.filter(studioSharedVerticalShortOutput);
+}
+
+function studioSharedAudioMixFieldNames() {
+  return [
+    "Voiceover_Volume",
+    "Voiceover_Render_Volume",
+    "Music_Volume",
+    "Music_Ducked_Volume",
+    "Music_Ducking_Enabled",
+    "Music_Duck_Fade_Frames",
+  ];
+}
+
+function studioPickSharedAudioMixFields(fields = {}) {
+  const picked = {};
+  for (const name of studioSharedAudioMixFieldNames()) {
+    if (fields[name] !== undefined) picked[name] = fields[name];
+  }
+  return picked;
+}
+
+function studioSharedRenderRerenderFields() {
+  return {
+    Render_Status: "Ready for Render",
+    Output_Status: "In Production",
+    Publish_Status: "Not Ready",
+    Remotion_Job_ID: "",
+    Remotion_Status_URL: "",
+    Remotion_Props_JSON: "",
+    Remotion_Error_Message: "",
+    Final_File_URL: "",
+    Final_File_ID: "",
+    Output_URL: "",
+    Final_File_Error_Message: "",
+    Final_File_Storage_Status: "",
+    Studio_Preview_URL: "",
+    Studio_Preview_R2_Key: "",
+    Studio_Preview_Updated_At: "",
+  };
+}
+
+async function studioPatchSiblingVerticalShortOutputs(env, sourceRecord, fields, options = {}) {
+  const siblings = await studioSiblingVerticalShortOutputs(env, sourceRecord);
+  if (siblings.length <= 1) return siblings;
+  const sourceId = String(sourceRecord?.id || "").trim();
+  const patch = { ...fields };
+  await Promise.all(siblings.map(async (row) => {
+    if (String(row?.id || "").trim() === sourceId) return row;
+    try {
+      return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: patch, typecast: options.typecast !== false }),
+      });
+    } catch (error) {
+      console.warn("shared vertical short sibling patch failed", row.id, error);
+      return row;
+    }
+  }));
+  return siblings;
 }
 
 function item4PhotoOverlayFromCaption(text, { aspectRatio = "9:16" } = {}) {
@@ -21034,15 +21117,24 @@ async function updateOutputCreative(request, env, url, authorization) {
       body: JSON.stringify({ fields: outputFields, typecast: false }),
     });
     const refreshedOutput = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, id);
+    const sharedSiblings = await studioPatchSiblingVerticalShortOutputs(
+      env,
+      refreshedOutput,
+      studioPickSharedAudioMixFields(outputFields),
+      { typecast: false },
+    );
     const slides = await phase6SlidesForOutput(env, refreshedOutput);
     return respond(request, env, {
       ok: true,
       saved: true,
       audio_only: true,
+      shared_vertical_short_siblings: sharedSiblings.length,
       record: mapPhase6CreativeOutput(refreshedOutput),
       slides: phase6SlidesWithTitleRenderInput(refreshedOutput, slides),
       title_lock: phase6TitleLockView(refreshedOutput, slides),
-      message: "Audio mix saved. Apply mix & rerender to hear it on a new preview.",
+      message: sharedSiblings.length > 1
+        ? "Audio mix saved for all Reels, Shorts, and TikTok on this post. Apply mix & rerender once to refresh every preview."
+        : "Audio mix saved. Apply mix & rerender to hear it on a new preview.",
     });
   }
 
@@ -26991,16 +27083,27 @@ async function reviewOutputCreative(request, env, url, authorization, ctx = null
       method: "PATCH",
       body: JSON.stringify({ fields: mixFields, typecast: true }),
     });
+    const sharedMix = {
+      ...studioPickSharedAudioMixFields(mixFields),
+      ...studioSharedRenderRerenderFields(),
+      Review_Status: mixFields.Review_Status,
+      Output_Status: mixFields.Output_Status,
+      Publish_Status: mixFields.Publish_Status,
+    };
+    const sharedSiblings = await studioPatchSiblingVerticalShortOutputs(env, updated, sharedMix);
     const slides = await phase6SlidesForOutput(env, updated);
     return respond(request, env, {
       ok: true,
       action: "apply_audio_mix",
       preview_rerender_prepared: true,
+      shared_vertical_short_siblings: sharedSiblings.length,
       record: mapPhase6CreativeOutput(updated),
       slides: phase6SlidesWithTitleRenderInput(updated, slides),
       handoff: phase6CreativeHandoffStatus(updated, slides),
       handoff_state: "render_ready",
-      message: "Mix saved. Studio is rendering a new preview. Approve stays locked until that preview is ready.",
+      message: sharedSiblings.length > 1
+        ? "Mix saved for all Reels, Shorts, and TikTok on this post. Studio is rendering one shared preview for every platform."
+        : "Mix saved. Studio is rendering a new preview. Approve stays locked until that preview is ready.",
     });
   }
   if (!doNotPublish) {
