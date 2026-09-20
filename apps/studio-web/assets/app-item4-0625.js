@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.349-content-approve-all";
+  const BUILD_ID = "item4-0.6.350-content-approve-visible";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -14192,9 +14192,7 @@
           const open = isPipelineGroupExpanded(group.key, newest);
           const label = pipelineContentGroupLabel(group.records);
           const groupReady = pipelineManualApprovableOutputs(group.records);
-          const approveButton = groupReady.length
-            ? `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="Approve only the ready outputs in this content item">Approve all (${groupReady.length})</button>`
-            : "";
+          const approveButton = `<button type="button" class="secondary-button pipeline-group-approve" data-pipeline-group-approve="${escapeHtml(group.key)}" title="${groupReady.length ? "Approve only the ready outputs in this content item" : "No outputs in this content item are waiting for approval"}" ${groupReady.length ? "" : "disabled"}>Approve all${groupReady.length ? ` (${groupReady.length})` : ""}</button>`;
           const header = `<tr class="pipeline-group-row"><td colspan="9"><div class="pipeline-group-head"><button type="button" class="pipeline-group-toggle" data-pipeline-group-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-group-title">${escapeHtml(label)}</span></button>${approveButton}</div></td></tr>`;
           return `<tbody class="pipeline-output-group${open ? "" : " is-collapsed"}" data-pipeline-group="${escapeHtml(group.key)}">${header}${group.records.map((row) => pipelineRow(row, group.records)).join("")}</tbody>`;
         }).join("")
