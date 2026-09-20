@@ -12,6 +12,8 @@ import {
   youtubeLooksLikeQuotaOrWrapped403,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
+  outputTerminalPublishedFields,
+  staleManualFlagsOnPublishedFields,
   youtubeManualLiveVideoHealCandidate,
   youtubeNeedsUrlEntry,
   youtubeOembedUrl,
@@ -29,6 +31,27 @@ test("detects wrapped videos.list 403 quota text from undeployed YTS2_POLL path"
   };
   assert.equal(youtubeLooksLikeQuotaOrWrapped403(fields), true);
   assert.equal(youtubeManualActionRequired(fields), true);
+});
+
+test("published rows ignore stale manual fallback flags", () => {
+  const fields = {
+    Platform: "YouTube",
+    Publish_Status: "Published",
+    Output_Status: "Published",
+    YouTube_Stage: "YT2",
+    Manual_Fallback_Required: true,
+    Manual_Completion_Status: "Required",
+  };
+  assert.equal(outputTerminalPublishedFields(fields), true);
+  assert.equal(youtubeManualActionRequired(fields), false);
+  assert.deepEqual(staleManualFlagsOnPublishedFields(fields), {
+    Manual_Fallback_Required: false,
+    Manual_Completion_Status: "Not Required",
+    Publish_Error_Stage: "",
+    Publish_Error_Message: "",
+    YouTube_Error_Message: "",
+    Publish_Retry_Eligible: false,
+  });
 });
 
 test("manual flags still win without quota text", () => {

@@ -26,8 +26,24 @@ export function youtubeLooksLikeQuotaOrWrapped403(fields = {}) {
   return YOUTUBE_QUOTA_OR_WRAPPED_403_RE.test(youtubeErrorBlob(fields));
 }
 
+export function outputTerminalPublishedFields(fields = {}) {
+  const publish = fieldText(fields, "Publish_Status").toLowerCase();
+  const output = fieldText(fields, "Output_Status").toLowerCase();
+  const stage = fieldText(fields, "YouTube_Stage").toLowerCase();
+  const fbPublish = fieldText(fields, "FB_Publish_Status").toLowerCase();
+  const fbSlideshow = fieldText(fields, "FB_Slideshow_Status").toLowerCase();
+  const tiktokDraft = fieldText(fields, "TikTok_Draft_Status").toLowerCase();
+  return publish.includes("published")
+    || output.includes("published")
+    || fbPublish.includes("published")
+    || fbSlideshow.includes("published")
+    || tiktokDraft.includes("publish complete")
+    || stage === "complete";
+}
+
 /** True when Studio should show Manual Action Required, not Failed. */
 export function youtubeManualActionRequired(fields = {}) {
+  if (outputTerminalPublishedFields(fields)) return false;
   const publish = fieldText(fields, "Publish_Status").toLowerCase();
   if (publish.includes("manual publish required")) return true;
   if (fields.Manual_Fallback_Required === true || fields.Manual_Fallback_Required === 1) return true;
@@ -165,6 +181,25 @@ export function youtubeOembedUrl(watchUrl) {
 }
 
 /** Manual YouTube row that already stores a live video id/url but is still parked manual. */
+export function staleManualFlagsOnPublishedFields(fields = {}) {
+  if (!outputTerminalPublishedFields(fields)) return null;
+  const manualCompletion = fieldText(fields, "Manual_Completion_Status").toLowerCase();
+  const publish = fieldText(fields, "Publish_Status").toLowerCase();
+  const needsClear = fields.Manual_Fallback_Required === true
+    || fields.Manual_Fallback_Required === 1
+    || manualCompletion === "required"
+    || publish.includes("manual publish required");
+  if (!needsClear) return null;
+  return {
+    Manual_Fallback_Required: false,
+    Manual_Completion_Status: "Not Required",
+    Publish_Error_Stage: "",
+    Publish_Error_Message: "",
+    YouTube_Error_Message: "",
+    Publish_Retry_Eligible: false,
+  };
+}
+
 export function youtubeManualLiveVideoHealCandidate(fields = {}) {
   if (fieldText(fields, "Platform").toLowerCase() !== "youtube") return null;
   if (fields.Do_Not_Publish === true || fields.Do_Not_Publish === 1) return null;

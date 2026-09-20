@@ -69,6 +69,7 @@ import {
   youtubeManualLiveVideoHealCandidate,
   youtubeOembedUrl,
   youtubeWatchUrl,
+  staleManualFlagsOnPublishedFields,
 } from "./youtube-manual-publish.mjs";
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
@@ -381,7 +382,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.341-yt-manual-live-refresh",
+          version: "0.10.342-yt-published-wins-manual",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2465,18 +2466,17 @@ function normalizedOutputState(record) {
     return "Ready for Review";
   }
 
+  // Terminal success must win over stale manual flags and leftover error text.
+  // Output 550 was Published while Manual_Fallback_Required stayed true — manual
+  // must not beat Published. Output 372 had the same pattern with FB error text.
+  if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
+
   // YouTube Manual Publish Required must win over leftover YouTube_Error_Message,
   // otherwise Studio keeps painting a red Failed badge after we park the row.
   // Also catch undeployed YTS2_POLL + quota/403 rows that never set Manual Publish Required.
   if (youtubeManualActionRequired(fields)) {
     return "Manual Action Required";
   }
-
-  // Terminal success must win over stale error text left by earlier FBS2/AP0/YT
-  // attempts. Output 372 was Published with a live Facebook Reel URL while
-  // FB_Slideshow_Error_Message still said "FBS2 ... R2 upload runtime failure"
-  // — the Failed branch below used to win and paint a red badge forever.
-  if (has("Publish_Status", "published") || has("Output_Status", "published") || has("FB_Publish_Status", "published") || has("FB_Slideshow_Status", "published") || has("TikTok_Draft_Status", "publish complete") || text("YouTube_Stage") === "Complete") return "Published";
 
   if ((errors || explicitFailed) && !(retryablePublish && thumbnailOnlyError && youtubeVideoReady)) {
     const output = text("Output_Status").toLowerCase();
@@ -17139,8 +17139,13 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
   });
   const healed = [];
   let manualLiveHealBudget = 5;
+  let staleManualHealBudget = 8;
   for (const record of records) {
     let current = await phase6RestoreProductionReviewReady(env, record);
+    if (staleManualHealBudget > 0 && staleManualFlagsOnPublishedFields(current?.fields || current)) {
+      staleManualHealBudget -= 1;
+      current = await healStaleManualFlagsOnPublishedRecord(env, current);
+    }
     if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
       manualLiveHealBudget -= 1;
       current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
@@ -26280,6 +26285,20 @@ async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
   return results;
 }
 
+
+async function healStaleManualFlagsOnPublishedRecord(env, record) {
+  const patch = staleManualFlagsOnPublishedFields(record?.fields || record);
+  if (!patch) return record;
+  try {
+    return await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
+      method: "PATCH",
+      body: JSON.stringify({ fields: patch, typecast: true }),
+    });
+  } catch (error) {
+    console.warn("stale manual flags on published heal failed", record?.id, error);
+    return record;
+  }
+}
 
 async function healYoutubeManualWithLiveVideoRecord(env, record, options = {}) {
   const candidate = youtubeManualLiveVideoHealCandidate(record?.fields || record);
