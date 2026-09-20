@@ -214,7 +214,7 @@ def assign_clip_frames(
     return frames, total
 
 
-def overlay_from_caption(text: str, *, tiktok_916: bool = False) -> dict[str, Any] | None:
+def overlay_from_caption(text: str) -> dict[str, Any] | None:
     overlay_text = str(text or "").strip()
     if not overlay_text:
         return None
@@ -222,7 +222,7 @@ def overlay_from_caption(text: str, *, tiktok_916: bool = False) -> dict[str, An
         "enabled": True,
         "text": overlay_text,
         "role": "caption",
-        "position": "lower-third" if tiktok_916 else "bottom",
+        "position": "lower-third",
         "size": 52,
         "stylePreset": "Lower Third / Minimal",
         "animation": "fade",
@@ -589,10 +589,7 @@ def source_package(
             omitted.append(str(source.get("id") or source.get("name") or "unknown"))
             continue
         overlay_text = captions.get(str(source.get("id") or "")) or str(source.get("caption") or "").strip()
-        overlay = overlay_from_caption(
-            overlay_text,
-            tiktok_916=effective["platform"] == "TikTok" and ratio == "9:16",
-        )
+        overlay = overlay_from_caption(overlay_text)
         in_seconds, out_seconds = clip_in_out_seconds(merged)
         has_video = has_video or video
         clips.append({
