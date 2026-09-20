@@ -6,6 +6,10 @@ export const YOUTUBE_QUOTA_OR_WRAPPED_403_RE =
 export const YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA =
   'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}!="Manual Publish Required",{Publish_Status}!="Published",OR(FIND("YTS2_POLL",UPPER({Publish_Error_Stage}&""))>0,FIND("YTS1",UPPER({Publish_Error_Stage}&""))>0,FIND("YTP1",UPPER({Publish_Error_Stage}&""))>0),OR(FIND("quota",LOWER({YouTube_Error_Message}&""))>0,FIND("failed 403",LOWER({YouTube_Error_Message}&""))>0,FIND("quota",LOWER({Publish_Error_Message}&""))>0))';
 
+/** Manual YouTube rows that already carry a live video id but were never closed out. */
+export const YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA =
+  'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}!="Published",{Publish_Status}!="Published Privately",{Output_Status}!="Published",OR({Publish_Status}="Manual Publish Required",{Manual_Fallback_Required}=1,{Manual_Completion_Status}="Required"),OR({YouTube_Video_ID}!="",{Platform_Post_URL}!="",AND({Platform_Post_ID}!="",LEN({Platform_Post_ID}&"")=11)))';
+
 function fieldText(fields, name) {
   return String(fields?.[name] || "").trim();
 }
@@ -142,6 +146,24 @@ export function youtubeWatchUrl(videoId) {
   return YOUTUBE_VIDEO_ID_RE.test(id) ? `https://www.youtube.com/watch?v=${id}` : "";
 }
 
+/** Resolve a live YouTube video id from manual-close candidate fields. */
+export function youtubeLiveVideoIdFromFields(fields = {}) {
+  const fromVideoId = fieldText(fields, "YouTube_Video_ID");
+  if (YOUTUBE_VIDEO_ID_RE.test(fromVideoId)) return fromVideoId;
+  const fromPostId = fieldText(fields, "Platform_Post_ID");
+  if (YOUTUBE_VIDEO_ID_RE.test(fromPostId)) return fromPostId;
+  const fromUrl = parseYouTubeVideoId(fieldText(fields, "Platform_Post_URL"));
+  if (fromUrl) return fromUrl;
+  const fromManualUrl = parseYouTubeVideoId(fieldText(fields, "Manual_Published_URL"));
+  return fromManualUrl || "";
+}
+
+export function youtubeOembedUrl(watchUrl) {
+  const url = String(watchUrl || "").trim();
+  if (!url) return "";
+  return `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+}
+
 export function youtubeCompleteEligibility(record = {}) {
   const platform = String(record.platform || "").trim().toLowerCase();
   if (platform !== "youtube") return "not_youtube";
@@ -181,12 +203,15 @@ export function youtubeManualCloseFields({
   now,
   existingNotes = "",
   privacy = "",
+  autoHealed = false,
 } = {}) {
   const stamp = String(now || "").trim() || new Date().toISOString();
   const id = parseYouTubeVideoId(url) || String(videoId || "").trim();
   const liveUrl = youtubeWatchUrl(id) || String(url || "").trim();
   const privatePublish = String(privacy || "").trim().toLowerCase() === "private";
-  const note = `Studio YouTube publication confirmed at ${stamp}. URL: ${liveUrl}. Cover and/or video were completed in YouTube Studio.`;
+  const note = autoHealed
+    ? `Studio auto-healed a manual YouTube row at ${stamp}. Live URL verified: ${liveUrl}.`
+    : `Studio YouTube publication confirmed at ${stamp}. URL: ${liveUrl}. Cover and/or video were completed in YouTube Studio.`;
   const notes = String(existingNotes || "").trim() ? `${String(existingNotes).trim()}\n\n${note}` : note;
   return {
     Publish_Locked_At: null,

@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA,
   YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
   isYouTubePostUrl,
   manualPublishRequiredFields,
   nextPacificMidnightIso,
   parseYouTubeVideoId,
   youtubeCompleteEligibility,
+  youtubeLiveVideoIdFromFields,
   youtubeLooksLikeQuotaOrWrapped403,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
   youtubeNeedsUrlEntry,
+  youtubeOembedUrl,
+  youtubeWatchUrl,
 } from "./youtube-manual-publish.mjs";
 
 test("detects wrapped videos.list 403 quota text from undeployed YTS2_POLL path", () => {
@@ -130,4 +134,33 @@ test("manual close fields mark the output fully published and stop retries", () 
   assert.equal(fields.Manual_Completion_Status, "Completed");
   assert.equal(fields.Publish_Retry_Eligible, false);
   assert.match(fields.Output_Notes, /Studio YouTube publication confirmed/);
+});
+
+test("live video heal resolves ids from stored fields and builds oEmbed probe URL", () => {
+  assert.equal(
+    youtubeLiveVideoIdFromFields({
+      YouTube_Video_ID: "nYAitOg42b4",
+      Platform_Post_URL: "",
+    }),
+    "nYAitOg42b4"
+  );
+  assert.equal(
+    youtubeLiveVideoIdFromFields({
+      Platform_Post_URL: "https://www.youtube.com/shorts/nYAitOg42b4",
+    }),
+    "nYAitOg42b4"
+  );
+  const watch = youtubeWatchUrl("nYAitOg42b4");
+  assert.match(youtubeOembedUrl(watch), /nYAitOg42b4/);
+  assert.match(YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA, /Manual Publish Required/);
+});
+
+test("auto-healed close notes explain cron verification", () => {
+  const fields = youtubeManualCloseFields({
+    url: "https://www.youtube.com/watch?v=nYAitOg42b4",
+    now: "2026-09-20T14:55:00.000Z",
+    autoHealed: true,
+  });
+  assert.match(fields.Output_Notes, /auto-healed a manual YouTube row/);
+  assert.equal(fields.Manual_Fallback_Required, false);
 });
