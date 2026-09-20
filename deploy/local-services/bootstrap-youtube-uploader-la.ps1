@@ -71,6 +71,8 @@ try {
 
 Write-Host ''
 Write-Host 'Next: authorize LA Shining (not Miami) with both scopes:' -ForegroundColor Yellow
+Write-Host '  IMPORTANT: stop youtube-uploader-la first so port 3341 is free for the OAuth callback.'
+Write-Host '  Invoke-OpsDashboardAction.ps1 -Action stop-one -Service youtube-uploader-la'
 Write-Host "  cd `"$RuntimeDir`""
 Write-Host '  node .\youtube-oauth-setup-both-scopes.js'
 Write-Host '  # paste printed GOOGLE_REFRESH_TOKEN into .env, restart youtube-uploader-la'
