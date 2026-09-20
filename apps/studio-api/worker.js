@@ -58,12 +58,16 @@ import {
   youtubePublishAssetKey,
 } from "./youtube-public-mp4.mjs";
 import {
+  YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA,
   YOUTUBE_STALE_QUOTA_POLL_HEAL_FORMULA,
   isYouTubePostUrl,
   manualPublishRequiredFields,
   youtubeCompleteEligibility,
+  youtubeLiveVideoIdFromFields,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
+  youtubeOembedUrl,
+  youtubeWatchUrl,
 } from "./youtube-manual-publish.mjs";
 import {
   AUTONOMOUS_DEFAULT_MUSIC_ASSET_ID,
@@ -376,7 +380,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.339-shared-vertical-render",
+          version: "0.10.340-yt-manual-live-heal",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -26270,9 +26274,56 @@ async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
 }
 
 
+async function studioCloseYoutubeManualWithLiveVideo(env, options = {}) {
+  const limit = Number(options.limit || 3);
+  let rows = [];
+  try {
+    rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, {
+      limit,
+      filterFormula: YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA,
+    });
+  } catch (error) {
+    console.warn("youtube manual live-video heal scan failed", error);
+    return [];
+  }
+  const results = [];
+  for (const row of rows) {
+    try {
+      const videoId = youtubeLiveVideoIdFromFields(row.fields || {});
+      if (!videoId) continue;
+      const liveUrl = youtubeWatchUrl(videoId) || String(f(row, "Platform_Post_URL") || "").trim();
+      const oembed = youtubeOembedUrl(liveUrl);
+      if (!oembed) continue;
+      const probe = await fetch(oembed, { method: "GET", redirect: "follow" });
+      if (!probe.ok) {
+        results.push({ id: row.id, stage: "manual_live_video_heal", skipped: true, reason: `oembed_${probe.status}` });
+        continue;
+      }
+      const fields = youtubeManualCloseFields({
+        url: liveUrl,
+        videoId,
+        now: new Date().toISOString(),
+        existingNotes: f(row, "Output_Notes"),
+        privacy: f(row, "YouTube_Privacy_Status"),
+        autoHealed: true,
+      });
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
+        method: "PATCH",
+        body: JSON.stringify({ fields, typecast: true }),
+      });
+      results.push({ id: row.id, stage: "manual_live_video_heal", video_id: videoId, ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("youtube manual live-video heal failed", row.id, error);
+      results.push({ id: row.id, stage: "manual_live_video_heal", error: message });
+    }
+  }
+  return results;
+}
+
 async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
   const limit = Number(options.limit || 3);
-  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}="Manual Publish Required",{Publish_Retry_Eligible}=1,OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))';
+  const formula = 'AND({Test_Run_ID}=BLANK(),{Platform}="YouTube",{Do_Not_Publish}=0,{Publish_Status}="Manual Publish Required",{Publish_Retry_Eligible}=1,{YouTube_Video_ID}="",OR({Publish_Next_Retry_At}=BLANK(),IS_BEFORE({Publish_Next_Retry_At},NOW())))';
   let rows = [];
   try {
     rows = await listRecords(env, env.AIRTABLE_OUTPUT_TABLE_ID, { limit, filterFormula: formula });
@@ -26283,9 +26334,8 @@ async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
   const results = [];
   for (const row of rows) {
     try {
-      const videoId = String(f(row, "YouTube_Video_ID") || "").trim();
       const fields = {
-        Publish_Status: videoId ? "Publishing" : "Ready to Publish",
+        Publish_Status: "Ready to Publish",
         Publish_Error_Stage: "",
         Publish_Error_Message: "",
         YouTube_Error_Message: "",
@@ -26294,9 +26344,9 @@ async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
         Publish_Retry_Eligible: true,
         Manual_Fallback_Required: false,
         Manual_Completion_Status: "Not Required",
-        YouTube_Upload_Status: videoId ? "Uploaded" : "Not Started",
-        YouTube_Stage: videoId ? "YT2" : "YT1",
-        YouTube_Upload_Job_ID: videoId ? String(f(row, "YouTube_Upload_Job_ID") || "") : "",
+        YouTube_Upload_Status: "Not Started",
+        YouTube_Stage: "YT1",
+        YouTube_Upload_Job_ID: "",
         YouTube_Package_Status: "Ready",
       };
       await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
@@ -26304,8 +26354,8 @@ async function studioRearmDueYoutubeManualPublishes(env, options = {}) {
         body: JSON.stringify({ fields, typecast: true }),
       });
       const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id);
-      const stage = videoId ? "yts2" : "ytp1";
-      const target = videoId ? "YTS2" : "YTP1";
+      const stage = "ytp1";
+      const target = "YTP1";
       const pulsed = await studioPulseYtRecord(env, stage, target, refreshed);
       results.push({
         id: row.id,
@@ -26337,6 +26387,11 @@ async function studioReconcileYoutubePublishes(env, options = {}) {
     results.push(...await studioParkStaleYoutubeQuotaPolls(env, { limit }));
   } catch (error) {
     console.warn("youtube stale quota-poll park failed", error);
+  }
+  try {
+    results.push(...await studioCloseYoutubeManualWithLiveVideo(env, { limit }));
+  } catch (error) {
+    console.warn("youtube manual live-video heal failed", error);
   }
   try {
     results.push(...await studioRearmDueYoutubeManualPublishes(env, { limit }));
