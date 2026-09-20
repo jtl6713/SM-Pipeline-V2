@@ -765,7 +765,15 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
         # looping on "Rendering 0/N" with no Remotion job.
         run_voiceover_p2(client, ctx)
     copy_voiceover_to_outputs(client, ctx.get("parent") or {}, ctx["outputs"])
+    from studio_produce.shared_render import (
+        build_shared_render_plan,
+        propagate_render_result,
+        sort_outputs_for_shared_render,
+    )
+
     test_run_id = field_str(ctx["request"], "Test_Run_ID") or None
+    shared_plan = build_shared_render_plan(ctx["outputs"])
+    ordered_outputs = sort_outputs_for_shared_render(ctx["outputs"], shared_plan)
     remaining = []
     transient = False
     started_r4 = False
@@ -773,9 +781,21 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
         field_str(row, "Render_Status").lower() == "rendering" and field_str(row, "Remotion_Job_ID")
         for row in ctx["outputs"]
     )
-    for output in ctx["outputs"]:
+    for output in ordered_outputs:
         fresh = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
+        meta = shared_plan.get(fresh["id"], {"role": "solo", "canonical_id": fresh["id"], "sibling_ids": []})
+        if meta.get("role") == "sibling":
+            canonical = client.get_record(PLATFORM_OUTPUTS_TABLE, meta["canonical_id"])
+            if _output_ready(fresh):
+                continue
+            if _output_ready(canonical):
+                propagate_render_result(client, canonical, [fresh["id"]])
+                continue
+            remaining.append(fresh["id"])
+            continue
         if _output_ready(fresh):
+            if meta.get("role") == "canonical" and meta.get("sibling_ids"):
+                propagate_render_result(client, fresh, meta["sibling_ids"])
             continue
         render_status = field_str(fresh, "Render_Status")
         native = is_native_photo(
@@ -807,6 +827,8 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 result = process_r5(output_record_id=fresh["id"], test_run_id=test_run_id)
                 harvested = client.get_record(PLATFORM_OUTPUTS_TABLE, fresh["id"])
                 if result.get("processed") and _output_ready(harvested):
+                    if meta.get("role") == "canonical" and meta.get("sibling_ids"):
+                        propagate_render_result(client, harvested, meta["sibling_ids"])
                     continue
                 if field_str(harvested, "Render_Status").lower() == "failed" and _is_delay_render_failure(harvested):
                     _requeue_failed_render(client, harvested["id"])

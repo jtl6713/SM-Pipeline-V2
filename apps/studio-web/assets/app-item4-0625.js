@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.347-unified-lower-third";
+  const BUILD_ID = "item4-0.6.348-shared-vertical-render";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12808,9 +12808,9 @@
         ? (phase6IsNativeStillPreview(output)
           ? "<strong>Final publish approval.</strong> Review the still, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."
           : (creativeSimpleVideoKind(output)
-            ? "<strong>Final publish approval.</strong> Play the render, change music volume under Audio if you want, then Approve for publishing."
+            ? "<strong>Final publish approval.</strong> Play the render. Music volume under Audio applies to every Reel, Short, and TikTok on this post."
             : "<strong>Final publish approval.</strong> Adjust music and voiceover if needed, play the render, then Approve for publishing. Instagram, Facebook, and YouTube will auto-publish publicly. TikTok will be saved as a draft."))
-        : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender. Play the new preview before approving."))))
+        : "<strong>Review mix.</strong> Adjust music and voiceover, then Apply mix &amp; rerender once — Studio renders one shared preview for every Reel, Short, and TikTok on this post."))))
       : titleLocked
         ? '<strong>Titles locked.</strong> The approved preview locked per-photo titles. Unlock titles to start a new version. Publishing stays locked.'
         : '<strong>Review mode.</strong> Edit, save, rerender, and approve the preview here. Approving locks per-photo titles. Publishing stays locked until the later publishing step.';
