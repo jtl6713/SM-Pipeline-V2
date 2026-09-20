@@ -66,6 +66,7 @@ import {
   youtubeLiveVideoIdFromFields,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
+  youtubeManualLiveVideoHealCandidate,
   youtubeOembedUrl,
   youtubeWatchUrl,
 } from "./youtube-manual-publish.mjs";
@@ -380,7 +381,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.340-yt-manual-live-heal",
+          version: "0.10.341-yt-manual-live-refresh",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -17137,8 +17138,14 @@ async function listOutputs(request, env, url, authorization, ctx = null) {
     sortDirection: "desc",
   });
   const healed = [];
+  let manualLiveHealBudget = 5;
   for (const record of records) {
-    healed.push(await phase6RestoreProductionReviewReady(env, record));
+    let current = await phase6RestoreProductionReviewReady(env, record);
+    if (manualLiveHealBudget > 0 && youtubeManualLiveVideoHealCandidate(current?.fields || current)) {
+      manualLiveHealBudget -= 1;
+      current = await healYoutubeManualWithLiveVideoRecord(env, current, { autoHealed: true });
+    }
+    healed.push(current);
   }
   const jobs = await loadStudioProductionJobsForOutputs(env, healed);
   if (ctx && typeof ctx.waitUntil === "function") {
@@ -26274,6 +26281,24 @@ async function studioParkStaleYoutubeQuotaPolls(env, options = {}) {
 }
 
 
+async function healYoutubeManualWithLiveVideoRecord(env, record, options = {}) {
+  const candidate = youtubeManualLiveVideoHealCandidate(record?.fields || record);
+  if (!candidate) return record;
+  const oembed = youtubeOembedUrl(candidate.liveUrl);
+  if (!oembed) return record;
+  try {
+    const probe = await fetch(oembed, { method: "GET", redirect: "follow" });
+    if (!probe.ok) return record;
+    return await patchYoutubeManualClose(env, record, {
+      url: candidate.liveUrl,
+      autoHealed: options.autoHealed !== false,
+    });
+  } catch (error) {
+    console.warn("youtube manual live-video heal failed", record?.id, error);
+    return record;
+  }
+}
+
 async function studioCloseYoutubeManualWithLiveVideo(env, options = {}) {
   const limit = Number(options.limit || 3);
   let rows = [];
@@ -26289,29 +26314,15 @@ async function studioCloseYoutubeManualWithLiveVideo(env, options = {}) {
   const results = [];
   for (const row of rows) {
     try {
-      const videoId = youtubeLiveVideoIdFromFields(row.fields || {});
-      if (!videoId) continue;
-      const liveUrl = youtubeWatchUrl(videoId) || String(f(row, "Platform_Post_URL") || "").trim();
-      const oembed = youtubeOembedUrl(liveUrl);
-      if (!oembed) continue;
-      const probe = await fetch(oembed, { method: "GET", redirect: "follow" });
-      if (!probe.ok) {
-        results.push({ id: row.id, stage: "manual_live_video_heal", skipped: true, reason: `oembed_${probe.status}` });
-        continue;
+      const healed = await healYoutubeManualWithLiveVideoRecord(env, row, { autoHealed: true });
+      if (healed?.id === row.id && String(f(healed, "Publish_Status") || "").toLowerCase().includes("published")) {
+        results.push({
+          id: row.id,
+          stage: "manual_live_video_heal",
+          video_id: youtubeLiveVideoIdFromFields(row.fields || {}),
+          ok: true,
+        });
       }
-      const fields = youtubeManualCloseFields({
-        url: liveUrl,
-        videoId,
-        now: new Date().toISOString(),
-        existingNotes: f(row, "Output_Notes"),
-        privacy: f(row, "YouTube_Privacy_Status"),
-        autoHealed: true,
-      });
-      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, row.id, {
-        method: "PATCH",
-        body: JSON.stringify({ fields, typecast: true }),
-      });
-      results.push({ id: row.id, stage: "manual_live_video_heal", video_id: videoId, ok: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("youtube manual live-video heal failed", row.id, error);
@@ -32179,13 +32190,14 @@ const YOUTUBE_COMPLETE_ERRORS = {
   already_published: "This YouTube output is already marked Published.",
 };
 
-async function patchYoutubeManualClose(env, record, { url } = {}) {
+async function patchYoutubeManualClose(env, record, { url, autoHealed = false } = {}) {
   const fields = youtubeManualCloseFields({
     url,
     videoId: f(record, "YouTube_Video_ID"),
     now: new Date().toISOString(),
     existingNotes: f(record, "Output_Notes"),
     privacy: f(record, "YouTube_Privacy_Status"),
+    autoHealed,
   });
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id, {
     method: "PATCH",

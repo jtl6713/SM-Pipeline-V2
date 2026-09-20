@@ -164,6 +164,27 @@ export function youtubeOembedUrl(watchUrl) {
   return `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
 }
 
+/** Manual YouTube row that already stores a live video id/url but is still parked manual. */
+export function youtubeManualLiveVideoHealCandidate(fields = {}) {
+  if (fieldText(fields, "Platform").toLowerCase() !== "youtube") return null;
+  if (fields.Do_Not_Publish === true || fields.Do_Not_Publish === 1) return null;
+  if (youtubeCompleteEligibility({
+    platform: "YouTube",
+    do_not_publish: fields.Do_Not_Publish,
+    publish_status: fieldText(fields, "Publish_Status"),
+    output_status: fieldText(fields, "Output_Status"),
+    youtube_stage: fieldText(fields, "YouTube_Stage"),
+  }) !== null) return null;
+  if (!youtubeManualActionRequired(fields)) return null;
+  const videoId = youtubeLiveVideoIdFromFields(fields);
+  if (!videoId) return null;
+  const liveUrl = youtubeWatchUrl(videoId)
+    || fieldText(fields, "Platform_Post_URL")
+    || fieldText(fields, "Manual_Published_URL");
+  if (!liveUrl) return null;
+  return { videoId, liveUrl };
+}
+
 export function youtubeCompleteEligibility(record = {}) {
   const platform = String(record.platform || "").trim().toLowerCase();
   if (platform !== "youtube") return "not_youtube";

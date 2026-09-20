@@ -498,3 +498,4 @@ TikTok inbox lead window Worker deploy: 2026-09-20 — Hold TikTok inbox drafts 
 Unified lower-third burn-in Worker deploy: 2026-09-20 — IG Reel, FB Reel, YT Short, and TikTok Video share TikTok-style lower-third burned-in caption placement on 9:16. Worker 0.10.338-unified-lower-third.
 Shared vertical short render Worker deploy: 2026-09-20 — One Remotion render propagates to IG/FB/YT/TikTok siblings; review audio mix syncs across all four. Worker 0.10.339-shared-vertical-render.
 YouTube manual live-video heal Worker deploy: 2026-09-20 — Cron auto-closes manual YouTube rows when oEmbed confirms the stored video id is live; stop re-pulsing YTS2 on rows that already uploaded. Worker 0.10.340-yt-manual-live-heal.
+YouTube manual live refresh heal Worker deploy: 2026-09-20 — Pipeline refresh also closes manual YouTube rows when the stored URL/video id already resolves live. Worker 0.10.341-yt-manual-live-refresh.
