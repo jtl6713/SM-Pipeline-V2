@@ -1117,6 +1117,12 @@ input, select, textarea, button {
 #outputsList .pipeline-group-chevron{display:inline-flex;width:1em;flex:0 0 auto;opacity:.7}
 #outputsList .pipeline-group-title{font-size:.82rem}
 #outputsList .pipeline-output-group.is-collapsed tr:not(.pipeline-group-row){display:none}
+#outputsList .pipeline-archived-section-row td{background:#e8eceb;color:var(--ink-soft);font-weight:800;padding:10px 8px;border-top:2px solid var(--line);letter-spacing:.02em}
+#outputsList .pipeline-archived-section-toggle{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:inherit;font:inherit;font-weight:800;text-align:left;padding:4px;margin:0;cursor:pointer;border-radius:8px}
+#outputsList .pipeline-archived-section-toggle:hover,#outputsList .pipeline-archived-section-toggle:focus-visible{background:var(--teal-soft);outline:0;color:var(--teal-dark)}
+#outputsList .pipeline-archived-section-title{font-size:.84rem;text-transform:uppercase;letter-spacing:.06em}
+#outputsList .pipeline-archived-section-meta{font-size:.78rem;font-weight:600;opacity:.72}
+#outputsList .pipeline-archived-group .pipeline-group-row td{background:#eef2f1;color:var(--ink-soft)}
 @media(max-width:760px){
   #outputsList .data-table thead{display:block;border-bottom:1px solid var(--line)}
   #outputsList .data-table thead tr{display:flex;flex-wrap:wrap;gap:4px;padding:8px 12px}
