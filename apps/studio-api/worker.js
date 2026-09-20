@@ -376,7 +376,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.337-tiktok-inbox-lead",
+          version: "0.10.338-unified-lower-third",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -4538,14 +4538,22 @@ async function studioRepairLeftoverNativeLettering(env, po, context) {
   });
 }
 
-function item4PhotoOverlayFromCaption(text, { tiktok916 = false } = {}) {
+function studioBurnedInOverlayPosition(aspectRatio = "9:16") {
+  return String(aspectRatio || "").replace("x", ":") === "9:16" ? "lower-third" : "bottom";
+}
+
+function phase6DefaultOverlayPosition(aspectRatio = "") {
+  return String(aspectRatio || "").replace("x", ":") === "9:16" ? "lower-third" : "center";
+}
+
+function item4PhotoOverlayFromCaption(text, { aspectRatio = "9:16" } = {}) {
   const overlayText = String(text || "").trim();
   if (!overlayText) return null;
   return {
     enabled: true,
     text: overlayText,
     role: "caption",
-    position: tiktok916 ? "lower-third" : "bottom",
+    position: studioBurnedInOverlayPosition(aspectRatio),
     size: 52,
     stylePreset: "Lower Third / Minimal",
     animation: "fade",
@@ -13271,7 +13279,6 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
   const clips = [];
 
   const captions = item4OverlayCaptionBySourceId(requestRecord);
-  const tiktok916 = platform === "TikTok" && ratio === "9:16";
   for (const { source, variant, url, mediaAssetId, driveId, looksVideo } of eligibleSources) {
     const frames = baseFrames + (remainder > 0 ? 1 : 0);
     if (remainder > 0) remainder -= 1;
@@ -13283,7 +13290,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
         || String(source?.caption || variant?.caption || "").trim()
         || String(f(parentContentItem, "Content_Title") || "").trim()
     );
-    const overlay = item4PhotoOverlayFromCaption(overlayText, { tiktok916 });
+    const overlay = item4PhotoOverlayFromCaption(overlayText, { aspectRatio: ratio });
     clips.push({
       id: `studio-source-${clips.length + 1}`,
       order: Number(source?.order || clips.length + 1),
@@ -20345,7 +20352,6 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
     "1:1": phase6VariantForRatio(slide, "1:1"),
     "16:9": null,
   };
-  const tiktok916 = String(platform || "") === "TikTok" && String(targetRatio || "") === "9:16";
   return {
     id: slide.id,
     name: f(slide, "Slide Name"),
@@ -20363,7 +20369,7 @@ function mapPhase6CreativeSlide(slide, targetRatio = null, defaultVoiceoverVolum
       text: phase6Text(overlay.text, 1000),
       style_preset: phase6Text(overlay.stylePreset || "Chicago Editorial", 80),
       role: phase6Text(overlay.role || "overlay", 60),
-      position: phase6Text(overlay.position || (tiktok916 ? "lower-third" : "center"), 60),
+      position: phase6Text(overlay.position || phase6DefaultOverlayPosition(targetRatio), 60),
       size: phase6Number(overlay.size, 64),
       version: Math.max(1, Math.round(phase6Number(overlay.version, 1))),
       eyebrow: phase6Text(overlay.eyebrow, 250),
@@ -20434,7 +20440,7 @@ function phase6VirtualSlidesFromSelectedAssets(outputRecord) {
         text: overlayText,
         style_preset: String(clip.overlay?.stylePreset || clip.overlay?.style_preset || "Lower Third / Minimal"),
         role: String(clip.overlay?.role || "caption"),
-        position: String(clip.overlay?.position || (String(f(outputRecord, "Platform") || "") === "TikTok" && ratio === "9:16" ? "lower-third" : "bottom")),
+        position: String(clip.overlay?.position || studioBurnedInOverlayPosition(ratio)),
         size: Number(clip.overlay?.size || 52),
         version: 1,
         eyebrow: "",
@@ -21065,7 +21071,7 @@ async function updateOutputCreative(request, env, url, authorization) {
   const linkedIds = new Set(Array.isArray(f(existingOutput, "Carousel Slides")) ? f(existingOutput, "Carousel Slides") : []);
   const slideInputs = Array.isArray(payload?.slides) ? payload.slides.slice(0, 40) : [];
   const existingSlides = new Map();
-  const tiktok916 = String(f(existingOutput, "Platform") || "") === "TikTok" && String(f(existingOutput, "Aspect_Ratio") || "") === "9:16";
+  const outputAspectRatio = String(f(existingOutput, "Aspect_Ratio") || "").trim();
   for (const slideInput of slideInputs) {
     const slideId = String(slideInput?.id || "").trim();
     if (!linkedIds.has(slideId)) throw new HttpError(400, `Slide ${slideId || "(blank)"} is not linked to this output`);
@@ -21099,13 +21105,13 @@ async function updateOutputCreative(request, env, url, authorization) {
     const previousOverlay = previousDirective.overlay && typeof previousDirective.overlay === "object" ? previousDirective.overlay : {};
     const oldOverlayForIdentity = {
       ...previousOverlay,
-      position: previousOverlay.position || (tiktok916 ? "lower-third" : "center"),
+      position: previousOverlay.position || phase6DefaultOverlayPosition(outputAspectRatio),
       caption: previousOverlay.caption || previousOverlay.subtitle,
       subtitle: previousOverlay.subtitle || previousOverlay.caption,
     };
     const newOverlayForIdentity = {
       ...directive.overlay,
-      position: directive.overlay?.position || (tiktok916 ? "lower-third" : "center"),
+      position: directive.overlay?.position || phase6DefaultOverlayPosition(outputAspectRatio),
     };
     if (phase6TitleEditIdentity(oldOverlayForIdentity, previousDirective.durationSeconds) !== phase6TitleEditIdentity(newOverlayForIdentity, directive.durationSeconds)) {
       overlayChanged = true;
@@ -21311,7 +21317,7 @@ function phase6RenderOverlayFromSlide(slide, options = {}) {
   const overlay = {
     enabled,
     text,
-    position: phase6Text(o.position || (tiktok ? "lower-third" : "center"), 60),
+    position: phase6Text(o.position || phase6DefaultOverlayPosition(options.ratio), 60),
     size: Math.round(phase6Clamp(o.size, 20, 140, 64)),
     stylePreset: phase6Text(o.style_preset || "Chicago Editorial", 80),
     animation: phase6Text(o.animation || "fade", 60),

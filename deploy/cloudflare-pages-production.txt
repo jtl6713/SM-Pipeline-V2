@@ -543,3 +543,4 @@ Lower background music Pages deploy: 2026-09-20 — Studio audio controls defaul
 Manage Idea mixed media Pages deploy: 2026-09-20 — Existing-library picker suggests, selects, and attaches both photos and Raw Footage clips. UI 0.6.344-idea-mixed-media.
 Vertical short output defaults Pages deploy: 2026-09-20 — Vertical Short Video selects only Reel and Story for Instagram and Facebook; changing format clears stale photo/carousel defaults. UI 0.6.345-vertical-reel-story.
 Finished-video resilient upload Pages deploy: 2026-09-20 — Upload starts before heavy workspace refreshes, every MP4/MOV uses resumable parts, exact errors stay visible, and Optional details begins with Caption. UI 0.6.346-finished-upload-options.
+Unified lower-third burn-in Pages deploy: 2026-09-20 — Creative editor and preview default to TikTok-style lower-third overlay on 9:16 for all platforms. UI 0.6.347-unified-lower-third.

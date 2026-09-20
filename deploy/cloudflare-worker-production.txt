@@ -495,3 +495,4 @@ Lower background music Worker deploy: 2026-09-20 — New Studio renders default 
 Manage Idea mixed media Worker deploy: 2026-09-20 — Idea suggestions include eligible Raw Footage and library attachment accepts mixed photos and clips. Worker 0.10.335-idea-mixed-media.
 Vertical short output defaults Worker deploy: 2026-09-20 — Photo- and clip-origin Vertical Short Video plans use Instagram Reel + Story and Facebook Reel + Story, never Facebook Slideshow Reel. Worker 0.10.336-vertical-reel-story.
 TikTok inbox lead window Worker deploy: 2026-09-20 — Hold TikTok inbox drafts until ~15 minutes before Scheduled_Post_Date, then send draft + email. Worker 0.10.337-tiktok-inbox-lead.
+Unified lower-third burn-in Worker deploy: 2026-09-20 — IG Reel, FB Reel, YT Short, and TikTok Video share TikTok-style lower-third burned-in caption placement on 9:16. Worker 0.10.338-unified-lower-third.

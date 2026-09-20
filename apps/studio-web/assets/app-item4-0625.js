@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.346-finished-upload-options";
+  const BUILD_ID = "item4-0.6.347-unified-lower-third";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12285,7 +12285,7 @@
   }
 
   function phase6DefaultOverlayPosition() {
-    return String(activeCreativeOutput?.platform || "") === "TikTok" && String(activeCreativeOutput?.aspect_ratio || "") === "9:16"
+    return String(activeCreativeOutput?.aspect_ratio || "").replace("x", ":") === "9:16"
       ? "lower-third"
       : "center";
   }
@@ -12350,7 +12350,6 @@
     }
 
     const targetRatio = String(activeCreativeOutput?.aspect_ratio || "4:5");
-    const tiktok916 = String(activeCreativeOutput?.platform || "") === "TikTok" && targetRatio === "9:16";
     const titleLocked = Boolean(creativeTitleLock?.locked);
     const titleLockAttr = titleLocked ? "disabled" : "";
     const styles = creativeOptions.style_presets || [];
@@ -12364,7 +12363,7 @@
 
     target.innerHTML = creativeSlides.map((slide, index) => {
       const overlay = slide.overlay || {};
-      const overlayPosition = overlay.position || (tiktok916 ? "lower-third" : "center");
+      const overlayPosition = overlay.position || phase6DefaultOverlayPosition();
       const overlayCaption = overlay.caption || overlay.subtitle || "";
       const overlayVersion = Number(overlay.version || slide.title_render_input?.version || 1);
       const voiceover = slide.voiceover || {};
