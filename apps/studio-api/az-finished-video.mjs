@@ -9,6 +9,72 @@ export const AZ_OVERRIDES = Object.freeze({
   YouTube: "Short",
 });
 export const AZ_EXTRAS = Object.freeze(["Instagram::Story", "Facebook::Story"]);
+export const AZ_EXPECTED_OUTPUT_COUNT = AZ_PLATFORMS.length + AZ_EXTRAS.length;
+export const FINISHED_STORY_TEASER_SECONDS = 10;
+
+export function outputPairKey(platform, outputType) {
+  return `${String(platform || "").trim()}::${String(outputType || "").trim()}`;
+}
+
+export function uniquePlanItems(items) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items || []) {
+    const platform = String(item?.platform || "").trim();
+    const outputType = String(item?.output_type || item?.outputType || "").trim();
+    if (!platform || !outputType) continue;
+    const key = outputPairKey(platform, outputType);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...item, platform, output_type: outputType });
+  }
+  return out;
+}
+
+export function pickDuplicateOutputKeepers(rows) {
+  const groups = new Map();
+  for (const row of rows || []) {
+    const key = outputPairKey(row?.platform, row?.output_type);
+    if (!key || key === "::") continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const keepers = [];
+  const extras = [];
+  for (const group of groups.values()) {
+    const sorted = [...group].sort((a, b) => {
+      const aPo = a?.has_platform_output ? 0 : 1;
+      const bPo = b?.has_platform_output ? 0 : 1;
+      if (aPo !== bPo) return aPo - bPo;
+      const orderA = Number(a?.output_order);
+      const orderB = Number(b?.output_order);
+      const ao = Number.isFinite(orderA) && orderA > 0 ? orderA : 9999;
+      const bo = Number.isFinite(orderB) && orderB > 0 ? orderB : 9999;
+      if (ao !== bo) return ao - bo;
+      return String(a?.created_at || a?.id || "").localeCompare(String(b?.created_at || b?.id || ""));
+    });
+    keepers.push(sorted[0]);
+    extras.push(...sorted.slice(1));
+  }
+  return { keepers, extras };
+}
+
+export function finishedCompanionStoryFields() {
+  return {
+    Voiceover_Mode_Override: "No",
+    Background_Music_Mode_Override: "No",
+    Video_Duration_Seconds_Override: FINISHED_STORY_TEASER_SECONDS,
+    Video_Clip_Count_Mode_Override: "Exact",
+    Video_Clip_Count_Exact_Override: 1,
+  };
+}
+
+export function finishedStoryTeaserClipFlags() {
+  return {
+    keepSourceAudio: true,
+    muted: false,
+  };
+}
 
 export function azOriginStamp({ caption = "ai", title = "" } = {}) {
   void title;

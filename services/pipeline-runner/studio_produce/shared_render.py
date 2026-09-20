@@ -16,6 +16,11 @@ CANONICAL_PLATFORM_ORDER = ("Instagram", "Facebook", "YouTube", "TikTok")
 
 
 def is_shared_render_eligible(output: dict[str, Any]) -> bool:
+    notes = field_str(output, "Output_Notes").lower()
+    if "ez-input=finished-video" in notes or "finished passthrough" in notes:
+        return False
+    if field_str(output, "Render_Status") == "Rendered" and not field_str(output, "Composition_ID"):
+        return False
     ratio = field_str(output, "Aspect_Ratio").replace("x", ":")
     if ratio != "9:16":
         return False
