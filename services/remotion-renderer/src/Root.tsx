@@ -84,7 +84,7 @@ export const RemotionRoot: React.FC = () => {
                     filename: 'test-render.mp4',
                     titleText: 'REMOTE ASSET DOWNLOAD TEST',
                     brandText: 'CHICAGOSHINING',
-                    musicVolume: 0.12,
+                    musicVolume: 0.072,
                     voiceoverVolume: 1,
                     durationInFrames: 900,
                     fps: 30,

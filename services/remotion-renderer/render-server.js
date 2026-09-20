@@ -19,7 +19,7 @@ const DEFAULT_MUSIC_END_FADE_SECONDS = 0.5;
 const PIPELINE_RUNNER_INTERNAL_URL = String(
     process.env.PIPELINE_RUNNER_INTERNAL_URL || 'http://127.0.0.1:3350'
 ).replace(/\/$/, '');
-const SERVICE_VERSION = '2026-09-05-contain-stills';
+const SERVICE_VERSION = '2026-09-20-music-60pct';
 const PROJECT_DIR = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_DIR, 'public');
 const OUT_DIR = path.join(PROJECT_DIR, 'out');
@@ -793,7 +793,7 @@ async function buildRewrittenProps({ body, jobId, job }) {
         ? clamp(
             toFiniteNumber(
                 rewrittenMusic.volume,
-                toFiniteNumber(body.musicVolume, 0.12)
+                toFiniteNumber(body.musicVolume, 0.072)
             ),
             0,
             1

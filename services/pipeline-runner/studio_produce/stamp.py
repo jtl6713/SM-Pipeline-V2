@@ -770,7 +770,8 @@ def stamp_fields(
         ) else None,
         "Music_URL": package.get("effective", {}).get("music_url") or None,
         "Preferred_Music_URL": package.get("effective", {}).get("music_url") or None,
-        "Music_Volume": 1.0 if package.get("effective", {}).get("music_url") else 0,
+        # Keep background music below narration. This is 60% of the prior 1.0 mix.
+        "Music_Volume": 0.6 if package.get("effective", {}).get("music_url") else 0,
         "Music_Start_Seconds": package.get("effective", {}).get("music_start_seconds") or 0,
         "Timing_Status": (
             "Pending"

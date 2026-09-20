@@ -58,9 +58,9 @@ export const defaultV3Props: TestRemotionV3Props = {
 	filename: 'v3-default-test.mp4',
 	titleText: 'DYNAMIC ASSET URL TEST',
 	brandText: 'CHICAGOSHINING',
-	musicVolume: 0.12,
+	musicVolume: 0.072,
 	voiceoverVolume: 1,
-	postVoiceoverMusicVolume: 0.17,
+	postVoiceoverMusicVolume: 0.102,
 	musicBoostFadeFrames: 15,
 	musicEndFadeFrames: 15,
 	clips: [
@@ -279,7 +279,7 @@ export const TestRemotionV3: React.FC<TestRemotionV3Props> = (props) => {
 		props.music?.volume ??
 		props.musicVolume ??
 		defaultV3Props.music?.volume ??
-		0.12;
+		0.072;
 
 	const voiceoverSrc = props.voiceover?.src || props.voiceover?.url;
 	const voiceoverVolume =

@@ -1286,7 +1286,7 @@ React.FC<ChicagoShiningPhotoSequenceProps> = ({
 
   const musicSource = resolveSource(music?.src ?? music?.url);
   const musicEnabled = music?.enabled !== false && Boolean(musicSource);
-  const baseMusicVolume = clampNumber(music?.volume, 0, 2, 0.07);
+  const baseMusicVolume = clampNumber(music?.volume, 0, 2, 0.042);
   const duckingMultiplier = clampNumber(
     music?.duckingMultiplier,
     0,

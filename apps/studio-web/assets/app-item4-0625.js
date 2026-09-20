@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.342-unused-status";
+  const BUILD_ID = "item4-0.6.343-music-60pct";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -12528,8 +12528,8 @@
     $("creativeDefaultVoice").closest(".voice-select-wrap")?.insertAdjacentHTML("beforeend", `<div class="voice-catalog-note">${escapeHtml(voiceNote)}</div>`);
 
     const voiceover = Math.max(0, Math.min(125, Number(output.voiceover?.volume ?? 1) * 100));
-    const normal = phase6Percent(output.music?.normal_volume, 100);
-    const ducked = phase6Percent(output.music?.ducked_volume, 8);
+    const normal = phase6Percent(output.music?.normal_volume, 60);
+    const ducked = phase6Percent(output.music?.ducked_volume, 5.04);
     $("creativeVoiceoverVolume").value = phase6FormatPercent(voiceover);
     $("creativeVoiceoverVolumeRange").value = phase6FormatPercent(voiceover);
     $("creativeMusicNormal").value = normal;

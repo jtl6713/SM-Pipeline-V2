@@ -128,3 +128,15 @@ def test_r4_p020_merges_parent_voiceover():
     assert route == "p020_manifest"
     assert payload["voiceover"]["url"] == "https://example.com/parent-vo.mp3"
     assert payload["voiceoverUrl"] == "https://example.com/parent-vo.mp3"
+
+
+def test_r4_p020_uses_reduced_ducked_music_default():
+    output = _photo_output(
+        Creative_Render_Manifest_JSON="{}",
+        Music_URL="https://example.com/music.mp3",
+        Music_Volume=0.6,
+    )
+    route, payload = choose_render_request(output, None, default_music=0.21, default_voice=1.0)
+    assert route == "p020_manifest"
+    assert payload["music"]["volume"] == 0.6
+    assert payload["music"]["duckingMultiplier"] == 0.084
