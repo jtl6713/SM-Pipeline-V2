@@ -12,6 +12,7 @@ import {
   youtubeLooksLikeQuotaOrWrapped403,
   youtubeManualActionRequired,
   youtubeManualCloseFields,
+  youtubeManualLiveVideoHealCandidate,
   youtubeNeedsUrlEntry,
   youtubeOembedUrl,
   youtubeWatchUrl,
@@ -153,6 +154,34 @@ test("live video heal resolves ids from stored fields and builds oEmbed probe UR
   const watch = youtubeWatchUrl("nYAitOg42b4");
   assert.match(youtubeOembedUrl(watch), /nYAitOg42b4/);
   assert.match(YOUTUBE_MANUAL_LIVE_VIDEO_HEAL_FORMULA, /Manual Publish Required/);
+});
+
+test("manual live heal candidate uses stored video id without a new URL paste", () => {
+  const candidate = youtubeManualLiveVideoHealCandidate({
+    Platform: "YouTube",
+    Do_Not_Publish: false,
+    Publish_Status: "Manual Publish Required",
+    Output_Status: "Approved for Publishing",
+    YouTube_Stage: "YT2",
+    Manual_Fallback_Required: true,
+    Manual_Completion_Status: "Required",
+    YouTube_Video_ID: "nYAitOg42b4",
+    Platform_Post_URL: "https://www.youtube.com/watch?v=nYAitOg42b4",
+  });
+  assert.deepEqual(candidate, {
+    videoId: "nYAitOg42b4",
+    liveUrl: "https://www.youtube.com/watch?v=nYAitOg42b4",
+  });
+  assert.equal(
+    youtubeManualLiveVideoHealCandidate({
+      Platform: "YouTube",
+      Publish_Status: "Published",
+      Output_Status: "Published",
+      YouTube_Stage: "Complete",
+      YouTube_Video_ID: "nYAitOg42b4",
+    }),
+    null
+  );
 });
 
 test("auto-healed close notes explain cron verification", () => {
