@@ -13,8 +13,8 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(html, /id="promoteTimingHint"/);
   assert.match(html, /id="promoteVoiceoverTail"/);
   assert.match(html, /id="promoteVideoDuration"/);
-  assert.match(html, /UI build 0\.6\.344/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.344-idea-mixed-media/);
+  assert.match(html, /UI build 0\.6\.345/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.345-vertical-reel-story/);
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -24,11 +24,18 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(config, /Video duration still wins/);
   assert.match(config, /prVoiceoverDuration: "Spoken narration length/);
   assert.match(config, /Help → Ideas has a graphic/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.344-idea-mixed-media"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.345-vertical-reel-story"/);
   assert.match(app, /function syncPromoteTimingHint/);
   assert.match(app, /Video duration is the hard cap/);
   assert.match(app, /library_asset_ids/);
   assert.match(app, /restoreIdeaLibraryPickerAfterDrawerUpdate/);
+});
+
+test("Vertical Short Video defaults Instagram and Facebook to Reel plus Story", () => {
+  assert.match(app, /"Vertical Short Video": \{Instagram:"Reel", Facebook:"Reel"/);
+  assert.match(app, /verticalShort && \["Instagram", "Facebook"\]\.includes\(platform\) && primary === "Reel"/);
+  assert.match(app, /defaults\.push\("Story"\)/);
+  assert.match(app, /applyDefaultOutputsForPlatform\(input\.value, \{ replace: true \}\)/);
 });
 
 test("review audio defaults use sixty percent of the previous mix", () => {

@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.344-idea-mixed-media";
+  const BUILD_ID = "item4-0.6.345-vertical-reel-story";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -9113,6 +9113,10 @@
   }
 
   function recommendedOutputFor(platform) {
+    const contentType = String($("prContentType")?.value || "").trim();
+    if (contentType === "Vertical Short Video") {
+      return OUTPUT_DEFAULTS_BY_CONTENT_TYPE[contentType]?.[platform] || "";
+    }
     const wizardCount = ezPlanApi()?.ezWizardPhotoCount?.(ezWizardPending || ezWizardAnswers) || 0;
     const count = item4Workspace?.assets?.length || (usingEzPlatforms() ? ezStagedFiles.length : 0) || wizardCount;
     if (count > 0 || usingEzPlatforms()) {
@@ -9124,8 +9128,28 @@
       });
       if (planned?.overrides?.[platform]) return planned.overrides[platform];
     }
-    const contentType = $("prContentType")?.value || "";
     return OUTPUT_DEFAULTS_BY_CONTENT_TYPE[contentType]?.[platform] || "";
+  }
+
+  function defaultOutputTypesForPlatform(platform) {
+    const primary = recommendedOutputFor(platform);
+    if (!primary) return [];
+    const contentType = String($("prContentType")?.value || "").trim();
+    const verticalShort = contentType === "Vertical Short Video" || currentEzPackageId() === "video";
+    const defaults = [primary];
+    if (verticalShort && ["Instagram", "Facebook"].includes(platform) && primary === "Reel") {
+      defaults.push("Story");
+    }
+    return defaults;
+  }
+
+  function applyDefaultOutputsForPlatform(platform, { replace = false } = {}) {
+    const platformInputs = outputMatrixInputs().filter((input) => input.dataset.platform === platform);
+    if (replace) platformInputs.forEach((input) => { input.checked = false; });
+    for (const outputType of defaultOutputTypesForPlatform(platform)) {
+      const input = platformInputs.find((candidate) => candidate.value === outputType);
+      if (input) input.checked = true;
+    }
   }
 
   function seedOutputMatrixFromLegacyPlatforms(record) {
@@ -9133,9 +9157,7 @@
     if ($("prOutputCards")) $("prOutputCards").innerHTML = "";
     if ($("prOutputOverrideEditor")) $("prOutputOverrideEditor").hidden = true;
     for (const platform of (Array.isArray(record?.platforms) ? record.platforms : [])) {
-      const recommended = recommendedOutputFor(platform);
-      const input = outputMatrixInputs().find(x => x.dataset.platform === platform && x.value === recommended);
-      if (input) input.checked = true;
+      applyDefaultOutputsForPlatform(platform);
     }
     updateOutputMatrixSummary();
   }
@@ -9177,7 +9199,8 @@
 
   function defaultOutputsForPlatforms(platforms) {
     return Array.from(new Set(Array.isArray(platforms) ? platforms : []))
-      .map(platform => ({ platform, output_type: recommendedOutputFor(platform), enabled: true }))
+      .flatMap(platform => defaultOutputTypesForPlatform(platform)
+        .map(output_type => ({ platform, output_type, enabled: true })))
       .filter(row => row.output_type);
   }
 
@@ -10259,8 +10282,7 @@
       if (!input.checked) {
         platformInputs.forEach(x => { x.checked = false; });
       } else if (!platformInputs.some(x => x.checked)) {
-        const target = platformInputs.find(x => x.value === recommendedOutputFor(input.value));
-        if (target) target.checked = true;
+        applyDefaultOutputsForPlatform(input.value);
       }
       updateOutputMatrixSummary();
     });
@@ -10269,11 +10291,7 @@
   $("prContentType")?.addEventListener("change", () => {
     document.querySelectorAll('input[name="prPlatform"]:checked').forEach(input => {
       if (!["Instagram","Facebook","TikTok","YouTube"].includes(input.value)) return;
-      const platformInputs = outputMatrixInputs().filter(x => x.dataset.platform === input.value);
-      if (!platformInputs.some(x => x.checked)) {
-        const target = platformInputs.find(x => x.value === recommendedOutputFor(input.value));
-        if (target) target.checked = true;
-      }
+      applyDefaultOutputsForPlatform(input.value, { replace: true });
     });
     updateOutputMatrixSummary();
   });

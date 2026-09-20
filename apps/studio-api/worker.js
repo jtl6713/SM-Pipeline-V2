@@ -370,7 +370,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.335-idea-mixed-media",
+          version: "0.10.336-vertical-reel-story",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -6704,9 +6704,7 @@ function item4SlideImageUrl(row) {
 function item4PackageOverrides(packageId, photoCount, { hasVideo = false } = {}) {
   const pkg = String(packageId || "").trim().toLowerCase();
   if (pkg === "video") {
-    return hasVideo
-      ? { ...ITEM4_VIDEO_DEFAULTS }
-      : { Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" };
+    return { ...ITEM4_VIDEO_DEFAULTS };
   }
   if (pkg === "slides") {
     if (hasVideo) return { ...ITEM4_VIDEO_DEFAULTS };
@@ -6724,7 +6722,7 @@ function item4DefaultOutputType(platform, photoCount, { hasVideo = false, packag
   if (hasVideo) return ITEM4_VIDEO_DEFAULTS[platform] || null;
   const n = Math.max(0, Number(photoCount) || 0);
   const single = Object.freeze({ Instagram: "Single Image", Facebook: "Single Image", TikTok: "Single Photo" });
-  const multiple = Object.freeze({ Instagram: "Reel", Facebook: "Slideshow Reel", TikTok: "Video Draft", YouTube: "Short" });
+  const multiple = Object.freeze({ Instagram: "Reel", Facebook: "Reel", TikTok: "Video Draft", YouTube: "Short" });
   const map = n <= 1 ? single : multiple;
   return map[platform] || null;
 }
@@ -7031,8 +7029,9 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
   const keepAiMode = String(f(record, "Carousel_Image_Mode") || "").trim() === "Make AI Generated";
   const keepExact = keepAiMode && Number(f(record, "Carousel_Slide_Count_Exact") || 0) >= photoCount;
   const maxCount=Math.min(15,Math.max(1,photoCount));
+  const requestedMasterContentType = String(f(record, "Master_Content_Type") || "").trim();
   record=await item4UpdateRequestState(env,recordId,{
-    Master_Content_Type:photoCount<=1?"Feed Post":"Photo Set", Target_Platforms:items.map(item=>item.platform),
+    Master_Content_Type:requestedMasterContentType || (photoCount<=1?"Feed Post":"Photo Set"), Target_Platforms:items.map(item=>item.platform),
     Carousel_Image_Mode: keepAiMode ? "Make AI Generated" : "Manual Upload",
     Carousel_Slide_Count_Mode:"Exact",
     Carousel_Slide_Count_Exact: keepExact ? Number(f(record, "Carousel_Slide_Count_Exact") || photoCount) : photoCount,

@@ -45,7 +45,7 @@ export const EZ_PHOTO_PASSES = Object.freeze({
   }),
   video: Object.freeze({
     Instagram: "Reel",
-    Facebook: "Slideshow Reel",
+    Facebook: "Reel",
     TikTok: "Video Draft",
     YouTube: "Short",
   }),
