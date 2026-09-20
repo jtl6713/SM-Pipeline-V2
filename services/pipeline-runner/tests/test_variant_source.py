@@ -4,6 +4,8 @@ from PIL import Image
 
 from integrations.variant_service import (
     looks_like_heic_bytes,
+    pillow_image_decodable,
+    pillow_image_format,
     prepare_variant_source,
     rasterize_still_bytes,
 )
@@ -63,3 +65,23 @@ def test_rasterize_heic_does_not_prefer_tiny_drive_thumbnail(monkeypatch):
     )
     out = rasterize_still_bytes(_heic_header(), drive=object(), drive_id="drive1", ext="heic")
     assert out == jpeg
+
+
+def test_truncated_jpeg_uses_complete_drive_thumbnail(monkeypatch):
+    truncated = _jpeg(640, 960)[:-7]
+    thumbnail = _jpeg(320, 480)
+    assert pillow_image_format(truncated) == "JPEG"
+    assert pillow_image_decodable(truncated) is False
+    monkeypatch.setattr(
+        "integrations.variant_service._drive_jpeg_thumbnail",
+        lambda *_args, **_kwargs: thumbnail,
+    )
+
+    out = rasterize_still_bytes(
+        truncated,
+        drive=object(),
+        drive_id="drive-truncated",
+        ext="jpg",
+    )
+
+    assert out == thumbnail

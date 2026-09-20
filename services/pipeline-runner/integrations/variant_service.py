@@ -54,6 +54,16 @@ def pillow_image_format(image_bytes: bytes) -> str | None:
         return None
 
 
+def pillow_image_decodable(image_bytes: bytes) -> bool:
+    """Return true only when Pillow can read the complete pixel payload."""
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image.load()
+        return True
+    except Exception:
+        return False
+
+
 def _extension_for_decode(image_bytes: bytes, ext: str = "") -> str:
     cleaned = str(ext or "").strip().lower().lstrip(".")
     if cleaned:
@@ -80,7 +90,7 @@ def _drive_jpeg_thumbnail(drive: Any, drive_id: str) -> bytes | None:
         return None
     if not grabbed or not grabbed[0]:
         return None
-    return grabbed[0] if pillow_image_format(grabbed[0]) else None
+    return grabbed[0] if pillow_image_decodable(grabbed[0]) else None
 
 
 def ffmpeg_heic_still(image_bytes: bytes, ext: str = "heic") -> bytes | None:
@@ -134,13 +144,13 @@ def rasterize_still_bytes(
     ext_l = _extension_for_decode(image_bytes, ext)
     if looks_like_heic_bytes(image_bytes) or ext_l in {"heic", "heif"}:
         converted = ffmpeg_heic_still(image_bytes, ext_l)
-        if converted and pillow_image_format(converted):
+        if converted and pillow_image_decodable(converted):
             return converted
         thumb = _drive_jpeg_thumbnail(drive, drive_id)
         if thumb:
             return thumb
         raise RuntimeError(UNREADABLE_STILL_ERROR)
-    if pillow_image_format(image_bytes):
+    if pillow_image_decodable(image_bytes):
         return image_bytes
     thumb = _drive_jpeg_thumbnail(drive, drive_id)
     if thumb:
@@ -148,7 +158,7 @@ def rasterize_still_bytes(
     from item4.clip_poster import ffmpeg_poster_frame
 
     converted = ffmpeg_poster_frame(image_bytes, ext_l)
-    if converted and pillow_image_format(converted):
+    if converted and pillow_image_decodable(converted):
         return converted
     raise RuntimeError(UNREADABLE_STILL_ERROR)
 
