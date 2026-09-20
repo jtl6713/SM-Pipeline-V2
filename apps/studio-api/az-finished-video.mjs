@@ -11,9 +11,30 @@ export const AZ_OVERRIDES = Object.freeze({
 export const AZ_EXTRAS = Object.freeze(["Instagram::Story", "Facebook::Story"]);
 export const AZ_EXPECTED_OUTPUT_COUNT = AZ_PLATFORMS.length + AZ_EXTRAS.length;
 export const FINISHED_STORY_TEASER_SECONDS = 10;
+export const AZ_OUTPUT_LOCK_MS = 45_000;
+export const FINISHED_DESTINATION_KEYS = Object.freeze([
+  "Instagram::Reel",
+  "Facebook::Reel",
+  "TikTok::Video Draft",
+  "YouTube::Short",
+  "Instagram::Story",
+  "Facebook::Story",
+]);
 
 export function outputPairKey(platform, outputType) {
   return `${String(platform || "").trim()}::${String(outputType || "").trim()}`;
+}
+
+export function canonicalFinishedDestinationKey(platform, outputType) {
+  const p = String(platform || "").trim();
+  const o = String(outputType || "").trim();
+  if (!p) return "";
+  if (o === "Story") return `${p}::Story`;
+  if (p === "Instagram") return "Instagram::Reel";
+  if (p === "Facebook") return "Facebook::Reel";
+  if (p === "TikTok") return "TikTok::Video Draft";
+  if (p === "YouTube") return "YouTube::Short";
+  return outputPairKey(p, o);
 }
 
 export function uniquePlanItems(items) {
@@ -31,10 +52,60 @@ export function uniquePlanItems(items) {
   return out;
 }
 
-export function pickDuplicateOutputKeepers(rows) {
+export function capFinishedPlanItems(items) {
+  const allowed = new Set(FINISHED_DESTINATION_KEYS);
+  const seen = new Set();
+  const out = [];
+  for (const item of uniquePlanItems(items)) {
+    const key = canonicalFinishedDestinationKey(item.platform, item.output_type);
+    if (!allowed.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    const [platform, output_type] = key.split("::");
+    out.push({ ...item, platform, output_type });
+  }
+  return out;
+}
+
+export function shouldCreateFinishedOutput(existingKeys, wantedKey) {
+  const key = String(wantedKey || "").trim();
+  if (!key || !FINISHED_DESTINATION_KEYS.includes(key)) return false;
+  const live = new Set((existingKeys || []).map((item) => String(item || "").trim()).filter(Boolean));
+  if (live.has(key)) return false;
+  return live.size < AZ_EXPECTED_OUTPUT_COUNT;
+}
+
+export function azOutputLockToken(now = Date.now()) {
+  return `az-output-lock=${Number(now)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function azOutputLockAgeMs(notes, now = Date.now()) {
+  const match = /az-output-lock=(\d+)/.exec(String(notes || ""));
+  if (!match) return null;
+  return Number(now) - Number(match[1]);
+}
+
+export function azOutputLockIsFresh(notes, now = Date.now()) {
+  const age = azOutputLockAgeMs(notes, now);
+  return age != null && age >= 0 && age < AZ_OUTPUT_LOCK_MS;
+}
+
+export function mergeAzOutputLock(notes, token) {
+  const cleaned = String(notes || "").replace(/\n?az-output-lock=\S+/g, "").trim();
+  return [cleaned, String(token || "").trim()].filter(Boolean).join("\n").slice(0, 10000);
+}
+
+export function azOutputLockHeld(notes, token) {
+  const value = String(token || "").trim();
+  return Boolean(value) && String(notes || "").includes(value);
+}
+
+export function pickDuplicateOutputKeepers(rows, { keyOf } = {}) {
+  const keyFn = typeof keyOf === "function"
+    ? keyOf
+    : (row) => outputPairKey(row?.platform, row?.output_type);
   const groups = new Map();
   for (const row of rows || []) {
-    const key = outputPairKey(row?.platform, row?.output_type);
+    const key = keyFn(row);
     if (!key || key === "::") continue;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);

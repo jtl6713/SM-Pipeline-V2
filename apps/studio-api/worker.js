@@ -72,10 +72,19 @@ import {
   staleManualFlagsOnPublishedFields,
 } from "./youtube-manual-publish.mjs";
 import {
+  AZ_EXPECTED_OUTPUT_COUNT,
+  FINISHED_DESTINATION_KEYS,
   FINISHED_STORY_TEASER_SECONDS,
+  azOutputLockHeld,
+  azOutputLockIsFresh,
+  azOutputLockToken,
+  canonicalFinishedDestinationKey,
+  capFinishedPlanItems,
   finishedCompanionStoryFields,
   finishedStoryTeaserClipFlags,
+  mergeAzOutputLock,
   pickDuplicateOutputKeepers,
+  shouldCreateFinishedOutput,
   uniquePlanItems,
 } from "./az-finished-video.mjs";
 import {
@@ -389,7 +398,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.343-finished-passthrough-six",
+          version: "0.10.344-finished-hardcap-six",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -3714,25 +3723,20 @@ function mapProductionRequestOutput(record, master = null) {
   return mapped;
 }
 
-async function outputRowsForProductionRequest(env, productionRequestId) {
+async function outputRowsForProductionRequest(env, productionRequestId, options = {}) {
+  const includeInactive = Boolean(options.includeInactive);
   const requestId = String(productionRequestId || "").trim();
   if (!/^rec[A-Za-z0-9]+$/.test(requestId)) return [];
 
-  // Never scan a global page of PRO rows — tables grow past 100 and older
-  // outputs for a request fall out of the window, so fanout skips them and
-  // sync creates duplicates. Resolve via the parent request's linked IDs.
-  let linkedIds = [];
+  // Reverse links lag during concurrent POSTs, so also scan by the request
+  // name/id. Include inactive rows when collapsing so extras cannot hide.
+  const byId = new Map();
+  let parent = null;
   try {
-    const parent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
-    linkedIds = arrayOrEmpty(f(parent, "Production Request Outputs"))
+    parent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, requestId);
+    const linkedIds = arrayOrEmpty(f(parent, "Production Request Outputs"))
       .map((id) => String(id || "").trim())
       .filter((id) => /^rec[A-Za-z0-9]+$/.test(id));
-  } catch (error) {
-    console.warn("outputRowsForProductionRequest parent lookup failed", requestId, error);
-  }
-
-  const rows = [];
-  if (linkedIds.length) {
     for (let i = 0; i < linkedIds.length; i += 40) {
       const slice = linkedIds.slice(i, i + 40);
       const formula = `OR(${slice.map((id) => `RECORD_ID()='${id}'`).join(",")})`;
@@ -3740,29 +3744,31 @@ async function outputRowsForProductionRequest(env, productionRequestId) {
         limit: slice.length,
         filterFormula: formula,
       });
-      rows.push(...page);
+      for (const row of page) if (row?.id) byId.set(row.id, row);
     }
-  } else {
-    // Fallback: page the whole table and filter by parent link (rare empty link).
-    let offset = null;
-    let pages = 0;
-    do {
-      const page = await listRecordsPage(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
-        limit: 100,
-        offset,
-      });
-      for (const row of page.records || []) {
-        const links = Array.isArray(f(row, "Production_Request")) ? f(row, "Production_Request") : [];
-        if (links.includes(requestId)) rows.push(row);
-      }
-      offset = page.offset || null;
-      pages += 1;
-    } while (offset && pages < 50);
+  } catch (error) {
+    console.warn("outputRowsForProductionRequest parent lookup failed", requestId, error);
   }
 
-  return rows
-    .filter((row) => Boolean(f(row, "Active")))
-    .sort((a, b) => Number(f(a, "Output_Order") || 0) - Number(f(b, "Output_Order") || 0));
+  const prName = String(f(parent || {}, "Production_Request_ID") || "").replace(/'/g, "\\'");
+  const clauses = [`FIND('${requestId}', ARRAYJOIN({Production_Request})&"")`];
+  if (prName) clauses.push(`FIND('${prName}', ARRAYJOIN({Production_Request})&"")`);
+  let offset = null;
+  let pages = 0;
+  do {
+    const page = await listRecordsPage(env, PRODUCTION_REQUEST_OUTPUT_TABLE, {
+      limit: 100,
+      offset,
+      filterFormula: clauses.length > 1 ? `OR(${clauses.join(",")})` : clauses[0],
+    });
+    for (const row of page.records || []) if (row?.id) byId.set(row.id, row);
+    offset = page.offset || null;
+    pages += 1;
+  } while (offset && pages < 10);
+
+  const rows = [...byId.values()];
+  const filtered = includeInactive ? rows : rows.filter((row) => Boolean(f(row, "Active")));
+  return filtered.sort((a, b) => Number(f(a, "Output_Order") || 0) - Number(f(b, "Output_Order") || 0));
 }
 
 async function loadAuthorizedProductionRequestOutput(env, outputRecordId, authorization) {
@@ -3833,17 +3839,41 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
 
   if (!normalized.length) throw new HttpError(400, "Choose at least one platform output");
 
-  const existing = await outputRowsForProductionRequest(env, productionRequestId);
-  const byKey = new Map(existing.map(row => [
-    `${String(f(row, "Platform") || "").trim()}::${String(f(row, "Output_Type") || "").trim()}`,
-    row
-  ]));
+  const finishedVideo = studioFinishedOriginKind(parent) === "finished-video";
+  const planItems = finishedVideo ? capFinishedPlanItems(normalized) : uniquePlanItems(normalized);
+  let azLock = null;
+  if (finishedVideo) {
+    azLock = await acquireAzOutputLock(env, parent);
+    parent = azLock.record;
+    if (!azLock.acquired) {
+      await item4CollapseDuplicatePlanOutputs(
+        env,
+        await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true }),
+        { finishedVideo: true }
+      );
+      const rows = await outputRowsForProductionRequest(env, productionRequestId);
+      return respond(request, env, {
+        ok: true,
+        synchronized: true,
+        locked: true,
+        production_request: mapProductionRequest(parent),
+        records: rows.map(row => mapProductionRequestOutput(row, parent)),
+      });
+    }
+  }
+  let existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+  await item4CollapseDuplicatePlanOutputs(env, existing, { finishedVideo });
+  existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+  const rowKey = (row) => finishedVideo
+    ? canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"))
+    : `${String(f(row, "Platform") || "").trim()}::${String(f(row, "Output_Type") || "").trim()}`;
+  const byKey = new Map(existing.map(row => [rowKey(row), row]));
 
   const now = new Date().toISOString();
   const occupied = await studioOccupiedSchedulesOrEmpty(env);
-  const stamps = studioBuildSuggestedScheduleMap(normalized.map((item) => {
+  const stamps = studioBuildSuggestedScheduleMap(planItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
-    const current = byKey.get(key);
+    const current = byKey.get(finishedVideo ? canonicalFinishedDestinationKey(item.platform, item.output_type) : key);
     return {
       platform: item.platform,
       output_type: item.output_type,
@@ -3851,13 +3881,14 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
     };
   }), occupied);
 
-  for (let i = 0; i < normalized.length; i++) {
-    const item = normalized[i];
+  for (let i = 0; i < planItems.length; i++) {
+    const item = planItems[i];
     const key = `${item.platform}::${item.output_type}`;
-    const current = byKey.get(key);
-    const storyFields = item4CompanionStoryFields(item.output_type, {
-      finishedVideo: studioFinishedOriginKind(parent) === "finished-video",
-    });
+    const destKey = finishedVideo ? canonicalFinishedDestinationKey(item.platform, item.output_type) : key;
+    existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+    for (const row of existing) byKey.set(rowKey(row), row);
+    const current = byKey.get(destKey);
+    const storyFields = item4CompanionStoryFields(item.output_type, { finishedVideo });
     const scheduledAt = studioDestinationScheduleStamp(current, key, stamps, scheduleOverrides);
 
     if (current) {
@@ -3876,59 +3907,70 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
           typecast: false,
         }),
       });
-    } else {
-      await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
-        method: "POST",
-        body: JSON.stringify({
-          fields: {
-            Production_Request_Output_ID: makeProductionRequestOutputId(),
-            Production_Request: [parent.id],
-            Test_Run_ID: String(f(parent, "Test_Run_ID") || "").trim() || null,
-            Organization: [authorization.organization.record_id],
-            Brand: [arrayOrEmpty(f(parent, "Brand"))[0] || authorization.brand.record_id],
-            Created_By: [authorization.user.record_id],
-            Platform: item.platform,
-            Output_Type: item.output_type,
-            Output_Status: "Draft",
-            Output_Order: i + 1,
-            Enabled: true,
-            Voiceover_Mode_Override: storyFields.Voiceover_Mode_Override || "Inherit",
-            Background_Music_Mode_Override: storyFields.Background_Music_Mode_Override || "Inherit",
-            Thumbnail_Mode_Override: "Inherit",
-            Video_Duration_Seconds_Override: storyFields.Video_Duration_Seconds_Override ?? null,
-            Video_Clip_Count_Mode_Override: storyFields.Video_Clip_Count_Mode_Override || "Inherit",
-            Video_Clip_Count_Exact_Override: storyFields.Video_Clip_Count_Exact_Override ?? null,
-            Carousel_Slide_Count_Mode_Override: "Inherit",
-            Carousel_Image_Mode_Override: "Inherit",
-            Title_Mode_Override: "Inherit",
-            Caption_Mode_Override: "Inherit",
-            Script_Mode_Override: "Inherit",
-            Publish_Mode: "Inherit",
-            Scheduled_At: scheduledAt || stamps.get(key) || null,
-            Created_At: now,
-            Updated_At: now,
-            Active: true,
-          },
-          typecast: false,
-        }),
-      });
+      continue;
     }
+    if (finishedVideo) {
+      const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId).catch(() => null);
+      if (!azLock?.token || !azOutputLockHeld(String(f(latest || {}, "Production_Notes") || ""), azLock.token)) continue;
+      if (!shouldCreateFinishedOutput(finishedEnabledKeysFromRows(existing), destKey)) continue;
+    }
+    const created = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
+      method: "POST",
+      body: JSON.stringify({
+        fields: {
+          Production_Request_Output_ID: makeProductionRequestOutputId(),
+          Production_Request: [parent.id],
+          Test_Run_ID: String(f(parent, "Test_Run_ID") || "").trim() || null,
+          Organization: [authorization.organization.record_id],
+          Brand: [arrayOrEmpty(f(parent, "Brand"))[0] || authorization.brand.record_id],
+          Created_By: [authorization.user.record_id],
+          Platform: item.platform,
+          Output_Type: item.output_type,
+          Output_Status: "Draft",
+          Output_Order: i + 1,
+          Enabled: true,
+          Voiceover_Mode_Override: storyFields.Voiceover_Mode_Override || "Inherit",
+          Background_Music_Mode_Override: storyFields.Background_Music_Mode_Override || "Inherit",
+          Thumbnail_Mode_Override: "Inherit",
+          Video_Duration_Seconds_Override: storyFields.Video_Duration_Seconds_Override ?? null,
+          Video_Clip_Count_Mode_Override: storyFields.Video_Clip_Count_Mode_Override || "Inherit",
+          Video_Clip_Count_Exact_Override: storyFields.Video_Clip_Count_Exact_Override ?? null,
+          Carousel_Slide_Count_Mode_Override: "Inherit",
+          Carousel_Image_Mode_Override: "Inherit",
+          Title_Mode_Override: "Inherit",
+          Caption_Mode_Override: "Inherit",
+          Script_Mode_Override: "Inherit",
+          Publish_Mode: "Inherit",
+          Scheduled_At: scheduledAt || stamps.get(key) || null,
+          Created_At: now,
+          Updated_At: now,
+          Active: true,
+        },
+        typecast: false,
+      }),
+    });
+    if (created?.id) byKey.set(destKey, created);
   }
 
-  const selectedKeys = new Set(normalized.map(item => `${item.platform}::${item.output_type}`));
+  const selectedKeys = new Set(planItems.map((item) => (
+    finishedVideo
+      ? canonicalFinishedDestinationKey(item.platform, item.output_type)
+      : `${item.platform}::${item.output_type}`
+  )));
+  existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
   for (const row of existing) {
-    const key = `${String(f(row, "Platform") || "").trim()}::${String(f(row, "Output_Type") || "").trim()}`;
+    const key = rowKey(row);
     if (selectedKeys.has(key)) continue;
     await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, row.id, {
       method: "PATCH",
       body: JSON.stringify({
-        fields: { Enabled: false, Updated_At: now },
+        fields: { Enabled: false, Active: finishedVideo ? false : f(row, "Active"), Updated_At: now },
         typecast: false,
       }),
     });
   }
 
-  const targetPlatforms = [...new Set(normalized.map(item => item.platform))];
+  const targetPlatforms = [...new Set(planItems.map(item => item.platform))];
   let updatedParent = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, parent.id, {
     method: "PATCH",
     body: JSON.stringify({
@@ -3936,9 +3978,13 @@ async function syncProductionRequestOutputs(request, env, url, authorization) {
       typecast: false,
     }),
   });
-  updatedParent = await item4ReconcilePlanWithEnabledOutputs(env, updatedParent, normalized);
+  updatedParent = await item4ReconcilePlanWithEnabledOutputs(env, updatedParent, planItems);
   updatedParent = await item4RelinkVariantQueueOutputs(env, updatedParent);
-  await item4CollapseDuplicatePlanOutputs(env, await outputRowsForProductionRequest(env, productionRequestId));
+  await item4CollapseDuplicatePlanOutputs(
+    env,
+    await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true }),
+    { finishedVideo }
+  );
 
   const rows = await outputRowsForProductionRequest(env, productionRequestId);
   return respond(request, env, {
@@ -6907,7 +6953,7 @@ function item4RowHasPlatformOutput(row) {
   return arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
 }
 
-async function item4CollapseDuplicatePlanOutputs(env, rows) {
+async function item4CollapseDuplicatePlanOutputs(env, rows, { finishedVideo = false } = {}) {
   const mapped = (rows || []).map((row) => ({
     id: row.id,
     row,
@@ -6917,7 +6963,9 @@ async function item4CollapseDuplicatePlanOutputs(env, rows) {
     output_order: Number(f(row, "Output_Order") || 0),
     created_at: String(f(row, "Created_At") || ""),
   }));
-  const { extras } = pickDuplicateOutputKeepers(mapped);
+  const { extras } = pickDuplicateOutputKeepers(mapped, finishedVideo
+    ? { keyOf: (row) => canonicalFinishedDestinationKey(row.platform, row.output_type) }
+    : {});
   const now = new Date().toISOString();
   let collapsed = 0;
   for (const extra of extras) {
@@ -7106,19 +7154,58 @@ async function item4ReconcileEnabledPlanOutputs(env, requestRecord) {
   return item4RelinkVariantQueueOutputs(env, updated);
 }
 
+async function acquireAzOutputLock(env, requestRecord) {
+  const notes = String(f(requestRecord, "Production_Notes") || "");
+  if (azOutputLockIsFresh(notes)) return { acquired: false, record: requestRecord };
+  const token = azOutputLockToken();
+  const record = await item4UpdateRequestState(env, requestRecord.id, {
+    Production_Notes: mergeAzOutputLock(notes, token),
+  });
+  const held = azOutputLockHeld(String(f(record, "Production_Notes") || ""), token);
+  return { acquired: held, record, token };
+}
+
+function finishedEnabledKeysFromRows(rows) {
+  const keys = new Set();
+  for (const row of rows || []) {
+    if (!f(row, "Enabled") && !f(row, "Active")) continue;
+    const key = canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"));
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
 async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = null } = {}) {
   const productionRequestId = requestRecord.id;
-  const uniqueItems = uniquePlanItems(items);
   const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
-  const existing = await outputRowsForProductionRequest(env, productionRequestId);
-  const byKey = new Map(existing.map(row => [`${String(f(row,"Platform")||"").trim()}::${String(f(row,"Output_Type")||"").trim()}`, row]));
+  const uniqueItems = finishedVideo ? capFinishedPlanItems(items) : uniquePlanItems(items);
+  let azLock = null;
+  if (finishedVideo) {
+    azLock = await acquireAzOutputLock(env, requestRecord);
+    requestRecord = azLock.record;
+    if (!azLock.acquired) {
+      await item4CollapseDuplicatePlanOutputs(
+        env,
+        await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true }),
+        { finishedVideo: true }
+      );
+      return;
+    }
+  }
+  let existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+  await item4CollapseDuplicatePlanOutputs(env, existing, { finishedVideo });
+  existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+  const rowKey = (row) => finishedVideo
+    ? canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"))
+    : `${String(f(row,"Platform")||"").trim()}::${String(f(row,"Output_Type")||"").trim()}`;
+  const byKey = new Map(existing.map(row => [rowKey(row), row]));
   const wanted = new Set();
   const now = new Date().toISOString();
   const scheduleOverrides = studioScheduleOverridesFromPayload({ schedules });
   const occupied = await studioOccupiedSchedulesOrEmpty(env);
   const stamps = studioBuildSuggestedScheduleMap(uniqueItems.map((item) => {
     const key = `${item.platform}::${item.output_type}`;
-    const current = byKey.get(key);
+    const current = byKey.get(finishedVideo ? canonicalFinishedDestinationKey(item.platform, item.output_type) : key);
     return {
       platform: item.platform,
       output_type: item.output_type,
@@ -7128,8 +7215,11 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
   for (let i=0; i<uniqueItems.length; i++) {
     const item = uniqueItems[i];
     const key = `${item.platform}::${item.output_type}`;
-    wanted.add(key);
-    const current = byKey.get(key);
+    const destKey = finishedVideo ? canonicalFinishedDestinationKey(item.platform, item.output_type) : key;
+    wanted.add(destKey);
+    existing = await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true });
+    for (const row of existing) byKey.set(rowKey(row), row);
+    const current = byKey.get(destKey);
     const storyFields = item4CompanionStoryFields(item.output_type, { finishedVideo });
     const scheduledAt = studioDestinationScheduleStamp(current, key, stamps, scheduleOverrides);
     if (current) {
@@ -7137,27 +7227,36 @@ async function item4SyncPlanOutputs(env, requestRecord, items, { schedules = nul
         method:"PATCH",
         body:JSON.stringify({fields:{Enabled:true,Active:true,Output_Order:i+1,Output_Status:"Draft",Carousel_Image_Mode_Override:"Manual Upload",...(scheduledAt ? { Scheduled_At: scheduledAt } : {}),...storyFields,Updated_At:now},typecast:false}),
       });
-    } else {
-      const created = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
-        method:"POST",
-        body:JSON.stringify({fields:{
-          Production_Request_Output_ID:makeProductionRequestOutputId(), Production_Request:[productionRequestId],
-          Test_Run_ID:String(f(requestRecord,"Test_Run_ID")||"").trim()||null,
-          Organization:arrayOrEmpty(f(requestRecord,"Organization")), Brand:arrayOrEmpty(f(requestRecord,"Brand")), Created_By:arrayOrEmpty(f(requestRecord,"Created_By")),
-          Platform:item.platform, Output_Type:item.output_type, Output_Status:"Draft", Output_Order:i+1, Enabled:true, Active:true,
-          Carousel_Image_Mode_Override:"Manual Upload", Scheduled_At: scheduledAt || stamps.get(key) || null, ...storyFields, Created_At:now, Updated_At:now,
-        },typecast:false}),
-      });
-      if (created?.id) byKey.set(key, created);
+      continue;
     }
+    if (finishedVideo) {
+      const latest = await airtableFetch(env, PRODUCTION_REQUEST_TABLE, productionRequestId).catch(() => null);
+      if (!azLock?.token || !azOutputLockHeld(String(f(latest || {}, "Production_Notes") || ""), azLock.token)) continue;
+      if (!shouldCreateFinishedOutput(finishedEnabledKeysFromRows(existing), destKey)) continue;
+    }
+    const created = await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, "", {
+      method:"POST",
+      body:JSON.stringify({fields:{
+        Production_Request_Output_ID:makeProductionRequestOutputId(), Production_Request:[productionRequestId],
+        Test_Run_ID:String(f(requestRecord,"Test_Run_ID")||"").trim()||null,
+        Organization:arrayOrEmpty(f(requestRecord,"Organization")), Brand:arrayOrEmpty(f(requestRecord,"Brand")), Created_By:arrayOrEmpty(f(requestRecord,"Created_By")),
+        Platform:item.platform, Output_Type:item.output_type, Output_Status:"Draft", Output_Order:i+1, Enabled:true, Active:true,
+        Carousel_Image_Mode_Override:"Manual Upload", Scheduled_At: scheduledAt || stamps.get(key) || null, ...storyFields, Created_At:now, Updated_At:now,
+      },typecast:false}),
+    });
+    if (created?.id) byKey.set(destKey, created);
   }
   for (const row of existing) {
-    const key=`${String(f(row,"Platform")||"").trim()}::${String(f(row,"Output_Type")||"").trim()}`;
+    const key = rowKey(row);
     if (!wanted.has(key)) {
       await airtableFetch(env, PRODUCTION_REQUEST_OUTPUT_TABLE, row.id, {method:"PATCH",body:JSON.stringify({fields:{Enabled:false,Active:false,Updated_At:now},typecast:false})});
     }
   }
-  await item4CollapseDuplicatePlanOutputs(env, await outputRowsForProductionRequest(env, productionRequestId));
+  await item4CollapseDuplicatePlanOutputs(
+    env,
+    await outputRowsForProductionRequest(env, productionRequestId, { includeInactive: true }),
+    { finishedVideo }
+  );
 }
 
 async function buildItem4OutputPlan(request, env, url, authorization) {
@@ -7201,22 +7300,25 @@ async function buildItem4OutputPlan(request, env, url, authorization) {
       continue;
     }
   }
-  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items};
+  const finishedVideo = studioFinishedOriginKind(record) === "finished-video";
+  const plannedItems = finishedVideo ? capFinishedPlanItems(items) : items;
+  const plan={schema_version:"item4.output-plan.1",generated_at:new Date().toISOString(),production_request_record_id:recordId,source_asset_count:photoCount,photo_count_kind:item4PhotoCountKind(photoCount),items:plannedItems};
+  needsReview = plannedItems.some((item) => !item.aspect_ratio);
 
-  if (payload.check_fbs1 === true && !payload.skip_fbs1_guard && items.some(item =>
+  if (payload.check_fbs1 === true && !payload.skip_fbs1_guard && plannedItems.some(item =>
     item.platform === "Facebook" &&
     item.output_type === "Slideshow Reel"
   )) {
     await item4EnsureFacebookSlideshowVoiceoverPayload(env, authorization);
   }
 
-  await item4SyncPlanOutputs(env,record,items,{ schedules: payload.schedules });
+  await item4SyncPlanOutputs(env,record,plannedItems,{ schedules: payload.schedules });
   const keepAiMode = String(f(record, "Carousel_Image_Mode") || "").trim() === "Make AI Generated";
   const keepExact = keepAiMode && Number(f(record, "Carousel_Slide_Count_Exact") || 0) >= photoCount;
   const maxCount=Math.min(15,Math.max(1,photoCount));
   const requestedMasterContentType = String(f(record, "Master_Content_Type") || "").trim();
   record=await item4UpdateRequestState(env,recordId,{
-    Master_Content_Type:requestedMasterContentType || (photoCount<=1?"Feed Post":"Photo Set"), Target_Platforms:items.map(item=>item.platform),
+    Master_Content_Type:requestedMasterContentType || (photoCount<=1?"Feed Post":"Photo Set"), Target_Platforms:plannedItems.map(item=>item.platform),
     Carousel_Image_Mode: keepAiMode ? "Make AI Generated" : "Manual Upload",
     Carousel_Slide_Count_Mode:"Exact",
     Carousel_Slide_Count_Exact: keepExact ? Number(f(record, "Carousel_Slide_Count_Exact") || photoCount) : photoCount,
@@ -8610,7 +8712,7 @@ async function azBuildPlanItems(env, record) {
   const existingPlan = item4ParseJson(f(record, "Studio_Output_Plan_JSON"), null);
   const existingItems = Array.isArray(existingPlan?.items) ? existingPlan.items : [];
   if (existingItems.length) {
-    return uniquePlanItems(existingItems
+    return capFinishedPlanItems(existingItems
       .map((item) => ({
         platform: String(item?.platform || "").trim(),
         output_type: String(item?.output_type || "").trim(),
@@ -8638,7 +8740,7 @@ async function azBuildPlanItems(env, record) {
       continue;
     }
   }
-  return uniquePlanItems(items);
+  return capFinishedPlanItems(items);
 }
 
 async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
@@ -8649,34 +8751,38 @@ async function azEnsurePlatformOutputs(env, requestRecord, options = {}) {
   // limit of 2 left mains stranded when the PRO lookup window was incomplete.
   const batchLimit = Math.max(1, Math.min(10, Number(options.limit) || 6));
 
-  let proRows = await outputRowsForProductionRequest(env, requestRecord.id);
-  const collapsed = await item4CollapseDuplicatePlanOutputs(env, proRows);
+  const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
+  let proRows = await outputRowsForProductionRequest(env, requestRecord.id, { includeInactive: true });
+  const collapsed = await item4CollapseDuplicatePlanOutputs(env, proRows, { finishedVideo });
   if (collapsed.collapsed) {
-    proRows = await outputRowsForProductionRequest(env, requestRecord.id);
+    proRows = await outputRowsForProductionRequest(env, requestRecord.id, { includeInactive: true });
   }
   let enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
+  if (finishedVideo) enabled = keepFinishedOutputRows(enabled);
   let synced = false;
   if (!enabled.length) {
     const items = await azBuildPlanItems(env, requestRecord);
     if (!items.length) return { error: "no_plan_items", production_request_id: requestRecord.id };
-    await item4SyncPlanOutputs(env, requestRecord, items);
-    const needsReview = items.some((item) => !item.aspect_ratio);
+    const planItems = finishedVideo ? capFinishedPlanItems(items) : items;
+    await item4SyncPlanOutputs(env, requestRecord, planItems);
+    const needsReview = planItems.some((item) => !item.aspect_ratio);
     const plan = {
       schema_version: "item4.output-plan.1",
       generated_at: new Date().toISOString(),
       production_request_record_id: requestRecord.id,
       source_asset_count: Math.max(1, item4AssetManifest(requestRecord).length),
       photo_count_kind: "exact",
-      items,
+      items: planItems,
       recovered_by: "az-ensure-outputs",
     };
     requestRecord = await item4UpdateRequestState(env, requestRecord.id, {
       Studio_Output_Plan_JSON: JSON.stringify(plan),
       Studio_Output_Plan_Status: needsReview ? "Needs Review" : "Ready",
-      Target_Platforms: [...new Set(items.map((item) => item.platform))],
+      Target_Platforms: [...new Set(planItems.map((item) => item.platform))],
     });
     proRows = await outputRowsForProductionRequest(env, requestRecord.id);
     enabled = proRows.filter((row) => Boolean(f(row, "Enabled")));
+    if (finishedVideo) enabled = keepFinishedOutputRows(enabled);
     synced = true;
   }
 
@@ -8743,7 +8849,9 @@ async function advanceAzFinishedVideo(env, requestId, authorization, ctx = null,
     return { waiting: "assets", production_request_id: requestId, phase };
   }
   const planStatus = String(f(record, "Studio_Output_Plan_Status") || "").trim();
-  if (planStatus !== "Ready" && (phase === "auto" || phase === "plan" || phase === "outputs")) {
+  const existingPros = await outputRowsForProductionRequest(env, requestId, { includeInactive: true }).catch(() => []);
+  const existingKeys = finishedEnabledKeysFromRows(existingPros);
+  if (existingKeys.size < AZ_EXPECTED_OUTPUT_COUNT && planStatus !== "Ready" && (phase === "auto" || phase === "plan" || phase === "outputs")) {
     const editable = ["Draft", "Ready"].includes(String(f(record, "Request_Status") || "").trim());
     if (editable) {
       const planCall = studioInternalJsonRequest(`/api/production-requests/${requestId}/plan`, {
@@ -16067,11 +16175,57 @@ async function markParentContentItemAsStudioUmbrella(env, parentContentItem, out
   });
 }
 
+function finishedDestinationKeyFromPlatformOutput(row) {
+  return canonicalFinishedDestinationKey(
+    f(row, "Platform"),
+    f(row, "Studio_Output_Type") || f(row, "Output_Type") || f(row, "Platform_Output_Type")
+  );
+}
+
+async function listExistingFinishedPlatformOutputs(env, requestRecord, parent) {
+  const requestId = String(requestRecord?.id || "").replace(/'/g, "\\'");
+  const contentId = String(parent?.id || "").replace(/"/g, '\\"');
+  const contentNumber = String(f(parent || {}, "Content_ID") || "").replace(/'/g, "\\'");
+  const clauses = [];
+  if (requestId) clauses.push(`FIND('${requestId}', {Studio_Output_Directives_JSON}&"")`);
+  if (contentNumber) clauses.push(`FIND(',${contentNumber},', ',' & ARRAYJOIN({Content_Item}) & ',')`);
+  if (contentId) clauses.push(`FIND("${contentId}", ARRAYJOIN({Content_Item})&"")`);
+  if (!clauses.length) return [];
+  return listRecords(env, STUDIO_PLATFORM_OUTPUT_TABLE, {
+    limit: 50,
+    filterFormula: clauses.length > 1 ? `OR(${clauses.join(",")})` : clauses[0],
+  }).catch(() => []);
+}
+
+function keepFinishedOutputRows(rows) {
+  const seen = new Set();
+  const keepers = [];
+  for (const row of rows || []) {
+    const key = canonicalFinishedDestinationKey(f(row, "Platform"), f(row, "Output_Type"));
+    if (!FINISHED_DESTINATION_KEYS.includes(key) || seen.has(key)) continue;
+    seen.add(key);
+    keepers.push(row);
+    if (keepers.length >= AZ_EXPECTED_OUTPUT_COUNT) break;
+  }
+  return keepers;
+}
+
 async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, parentContentItemId, options = {}) {
   const onlyMissing = Boolean(options.onlyMissing);
   const limit = Number(options.limit);
-  const batchLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : null;
-  const outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
+  const finishedVideo = studioFinishedOriginKind(requestRecord) === "finished-video";
+  if (finishedVideo) {
+    await item4CollapseDuplicatePlanOutputs(
+      env,
+      await outputRowsForProductionRequest(env, requestRecord.id, { includeInactive: true }),
+      { finishedVideo: true }
+    );
+  }
+  const batchLimit = Number.isFinite(limit) && limit > 0
+    ? Math.floor(limit)
+    : (finishedVideo ? AZ_EXPECTED_OUTPUT_COUNT : null);
+  let outputRows=(await outputRowsForProductionRequest(env,requestRecord.id)).filter(row=>Boolean(f(row,"Enabled")));
+  if (finishedVideo) outputRows = keepFinishedOutputRows(outputRows);
   if(!outputRows.length) return {enabled_output_count:0,routed_count:0,blocked_count:0,remaining:0,work_items:[],single_parent_mode:true};
   const candidates = onlyMissing
     ? outputRows.filter((row) => !arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || ""))))
@@ -16118,6 +16272,21 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
       if(proId){
         const found=await listRecords(env,STUDIO_PLATFORM_OUTPUT_TABLE,{limit:1,filterFormula:`FIND(',${proId},', ',' & ARRAYJOIN({Production_Request_Output}) & ',') > 0`});
         poId=found?.[0]?.id||null;
+      }
+    }
+    if(!poId && finishedVideo){
+      const destKey=canonicalFinishedDestinationKey(f(outputRow,"Platform"), f(outputRow,"Output_Type"));
+      const existingPos=await listExistingFinishedPlatformOutputs(env, requestRecord, parent);
+      const match=existingPos.find((row) => finishedDestinationKeyFromPlatformOutput(row) === destKey);
+      if(match) poId=match.id;
+      else {
+        const liveKeys=new Set(existingPos.map(finishedDestinationKeyFromPlatformOutput).filter(Boolean));
+        if(!shouldCreateFinishedOutput(liveKeys, destKey)){
+          blocked++;
+          await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{method:"PATCH",body:JSON.stringify({fields:{Content_Item:[parent.id],Pipeline_Family:route?.pipeline_family||null,Pipeline_Route_Status:"Blocked",Pipeline_Route_Notes:"Finished-video hard cap: six destinations already exist.",Routed_At:null,Updated_At:new Date().toISOString()},typecast:false})});
+          workItems.push({production_request_output_record_id:outputRow.id,routed:false,issues:["finished_video_hardcap"]});
+          continue;
+        }
       }
     }
     let po;
@@ -16169,7 +16338,10 @@ async function finalizeProductionRequestPromotion(env, requestRecordId, ideaReco
     outputFanout = await fanoutProductionRequestOutputsToContentItems(
       env,
       requestRecord,
-      contentItemId
+      contentItemId,
+      studioFinishedOriginKind(requestRecord) === "finished-video"
+        ? { onlyMissing: true, limit: AZ_EXPECTED_OUTPUT_COUNT }
+        : {}
     );
 
     // Seed and theme the AI slots first. P2 speaks the script that arming stamps,

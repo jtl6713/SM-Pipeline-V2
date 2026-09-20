@@ -501,3 +501,4 @@ YouTube manual live-video heal Worker deploy: 2026-09-20 — Cron auto-closes ma
 YouTube manual live refresh heal Worker deploy: 2026-09-20 — Pipeline refresh also closes manual YouTube rows when the stored URL/video id already resolves live. Worker 0.10.341-yt-manual-live-refresh.
 YouTube published wins manual Worker deploy: 2026-09-20 — Published outputs ignore stale Manual_Fallback_Required; Pipeline clears leftover manual flags on refresh. Worker 0.10.342-yt-published-wins-manual.
 Finished-video passthrough six Worker deploy: 2026-09-20 — Keep original audio on finished shorts; Stories are a 10s trim of the same file; collapse duplicate kits so a pass has exactly six outputs. Worker 0.10.343-finished-passthrough-six.
+Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync and fanout cannot mint more than six destinations. Lock + formula lookup + re-query before POST + reuse existing Platform Outputs. Worker 0.10.344-finished-hardcap-six.
