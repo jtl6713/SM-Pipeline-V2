@@ -13,8 +13,8 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(html, /id="promoteTimingHint"/);
   assert.match(html, /id="promoteVoiceoverTail"/);
   assert.match(html, /id="promoteVideoDuration"/);
-  assert.match(html, /UI build 0\.6\.351/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.351-pipeline-archived/);
+  assert.match(html, /UI build 0\.6\.352/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.352-variant-prepare-copy/);
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -24,11 +24,17 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(config, /Video duration still wins/);
   assert.match(config, /prVoiceoverDuration: "Spoken narration length/);
   assert.match(config, /Help → Ideas has a graphic/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.351-pipeline-archived"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.352-variant-prepare-copy"/);
   assert.match(app, /function syncPromoteTimingHint/);
   assert.match(app, /Video duration is the hard cap/);
   assert.match(app, /library_asset_ids/);
   assert.match(app, /restoreIdeaLibraryPickerAfterDrawerUpdate/);
+});
+
+test("variant not-ready copy distinguishes not started from preparing", () => {
+  assert.match(app, /function item4VariantNotReadyCopy/);
+  assert.match(app, /Platform crops have not been run yet/);
+  assert.match(app, /Platform crops are still finishing/);
 });
 
 test("Pipeline archives fully published content items at the bottom", () => {
