@@ -119,6 +119,8 @@ const JSON_HEADERS = {
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
 };
+const STUDIO_DEFAULT_MUSIC_VOLUME = 0.6;
+const STUDIO_DEFAULT_DUCKED_MUSIC_VOLUME = 0.0504;
 
 export default {
   async fetch(request, env, ctx) {
@@ -368,7 +370,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.333-studio-scheduled-at",
+          version: "0.10.334-music-60pct",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -13326,7 +13328,7 @@ function item4StudioSourcePackageForOutput(requestRecord, outputRow, effective, 
     title_text: titleText,
     brand_text: brandText,
     music_url: String(effective?.music?.url || "").trim(),
-    music_volume: String(effective?.music?.url || "").trim() ? 1 : 0,
+    music_volume: String(effective?.music?.url || "").trim() ? STUDIO_DEFAULT_MUSIC_VOLUME : 0,
     voiceover_url: item4StudioDirectiveYes(effective?.voiceover_mode)
       ? String(f(parentContentItem, "Voiceover_URL") || "").trim()
       : "",
@@ -13660,7 +13662,7 @@ function platformOutputSeedFields(parentContentItem, requestRecord, outputRow, e
     Music_URL: effective.music?.url || null,
     Selected_Music_URL: effective.music?.url || null,
     Selected_Music_Media_Asset_ID: effective.music?.record_id || null,
-    Music_Volume: effective.music?.url ? 1 : 0,
+    Music_Volume: effective.music?.url ? STUDIO_DEFAULT_MUSIC_VOLUME : 0,
     Voiceover_URL: item4StudioDirectiveYes(effective.voiceover_mode)
       ? (String(f(parentContentItem, "Voiceover_URL") || "").trim() || null)
       : null,
@@ -20222,8 +20224,13 @@ function phase6ResolvedVoiceoverVolume(record, fallback = 1) {
 function phase6AudioMixFieldsFromPayload(payload, current) {
   const audio = payload?.audio && typeof payload.audio === "object" ? payload.audio : {};
   const voiceoverVolume = phase6Clamp(audio.voiceover_volume, 0, 1.25, current?.voiceover?.volume ?? 1);
-  const normal = phase6Clamp(audio.normal_volume, 0, 1, current?.music?.normal_volume ?? 1);
-  const ducked = phase6Clamp(audio.ducked_volume, 0, 1, current?.music?.ducked_volume ?? 0.084);
+  const normal = phase6Clamp(audio.normal_volume, 0, 1, current?.music?.normal_volume ?? STUDIO_DEFAULT_MUSIC_VOLUME);
+  const ducked = phase6Clamp(
+    audio.ducked_volume,
+    0,
+    1,
+    current?.music?.ducked_volume ?? STUDIO_DEFAULT_DUCKED_MUSIC_VOLUME
+  );
   const duckEnabled = phase6Bool(audio.ducking_enabled, current?.music?.ducking_enabled !== false);
   const duckFade = Math.round(phase6Clamp(audio.duck_fade_frames, 0, 90, current?.music?.duck_fade_frames ?? 6));
   if (duckEnabled && ducked > normal) {
@@ -20802,11 +20809,16 @@ function mapPhase6CreativeOutput(record) {
   const manifest = phase6ParseJson(f(record, "Creative_Render_Manifest_JSON"), null);
   const settings = phase6ParseJson(f(record, "Studio_Creative_Settings_JSON"), {}) || {};
   const manifestMusic = manifest?.music && typeof manifest.music === "object" ? manifest.music : {};
-  const normal = phase6Number(f(record, "Music_Volume"), phase6Number(manifestMusic.baseVolume, 1));
+  const normal = phase6Number(
+    f(record, "Music_Volume"),
+    phase6Number(manifestMusic.baseVolume, STUDIO_DEFAULT_MUSIC_VOLUME)
+  );
   const ducked = phase6Number(
     f(record, "Music_Ducked_Volume"),
-    phase6Number(manifestMusic.effectiveDuckedVolume,
-      normal * phase6Number(manifestMusic.duckingMultiplier, 0.35))
+    phase6Number(
+      manifestMusic.effectiveDuckedVolume,
+      normal * phase6Number(manifestMusic.duckingMultiplier, 0.084)
+    )
   );
   const duckEnabled = f(record, "Music_Ducking_Enabled") === null
     ? manifestMusic.duckingEnabled !== false
@@ -21397,8 +21409,18 @@ async function phase6BuildPreviewRenderPackage(env, outputRecord) {
   const totalFrames = clips.reduce((sum, clip) => sum + Number(clip.durationFrames || 0), 0);
   if (!totalFrames) throw new HttpError(409, "Phase 6 preview package resolved to zero frames");
 
-  const normal = phase6Clamp(mapped?.music?.normal_volume, 0, 1, 1);
-  const ducked = phase6Clamp(mapped?.music?.ducked_volume, 0, 1, 0.084);
+  const normal = phase6Clamp(
+    mapped?.music?.normal_volume,
+    0,
+    1,
+    STUDIO_DEFAULT_MUSIC_VOLUME
+  );
+  const ducked = phase6Clamp(
+    mapped?.music?.ducked_volume,
+    0,
+    1,
+    STUDIO_DEFAULT_DUCKED_MUSIC_VOLUME
+  );
   const duckEnabled = mapped?.music?.ducking_enabled !== false;
   if (duckEnabled && ducked > normal) {
     throw new HttpError(409, "Ducked music volume cannot exceed normal music volume");

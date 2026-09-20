@@ -25,12 +25,12 @@ def get_render_server_url(client: AirtableClient) -> str:
 
 def get_render_volumes(client: AirtableClient) -> tuple[float, float]:
     settings = PipelineSettings(client)
-    music_raw = settings.get("render_music_volume") or "0.35"
+    music_raw = settings.get("render_music_volume") or "0.21"
     voice_raw = settings.get("render_voiceover_volume") or "1"
     try:
         music = float(str(music_raw).strip())
     except ValueError:
-        music = 0.35
+        music = 0.21
     try:
         voice = float(str(voice_raw).strip())
     except ValueError:

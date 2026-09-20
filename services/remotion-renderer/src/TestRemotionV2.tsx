@@ -36,7 +36,7 @@ export const testRemotionV2DefaultProps: TestRemotionV2Props = {
     filename: 'visible-motion-crossfade-test.mp4',
     titleText: 'Visible Motion Test',
     brandText: 'ChicagoShining',
-    musicVolume: 0.12,
+    musicVolume: 0.072,
     clipOrder: defaultClipOrder,
     motionStyles: ['slowZoom', 'slowZoom', 'slowZoom'],
 };
@@ -142,7 +142,7 @@ export const TestRemotionV2: React.FC<TestRemotionV2Props> = ({
     clipOrder,
     titleText = 'Visible Motion Test',
     brandText = 'ChicagoShining',
-    musicVolume = 0.15,
+    musicVolume = 0.09,
     motionStyles,
 }) => {
     const clips = cleanClipOrder(clipOrder);

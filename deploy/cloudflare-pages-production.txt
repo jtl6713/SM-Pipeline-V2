@@ -539,3 +539,4 @@ Best-times stay in analytics windows Pages deploy: 2026-09-19 — Occupancy spre
 
 Idea type graphic Pages deploy: 2026-09-19 — Help → Ideas shows each master content type and what Pipeline builds. UI 0.6.341-idea-types.
 Unused-photo status Pages deploy: 2026-09-19 — Ideas run status uses a prominent red callout separated from the ideas list. UI 0.6.342-unused-status.
+Lower background music Pages deploy: 2026-09-20 — Studio audio controls default to 60% of the prior normal and ducked levels. UI 0.6.343-music-60pct.

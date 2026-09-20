@@ -718,6 +718,7 @@ def test_stamp_timing_pending_for_single_clip_with_music():
         None,
     )
     assert fields["Timing_Status"] == "Pending"
+    assert fields["Music_Volume"] == 0.6
 
 
 def test_stamp_timing_skipped_without_music():

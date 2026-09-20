@@ -164,7 +164,7 @@ def build_p020_request(output: dict[str, Any], *, default_music: float) -> dict[
     music_url = field_str(output, "Music_URL")
     music_enabled = bool(music_url)
     music_volume = _music_volume(output, default_music)
-    ducked = _num(field(output, "Music_Ducked_Volume"), 0.084)
+    ducked = _num(field(output, "Music_Ducked_Volume"), 0.0504)
     ducking_enabled = field(output, "Music_Ducking_Enabled") is not False
     duck_fade = int(_num(field(output, "Music_Duck_Fade_Frames"), 6))
     duck_multiplier = (ducked / music_volume) if music_volume > 0 and ducking_enabled else 0

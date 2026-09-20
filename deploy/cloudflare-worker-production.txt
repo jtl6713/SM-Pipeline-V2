@@ -491,3 +491,4 @@ Suggested times occupancy Worker deploy: 2026-09-19 — Best-times and AZ load u
 Best-times stay in analytics windows Worker deploy: 2026-09-19 — Suggested ISO prefers analytics days/windows, then skips booked slots. Worker 0.10.332-best-times-spread.
 
 Pipeline list field name Worker deploy: 2026-09-19 — Platform Outputs uses Studio_Scheduled_At, not Scheduled_At. Worker 0.10.333-studio-scheduled-at.
+Lower background music Worker deploy: 2026-09-20 — New Studio renders default to 0.60 normal and 0.0504 ducked music. Worker 0.10.334-music-60pct.
