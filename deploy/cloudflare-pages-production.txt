@@ -541,3 +541,4 @@ Idea type graphic Pages deploy: 2026-09-19 — Help → Ideas shows each master 
 Unused-photo status Pages deploy: 2026-09-19 — Ideas run status uses a prominent red callout separated from the ideas list. UI 0.6.342-unused-status.
 Lower background music Pages deploy: 2026-09-20 — Studio audio controls default to 60% of the prior normal and ducked levels. UI 0.6.343-music-60pct.
 Manage Idea mixed media Pages deploy: 2026-09-20 — Existing-library picker suggests, selects, and attaches both photos and Raw Footage clips. UI 0.6.344-idea-mixed-media.
+Vertical short output defaults Pages deploy: 2026-09-20 — Vertical Short Video selects only Reel and Story for Instagram and Facebook; changing format clears stale photo/carousel defaults. UI 0.6.345-vertical-reel-story.

@@ -493,3 +493,4 @@ Best-times stay in analytics windows Worker deploy: 2026-09-19 — Suggested ISO
 Pipeline list field name Worker deploy: 2026-09-19 — Platform Outputs uses Studio_Scheduled_At, not Scheduled_At. Worker 0.10.333-studio-scheduled-at.
 Lower background music Worker deploy: 2026-09-20 — New Studio renders default to 0.60 normal and 0.0504 ducked music. Worker 0.10.334-music-60pct.
 Manage Idea mixed media Worker deploy: 2026-09-20 — Idea suggestions include eligible Raw Footage and library attachment accepts mixed photos and clips. Worker 0.10.335-idea-mixed-media.
+Vertical short output defaults Worker deploy: 2026-09-20 — Photo- and clip-origin Vertical Short Video plans use Instagram Reel + Story and Facebook Reel + Story, never Facebook Slideshow Reel. Worker 0.10.336-vertical-reel-story.

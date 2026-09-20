@@ -111,7 +111,7 @@ test("EZ plan packages for single vs multi vs clips", () => {
   assert.equal(slides.overrides.Instagram, "Carousel");
   assert.equal(slides.overrides.YouTube, "Slideshow Video");
   const video = ezPlanFromPhotoCount({ photoCount: 4, packageId: "video" });
-  assert.equal(video.overrides.Facebook, "Slideshow Reel");
+  assert.equal(video.overrides.Facebook, "Reel");
   assert.deepEqual(video.extras, ["Instagram::Story", "Facebook::Story"]);
   const clips = ezPlanFromPhotoCount({
     photoCount: 2,

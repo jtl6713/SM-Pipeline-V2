@@ -213,7 +213,7 @@ test("YouTube mapper keeps titles and picker requires assets", () => {
   assert.match(picked.post_caption, /Pilsen walls/);
   assert.deepEqual(autonomousPlanOverrides("Vertical Short Video"), {
     Instagram: "Reel",
-    Facebook: "Slideshow Reel",
+    Facebook: "Reel",
     TikTok: "Video Draft",
     YouTube: "Short",
   });

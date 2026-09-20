@@ -34,7 +34,7 @@ test("multiple photos default to vertical video plus Stories", () => {
   assert.equal(plan.master_content_type, "Photo Set");
   assert.equal(plan.youtube_enabled, true);
   assert.equal(plan.overrides.Instagram, "Reel");
-  assert.equal(plan.overrides.Facebook, "Slideshow Reel");
+  assert.equal(plan.overrides.Facebook, "Reel");
   assert.equal(plan.overrides.TikTok, "Video Draft");
   assert.equal(plan.overrides.YouTube, "Short");
   assert.deepEqual(plan.extras, ["Instagram::Story", "Facebook::Story"]);
@@ -51,9 +51,9 @@ test("slides package is swipeable stills and a YouTube rendered video", () => {
   assert.ok(!Object.values(plan.overrides).includes("Slideshow Reel"));
 });
 
-test("video package from photos keeps Facebook as a photo-origin Reel", () => {
+test("video package from photos uses Facebook Reel plus Stories", () => {
   const plan = ezPlanFromPhotoCount({ photoCount: 4, packageId: "video" });
-  assert.equal(plan.overrides.Facebook, "Slideshow Reel");
+  assert.equal(plan.overrides.Facebook, "Reel");
   assert.deepEqual(plan.extras, ["Instagram::Story", "Facebook::Story"]);
 });
 

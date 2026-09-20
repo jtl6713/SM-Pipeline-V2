@@ -26,7 +26,7 @@ export const AUTONOMOUS_STANDARD_PLATFORMS = Object.freeze([
 ]);
 export const AUTONOMOUS_REEL_OVERRIDES = Object.freeze({
   Instagram: "Reel",
-  Facebook: "Slideshow Reel",
+  Facebook: "Reel",
   TikTok: "Video Draft",
   YouTube: "Short",
 });

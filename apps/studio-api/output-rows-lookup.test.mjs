@@ -29,7 +29,7 @@ test("output row lookup chunks linked ids into RECORD_ID formulas", () => {
 test("video package destinations stay at six (4 mains + IG/FB Stories)", () => {
   const videoPackage = [
     "Instagram::Reel",
-    "Facebook::Slideshow Reel",
+    "Facebook::Reel",
     "TikTok::Video Draft",
     "YouTube::Short",
     "Instagram::Story",
