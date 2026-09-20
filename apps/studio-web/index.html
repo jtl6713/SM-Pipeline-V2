@@ -9,7 +9,7 @@
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500&display=swap">
- <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.343-music-60pct">
+ <link rel="stylesheet" href="/assets/styles-phase7-0621.css?v=0.6.344-idea-mixed-media">
 </head>
 <body>
  <header class="topbar">
@@ -1389,8 +1389,8 @@
  <button type="button" class="text-button" data-open-page="ideas">Open Ideas</button>
  </li>
  <li>
- <strong>Add photos from the idea drawer.</strong>
- <span>Open the idea, then <em>Add new photos</em> or <em>Use existing</em>. New uploads start an empty Production request. Library stills attach first, then you customize. Studio builds a multi-platform plan from the photo count, not from a content-type picker on the idea.</span>
+ <strong>Add media from the idea drawer.</strong>
+ <span>Open the idea, then <em>Add new media</em> or <em>Use existing</em>. You can combine classified Drive photos and Raw Footage clips before opening Production, then customize the plan.</span>
  </li>
  <li>
  <strong>Confirm platforms and crops in Production.</strong>
@@ -1581,7 +1581,7 @@
  <li><strong>Use unused photos</strong> — scan unused library stills, pick a related 5–10 set, write the idea and caption, and produce through to Ready for Review. Nothing publishes.</li>
  <li><strong>Generate AI ideas</strong> — create 1–10 ideas. Studio waits until they show up in the table.</li>
  <li><strong>New idea</strong> — select an existing unpromoted candidate or enter a title/summary by hand.</li>
- <li><strong>Manage</strong> — edit copy, hold/restore, delete, or choose <em>Add new photos</em> / <em>Use existing</em> to open Production.</li>
+ <li><strong>Manage</strong> — edit copy, hold/restore, delete, or choose <em>Add new media</em> / <em>Use existing</em> to attach photos and clips before opening Production.</li>
  <li><strong>Promote to production</strong> — creates the content item from this idea. No review email is sent. Requires a summary, content type, and platforms. Hover the ? next to each field for what it does.</li>
  <li><strong>Video duration vs voiceover</strong> — Video duration is the hard cap. On the idea drawer, spoken length is duration minus Video after voiceover (30s − 2s = 28s of speech). If you later set an explicit Voiceover duration on Production, that spoken length wins and the tail is extra after it. If speech + tail is longer than Video duration, the video is cut at the duration.</li>
  </ul>
@@ -1785,7 +1785,7 @@
  </nav>
  <div class="studio-footer-meta">
  <span id="apiStatus" class="topbar-status">Connecting…</span>
- <span id="uiBuildLabel">UI build 0.6.341</span>
+ <span id="uiBuildLabel">UI build 0.6.344</span>
  <span id="workerBuildLabel">Worker …</span> </div>
  </footer>
 
@@ -1826,20 +1826,20 @@
  <div class="production-request-launch" id="productionRequestLaunch">
  <div>
  <strong>This idea is a brief</strong>
- <span>Choose new uploads or library stills, then customize on Production. Reel / Slideshow Reel / TikTok / Short are chosen from the photos — not from a type list here.</span>
+ <span>Choose new uploads or existing Drive photos and clips, then customize the package on Production.</span>
  </div>
  <div class="idea-media-chooser">
- <button type="button" class="primary-button" id="configureProductionButton">Add new photos</button>
+ <button type="button" class="primary-button" id="configureProductionButton">Add new media</button>
  <button type="button" class="secondary-button" id="useExistingLibraryButton">Use existing</button>
  </div>
  </div>
 
  <div class="idea-library-picker" id="ideaLibraryPicker" hidden>
  <label class="form-field">
- <span>Search library stills</span>
+ <span>Search library photos and clips</span>
  <input id="ideaLibrarySearch" type="search" form="ideaLibraryPickerForm" placeholder="Andersonville, Pilsen, neighborhood…">
  </label>
- <p class="idea-library-picker-hint" id="ideaLibraryPickerHint">Suggested stills are checked. Uncheck any you do not want, or search the Drive library to add more.</p>
+ <p class="idea-library-picker-hint" id="ideaLibraryPickerHint">Suggested photos and clips are checked. Uncheck any you do not want, or search the Drive library to add more.</p>
  <div class="idea-library-picker-body" id="ideaLibraryGrid"></div>
  <div class="idea-library-picker-actions">
  <button type="button" class="primary-button" id="ideaLibraryContinueButton" disabled>Continue to Production</button>
@@ -1851,7 +1851,7 @@
  <div class="promotion-heading" id="ideaPromotionHeading">
  <div>
  <strong>Promote to production</strong>
- <span>Creates the content item from this idea. No review email is sent. Use Add new photos or Use existing if you want to attach footage first. Requires a summary.</span>
+ <span>Creates the content item from this idea. No review email is sent. Use Add new media or Use existing if you want to attach photos and clips first. Requires a summary.</span>
  </div>
  </div>
 
@@ -1935,8 +1935,8 @@
  </div>
  </aside>
 
- <script src="/assets/config-0621.js?v=0.6.341-idea-types"></script>
+ <script src="/assets/config-0621.js?v=0.6.344-idea-mixed-media"></script>
  <script src="/assets/ez-plan.js?v=0.6.340-best-times-spread"></script>
- <script src="/assets/app-item4-0625.js?v=0.6.343-music-60pct"></script>
+ <script src="/assets/app-item4-0625.js?v=0.6.344-idea-mixed-media"></script>
 </body>
 </html>

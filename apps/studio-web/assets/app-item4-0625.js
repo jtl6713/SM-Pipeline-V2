@@ -205,7 +205,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.343-music-60pct";
+  const BUILD_ID = "item4-0.6.344-idea-mixed-media";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -2174,7 +2174,7 @@
       configureButton.disabled = promoted || Boolean(idea?.is_on_hold);
       configureButton.textContent = promoted
         ? "Production locked"
-        : (String(idea?.photo_wait_status || "") === "Ready" ? "Open Production" : "Add new photos");
+        : (String(idea?.photo_wait_status || "") === "Ready" ? "Open Production" : "Add new media");
     }
     const useExistingButton = $("useExistingLibraryButton");
     if (useExistingButton) {
@@ -2431,7 +2431,7 @@
         }
       }
       const kept = ideaLibrarySelected.size;
-      setManageMessage(kept ? `Changes saved. ${kept} photo${kept === 1 ? "" : "s"} still selected.` : "Changes saved.", "success");
+      setManageMessage(kept ? `Changes saved. ${kept} media item${kept === 1 ? "" : "s"} still selected.` : "Changes saved.", "success");
     } catch (e) {
       setManageMessage(e.message, "error-text");
     } finally {
@@ -9490,7 +9490,7 @@
     } finally {
       if (button && activeIdea && !ideaIsPromoted(activeIdea) && !activeIdea.is_on_hold) {
         button.disabled = false;
-        button.textContent = "Add new photos";
+        button.textContent = "Add new media";
       }
     }
   }
@@ -9588,6 +9588,7 @@
     if (!ideaId) return { suggested: [], matches: [] };
     const params = new URLSearchParams();
     if (String(query || "").trim()) params.set("q", String(query).trim());
+    params.set("include", "video");
     const qs = params.toString();
     const result = await api(`/api/ideas/${encodeURIComponent(ideaId)}/library-suggestions${qs ? `?${qs}` : ""}`, { timeoutMs: 20000 });
     return {
@@ -9656,7 +9657,7 @@
     if (more.length) {
       parts.push(`<div class="idea-library-block"><p class="idea-library-section">More from library</p><div class="idea-library-cards">${more.map(card).join("")}</div></div>`);
     }
-    return parts.join("") || `<p class="idea-library-picker-hint">No classified Drive stills matched that search.</p>`;
+    return parts.join("") || `<p class="idea-library-picker-hint">No classified Drive photos or clips matched that search.</p>`;
   }
 
   function syncIdeaLibraryContinue() {
@@ -9679,7 +9680,7 @@
       const suggested = ideaLibrarySuggestedIds.size;
       hint.textContent = suggested
         ? `${suggested} suggested. ${checked} checked. Uncheck to drop, search to add.`
-        : `No place match yet. ${checked} checked. Search the Drive library and check stills to add.`;
+        : `No place match yet. ${checked} checked. Search the Drive library and check photos or clips to add.`;
     }
     syncIdeaLibraryContinue();
     item4BindClipPlayers(grid);
@@ -9690,8 +9691,8 @@
     if (!activeIdea?.id) return;
     const grid = $("ideaLibraryGrid");
     const hint = $("ideaLibraryPickerHint");
-    if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library stills…</p>`;
-    if (hint) hint.textContent = "Loading suggested stills and the Drive library.";
+    if (grid) grid.innerHTML = `<p class="idea-library-picker-hint">Loading library photos and clips…</p>`;
+    if (hint) hint.textContent = "Loading suggested photos, clips, and the Drive library.";
     const q = String(query || "").trim();
     const [ideaPack, browse] = await Promise.all([
       fetchIdeaLibrarySuggested(activeIdea.id, q).catch(() => ({ suggested: [], matches: [] })),
@@ -9733,7 +9734,7 @@
       continueButton.disabled = true;
       continueButton.textContent = "Attaching…";
     }
-    setManageMessage("Attaching library stills and opening Production…", "");
+    setManageMessage("Attaching library photos and clips and opening Production…", "");
     try {
       await Promise.all([ensureProductionRequestMusic(), loadEzAudioOptions()]);
       const result = await api(`/api/ideas/${encodeURIComponent(idea.id)}/production-request`, {
@@ -9744,7 +9745,11 @@
       if (!requestId) throw new Error("Production Request was not created.");
       await api(`/api/production-requests/${encodeURIComponent(requestId)}/assets/library`, {
         method: "POST",
-        body: JSON.stringify({ media_asset_ids: mediaAssetIds }),
+        body: JSON.stringify({
+          media_asset_ids: mediaAssetIds,
+          allow_video: true,
+          origin_kind: "photos-and-clips",
+        }),
         timeoutMs: 45000,
       });
       await closeIdeaDrawer({ save: false });

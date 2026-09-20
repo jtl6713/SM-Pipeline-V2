@@ -370,7 +370,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.334-music-60pct",
+          version: "0.10.335-idea-mixed-media",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -5911,6 +5911,9 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
   const ideaId = ideaRecordIdFromPath(url);
   const idea = await loadAuthorizedIdea(env, ideaId, authorization);
   const query = String(url.searchParams.get("q") || "").trim();
+  const includeVideo = ["1", "true", "video", "all", "clips"].includes(
+    String(url.searchParams.get("include") || "").trim().toLowerCase()
+  );
   const ideaTokens = ideaLibraryTokens([
     f(idea, "Candidate_Title"),
     f(idea, "Idea_Summary"),
@@ -5931,11 +5934,16 @@ async function getIdeaLibrarySuggestions(request, env, url, authorization) {
     limit: scanLimit,
     sortField: "Intake_Date",
     sortDirection: "desc",
-    filterFormula: combineAirtableFormulas(ideaLibraryFilterFormula(filterKeys), scopeFormula),
+    filterFormula: combineAirtableFormulas(
+      ideaLibraryFilterFormula(filterKeys, { includeVideo }),
+      scopeFormula
+    ),
   });
   const ranked = [];
   for (const record of records) {
-    if (!ideaLibraryIsEligibleImage(record)) continue;
+    const eligible = ideaLibraryIsEligibleImage(record)
+      || (includeVideo && ideaLibraryIsEligibleVideo(record));
+    if (!eligible) continue;
     const row = ideaLibraryRankAsset(record, {
       placeKeys,
       subjectKeys,

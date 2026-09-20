@@ -13,8 +13,8 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(html, /id="promoteTimingHint"/);
   assert.match(html, /id="promoteVoiceoverTail"/);
   assert.match(html, /id="promoteVideoDuration"/);
-  assert.match(html, /UI build 0\.6\.341/);
-  assert.match(html, /app-item4-0625\.js\?v=0\.6\.343-music-60pct/);
+  assert.match(html, /UI build 0\.6\.344/);
+  assert.match(html, /app-item4-0625\.js\?v=0\.6\.344-idea-mixed-media/);
   assert.match(html, /id="ideaLibraryPickerForm"/);
   assert.match(html, /class="idea-type-guide"/);
   assert.match(html, /Photo Set turns stills into Reels|Photo Set/);
@@ -24,7 +24,7 @@ test("idea promote drawer documents duration vs voiceover tail precedence", () =
   assert.match(config, /Video duration still wins/);
   assert.match(config, /prVoiceoverDuration: "Spoken narration length/);
   assert.match(config, /Help → Ideas has a graphic/);
-  assert.match(app, /BUILD_ID = "item4-0\.6\.343-music-60pct"/);
+  assert.match(app, /BUILD_ID = "item4-0\.6\.344-idea-mixed-media"/);
   assert.match(app, /function syncPromoteTimingHint/);
   assert.match(app, /Video duration is the hard cap/);
   assert.match(app, /library_asset_ids/);
@@ -36,4 +36,12 @@ test("review audio defaults use sixty percent of the previous mix", () => {
   assert.match(html, /id="creativeMusicDucked"[^>]+value="5\.04"/);
   assert.match(app, /phase6Percent\(output\.music\?\.normal_volume, 60\)/);
   assert.match(app, /phase6Percent\(output\.music\?\.ducked_volume, 5\.04\)/);
+});
+
+test("Manage Idea attaches both library photos and clips", () => {
+  assert.match(html, /id="configureProductionButton">Add new media</);
+  assert.match(html, /Search library photos and clips/);
+  assert.match(app, /params\.set\("include", "video"\)/);
+  assert.match(app, /allow_video: true/);
+  assert.match(app, /origin_kind: "photos-and-clips"/);
 });
