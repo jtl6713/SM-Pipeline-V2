@@ -16,6 +16,14 @@ def test_t1_formula_waits_for_ready_render_and_music():
     assert '{Music_URL}!=""' in formula
 
 
+def test_t1_identifies_story_for_exact_skip():
+    from t1.processor import _is_story_output
+
+    assert _is_story_output({"fields": {"Format": "Story"}}) is True
+    assert _is_story_output({"fields": {"Studio_Output_Type": "Story"}}) is True
+    assert _is_story_output({"fields": {"Format": "Vertical Short Video"}}) is False
+
+
 def test_t1_reuses_existing_timeline_json():
     from t1.processor import existing_timeline_json
 
