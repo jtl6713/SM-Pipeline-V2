@@ -11,15 +11,10 @@ from render.fields import field_str
 
 
 def graph_caption(record: dict[str, Any]) -> str:
-    caption = field_str(record, "Output_Caption")
-    hashtags = field_str(record, "Output_Hashtags")
-    if not hashtags:
-        return caption
-    if hashtags in caption:
-        return caption
-    if caption:
-        return f"{caption}\n\n{hashtags}"
-    return hashtags
+    return caption_with_hashtags(
+        field_str(record, "Output_Caption"),
+        field_str(record, "Output_Hashtags"),
+    )
 
 
 def cache_busted_video_url(record: dict[str, Any], now: datetime | None = None) -> str:
