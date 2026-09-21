@@ -191,6 +191,7 @@
   let pipelineOutputs = [];
   let pipelineSort = { key: "output", dir: "desc" };
   let ideasSort = { key: "idea", dir: "desc" };
+  let ideasCurrentSectionOpen = true;
   let ideasArchivedSectionOpen = false;
   let contentSort = { key: "content", dir: "desc" };
   const pipelineGroupOpen = new Map();
@@ -226,7 +227,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.357-music-native-picker";
+  const BUILD_ID = "item4-0.6.358-ideas-two-sections";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -10756,12 +10757,14 @@
     return { active, archived };
   }
 
-  function renderIdeaArchivedSection(archived) {
-    if (!archived.length) return "";
-    const open = ideasArchivedSectionOpen;
-    const banner = `<tbody class="pipeline-archived-section${open ? "" : " is-collapsed"}" data-idea-archived-section><tr class="pipeline-archived-section-row"><td colspan="7"><button type="button" class="pipeline-archived-section-toggle" data-idea-archived-toggle aria-expanded="${open ? "true" : "false"}"><span class="pipeline-group-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="pipeline-archived-section-title">Archived</span><span class="pipeline-archived-section-meta">${archived.length} idea${archived.length === 1 ? "" : "s"} in production</span></button></td></tr></tbody>`;
-    if (!open) return banner;
-    return `${banner}<tbody class="idea-archived-rows">${archived.map(ideaRowHtml).join("")}</tbody>`;
+  function renderIdeaSection({ key, title, records, open, meta }) {
+    const rows = records.length
+      ? records.map(ideaRowHtml).join("")
+      : '<tr><td colspan="7"><div class="empty">No ideas in this section.</div></td></tr>';
+    const table = open
+      ? `<div class="idea-window-body"><table class="data-table idea-table"><thead><tr>${ideaSortHeader("idea", "Idea")}${ideaSortHeader("status", "Status")}${ideaSortHeader("type", "Type")}${ideaSortHeader("platforms", "Platforms")}${ideaSortHeader("structure", "Structure")}${ideaSortHeader("production", "Production")}<th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : "";
+    return `<section class="panel idea-window${open ? "" : " is-collapsed"}" data-idea-section="${escapeHtml(key)}"><button type="button" class="idea-window-toggle" data-idea-section-toggle="${escapeHtml(key)}" aria-expanded="${open ? "true" : "false"}"><span class="idea-window-chevron" aria-hidden="true">${open ? "▾" : "▸"}</span><span class="idea-window-title">${escapeHtml(title)}</span><span class="idea-window-meta">${escapeHtml(meta)}</span></button>${table}</section>`;
   }
 
   function renderIdeasTable(target, records) {
@@ -10773,11 +10776,22 @@
     const { active, archived } = partitionIdeaRecords(records);
     const sortedActive = sortedIdeaRecords(active);
     const sortedArchived = sortedIdeaRecords(archived);
-    const activeRows = sortedActive.length
-      ? sortedActive.map(ideaRowHtml).join("")
-      : '<tr><td colspan="7"><div class="empty">No ideas are waiting to move into production.</div></td></tr>';
-    const archivedSection = renderIdeaArchivedSection(sortedArchived);
-    target.innerHTML = `<table class="data-table idea-table"><thead><tr>${ideaSortHeader("idea", "Idea")}${ideaSortHeader("status", "Status")}${ideaSortHeader("type", "Type")}${ideaSortHeader("platforms", "Platforms")}${ideaSortHeader("structure", "Structure")}${ideaSortHeader("production", "Production")}<th></th></tr></thead><tbody>${activeRows}</tbody>${archivedSection}</table>`;
+    const currentSection = renderIdeaSection({
+      key: "current",
+      title: "Current ideas",
+      records: sortedActive,
+      open: ideasCurrentSectionOpen,
+      meta: `${sortedActive.length} idea${sortedActive.length === 1 ? "" : "s"} not in production`,
+    });
+    const archivedSection = renderIdeaSection({
+      key: "archived",
+      title: "Archived",
+      records: sortedArchived,
+      open: ideasArchivedSectionOpen,
+      meta: `${sortedArchived.length} idea${sortedArchived.length === 1 ? "" : "s"} already in production`,
+    });
+    target.innerHTML = `<div class="idea-window-stack">${currentSection}${archivedSection}</div>`;
+
     target.querySelectorAll("[data-idea-sort]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -10791,13 +10805,17 @@
         renderIdeasTable(target, records);
       });
     });
-    target.querySelectorAll("[data-idea-archived-toggle]").forEach((button) => {
+
+    target.querySelectorAll("[data-idea-section-toggle]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
-        ideasArchivedSectionOpen = !ideasArchivedSectionOpen;
+        const section = button.dataset.ideaSectionToggle;
+        if (section === "current") ideasCurrentSectionOpen = !ideasCurrentSectionOpen;
+        if (section === "archived") ideasArchivedSectionOpen = !ideasArchivedSectionOpen;
         renderIdeasTable(target, records);
       });
     });
+
     const byId = new Map([...sortedActive, ...sortedArchived].map((record) => [record.id, record]));
     target.querySelectorAll("[data-idea-id]").forEach((button) => {
       button.addEventListener("click", () => {
