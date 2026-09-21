@@ -84,6 +84,7 @@ import {
   finishedStoryTeaserClipFlags,
   mergeAzOutputLock,
   pickDuplicateOutputKeepers,
+  pickPlatformOutputSeedKeeper,
   shouldCreateFinishedOutput,
   uniquePlanItems,
 } from "./az-finished-video.mjs";
@@ -399,7 +400,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.356-pipeline-rerendering-label",
+          version: "0.10.357-platform-output-fanout-dedupe",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -470,6 +471,7 @@ export default {
           studio_finished_story_teaser_10s_v1: true,
           studio_finished_passthrough_six_v1: true,
           studio_p3_promote_pulse_v1: true,
+          studio_platform_output_fanout_dedupe_v1: true,
           studio_r3_seed_selected_v1: true,
           production_make_idle_cadence_v1: true,
           production_request_kate_voice_v1: true,
@@ -6991,6 +6993,63 @@ function item4CompanionStoryFields(outputType, { finishedVideo = false } = {}) {
 
 function item4RowHasPlatformOutput(row) {
   return arrayOrEmpty(f(row, "Platform_Output")).some((id) => /^rec[A-Za-z0-9]+$/.test(String(id || "")));
+}
+
+function item4PlatformOutputHasPublishedIdentity(row) {
+  const outputStatus = String(f(row, "Output_Status") || "").trim().toLowerCase();
+  const publishStatus = String(f(row, "Publish_Status") || "").trim().toLowerCase();
+  if (outputStatus === "published" || publishStatus.includes("published") || publishStatus.includes("success")) return true;
+  return [
+    "Platform_Post_URL",
+    "Platform_Post_ID",
+    "Instagram_Media_ID",
+    "Facebook_Post_ID",
+    "TikTok_Post_ID",
+    "TikTok_Video_ID",
+    "YouTube_Video_ID",
+    "Published_At",
+  ].some((name) => Boolean(String(f(row, name) || "").trim()));
+}
+
+async function item4ReconcileCreatedPlatformOutput(env, outputRow, createdPo) {
+  const rawProId = String(f(outputRow, "Production_Request_Output_ID") || "").trim();
+  if (!rawProId || !createdPo?.id) return { keeper: createdPo, deleted_ids: [], unsafe_extra_ids: [] };
+  const proId = rawProId.replace(/'/g, "\\'");
+  const rows = await listRecords(env, STUDIO_PLATFORM_OUTPUT_TABLE, {
+    limit: 10,
+    filterFormula: `FIND(',${proId},', ',' & ARRAYJOIN({Production_Request_Output}) & ',') > 0`,
+  });
+  if (!rows || rows.length <= 1) return { keeper: rows?.[0] || createdPo, deleted_ids: [], unsafe_extra_ids: [] };
+
+  const ranked = rows.map((row) => ({
+    ...row,
+    output_id: Number(f(row, "Output_ID") || 0),
+    published: item4PlatformOutputHasPublishedIdentity(row),
+    created_at: String(row?.createdTime || ""),
+  }));
+  const { keeper, extras } = pickPlatformOutputSeedKeeper(ranked);
+  if (!keeper?.id) return { keeper: createdPo, deleted_ids: [], unsafe_extra_ids: [] };
+
+  const deletedIds = [];
+  const unsafeExtraIds = [];
+  for (const extra of extras) {
+    if (!extra?.id || extra.id === keeper.id) continue;
+    if (item4PlatformOutputHasPublishedIdentity(extra)) {
+      unsafeExtraIds.push(extra.id);
+      continue;
+    }
+    await airtableFetch(env, STUDIO_PLATFORM_OUTPUT_TABLE, extra.id, { method: "DELETE" });
+    deletedIds.push(extra.id);
+  }
+  if (deletedIds.length || unsafeExtraIds.length) {
+    console.warn(`Platform Output fanout dedupe ${JSON.stringify({
+      production_request_output_id: rawProId,
+      keeper: keeper.id,
+      deleted: deletedIds,
+      preserved_published: unsafeExtraIds,
+    })}`);
+  }
+  return { keeper, deleted_ids: deletedIds, unsafe_extra_ids: unsafeExtraIds };
 }
 
 async function item4CollapseDuplicatePlanOutputs(env, rows, { finishedVideo = false } = {}) {
@@ -16332,8 +16391,20 @@ async function fanoutProductionRequestOutputsToContentItems(env, requestRecord, 
       }
     }
     let po;
+    let createdNewPlatformOutput=false;
     if(poId) po=await airtableFetch(env,STUDIO_PLATFORM_OUTPUT_TABLE,poId,{method:"PATCH",body:JSON.stringify({fields:seed,typecast:true})});
-    else po=await airtableFetch(env,STUDIO_PLATFORM_OUTPUT_TABLE,"",{method:"POST",body:JSON.stringify({fields:seed,typecast:true})});
+    else {
+      po=await airtableFetch(env,STUDIO_PLATFORM_OUTPUT_TABLE,"",{method:"POST",body:JSON.stringify({fields:seed,typecast:true})});
+      createdNewPlatformOutput=true;
+    }
+    if(createdNewPlatformOutput){
+      try {
+        const reconciled=await item4ReconcileCreatedPlatformOutput(env,outputRow,po);
+        if(reconciled?.keeper?.id) po=reconciled.keeper;
+      } catch(error) {
+        console.warn("Platform Output fanout post-create reconciliation failed", outputRow.id, error);
+      }
+    }
     const now=new Date().toISOString();
     await airtableFetch(env,PRODUCTION_REQUEST_OUTPUT_TABLE,outputRow.id,{method:"PATCH",body:JSON.stringify({fields:{Content_Item:[parent.id],Platform_Output:[po.id],Pipeline_Family:route.pipeline_family,Pipeline_Route_Status:"Routed",Pipeline_Route_Notes:`Single-parent route: ${route.pipeline_family}; Platform Output ${po.id}; Content Item ${parent.id}.`,Routed_At:now,Updated_At:now},typecast:false})});
     routed++;
