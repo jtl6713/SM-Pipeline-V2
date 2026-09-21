@@ -399,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.354-facebook-reel-native-receipts",
+          version: "0.10.355-facebook-reel-native-fallback",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -1259,6 +1259,11 @@ export default {
         await studioReconcileOverdueScheduledPublishes(env, { limit: 12 });
       } catch (error) {
         console.warn("overdue scheduled publish rescue cron failed", error);
+      }
+      try {
+        await studioReconcileFacebookReels(env, { limit: 4 });
+      } catch (error) {
+        console.warn("facebook reel priority reconcile cron failed", error);
       }
       try {
         await opsForceAzNavyPierTitle(env);
@@ -25612,6 +25617,183 @@ async function studioEnsureFacebookSlideshowAsset(env, record) {
   return studioPulseFbs2(env, record);
 }
 
+async function studioPublishFacebookReelNative(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3-NATIVE" };
+
+  const videoUrl = String(
+    f(record, "FB_Slideshow_Public_URL")
+    || f(record, "Publish_Asset_URL")
+    || f(record, "Studio_Preview_URL")
+    || ""
+  ).trim();
+  if (!videoUrl.startsWith("https://media.chicagoshining.com/")) {
+    return { ok: false, skipped: "missing-public-mp4", target: "FBS3-NATIVE" };
+  }
+
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ID",
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+  ], record);
+  const pageId = String(settings.FACEBOOK_PAGE_ID || "").trim();
+  const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+  if (!pageId || !token) return { ok: false, skipped: "missing-facebook-settings", target: "FBS3-NATIVE" };
+
+  const description = (() => {
+    const caption = String(f(record, "Output_Caption") || "").trim().slice(0, 4500);
+    const hashtags = String(f(record, "Output_Hashtags") || "").trim().slice(0, 450);
+    return caption && hashtags ? `${caption}\n\n${hashtags}` : (caption || hashtags);
+  })();
+  const title = String(
+    f(record, "Output_Title")
+    || f(record, "Title_Text")
+    || f(record, "Output_Caption")
+    || "Facebook Reel"
+  ).trim().slice(0, 255) || "Facebook Reel";
+  const location = await studioResolvePublishLocation(env, record);
+
+  let videoId = String(f(record, "FB_Slideshow_Meta_Video_ID") || f(record, "Platform_Post_ID") || "").trim();
+  let uploadUrl = String(f(record, "FB_Slideshow_Meta_Upload_URL") || "").trim();
+
+  if (videoId && !uploadUrl && String(f(record, "FB_Slideshow_Status") || "").toLowerCase().includes("processing")) {
+    return { ok: true, skipped: "already-processing", target: "FBS3-NATIVE", needs_poll: true, video_id: videoId };
+  }
+
+  if (!videoId) {
+    const startUrl = new URL(`https://graph.facebook.com/${version}/${pageId}/video_reels`);
+    startUrl.searchParams.set("upload_phase", "start");
+    const startResponse = await fetch(startUrl.toString(), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const start = await startResponse.json().catch(() => ({}));
+    videoId = String(start.video_id || "").trim();
+    uploadUrl = String(start.upload_url || "").trim();
+    if (!startResponse.ok || !videoId || !uploadUrl) {
+      return {
+        ok: false,
+        target: "FBS3-NATIVE",
+        error: start?.error?.message || `start ${startResponse.status}`,
+      };
+    }
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        typecast: true,
+        fields: {
+          Publish_Status: "Publishing",
+          FB_Publish_Status: "Publishing",
+          FB_Slideshow_Status: "Uploading Reel",
+          FB_Slideshow_Meta_Video_ID: videoId,
+          FB_Slideshow_Meta_Upload_URL: uploadUrl,
+          Publish_Error_Stage: "",
+          Publish_Error_Message: "",
+          Publish_Retry_Eligible: false,
+        },
+      }),
+    });
+  }
+
+  const mediaResponse = await fetch(videoUrl, {
+    headers: { "User-Agent": "chicagoshining-studio-api/facebook-reel-native" },
+  });
+  if (!mediaResponse.ok) {
+    return { ok: false, target: "FBS3-NATIVE", error: `cdn ${mediaResponse.status}`, video_id: videoId };
+  }
+  const payload = await mediaResponse.arrayBuffer();
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${token}`,
+      offset: "0",
+      file_size: String(payload.byteLength),
+      "Content-Type": "application/octet-stream",
+    },
+    body: payload,
+  });
+  const upload = await uploadResponse.json().catch(() => ({}));
+  if (!uploadResponse.ok || upload.success === false) {
+    return {
+      ok: false,
+      target: "FBS3-NATIVE",
+      error: upload?.error?.message || upload?.debug_info?.message || `upload ${uploadResponse.status}`,
+      video_id: videoId,
+    };
+  }
+
+  const finishBase = `https://graph.facebook.com/${version}/${pageId}/video_reels`;
+  const makeFinish = async (includePlace) => {
+    const url = new URL(finishBase);
+    url.searchParams.set("upload_phase", "finish");
+    url.searchParams.set("video_id", videoId);
+    url.searchParams.set("video_state", "PUBLISHED");
+    if (description) url.searchParams.set("description", description);
+    if (title) url.searchParams.set("title", title);
+    if (includePlace && location?.page_id) url.searchParams.set("place", String(location.page_id));
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await response.json().catch(() => ({}));
+    return { response, body };
+  };
+
+  let finished = await makeFinish(true);
+  if (!finished.response.ok && location?.page_id && /place/i.test(String(finished.body?.error?.message || ""))) {
+    finished = await makeFinish(false);
+  }
+  if (!finished.response.ok) {
+    const ambiguous = finished.response.status >= 500 || finished.response.status === 0;
+    if (ambiguous) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          typecast: true,
+          fields: {
+            Publish_Status: "Publishing",
+            Platform_Post_ID: videoId,
+            FB_Publish_Status: "Publishing",
+            FB_Slideshow_Status: "Reel Processing",
+            FB_Slideshow_Meta_Video_ID: videoId,
+            Publish_Error_Stage: "FBS3_AMBIGUOUS",
+            Publish_Error_Message: "Facebook Reel finish outcome was ambiguous; native poll will reconcile.",
+            Publish_Retry_Eligible: true,
+            Publish_Next_Retry_At: new Date().toISOString(),
+          },
+        }),
+      });
+      return { ok: true, target: "FBS3-NATIVE", needs_poll: true, video_id: videoId, ambiguous: true };
+    }
+    return {
+      ok: false,
+      target: "FBS3-NATIVE",
+      error: finished.body?.error?.message || `finish ${finished.response.status}`,
+      video_id: videoId,
+    };
+  }
+
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      typecast: true,
+      fields: {
+        Publish_Status: "Publishing",
+        Platform_Post_ID: videoId,
+        FB_Publish_Status: "Publishing",
+        FB_Slideshow_Status: "Reel Processing",
+        FB_Slideshow_Meta_Video_ID: videoId,
+        Publish_Error_Stage: "",
+        Publish_Error_Message: "",
+        Publish_Retry_Eligible: true,
+        Publish_Next_Retry_At: new Date(Date.now() + 60000).toISOString(),
+      },
+    }),
+  });
+  return { ok: true, target: "FBS3-NATIVE", backend: "graph", needs_poll: true, video_id: videoId };
+}
+
 async function studioPulseFbs3(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3" };
@@ -25628,9 +25810,14 @@ async function studioPulseFbs3(env, record) {
     };
   }
   const skipped = payload?.status === "skipped";
+  const reason = skipped ? (payload?.details?.run?.reason || "python-skip") : undefined;
+  if (reason === "facebook_manual_publish") {
+    const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId).catch(() => record);
+    return studioPublishFacebookReelNative(env, refreshed);
+  }
   return {
     ok: true,
-    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    skipped: reason,
     target: "FBS3",
     backend: "python",
     needs_poll: Boolean(payload?.details?.run?.needs_poll),
