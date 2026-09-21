@@ -16,7 +16,9 @@ from ttd.package import (
     handoff_email_subject,
     hash_completion_token,
     is_az_finished_video,
+    ordered_asset_links_html,
     photo_description,
+    profile_display_name,
     photo_title,
     sibling_status_line,
 )
@@ -133,6 +135,48 @@ def test_package_helpers():
     assert completion_url("https://pipeline.chicagoshining.com/hooks/ttd4", "recABCDEFGHIJKLMN", token).endswith(
         f"token={token}&action=form"
     )
+
+
+def test_handoff_email_shows_profile_in_subject_and_top():
+    record = _record(
+        Output_ID="595",
+        Output_Title="NYC at night",
+        TikTok_Draft_Type="Photo Carousel",
+        TikTok_Draft_Assets_JSON='["https://media.chicagoshining.com/a.jpg"]',
+    )
+    profile = _record(Profile_Name="New York Shining")
+    subject = handoff_email_subject(record, profile=profile)
+    html = handoff_email_html(record, profile=profile)
+
+    assert "TikTok Draft #595 — New York Shining — Ready in Inbox" in subject
+    assert profile_display_name(record, profile) == "New York Shining"
+    assert "<b>Profile:</b> New York Shining" in html
+    assert "TikTok inbox for <b>New York Shining</b>" in html
+    assert "@chicago.shining" not in html
+
+
+def test_handoff_email_renders_named_asset_links_in_manifest_order():
+    first = "https://media.chicagoshining.com/studio/previews/lettered/recExample/0.jpg"
+    second = "https://media.chicagoshining.com/studio/previews/lettered/recExample/1.jpg"
+    record = _record(
+        Output_ID="595",
+        Output_Title="Architecture",
+        TikTok_Draft_Type="Photo Carousel",
+        TikTok_Draft_Assets_JSON=f'["{second}","{first}"]',
+    )
+    slides = [
+        _record(**{"Slide Name": "Tribune Tower", "Slide Number": 1, "Asset_9x16_Public_URL": first}),
+        _record(**{"Slide Name": "Willis Tower", "Slide Number": 2, "Asset_9x16_Public_URL": second}),
+    ]
+
+    assets_html = ordered_asset_links_html(record, slides=slides)
+    email_html = handoff_email_html(record, asset_slides=slides)
+
+    assert assets_html.index("Willis Tower") < assets_html.index("Tribune Tower")
+    assert f'href="{second}"' in assets_html
+    assert f'href="{first}"' in assets_html
+    assert "Ordered draft assets" in email_html
+    assert '["https://' not in email_html
 
 
 def test_handoff_email_includes_public_cover():
