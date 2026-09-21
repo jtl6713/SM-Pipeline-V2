@@ -99,6 +99,25 @@ def test_r4_voiceover_required_when_effective_mode_is_yes():
     assert voiceover_is_required(_photo_output(Studio_Effective_Voiceover_Mode="No"), parent) is False
 
 
+def test_r4_explicit_no_voiceover_ignores_parent_url_and_story_timing_failure():
+    from r4.render_request import timing_blocks_render
+
+    output = _photo_output(
+        Studio_Effective_Voiceover_Mode="No",
+        Studio_Output_Type="Story",
+        Format="Story",
+        Timing_Status="Failed",
+        Voiceover_URL="https://example.com/inherited.mp3",
+        Render_Total_Frames=150,
+    )
+    parent = {"fields": {"Voiceover_URL": "https://example.com/parent.mp3", "Include_Voiceover": "Yes"}}
+    assert timing_blocks_render(output) is False
+    route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
+    assert route == "no_voiceover"
+    assert "voiceover" not in payload
+    assert "voiceoverUrl" not in payload
+
+
 def test_r4_music_start_seconds_pass_through():
     output = _photo_output(Music_URL="https://example.com/track.mp3", Music_Start_Seconds=12.5)
     route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)

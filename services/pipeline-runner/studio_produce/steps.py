@@ -125,6 +125,9 @@ def copy_voiceover_to_outputs(client: AirtableClient, parent: dict[str, Any], ou
         return 0
     copied = 0
     for output in outputs or []:
+        effective_mode = field_str(output, "Studio_Effective_Voiceover_Mode").strip().lower()
+        if effective_mode in {"no", "false", "0"}:
+            continue
         if field_str(output, "Voiceover_URL"):
             continue
         client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], {"Voiceover_URL": vo}, typecast=True)

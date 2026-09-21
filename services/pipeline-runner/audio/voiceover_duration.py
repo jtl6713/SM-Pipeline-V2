@@ -82,6 +82,19 @@ def render_video_seconds(output: dict[str, Any]) -> float | None:
     return None
 
 
+def voiceover_is_disabled(
+    output: dict[str, Any] | None = None,
+    content_item: dict[str, Any] | None = None,
+) -> bool:
+    output_mode = field_str(output or {}, "Studio_Effective_Voiceover_Mode").strip().lower()
+    if output_mode in {"no", "false", "0"}:
+        return True
+    if output_mode in {"yes", "true", "1"}:
+        return False
+    parent_mode = field_str(content_item or {}, "Include_Voiceover").strip().lower()
+    return parent_mode in {"no", "false", "0"}
+
+
 def voiceover_url(*records: dict[str, Any] | None) -> str:
     for record in records:
         if not record:
@@ -100,6 +113,8 @@ def measured_voiceover_seconds(
     probe: bool = True,
 ) -> float | None:
     records = (output, content_item)
+    if voiceover_is_disabled(output, content_item):
+        return None
     target_url = str(url or "").strip() or voiceover_url(*records)
     if probe and target_url:
         try:
@@ -176,6 +191,8 @@ def validate_voiceover_for_render(
     *,
     probe: bool = True,
 ) -> str | None:
+    if voiceover_is_disabled(output, content_item):
+        return None
     url = voiceover_url(output, content_item)
     if not url:
         return None

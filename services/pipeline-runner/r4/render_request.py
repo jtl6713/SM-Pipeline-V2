@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from render.fields import field, field_str, parse_json_field
+from audio.voiceover_duration import voiceover_is_disabled
 
 
 def _cover_url(output: dict[str, Any]) -> str:
@@ -33,6 +34,8 @@ def timing_blocks_render(output: dict[str, Any]) -> bool:
     from t1.apply import music_is_enabled
     from t1.constants import DONE_STATUSES, STATUS_FAILED
 
+    if field_str(output, "Format") == "Story" or field_str(output, "Studio_Output_Type") == "Story":
+        return False
     status = field_str(output, "Timing_Status")
     if status == STATUS_FAILED:
         return True
@@ -283,7 +286,7 @@ def choose_render_request(
     default_music: float,
     default_voice: float,
 ) -> tuple[str, dict[str, Any]]:
-    vo = voiceover_url(output, content_item)
+    vo = "" if voiceover_is_disabled(output, content_item) else voiceover_url(output, content_item)
     if field_str(output, "Creative_Render_Manifest_JSON"):
         payload = build_p020_request(output, default_music=default_music)
         if vo:

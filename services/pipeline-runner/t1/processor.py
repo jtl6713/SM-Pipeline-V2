@@ -50,6 +50,10 @@ def existing_timeline_json(output: dict[str, Any]) -> str:
     return str((output.get("fields") or {}).get("Timing_Timeline_JSON") or "").strip()
 
 
+def _is_story_output(output: dict[str, Any]) -> bool:
+    return field_str(output, "Format") == "Story" or field_str(output, "Studio_Output_Type") == "Story"
+
+
 def _eligible(output: dict[str, Any], *, test_run_id: str | None = None) -> bool:
     actual_test = field_str(output, "Test_Run_ID")
     expected_test = (test_run_id or "").strip()
@@ -141,6 +145,12 @@ def process_one(
         "make_scenario_id": MAKE_SCENARIO_ID,
         "make_scenario_name": MAKE_SCENARIO_NAME,
     }
+    if _is_story_output(output):
+        reason = "story"
+        if dry_run:
+            return {"processed": False, "dry_run": True, "skip": reason, **preview}
+        client.update_record(PLATFORM_OUTPUTS_TABLE, output["id"], _skip_fields(reason), typecast=True)
+        return {"processed": True, "skipped": reason, **preview}
     if existing_timeline_json(output):
         if dry_run:
             return {"processed": False, "dry_run": True, "skip": "timeline_already_present", **preview}
