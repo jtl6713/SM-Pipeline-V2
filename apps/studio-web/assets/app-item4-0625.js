@@ -206,7 +206,7 @@
   let creativeDirtyTimer = null;
   const creativeSlideCollapsed = new Set();
 
-  const BUILD_ID = "item4-0.6.353-status-red-bold";
+  const BUILD_ID = "item4-0.6.354-pipeline-rerendering-label";
   let item4AssetStripSignature = "";
   const ITEM4_ACCEPT_PHOTOS = "image/*,.heic,.heif,image/heic,image/heif,image/heic-sequence,image/heif-sequence";
   const ITEM4_ACCEPT_VIDEOS = "video/mp4,video/quicktime,video/webm,video/*,.mp4,.mov,.m4v,.webm";
@@ -1244,7 +1244,22 @@
     return (record?.studio_state === "Failed" || record?.studio_state === "Error") && !pipelineIsRetryingRender(record);
   }
 
+  function pipelineMixRerenderInProgress(record) {
+    const review = String(record?.review_status || "").trim();
+    const output = String(record?.output_status || "").trim();
+    const render = String(record?.render_status || "").trim();
+    const state = String(record?.studio_state || "").trim();
+    if (state === "Rerendering") return true;
+    if (/in production/i.test(output) && /^(Ready for Render|Rendering)$/i.test(render)) return true;
+    if (review === "Changes Requested") {
+      if (/in production/i.test(output)) return true;
+      if (/^(Ready for Render|Rendering)$/i.test(render)) return true;
+    }
+    return false;
+  }
+
   function pipelineStudioStateLabel(record) {
+    if (pipelineMixRerenderInProgress(record)) return "Rerendering";
     if (pipelineIsRetryingRender(record)) return "Trying Again";
     const state = String(record?.studio_state || "").trim();
     // Per-output success/publish states win over the parent produce job. Sibling
@@ -1280,12 +1295,14 @@
   }
 
   function pipelineRenderLabel(record) {
+    if (pipelineMixRerenderInProgress(record)) return "Rerendering";
     const render = String(record?.render_status || "").trim();
     if (pipelineIsRetryingRender(record) && /failed|error/i.test(render)) return "Trying Again";
     return render;
   }
 
   function pipelineOutputRenderComplete(record) {
+    if (pipelineMixRerenderInProgress(record)) return false;
     if (pipelineIsRetryingRender(record)) return false;
     const state = String(record?.studio_state || "").trim();
     return [
@@ -1301,6 +1318,7 @@
   }
 
   function pipelineOutputRenderInFlight(record) {
+    if (pipelineMixRerenderInProgress(record)) return true;
     if (pipelineIsRetryingRender(record)) return true;
     const state = String(record?.studio_state || "").trim();
     if (["Rendering", "Queued", "Preparing Assets"].includes(state)) return true;
@@ -14153,7 +14171,7 @@
     if (key === "platform") return String(record.platform || "");
     if (key === "type") return `${record.platform_output_type || record.format || ""} ${record.aspect_ratio || ""}`.trim();
     if (key === "state") return String(pipelineStudioStateLabel(record) || record.studio_state || "");
-    if (key === "render") return String(record.render_status || "");
+    if (key === "render") return String(pipelineRenderLabel(record) || record.render_status || "");
     if (key === "review") return String(record.review_status || "");
     if (key === "publish") return String(record.platform_publish_status || record.publish_status || "");
     if (key === "progress") {

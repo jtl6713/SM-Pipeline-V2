@@ -398,7 +398,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.348-fb-public-diagnostic-buildfix",
+          version: "0.10.349-pipeline-rerendering-label",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -2448,10 +2448,28 @@ async function studioEnsureNativePublishSlides(env, record) {
   return airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, record.id);
 }
 
+function studioMixRerenderInProgress(record) {
+  const fields = record?.fields || {};
+  const text = (name) => String(fields[name] || "").trim();
+  const review = text("Review_Status");
+  const output = text("Output_Status").toLowerCase();
+  const render = text("Render_Status").toLowerCase();
+  if (output.includes("in production") && (render.includes("ready for render") || render.includes("rendering"))) {
+    return true;
+  }
+  if (review === "Changes Requested") {
+    if (output.includes("in production")) return true;
+    if (render.includes("ready for render") || render.includes("rendering")) return true;
+  }
+  return false;
+}
+
 function normalizedOutputState(record) {
   const fields = record?.fields || {};
   const text = (name) => String(fields[name] || "").trim();
   const has = (name, value) => text(name).toLowerCase().includes(value.toLowerCase());
+
+  if (studioMixRerenderInProgress(record)) return "Rerendering";
 
   const retryablePublish = Boolean(fields.Publish_Retry_Eligible);
   const youtubeVideoReady = Boolean(text("YouTube_Video_ID"))
@@ -2601,7 +2619,7 @@ function contentLifecycleFromOutputs(outputRecords = []) {
     studioStage = "Needs Attention";
   } else if (states.some((state) => state === "Ready for Review")) {
     studioStage = "Review";
-  } else if (states.some((state) => state === "Rendering")) {
+  } else if (states.some((state) => state === "Rendering" || state === "Rerendering")) {
     studioStage = "Rendering";
   } else if (states.some((state) => ["Uploading", "Platform Processing", "Approved"].includes(state))) {
     studioStage = states.some((state) => state === "Uploading" || state === "Platform Processing")
@@ -2612,7 +2630,7 @@ function contentLifecycleFromOutputs(outputRecords = []) {
   }
 
   const earlyRender = new Set(["Queued", "Preparing Assets", "Rendering"]);
-  const incompleteRender = new Set(["Queued", "Preparing Assets", "Rendering", "Trying Again"]);
+  const incompleteRender = new Set(["Queued", "Preparing Assets", "Rendering", "Rerendering", "Trying Again"]);
   const total = states.length;
   const renderedCount = states.filter((state) => !incompleteRender.has(state)).length;
   let renderStatus = null;
@@ -2802,6 +2820,7 @@ function mapContent(record, outputRecords = null) {
 }
 
 function outputProgressMilestoneFloor(record) {
+  if (studioMixRerenderInProgress(record)) return 50;
   const review = String(f(record, "Review_Status") || "").toLowerCase();
   const output = String(f(record, "Output_Status") || "").toLowerCase();
   const render = String(f(record, "Render_Status") || "").toLowerCase();
@@ -2829,6 +2848,7 @@ function outputProgressPercent(record, state, job = null) {
     Queued: 5,
     "Preparing Assets": 30,
     Rendering: 50,
+    Rerendering: 50,
     "Ready for Review": 65,
     Approved: 75,
     Scheduled: 80,

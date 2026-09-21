@@ -10,6 +10,8 @@ import {
   pipelineColumnDisplayBucket,
   pipelineColumnFilterSummary,
   pipelineColumnFiltersActive,
+  pipelineMixRerenderInProgress,
+  pipelineRenderLabel,
   recordMatchesPipelineColumnFilters,
   uniqueSortedColumnValues,
 } from "./pipeline-column-filters.mjs";
@@ -53,6 +55,25 @@ const rows = [
     creative: "Open review",
   },
 ];
+
+test("mix rerender shows Rerendering instead of stale Rendered", () => {
+  const remix = {
+    studio_state: "Ready for Review",
+    output_status: "In Production",
+    render_status: "Rendered",
+    review_status: "Changes Requested",
+  };
+  assert.equal(pipelineMixRerenderInProgress(remix), true);
+  assert.equal(pipelineRenderLabel(remix), "Rerendering");
+  const ready = {
+    studio_state: "Ready for Review",
+    output_status: "Ready for Review",
+    render_status: "Rendered",
+    review_status: "Review Sent",
+  };
+  assert.equal(pipelineMixRerenderInProgress(ready), false);
+  assert.equal(pipelineRenderLabel(ready), "Rendered");
+});
 
 test("blank filters start empty for every pipeline column", () => {
   const filters = blankPipelineColumnFilters();

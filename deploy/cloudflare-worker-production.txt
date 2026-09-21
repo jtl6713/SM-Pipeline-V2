@@ -507,3 +507,4 @@ Finished-video hard cap six Worker deploy: 2026-09-20 — Concurrent plan-sync a
 2026-09-20 deploy Worker 0.10.347 FB-PUBLIC live diagnostic
 2026-09-20 deploy Worker 0.10.348 FB-PUBLIC diagnostic + build fix
 2026-09-20 redeploy Worker 0.10.348 current main after validation
+2026-09-21 deploy Worker 0.10.349 pipeline Rerendering studio state during mix remix

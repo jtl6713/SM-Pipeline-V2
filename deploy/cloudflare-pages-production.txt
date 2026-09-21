@@ -550,3 +550,4 @@ Shared vertical short render Pages deploy: 2026-09-20 — Review mix copy explai
 Pipeline archived section Pages deploy: 2026-09-20 — Fully published content items collapse into an Archived section at the bottom of Pipeline. UI 0.6.351-pipeline-archived.
 Variant prepare copy Pages deploy: 2026-09-20 — Approve prompt says Prepare first when crops have not started; still finishing only while Preparing. UI 0.6.352-variant-prepare-copy.
 2026-09-20 deploy Studio UI 0.6.353 bold red status messages
+2026-09-21 deploy Studio UI 0.6.354 pipeline rerendering label during mix remix
