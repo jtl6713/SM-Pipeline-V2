@@ -59,6 +59,16 @@ test("Music Manager uses native file labels for Windows file picker", () => {
   assert.doesNotMatch(app, /choose\?\.addEventListener\("click", openPicker\)/);
 });
 
+test("Ideas shows Current expanded and Archived collapsed by default", () => {
+  assert.match(app, /let ideasCurrentSectionOpen = true/);
+  assert.match(app, /let ideasArchivedSectionOpen = false/);
+  assert.match(app, /title: "Current ideas"/);
+  assert.match(app, /title: "Archived"/);
+  assert.match(app, /data-idea-section-toggle/);
+  assert.match(app, /not in production/);
+  assert.match(app, /already in production/);
+});
+
 test("Ideas archives promoted items in a collapsed section", () => {
   assert.match(app, /let ideasArchivedSectionOpen = false/);
   assert.match(app, /function partitionIdeaRecords/);
