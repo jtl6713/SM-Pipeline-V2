@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from asset.helpers import as_bool, parse_int
@@ -32,10 +31,10 @@ def replace_mismatch(
 
 
 def facebook_graph_publish_held_reason() -> str | None:
-    raw = os.environ.get("FACEBOOK_AUTO_PUBLISH", "").strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
-        return None
-    return "facebook_manual_publish"
+    # Make.com is retired. Approved Facebook outputs publish through the
+    # native Graph/Python path; the legacy FACEBOOK_AUTO_PUBLISH flag no
+    # longer gates production publishing.
+    return None
 
 
 def error_stage_contains(record: dict[str, Any], prefix: str) -> bool:
