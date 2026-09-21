@@ -7,15 +7,15 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from ap0.public_mp4 import is_public_publish_url
 from carousel.timeutil import chicago_now
 from fbs3.constants import DEFAULT_TITLE
+from p3.helpers import caption_with_hashtags
 from render.fields import field_str
 
 
 def reel_description(record: dict[str, Any]) -> str:
-    caption = field_str(record, "Output_Caption")[:4500]
-    hashtags = field_str(record, "Output_Hashtags")[:450]
-    if caption and hashtags:
-        return f"{caption}\n\n{hashtags}"
-    return caption or hashtags
+    return caption_with_hashtags(
+        field_str(record, "Output_Caption")[:4500],
+        field_str(record, "Output_Hashtags")[:450],
+    )
 
 
 def reel_title(record: dict[str, Any]) -> str:
