@@ -34,10 +34,10 @@ def _processing(**overrides):
     return _record(**fields)
 
 
-def test_fbs3_create_holds_when_facebook_auto_publish_off():
+def test_fbs3_create_ignores_legacy_facebook_auto_publish_flag():
     os.environ["FACEBOOK_AUTO_PUBLISH"] = "0"
     try:
-        assert create_eligibility_reason(_ready()) == "facebook_manual_publish"
+        assert create_eligibility_reason(_ready()) is None
     finally:
         os.environ["FACEBOOK_AUTO_PUBLISH"] = "1"
 

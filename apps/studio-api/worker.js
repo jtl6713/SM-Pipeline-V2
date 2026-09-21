@@ -208,6 +208,7 @@ export default {
       const isOutputCreativeContinueRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/render\/continue$/.test(url.pathname);
       const isOutputCreativeHandoffStatusRoute = /^\/api\/outputs\/rec[A-Za-z0-9]+\/creative\/handoff\/status$/.test(url.pathname);
       const isAdminMakeDeployRoute = url.pathname === "/api/admin/make-deploy";
+      const isAdminFbPublicDiagnosticRoute = url.pathname === "/api/admin/fb-public-diagnostic";
       const isAdminRepairControlRoute = url.pathname === "/api/admin/repair/control";
       const isOperationsRoute = url.pathname === "/api/operations";
       const isOperationsProfileRoute = /^\/api\/operations\/profiles\/rec[A-Za-z0-9]+$/.test(url.pathname);
@@ -398,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.349-pipeline-rerendering-label",
+          version: "0.10.356-pipeline-rerendering-label",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -440,6 +441,7 @@ export default {
           studio_due_publish_priority_v1: true,
           studio_overdue_scheduled_rescue_v1: true,
           studio_tiktok_photo_route_contract_v1: true,
+          studio_facebook_native_publish_v1: true,
           studio_fbs4_cover_unblock_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
@@ -698,6 +700,13 @@ export default {
         }
         assertWriteRequest(request, env);
         return adminMakeDeploy(request, env, authorization);
+      }
+
+      if (isAdminFbPublicDiagnosticRoute) {
+        requirePermission(authorization, "tenant_admin");
+        if (request.method !== "GET") throw new HttpError(405, "Method not allowed");
+        const diagnostic = await studioDiagnoseFacebookPublicMakeOnce(env);
+        return respond(request, env, diagnostic);
       }
 
       if (isAdminRepairControlRoute) {
@@ -1252,9 +1261,9 @@ export default {
         console.warn("overdue scheduled publish rescue cron failed", error);
       }
       try {
-        await studioDiagnoseFacebookPublicMakeOnce(env);
+        await studioReconcileFacebookReels(env, { limit: 4 });
       } catch (error) {
-        console.warn("FB-PUBLIC diagnostic cron failed", error);
+        console.warn("facebook reel priority reconcile cron failed", error);
       }
       try {
         await opsForceAzNavyPierTitle(env);
@@ -1303,11 +1312,6 @@ export default {
         await studioReconcileTiktokDrafts(env);
       } catch (error) {
         console.warn("tiktok draft reconcile cron failed", error);
-      }
-      try {
-        await studioReconcileFacebookPublicMake(env);
-      } catch (error) {
-        console.warn("facebook public make reconcile cron failed", error);
       }
       // Due IG carousels (Parent Ready) must publish before heavier platform polls
       // burn the isolate subrequest budget — 304 sat ~3h past schedule otherwise.
@@ -7429,8 +7433,10 @@ const STUDIO_FB2R_SCENARIO_ID = 5813511;
 const STUDIO_FB3_SCENARIO_ID = 5813534;
 const STUDIO_FB_ORCH_SCENARIO_ID = 5813561;
 function studioFacebookGraphPublishHeld(env) {
-  const raw = String(env?.FACEBOOK_AUTO_PUBLISH || "").trim().toLowerCase();
-  return !["1", "true", "yes", "on"].includes(raw);
+  void env;
+  // Make.com is retired. Approved Facebook outputs publish through the native
+  // Graph/Python path; do not reinterpret a missing legacy flag as a publish hold.
+  return false;
 }
 const STUDIO_AP0C_SCENARIO_ID = 5786899;
 const STUDIO_AP1C_SCENARIO_ID = 5790745;
@@ -22812,9 +22818,9 @@ const PRODUCTION_CADENCE_WEBHOOK_LIVE = Object.freeze([
 ]);
 const STUDIO_AP0_WEBHOOK_URL = ""; // Make.com retired
 // Live FB-PUBLIC scenario 6107230 (Make connection 9988775). Not unpublished Graph / FB-ORCH.
-const STUDIO_FB_PUBLIC_WEBHOOK_URL = "https://hook.us2.make.com/ivrjp4e0nfpuyvukb18116wj1fwgjdw1";
+const STUDIO_FB_PUBLIC_WEBHOOK_URL = ""; // Make.com retired; Facebook publishes through native Graph/Python stages.
 const STUDIO_FB_PUBLIC_SCENARIO_ID = 6107230;
-const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921";
+const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921-V3";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
   { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG" },
@@ -24697,77 +24703,6 @@ function studioFacebookPublicMakeEligible(record) {
   return false;
 }
 
-async function studioDiagnoseFacebookPublicMakeOnce(env) {
-  try {
-    const prior = await listRecords(env, "Make Admin Queue", {
-      limit: 1,
-      filterFormula: `{Correlation_ID}="${STUDIO_FB_PUBLIC_DIAG_CORRELATION}"`,
-    }).catch(() => []);
-    if (prior.length) return { skipped: "already-captured", record_id: prior[0].id };
-
-    const stateBody = await phase6MakeApiJson(env, `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}`, { method: "GET" });
-    const scenario = stateBody?.scenario || stateBody?.response?.scenario || stateBody || {};
-    const logsBody = await phase6MakeApiJson(
-      env,
-      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/logs?pg%5Blimit%5D=30`,
-      { method: "GET" }
-    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
-    const executionsBody = await phase6MakeApiJson(
-      env,
-      `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/executions?pg%5Blimit%5D=30`,
-      { method: "GET" }
-    ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
-
-    const logs = logsBody?.scenarioLogs || logsBody?.response?.scenarioLogs || logsBody?.data || [];
-    const executions = executionsBody?.executions || executionsBody?.response?.executions || executionsBody?.data || [];
-    const slim = (row) => {
-      const out = {};
-      for (const key of ["id","status","timestamp","startedAt","finishedAt","duration","operations","type","instant"]) {
-        if (row && Object.prototype.hasOwnProperty.call(row, key)) out[key] = row[key];
-      }
-      return out;
-    };
-    const result = {
-      scenario_id: STUDIO_FB_PUBLIC_SCENARIO_ID,
-      name: scenario?.name || null,
-      is_active: scenario?.isActive === true,
-      scheduling: scenario?.scheduling || null,
-      hook_present: Boolean(scenario?.hookId),
-      recent_logs: Array.isArray(logs) ? logs.slice(0, 30).map(slim) : [],
-      recent_executions: Array.isArray(executions) ? executions.slice(0, 30).map(slim) : [],
-      logs_error: logsBody?.diagnostic_error || null,
-      executions_error: executionsBody?.diagnostic_error || null,
-      captured_at: new Date().toISOString(),
-    };
-    const stamp = new Date().toISOString();
-    const created = await airtableFetch(env, "Make Admin Queue", "", {
-      method: "POST",
-      body: JSON.stringify({
-        records: [{ fields: {
-          Command_ID: `FB-PUBLIC-DIAG-${Date.now()}`,
-          Action: "GET_SCENARIO",
-          Scenario_ID: STUDIO_FB_PUBLIC_SCENARIO_ID,
-          Scenario_Name: String(scenario?.name || "FB-PUBLIC"),
-          Write_Approved: false,
-          Status: "Succeeded",
-          Result_JSON: JSON.stringify(result),
-          Requested_At: stamp,
-          Started_At: stamp,
-          Completed_At: stamp,
-          Requested_By: "chicagoshining-studio-api",
-          Correlation_ID: STUDIO_FB_PUBLIC_DIAG_CORRELATION,
-          Notes: "Read-only sanitized FB-PUBLIC live scenario/execution diagnostic for overdue scheduled publish recovery.",
-        }}],
-        typecast: true,
-      }),
-    });
-    return { ok: true, result, record_id: created?.records?.[0]?.id || null };
-  } catch (error) {
-    console.warn("FB-PUBLIC live diagnostic failed", error);
-    return { ok: false, error: String(error?.message || error) };
-  }
-}
-
 async function studioPulseFacebookPublicMake(env, record) {
   const recordId = String(record?.id || "").trim();
   const target = "FB-PUBLIC";
@@ -25702,6 +25637,183 @@ async function studioEnsureFacebookSlideshowAsset(env, record) {
   return studioPulseFbs2(env, record);
 }
 
+async function studioPublishFacebookReelNative(env, record) {
+  const recordId = String(record?.id || "").trim();
+  if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3-NATIVE" };
+
+  const videoUrl = String(
+    f(record, "FB_Slideshow_Public_URL")
+    || f(record, "Publish_Asset_URL")
+    || f(record, "Studio_Preview_URL")
+    || ""
+  ).trim();
+  if (!videoUrl.startsWith("https://media.chicagoshining.com/")) {
+    return { ok: false, skipped: "missing-public-mp4", target: "FBS3-NATIVE" };
+  }
+
+  const settings = await studioActivePipelineSettings(env, [
+    "FACEBOOK_PAGE_ID",
+    "FACEBOOK_PAGE_ACCESS_TOKEN",
+    "FACEBOOK_GRAPH_API_VERSION",
+  ], record);
+  const pageId = String(settings.FACEBOOK_PAGE_ID || "").trim();
+  const token = String(settings.FACEBOOK_PAGE_ACCESS_TOKEN || "").trim();
+  const version = String(settings.FACEBOOK_GRAPH_API_VERSION || "v25.0").replace(/^\/+|\/+$/g, "");
+  if (!pageId || !token) return { ok: false, skipped: "missing-facebook-settings", target: "FBS3-NATIVE" };
+
+  const description = (() => {
+    const caption = String(f(record, "Output_Caption") || "").trim().slice(0, 4500);
+    const hashtags = String(f(record, "Output_Hashtags") || "").trim().slice(0, 450);
+    return caption && hashtags ? `${caption}\n\n${hashtags}` : (caption || hashtags);
+  })();
+  const title = String(
+    f(record, "Output_Title")
+    || f(record, "Title_Text")
+    || f(record, "Output_Caption")
+    || "Facebook Reel"
+  ).trim().slice(0, 255) || "Facebook Reel";
+  const location = await studioResolvePublishLocation(env, record);
+
+  let videoId = String(f(record, "FB_Slideshow_Meta_Video_ID") || f(record, "Platform_Post_ID") || "").trim();
+  let uploadUrl = String(f(record, "FB_Slideshow_Meta_Upload_URL") || "").trim();
+
+  if (videoId && !uploadUrl && String(f(record, "FB_Slideshow_Status") || "").toLowerCase().includes("processing")) {
+    return { ok: true, skipped: "already-processing", target: "FBS3-NATIVE", needs_poll: true, video_id: videoId };
+  }
+
+  if (!videoId) {
+    const startUrl = new URL(`https://graph.facebook.com/${version}/${pageId}/video_reels`);
+    startUrl.searchParams.set("upload_phase", "start");
+    const startResponse = await fetch(startUrl.toString(), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const start = await startResponse.json().catch(() => ({}));
+    videoId = String(start.video_id || "").trim();
+    uploadUrl = String(start.upload_url || "").trim();
+    if (!startResponse.ok || !videoId || !uploadUrl) {
+      return {
+        ok: false,
+        target: "FBS3-NATIVE",
+        error: start?.error?.message || `start ${startResponse.status}`,
+      };
+    }
+    await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+      method: "PATCH",
+      body: JSON.stringify({
+        typecast: true,
+        fields: {
+          Publish_Status: "Publishing",
+          FB_Publish_Status: "Publishing",
+          FB_Slideshow_Status: "Uploading Reel",
+          FB_Slideshow_Meta_Video_ID: videoId,
+          FB_Slideshow_Meta_Upload_URL: uploadUrl,
+          Publish_Error_Stage: "",
+          Publish_Error_Message: "",
+          Publish_Retry_Eligible: false,
+        },
+      }),
+    });
+  }
+
+  const mediaResponse = await fetch(videoUrl, {
+    headers: { "User-Agent": "chicagoshining-studio-api/facebook-reel-native" },
+  });
+  if (!mediaResponse.ok) {
+    return { ok: false, target: "FBS3-NATIVE", error: `cdn ${mediaResponse.status}`, video_id: videoId };
+  }
+  const payload = await mediaResponse.arrayBuffer();
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${token}`,
+      offset: "0",
+      file_size: String(payload.byteLength),
+      "Content-Type": "application/octet-stream",
+    },
+    body: payload,
+  });
+  const upload = await uploadResponse.json().catch(() => ({}));
+  if (!uploadResponse.ok || upload.success === false) {
+    return {
+      ok: false,
+      target: "FBS3-NATIVE",
+      error: upload?.error?.message || upload?.debug_info?.message || `upload ${uploadResponse.status}`,
+      video_id: videoId,
+    };
+  }
+
+  const finishBase = `https://graph.facebook.com/${version}/${pageId}/video_reels`;
+  const makeFinish = async (includePlace) => {
+    const url = new URL(finishBase);
+    url.searchParams.set("upload_phase", "finish");
+    url.searchParams.set("video_id", videoId);
+    url.searchParams.set("video_state", "PUBLISHED");
+    if (description) url.searchParams.set("description", description);
+    if (title) url.searchParams.set("title", title);
+    if (includePlace && location?.page_id) url.searchParams.set("place", String(location.page_id));
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await response.json().catch(() => ({}));
+    return { response, body };
+  };
+
+  let finished = await makeFinish(true);
+  if (!finished.response.ok && location?.page_id && /place/i.test(String(finished.body?.error?.message || ""))) {
+    finished = await makeFinish(false);
+  }
+  if (!finished.response.ok) {
+    const ambiguous = finished.response.status >= 500 || finished.response.status === 0;
+    if (ambiguous) {
+      await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+        method: "PATCH",
+        body: JSON.stringify({
+          typecast: true,
+          fields: {
+            Publish_Status: "Publishing",
+            Platform_Post_ID: videoId,
+            FB_Publish_Status: "Publishing",
+            FB_Slideshow_Status: "Reel Processing",
+            FB_Slideshow_Meta_Video_ID: videoId,
+            Publish_Error_Stage: "FBS3_AMBIGUOUS",
+            Publish_Error_Message: "Facebook Reel finish outcome was ambiguous; native poll will reconcile.",
+            Publish_Retry_Eligible: true,
+            Publish_Next_Retry_At: new Date().toISOString(),
+          },
+        }),
+      });
+      return { ok: true, target: "FBS3-NATIVE", needs_poll: true, video_id: videoId, ambiguous: true };
+    }
+    return {
+      ok: false,
+      target: "FBS3-NATIVE",
+      error: finished.body?.error?.message || `finish ${finished.response.status}`,
+      video_id: videoId,
+    };
+  }
+
+  await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId, {
+    method: "PATCH",
+    body: JSON.stringify({
+      typecast: true,
+      fields: {
+        Publish_Status: "Publishing",
+        Platform_Post_ID: videoId,
+        FB_Publish_Status: "Publishing",
+        FB_Slideshow_Status: "Reel Processing",
+        FB_Slideshow_Meta_Video_ID: videoId,
+        Publish_Error_Stage: "",
+        Publish_Error_Message: "",
+        Publish_Retry_Eligible: true,
+        Publish_Next_Retry_At: new Date(Date.now() + 60000).toISOString(),
+      },
+    }),
+  });
+  return { ok: true, target: "FBS3-NATIVE", backend: "graph", needs_poll: true, video_id: videoId };
+}
+
 async function studioPulseFbs3(env, record) {
   const recordId = String(record?.id || "").trim();
   if (!STUDIO_AP0_RECORD_ID.test(recordId)) return { ok: false, skipped: "bad-id", target: "FBS3" };
@@ -25718,9 +25830,14 @@ async function studioPulseFbs3(env, record) {
     };
   }
   const skipped = payload?.status === "skipped";
+  const reason = skipped ? (payload?.details?.run?.reason || "python-skip") : undefined;
+  if (reason === "facebook_manual_publish") {
+    const refreshed = await airtableFetch(env, env.AIRTABLE_OUTPUT_TABLE_ID, recordId).catch(() => record);
+    return studioPublishFacebookReelNative(env, refreshed);
+  }
   return {
     ok: true,
-    skipped: skipped ? (payload?.details?.run?.reason || "python-skip") : undefined,
+    skipped: reason,
     target: "FBS3",
     backend: "python",
     needs_poll: Boolean(payload?.details?.run?.needs_poll),
@@ -26312,25 +26429,6 @@ async function studioEnsureOutputCaption(env, record) {
 // after it is recoverable on a later pass, so it is split off: this half runs on the request
 // path where it cannot be dropped by a cancelled background task or an exhausted invocation.
 async function studioDispatchApprovedPublishNow(env, record) {
-  if (studioFacebookGraphPublishHeld(env) && String(f(record, "Platform") || "").trim() === "Facebook") {
-    if (!studioPublishCanDispatchNow(record)) {
-      return {
-        ok: true,
-        skipped: "scheduled-hold",
-        held_until: studioPublishHeldUntilIso(record),
-        record,
-      };
-    }
-    if (studioFacebookPublicMakeEligible(record)) {
-      record = await studioEnsureOutputCaption(env, record);
-      const pulsed = await studioPulseFacebookPublicMake(env, record);
-      return { ...pulsed, armed: [], plan: pulsed.plan || { target: "FB-PUBLIC" }, record };
-    }
-    if (studioFacebookPublicMakeRoutable(record)) {
-      return { ok: true, skipped: "facebook-make-asset-pending", record };
-    }
-    return { ok: true, skipped: "facebook-manual-publish", record };
-  }
   if (!studioPublishCanDispatchNow(record)) {
     return {
       ok: true,
@@ -27374,10 +27472,16 @@ async function studioReconcileFacebookReels(env, options = {}) {
     if (!studioPublishCanDispatchNow(row)) continue;
     try {
       const pulsed = await studioPulseFbs3(env, row);
+      await studioStampPublishDispatch(
+        env,
+        row,
+        `facebook-native-reel: ${pulsed?.skipped ? `skipped=${pulsed.skipped}` : pulsed?.ok === false ? `failed=${pulsed?.message || pulsed?.status || "unknown"}` : `accepted FBS3 video_id=${pulsed?.video_id || ""}`}`
+      );
       results.push({ id: row.id, stage: "fbs3", ok: pulsed?.ok !== false, skipped: pulsed?.skipped || false });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.warn("facebook reel create reconcile failed", row.id, error);
+      await studioStampPublishDispatch(env, row, `facebook-native-reel failed: ${message}`);
       results.push({ id: row.id, stage: "fbs3", error: message });
     }
   }
@@ -27417,23 +27521,16 @@ async function approveOutputRecordForPublishing(env, existing, note, stamp, payl
     occupiedMs = occupied[platform] || [];
   }
   const scheduleFields = studioPublishScheduleFields(payload || {}, record, { occupiedMs });
-  const facebookMake = studioFacebookGraphPublishHeld(env) && platform === "Facebook"
-    && studioFacebookPublicMakeRoutable(record);
-  const facebookManual = studioFacebookGraphPublishHeld(env) && platform === "Facebook" && !facebookMake;
   const scheduledIso = scheduleFields.Scheduled_Post_Date || f(record, "Scheduled_Post_Date");
   const fields = {
     Review_Status: "Approved",
     Output_Status: "Approved for Publishing",
     Publish_Status: "Ready to Schedule",
-    Publish_Method: facebookManual ? "Manual" : "Automated",
-    Auto_Publish_Enabled: !facebookManual,
+    Publish_Method: "Automated",
+    Auto_Publish_Enabled: true,
     Review_Decision_At: stamp,
     Do_Not_Publish: false,
-    Review_Notes: [existingNotes, note, facebookManual
-      ? `Studio Pipeline approved the Facebook render at ${stamp}. Graph publish is held — post this in Business Suite until the Meta app is live.`
-      : facebookMake
-        ? `Studio Pipeline approved the Facebook render at ${stamp}. Studio will fire the Live Make publisher (FB-PUBLIC).`
-        : `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
+    Review_Notes: [existingNotes, note, `Studio Pipeline approved for publishing at ${stamp}.`].filter(Boolean).join("\n\n"),
     ...studioPublishHandoffFields(record, { scheduledPostDate: scheduledIso }),
     ...scheduleFields,
   };

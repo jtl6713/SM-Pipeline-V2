@@ -18,14 +18,12 @@ def _record(**fields):
     return {"id": "recABCDEFGHIJKLMN", "fields": fields}
 
 
-def test_facebook_graph_publish_hold():
+def test_facebook_native_publish_ignores_legacy_auto_publish_flag():
     os.environ["FACEBOOK_AUTO_PUBLISH"] = "0"
     try:
         ready = _record(Platform="Facebook", Auto_Publish_Enabled=True, Image_Output_Selected=True, FB_Publish_Status="Ready for Assets")
-        assert fb0_eligibility_reason(ready) == "facebook_manual_publish"
-        assert fb1_eligibility_reason(_record(Platform="Facebook", FB_Publish_Status="Ready for Photo Media")) == (
-            "facebook_manual_publish"
-        )
+        assert fb0_eligibility_reason(ready) is None
+        assert fb1_eligibility_reason(_record(Platform="Facebook", FB_Publish_Status="Ready for Photo Media")) is None
     finally:
         os.environ["FACEBOOK_AUTO_PUBLISH"] = "1"
 
