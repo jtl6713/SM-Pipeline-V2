@@ -2798,6 +2798,64 @@ body:has(#page-content.active) .studio-footer-links button:hover{
   border:1px solid var(--line);
   background:#0c1c33;
 }
+.idea-window-stack{
+  display:grid;
+  gap:14px;
+}
+.idea-window{
+  padding:0;
+  overflow:hidden;
+}
+.idea-window-toggle{
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:16px 18px;
+  border:0;
+  background:transparent;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
+  font:inherit;
+}
+.idea-window-toggle:hover{
+  background:rgba(15, 23, 42, 0.035);
+}
+.idea-window-chevron{
+  width:18px;
+  flex:0 0 18px;
+  font-size:18px;
+  line-height:1;
+}
+.idea-window-title{
+  font-weight:800;
+  font-size:16px;
+}
+.idea-window-meta{
+  margin-left:auto;
+  color:var(--muted);
+  font-size:13px;
+  font-weight:600;
+}
+.idea-window-body{
+  border-top:1px solid var(--line);
+  overflow-x:auto;
+}
+.idea-window.is-collapsed .idea-window-toggle{
+  border-bottom:0;
+}
+@media(max-width:760px){
+  .idea-window-toggle{
+    align-items:flex-start;
+    flex-wrap:wrap;
+  }
+  .idea-window-meta{
+    width:100%;
+    margin-left:28px;
+  }
+}
+
 .native-file-label{
   position:relative;
   overflow:hidden;
