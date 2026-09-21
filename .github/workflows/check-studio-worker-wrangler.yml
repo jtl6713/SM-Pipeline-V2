@@ -13,6 +13,7 @@ jobs:
       - name: Wrangler dry run with diagnostics
         shell: bash
         run: |
+          set +e
           set -uo pipefail
           mkdir -p /tmp/w
           cp apps/studio-api/worker.js /tmp/w/worker.js
