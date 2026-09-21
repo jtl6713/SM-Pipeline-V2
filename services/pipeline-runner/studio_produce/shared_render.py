@@ -49,11 +49,16 @@ def _normalized_clip_key(raw: str) -> str:
         for clip in payload:
             if not isinstance(clip, dict):
                 continue
+            overlay = clip.get("overlay") if isinstance(clip.get("overlay"), dict) else None
+            overlay_text = ""
+            if overlay:
+                overlay_text = str(overlay.get("text") or "").strip()
             normalized.append(
                 {
                     "url": str(clip.get("url") or clip.get("src") or "").strip(),
-                    "durationFrames": int(clip.get("durationFrames") or clip.get("duration_frames") or 0),
-                    "overlay": clip.get("overlay") if isinstance(clip.get("overlay"), dict) else None,
+                    # Ignore per-output durationFrames — T1 can extend one sibling while others
+                    # still carry a stale stamp total and must stay in the same shared render.
+                    "overlay": overlay_text,
                 }
             )
         return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode("utf-8")).hexdigest()
@@ -66,10 +71,19 @@ def render_equivalence_key(output: dict[str, Any]) -> str | None:
     clip_key = _normalized_clip_key(field_str(output, "Render_Clip_List_JSON"))
     if not clip_key:
         return None
+    timeline = field(output, "Timing_Timeline_JSON")
+    timeline_frames = ""
+    if timeline:
+        try:
+            parsed = json.loads(str(timeline))
+            if isinstance(parsed, dict) and parsed.get("duration_frames"):
+                timeline_frames = str(parsed.get("duration_frames"))
+        except json.JSONDecodeError:
+            timeline_frames = ""
     parts = [
         clip_key,
         field_str(output, "Composition_ID"),
-        str(field(output, "Render_Total_Frames") or ""),
+        timeline_frames or str(field(output, "Render_Total_Frames") or ""),
         field_str(output, "Music_URL"),
         field_str(output, "Voiceover_URL"),
         str(field(output, "Music_Volume") or ""),
@@ -161,6 +175,9 @@ def propagate_fields_from_source(source: dict[str, Any]) -> dict[str, Any]:
     clip_json = field_str(source, "Render_Clip_List_JSON")
     if clip_json:
         fields["Render_Clip_List_JSON"] = clip_json
+    total_frames = field(source, "Render_Total_Frames")
+    if total_frames not in (None, ""):
+        fields["Render_Total_Frames"] = total_frames
     timing_json = field_str(source, "Timing_Timeline_JSON")
     if timing_json:
         fields["Timing_Timeline_JSON"] = timing_json

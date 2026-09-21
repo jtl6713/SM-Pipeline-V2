@@ -62,6 +62,42 @@ def test_build_shared_render_plan_groups_equivalent_outputs():
     assert set(plan["recIG"]["sibling_ids"]) == {"recFB", "recYT", "recTT"}
 
 
+def test_stale_duration_frames_still_share_one_render():
+    short_clip = '[{"url":"https://media.chicagoshining.com/a.jpg","durationFrames":75,"overlay":{"text":"A"}}]'
+    long_clip = '[{"url":"https://media.chicagoshining.com/a.jpg","durationFrames":122,"overlay":{"text":"A"}}]'
+    common = {
+        "Aspect_Ratio": "9:16",
+        "Composition_ID": "ChicagoShiningPhotoSequence",
+        "Music_URL": "https://media.chicagoshining.com/music.mp3",
+        "Voiceover_URL": "https://media.chicagoshining.com/vo.mp3",
+        "Music_Volume": 0.6,
+        "Timing_Status": "Ready",
+        "Timing_Timeline_JSON": '{"duration_frames":1460,"duration_seconds":48.6667}',
+    }
+    ig = _output(
+        id="recIG",
+        Platform="Instagram",
+        Studio_Output_Type="Reel",
+        Output_ID="1",
+        Render_Total_Frames=1460,
+        Render_Clip_List_JSON=long_clip,
+        **common,
+    )
+    yt = _output(
+        id="recYT",
+        Platform="YouTube",
+        Studio_Output_Type="Short",
+        Output_ID="3",
+        Render_Total_Frames=900,
+        Render_Clip_List_JSON=short_clip,
+        **common,
+    )
+    assert render_equivalence_key(ig) == render_equivalence_key(yt)
+    plan = build_shared_render_plan([ig, yt])
+    assert plan["recIG"]["role"] == "canonical"
+    assert plan["recYT"]["role"] == "sibling"
+
+
 def test_different_music_volume_splits_groups():
     clip = '[{"url":"https://media.chicagoshining.com/a.jpg","durationFrames":90}]'
     base = {
