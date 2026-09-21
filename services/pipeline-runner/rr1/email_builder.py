@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from p3.helpers import caption_with_hashtags
 from render.fields import field_str
 
 
@@ -92,8 +93,12 @@ def build_review_card(
     final_url = field_str(output, "Final_File_URL")
     review_images = field_str(output, "Selected_Review_Images_HTML")
     thumbnail_url = field_str(output, "Thumbnail_URL")
-    caption = html.escape(field_str(output, "Output_Caption"))
-    hashtags = html.escape(field_str(output, "Output_Hashtags"))
+    caption = html.escape(
+        caption_with_hashtags(
+            field_str(output, "Output_Caption"),
+            field_str(output, "Output_Hashtags"),
+        )
+    )
     asset_summary = html.escape(field_str(output, "Selected_Asset_Summary"))
 
     decisions = "".join(
@@ -125,10 +130,8 @@ def build_review_card(
     {review_images}
   </p>
   {_thumbnail_block(thumbnail_url)}
-  <p style="margin:10px 0 4px 0;"><b>Caption:</b></p>
+  <p style="margin:10px 0 4px 0;"><b>Caption + hashtags:</b></p>
   <div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">{caption}</div>
-  <p style="margin:10px 0 4px 0;"><b>Hashtags:</b></p>
-  <div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">{hashtags}</div>
   <p style="margin:10px 0 4px 0;"><b>Selected assets:</b></p>
   <div style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">{asset_summary}</div>
   <div style="margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb;">
