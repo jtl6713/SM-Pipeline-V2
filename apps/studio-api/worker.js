@@ -398,7 +398,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.345-finished-hardcap-six",
+          version: "0.10.346-finished-hardcap-six",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -439,6 +439,7 @@ export default {
           studio_insights_youtube_discovery_v1: true,
           studio_due_publish_priority_v1: true,
           studio_overdue_scheduled_rescue_v1: true,
+          studio_tiktok_photo_route_contract_v1: true,
           studio_fbs4_cover_unblock_v1: true,
           studio_publish_dispatch_reconcile_v1: true,
           studio_publish_location_v1: true,
@@ -2341,9 +2342,13 @@ function studioPublishHandoffFields(record, options = {}) {
         fields.Asset_Aspect_Family = "9:16";
       }
     } else {
-      fields.TikTok_Draft_Type = clipCount > 1 ? "Photo Carousel" : "Single Photo";
+      const photoType = clipCount > 1 ? "Photo Carousel" : "Single Photo";
+      fields.TikTok_Draft_Type = photoType;
+      fields.Image_Output_Type = photoType;
       fields.Image_Output_Selected = true;
       fields.Image_Publish_Mode = "TikTok Draft";
+      fields.Asset_Aspect_Family = "9:16";
+      if (clipCount) fields.Image_Count = clipCount;
     }
     fields.Publish_Status = armedPublish;
   }

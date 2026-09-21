@@ -23,11 +23,14 @@ def _ci(value: Any) -> str:
 
 
 def is_photo_route(record: dict[str, Any]) -> bool:
+    # Studio's TikTok handoff owns both fields now, but accept the stable draft type
+    # as a fallback so an older row cannot be stranded by a blank Image_Output_Type.
+    image_type = field_str(record, "Image_Output_Type") or field_str(record, "TikTok_Draft_Type")
     return (
         as_bool(field(record, "Image_Output_Selected"), False)
         and _ci(field_str(record, "Image_Publish_Mode")) == _ci(IMAGE_PUBLISH_MODE)
         and _ci(field_str(record, "Asset_Aspect_Family")) == _ci(ASSET_ASPECT_FAMILY)
-        and bool(field_str(record, "Image_Output_Type"))
+        and _ci(image_type) in {_ci(DRAFT_TYPE_SINGLE), _ci(DRAFT_TYPE_CAROUSEL)}
     )
 
 
