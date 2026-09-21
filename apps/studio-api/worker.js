@@ -399,7 +399,7 @@ export default {
         return respond(request, env, {
           ok: true,
           service: "chicagoshining-studio-api",
-          version: "0.10.351-fb-public-blueprint-diagnostic",
+          version: "0.10.352-fb-public-module-logs",
           studio_desk_inventory_v1: true,
           studio_desk_activity_v1: true,
           studio_tiktok_complete_v1: true,
@@ -22802,7 +22802,7 @@ const STUDIO_AP0_WEBHOOK_URL = ""; // Make.com retired
 // Live FB-PUBLIC scenario 6107230 (Make connection 9988775). Not unpublished Graph / FB-ORCH.
 const STUDIO_FB_PUBLIC_WEBHOOK_URL = "https://hook.us2.make.com/ivrjp4e0nfpuyvukb18116wj1fwgjdw1";
 const STUDIO_FB_PUBLIC_SCENARIO_ID = 6107230;
-const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921-V2";
+const STUDIO_FB_PUBLIC_DIAG_CORRELATION = "FB-PUBLIC-LIVE-DIAG-20260921-V3";
 const STUDIO_AP0_RECORD_ID = /^rec[A-Za-z0-9]{14}$/;
 const PRODUCTION_CADENCE_PUBLISH_ORCH = Object.freeze([
   { id: STUDIO_IG_ORCH_SCENARIO_ID, key: "IG" },
@@ -24752,6 +24752,23 @@ async function studioDiagnoseFacebookPublicMakeOnce(env) {
     };
     if (blueprint?.flow) walk(blueprint.flow);
 
+    const moduleLogs = {};
+    for (const moduleId of [6, 7, 8, 9]) {
+      const body = await makeGet(
+        `/scenarios/${STUDIO_FB_PUBLIC_SCENARIO_ID}/modules/${moduleId}/logs?pg%5Blimit%5D=30`
+      ).catch((error) => ({ diagnostic_error: String(error?.message || error) }));
+      const rows = body?.moduleLogs || body?.response?.moduleLogs || body?.data || [];
+      moduleLogs[String(moduleId)] = {
+        error: body?.diagnostic_error || null,
+        rows: Array.isArray(rows) ? rows.slice(0, 30).map((row) => ({
+          executionId: row?.executionId ?? null,
+          timestamp: row?.timestamp ?? null,
+          status: row?.status ?? null,
+          bundles: sanitize(row?.bundles ?? null),
+        })) : [],
+      };
+    }
+
     const logs = logsBody?.scenarioLogs || logsBody?.response?.scenarioLogs || logsBody?.data || [];
     const executions = executionsBody?.executions || executionsBody?.response?.executions || executionsBody?.data || [];
     const slim = (row) => {
@@ -24770,6 +24787,7 @@ async function studioDiagnoseFacebookPublicMakeOnce(env) {
       blueprint_name: blueprint?.name || null,
       modules,
       blueprint_error: blueprintBody?.diagnostic_error || null,
+      module_logs: moduleLogs,
       recent_logs: Array.isArray(logs) ? logs.slice(0, 30).map(slim) : [],
       recent_executions: Array.isArray(executions) ? executions.slice(0, 30).map(slim) : [],
       logs_error: logsBody?.diagnostic_error || null,
