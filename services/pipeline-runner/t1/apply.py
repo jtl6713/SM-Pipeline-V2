@@ -59,7 +59,7 @@ def voiceover_tail_seconds(output: dict[str, Any]) -> float:
     return DEFAULT_VOICEOVER_TAIL_SECONDS
 
 
-def analysis_window(output: dict[str, Any]) -> tuple[float, float]:
+def analysis_window(output: dict[str, Any], *, vo_end_override: float | None = None) -> tuple[float, float]:
     start = field(output, "Music_Start_Seconds")
     if start in (None, ""):
         start = field(output, "Studio_Effective_Music_Start_Seconds") or 0
@@ -80,7 +80,7 @@ def analysis_window(output: dict[str, Any]) -> tuple[float, float]:
         duration_f = max(0.25, float(duration or 0))
     except (TypeError, ValueError):
         duration_f = 30.0
-    vo_end = voiceover_end_seconds(output)
+    vo_end = vo_end_override if vo_end_override else voiceover_end_seconds(output)
     if vo_end:
         duration_f = max(duration_f, vo_end + voiceover_tail_seconds(output))
     owner = None

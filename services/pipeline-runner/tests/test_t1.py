@@ -165,6 +165,18 @@ def test_analysis_window_extends_for_voiceover_without_owner_cap():
     assert analysis_window(output) == (0.0, 22.0)
 
 
+def test_analysis_window_honors_measured_voiceover_override():
+    output = {
+        "fields": {
+            "Music_Duration_Seconds": 25.356,
+            "Studio_Effective_Video_Duration_Seconds": 30,
+            "Voiceover_Tail_Seconds": 2,
+            "Studio_Effective_Voiceover_Duration_Seconds": 15,
+        }
+    }
+    assert analysis_window(output, vo_end_override=26.8) == (0.0, 28.8)
+
+
 def test_apply_timeline_cycles_source_clips():
     clips = [
         {"url": "https://cdn/a.jpg", "durationFrames": 30},
