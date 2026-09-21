@@ -76,7 +76,7 @@ def _photo_output(**fields):
 
 def test_r4_uses_parent_voiceover_when_output_blank():
     output = _photo_output()
-    parent = {"fields": {"Voiceover_URL": "https://example.com/vo.mp3", "Voiceover_Script": "hello"}}
+    parent = {"fields": {"Voiceover_URL": "https://example.com/vo.mp3", "Voiceover_Script": "hello", "Include_Voiceover": "Yes"}}
     route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
     assert route == "voiceover"
     assert payload["voiceover"]["url"] == "https://example.com/vo.mp3"
@@ -85,7 +85,7 @@ def test_r4_uses_parent_voiceover_when_output_blank():
 
 
 def test_r4_voiceover_without_content_item_does_not_crash():
-    output = _photo_output(Voiceover_URL="https://example.com/output-vo.mp3")
+    output = _photo_output(Voiceover_URL="https://example.com/output-vo.mp3", Studio_Effective_Voiceover_Mode="Yes")
     route, payload = choose_render_request(output, None, default_music=0.35, default_voice=1.0)
     assert route == "voiceover"
     assert payload["voiceover"]["url"] == "https://example.com/output-vo.mp3"
@@ -97,6 +97,25 @@ def test_r4_voiceover_required_when_effective_mode_is_yes():
     parent = {"fields": {"Include_Voiceover": "Yes"}}
     assert voiceover_is_required(_photo_output(), parent) is True
     assert voiceover_is_required(_photo_output(Studio_Effective_Voiceover_Mode="No"), parent) is False
+
+
+def test_r4_explicit_no_voiceover_ignores_parent_url_and_story_timing_failure():
+    from r4.render_request import timing_blocks_render
+
+    output = _photo_output(
+        Studio_Effective_Voiceover_Mode="No",
+        Studio_Output_Type="Story",
+        Format="Story",
+        Timing_Status="Failed",
+        Voiceover_URL="https://example.com/inherited.mp3",
+        Render_Total_Frames=150,
+    )
+    parent = {"fields": {"Voiceover_URL": "https://example.com/parent.mp3", "Include_Voiceover": "Yes"}}
+    assert timing_blocks_render(output) is False
+    route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
+    assert route == "no_voiceover"
+    assert "voiceover" not in payload
+    assert "voiceoverUrl" not in payload
 
 
 def test_r4_music_start_seconds_pass_through():
@@ -123,7 +142,7 @@ def test_r4_expected_clip_count_follows_expanded_clip_list():
 
 def test_r4_p020_merges_parent_voiceover():
     output = _photo_output(Creative_Render_Manifest_JSON="{}")
-    parent = {"fields": {"Voiceover_URL": "https://example.com/parent-vo.mp3"}}
+    parent = {"fields": {"Voiceover_URL": "https://example.com/parent-vo.mp3", "Include_Voiceover": "Yes"}}
     route, payload = choose_render_request(output, parent, default_music=0.35, default_voice=1.0)
     assert route == "p020_manifest"
     assert payload["voiceover"]["url"] == "https://example.com/parent-vo.mp3"
