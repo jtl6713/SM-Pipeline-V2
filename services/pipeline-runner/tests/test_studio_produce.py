@@ -811,6 +811,34 @@ def test_stamp_recrop_rewrites_clip_list_and_reopens_timing():
     assert "fill-crop-v2-new.jpg" in fields["Render_Clip_List_JSON"]
 
 
+def test_stamp_overlay_text_change_rewrites_clip_list_without_retiming():
+    still = "https://media.chicagoshining.com/studio/previews/item4/a/photo.jpg"
+    package = {
+        "native": False,
+        "story": False,
+        "clip_count": 1,
+        "total_frames": 900,
+        "clips": [{"url": still, "media_asset_record_id": "recPHOTO00000001"}],
+        "effective": {"music_url": "https://media.example/track.mp3", "background_music_mode": "Yes"},
+        "render_clip_list_json": json.dumps([{"url": still, "media_kind": "photo", "overlay": {"text": "Tribune Tower"}}]),
+        "selected_assets_json": "{}",
+        "output_filename": "studio-test.mp4",
+    }
+    fields = stamp_fields(
+        package,
+        None,
+        existing={
+            "fields": {
+                "Timing_Status": "Ready",
+                "Timing_Timeline_JSON": '{"schema_version":"timing.timeline.1"}',
+                "Render_Clip_List_JSON": json.dumps([{"url": still, "media_kind": "photo", "overlay": {"text": "Old Title"}}]),
+            }
+        },
+    )
+    assert "Timing_Status" not in fields
+    assert "Tribune Tower" in fields["Render_Clip_List_JSON"]
+
+
 def test_stamp_heals_pending_when_timeline_already_exists():
     fields = stamp_fields(
         {
