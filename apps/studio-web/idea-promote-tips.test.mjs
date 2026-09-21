@@ -50,6 +50,14 @@ test("variant not-ready copy distinguishes not started from preparing", () => {
   assert.match(app, /Platform crops are still finishing/);
 });
 
+test("Ideas archives promoted items in a collapsed section", () => {
+  assert.match(app, /let ideasArchivedSectionOpen = false/);
+  assert.match(app, /function partitionIdeaRecords/);
+  assert.match(app, /if \(ideaIsPromoted\(record\)\) archived\.push\(record\)/);
+  assert.match(app, /data-idea-archived-toggle/);
+  assert.match(app, /idea.*in production/);
+});
+
 test("Pipeline archives fully published content items at the bottom", () => {
   assert.match(app, /function pipelineContentGroupFullyPublished/);
   assert.match(app, /renderPipelineArchivedSection/);
