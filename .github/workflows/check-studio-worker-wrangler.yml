@@ -1,0 +1,36 @@
+name: Check Studio Worker Wrangler
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/check-studio-worker-wrangler.txt']
+permissions: {contents: read}
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Wrangler dry run with diagnostics
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/w
+          cp apps/studio-api/worker.js /tmp/w/worker.js
+          cp apps/studio-api/*.mjs /tmp/w/
+          rm -f /tmp/w/*.test.mjs
+          cd /tmp/w
+          npm init -y >/dev/null 2>&1
+          npm install --no-save wrangler@4.123.0 >/dev/null 2>&1
+          cat >wrangler.jsonc <<'EOF'
+          {
+            "name":"studio-syntax-check",
+            "main":"worker.js",
+            "compatibility_date":"2026-08-02",
+            "workers_dev":false,
+            "r2_buckets":[{"binding":"STUDIO_MEDIA","bucket_name":"dummy"}]
+          }
+          EOF
+          ./node_modules/.bin/wrangler deploy --config wrangler.jsonc --dry-run > /tmp/dry.log 2>&1
+          code=$?
+          cat /tmp/dry.log
+          exit $code
