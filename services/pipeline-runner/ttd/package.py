@@ -145,14 +145,53 @@ def platform_status_block(siblings: list[dict[str, Any]] | None) -> str:
     )
 
 
+def _lookup_display_text(value: Any) -> str:
+    """Best-effort display text for Airtable lookup/link values, never a rec... id."""
+    if isinstance(value, str):
+        text = value.strip()
+        return "" if text.startswith("rec") else text
+    if isinstance(value, list):
+        for item in value:
+            text = _lookup_display_text(item)
+            if text:
+                return text
+        return ""
+    if isinstance(value, dict):
+        name = str(value.get("name") or "").strip()
+        if name:
+            return name
+        values = value.get("valuesByLinkedRecordId")
+        if isinstance(values, dict):
+            for linked_values in values.values():
+                text = _lookup_display_text(linked_values)
+                if text:
+                    return text
+    return ""
+
+
 def profile_display_name(record: dict[str, Any], profile: dict[str, Any] | None = None) -> str:
     """Exact Content Profile name for human-facing TikTok handoffs."""
-    for source in (profile or {}, record or {}):
+    if profile:
         for field_name in ("Profile_Name", "Brand_Name", "Market_Name"):
-            value = field_str(source, field_name)
+            value = field_str(profile, field_name)
             if value:
                 return value
+
+    lookup_name = _lookup_display_text(field(record, "Content_Profile"))
+    if lookup_name:
+        return lookup_name
+    for field_name in ("Profile_Name", "Brand_Name", "Market_Name"):
+        value = _lookup_display_text(field(record, field_name))
+        if value:
+            return value
     return "ChicagoShining"
+
+
+def profile_tiktok_handle(profile: dict[str, Any] | None = None) -> str:
+    handle = field_str(profile or {}, "TikTok_Handle")
+    if not handle:
+        return ""
+    return handle if handle.startswith("@") else f"@{handle}"
 
 
 def handoff_email_subject(
@@ -284,14 +323,19 @@ def handoff_email_html(
     count = html.escape(image_count_label(record))
     az = is_az_finished_video(record)
     profile_name = html.escape(profile_display_name(record, profile))
+    tiktok_handle = html.escape(profile_tiktok_handle(profile))
+    destination = tiktok_handle or profile_name
+    profile_banner = f"<b>Profile:</b> {profile_name}"
+    if tiktok_handle:
+        profile_banner += f"<br><b>TikTok:</b> {tiktok_handle}"
     heading = f"{profile_name} publish package" if az else "TikTok draft delivered — manual action required"
     intro = (
-        f'<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the TikTok inbox for <b>{profile_name}</b>. '
+        f'<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the TikTok inbox for <b>{destination}</b>. '
         "Sibling Instagram, Facebook, and YouTube posts for this video share the same campaign day. "
         "TikTok cannot tell us when the inbox draft goes public — use Mark as Published after you post. "
         "TikTok Story is still manual in the app.</p>"
         if az
-        else f'<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the TikTok inbox for <b>{profile_name}</b>. It has not been marked Published in Airtable.</p>'
+        else f'<p style="margin:0 0 16px;color:#4b5563;">TikTok accepted the asset package and delivered it to the TikTok inbox for <b>{destination}</b>. It has not been marked Published in Airtable.</p>'
     )
     status_block = platform_status_block(siblings) if az else ""
     story_note = (
@@ -304,7 +348,7 @@ def handoff_email_html(
         '<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827;background:#f3f4f6;padding:20px;">'
         '<div style="max-width:820px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:22px;">'
         f"<h2 style=\"margin:0 0 8px;\">{heading}</h2>"
-        f'<div style="margin:0 0 14px;padding:10px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;"><b>Profile:</b> {profile_name}</div>'
+        f'<div style="margin:0 0 14px;padding:10px 12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;">{profile_banner}</div>'
         f"{intro}"
         f"{status_block}"
         f'<div style="border:1px solid #ddd;border-radius:10px;padding:16px;"><h3 style="margin-top:0;">Output #{output_id} — {title}</h3>'
