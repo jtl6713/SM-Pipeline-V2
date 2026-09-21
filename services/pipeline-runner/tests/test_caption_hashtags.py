@@ -2,6 +2,7 @@ import json
 
 from fbs3.caption import reel_description
 from p3.helpers import caption_with_hashtags
+from rr1.email_builder import build_review_card
 from studio_produce.steps import apply_caption
 from ttd.package import photo_description
 from yt.package import description_final, package_fields
@@ -80,3 +81,11 @@ def test_studio_apply_caption_backfills_parent_hashtags_to_existing_output_capti
     assert patch["Output_Hashtags"] == "#BeverlyHills #LosAngeles #ExploreLA"
     assert patch["Output_Caption"].endswith("#BeverlyHills #LosAngeles #ExploreLA")
     assert typecast is True
+
+
+def test_review_email_caption_block_contains_hashtags_once():
+    record = _record("Walk the city.", "#Chicago #Travel")
+    card = build_review_card(record, decision_webhook_url="https://example.com/review")
+    assert "Caption + hashtags" in card
+    assert card.count("#Chicago") == 1
+    assert card.count("#Travel") == 1
